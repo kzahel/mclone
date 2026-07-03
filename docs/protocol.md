@@ -94,9 +94,15 @@ commands are intents, not client-owned state mutations.
 Failures are surfaced through the transport handshake and connection errors, not
 yet an in-band error update.
 
-The loop is **request/response**: the host emits queued updates as the reply to
-a client command. A server-push lane — so a player who stops sending commands
-still sees others move — is still to come.
+Current native TCP and WebSocket remote transports are still
+**request/response-shaped**: the host emits queued updates as the reply to a
+client command. That is a transport implementation detail, not the long-term
+session model. The target client architecture is a session bus with separate
+outbound command and inbound update streams; see
+[`session-network-architecture.md`](./session-network-architecture.md) and
+[`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md).
+A server-push lane — so a player who stops sending commands still sees others
+move — is still to come for remote dedicated transports.
 
 ### Entity Snapshots
 

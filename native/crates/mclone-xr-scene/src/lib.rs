@@ -24,7 +24,7 @@ use mclone_app_runtime::session::{
     ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
 };
 use mclone_app_runtime::{
-    RuntimePollDiagnostics, debug_block_palette_overlay, elapsed_ms,
+    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, debug_block_palette_overlay, elapsed_ms,
     set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::AssetSource;
@@ -5186,7 +5186,10 @@ where
     let command_start = Instant::now();
     let changed = if let Some(report) = camera.next_pose_sync_command() {
         let (changed, command_timing) = runtime
-            .send_gameplay_command_timed(report.command)
+            .send_gameplay_command_with_update_policy_timed(
+                report.command,
+                GameplayCommandUpdatePolicy::SendOnly,
+            )
             .context("failed to sync XR terrain player pose to server")?;
         timing.server_command_send_ms = command_timing.send_ms;
         timing.server_command_drain_updates_ms = command_timing.drain_updates_ms;

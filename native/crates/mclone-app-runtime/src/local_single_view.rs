@@ -31,9 +31,10 @@ use crate::session::{
     SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
 };
 use crate::{
-    DEFAULT_RENDER_CHUNK_MESH_BUDGET, GameplayCommandTiming, RuntimePollDiagnostics,
-    RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
-    TimedRenderSectionCacheUpdate, chunk_tracking_radius_for_render_distance, elapsed_ms,
+    DEFAULT_RENDER_CHUNK_MESH_BUDGET, GameplayCommandTiming, GameplayCommandUpdatePolicy,
+    RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime,
+    SingleViewRuntimeStats, TimedRenderSectionCacheUpdate,
+    chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 
@@ -370,9 +371,29 @@ impl LocalSingleViewSceneRuntime {
             .map(|(changed, _)| changed)
     }
 
+    pub fn send_gameplay_command_with_update_policy(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<bool> {
+        self.send_gameplay_command_with_update_policy_timed(command, policy)
+            .map(|(changed, _)| changed)
+    }
+
     pub fn send_gameplay_command_timed(
         &mut self,
         command: ClientCommand,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        self.send_gameplay_command_with_update_policy_timed(
+            command,
+            GameplayCommandUpdatePolicy::DrainImmediately,
+        )
+    }
+
+    pub fn send_gameplay_command_with_update_policy_timed(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
     ) -> Result<(bool, GameplayCommandTiming)> {
         let total_start = Instant::now();
         let send_start = Instant::now();
@@ -380,16 +401,22 @@ impl LocalSingleViewSceneRuntime {
             .send_command(command)
             .context("failed to send local single-view gameplay command")?;
         let send_ms = elapsed_ms(send_start.elapsed());
-        let drain_start = Instant::now();
-        let updates = self
-            .server_runner
-            .drain_updates()
-            .context("failed to drain local single-view integrated server updates")?;
-        let drain_updates_ms = elapsed_ms(drain_start.elapsed());
-        let apply_report = if updates.is_empty() {
-            RuntimeUpdateApplyReport::default()
-        } else {
-            self.core.apply_server_updates_report(updates)
+        let (drain_updates_ms, apply_report) = match policy {
+            GameplayCommandUpdatePolicy::DrainImmediately => {
+                let drain_start = Instant::now();
+                let updates = self
+                    .server_runner
+                    .drain_updates()
+                    .context("failed to drain local single-view integrated server updates")?;
+                let drain_updates_ms = elapsed_ms(drain_start.elapsed());
+                let apply_report = if updates.is_empty() {
+                    RuntimeUpdateApplyReport::default()
+                } else {
+                    self.core.apply_server_updates_report(updates)
+                };
+                (drain_updates_ms, apply_report)
+            }
+            GameplayCommandUpdatePolicy::SendOnly => (0.0, RuntimeUpdateApplyReport::default()),
         };
         Ok((
             true,
@@ -845,13 +872,37 @@ where
         }
     }
 
+    pub fn send_gameplay_command_with_update_policy(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<bool> {
+        self.send_gameplay_command_with_update_policy_timed(command, policy)
+            .map(|(changed, _)| changed)
+    }
+
     pub fn send_gameplay_command_timed(
         &mut self,
         command: ClientCommand,
     ) -> Result<(bool, GameplayCommandTiming)> {
+        self.send_gameplay_command_with_update_policy_timed(
+            command,
+            GameplayCommandUpdatePolicy::DrainImmediately,
+        )
+    }
+
+    pub fn send_gameplay_command_with_update_policy_timed(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<(bool, GameplayCommandTiming)> {
         match self {
-            Self::Local(scene) => scene.send_gameplay_command_timed(command),
-            Self::RemoteDedicated(scene) => scene.send_gameplay_command_timed(command),
+            Self::Local(scene) => {
+                scene.send_gameplay_command_with_update_policy_timed(command, policy)
+            }
+            Self::RemoteDedicated(scene) => {
+                scene.send_gameplay_command_with_update_policy_timed(command, policy)
+            }
         }
     }
 
@@ -1320,9 +1371,29 @@ where
         dispatch_remote_dedicated_command(&mut self.core, &mut self.session, command)
     }
 
+    pub fn send_gameplay_command_with_update_policy(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<bool> {
+        self.send_gameplay_command_with_update_policy_timed(command, policy)
+            .map(|(changed, _)| changed)
+    }
+
     pub fn send_gameplay_command_timed(
         &mut self,
         command: ClientCommand,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        self.send_gameplay_command_with_update_policy_timed(
+            command,
+            GameplayCommandUpdatePolicy::DrainImmediately,
+        )
+    }
+
+    pub fn send_gameplay_command_with_update_policy_timed(
+        &mut self,
+        command: ClientCommand,
+        _policy: GameplayCommandUpdatePolicy,
     ) -> Result<(bool, GameplayCommandTiming)> {
         let total_start = Instant::now();
         let changed =
@@ -1629,6 +1700,58 @@ mod tests {
                 .chunk_snapshot(ChunkPos::new(0, 0))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn local_send_only_command_defers_update_application_until_poll() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mut runtime = LocalSingleViewSceneRuntime::new(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false),
+        )
+        .unwrap();
+        runtime.poll_until_idle().unwrap();
+        assert!(
+            runtime
+                .client()
+                .chunk_snapshot(ChunkPos::new(0, 0))
+                .is_some()
+        );
+
+        let next_center = ChunkPos::new(1, 0);
+        let command = ClientCommand::SetChunkView(crate::chunk_view(
+            next_center,
+            0,
+            chunk_tracking_radius_for_render_distance(0),
+        ));
+        let (_changed, timing) = runtime
+            .send_gameplay_command_with_update_policy_timed(
+                command,
+                GameplayCommandUpdatePolicy::SendOnly,
+            )
+            .unwrap();
+        assert_eq!(timing.drain_updates_ms, 0.0);
+        assert_eq!(timing.updates, 0);
+        assert!(runtime.client().chunk_snapshot(next_center).is_none());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let diagnostics = runtime.server_runner_diagnostics().unwrap();
+            if diagnostics.update_queue_depth > 0 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for deferred server update"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(runtime.poll().unwrap());
+        assert!(runtime.client().chunk_snapshot(next_center).is_some());
     }
 
     #[test]

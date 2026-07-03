@@ -600,6 +600,13 @@ pub struct RuntimeUpdateApplyReport {
     pub unload_updates: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameplayCommandUpdatePolicy {
+    #[default]
+    DrainImmediately,
+    SendOnly,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GameplayCommandTiming {
     pub total_ms: f64,

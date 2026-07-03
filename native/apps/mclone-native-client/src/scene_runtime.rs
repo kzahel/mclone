@@ -12,7 +12,9 @@ use mclone_app_runtime::local_single_view::{
     LocalSingleViewStartupStep, NativeSingleViewSceneRuntime,
     build_local_single_view_client_runtime,
 };
-use mclone_app_runtime::{RuntimePollDiagnostics, SingleViewRuntimeStats};
+use mclone_app_runtime::{
+    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, SingleViewRuntimeStats,
+};
 #[cfg(test)]
 use mclone_app_runtime::{camera_position_inside_water_block, snapshot_block_state_at_world};
 pub(crate) use mclone_app_runtime::{chunk_tracking_radius_for_render_distance, square_count};
@@ -302,7 +304,11 @@ impl WindowSceneRuntime {
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
         let changed = if let Some(report) = camera.next_pose_sync_command() {
-            self.send_gameplay_command(report.command)
+            self.scene
+                .send_gameplay_command_with_update_policy(
+                    report.command,
+                    GameplayCommandUpdatePolicy::SendOnly,
+                )
                 .context("failed to sync player pose to server")?
         } else {
             false
