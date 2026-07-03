@@ -70,34 +70,27 @@ Reference material:
 
 The retired browser engine has been removed from the live tree. Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
 
-## Stack
+## Code Layout
 
-- **Primary language:** Rust, under [`native/`](native/).
-- **Primary development loop:** desktop flat, with `mclone-native-client` as the fastest interactive loop and the offscreen flat-client host as the target no-window validation path.
-- **Desktop XR:** opt-in OpenXR mode in `mclone-native-client` behind the `xr` feature; validated with real mclone stereo terrain and controller locomotion through shared XR crates.
-- **Android XR / Quest:** standalone Quest OpenXR package under [`android-xr/`](android-xr/) using `mclone-android-xr-client`; validated with staged assets, real stereo terrain, controller setup, and basic locomotion.
-- **Flat Android:** non-XR `NativeActivity` APK under [`android/`](android/) using `mclone-android-client`; validated with AVD screenshot and touch-orbit smokes.
-- **Web target:** Rust/WASM browser client through `mclone-web-client`, WebGPU, browser workers, and deployment at `mclone.kzahel.com`.
-- **Renderer:** `wgpu`, native first, web-compatible capability checks at renderer milestones. Vanilla visual behavior should be checked against the Java 1.17.1 client source before borrowing renderer policy from other engines.
-- **Worldgen:** direct Rust port of MC Java 1.17.1's pipeline; bit-exact seed parity is the correctness bar.
-- **Protocol/runtime:** `mclone_protocol`, `mclone_net`, `mclone_server`, `mclone_client`, `mclone_app_runtime`, and `mclone_render_session` keep singleplayer, remote, render-section, and platform app paths on shared contracts.
-- **Host mode invariant:** local integrated, remote dedicated, and future P2P/session modes are runtime host choices, not platform identities. Desktop, web, flat Android, and XR clients should converge on the same client/server protocol and runtime shell wherever the display/input platform permits it.
-- **XR sharing:** `mclone_xr_host`, `mclone_xr_graphics`, and `mclone_xr_scene` keep desktop XR and Android XR from growing private copies of session, swapchain, terrain, and controller-locomotion behavior.
-- **Java reference client:** `reference/minecraft-1.17.1/src/` is the authority for vanilla block/entity rendering behavior, model baking, atlas stitching, mipmaps/filtering, render layers, lighting, fog, sky, particles, and client-visible state.
-- **Sibling reference engine:** `~/code/playbox` is the local Rust `winit`/`wgpu`/headless/Android/OpenXR pattern library. For platform or XR work, start with its `Cargo.toml`, `docs/architecture/rendering.md`, `docs/architecture/platforms.md`, `android/README.md`, and `android-xr/README.md`.
-- **Oracle tooling:** Java and TypeScript fixture-generation helpers live under [`oracle/`](oracle/); shared fixture JSON remains under [`test/fixtures/`](test/fixtures/) and is consumed by native Rust tests.
+- [`native/Cargo.toml`](native/Cargo.toml) - primary Rust workspace
+- [`native/apps/mclone-native-client/`](native/apps/mclone-native-client/) - desktop flat app shell, desktop OpenXR entrypoint, CLI diagnostics, and offscreen capture entrypoints
+- [`native/apps/mclone-web-client/`](native/apps/mclone-web-client/) - Rust/WASM browser client
+- [`native/apps/mclone-android-client/`](native/apps/mclone-android-client/) - flat Android client
+- [`native/apps/mclone-android-xr-client/`](native/apps/mclone-android-xr-client/) - Quest / Android XR client
+- [`native/apps/mclone-dedicated-server/`](native/apps/mclone-dedicated-server/) - headless dedicated server
+- [`native/crates/`](native/crates/) - shared engine, protocol, runtime, renderer, UI, worldgen, asset, mesh, lighting, and XR crates
+- [`oracle/`](oracle/) - Java and TypeScript fixture-generation helpers
+- [`test/fixtures/`](test/fixtures/) - shared oracle fixture data consumed by native Rust tests
+- [`reference/minecraft-1.17.1/`](reference/minecraft-1.17.1/) - generated, gitignored Minecraft reference tree
 
 ## Common Validation
 
-Use the native Rust workspace for implementation work:
+Recommended default gates:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml
-pnpm native:worldgen:smoke
-pnpm native:movement:smoke
-pnpm native:timedemo:smoke
+pnpm native:desktop-offscreen:smoke
 pnpm native:web:build
-pnpm native:web:smoke
 ```
 
-Rendered-output work should use the native headless/offscreen capture paths where available and keep screenshots outside the repo, for example under `/tmp`.
+Use [`docs/platforms.md`](docs/platforms.md) for the full platform validation matrix. Rendered-output work should use the native headless/offscreen capture paths where available and keep screenshots outside the repo, for example under `/tmp`.
