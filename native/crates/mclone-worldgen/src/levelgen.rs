@@ -386,6 +386,310 @@ mod tests {
             surface_family: SurfaceFamily::ShatteredSavanna,
             feature_family: None,
         },
+        PaletteMatrixCase {
+            seed: 252,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:frozen_river",
+            surface_family: SurfaceFamily::FrozenWater,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 326,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:snowy_mountains",
+            surface_family: SurfaceFamily::Snow,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 1554,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:mushroom_field_shore",
+            surface_family: SurfaceFamily::Mycelium,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 120,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:desert_hills",
+            surface_family: SurfaceFamily::Sand,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 2,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:wooded_hills",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 29,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:taiga_hills",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 146,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:jungle_hills",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 4,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:deep_ocean",
+            surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 167,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:stone_shore",
+            surface_family: SurfaceFamily::Mountain,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 30,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:birch_forest_hills",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 886,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:snowy_taiga_hills",
+            surface_family: SurfaceFamily::Snow,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 93,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:giant_tree_taiga_hills",
+            surface_family: SurfaceFamily::GiantTaiga,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 3,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:wooded_mountains",
+            surface_family: SurfaceFamily::Mountain,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 86,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:wooded_badlands_plateau",
+            surface_family: SurfaceFamily::Badlands,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 84,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:badlands_plateau",
+            surface_family: SurfaceFamily::Badlands,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 56,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:deep_lukewarm_ocean",
+            surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 13,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:deep_cold_ocean",
+            surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 25,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:sunflower_plains",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 98,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:desert_lakes",
+            surface_family: SurfaceFamily::Sand,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 212,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:gravelly_mountains",
+            surface_family: SurfaceFamily::Mountain,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 135,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:flower_forest",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 1326,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:taiga_mountains",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 1094,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:swamp_hills",
+            surface_family: SurfaceFamily::Swamp,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 59,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:ice_spikes",
+            surface_family: SurfaceFamily::Snow,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 1374,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:modified_jungle",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 314_096,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:modified_jungle_edge",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 48,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:tall_birch_forest",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 1557,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:tall_birch_hills",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 410,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:dark_forest_hills",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 12_006,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:snowy_taiga_mountains",
+            surface_family: SurfaceFamily::Snow,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 282,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:giant_spruce_taiga_hills",
+            surface_family: SurfaceFamily::GiantTaiga,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 83,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:modified_gravelly_mountains",
+            surface_family: SurfaceFamily::Mountain,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 175,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:shattered_savanna_plateau",
+            surface_family: SurfaceFamily::ShatteredSavanna,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 8464,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:eroded_badlands",
+            surface_family: SurfaceFamily::Badlands,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 3823,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:modified_wooded_badlands_plateau",
+            surface_family: SurfaceFamily::Badlands,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 18_441,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:modified_badlands_plateau",
+            surface_family: SurfaceFamily::Badlands,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 626,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:bamboo_jungle",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 1000,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:bamboo_jungle_hills",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
     ];
 
     #[derive(Debug, Deserialize)]
@@ -1432,11 +1736,12 @@ mod tests {
             let family_columns = count_top_surface_family(&chunk, case.surface_family);
             assert!(
                 family_columns > 0,
-                "seed {} chunk ({}, {}) had no top-surface {} columns",
+                "seed {} chunk ({}, {}) had no top-surface {} columns; top surface histogram: {:?}",
                 case.seed,
                 case.chunk_x,
                 case.chunk_z,
-                case.surface_family.name()
+                case.surface_family.name(),
+                top_surface_histogram(&chunk)
             );
 
             if let Some(feature_family) = case.feature_family {
@@ -2309,6 +2614,18 @@ mod tests {
             }
         }
         count
+    }
+
+    fn top_surface_histogram(chunk: &GeneratedChunk) -> BTreeMap<&'static str, usize> {
+        let mut counts = BTreeMap::new();
+        for local_z in 0..GeneratedChunk::WIDTH {
+            for local_x in 0..GeneratedChunk::WIDTH {
+                if let Some(block) = top_non_air_block(chunk, local_x, local_z) {
+                    *counts.entry(crate::block::block_name(block)).or_insert(0) += 1;
+                }
+            }
+        }
+        counts
     }
 
     fn count_feature_family(chunk: &GeneratedChunk, family: FeatureFamily) -> usize {
