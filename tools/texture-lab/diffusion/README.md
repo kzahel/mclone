@@ -45,7 +45,34 @@ uv run python propose.py \
 ```
 
 Outputs include one PNG per seed/strength pair, a 3x3 self-tiled sheet for each
-candidate, and `manifest.json` with input hashes, model provenance, device,
-patched convolution counts, and wrap seam metrics.
+candidate, an aggregate `contact-sheet.png`, and `manifest.json` with input
+hashes, model provenance, device, patched convolution counts, image stats, and
+wrap seam metrics.
 
 Use `--no-seamless` to A/B the circular-padding patch.
+
+## Stone Sweep
+
+Export the owned 16x16 stone macro mask from the TypeScript lab:
+
+```sh
+pnpm --dir tools/texture-lab export -- \
+  --texture stone \
+  --authoring-role structure \
+  --authoring-only \
+  --out /tmp/mclone-texture-lab/diffusion/stone-input
+```
+
+Run the current stone proposal sweep:
+
+```sh
+cd tools/texture-lab/diffusion
+uv run python propose.py \
+  --input /tmp/mclone-texture-lab/diffusion/stone-input/authoring/stone-structure.png \
+  --prompt "top-down photograph of a rough gray stone surface, chipped granite, matte, flat even lighting, seamless texture, no shadows" \
+  --seeds 2001 2002 2003 2004 2005 2006 2007 2008 \
+  --strengths 0.35 0.5 0.65 \
+  --steps 20 \
+  --dtype fp32 \
+  --out-dir /tmp/mclone-texture-lab/diffusion/stone
+```

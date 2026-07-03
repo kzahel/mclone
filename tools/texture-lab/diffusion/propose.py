@@ -78,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         seamless_patch = make_seamless(pipe, torch)
 
     candidates: list[dict[str, Any]] = []
+    candidate_images: list[tuple[str, Any]] = []
     for seed in seeds:
         for strength in strengths:
             generator = torch.Generator("cpu").manual_seed(seed)
@@ -109,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
                     "seam": seam,
                 }
             )
+            candidate_images.append((candidate_id, image.copy()))
+
+    contact_sheet_path: Path | None = None
+    if candidate_images:
+        contact_sheet_path = out_dir / "contact-sheet.png"
+        make_contact_sheet(candidate_images, pil_image).save(contact_sheet_path)
 
     manifest = {
         "schema_version": 1,
@@ -149,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             "platform": platform.platform(),
             "pytorch_enable_mps_fallback": os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK"),
         },
+        "contact_sheet_png": str(contact_sheet_path) if contact_sheet_path else None,
         "candidates": candidates,
     }
     (out_dir / "manifest.json").write_text(
@@ -157,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     print(f"Wrote {len(candidates)} candidate(s) to {out_dir}")
+    if contact_sheet_path:
+        print(f"Wrote contact sheet to {contact_sheet_path}")
     print(f"Wrote manifest to {out_dir / 'manifest.json'}")
     return 0
 
@@ -353,6 +363,27 @@ def make_tile_sheet(image: Any, pil_image: Any) -> Any:
     for y in range(3):
         for x in range(3):
             sheet.paste(rgb, (x * width, y * height))
+    return sheet
+
+
+def make_contact_sheet(candidate_images: list[tuple[str, Any]], pil_image: Any) -> Any:
+    thumb_size = 192
+    gutter = 8
+    columns = min(6, max(1, len(candidate_images)))
+    rows = (len(candidate_images) + columns - 1) // columns
+    sheet = pil_image.new(
+        "RGB",
+        (columns * thumb_size + (columns + 1) * gutter, rows * thumb_size + (rows + 1) * gutter),
+        (34, 36, 35),
+    )
+    for index, (_candidate_id, image) in enumerate(candidate_images):
+        column = index % columns
+        row = index // columns
+        thumb = image.convert("RGB")
+        thumb.thumbnail((thumb_size, thumb_size), resample=pil_image.Resampling.LANCZOS)
+        x = gutter + column * (thumb_size + gutter) + (thumb_size - thumb.width) // 2
+        y = gutter + row * (thumb_size + gutter) + (thumb_size - thumb.height) // 2
+        sheet.paste(thumb, (x, y))
     return sheet
 
 

@@ -241,6 +241,20 @@ Local validation on macOS/M4/MPS:
 - Matching 20-step fp32 `--no-seamless` control recorded horizontal 23.6504
   and vertical 18.9355 mean wrap error, so the circular-padding patch is
   materially improving seams but is still a best-effort patch, not a proof.
+- M2 input export and sweep are wired:
+  - `src/export.ts` supports `--texture <name>`, `--authoring-role structure`,
+    and `--authoring-only`.
+  - Stone's 16x16 authoring structure was exported to
+    `/tmp/mclone-texture-lab/diffusion/stone-input/authoring/stone-structure.png`.
+  - The M2 sweep ran against that owned macro PNG with seeds `2001..2008`,
+    strengths `0.35, 0.5, 0.65`, 20 steps, and `--dtype fp32`.
+  - Output landed under `/tmp/mclone-texture-lab/diffusion/stone/`: 24 raw
+    candidate PNGs, 24 per-candidate 3x3 tiled PNGs, `contact-sheet.png`, and
+    `manifest.json`.
+  - Manifest validation found 24 non-flat candidates, input nearest-resized
+    from 16x16 to 512x512, and max mean wrap errors of horizontal 20.3822 and
+    vertical 19.4798 RGB levels. Several candidates are visibly too blocky or
+    tile-like, which is expected input for M3 triage rather than an M2 failure.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;
@@ -264,7 +278,7 @@ macro-correction tuning is speculative work that will be redone.
   boundary is within the same tolerance the lab's seam diagnostic uses. If
   the seam fails with the patch on, that is a finding to report, not to
   silently work around — see the known gap in Tiling.
-- **M2 — stone proposal sweep.** Wire the input side: export the current
+- **M2 — stone proposal sweep.** Done locally: export the current
   stone 16x16 macro plan to PNG (macro mask alone, not the composite — add
   a lab export option if one is missing), nearest-upscale, run the sweep
   (8 seeds × 3 strengths). Accept: 24 raw candidates plus a simple contact
