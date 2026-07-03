@@ -1,0 +1,16 @@
+[project]
+name = "mclone-texture-lab-diffusion"
+version = "0.1.0"
+description = "Diffusion proposal runner for mclone texture lab upscale experiments"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "accelerate>=1.11.0",
+  "diffusers>=0.36.0",
+  "pillow>=12.0.0",
+  "safetensors>=0.7.0",
+  "torch>=2.9.0",
+  "transformers>=4.57.0",
+]
+
+[tool.uv]
+package = false
