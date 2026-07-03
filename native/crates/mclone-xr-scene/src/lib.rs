@@ -3151,6 +3151,7 @@ where
             let drained_report = self.apply_section_update_uploads(
                 device,
                 RenderSectionCacheUpdate::default(),
+                false,
                 timing,
             )?;
             timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
@@ -3337,8 +3338,12 @@ where
         let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
         if upload_frame_decision.should_apply_section_update_after_sync {
             let upload_start = Instant::now();
-            let section_update_report =
-                self.apply_section_update_uploads(device, section_update, timing)?;
+            let section_update_report = self.apply_section_update_uploads(
+                device,
+                section_update,
+                upload_frame_decision.upload_backpressured,
+                timing,
+            )?;
             timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
             accumulate_upload_report(&mut upload_report, section_update_report.upload);
             upload_phase.absorb(section_update_report.phase);
@@ -3436,6 +3441,7 @@ where
         &mut self,
         device: &wgpu::Device,
         section_update: RenderSectionCacheUpdate,
+        upload_backpressured: bool,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadApplyReport> {
         if self.render_section_upload_budget.is_none()
@@ -3453,10 +3459,11 @@ where
             let apply_start = Instant::now();
             let report = self
                 .draw
-                .apply_section_updates(
+                .apply_section_updates_with_context(
                     device,
                     &section_update.rebuilt_sections,
                     &section_update.removed_section_keys,
+                    upload_backpressured,
                 )
                 .context("upload XR terrain render section updates");
             timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
@@ -3487,7 +3494,12 @@ where
         let apply_start = Instant::now();
         let report = self
             .draw
-            .apply_section_updates(device, &drain.rebuilt_sections, &drain.removed_section_keys)
+            .apply_section_updates_with_context(
+                device,
+                &drain.rebuilt_sections,
+                &drain.removed_section_keys,
+                upload_backpressured,
+            )
             .context("accept budgeted XR terrain render section updates");
         timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
         report.map(|upload| {

@@ -1489,6 +1489,65 @@ Next implementation implication:
 - Do not tune `2 / 16 / 64` again until the draw-record/encode path is separated
   from upload and ready-publication cost.
 
+Prepared record dirty-cause attribution:
+
+- Implemented July 3, 2026 as an instrumentation slice, without changing draw
+  behavior.
+- `TexturedSectionDrawResources` now keeps a pending prepared-record dirty-cause
+  bitset. Causes accumulate until the next prepared-record rebuild instead of
+  being overwritten by later mutations.
+- Tracked causes are initial build, section upload/rebuild, section removal,
+  traversal-ready set change, and upload-backpressured context when XR's upload
+  frame decision is available.
+- `TexturedSectionRecordCacheStats` now counts prepared-record rebuild causes,
+  multi-cause rebuilds, and cumulative maxima for visibility sections, loaded
+  sections, ready sections, and loaded indices at rebuild time.
+- Android XR logs the new fields on `MCLONE_ANDROID_XR_PERF_RECORD_CACHE` as
+  sample-delta cause counters plus cumulative rebuild size maxima.
+
+Validation so far:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render record_cache_stats_track_prepared_rebuild_dirty_causes -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render record_cache_stats_track_upload_backpressured_ready_set_context -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render -- --nocapture`
+- `cd native && cargo ndk -t arm64-v8a --platform 28 check --package mclone-android-xr-client --lib`
+- `cargo test --manifest-path native/Cargo.toml`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, `2 / 16 / 64`, 45 seconds.
+
+Measurement:
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Prepared rebuild causes | Key tail |
+|---|---:|---|---:|---|---|
+| `2 / 16 / 64` prepared-record attribution | 16 | 14.790 / 17.195 / 20.422 / 27.254 ms | 55.9% | rebuilds 124; upload dirty 114; ready dirty 12; multi dirty 2; backpressured dirty 0; max rebuild 1.859 ms; max visibility/loaded/ready 3600/1133/3136 | runtime upload 12.168 ms; poll 8.528 ms; upload apply 5.145 ms; shared records 1.939 ms; left/right eye encode 3.410/3.438 ms; stereo poll wait 9.655 ms |
+
+Interpretation:
+
+- The new counters landed and are visible on Quest. Prepared-record rebuilds are
+  overwhelmingly driven by section upload/rebuild (`114 / 124`), not
+  traversal-ready churn (`12 / 124`).
+- Prepared/shared records were not the largest tail in this run
+  (`1.939 ms` max, `1.183 ms` average rebuild). Incremental prepared-record
+  updates are still plausible, but they should not be the next default
+  optimization without another signal.
+- The largest observed terrain/runtime costs are now runtime upload/poll and
+  upload apply. Worst-frame detail shows one top frame dominated by runtime poll
+  update application rather than record rebuild (`poll_ms=8.528`,
+  `apply_updates_ms=8.509`, `client_apply_ms=8.260`).
+- Eye encode remains worth watching (`3.410 / 3.438 ms` max), but existing
+  per-layer split suggests the opaque terrain pass is the main eye-side bucket
+  rather than a hidden record rebuild.
+
+Closeout notes:
+
+- Next Quest RD7 run should use the same `2 / 16 / 64` settled-orbit lane and
+  keep the new `prepared_rebuild_*_dirty` distribution in the summary.
+- Keep the older deferred note to force or construct a
+  `ready_set_backpressured > 0` run; the versioned ready path has not yet
+  proven behavior under that exact condition.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1553,18 +1612,25 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Use the versioned traversal-ready cache as the new baseline and move to
-draw-record/encode maintenance. The July 3 RD7 orbit skipped `2833 / 3011`
-ready publishes and reduced ready publish max to `1.322 ms`, so traversal-ready
-publication is no longer the obvious broad per-frame cost. The next safe chunk
-is to attach prepared-record rebuilds more tightly to section lifecycle and add
-attribution for `shared_records` / eye encode tails by changed section count,
-section layer, and rebuild cause.
+Use the prepared-record attribution run as the new baseline and move back to the
+runtime update/upload side before optimizing prepared records. The July 3 RD7
+attribution run showed prepared rebuilds are mostly upload dirty (`114 / 124`),
+but prepared/shared records peaked at only `1.939 ms`; the bigger tails were
+runtime upload (`12.168 ms`), poll/update application (`8.528 ms` poll with
+`8.509 ms` update apply on the worst frame), upload apply (`5.145 ms`), and XR
+poll wait.
+
+The next safe chunk is to attribute and pace runtime update application during
+XR terrain frames: split poll/update application into server-update categories,
+tie upload-apply spikes to accepted/uploaded section counts, and decide whether
+the update pump needs a frame budget or staging boundary. Keep per-eye encode
+attribution as the follow-up if the update/upload side is not the dominant tail
+in the next RD7 run.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of
-the time. The next run should tell us whether draw-record/encode lifecycle
-ownership reduces the remaining tails, not whether one more isolated budget
-number looks better. Keep the deferred closeout note to force a
+the time. The next run should tell us whether update/upload pacing reduces the
+remaining terrain-runtime tails, not whether one more isolated budget number
+looks better. Keep the deferred closeout note to force a
 `ready_set_backpressured > 0` run, because neither July 3 RD7 orbit hit that
 condition.

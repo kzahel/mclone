@@ -513,6 +513,16 @@ pub struct TexturedSectionRecordCacheStats {
     pub prepared_record_rebuilds: u64,
     pub prepared_record_rebuild_total_ms: f64,
     pub prepared_record_rebuild_max_ms: f64,
+    pub prepared_record_rebuild_initial_dirty: u64,
+    pub prepared_record_rebuild_section_upload_dirty: u64,
+    pub prepared_record_rebuild_section_remove_dirty: u64,
+    pub prepared_record_rebuild_ready_set_dirty: u64,
+    pub prepared_record_rebuild_upload_backpressured_dirty: u64,
+    pub prepared_record_rebuild_multi_dirty: u64,
+    pub prepared_record_rebuild_visibility_section_max: u64,
+    pub prepared_record_rebuild_loaded_section_max: u64,
+    pub prepared_record_rebuild_ready_section_max: u64,
+    pub prepared_record_rebuild_loaded_index_max: u64,
 }
 
 impl TexturedSectionRecordCacheStats {
@@ -538,6 +548,50 @@ impl TexturedSectionRecordCacheStats {
         if upload_backpressured {
             self.ready_set_upload_backpressured_skipped_calls += 1;
         }
+    }
+
+    pub fn record_prepared_record_rebuild(
+        &mut self,
+        rebuild_ms: f64,
+        dirty_causes: TexturedSectionRecordDirtyCauses,
+        visibility_section_count: usize,
+        loaded_section_count: usize,
+        ready_section_count: usize,
+        loaded_index_count: u32,
+    ) {
+        self.prepared_record_rebuilds += 1;
+        self.prepared_record_rebuild_total_ms += rebuild_ms;
+        self.prepared_record_rebuild_max_ms = self.prepared_record_rebuild_max_ms.max(rebuild_ms);
+        if dirty_causes.contains(TexturedSectionRecordDirtyCauses::INITIAL) {
+            self.prepared_record_rebuild_initial_dirty += 1;
+        }
+        if dirty_causes.contains(TexturedSectionRecordDirtyCauses::SECTION_UPLOAD) {
+            self.prepared_record_rebuild_section_upload_dirty += 1;
+        }
+        if dirty_causes.contains(TexturedSectionRecordDirtyCauses::SECTION_REMOVE) {
+            self.prepared_record_rebuild_section_remove_dirty += 1;
+        }
+        if dirty_causes.contains(TexturedSectionRecordDirtyCauses::TRAVERSAL_READY) {
+            self.prepared_record_rebuild_ready_set_dirty += 1;
+        }
+        if dirty_causes.contains(TexturedSectionRecordDirtyCauses::UPLOAD_BACKPRESSURED) {
+            self.prepared_record_rebuild_upload_backpressured_dirty += 1;
+        }
+        if dirty_causes.cause_count() > 1 {
+            self.prepared_record_rebuild_multi_dirty += 1;
+        }
+        self.prepared_record_rebuild_visibility_section_max = self
+            .prepared_record_rebuild_visibility_section_max
+            .max(visibility_section_count as u64);
+        self.prepared_record_rebuild_loaded_section_max = self
+            .prepared_record_rebuild_loaded_section_max
+            .max(loaded_section_count as u64);
+        self.prepared_record_rebuild_ready_section_max = self
+            .prepared_record_rebuild_ready_section_max
+            .max(ready_section_count as u64);
+        self.prepared_record_rebuild_loaded_index_max = self
+            .prepared_record_rebuild_loaded_index_max
+            .max(u64::from(loaded_index_count));
     }
 
     pub fn prepared_record_rebuild_avg_ms(self) -> f64 {
@@ -583,7 +637,64 @@ impl TexturedSectionRecordCacheStats {
             // A max cannot be derived from cumulative counters; callers that
             // need sample-local max should track per-prepare samples.
             prepared_record_rebuild_max_ms: 0.0,
+            prepared_record_rebuild_initial_dirty: self
+                .prepared_record_rebuild_initial_dirty
+                .saturating_sub(baseline.prepared_record_rebuild_initial_dirty),
+            prepared_record_rebuild_section_upload_dirty: self
+                .prepared_record_rebuild_section_upload_dirty
+                .saturating_sub(baseline.prepared_record_rebuild_section_upload_dirty),
+            prepared_record_rebuild_section_remove_dirty: self
+                .prepared_record_rebuild_section_remove_dirty
+                .saturating_sub(baseline.prepared_record_rebuild_section_remove_dirty),
+            prepared_record_rebuild_ready_set_dirty: self
+                .prepared_record_rebuild_ready_set_dirty
+                .saturating_sub(baseline.prepared_record_rebuild_ready_set_dirty),
+            prepared_record_rebuild_upload_backpressured_dirty: self
+                .prepared_record_rebuild_upload_backpressured_dirty
+                .saturating_sub(baseline.prepared_record_rebuild_upload_backpressured_dirty),
+            prepared_record_rebuild_multi_dirty: self
+                .prepared_record_rebuild_multi_dirty
+                .saturating_sub(baseline.prepared_record_rebuild_multi_dirty),
+            prepared_record_rebuild_visibility_section_max: 0,
+            prepared_record_rebuild_loaded_section_max: 0,
+            prepared_record_rebuild_ready_section_max: 0,
+            prepared_record_rebuild_loaded_index_max: 0,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TexturedSectionRecordDirtyCauses {
+    bits: u8,
+}
+
+impl TexturedSectionRecordDirtyCauses {
+    pub const INITIAL: Self = Self { bits: 1 << 0 };
+    pub const SECTION_UPLOAD: Self = Self { bits: 1 << 1 };
+    pub const SECTION_REMOVE: Self = Self { bits: 1 << 2 };
+    pub const TRAVERSAL_READY: Self = Self { bits: 1 << 3 };
+    pub const UPLOAD_BACKPRESSURED: Self = Self { bits: 1 << 4 };
+
+    pub const fn empty() -> Self {
+        Self { bits: 0 }
+    }
+
+    pub const fn with(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.bits & other.bits != 0
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.bits == 0
+    }
+
+    pub fn cause_count(self) -> u32 {
+        self.bits.count_ones()
     }
 }
 
@@ -591,6 +702,11 @@ impl TexturedSectionRecordCacheStats {
 pub struct TexturedSectionRecordPrepareStats {
     pub rebuilt: bool,
     pub rebuild_ms: f64,
+    pub dirty_causes: TexturedSectionRecordDirtyCauses,
+    pub visibility_section_count: usize,
+    pub loaded_section_count: usize,
+    pub ready_section_count: usize,
+    pub loaded_index_count: u32,
     pub cache: TexturedSectionRecordCacheStats,
 }
 
@@ -2232,6 +2348,7 @@ pub struct TexturedSectionDrawResources {
     // XR) that culls through this draw-state store reuses the same cache.
     cached_records: RefCell<Option<Arc<PreparedTexturedSectionRecords>>>,
     records_dirty: Cell<bool>,
+    record_dirty_causes: Cell<TexturedSectionRecordDirtyCauses>,
     record_cache_stats: Cell<TexturedSectionRecordCacheStats>,
     // Slice G: reusable per-eye cull scratch (cleared each call). `RefCell`
     // because the render path borrows `&self`; the scratch is only ever touched
@@ -2260,6 +2377,7 @@ impl TexturedSectionDrawResources {
             atlas,
             cached_records: RefCell::new(None),
             records_dirty: Cell::new(true),
+            record_dirty_causes: Cell::new(TexturedSectionRecordDirtyCauses::INITIAL),
             record_cache_stats: Cell::new(TexturedSectionRecordCacheStats::default()),
             cull_scratch: RefCell::new(CullScratch::default()),
         };
@@ -2291,13 +2409,34 @@ impl TexturedSectionDrawResources {
         sections: &[TexturedRenderSectionMesh],
         removed: &BTreeSet<RenderSectionKey>,
     ) -> Result<TexturedSectionUploadReport> {
+        self.apply_section_updates_with_context(device, sections, removed, false)
+    }
+
+    pub fn apply_section_updates_with_context(
+        &mut self,
+        device: &wgpu::Device,
+        sections: &[TexturedRenderSectionMesh],
+        removed: &BTreeSet<RenderSectionKey>,
+        upload_backpressured: bool,
+    ) -> Result<TexturedSectionUploadReport> {
         if sections.is_empty() && removed.is_empty() {
             return Ok(TexturedSectionUploadReport::default());
         }
         self.section_set_generation = self.section_set_generation.wrapping_add(1);
         // Slice F: the section set / meshes change here, so the cached culling
         // records must be rebuilt on the next prepare.
-        self.records_dirty.set(true);
+        let mut dirty_causes = TexturedSectionRecordDirtyCauses::empty();
+        if !sections.is_empty() {
+            dirty_causes = dirty_causes.with(TexturedSectionRecordDirtyCauses::SECTION_UPLOAD);
+        }
+        if !removed.is_empty() {
+            dirty_causes = dirty_causes.with(TexturedSectionRecordDirtyCauses::SECTION_REMOVE);
+        }
+        if upload_backpressured {
+            dirty_causes =
+                dirty_causes.with(TexturedSectionRecordDirtyCauses::UPLOAD_BACKPRESSURED);
+        }
+        self.mark_records_dirty(dirty_causes);
         let mut report = TexturedSectionUploadReport::default();
         for key in removed {
             if self.sections.remove(key).is_some() {
@@ -2363,7 +2502,12 @@ impl TexturedSectionDrawResources {
         self.record_cache_stats.set(stats);
         // Slice F follow-up: readiness flips change cached `traversal_ready`.
         // Reasserting the same ready set should not rebuild prepared records.
-        self.records_dirty.set(true);
+        let mut dirty_causes = TexturedSectionRecordDirtyCauses::TRAVERSAL_READY;
+        if upload_backpressured {
+            dirty_causes =
+                dirty_causes.with(TexturedSectionRecordDirtyCauses::UPLOAD_BACKPRESSURED);
+        }
+        self.mark_records_dirty(dirty_causes);
         self.traversal_ready_sections = filtered_ready_sections;
     }
 
@@ -2377,6 +2521,13 @@ impl TexturedSectionDrawResources {
 
     pub fn record_cache_stats(&self) -> TexturedSectionRecordCacheStats {
         self.record_cache_stats.get()
+    }
+
+    fn mark_records_dirty(&self, causes: TexturedSectionRecordDirtyCauses) {
+        let mut dirty_causes = self.record_dirty_causes.get();
+        dirty_causes = dirty_causes.with(causes);
+        self.record_dirty_causes.set(dirty_causes);
+        self.records_dirty.set(true);
     }
 
     pub fn section_count(&self) -> usize {
@@ -2546,18 +2697,38 @@ impl TexturedSectionDrawResources {
         let mut prepare_stats = TexturedSectionRecordPrepareStats::default();
         if self.records_dirty.get() || self.cached_records.borrow().is_none() {
             let rebuild_start = timing_now();
-            let rebuilt = Arc::new(self.build_prepared_records());
+            let rebuilt_records = self.build_prepared_records();
             let rebuild_ms = timing_elapsed_ms(rebuild_start);
+            let mut dirty_causes = self.record_dirty_causes.get();
+            if dirty_causes.is_empty() {
+                dirty_causes = TexturedSectionRecordDirtyCauses::INITIAL;
+            }
+            let visibility_section_count = rebuilt_records.records.len();
+            let loaded_section_count = rebuilt_records.loaded_section_count;
+            let ready_section_count = self.traversal_ready_sections.len();
+            let loaded_index_count = rebuilt_records.loaded_index_count;
+            let rebuilt = Arc::new(rebuilt_records);
             *self.cached_records.borrow_mut() = Some(rebuilt);
             self.records_dirty.set(false);
+            self.record_dirty_causes
+                .set(TexturedSectionRecordDirtyCauses::empty());
             let mut cache_stats = self.record_cache_stats.get();
-            cache_stats.prepared_record_rebuilds += 1;
-            cache_stats.prepared_record_rebuild_total_ms += rebuild_ms;
-            cache_stats.prepared_record_rebuild_max_ms =
-                cache_stats.prepared_record_rebuild_max_ms.max(rebuild_ms);
+            cache_stats.record_prepared_record_rebuild(
+                rebuild_ms,
+                dirty_causes,
+                visibility_section_count,
+                loaded_section_count,
+                ready_section_count,
+                loaded_index_count,
+            );
             self.record_cache_stats.set(cache_stats);
             prepare_stats.rebuilt = true;
             prepare_stats.rebuild_ms = rebuild_ms;
+            prepare_stats.dirty_causes = dirty_causes;
+            prepare_stats.visibility_section_count = visibility_section_count;
+            prepare_stats.loaded_section_count = loaded_section_count;
+            prepare_stats.ready_section_count = ready_section_count;
+            prepare_stats.loaded_index_count = loaded_index_count;
         }
         prepare_stats.cache = self.record_cache_stats.get();
         (
@@ -3992,6 +4163,55 @@ mod tests {
         assert_eq!(next_delta.ready_set_upload_backpressured_unchanged_calls, 1);
         assert_eq!(next_delta.ready_set_skipped_calls, 1);
         assert_eq!(next_delta.ready_set_upload_backpressured_skipped_calls, 1);
+    }
+
+    #[test]
+    fn record_cache_stats_track_prepared_rebuild_dirty_causes() {
+        let baseline = TexturedSectionRecordCacheStats::default();
+        let mut stats = baseline;
+
+        stats.record_prepared_record_rebuild(
+            1.5,
+            TexturedSectionRecordDirtyCauses::INITIAL
+                .with(TexturedSectionRecordDirtyCauses::SECTION_UPLOAD),
+            16,
+            12,
+            10,
+            600,
+        );
+        stats.record_prepared_record_rebuild(
+            0.75,
+            TexturedSectionRecordDirtyCauses::TRAVERSAL_READY
+                .with(TexturedSectionRecordDirtyCauses::UPLOAD_BACKPRESSURED),
+            18,
+            14,
+            8,
+            720,
+        );
+
+        assert_eq!(stats.prepared_record_rebuilds, 2);
+        assert_eq!(stats.prepared_record_rebuild_initial_dirty, 1);
+        assert_eq!(stats.prepared_record_rebuild_section_upload_dirty, 1);
+        assert_eq!(stats.prepared_record_rebuild_section_remove_dirty, 0);
+        assert_eq!(stats.prepared_record_rebuild_ready_set_dirty, 1);
+        assert_eq!(stats.prepared_record_rebuild_upload_backpressured_dirty, 1);
+        assert_eq!(stats.prepared_record_rebuild_multi_dirty, 2);
+        assert_eq!(stats.prepared_record_rebuild_visibility_section_max, 18);
+        assert_eq!(stats.prepared_record_rebuild_loaded_section_max, 14);
+        assert_eq!(stats.prepared_record_rebuild_ready_section_max, 10);
+        assert_eq!(stats.prepared_record_rebuild_loaded_index_max, 720);
+
+        let delta = stats.sample_delta(baseline);
+        assert_eq!(delta.prepared_record_rebuilds, 2);
+        assert_eq!(delta.prepared_record_rebuild_initial_dirty, 1);
+        assert_eq!(delta.prepared_record_rebuild_section_upload_dirty, 1);
+        assert_eq!(delta.prepared_record_rebuild_ready_set_dirty, 1);
+        assert_eq!(delta.prepared_record_rebuild_upload_backpressured_dirty, 1);
+        assert_eq!(delta.prepared_record_rebuild_multi_dirty, 2);
+        assert_eq!(delta.prepared_record_rebuild_visibility_section_max, 0);
+        assert_eq!(delta.prepared_record_rebuild_loaded_section_max, 0);
+        assert_eq!(delta.prepared_record_rebuild_ready_section_max, 0);
+        assert_eq!(delta.prepared_record_rebuild_loaded_index_max, 0);
     }
 
     #[test]

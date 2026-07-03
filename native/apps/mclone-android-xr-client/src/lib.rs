@@ -4318,7 +4318,7 @@ mod android {
                 self.max_upload.upload_backpressured
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_RECORD_CACHE ready_set_calls={} ready_set_changed={} ready_set_unchanged={} ready_set_backpressured={} ready_set_backpressured_changed={} ready_set_backpressured_unchanged={} ready_set_skipped={} ready_set_backpressured_skipped={} prepared_rebuilds={} prepared_rebuild_frames={} prepared_rebuild_total_ms={:.3} prepared_rebuild_avg_ms={:.3} prepared_rebuild_max_ms={:.3} cumulative_rebuild_max_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_RECORD_CACHE ready_set_calls={} ready_set_changed={} ready_set_unchanged={} ready_set_backpressured={} ready_set_backpressured_changed={} ready_set_backpressured_unchanged={} ready_set_skipped={} ready_set_backpressured_skipped={} prepared_rebuilds={} prepared_rebuild_frames={} prepared_rebuild_total_ms={:.3} prepared_rebuild_avg_ms={:.3} prepared_rebuild_max_ms={:.3} cumulative_rebuild_max_ms={:.3} prepared_rebuild_initial_dirty={} prepared_rebuild_upload_dirty={} prepared_rebuild_remove_dirty={} prepared_rebuild_ready_dirty={} prepared_rebuild_backpressured_dirty={} prepared_rebuild_multi_dirty={} cumulative_rebuild_visibility_max={} cumulative_rebuild_loaded_max={} cumulative_rebuild_ready_max={} cumulative_rebuild_index_max={}",
                 record_cache_delta.ready_set_calls,
                 record_cache_delta.ready_set_changed_calls,
                 record_cache_delta.ready_set_unchanged_calls,
@@ -4332,7 +4332,21 @@ mod android {
                 self.record_rebuild_total_ms,
                 record_rebuild_avg_ms,
                 self.record_rebuild_max_ms,
-                self.latest_record_cache.prepared_record_rebuild_max_ms
+                self.latest_record_cache.prepared_record_rebuild_max_ms,
+                record_cache_delta.prepared_record_rebuild_initial_dirty,
+                record_cache_delta.prepared_record_rebuild_section_upload_dirty,
+                record_cache_delta.prepared_record_rebuild_section_remove_dirty,
+                record_cache_delta.prepared_record_rebuild_ready_set_dirty,
+                record_cache_delta.prepared_record_rebuild_upload_backpressured_dirty,
+                record_cache_delta.prepared_record_rebuild_multi_dirty,
+                self.latest_record_cache
+                    .prepared_record_rebuild_visibility_section_max,
+                self.latest_record_cache
+                    .prepared_record_rebuild_loaded_section_max,
+                self.latest_record_cache
+                    .prepared_record_rebuild_ready_section_max,
+                self.latest_record_cache
+                    .prepared_record_rebuild_loaded_index_max
             );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms={:.3} drain_updates_ms={:.3} apply_updates_ms={:.3} dirty_mark_ms={:.3} client_apply_ms={:.3} poll_diagnostics_ms={:.3} diagnostics_refresh_frames={} diagnostics_refreshed={} diagnostics_cache_age_ms={:.3} server_detail_refreshes={} server_detail_age_ms={:.3} server_tick_ms={:.3} scheduler_tick_ms={:.3} updates={} snapshot_updates={} section_updates={} unload_updates={}",
@@ -4682,6 +4696,11 @@ mod android {
         TexturedSectionRecordPrepareStats {
             rebuilt: a.rebuilt || b.rebuilt,
             rebuild_ms: a.rebuild_ms.max(b.rebuild_ms),
+            dirty_causes: a.dirty_causes.with(b.dirty_causes),
+            visibility_section_count: a.visibility_section_count.max(b.visibility_section_count),
+            loaded_section_count: a.loaded_section_count.max(b.loaded_section_count),
+            ready_section_count: a.ready_section_count.max(b.ready_section_count),
+            loaded_index_count: a.loaded_index_count.max(b.loaded_index_count),
             cache: max_record_cache_stats(a.cache, b.cache),
         }
     }
@@ -4714,6 +4733,36 @@ mod android {
             prepared_record_rebuild_max_ms: a
                 .prepared_record_rebuild_max_ms
                 .max(b.prepared_record_rebuild_max_ms),
+            prepared_record_rebuild_initial_dirty: a
+                .prepared_record_rebuild_initial_dirty
+                .max(b.prepared_record_rebuild_initial_dirty),
+            prepared_record_rebuild_section_upload_dirty: a
+                .prepared_record_rebuild_section_upload_dirty
+                .max(b.prepared_record_rebuild_section_upload_dirty),
+            prepared_record_rebuild_section_remove_dirty: a
+                .prepared_record_rebuild_section_remove_dirty
+                .max(b.prepared_record_rebuild_section_remove_dirty),
+            prepared_record_rebuild_ready_set_dirty: a
+                .prepared_record_rebuild_ready_set_dirty
+                .max(b.prepared_record_rebuild_ready_set_dirty),
+            prepared_record_rebuild_upload_backpressured_dirty: a
+                .prepared_record_rebuild_upload_backpressured_dirty
+                .max(b.prepared_record_rebuild_upload_backpressured_dirty),
+            prepared_record_rebuild_multi_dirty: a
+                .prepared_record_rebuild_multi_dirty
+                .max(b.prepared_record_rebuild_multi_dirty),
+            prepared_record_rebuild_visibility_section_max: a
+                .prepared_record_rebuild_visibility_section_max
+                .max(b.prepared_record_rebuild_visibility_section_max),
+            prepared_record_rebuild_loaded_section_max: a
+                .prepared_record_rebuild_loaded_section_max
+                .max(b.prepared_record_rebuild_loaded_section_max),
+            prepared_record_rebuild_ready_section_max: a
+                .prepared_record_rebuild_ready_section_max
+                .max(b.prepared_record_rebuild_ready_section_max),
+            prepared_record_rebuild_loaded_index_max: a
+                .prepared_record_rebuild_loaded_index_max
+                .max(b.prepared_record_rebuild_loaded_index_max),
         }
     }
 
