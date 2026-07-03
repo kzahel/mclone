@@ -13,11 +13,12 @@ use mclone_protocol::{
     encode_client_command, encode_server_update,
 };
 use mclone_server::{
-    INITIAL_DAY_TIME, IntegratedServer, IntegratedServerRunner, LightStatusMailboxKind,
-    ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
-    ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WasmServerJobWorkerConfig,
-    WorkerFrameMetrics, WorkerFrameTransportKind, WorldgenJobSession, WorldgenMailboxKind,
-    compute_light_status_job_frame,
+    ChunkRecord, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServer,
+    IntegratedServerRunner, LightStatusMailboxKind, ServerRunnerDiagnostics, ServerRunnerError,
+    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
+    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind, WorldStore,
+    WorldgenJobSession, WorldgenMailboxKind, compute_light_status_job_frame, decode_chunk_record,
+    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -52,8 +53,18 @@ pub struct WebIntegratedServerRunnerConfig {
     pub job_worker_url: String,
     pub bindgen_js_url: String,
     pub bindgen_wasm_url: String,
+    pub world_storage: WebIntegratedServerWorldStorage,
     pub runner_transport_kind: Option<WorkerFrameTransportKind>,
     pub runner_initial_response_bytes: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WebIntegratedServerWorldStorage {
+    Transient,
+    IndexedDb {
+        world_id: String,
+        clear_existing: bool,
+    },
 }
 
 impl WebIntegratedServerRunnerConfig {
@@ -70,9 +81,22 @@ impl WebIntegratedServerRunnerConfig {
             job_worker_url: job_worker_url.into(),
             bindgen_js_url: bindgen_js_url.into(),
             bindgen_wasm_url: bindgen_wasm_url.into(),
+            world_storage: WebIntegratedServerWorldStorage::Transient,
             runner_transport_kind: None,
             runner_initial_response_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
         }
+    }
+
+    pub fn with_indexed_db_world(
+        mut self,
+        world_id: impl Into<String>,
+        clear_existing: bool,
+    ) -> Self {
+        self.world_storage = WebIntegratedServerWorldStorage::IndexedDb {
+            world_id: world_id.into(),
+            clear_existing,
+        };
+        self
     }
 
     pub const fn with_runner_transport_kind(
@@ -319,11 +343,34 @@ impl WebIntegratedServerRunner {
             return;
         }
         self.shutdown_requested = true;
-        let _ = self.post_shutdown();
+        let _ = self.post_shutdown_with_request_id(0);
         self.worker.terminate();
         let mut diagnostics = self.diagnostics.borrow_mut();
         diagnostics.running = false;
         diagnostics.awaiting_tick = false;
+    }
+
+    pub async fn shutdown_gracefully(&mut self) -> Result<(), String> {
+        if self.shutdown_requested {
+            return Ok(());
+        }
+        self.shutdown_requested = true;
+        let request_id = self.next_request_id();
+        let promise = self.register_pending(request_id);
+        if let Err(error) = self.post_shutdown_with_request_id(request_id) {
+            self.pending.borrow_mut().remove(&request_id);
+            self.worker.terminate();
+            return Err(error);
+        }
+        let response = JsFuture::from(promise).await.map_err(|error| {
+            format!("server worker shutdown failed: {}", js_error_string(&error))
+        })?;
+        ensure_worker_response_ok(&response)?;
+        self.worker.terminate();
+        let mut diagnostics = self.diagnostics.borrow_mut();
+        diagnostics.running = false;
+        diagnostics.awaiting_tick = false;
+        Ok(())
     }
 
     fn next_request_id(&mut self) -> u32 {
@@ -341,6 +388,19 @@ impl WebIntegratedServerRunner {
         set_string(&message, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
         set_string(&message, "jobWorkerUrl", &config.job_worker_url)?;
+        match &config.world_storage {
+            WebIntegratedServerWorldStorage::Transient => {
+                set_string(&message, "worldStorage", "transient")?;
+            }
+            WebIntegratedServerWorldStorage::IndexedDb {
+                world_id,
+                clear_existing,
+            } => {
+                set_string(&message, "worldStorage", "indexeddb")?;
+                set_string(&message, "worldId", world_id)?;
+                set_bool(&message, "clearWorldStorage", *clear_existing)?;
+            }
+        }
         set_string(&message, "runnerTransportKind", self.transport_kind.label())?;
         set_number(
             &message,
@@ -438,10 +498,10 @@ impl WebIntegratedServerRunner {
         Ok(())
     }
 
-    fn post_shutdown(&mut self) -> Result<(), String> {
+    fn post_shutdown_with_request_id(&self, request_id: u32) -> Result<(), String> {
         let message = Object::new();
         set_string(&message, "kind", "shutdown")?;
-        set_number(&message, "requestId", 0.0)?;
+        set_number(&message, "requestId", f64::from(request_id))?;
         self.worker
             .post_message(&message)
             .map_err(|error| format!("failed to post shutdown to server worker: {error:?}"))
@@ -1107,6 +1167,8 @@ fn handle_runner_message(
         return;
     }
 
+    let shutdown_complete = string_prop(&data, "kind").as_deref() == Some("shutdown-complete");
+
     let frames_result = if string_prop(&data, "transportKind").as_deref() == Some("shared-memory") {
         let mut slot = if request_id != 0 {
             shared_inflight.borrow_mut().remove(&request_id)
@@ -1188,6 +1250,10 @@ fn handle_runner_message(
         }
     }
     diagnostics.borrow_mut().runner_frame_metrics = *runner_frame_metrics.borrow();
+
+    if shutdown_complete {
+        worker.terminate();
+    }
 
     if request_id == 0 {
         return;
@@ -1461,8 +1527,72 @@ fn ensure_worker_response_ok(value: &JsValue) -> Result<(), String> {
 pub struct McloneWebIntegratedServerWorker {
     server: IntegratedServer,
     diagnostics: ServerRunnerDiagnostics,
+    indexed_db_state: Option<Rc<RefCell<WebIndexedDbWorldStoreState>>>,
     command_queue_depth: usize,
     running: bool,
+}
+
+#[derive(Debug, Default)]
+struct WebIndexedDbWorldStoreState {
+    chunks: BTreeMap<ChunkPos, ChunkRecord>,
+    entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
+    dirty_chunks: BTreeMap<ChunkPos, ChunkRecord>,
+    dirty_entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
+}
+
+impl WebIndexedDbWorldStoreState {
+    fn from_js_records(
+        chunk_records: JsValue,
+        entity_chunk_records: JsValue,
+    ) -> Result<Rc<RefCell<Self>>, String> {
+        let mut state = Self::default();
+        for record in decode_chunk_records_from_js(&chunk_records)? {
+            state.chunks.insert(record.pos(), record);
+        }
+        for record in decode_entity_chunk_records_from_js(&entity_chunk_records)? {
+            state.entity_chunks.insert(record.pos, record);
+        }
+        Ok(Rc::new(RefCell::new(state)))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct WebIndexedDbWorldStore {
+    state: Rc<RefCell<WebIndexedDbWorldStoreState>>,
+}
+
+impl WebIndexedDbWorldStore {
+    fn new(state: Rc<RefCell<WebIndexedDbWorldStoreState>>) -> Self {
+        Self { state }
+    }
+}
+
+impl WorldStore for WebIndexedDbWorldStore {
+    fn supports_entity_chunks(&self) -> bool {
+        true
+    }
+
+    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+        Ok(self.state.borrow().chunks.get(&pos).cloned())
+    }
+
+    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+        let mut state = self.state.borrow_mut();
+        state.chunks.insert(record.pos(), record.clone());
+        state.dirty_chunks.insert(record.pos(), record.clone());
+        Ok(())
+    }
+
+    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Ok(self.state.borrow().entity_chunks.get(&pos).cloned())
+    }
+
+    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+        let mut state = self.state.borrow_mut();
+        state.entity_chunks.insert(record.pos, record.clone());
+        state.dirty_entity_chunks.insert(record.pos, record.clone());
+        Ok(())
+    }
 }
 
 #[wasm_bindgen]
@@ -1470,7 +1600,7 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: i64) -> Self {
         let server = IntegratedServer::local_integrated(seed);
-        Self::from_server(seed, server)
+        Self::from_server(seed, server, None)
     }
 
     #[wasm_bindgen(js_name = withJobWorkers)]
@@ -1484,7 +1614,42 @@ impl McloneWebIntegratedServerWorker {
             seed,
             WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
         );
-        Self::from_server(seed, server)
+        Self::from_server(seed, server, None)
+    }
+
+    #[wasm_bindgen(js_name = withIndexedDbRecords)]
+    pub fn with_indexed_db_records(
+        seed: i64,
+        chunk_records: JsValue,
+        entity_chunk_records: JsValue,
+    ) -> Result<Self, JsValue> {
+        let state =
+            WebIndexedDbWorldStoreState::from_js_records(chunk_records, entity_chunk_records)
+                .map_err(|error| JsValue::from_str(&error))?;
+        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
+        let server = IntegratedServer::local_integrated_with_world_store(seed, store);
+        Ok(Self::from_server(seed, server, Some(state)))
+    }
+
+    #[wasm_bindgen(js_name = withJobWorkersAndIndexedDbRecords)]
+    pub fn with_job_workers_and_indexed_db_records(
+        seed: i64,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+        chunk_records: JsValue,
+        entity_chunk_records: JsValue,
+    ) -> Result<Self, JsValue> {
+        let state =
+            WebIndexedDbWorldStoreState::from_js_records(chunk_records, entity_chunk_records)
+                .map_err(|error| JsValue::from_str(&error))?;
+        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
+        let server = IntegratedServer::local_integrated_with_world_store_and_wasm_job_workers(
+            seed,
+            store,
+            WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
+        );
+        Ok(Self::from_server(seed, server, Some(state)))
     }
 
     #[wasm_bindgen(js_name = handleCommandFrame)]
@@ -1575,13 +1740,26 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(js_name = shutdown)]
     pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
         self.running = false;
+        if let Err(error) = self.server.shutdown_persistence() {
+            let error = error.to_string();
+            self.refresh_diagnostics(None, false, Some(error.clone()));
+            return Err(JsValue::from_str(&error));
+        }
         self.refresh_diagnostics(None, false, None);
-        worker_response(Vec::new(), &mut self.diagnostics).map_err(JsValue::from)
+        let response = worker_response(Vec::new(), &mut self.diagnostics).map_err(JsValue::from)?;
+        if let Some(state) = &self.indexed_db_state {
+            attach_indexed_db_dirty_records(&response, &state.borrow()).map_err(JsValue::from)?;
+        }
+        Ok(response)
     }
 }
 
 impl McloneWebIntegratedServerWorker {
-    fn from_server(seed: i64, server: IntegratedServer) -> Self {
+    fn from_server(
+        seed: i64,
+        server: IntegratedServer,
+        indexed_db_state: Option<Rc<RefCell<WebIndexedDbWorldStoreState>>>,
+    ) -> Self {
         let mut diagnostics =
             ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, seed, server.day_time());
         diagnostics.running = true;
@@ -1589,6 +1767,7 @@ impl McloneWebIntegratedServerWorker {
         let mut worker = Self {
             server,
             diagnostics,
+            indexed_db_state,
             command_queue_depth: 0,
             running: true,
         };
@@ -1658,6 +1837,109 @@ fn worker_response(
     )
     .map_err(|error| format!("failed to attach worker diagnostics: {error:?}"))?;
     Ok(object.into())
+}
+
+fn decode_chunk_records_from_js(value: &JsValue) -> Result<Vec<ChunkRecord>, String> {
+    if value.is_null() || value.is_undefined() {
+        return Ok(Vec::new());
+    }
+    Array::from(value)
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let bytes = js_record_bytes(&entry)
+                .map_err(|error| format!("indexedDB chunk record {index}: {error}"))?;
+            decode_chunk_record(&bytes)
+                .map_err(|error| format!("decode indexedDB chunk record {index}: {error}"))
+        })
+        .collect()
+}
+
+fn decode_entity_chunk_records_from_js(value: &JsValue) -> Result<Vec<EntityChunkRecord>, String> {
+    if value.is_null() || value.is_undefined() {
+        return Ok(Vec::new());
+    }
+    Array::from(value)
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let bytes = js_record_bytes(&entry)
+                .map_err(|error| format!("indexedDB entity chunk record {index}: {error}"))?;
+            decode_entity_chunk_record(&bytes)
+                .map_err(|error| format!("decode indexedDB entity chunk record {index}: {error}"))
+        })
+        .collect()
+}
+
+fn js_record_bytes(value: &JsValue) -> Result<Vec<u8>, String> {
+    if let Some(bytes) = value.dyn_ref::<Uint8Array>() {
+        return Ok(bytes.to_vec());
+    }
+    let record = Reflect::get(value, &JsValue::from_str("record"))
+        .map_err(|error| format!("failed to read record bytes: {error:?}"))?;
+    record
+        .dyn_ref::<Uint8Array>()
+        .map(Uint8Array::to_vec)
+        .ok_or_else(|| "record bytes must be a Uint8Array".to_owned())
+}
+
+fn attach_indexed_db_dirty_records(
+    response: &JsValue,
+    state: &WebIndexedDbWorldStoreState,
+) -> Result<(), String> {
+    let chunks = chunk_records_to_js(&state.dirty_chunks)?;
+    let entity_chunks = entity_chunk_records_to_js(&state.dirty_entity_chunks)?;
+    Reflect::set(response, &JsValue::from_str("indexedDbChunks"), &chunks)
+        .map_err(|error| format!("failed to attach indexedDB chunks: {error:?}"))?;
+    Reflect::set(
+        response,
+        &JsValue::from_str("indexedDbEntityChunks"),
+        &entity_chunks,
+    )
+    .map_err(|error| format!("failed to attach indexedDB entity chunks: {error:?}"))?;
+    Ok(())
+}
+
+fn chunk_records_to_js(records: &BTreeMap<ChunkPos, ChunkRecord>) -> Result<Array, String> {
+    let array = Array::new();
+    for (pos, record) in records {
+        let bytes = encode_chunk_record(record).map_err(|error| {
+            format!(
+                "encode indexedDB chunk record ({}, {}): {error}",
+                pos.x, pos.z
+            )
+        })?;
+        let object: JsValue = indexed_db_record_to_js(*pos, bytes)?.into();
+        array.push(&object);
+    }
+    Ok(array)
+}
+
+fn entity_chunk_records_to_js(
+    records: &BTreeMap<ChunkPos, EntityChunkRecord>,
+) -> Result<Array, String> {
+    let array = Array::new();
+    for (pos, record) in records {
+        let bytes = encode_entity_chunk_record(record).map_err(|error| {
+            format!(
+                "encode indexedDB entity chunk record ({}, {}): {error}",
+                pos.x, pos.z
+            )
+        })?;
+        let object: JsValue = indexed_db_record_to_js(*pos, bytes)?.into();
+        array.push(&object);
+    }
+    Ok(array)
+}
+
+fn indexed_db_record_to_js(pos: ChunkPos, bytes: Vec<u8>) -> Result<Object, String> {
+    let object = Object::new();
+    set_number(&object, "x", f64::from(pos.x))?;
+    set_number(&object, "z", f64::from(pos.z))?;
+    let bytes = Uint8Array::from(bytes.as_slice());
+    Reflect::set(&object, &JsValue::from_str("record"), &bytes)
+        .map_err(|error| format!("failed to attach indexedDB record bytes: {error:?}"))?;
+    Ok(object)
 }
 
 fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, String> {

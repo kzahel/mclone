@@ -84,6 +84,9 @@ const WEB_MIN_RENDER_DISTANCE: i32 = 1;
 const WEB_MAX_RENDER_DISTANCE: i32 = 16;
 const WEB_DEFAULT_RENDER_DISTANCE: u32 = 3;
 const WEB_FIXED_FPS_CAP: u32 = 60;
+const WEB_QUERY_WORLD_STORAGE: &str = "worldStorage";
+const WEB_QUERY_WORLD_ID: &str = "worldId";
+const WEB_QUERY_CLEAR_WORLD_STORAGE: &str = "clearWorldStorage";
 const WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT: f32 = 2.4;
 const WEB_TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.5;
 const WEB_TOUCH_LOOK_SENSITIVITY_MAX: f32 = 5.0;
@@ -223,6 +226,9 @@ pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
     server_job_worker_url: String,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
+    world_storage: String,
+    world_id: String,
+    clear_world_storage: bool,
 ) -> Result<WebChunkRenderSession, JsValue> {
     let render_options = startup_render_options(
         section_occlusion_culling,
@@ -230,9 +236,7 @@ pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
         &render_color_profile,
     )
     .map_err(JsValue::from)?;
-    WebChunkRenderSession::new_with_worker_at(
-        canvas,
-        asset_pack_bytes.to_vec(),
+    let runner_config = web_integrated_server_runner_config_with_storage(
         WebIntegratedServerRunnerConfig::new(
             seed,
             server_worker_url,
@@ -240,6 +244,15 @@ pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
             bindgen_js_url,
             bindgen_wasm_url,
         ),
+        &world_storage,
+        &world_id,
+        clear_world_storage,
+    )
+    .map_err(JsValue::from)?;
+    WebChunkRenderSession::new_with_worker_at(
+        canvas,
+        asset_pack_bytes.to_vec(),
+        runner_config,
         ChunkPos {
             x: initial_center_x,
             z: initial_center_z,
@@ -302,7 +315,11 @@ pub async fn mclone_web_create_remote_chunk_render_session_with_startup(
 #[wasm_bindgen]
 pub fn mclone_web_startup_options_from_query(search: String) -> Result<JsValue, JsValue> {
     let options = parse_startup_options_from_query(&search)?;
-    startup_options_to_js_value(&options).map_err(JsValue::from)
+    let storage = parse_web_world_storage_from_query(&search, options.scene.seed)?;
+    let value = startup_options_to_js_value(&options).map_err(JsValue::from)?;
+    let object: js_sys::Object = value.unchecked_into();
+    attach_web_world_storage_startup_options(&object, &storage).map_err(JsValue::from)?;
+    Ok(object.into())
 }
 
 #[wasm_bindgen]
@@ -2877,12 +2894,24 @@ impl WebChunkRenderSession {
     #[wasm_bindgen(js_name = shutdown)]
     pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
         self.runtime.request_shutdown();
-        let object = js_sys::Object::new();
-        set_bool(&object, "ok", true).map_err(JsValue::from)?;
-        set_string(&object, "runnerKind", self.runtime.runner_kind().label())
-            .map_err(JsValue::from)?;
-        Ok(object.into())
+        shutdown_report_to_js(self.runtime.runner_kind())
     }
+
+    #[wasm_bindgen(js_name = shutdownAsync)]
+    pub async fn shutdown_async(&mut self) -> Result<JsValue, JsValue> {
+        self.runtime
+            .shutdown_gracefully()
+            .await
+            .map_err(JsValue::from)?;
+        shutdown_report_to_js(self.runtime.runner_kind())
+    }
+}
+
+fn shutdown_report_to_js(runner_kind: ServerRunnerKind) -> Result<JsValue, JsValue> {
+    let object = js_sys::Object::new();
+    set_bool(&object, "ok", true).map_err(JsValue::from)?;
+    set_string(&object, "runnerKind", runner_kind.label()).map_err(JsValue::from)?;
+    Ok(object.into())
 }
 
 impl WebChunkRenderSession {
@@ -4871,6 +4900,100 @@ fn parse_startup_options_from_query(search: &str) -> Result<StartupOptions, JsVa
         }
     }
     Ok(state.finish())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WebWorldStorageStartupOptions {
+    world_storage: String,
+    world_id: String,
+    clear_world_storage: bool,
+}
+
+fn parse_web_world_storage_from_query(
+    search: &str,
+    seed: i64,
+) -> Result<WebWorldStorageStartupOptions, JsValue> {
+    let params = web_sys::UrlSearchParams::new_with_str(search).map_err(|error| {
+        JsValue::from_str(&format!(
+            "failed to parse web world storage query string: {error:?}"
+        ))
+    })?;
+    let raw_storage = params
+        .get(WEB_QUERY_WORLD_STORAGE)
+        .unwrap_or_else(|| "transient".to_owned());
+    let world_storage = normalize_web_world_storage_label(&raw_storage).map_err(JsValue::from)?;
+    let raw_world_id = params
+        .get(WEB_QUERY_WORLD_ID)
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let world_id = if world_storage == "indexeddb" && raw_world_id.is_empty() {
+        default_web_world_id(seed)
+    } else {
+        raw_world_id
+    };
+    Ok(WebWorldStorageStartupOptions {
+        world_storage,
+        world_id,
+        clear_world_storage: query_truthy(&params, WEB_QUERY_CLEAR_WORLD_STORAGE),
+    })
+}
+
+fn attach_web_world_storage_startup_options(
+    object: &js_sys::Object,
+    options: &WebWorldStorageStartupOptions,
+) -> Result<(), String> {
+    set_string(object, "worldStorage", &options.world_storage)?;
+    set_string(object, "worldId", &options.world_id)?;
+    set_bool(object, "clearWorldStorage", options.clear_world_storage)
+}
+
+fn web_integrated_server_runner_config_with_storage(
+    config: WebIntegratedServerRunnerConfig,
+    world_storage: &str,
+    world_id: &str,
+    clear_world_storage: bool,
+) -> Result<WebIntegratedServerRunnerConfig, String> {
+    match normalize_web_world_storage_label(world_storage)?.as_str() {
+        "transient" => Ok(config),
+        "indexeddb" => {
+            let world_id = world_id.trim();
+            let world_id = if world_id.is_empty() {
+                default_web_world_id(config.seed)
+            } else {
+                world_id.to_owned()
+            };
+            Ok(config.with_indexed_db_world(world_id, clear_world_storage))
+        }
+        _ => unreachable!("normalize_web_world_storage_label returned an unknown label"),
+    }
+}
+
+fn normalize_web_world_storage_label(value: &str) -> Result<String, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "transient" | "memory" => Ok("transient".to_owned()),
+        "indexeddb" | "indexed-db" | "persistent" => Ok("indexeddb".to_owned()),
+        other => Err(format!(
+            "unsupported web worldStorage {other:?}; expected transient or indexeddb"
+        )),
+    }
+}
+
+fn default_web_world_id(seed: i64) -> String {
+    format!("seed-{seed}")
+}
+
+fn query_truthy(params: &web_sys::UrlSearchParams, key: &str) -> bool {
+    if !params.has(key) {
+        return false;
+    }
+    let value = params.get(key).unwrap_or_default();
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => true,
+    }
 }
 
 fn web_render_distance_limits() -> RenderDistanceLimits {

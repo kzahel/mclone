@@ -1,7 +1,7 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 5B desktop local world-dir wiring landed, browser
-IndexedDB backend next.
+Status: active; Slice 6A browser IndexedDB preload/writeback bridge landed,
+true streaming/load-miss IndexedDB adapter next.
 
 ## Purpose
 
@@ -35,7 +35,7 @@ Read before implementation:
 
 ## Current Native State
 
-Live Rust after Slice 5B has:
+Live Rust after Slice 6A has:
 
 - `native/crates/mclone-server/src/persistence.rs`
 - `ChunkSnapshotStore`
@@ -71,13 +71,20 @@ Live Rust after Slice 5B has:
   `NativeIntegratedServerWorldStorage`
 - desktop native-client `--world-dir PATH` and explicit `--transient` startup
   modes for local integrated worlds
+- browser worker `worldStorage=indexeddb` / `worldId=...` startup selection
+- worker-owned IndexedDB object stores for chunk and entity chunk blobs
+- wasm-visible shared chunk/entity record binary encode/decode helpers
+- wasm `WorldStore` adapter over preloaded IndexedDB records with dirty-record
+  writeback on graceful shutdown
+- `WebChunkRenderSession.shutdownAsync()` for IndexedDB writeback completion
 
 This is useful but still too narrow:
 
 - desktop local persistence is startup/CLI-wired but does not yet have an
   in-game world browser or named-world UI
 - no player/world/saved-data records
-- no web IndexedDB adapter
+- browser IndexedDB is preload/writeback only; it does not yet service async
+  load misses directly from IndexedDB during the session
 - no Android app-private world-dir wiring
 
 `docs/loading-persistence.md` contains richer target vocabulary than the live
@@ -506,18 +513,56 @@ Validation:
 
 Add browser singleplayer storage behind the same logical contract.
 
+Status: Slice 6A preload/writeback bridge landed 2026-07-03.
+
 Deliverables:
 
-- IndexedDB object stores for metadata, chunks, entity chunks, players, saved data
-- host-worker-owned adapter
-- clear-world/debug reset path
+- IndexedDB object stores for chunks and entity chunks landed; metadata,
+  players, and saved data remain placeholders for later record families
+- host-worker-owned adapter landed in the integrated-server worker
+- clear-world/debug reset path landed through `clearWorldStorage`
 - adapter lifetime equals world lifetime; world replacement tears down and
   recreates the adapter instead of epoch-stamping requests
-- no main-thread chunk/entity decode
+- no main-thread chunk/entity decode; TypeScript stores raw `Uint8Array` blobs
+  and Rust owns the shared binary codec
+
+Landed shape:
+
+- `mclone-server` exports chunk/entity record encode/decode helpers that compile
+  for wasm as well as native.
+- `IntegratedServer` / `ChunkScheduler` can construct a local integrated server
+  over an arbitrary `WorldStore` while still using wasm worldgen/light job
+  workers.
+- The web integrated-server worker opens `mclone-web-worlds` IndexedDB and uses
+  `(worldId, x, z)` keys for `chunks` and `entityChunks` stores.
+- Startup with `worldStorage=indexeddb` loads all records for the selected
+  `worldId`, then constructs Rust over a wasm `WorldStore` backed by those
+  decoded records.
+- During the session, the shared persistence actor still owns pending-write
+  visibility, dirty save, flush, and close semantics; the wasm store mirrors
+  committed writes into dirty maps.
+- `shutdownAsync()` waits for the worker to call
+  `IntegratedServer::shutdown_persistence`, receives dirty encoded records, and
+  writes them back to IndexedDB before resolving.
+- `worldStorage=indexeddb`, `worldId=...`, and `clearWorldStorage=1` are parsed
+  from the browser query string and passed through the shared web runner config.
 
 Validation:
 
-- web smoke creates a world, edits a block, reloads page, sees edit
+- `pnpm native:web:smoke` includes an IndexedDB probe that creates a persistent
+  browser world, clears existing records, streams a small view, awaits
+  `shutdownAsync()`, verifies chunk records exist in IndexedDB, restarts the
+  same world, and streams from the preloaded/decoded records
+- `cargo test --manifest-path native/Cargo.toml -p mclone-web-client`
+- `pnpm native:web:build`
+
+Deferred beyond Slice 6A:
+
+- true async/load-miss IndexedDB adapter instead of startup preload of every
+  record in the selected world
+- block-edit/reload page-level browser smoke
+- metadata/player/saved-data object stores wired to live record families
+- in-app browser world list / create / delete UI
 - generated animal survives page reload
 - killed generated animal remains gone
 - `clearWorldStorage=1` or successor path gives deterministic clean start

@@ -65,10 +65,11 @@ pub use loading_progress::{
 pub use persistence::SqliteWorldStore;
 pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
-    ChunkStoreError, ChunkStoreResult, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore,
-    PersistenceActor, PersistenceMailbox, PersistenceRequestId, PlayerRecordKey, SaveDurability,
-    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey,
-    WorldStore, WorldStoreCompletion, WorldStoreRequest,
+    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, MemoryWorldStore, NullChunkSnapshotStore,
+    NullWorldStore, PersistenceActor, PersistenceMailbox, PersistenceRequestId, PlayerRecordKey,
+    SaveDurability, ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
+    WorldRecordKey, WorldStore, WorldStoreCompletion, WorldStoreRequest, decode_chunk_record,
+    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
 };
 pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,

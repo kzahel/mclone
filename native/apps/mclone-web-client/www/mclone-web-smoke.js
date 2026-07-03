@@ -24,6 +24,10 @@ const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.me
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
+const WORLD_DB_NAME = "mclone-web-worlds";
+const WORLD_CHUNK_STORE = "chunks";
+const WORLD_ENTITY_CHUNK_STORE = "entityChunks";
+const WORLD_ID_INDEX = "worldId";
 
 const ready = boot();
 globalThis.__mcloneNativeReady = ready;
@@ -388,6 +392,12 @@ async function renderCanvas() {
       const firstReport = firstCenter.report;
       const report = secondCenter.report;
       const shutdownReport = session.shutdown();
+      const indexedDbPersistence = await runIndexedDbPersistenceSmoke(
+        module,
+        assetPack,
+        canvas,
+        compiler,
+      );
       const sharedTopologyStress = await runSharedTopologyStress(module);
       const remoteWebSocket = await runRemoteWebSocketSmoke(module);
       return {
@@ -414,6 +424,7 @@ async function renderCanvas() {
           && report.assetPackLoaded
           && report.textured
           && shutdownReport.ok
+          && indexedDbPersistence.ok
           && sharedTopologyStressActive(sharedTopologyStress)
           && remoteWebSocketActive(remoteWebSocket)
         ),
@@ -426,6 +437,7 @@ async function renderCanvas() {
         firstReport,
         report,
         shutdownReport,
+        indexedDbPersistence,
         sharedTopologyStress,
         remoteWebSocket,
       };
@@ -440,6 +452,155 @@ async function renderCanvas() {
       reason: stringifyError(error),
     };
   }
+}
+
+/**
+ * @param {WasmModule} module
+ * @param {Uint8Array} assetPack
+ * @param {HTMLCanvasElement} canvas
+ * @param {RenderSectionWorkerCompiler} compiler
+ */
+async function runIndexedDbPersistenceSmoke(module, assetPack, canvas, compiler) {
+  if (typeof module.mclone_web_create_worker_chunk_render_session_with_startup !== "function") {
+    return {
+      ok: false,
+      reason: "missing mclone_web_create_worker_chunk_render_session_with_startup export",
+    };
+  }
+  const worldId = `smoke-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const first = await createIndexedDbSmokeSession(module, assetPack, canvas, worldId, true);
+  if (typeof first.shutdownAsync !== "function") {
+    return {
+      ok: false,
+      reason: "missing WebChunkRenderSession.shutdownAsync export",
+    };
+  }
+  try {
+    const firstCenter = await streamOverviewToIdle(first, compiler, 0, 0, 1);
+    const firstShutdown = await first.shutdownAsync();
+    const afterFirst = await waitForIndexedDbWorldRecords(worldId, 1);
+    const second = await createIndexedDbSmokeSession(module, assetPack, canvas, worldId, false);
+    if (typeof second.shutdownAsync !== "function") {
+      return {
+        ok: false,
+        reason: "missing WebChunkRenderSession.shutdownAsync export on restart",
+      };
+    }
+    try {
+      const secondCenter = await streamOverviewToIdle(second, compiler, 0, 0, 1);
+      const secondShutdown = await second.shutdownAsync();
+      const afterSecond = await waitForIndexedDbWorldRecords(worldId, afterFirst.chunks);
+      return {
+        ok: Boolean(
+          firstCenter.settled
+          && secondCenter.settled
+          && firstShutdown?.ok
+          && secondShutdown?.ok
+          && afterFirst.chunks > 0
+          && afterSecond.chunks >= afterFirst.chunks
+        ),
+        worldId,
+        afterFirst,
+        afterSecond,
+        firstShutdown,
+        secondShutdown,
+        firstCenter: publicOverviewCenter(firstCenter),
+        secondCenter: publicOverviewCenter(secondCenter),
+      };
+    } finally {
+      try {
+        second.shutdown();
+      } catch {}
+    }
+  } finally {
+    try {
+      first.shutdown();
+    } catch {}
+  }
+}
+
+/**
+ * @param {WasmModule} module
+ * @param {Uint8Array} assetPack
+ * @param {HTMLCanvasElement} canvas
+ * @param {string} worldId
+ * @param {boolean} clearWorldStorage
+ */
+async function createIndexedDbSmokeSession(module, assetPack, canvas, worldId, clearWorldStorage) {
+  return await module.mclone_web_create_worker_chunk_render_session_with_startup(
+    canvas,
+    assetPack,
+    424242n,
+    0,
+    0,
+    1.0,
+    true,
+    false,
+    "vanilla",
+    SERVER_WORKER_URL.href,
+    SERVER_JOB_WORKER_URL.href,
+    BINDGEN_JS_URL.href,
+    BINDGEN_WASM_URL.href,
+    "indexeddb",
+    worldId,
+    clearWorldStorage,
+  );
+}
+
+async function countIndexedDbWorldRecords(worldId) {
+  const db = await openSmokeWorldDb();
+  try {
+    const [chunks, entityChunks] = await Promise.all([
+      countIndexedDbStoreForWorld(db, WORLD_CHUNK_STORE, worldId),
+      countIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
+    ]);
+    return {
+      chunks,
+      entityChunks,
+      total: chunks + entityChunks,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+async function waitForIndexedDbWorldRecords(worldId, minChunks) {
+  const deadline = performance.now() + 10_000;
+  let last = { chunks: 0, entityChunks: 0, total: 0 };
+  while (performance.now() < deadline) {
+    last = await countIndexedDbWorldRecords(worldId);
+    if (last.chunks >= minChunks) {
+      return last;
+    }
+    await yieldToEventLoop();
+  }
+  throw new Error(
+    `IndexedDB world ${worldId} did not reach ${minChunks} chunk records: `
+      + JSON.stringify(last),
+  );
+}
+
+function openSmokeWorldDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(WORLD_DB_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("failed to open smoke IndexedDB"));
+  });
+}
+
+function countIndexedDbStoreForWorld(db, storeName, worldId) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, "readonly");
+    const request = transaction
+      .objectStore(storeName)
+      .index(WORLD_ID_INDEX)
+      .count(IDBKeyRange.only(worldId));
+    request.onsuccess = () => resolve(Number(request.result) || 0);
+    request.onerror = () => reject(request.error ?? new Error(`failed to count ${storeName}`));
+    transaction.onerror = () => reject(
+      transaction.error ?? new Error(`failed to count ${storeName}`),
+    );
+  });
 }
 
 // 067 Stage 3: drive `syncOverviewRenderFrame` to idle at a fixed chunk center, relaying

@@ -53,6 +53,9 @@ interface WebStartupOptions extends WasmReport {
   sectionOcclusionCulling: boolean;
   forceFullbright: boolean;
   renderColorProfile: string;
+  worldStorage: "transient" | "indexeddb";
+  worldId: string;
+  clearWorldStorage: boolean;
 }
 
 interface AppRuntimeState extends Record<string, any> {
@@ -417,6 +420,9 @@ class WebChunkApp {
         SERVER_JOB_WORKER_URL.href,
         BINDGEN_JS_URL.href,
         BINDGEN_WASM_URL.href,
+        startup.worldStorage,
+        startup.worldId,
+        startup.clearWorldStorage,
       );
     }
     for (const name of [
@@ -1577,6 +1583,9 @@ function startupOptionsFromLocation(module: WasmModule): WebStartupOptions {
     sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
     forceFullbright: Boolean(raw.forceFullbright),
     renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
+    worldStorage: raw.worldStorage === "indexeddb" ? "indexeddb" : "transient",
+    worldId: String(raw.worldId ?? ""),
+    clearWorldStorage: Boolean(raw.clearWorldStorage),
   };
 }
 

@@ -377,6 +377,10 @@ impl WebRuntime {
     pub fn request_shutdown(&mut self) {
         self.host.request_shutdown();
     }
+
+    pub async fn shutdown_gracefully(&mut self) -> Result<(), String> {
+        self.host.shutdown_gracefully().await
+    }
 }
 
 pub type WebRuntimeStepReport = RuntimeStepReport;
@@ -511,6 +515,19 @@ impl WebRuntimeHost {
             Self::Worker(host) => host.request_shutdown(),
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(host) => host.request_shutdown(),
+        }
+    }
+
+    async fn shutdown_gracefully(&mut self) -> Result<(), String> {
+        match self {
+            Self::Inline(_) => Ok(()),
+            #[cfg(target_arch = "wasm32")]
+            Self::Worker(host) => host.shutdown_gracefully().await,
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(host) => {
+                host.request_shutdown();
+                Ok(())
+            }
         }
     }
 }

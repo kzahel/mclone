@@ -25,6 +25,9 @@ interface IntegratedServerWorkerMessage {
   jobWorkerUrl?: string;
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
+  worldStorage?: "transient" | "indexeddb";
+  worldId?: string;
+  clearWorldStorage?: boolean;
   runnerTransportKind?: string;
   tickIntervalMs?: number;
   frame?: Uint8Array;
@@ -56,6 +59,18 @@ type RunnerOutboundMessage = Record<string, any> & {
   updates?: unknown[];
 };
 
+interface IndexedDbRecord {
+  worldId: string;
+  x: number;
+  z: number;
+  record: Uint8Array;
+}
+
+interface IndexedDbWorldRecords {
+  chunks: IndexedDbRecord[];
+  entityChunks: IndexedDbRecord[];
+}
+
 let wasmModulePromise: Promise<WasmModule> | null = null;
 // The resolved wasm module, captured once `startServer` loads it. The packed-frame codec
 // (070 Stage 3) lives in Rust and is reached through this handle, so the SAB packing format has a
@@ -63,6 +78,7 @@ let wasmModulePromise: Promise<WasmModule> | null = null;
 // server is started).
 let wasmModule: WasmModule | null = null;
 let server: McloneWebIntegratedServerWorker | null = null;
+let indexedDbWorldId: string | null = null;
 let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
 let runnerTransportKind: "shared-memory" | "message-transfer" = "message-transfer";
 let nextRunnerSharedBufferId = 1;
@@ -75,6 +91,11 @@ const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 // runner's pool, so these need not agree with any Rust constant.
 const MAX_RUNNER_SHARED_POOL_SLOTS = 2;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES = 2 * 1024 * 1024;
+const WORLD_DB_NAME = "mclone-web-worlds";
+const WORLD_DB_VERSION = 1;
+const WORLD_CHUNK_STORE = "chunks";
+const WORLD_ENTITY_CHUNK_STORE = "entityChunks";
+const WORLD_ID_INDEX = "worldId";
 
 workerSelf.onmessage = async (event: MessageEvent) => {
   const message = (event.data ?? {}) as IntegratedServerWorkerMessage;
@@ -90,7 +111,7 @@ workerSelf.onmessage = async (event: MessageEvent) => {
         releaseRunnerSharedBuffer(message);
         break;
       case "shutdown":
-        shutdown(message);
+        await shutdown(message);
         break;
       default:
         postFailure(
@@ -113,19 +134,54 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
 
   const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
   wasmModule = module;
-  server = message.jobWorkerUrl && typeof module.McloneWebIntegratedServerWorker.withJobWorkers === "function"
-    ? module.McloneWebIntegratedServerWorker.withJobWorkers(
-      toBigIntSeed(message.seed),
-      String(message.jobWorkerUrl),
-      String(message.bindgenJsUrl),
-      String(message.bindgenWasmUrl),
-    )
-    : new module.McloneWebIntegratedServerWorker(toBigIntSeed(message.seed));
+  const seed = toBigIntSeed(message.seed);
+  const workerConstructor = module.McloneWebIntegratedServerWorker as any;
+  const indexedRecords = message.worldStorage === "indexeddb"
+    ? await loadIndexedDbWorldForStart(message)
+    : null;
+  const hasJobWorkers = Boolean(message.jobWorkerUrl)
+    && typeof workerConstructor.withJobWorkers === "function";
+  if (indexedRecords) {
+    if (
+      hasJobWorkers
+      && typeof workerConstructor.withJobWorkersAndIndexedDbRecords === "function"
+    ) {
+      server = workerConstructor.withJobWorkersAndIndexedDbRecords(
+        seed,
+        String(message.jobWorkerUrl),
+        String(message.bindgenJsUrl),
+        String(message.bindgenWasmUrl),
+        indexedRecords.chunks,
+        indexedRecords.entityChunks,
+      );
+    } else if (typeof workerConstructor.withIndexedDbRecords === "function") {
+      server = workerConstructor.withIndexedDbRecords(
+        seed,
+        indexedRecords.chunks,
+        indexedRecords.entityChunks,
+      );
+    } else {
+      throw new Error("wasm module does not expose IndexedDB integrated-server constructors");
+    }
+  } else {
+    indexedDbWorldId = null;
+    server = hasJobWorkers
+      ? workerConstructor.withJobWorkers(
+        seed,
+        String(message.jobWorkerUrl),
+        String(message.bindgenJsUrl),
+        String(message.bindgenWasmUrl),
+      )
+      : new workerConstructor(seed);
+  }
   runnerTransportKind = message.runnerTransportKind === "shared-memory" && sharedTransportAvailable()
     ? "shared-memory"
     : "message-transfer";
   const intervalMs = Math.max(1, Number(message.tickIntervalMs) || 50);
   tickTimer = setInterval(tickServer, intervalMs);
+  if (!server) {
+    throw new Error("integrated server worker did not start");
+  }
   const diagnostics = server.diagnostics();
   workerSelf.postMessage({
     ok: true,
@@ -184,19 +240,197 @@ function tickServer(): void {
   }
 }
 
-function shutdown(message: IntegratedServerWorkerMessage): void {
+async function shutdown(message: IntegratedServerWorkerMessage): Promise<void> {
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = 0;
   }
   const result = server?.shutdown?.() ?? { updates: [], diagnostics: null };
   server = null;
+  if (indexedDbWorldId) {
+    await saveIndexedDbDirtyRecords(indexedDbWorldId, result);
+    indexedDbWorldId = null;
+  }
   workerSelf.postMessage({
     ok: true,
     kind: "shutdown-complete",
     requestId: Number(message.requestId) || 0,
     updates: [],
     diagnostics: result.diagnostics,
+  });
+}
+
+async function loadIndexedDbWorldForStart(
+  message: IntegratedServerWorkerMessage,
+): Promise<IndexedDbWorldRecords> {
+  const worldId = indexedDbWorldIdFromMessage(message);
+  indexedDbWorldId = worldId;
+  const db = await openWorldDb();
+  try {
+    if (message.clearWorldStorage) {
+      await clearIndexedDbWorld(db, worldId);
+    }
+    const [chunks, entityChunks] = await Promise.all([
+      loadIndexedDbRecords(db, WORLD_CHUNK_STORE, worldId),
+      loadIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, worldId),
+    ]);
+    return { chunks, entityChunks };
+  } finally {
+    db.close();
+  }
+}
+
+function indexedDbWorldIdFromMessage(message: IntegratedServerWorkerMessage): string {
+  const explicit = String(message.worldId ?? "").trim();
+  if (explicit.length > 0) {
+    return explicit;
+  }
+  return `seed-${String(message.seed ?? "0")}`;
+}
+
+function openWorldDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(WORLD_DB_NAME, WORLD_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      ensureWorldStore(db, request.transaction, WORLD_CHUNK_STORE);
+      ensureWorldStore(db, request.transaction, WORLD_ENTITY_CHUNK_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB world store"));
+    request.onblocked = () => reject(new Error("IndexedDB world store upgrade was blocked"));
+  });
+}
+
+function ensureWorldStore(
+  db: IDBDatabase,
+  transaction: IDBTransaction | null,
+  storeName: string,
+): void {
+  if (db.objectStoreNames.contains(storeName)) {
+    const store = transaction?.objectStore(storeName);
+    if (store && !store.indexNames.contains(WORLD_ID_INDEX)) {
+      store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+    }
+    return;
+  }
+  const store = db.createObjectStore(storeName, { keyPath: ["worldId", "x", "z"] });
+  store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+}
+
+async function loadIndexedDbRecords(
+  db: IDBDatabase,
+  storeName: string,
+  worldId: string,
+): Promise<IndexedDbRecord[]> {
+  const transaction = db.transaction(storeName, "readonly");
+  const request = transaction
+    .objectStore(storeName)
+    .index(WORLD_ID_INDEX)
+    .getAll(IDBKeyRange.only(worldId));
+  const records = await idbRequest<unknown[]>(request);
+  await transactionDone(transaction);
+  return records.map((record) => normalizeIndexedDbRecord(worldId, record));
+}
+
+async function clearIndexedDbWorld(db: IDBDatabase, worldId: string): Promise<void> {
+  await Promise.all([
+    clearIndexedDbStoreForWorld(db, WORLD_CHUNK_STORE, worldId),
+    clearIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
+  ]);
+}
+
+async function clearIndexedDbStoreForWorld(
+  db: IDBDatabase,
+  storeName: string,
+  worldId: string,
+): Promise<void> {
+  const transaction = db.transaction(storeName, "readwrite");
+  const store = transaction.objectStore(storeName);
+  const request = store.index(WORLD_ID_INDEX).openKeyCursor(IDBKeyRange.only(worldId));
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) return;
+    store.delete(cursor.primaryKey);
+    cursor.continue();
+  };
+  await transactionDone(transaction);
+}
+
+async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string, any>): Promise<void> {
+  const chunks = indexedDbRecordsFromResult(worldId, result.indexedDbChunks);
+  const entityChunks = indexedDbRecordsFromResult(worldId, result.indexedDbEntityChunks);
+  if (chunks.length === 0 && entityChunks.length === 0) {
+    return;
+  }
+  const db = await openWorldDb();
+  try {
+    await Promise.all([
+      putIndexedDbRecords(db, WORLD_CHUNK_STORE, chunks),
+      putIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, entityChunks),
+    ]);
+  } finally {
+    db.close();
+  }
+}
+
+async function putIndexedDbRecords(
+  db: IDBDatabase,
+  storeName: string,
+  records: IndexedDbRecord[],
+): Promise<void> {
+  if (records.length === 0) return;
+  const transaction = db.transaction(storeName, "readwrite");
+  const store = transaction.objectStore(storeName);
+  for (const record of records) {
+    store.put(record);
+  }
+  await transactionDone(transaction);
+}
+
+function indexedDbRecordsFromResult(worldId: string, value: unknown): IndexedDbRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((record) => normalizeIndexedDbRecord(worldId, record));
+}
+
+function normalizeIndexedDbRecord(worldId: string, value: unknown): IndexedDbRecord {
+  const record = (value ?? {}) as Record<string, unknown>;
+  return {
+    worldId,
+    x: Math.trunc(Number(record.x) || 0),
+    z: Math.trunc(Number(record.z) || 0),
+    record: uint8ArrayFromUnknown(record.record),
+  };
+}
+
+function uint8ArrayFromUnknown(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
+  }
+  return new Uint8Array();
+}
+
+function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function transactionDone(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
   });
 }
 

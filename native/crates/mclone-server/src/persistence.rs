@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::io;
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 use std::io::{Read, Write};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -21,16 +20,12 @@ use rusqlite::{Connection, OptionalExtension, params};
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
 use mclone_protocol::{EntityRotation, ItemStackSnapshot};
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 use mclone_core::{
     BlockStateId, ChunkStatus, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection,
 };
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
-#[cfg(any(test, not(target_arch = "wasm32")))]
 const SNAPSHOT_FORMAT_VERSION: u32 = 5;
-#[cfg(any(test, not(target_arch = "wasm32")))]
 const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
 #[cfg(not(target_arch = "wasm32"))]
 const SQLITE_WORLD_SCHEMA_VERSION: i64 = 1;
@@ -186,6 +181,28 @@ impl EntityChunkRecord {
             entities: Vec::new(),
         }
     }
+}
+
+pub fn encode_chunk_record(record: &ChunkRecord) -> ChunkStoreResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    write_chunk_record(&mut bytes, record)?;
+    Ok(bytes)
+}
+
+pub fn decode_chunk_record(bytes: &[u8]) -> ChunkStoreResult<ChunkRecord> {
+    let mut reader = bytes;
+    read_chunk_record(&mut reader)
+}
+
+pub fn encode_entity_chunk_record(record: &EntityChunkRecord) -> ChunkStoreResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    write_entity_chunk_record(&mut bytes, record)?;
+    Ok(bytes)
+}
+
+pub fn decode_entity_chunk_record(bytes: &[u8]) -> ChunkStoreResult<EntityChunkRecord> {
+    let mut reader = bytes;
+    read_entity_chunk_record(&mut reader)
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -1886,7 +1903,6 @@ fn write_snapshot(writer: &mut impl Write, snapshot: &ChunkSnapshot) -> ChunkSto
     write_chunk_record(writer, &ChunkRecord::from_snapshot(snapshot.clone()))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_chunk_record(writer: &mut impl Write, record: &ChunkRecord) -> ChunkStoreResult<()> {
     let snapshot = &record.snapshot;
     writer.write_all(SNAPSHOT_MAGIC)?;
@@ -1930,7 +1946,6 @@ fn read_snapshot(reader: &mut impl Read) -> ChunkStoreResult<ChunkSnapshot> {
     read_chunk_record(reader).map(|record| record.snapshot)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
     let mut magic = [0_u8; SNAPSHOT_MAGIC.len()];
     reader.read_exact(&mut magic)?;
@@ -2008,7 +2023,6 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_entity_chunk_record(
     writer: &mut impl Write,
     record: &EntityChunkRecord,
@@ -2027,7 +2041,6 @@ fn write_entity_chunk_record(
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityChunkRecord> {
     let mut magic = [0_u8; ENTITY_CHUNK_MAGIC.len()];
     reader.read_exact(&mut magic)?;
@@ -2063,7 +2076,6 @@ fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityCh
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_entity_save_record(
     writer: &mut impl Write,
     record: &EntitySaveRecord,
@@ -2081,7 +2093,6 @@ fn write_entity_save_record(
     write_entity_save_payload(writer, &record.payload)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_entity_save_record(reader: &mut impl Read) -> ChunkStoreResult<EntitySaveRecord> {
     let persistent_id = EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?);
     let kind = read_string(reader)?;
@@ -2107,7 +2118,6 @@ fn read_entity_save_record(reader: &mut impl Read) -> ChunkStoreResult<EntitySav
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_entity_save_payload(
     writer: &mut impl Write,
     payload: &EntitySavePayload,
@@ -2129,7 +2139,6 @@ fn write_entity_save_payload(
     }
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySavePayload> {
     match read_u8(reader)? {
         0 => Ok(EntitySavePayload::Cow),
@@ -2146,7 +2155,6 @@ fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySa
     }
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_item_stack_save_record(
     writer: &mut impl Write,
     stack: &ItemStackSaveRecord,
@@ -2155,7 +2163,6 @@ fn write_item_stack_save_record(
     write_u8(writer, stack.count)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_item_stack_save_record(reader: &mut impl Read) -> ChunkStoreResult<ItemStackSaveRecord> {
     Ok(ItemStackSaveRecord::new(
         read_string(reader)?,
@@ -2163,14 +2170,12 @@ fn read_item_stack_save_record(reader: &mut impl Read) -> ChunkStoreResult<ItemS
     ))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_vec3d(writer: &mut impl Write, value: Vec3d) -> ChunkStoreResult<()> {
     write_f64(writer, value.x)?;
     write_f64(writer, value.y)?;
     write_f64(writer, value.z)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_vec3d(reader: &mut impl Read) -> ChunkStoreResult<Vec3d> {
     Ok(Vec3d::new(
         read_f64(reader)?,
@@ -2179,7 +2184,6 @@ fn read_vec3d(reader: &mut impl Read) -> ChunkStoreResult<Vec3d> {
     ))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_optional_rotation(
     writer: &mut impl Write,
     rotation: Option<EntityRotation>,
@@ -2196,7 +2200,6 @@ fn write_optional_rotation(
     }
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_optional_rotation(reader: &mut impl Read) -> ChunkStoreResult<Option<EntityRotation>> {
     if !read_bool(reader)? {
         return Ok(None);
@@ -2209,7 +2212,6 @@ fn read_optional_rotation(reader: &mut impl Read) -> ChunkStoreResult<Option<Ent
     }))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_scheduled_ticks(
     writer: &mut impl Write,
     ticks: &[ScheduledTickRecord],
@@ -2224,7 +2226,6 @@ fn write_scheduled_ticks(
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_scheduled_ticks(reader: &mut impl Read) -> ChunkStoreResult<Vec<ScheduledTickRecord>> {
     let tick_count = read_len(reader)?;
     let mut ticks = Vec::with_capacity(tick_count);
@@ -2238,7 +2239,6 @@ fn read_scheduled_ticks(reader: &mut impl Read) -> ChunkStoreResult<Vec<Schedule
     Ok(ticks)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_block_pos(writer: &mut impl Write, pos: BlockPos) -> ChunkStoreResult<()> {
     write_i32(writer, pos.x)?;
     write_i32(writer, pos.y)?;
@@ -2246,7 +2246,6 @@ fn write_block_pos(writer: &mut impl Write, pos: BlockPos) -> ChunkStoreResult<(
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_block_pos(reader: &mut impl Read) -> ChunkStoreResult<BlockPos> {
     Ok(BlockPos::new(
         read_i32(reader)?,
@@ -2255,14 +2254,12 @@ fn read_block_pos(reader: &mut impl Read) -> ChunkStoreResult<BlockPos> {
     ))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_string(writer: &mut impl Write, value: &str, name: &str) -> ChunkStoreResult<()> {
     write_len(writer, value.len(), name)?;
     writer.write_all(value.as_bytes())?;
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_string(reader: &mut impl Read) -> ChunkStoreResult<String> {
     let len = read_len(reader)?;
     let mut bytes = vec![0; len];
@@ -2272,7 +2269,6 @@ fn read_string(reader: &mut impl Read) -> ChunkStoreResult<String> {
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_optional_u32(writer: &mut impl Write, value: Option<u32>) -> ChunkStoreResult<()> {
     match value {
         Some(value) => {
@@ -2284,7 +2280,6 @@ fn write_optional_u32(writer: &mut impl Write, value: Option<u32>) -> ChunkStore
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_optional_u32(reader: &mut impl Read) -> ChunkStoreResult<Option<u32>> {
     if read_bool(reader)? {
         Ok(Some(read_u32(reader)?))
@@ -2293,7 +2288,6 @@ fn read_optional_u32(reader: &mut impl Read) -> ChunkStoreResult<Option<u32>> {
     }
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_section(writer: &mut impl Write, section: &PackedChunkSection) -> ChunkStoreResult<()> {
     write_i32(writer, section.section_y)?;
     write_len(writer, section.palette_state_ids.len(), "palette length")?;
@@ -2312,7 +2306,6 @@ fn write_section(writer: &mut impl Write, section: &PackedChunkSection) -> Chunk
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_section(reader: &mut impl Read) -> ChunkStoreResult<PackedChunkSection> {
     let section_y = read_i32(reader)?;
     let palette_len = read_len(reader)?;
@@ -2334,7 +2327,6 @@ fn read_section(reader: &mut impl Read) -> ChunkStoreResult<PackedChunkSection> 
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_light_section(
     writer: &mut impl Write,
     section: &PackedLightSection,
@@ -2345,7 +2337,6 @@ fn write_light_section(
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_light_section(reader: &mut impl Read) -> ChunkStoreResult<PackedLightSection> {
     let section_y = read_i32(reader)?;
     let sky = read_optional_light_layer(reader)?;
@@ -2353,7 +2344,6 @@ fn read_light_section(reader: &mut impl Read) -> ChunkStoreResult<PackedLightSec
     Ok(PackedLightSection::new(section_y, sky, block))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_optional_light_layer(
     writer: &mut impl Write,
     layer: &Option<Vec<u8>>,
@@ -2375,7 +2365,6 @@ fn write_optional_light_layer(
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_optional_light_layer(reader: &mut impl Read) -> ChunkStoreResult<Option<Vec<u8>>> {
     if !read_bool(reader)? {
         return Ok(None);
@@ -2385,21 +2374,18 @@ fn read_optional_light_layer(reader: &mut impl Read) -> ChunkStoreResult<Option<
     Ok(Some(bytes))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_len(writer: &mut impl Write, value: usize, name: &str) -> ChunkStoreResult<()> {
     let value = u32::try_from(value)
         .map_err(|_| ChunkStoreError::InvalidData(format!("{name} {value} does not fit in u32")))?;
     write_u32(writer, value)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_len(reader: &mut impl Read) -> ChunkStoreResult<usize> {
     usize::try_from(read_u32(reader)?).map_err(|_| {
         ChunkStoreError::InvalidData("chunk snapshot length does not fit in usize".to_owned())
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn status_to_u8(status: ChunkStatus) -> u8 {
     match status {
         ChunkStatus::Terrain => 0,
@@ -2410,7 +2396,6 @@ fn status_to_u8(status: ChunkStatus) -> u8 {
     }
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn status_from_u8(value: u8) -> ChunkStoreResult<ChunkStatus> {
     match value {
         0 => Ok(ChunkStatus::Terrain),
@@ -2424,25 +2409,21 @@ fn status_from_u8(value: u8) -> ChunkStoreResult<ChunkStatus> {
     }
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_u8(writer: &mut impl Write, value: u8) -> ChunkStoreResult<()> {
     writer.write_all(&[value])?;
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_u8(reader: &mut impl Read) -> ChunkStoreResult<u8> {
     let mut bytes = [0_u8; 1];
     reader.read_exact(&mut bytes)?;
     Ok(bytes[0])
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_bool(writer: &mut impl Write, value: bool) -> ChunkStoreResult<()> {
     write_u8(writer, u8::from(value))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_bool(reader: &mut impl Read) -> ChunkStoreResult<bool> {
     match read_u8(reader)? {
         0 => Ok(false),
@@ -2453,65 +2434,55 @@ fn read_bool(reader: &mut impl Read) -> ChunkStoreResult<bool> {
     }
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_u32(writer: &mut impl Write, value: u32) -> ChunkStoreResult<()> {
     writer.write_all(&value.to_le_bytes())?;
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_u32(reader: &mut impl Read) -> ChunkStoreResult<u32> {
     let mut bytes = [0_u8; 4];
     reader.read_exact(&mut bytes)?;
     Ok(u32::from_le_bytes(bytes))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_i32(writer: &mut impl Write, value: i32) -> ChunkStoreResult<()> {
     writer.write_all(&value.to_le_bytes())?;
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_i32(reader: &mut impl Read) -> ChunkStoreResult<i32> {
     let mut bytes = [0_u8; 4];
     reader.read_exact(&mut bytes)?;
     Ok(i32::from_le_bytes(bytes))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_u64(writer: &mut impl Write, value: u64) -> ChunkStoreResult<()> {
     writer.write_all(&value.to_le_bytes())?;
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_u64(reader: &mut impl Read) -> ChunkStoreResult<u64> {
     let mut bytes = [0_u8; 8];
     reader.read_exact(&mut bytes)?;
     Ok(u64::from_le_bytes(bytes))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_f32(writer: &mut impl Write, value: f32) -> ChunkStoreResult<()> {
     writer.write_all(&value.to_le_bytes())?;
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_f32(reader: &mut impl Read) -> ChunkStoreResult<f32> {
     let mut bytes = [0_u8; 4];
     reader.read_exact(&mut bytes)?;
     Ok(f32::from_le_bytes(bytes))
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_f64(writer: &mut impl Write, value: f64) -> ChunkStoreResult<()> {
     writer.write_all(&value.to_le_bytes())?;
     Ok(())
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
 fn read_f64(reader: &mut impl Read) -> ChunkStoreResult<f64> {
     let mut bytes = [0_u8; 8];
     reader.read_exact(&mut bytes)?;

@@ -459,6 +459,18 @@ impl ChunkScheduler {
         Self::with_persistence(seed, PersistenceMailbox::new(store))
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_world_store_and_wasm_job_workers(
+        seed: i64,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        let mut scheduler = Self::with_world_store(seed, store);
+        scheduler.worldgen_mailbox = WorldgenMailbox::with_wasm_job_worker(config.clone());
+        scheduler.light_mailbox = LightStatusMailbox::with_wasm_job_worker(config);
+        scheduler
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn try_with_threaded_world_store(
         seed: i64,
