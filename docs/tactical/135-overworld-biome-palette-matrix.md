@@ -1,11 +1,11 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, thirteen supported feature-family groups, and 27 F-checked
+overworld tint IDs, fourteen supported feature-family groups, and 31 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads, ocean
 water plants, warm-ocean coral/sea-pickle, dark-forest canopy/mushroom,
-mushroom-field huge mushrooms, savanna acacia, jungle tree, and bamboo-jungle
-palette coverage
+mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
+jungle tree, and bamboo-jungle palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -139,8 +139,8 @@ notes.
 | 24 | `minecraft:deep_ocean` | ocean-default | deep water checked; seagrass/kelp water plants checked | seed `4`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 25 | `minecraft:stone_shore` | mountains | stone shore checked, steep coast | seed `167`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water checked | seed `330`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 27 | `minecraft:birch_forest` | birch | birch tint/grass surface checked, birch leaves/trunks | seed `10`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 28 | `minecraft:birch_forest_hills` | birch | birch hill surface/tint checked; trees gap | seed `30`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 27 | `minecraft:birch_forest` | birch | birch tint/grass surface and birch log/leaves tree family checked | seed `10`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 28 | `minecraft:birch_forest_hills` | birch | birch hill surface/tint and birch log/leaves tree family checked | seed `30`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier, dark oak canopy, and huge mushroom family checked | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 30 | `minecraft:snowy_taiga` | snowy-taiga | snowy surface/tint checked, spruce/ferns/berries | seed `14`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 31 | `minecraft:snowy_taiga_hills` | snowy-taiga | snowy taiga hill surface/tint checked; spruce gap | seed `886`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -168,8 +168,8 @@ notes.
 | 140 | `minecraft:ice_spikes` | frozen-land | snow/ice-spikes surface checked; spike feature gap | seed `59`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 149 | `minecraft:modified_jungle` | jungle | jungle tint/surface and jungle log/leaves tree family checked; dense vines/cocoa gap | seed `1374`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 151 | `minecraft:modified_jungle_edge` | jungle-edge | jungle-edge tint/surface and jungle log/leaves tree family checked; vegetation gap | seed `314096`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 155 | `minecraft:tall_birch_forest` | birch | birch tint/surface checked; tall birch gap | seed `48`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 156 | `minecraft:tall_birch_hills` | birch | birch hill tint/surface checked; tall birch gap | seed `1557`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 155 | `minecraft:tall_birch_forest` | birch | birch tint/surface and tall-birch selector log/leaves family checked | seed `48`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 156 | `minecraft:tall_birch_hills` | birch | birch hill tint/surface and tall-birch selector log/leaves family checked | seed `1557`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 157 | `minecraft:dark_forest_hills` | dark-forest | dark-forest tint/surface, dark oak canopy, and huge mushroom family checked | seed `410`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 158 | `minecraft:snowy_taiga_mountains` | snowy-taiga | snowy taiga mountain tint/surface checked; spruce gap | seed `12006`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | podzol/coarse dirt surface checked, giant spruce gap | seed `2923`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -217,19 +217,19 @@ Landed:
 - The same worldgen probe now asserts currently supported visible feature
   families for plains, desert, swamp, taiga, snowy tundra, badlands, and ocean
   water plants, warm-ocean coral blocks and sea pickles, dark-forest dark oak
-  and huge mushroom block families, mushroom-field huge mushrooms, savanna
-  acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus jungle
-  log/leaves vegetation. Desert and badlands now require dead bush plus
-  cactus/sugar-cane family coverage; swamp requires the native vegetation/clay
-  subset plus sugar cane and lily pads; generated
+  and huge mushroom block families, mushroom-field huge mushrooms, birch
+  log/leaves trees, savanna acacia trees, jungle log/leaves trees, and
+  bamboo-jungle bamboo plus jungle log/leaves vegetation. Desert and badlands
+  now require dead bush plus cactus/sugar-cane family coverage; swamp requires
+  the native vegetation/clay subset plus sugar cane and lily pads; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
-  cap/stem blocks; mushroom fields require a huge mushroom cap plus stem;
-  savanna rows require acacia logs and leaves; jungle rows require jungle logs
-  and leaves; bamboo jungle rows require bamboo plus jungle logs and leaves. The
-  assertions are intentionally broad block-family checks, not exact decorated
-  counts.
+  cap/stem blocks; mushroom fields require a huge mushroom cap plus stem; birch
+  rows require birch logs and leaves; savanna rows require acacia logs and
+  leaves; jungle rows require jungle logs and leaves; bamboo jungle rows require
+  bamboo plus jungle logs and leaves. The assertions are intentionally broad
+  block-family checks, not exact decorated counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
   state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; dark oak
@@ -239,12 +239,13 @@ Landed:
   placement; Java-style waterlily random-patch placement; Java-style
   `nextBoolean` random-boolean selector placement for mushroom fields;
   Java-style seagrass, kelp, sea-pickle, and broad coral tree/claw/mushroom
-  placement; broad Java-shaped dark oak tree, huge mushroom, acacia
-  forking-trunk/flat-canopy placement, jungle tree/bush/mega-jungle selector
-  placement, and bamboo column/podzol-disk placement; the
+  placement; broad Java-shaped dark oak tree, huge mushroom, birch and
+  tall-birch tree table placement, acacia forking-trunk/flat-canopy placement,
+  jungle tree/bush/mega-jungle selector placement, and bamboo
+  column/podzol-disk placement; the
   `NoiseBasedDecorator` count path used by kelp/coral/bamboo; and
-  desert/badlands/swamp/ocean/dark-forest/savanna/jungle/bamboo-jungle feature
-  table entries, plus the mushroom-field huge mushroom table entry.
+  desert/badlands/swamp/ocean/dark-forest/birch/savanna/jungle/bamboo-jungle
+  feature table entries, plus the mushroom-field huge mushroom table entry.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
   asserts every matrix row's grass, foliage, and water tint output through the
   shared tint resolver by tint group, including the two registered rows without
@@ -286,16 +287,22 @@ Documented gaps from this slice:
   patches, default extra vegetation, exact huge mushroom side-state booleans,
   mushroom-field shore feature coverage, and spawn-table/no-normal-hostile
   behavior remain later `103` or entity-runtime work.
+- Java birch forests now have high-signal birch log/leaves coverage, including
+  separate normal birch and tall-birch table shapes. Exact parity is still
+  incomplete: tree counts, bee-nest side effects, flower/grass/default extra
+  vegetation counts, and exact decorated mismatch buckets remain later `103`
+  work.
 
 ## Suggested Next Slice
 
 Move from B/T/S coverage to visible land feature-family breadth:
 
 1. Pick one missing block/feature family with high palette value and port it
-   narrowly from Java. The strongest next row is now a birch/tall-birch F-check
-   sweep because birch log/leaves support already exists and several birch rows
-   remain B/T/S-only. Berry bushes are another good visible-variety follow-up
-   for taiga if the next slice should add a new block family instead.
+   narrowly from Java. The strongest next row is now berry bushes for taiga:
+   the taiga rows already have spruce/fern coverage, and sweet berry bushes add
+   a distinct low vegetation block family visible across normal and snowy taiga
+   variants. A lower-risk alternative is adding F checks for ordinary forest and
+   wooded-hills trees using the existing oak/birch selector support.
 2. Add `F` checks to this matrix only when the supporting block IDs/features
    exist in native and the check is a broad deterministic block-family probe.
 3. Move any exact decorated mismatch-bucket work into `103`.

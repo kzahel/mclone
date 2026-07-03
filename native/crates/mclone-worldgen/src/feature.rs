@@ -1142,7 +1142,7 @@ mod tests {
         assert!(birch.iter().any(|feature| {
             matches!(
                 feature.feature,
-                ConfiguredFeature::BasicTree(BasicTreeConfiguration { log: BIRCH_LOG, .. })
+                ConfiguredFeature::Tree(TreeConfiguration { log: BIRCH_LOG, .. })
             )
         }));
         assert!(
@@ -1595,6 +1595,58 @@ mod tests {
                 );
             }
             other => panic!("expected random boolean selector, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn birch_feature_tables_use_vanilla_normal_and_tall_slots() {
+        let birch = overworld_features_for_biome(get_layered_biome_by_id(27));
+        let tall_birch = overworld_features_for_biome(get_layered_biome_by_id(155));
+
+        let normal_tree = birch
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::Tree(_))
+            })
+            .expect("birch tree feature");
+        assert_eq!(
+            normal_tree.decorators,
+            vec![
+                ConfiguredDecorator::count_extra(10, 0.1, 1),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::water_depth_threshold(0),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
+            ]
+        );
+        assert_eq!(
+            normal_tree.feature,
+            ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002())
+        );
+
+        let tall_tree = tall_birch
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("tall birch tree selector");
+        assert_eq!(tall_tree.decorators, normal_tree.decorators);
+        match &tall_tree.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![WeightedConfiguredFeature::new(
+                        ConfiguredFeature::tree(TreeConfiguration::super_birch_bees_0002()),
+                        0.5,
+                    )]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002())
+                );
+            }
+            other => panic!("expected tall birch random selector, got {other:?}"),
         }
     }
 

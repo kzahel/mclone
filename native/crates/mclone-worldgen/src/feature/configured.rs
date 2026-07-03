@@ -611,6 +611,24 @@ impl TreeConfiguration {
         Self::birch().with_beehive_probability(0.002)
     }
 
+    pub const fn super_birch() -> Self {
+        Self::new(
+            BIRCH_LOG,
+            BIRCH_LEAVES,
+            TrunkPlacerConfiguration::straight(5, 2, 6),
+            FoliagePlacerConfiguration::Blob {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(0),
+                height: 3,
+            },
+            TwoLayersFeatureSize::new(1, 0, 1),
+        )
+    }
+
+    pub const fn super_birch_bees_0002() -> Self {
+        Self::super_birch().with_beehive_probability(0.002)
+    }
+
     pub const fn fancy_oak() -> Self {
         Self::new(
             OAK_LOG,

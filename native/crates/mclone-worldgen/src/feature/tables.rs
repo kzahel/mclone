@@ -51,10 +51,10 @@ pub(super) fn overworld_features_for_biome_cached(
         "minecraft:forest" | "minecraft:wooded_hills" | "minecraft:flower_forest" => {
             forest_feature_table()
         }
-        "minecraft:birch_forest"
-        | "minecraft:birch_forest_hills"
-        | "minecraft:tall_birch_forest"
-        | "minecraft:tall_birch_hills" => birch_forest_feature_table(),
+        "minecraft:birch_forest" | "minecraft:birch_forest_hills" => birch_forest_feature_table(),
+        "minecraft:tall_birch_forest" | "minecraft:tall_birch_hills" => {
+            tall_birch_forest_feature_table()
+        }
         "minecraft:taiga"
         | "minecraft:taiga_hills"
         | "minecraft:taiga_mountains"
@@ -144,6 +144,18 @@ fn birch_forest_feature_table() -> &'static [PlacedFeature] {
     FEATURES
         .get_or_init(|| {
             build_overworld_feature_table("minecraft:birch_forest", birch_forest_features())
+        })
+        .as_slice()
+}
+
+fn tall_birch_forest_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table(
+                "minecraft:tall_birch_forest",
+                tall_birch_forest_features(),
+            )
         })
         .as_slice()
 }
@@ -634,7 +646,16 @@ fn forest_features() -> Vec<PlacedFeature> {
 
 fn birch_forest_features() -> Vec<PlacedFeature> {
     vec![
-        tree_feature(BasicTreeConfiguration::birch(), 7, 0.3, 2),
+        birch_tree_feature(),
+        grass_patch(GRASS, 3),
+        flower_patch(DANDELION, 1),
+        flower_patch(POPPY, 1),
+    ]
+}
+
+fn tall_birch_forest_features() -> Vec<PlacedFeature> {
+    vec![
+        tall_birch_tree_feature(),
         grass_patch(GRASS, 3),
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
@@ -944,6 +965,28 @@ fn bamboo_vegetation_feature() -> PlacedFeature {
             ConfiguredFeature::random_patch(jungle_grass_patch_config()),
         )),
         tree_threshold_decorators(30, 0.1, 1),
+    )
+}
+
+fn birch_tree_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002()),
+        tree_threshold_decorators(10, 0.1, 1),
+    )
+}
+
+fn tall_birch_tree_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            [WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::super_birch_bees_0002()),
+                0.5,
+            )],
+            ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002()),
+        )),
+        tree_threshold_decorators(10, 0.1, 1),
     )
 }
 

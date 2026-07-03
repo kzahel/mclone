@@ -41,15 +41,15 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, BAMBOO, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK,
-        BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
-        DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
-        JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD,
-        MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL, POPPY,
-        RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
-        SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE,
-        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, is_air_like,
-        is_water,
+        ACACIA_LEAVES, ACACIA_LOG, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK,
+        BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT, DANDELION,
+        DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK,
+        GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
+        PACKED_ICE, PODZOL, POPPY, RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1,
+        SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
+        SPRUCE_LOG, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA,
+        TUBE_CORAL_BLOCK, WATER, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -138,6 +138,7 @@ mod tests {
         WarmOceanCoralSeaPickles,
         DarkForestCanopyMushrooms,
         MushroomFieldHugeMushrooms,
+        BirchTrees,
         SavannaAcacia,
         JungleTrees,
         BambooJungle,
@@ -160,6 +161,7 @@ mod tests {
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
                 Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
                 Self::MushroomFieldHugeMushrooms => "mushroom field huge mushrooms",
+                Self::BirchTrees => "birch log/leaves trees",
                 Self::SavannaAcacia => "savanna acacia trees",
                 Self::JungleTrees => "jungle log/leaves trees",
                 Self::BambooJungle => "bamboo plus jungle log/leaves vegetation",
@@ -210,6 +212,7 @@ mod tests {
                 Self::MushroomFieldHugeMushrooms => {
                     &[BROWN_MUSHROOM_BLOCK, RED_MUSHROOM_BLOCK, MUSHROOM_STEM]
                 }
+                Self::BirchTrees => &[BIRCH_LOG, BIRCH_LEAVES],
                 Self::SavannaAcacia => &[ACACIA_LOG, ACACIA_LEAVES],
                 Self::JungleTrees => &[JUNGLE_LOG, JUNGLE_LEAVES],
                 Self::BambooJungle => &[BAMBOO, JUNGLE_LOG, JUNGLE_LEAVES],
@@ -256,6 +259,9 @@ mod tests {
                         && (chunk.block_count(BROWN_MUSHROOM_BLOCK)
                             + chunk.block_count(RED_MUSHROOM_BLOCK))
                             > 0
+                }
+                Self::BirchTrees => {
+                    chunk.block_count(BIRCH_LOG) > 0 && chunk.block_count(BIRCH_LEAVES) > 0
                 }
                 Self::SavannaAcacia => {
                     chunk.block_count(ACACIA_LOG) > 0 && chunk.block_count(ACACIA_LEAVES) > 0
@@ -411,7 +417,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:birch_forest",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
             seed: 125,
@@ -579,7 +585,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:birch_forest_hills",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
             seed: 886,
@@ -715,7 +721,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:tall_birch_forest",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
             seed: 1557,
@@ -723,7 +729,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:tall_birch_hills",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
             seed: 410,
