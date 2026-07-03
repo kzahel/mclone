@@ -31,6 +31,11 @@ pub mod terrain_id {
     pub const WALL_TORCH_WEST: u32 = 104;
     pub const CACTUS: u32 = 105;
     pub const SUGAR_CANE: u32 = 106;
+    pub const SEAGRASS: u32 = 107;
+    pub const TALL_SEAGRASS_LOWER: u32 = 108;
+    pub const TALL_SEAGRASS_UPPER: u32 = 109;
+    pub const KELP: u32 = 110;
+    pub const KELP_PLANT: u32 = 111;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -109,6 +109,11 @@ pub const WALL_TORCH_SOUTH: RawBlockId = 103;
 pub const WALL_TORCH_WEST: RawBlockId = 104;
 pub const CACTUS: RawBlockId = 105;
 pub const SUGAR_CANE: RawBlockId = 106;
+pub const SEAGRASS: RawBlockId = 107;
+pub const TALL_SEAGRASS_LOWER: RawBlockId = 108;
+pub const TALL_SEAGRASS_UPPER: RawBlockId = 109;
+pub const KELP: RawBlockId = 110;
+pub const KELP_PLANT: RawBlockId = 111;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -145,6 +150,11 @@ impl GeneratedBlockId {
     pub const TORCH: Self = Self(TORCH);
     pub const CACTUS: Self = Self(CACTUS);
     pub const SUGAR_CANE: Self = Self(SUGAR_CANE);
+    pub const SEAGRASS: Self = Self(SEAGRASS);
+    pub const TALL_SEAGRASS_LOWER: Self = Self(TALL_SEAGRASS_LOWER);
+    pub const TALL_SEAGRASS_UPPER: Self = Self(TALL_SEAGRASS_UPPER);
+    pub const KELP: Self = Self(KELP);
+    pub const KELP_PLANT: Self = Self(KELP_PLANT);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -195,6 +205,11 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | WALL_TORCH_SOUTH
             | WALL_TORCH_WEST
             | SUGAR_CANE
+            | SEAGRASS
+            | TALL_SEAGRASS_LOWER
+            | TALL_SEAGRASS_UPPER
+            | KELP
+            | KELP_PLANT
     )
 }
 
@@ -387,6 +402,10 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         }
         CACTUS => "minecraft:cactus",
         SUGAR_CANE => "minecraft:sugar_cane",
+        SEAGRASS => "minecraft:seagrass",
+        TALL_SEAGRASS_LOWER | TALL_SEAGRASS_UPPER => "minecraft:tall_seagrass",
+        KELP => "minecraft:kelp",
+        KELP_PLANT => "minecraft:kelp_plant",
         _ => "minecraft:unknown",
     }
 }
@@ -423,6 +442,10 @@ mod tests {
         assert_eq!(block_light_opacity(WALL_TORCH_EAST), 0);
         assert_eq!(block_light_opacity(CACTUS), 15);
         assert_eq!(block_light_opacity(SUGAR_CANE), 0);
+        assert_eq!(block_light_opacity(SEAGRASS), 0);
+        assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
+        assert_eq!(block_light_opacity(KELP), 0);
+        assert_eq!(block_light_opacity(KELP_PLANT), 0);
     }
 
     #[test]
@@ -436,5 +459,9 @@ mod tests {
         assert_eq!(block_name(WALL_TORCH_WEST), "minecraft:wall_torch");
         assert_eq!(block_name(CACTUS), "minecraft:cactus");
         assert_eq!(block_name(SUGAR_CANE), "minecraft:sugar_cane");
+        assert_eq!(block_name(SEAGRASS), "minecraft:seagrass");
+        assert_eq!(block_name(TALL_SEAGRASS_UPPER), "minecraft:tall_seagrass");
+        assert_eq!(block_name(KELP), "minecraft:kelp");
+        assert_eq!(block_name(KELP_PLANT), "minecraft:kelp_plant");
     }
 }

@@ -42,9 +42,10 @@ mod tests {
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
         CACTUS, CLAY, COARSE_DIRT, DANDELION, DEAD_BUSH, FERN, GRASS, GRASS_BLOCK, GRAVEL, ICE,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL,
-        POPPY, RED_SAND, RawBlockId, SAND, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE,
-        SUGAR_CANE, TERRACOTTA, WATER, is_air_like, is_water,
+        KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG,
+        PACKED_ICE, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SEAGRASS, SNOW, SNOW_BLOCK,
+        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER,
+        TERRACOTTA, WATER, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -129,6 +130,7 @@ mod tests {
         TaigaSpruceFern,
         SnowySpruceFern,
         BadlandsDeadBushCactusSugarCane,
+        OceanWaterPlants,
     }
 
     impl FeatureFamily {
@@ -144,6 +146,7 @@ mod tests {
                 Self::BadlandsDeadBushCactusSugarCane => {
                     "badlands dead bush plus cactus/sugar cane"
                 }
+                Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
             }
         }
 
@@ -163,6 +166,13 @@ mod tests {
                 ],
                 Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
+                Self::OceanWaterPlants => &[
+                    SEAGRASS,
+                    TALL_SEAGRASS_LOWER,
+                    TALL_SEAGRASS_UPPER,
+                    KELP,
+                    KELP_PLANT,
+                ],
             }
         }
 
@@ -193,7 +203,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
             seed: 16,
@@ -353,7 +363,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:warm_ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
             seed: 6,
@@ -361,7 +371,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:lukewarm_ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
             seed: 5,
@@ -369,7 +379,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:cold_ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
             seed: 103,
@@ -473,7 +483,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:deep_ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
             seed: 167,
@@ -537,7 +547,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:deep_lukewarm_ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
             seed: 13,
@@ -545,7 +555,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:deep_cold_ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
             seed: 25,

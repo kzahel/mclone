@@ -9,6 +9,7 @@ mod disk;
 mod dripstone;
 mod glow_lichen;
 mod lake;
+mod ocean;
 mod ore;
 mod patch;
 mod placed;
@@ -22,10 +23,10 @@ pub use configured::{
     BasicTreeConfiguration, ConfiguredFeature, DecoratedFeatureConfiguration, DiskConfiguration,
     DripstoneClusterConfiguration, FloatProvider, FoliagePlacerConfiguration,
     GlowLichenConfiguration, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
-    RandomFeatureConfiguration, RandomPatchConfiguration, SimpleBlockConfiguration,
-    SmallDripstoneConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
-    TreeConfiguration, TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState,
-    WeightedConfiguredFeature,
+    RandomFeatureConfiguration, RandomPatchConfiguration, SeagrassConfiguration,
+    SimpleBlockConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
+    StraightTrunkPlacerConfiguration, TreeConfiguration, TrunkPlacerConfiguration,
+    TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use placed::{
@@ -155,6 +156,8 @@ impl ConfiguredFeature {
             Self::Decorated(config) => {
                 placed::place_configured_decorated_feature(world, biomes, random, origin, config)
             }
+            Self::Seagrass(config) => ocean::place_seagrass(world, random, origin, *config),
+            Self::Kelp => ocean::place_kelp(world, random, origin),
             Self::Ore(config) => ore::place_ore(world, random, origin, config),
             Self::FreezeTopLayer => top_layer::place_freeze_top_layer(world, biomes, origin),
         }
@@ -232,9 +235,9 @@ mod tests {
         DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE,
         DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
         DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
-        GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA,
-        OAK_LEAVES, OAK_LOG, POPPY, REDSTONE_ORE, SAND, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE,
-        TUFF, WATER,
+        GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, KELP, KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER,
+        LARGE_FERN_UPPER, LAVA, OAK_LEAVES, OAK_LOG, POPPY, REDSTONE_ORE, SAND, SEAGRASS, SNOW,
+        SPRUCE_LEAVES, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, DecorationContext, HeightProvider, IntProvider, VerticalAnchor,
@@ -253,6 +256,20 @@ mod tests {
                 chunk.set_block_at_y(x, 0, z, STONE);
                 chunk.set_block_at_y(x, 1, z, DIRT);
                 chunk.set_block_at_y(x, 2, z, GRASS_BLOCK);
+            }
+        }
+        chunk
+    }
+
+    fn flat_ocean_chunk() -> MutableChunkBlockBuffer {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 32);
+        for x in 0..CHUNK_WIDTH {
+            for z in 0..CHUNK_WIDTH {
+                chunk.set_block_at_y(x, 0, z, STONE);
+                chunk.set_block_at_y(x, 1, z, SAND);
+                for y in 2..=10 {
+                    chunk.set_block_at_y(x, y, z, WATER);
+                }
             }
         }
         chunk
@@ -489,6 +506,33 @@ mod tests {
         assert!(sugar_cane.place(&mut wet_chunk, &mut wet_random, BlockPos::new(8, 3, 8)));
         assert_eq!(wet_chunk.get_block_at_y(8, 3, 8), SUGAR_CANE);
         assert_eq!(wet_chunk.get_block_at_y(8, 4, 8), SUGAR_CANE);
+    }
+
+    #[test]
+    fn seagrass_feature_places_single_or_tall_water_plant_on_ocean_floor() {
+        let mut short_chunk = flat_ocean_chunk();
+        let mut short_random = WorldgenRandom::new(1);
+        let short = ConfiguredFeature::seagrass(SeagrassConfiguration::new(0.0));
+        assert!(short.place(&mut short_chunk, &mut short_random, BlockPos::new(8, 0, 8)));
+        assert_eq!(count_blocks(&short_chunk, SEAGRASS), 1);
+
+        let mut tall_chunk = flat_ocean_chunk();
+        let mut tall_random = WorldgenRandom::new(1);
+        let tall = ConfiguredFeature::seagrass(SeagrassConfiguration::new(1.0));
+        assert!(tall.place(&mut tall_chunk, &mut tall_random, BlockPos::new(8, 0, 8)));
+        assert_eq!(count_blocks(&tall_chunk, TALL_SEAGRASS_LOWER), 1);
+        assert_eq!(count_blocks(&tall_chunk, TALL_SEAGRASS_UPPER), 1);
+    }
+
+    #[test]
+    fn kelp_feature_places_body_column_with_head_in_water() {
+        let mut chunk = flat_ocean_chunk();
+        let mut random = WorldgenRandom::new(2);
+        let feature = ConfiguredFeature::kelp();
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 0, 8)));
+        assert_eq!(count_blocks(&chunk, KELP), 1);
+        assert!(count_blocks(&chunk, KELP_PLANT) > 0);
     }
 
     #[test]

@@ -387,6 +387,7 @@ const FACING_EAST: &[(&str, &str)] = &[("facing", "east")];
 const FACING_SOUTH: &[(&str, &str)] = &[("facing", "south")];
 const FACING_WEST: &[(&str, &str)] = &[("facing", "west")];
 const AGE_0: &[(&str, &str)] = &[("age", "0")];
+const AGE_20: &[(&str, &str)] = &[("age", "20")];
 const LEVEL_0: &[(&str, &str)] = &[("level", "0")];
 const LEVEL_1: &[(&str, &str)] = &[("level", "1")];
 const LEVEL_2: &[(&str, &str)] = &[("level", "2")];
@@ -507,6 +508,11 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (104, "minecraft:wall_torch", FACING_WEST),
     (105, "minecraft:cactus", AGE_0),
     (106, "minecraft:sugar_cane", AGE_0),
+    (107, "minecraft:seagrass", EMPTY_PROPS),
+    (108, "minecraft:tall_seagrass", HALF_LOWER),
+    (109, "minecraft:tall_seagrass", HALF_UPPER),
+    (110, "minecraft:kelp", AGE_20),
+    (111, "minecraft:kelp_plant", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -525,7 +531,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 107);
+        assert_eq!(registry.len(), 112);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -681,6 +687,26 @@ mod tests {
         assert_eq!(
             registry.by_id(BlockStateId(106)).unwrap().canonical_key(),
             "minecraft:sugar_cane[age=0]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:seagrass"),
+            Some(BlockStateId(107))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:tall_seagrass[half=lower]"),
+            Some(BlockStateId(108))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(109)).unwrap().canonical_key(),
+            "minecraft:tall_seagrass[half=upper]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:kelp[age=20]"),
+            Some(BlockStateId(110))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:kelp_plant"),
+            Some(BlockStateId(111))
         );
     }
 

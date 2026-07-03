@@ -1,5 +1,7 @@
-use crate::prng::RandomSource;
+use crate::noise::PerlinSimplexNoise;
+use crate::prng::{RandomSource, WorldgenRandom};
 use std::fmt;
+use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockPos {
@@ -357,6 +359,25 @@ impl CountConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoiseCountFactorDecoratorConfiguration {
+    pub noise_to_count_ratio: i32,
+    pub noise_factor: f64,
+    pub noise_offset: f64,
+}
+
+impl Eq for NoiseCountFactorDecoratorConfiguration {}
+
+impl NoiseCountFactorDecoratorConfiguration {
+    pub const fn new(noise_to_count_ratio: i32, noise_factor: f64, noise_offset: f64) -> Self {
+        Self {
+            noise_to_count_ratio,
+            noise_factor,
+            noise_offset,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrequencyWithExtraChanceDecoratorConfiguration {
     pub count: i32,
     pub extra_chance: f32,
@@ -424,6 +445,7 @@ pub enum ConfiguredDecorator {
     Nope,
     Square,
     Count(CountConfiguration),
+    CountNoiseBiased(NoiseCountFactorDecoratorConfiguration),
     CountExtra(FrequencyWithExtraChanceDecoratorConfiguration),
     Chance(ChanceDecoratorConfiguration),
     LavaLake(ChanceDecoratorConfiguration),
@@ -445,6 +467,18 @@ impl ConfiguredDecorator {
 
     pub const fn count(count: i32) -> Self {
         Self::Count(CountConfiguration::new(count))
+    }
+
+    pub const fn count_noise_biased(
+        noise_to_count_ratio: i32,
+        noise_factor: f64,
+        noise_offset: f64,
+    ) -> Self {
+        Self::CountNoiseBiased(NoiseCountFactorDecoratorConfiguration::new(
+            noise_to_count_ratio,
+            noise_factor,
+            noise_offset,
+        ))
     }
 
     pub const fn count_extra(count: i32, extra_chance: f32, extra_count: i32) -> Self {
@@ -493,6 +527,7 @@ impl ConfiguredDecorator {
             Self::Nope => nope_positions(context, random, pos),
             Self::Square => square_positions(context, random, pos),
             Self::Count(config) => count_positions(context, random, config, pos),
+            Self::CountNoiseBiased(config) => count_noise_biased_positions(config, pos),
             Self::CountExtra(config) => count_extra_positions(context, random, config, pos),
             Self::Chance(config) => chance_positions(context, random, config, pos),
             Self::LavaLake(config) => lava_lake_positions(context, random, config, pos),
@@ -537,6 +572,19 @@ pub fn count_positions(
 ) -> Vec<BlockPos> {
     let count = config.count().sample(random).max(0) as usize;
     vec![pos; count]
+}
+
+pub fn count_noise_biased_positions(
+    config: NoiseCountFactorDecoratorConfiguration,
+    pos: BlockPos,
+) -> Vec<BlockPos> {
+    let noise = biome_info_noise().get_value(
+        pos.x as f64 / config.noise_factor,
+        pos.z as f64 / config.noise_factor,
+        false,
+    );
+    let count = ((noise + config.noise_offset) * config.noise_to_count_ratio as f64).ceil() as i32;
+    vec![pos; count.max(0) as usize]
 }
 
 pub fn count_extra_positions(
@@ -660,6 +708,14 @@ fn next_int(random: &mut impl RandomSource, min: i32, max: i32) -> i32 {
     }
 }
 
+fn biome_info_noise() -> &'static PerlinSimplexNoise {
+    static NOISE: OnceLock<PerlinSimplexNoise> = OnceLock::new();
+    NOISE.get_or_init(|| {
+        let mut random = WorldgenRandom::new(2345);
+        PerlinSimplexNoise::from_octaves(&mut random, &[0])
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,6 +794,30 @@ mod tests {
                 .get_positions(&CONTEXT, &mut negative_random, POS)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn count_noise_biased_repeats_input_position_without_random_draws() {
+        let decorator = ConfiguredDecorator::count_noise_biased(120, 80.0, 0.0);
+        let mut random = WorldgenRandom::new(99);
+        let origin = (-128..=128)
+            .step_by(16)
+            .flat_map(|x| {
+                (-128..=128)
+                    .step_by(16)
+                    .map(move |z| BlockPos::new(x, POS.y, z))
+            })
+            .find(|pos| {
+                !decorator
+                    .get_positions(&CONTEXT, &mut random, *pos)
+                    .is_empty()
+            })
+            .expect("positive noise-biased count in deterministic search grid");
+        let positions = decorator.get_positions(&CONTEXT, &mut random, origin);
+
+        assert!(!positions.is_empty());
+        assert!(positions.iter().all(|position| *position == origin));
+        assert_eq!(random.get_count(), 0);
     }
 
     #[test]

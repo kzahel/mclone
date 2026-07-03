@@ -297,6 +297,19 @@ impl SmallDripstoneConfiguration {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeagrassConfiguration {
+    pub tall_probability: f32,
+}
+
+impl Eq for SeagrassConfiguration {}
+
+impl SeagrassConfiguration {
+    pub const fn new(tall_probability: f32) -> Self {
+        Self { tall_probability }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BasicTreeConfiguration {
     pub log: RawBlockId,
@@ -746,6 +759,8 @@ pub enum ConfiguredFeature {
     Tree(TreeConfiguration),
     RandomSelector(RandomFeatureConfiguration),
     Decorated(DecoratedFeatureConfiguration),
+    Seagrass(SeagrassConfiguration),
+    Kelp,
     Ore(OreConfiguration),
     FreezeTopLayer,
 }
@@ -805,6 +820,14 @@ impl ConfiguredFeature {
 
     pub fn decorated(config: DecoratedFeatureConfiguration) -> Self {
         Self::Decorated(config)
+    }
+
+    pub const fn seagrass(config: SeagrassConfiguration) -> Self {
+        Self::Seagrass(config)
+    }
+
+    pub const fn kelp() -> Self {
+        Self::Kelp
     }
 
     pub const fn ore(config: OreConfiguration) -> Self {

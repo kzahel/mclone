@@ -948,6 +948,8 @@ mod tests {
         assert!(assets.atlas.height > 0);
         assert!(assets.catalog.get(mclone_core::BlockStateId(105)).is_some());
         assert!(assets.catalog.get(mclone_core::BlockStateId(106)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(107)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(111)).is_some());
     }
 
     #[test]

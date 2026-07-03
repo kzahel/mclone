@@ -18,8 +18,8 @@ use super::{
     BasicTreeConfiguration, ConfiguredFeature, DecorationStep, DiskConfiguration,
     DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration, LakeConfiguration,
     OreConfiguration, PlacedFeature, RandomFeatureConfiguration, RandomPatchConfiguration,
-    SmallDripstoneConfiguration, SpringConfiguration, TreeConfiguration, WeightedBlockState,
-    WeightedConfiguredFeature,
+    SeagrassConfiguration, SmallDripstoneConfiguration, SpringConfiguration, TreeConfiguration,
+    WeightedBlockState, WeightedConfiguredFeature,
 };
 
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
@@ -80,6 +80,15 @@ pub(super) fn overworld_features_for_biome_cached(
         "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => {
             mushroom_field_feature_table()
         }
+        "minecraft:ocean" => ocean_feature_table(false),
+        "minecraft:deep_ocean" => ocean_feature_table(true),
+        "minecraft:cold_ocean" => cold_ocean_feature_table(false),
+        "minecraft:deep_cold_ocean" => cold_ocean_feature_table(true),
+        "minecraft:lukewarm_ocean" => lukewarm_ocean_feature_table(false),
+        "minecraft:deep_lukewarm_ocean" => lukewarm_ocean_feature_table(true),
+        "minecraft:warm_ocean" => warm_ocean_feature_table(false),
+        "minecraft:deep_warm_ocean" => warm_ocean_feature_table(true),
+        "minecraft:frozen_ocean" | "minecraft:deep_frozen_ocean" => frozen_ocean_feature_table(),
         _ => default_land_feature_table(),
     }
 }
@@ -168,6 +177,59 @@ fn mushroom_field_feature_table() -> &'static [PlacedFeature] {
         .get_or_init(|| {
             build_overworld_feature_table("minecraft:mushroom_fields", mushroom_field_features())
         })
+        .as_slice()
+}
+
+fn ocean_feature_table(deep: bool) -> &'static [PlacedFeature] {
+    static OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static DEEP_OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if deep { &DEEP_OCEAN } else { &OCEAN };
+    features
+        .get_or_init(|| build_overworld_feature_table("minecraft:ocean", ocean_features(deep)))
+        .as_slice()
+}
+
+fn cold_ocean_feature_table(deep: bool) -> &'static [PlacedFeature] {
+    static COLD_OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static DEEP_COLD_OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if deep { &DEEP_COLD_OCEAN } else { &COLD_OCEAN };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:cold_ocean", cold_ocean_features(deep))
+        })
+        .as_slice()
+}
+
+fn lukewarm_ocean_feature_table(deep: bool) -> &'static [PlacedFeature] {
+    static LUKEWARM_OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static DEEP_LUKEWARM_OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if deep {
+        &DEEP_LUKEWARM_OCEAN
+    } else {
+        &LUKEWARM_OCEAN
+    };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:lukewarm_ocean", lukewarm_ocean_features(deep))
+        })
+        .as_slice()
+}
+
+fn warm_ocean_feature_table(deep: bool) -> &'static [PlacedFeature] {
+    static WARM_OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static DEEP_WARM_OCEAN: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if deep { &DEEP_WARM_OCEAN } else { &WARM_OCEAN };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:warm_ocean", warm_ocean_features(deep))
+        })
+        .as_slice()
+}
+
+fn frozen_ocean_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:frozen_ocean", Vec::new()))
         .as_slice()
 }
 
@@ -562,6 +624,31 @@ fn mushroom_field_features() -> Vec<PlacedFeature> {
     vec![grass_patch(GRASS, 1)]
 }
 
+fn ocean_features(deep: bool) -> Vec<PlacedFeature> {
+    vec![
+        seagrass_feature(48, if deep { 0.8 } else { 0.3 }),
+        kelp_feature(120),
+    ]
+}
+
+fn cold_ocean_features(deep: bool) -> Vec<PlacedFeature> {
+    vec![
+        seagrass_feature(if deep { 40 } else { 32 }, if deep { 0.8 } else { 0.3 }),
+        kelp_feature(120),
+    ]
+}
+
+fn lukewarm_ocean_features(deep: bool) -> Vec<PlacedFeature> {
+    vec![
+        seagrass_feature(80, if deep { 0.8 } else { 0.3 }),
+        kelp_feature(80),
+    ]
+}
+
+fn warm_ocean_features(deep: bool) -> Vec<PlacedFeature> {
+    vec![seagrass_feature(80, if deep { 0.8 } else { 0.3 })]
+}
+
 fn default_land_features() -> Vec<PlacedFeature> {
     vec![
         tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
@@ -876,6 +963,30 @@ fn sugar_cane_patch(count: i32) -> PlacedFeature {
             place_on: &[],
         },
         count,
+    )
+}
+
+fn seagrass_feature(count: i32, tall_probability: f32) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::seagrass(SeagrassConfiguration::new(tall_probability)),
+        vec![
+            ConfiguredDecorator::count(count),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+        ],
+    )
+}
+
+fn kelp_feature(noise_to_count_ratio: i32) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::kelp(),
+        vec![
+            ConfiguredDecorator::count_noise_biased(noise_to_count_ratio, 80.0, 0.0),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+        ],
     )
 }
 

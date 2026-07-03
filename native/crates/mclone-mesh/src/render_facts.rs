@@ -61,6 +61,11 @@ fn java_no_collision(block: &ResourceLocation) -> bool {
             | "poppy"
             | "dead_bush"
             | "glow_lichen"
+            | "sugar_cane"
+            | "seagrass"
+            | "tall_seagrass"
+            | "kelp"
+            | "kelp_plant"
             | "torch"
             | "wall_torch"
     )
@@ -177,6 +182,11 @@ fn java_material_blocks_motion(block: &ResourceLocation) -> bool {
             | "poppy"
             | "dead_bush"
             | "glow_lichen"
+            | "sugar_cane"
+            | "seagrass"
+            | "tall_seagrass"
+            | "kelp"
+            | "kelp_plant"
             | "torch"
             | "wall_torch"
     )
@@ -207,7 +217,17 @@ fn java_abstract_glass_block(block: &ResourceLocation) -> bool {
 fn java_bush_like_block(block: &ResourceLocation) -> bool {
     matches!(
         block.path(),
-        "grass" | "fern" | "large_fern" | "dandelion" | "poppy" | "dead_bush"
+        "grass"
+            | "fern"
+            | "large_fern"
+            | "dandelion"
+            | "poppy"
+            | "dead_bush"
+            | "sugar_cane"
+            | "seagrass"
+            | "tall_seagrass"
+            | "kelp"
+            | "kelp_plant"
     )
 }
 
@@ -332,6 +352,11 @@ mod tests {
             "minecraft:dandelion",
             "minecraft:poppy",
             "minecraft:dead_bush",
+            "minecraft:sugar_cane",
+            "minecraft:seagrass",
+            "minecraft:tall_seagrass",
+            "minecraft:kelp",
+            "minecraft:kelp_plant",
             "minecraft:glow_lichen",
         ] {
             let facts = block_render_facts(&record(block), false);
