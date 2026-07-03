@@ -1,7 +1,9 @@
 # Session Network Architecture
 
 Status: target architecture; Slice 1 send-only high-frequency command policy
-landed for local integrated play; remaining implementation tracked in
+landed for local integrated play; revised 2026-07-03 to adopt the vanilla
+ordered-stream update model (thin apply plus a frame-budget stall) and drop
+the earlier priority-class design; remaining implementation tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -27,17 +29,45 @@ one-off caps or platform-specific network paths.
 Minecraft Java 1.17.1 separates command send from inbound packet handling:
 
 - The local player sends movement packets through `Connection.send(...)`.
-- The client receives packets on Netty or local-channel IO threads.
+- The client receives packets on Netty or local-channel IO threads, and packet
+  payloads are decoded there, not on the client thread.
 - `PacketUtils.ensureRunningOnSameThread(...)` schedules packet handlers onto
   the Minecraft client thread.
+- The client thread drains **all** queued packet handler tasks every render
+  frame (`Minecraft.runTick` -> `runAllTasks()`), in receive order. There are
+  no priority classes and no apply budget anywhere in the client.
 - `ClientPacketListener.handleLevelChunk(...)` installs chunk data and marks
   render sections dirty on the client thread.
 - `ChunkRenderDispatcher` then rebuilds dirty chunks asynchronously and queues
   uploads back to the render side.
 
 The important lesson is not "chunk updates never touch the main thread." They
-do. The lesson is that a movement packet send does not synchronously flush
-inbound chunk streaming work.
+do, every frame, unbudgeted. The lesson is where vanilla lets pressure
+accumulate when the server outruns the client:
+
+- **Packet apply is thin.** `handleLevelChunk` parses the payload into a
+  `LevelChunk` and calls `setSectionDirtyWithNeighbors`, which bottoms out in
+  `ViewArea.setDirty` — an array index into a fixed resident grid of
+  `RenderChunk` slots followed by a boolean store. No ordered-set churn, no
+  allocation, no meshing, no upload.
+- **Expensive work is pull-based with hard structural backpressure.** Mesh
+  rebuilds are gated by a fixed pool of `ChunkBufferBuilderPack`s; when no
+  builder is free, nothing is scheduled and the chunk simply stays dirty. The
+  render traversal chooses which dirty chunks to compile (visible, nearest
+  first), and the upload queue is bounded by the same pool.
+- **The buffer between them is world state.** Chunks the client cannot mesh
+  yet accumulate as installed chunk data plus dirty flags — passive memory
+  bounded by view distance, not queued work that anything rescans per frame.
+- **Arrival is smeared at the source.** Chunks are only sent when they finish
+  the server generation/lighting pipeline, which is itself throttled (for
+  example `ThreadedLevelLightEngine` processes a small task batch per tick),
+  so packets arrive spread across ticks instead of as one dump.
+
+Context from outside our reference target: even with this shape, desktop
+vanilla of the 1.17 era can hitch during chunk storms, and Mojang's eventual
+fix (1.20.2) was **server-side** chunk-send batching paced by client
+acknowledgements — pacing at the source, not client-side reordering. We do not
+port 1.20.2 systems, but the direction confirms where flow control belongs.
 
 ## Current Mclone Shape
 
@@ -55,7 +85,19 @@ app/render thread
 ```
 
 The bad coupling is API-level: `send_gameplay_command_timed` sends a command,
-drains the update queue, and applies every drained update before returning.
+drains the update queue, and applies every drained update before returning
+(fixed for pose sync by the Slice 1 `SendOnly` policy).
+
+Compared to the reference shape, local integrated play also has three costly
+gaps beyond the API coupling:
+
+- `drain_updates` decodes every pending update frame on the app/render thread
+  at the drain point, where vanilla decodes on the IO side.
+- Render dirty marking is ordered-set insertion churn per update (~0.13 ms per
+  chunk-scale update measured in `130`), where vanilla flips a boolean on a
+  resident render-section slot.
+- `set_chunk_view` still performs an immediate unbudgeted drain inside the
+  movement/interest path even after Slice 1.
 
 Native remote dedicated is even more request/response-shaped today:
 `NativeClientSession::send_command` writes one command and blocks reading one
@@ -74,7 +116,7 @@ The client-facing shape should be a bus, not a request/response session:
 client app/render/runtime thread
   - samples input and XR/flat poses
   - enqueues outbound commands
-  - drains inbound updates under priority and frame budget
+  - drains inbound updates in receive order under a frame budget
   - applies client replica updates
   - marks render dirty incrementally
   - renders from already-paced state
@@ -83,8 +125,8 @@ session/network actor
   - owns connection or local runner bridge
   - writes outbound command frames
   - reads inbound update frames
-  - decodes frames and classifies update priority
-  - pushes updates to inbound queues
+  - decodes frames into logical updates
+  - pushes updates to the inbound queue in receive order
   - exposes diagnostics/backpressure
 
 authoritative host
@@ -116,30 +158,80 @@ trait ClientSessionBus {
 }
 ```
 
-The bus owns transport/session mechanics. The app/runtime owns when drained
-updates are applied and how much frame budget they may consume.
+The bus owns transport/session mechanics and hands back decoded updates in
+receive order. The app/runtime owns when drained updates are applied and how
+much frame budget they may consume.
 
 Local integrated, native TCP, WebSocket, WebRTC, and worker channels should all
 fit behind this boundary. Platform adapters may be async internally; the shared
 runtime should not become async just because one backend is.
 
-## Priority And Backpressure
+## Parity And Divergence
 
-Inbound updates need explicit priority because not every update has the same
-frame-time or correctness consequence.
+The reference-porting policy requires recording where we follow the Java shape
+and where we deliberately leave it.
 
-| Class | Examples | Apply policy |
-| --- | --- | --- |
-| Critical ordered | disconnect/errors, session lifecycle, `PlayerPosition` correction, teleport acknowledgement state | Apply promptly before lower-priority work. Do not delay behind chunk streaming. |
-| Gameplay ordered | inventory/container state, carried item, interaction results, local block action confirmations | Preserve ordering for gameplay semantics. Small batches can usually apply in the same frame. |
-| Realtime superseding | remote-player/entity transform snapshots, presentation-only pose updates | Coalesce by entity/player when newer state replaces older state. Do not let stale transforms grow an unbounded queue. |
-| World streaming paced | `ChunkSnapshot`, `ChunkUnload`, broad chunk light/content payloads | Apply under an explicit per-frame budget. Maintain per-chunk ordering and avoid starving nearby visible chunks. |
-| Section/block mutation | `SectionBlockUpdates`, local edit echo, light deltas | Ordered per affected section/chunk. Local-player-visible edits may deserve a higher coherence lane than background streaming. |
+Parity (the default):
 
-Outbound commands need similar policy, but with care:
+- Outbound commands and inbound updates are separate streams; a movement send
+  never flushes inbound work.
+- Updates are applied on the client/runtime thread at an owned pump point.
+- Updates are applied in strict receive order. There are no priority classes,
+  no cross-update reordering, and no coalescing for local play. Per-chunk
+  snapshot/mutation/unload ordering follows automatically.
+- Update payload decode happens on the producer/IO side (session actor,
+  integrated runner thread), not on the render thread.
+- Update application is thin: install state, flip resident dirty slots. All
+  heavy compile/upload work stays pull-based behind the bounded terrain
+  pipeline (`tactical/128`).
+- Player position corrections are ordinary ordered updates, applied in stream
+  order.
 
-- Java-like movement packets are ordered command records; the current vanilla
-  movement path should not accidentally flush inbound updates.
+Deliberate divergence (narrow, recorded):
+
+- The update pump has a per-frame apply budget. When the budget is exhausted
+  mid-queue, application stalls and resumes next frame. This changes only
+  *when* updates apply, never their order or content. Justification: vanilla
+  drains everything each frame and tolerates occasional chunk-storm hitches on
+  desktop; a 13.9 ms Quest frame cannot. Setting the budget to unlimited
+  restores exact vanilla semantics, which keeps the parity path open.
+- Recorded trade: a stall delays everything behind it, including corrections.
+  A 30-update burst at 4 updates per frame is ~7 frames (~100 ms at 72 Hz) of
+  worst-case added latency where vanilla would apply same-frame. Queue age
+  must therefore be visible in diagnostics. If measured correction latency
+  ever becomes a real problem, the recorded escalation is a narrow critical
+  fast-lane for session lifecycle/corrections only — adopted with evidence,
+  never for chunk streaming, and never as a default local-play mechanism.
+
+Parked, not planned:
+
+- Priority classes, superseding lanes, and entity-transform coalescing may
+  return for remote high-rate entity snapshots (tactical `133` Slice 6
+  territory, likely alongside WebRTC-style transports). Any such lane must
+  define spawn/despawn ordering rules before it coalesces anything. It is not
+  a local-play mechanism.
+
+## Ordering, Pacing, And Backpressure
+
+Inbound updates form one logical stream:
+
+- Apply in receive order at the runtime pump, under the frame budget, always
+  applying at least one pending update per pump so a stall cannot become
+  livelock.
+- When the server outruns the client, pressure accumulates first as undrained
+  frames in the inbound queue (observable depth, age, bytes), then as
+  installed world state waiting on the pull-based mesh pipeline. Neither grows
+  without bound: the inbound queue is limited by interest management and
+  source pacing, and world state is bounded by view distance.
+- Pacing beyond the budget stall belongs at the source: integrated-server
+  send-side smearing and interest hysteresis (unload margin wider than load
+  margin, so a path oscillating near a chunk boundary does not thrash full
+  row swaps).
+
+Outbound commands stay ordered command records, with care:
+
+- Java-like movement packets are ordered command records; the vanilla movement
+  path must never flush inbound updates.
 - Future FPS-style predicted movement may require preserving every fixed-step
   command for replay. Do not blindly collapse that lane into "latest input."
 - Some presentation or view-center commands can be latest-wins if the command's
@@ -149,13 +241,11 @@ Outbound commands need similar policy, but with care:
 
 Backpressure should be visible in diagnostics:
 
-- outbound queue depth by command class,
-- inbound queue depth by update class,
-- bytes queued,
-- applied updates by class per frame,
-- deferred chunk snapshots/unloads,
-- coalesced realtime updates,
-- time spent in drain, dirty marking, client apply, and render dirty handoff.
+- outbound queue depth,
+- inbound queue depth, oldest queued update age, and bytes queued,
+- updates applied versus deferred per pump, and stall occurrences,
+- producer-side decode time,
+- time spent in apply, dirty marking, client apply, and render dirty handoff.
 
 ## Native Implementation Shape
 
@@ -163,15 +253,20 @@ Local integrated:
 
 - Keep `NativeIntegratedServerRunner` as the authoritative server actor.
 - Keep command and update channels.
-- Remove update draining from high-frequency command send helpers.
-- Let the runtime update pump drain/apply inbound updates with budget and
-  priority.
+- Remove update draining from command send helpers (`send_gameplay_command*`
+  landed in Slice 1; `set_chunk_view` still pending).
+- The runtime update pump drains and applies inbound updates in receive order
+  under the frame budget. Undrained updates stay in the channel so queue depth
+  remains observable and idle/bootstrap checks keep working.
+- Move update payload decode to the runner side so the pump applies
+  already-decoded updates.
 
 Native remote TCP:
 
-- Move `TcpStream` ownership to a session/network thread.
+- Move `TcpStream` ownership to a session/network thread; that thread owns
+  payload decode.
 - The app thread enqueues `ClientCommand` frames and drains decoded
-  `ServerUpdate` frames from queues.
+  `ServerUpdate`s from queues.
 - The first implementation can keep the current wire codec and blocking socket
   reads in the IO thread.
 - Server-push wire changes can come later; the app/runtime boundary should be
@@ -186,8 +281,8 @@ private transport semantics.
 Web should converge on the same bus semantics while preserving browser-owned
 async mechanics:
 
-- WebSocket `message` callbacks or WebRTC data-channel callbacks push binary
-  frames into an inbound queue.
+- WebSocket `message` callbacks or WebRTC data-channel callbacks push decoded
+  updates onto the same inbound queue in receive order.
 - A worker-integrated server publishes updates through the same logical queue.
 - The Rust runtime drains updates on its normal frame/update cadence.
 - Hot paths can later use `SharedArrayBuffer`/atomics, but the policy remains
@@ -199,17 +294,25 @@ stay event-driven.
 ## Invariants
 
 - Renderer-facing code never calls the authoritative server directly.
-- Movement/pose command send never performs unbounded inbound update apply.
-- Client replica mutation and render dirty marking happen at explicit update
-  pump points, with priority and budget.
+- Command send never performs inbound update application, bounded or not.
+- Server updates are applied only at the owned runtime pump, in receive order,
+  under an explicit frame budget; a pump pass always applies at least one
+  pending update so a stall cannot become livelock.
+- The pump runs every frame in every client lane. Queue depth and oldest
+  queued update age are diagnostics so starvation is detectable rather than
+  assumed absent.
+- Update application stays thin: producer-side decode, resident-slot dirty
+  marking. New per-update work at the pump (payload decode, allocation,
+  ordered-set churn) is a regression smell.
+- Client player simulation does not free-run against missing chunks. Vanilla
+  gates `LocalPlayer.tick()` on the player's chunk being present; the same
+  gate matters here once a budget stall can defer the player's chunk snapshot.
 - Local integrated and remote dedicated share the same client update
   application path.
 - Web and native may differ in transport mechanics, not in command/update
   semantics.
-- Chunk streaming cannot starve corrections, lifecycle updates, or interaction
-  feedback.
 - Old render output remains visible until replacement compile/upload work is
-  complete; network pacing should feed, not bypass, the terrain lifecycle.
+  complete; network pacing feeds, not bypasses, the terrain lifecycle.
 
 ## Related Docs
 
@@ -226,6 +329,8 @@ stay event-driven.
 - [`tactical/085-web-host-mode-convergence.md`](./tactical/085-web-host-mode-convergence.md)
   tracks shared host-mode policy versus web async mechanics.
 - [`tactical/128-terrain-render-pipeline-coordination.md`](./tactical/128-terrain-render-pipeline-coordination.md)
-  owns the dirty-to-drawable terrain pipeline.
+  owns the dirty-to-drawable terrain pipeline that provides the pull-based
+  backpressure this model relies on.
 - [`tactical/131-quest-cpu-gpu-overlap-and-frame-cost-hygiene.md`](./tactical/131-quest-cpu-gpu-overlap-and-frame-cost-hygiene.md)
-  records the measured Quest RD7 command/update tail that triggered this work.
+  records the measured Quest RD7 command/update tail that triggered this work
+  and the dirty-mark cost diagnosis behind the thin-apply requirement.
