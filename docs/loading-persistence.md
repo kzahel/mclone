@@ -194,8 +194,9 @@ ChunkScheduler actor integration
 ```
 
 The synchronous facade remains only as compatibility/testing glue around the
-same mailbox. Entity chunks are the next reserved record family that still
-needs a concrete host integration.
+same mailbox. Entity chunks now have a shared record/mailbox foundation; their
+dirty tracking, hydration, and save-before-unload acknowledgements still need
+concrete scheduler host integration.
 
 Browser singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote host uses file-backed JSON records under a save root. Unit tests generally use memory storage.
 

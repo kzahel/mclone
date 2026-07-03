@@ -126,6 +126,53 @@ impl MobRuntimeState {
         }
     }
 
+    pub(crate) fn from_saved(
+        id: EntityId,
+        metadata: EntityMetadata,
+        on_ground: bool,
+        y_rot_degrees: f32,
+        delta_movement: Vec3d,
+        chicken_egg_time: Option<i32>,
+    ) -> Self {
+        debug_assert!(
+            metadata.is_passive_mob(),
+            "mob runtime state requires mob metadata"
+        );
+        let mut pathfinding_malus = PathfindingMalusTable::default();
+        if metadata.kind == EntityKind::Chicken {
+            pathfinding_malus.set(BlockPathType::Water, 0.0);
+        }
+
+        let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
+        let species = MobSpeciesState::from_saved(metadata.kind, &mut random, chicken_egg_time);
+
+        let mut goal_selector = GoalSelector::default();
+        match metadata.kind {
+            EntityKind::Cow => passive::register_cow_goals(&mut goal_selector),
+            EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
+            EntityKind::DebugCube | EntityKind::Item => {}
+        }
+        let attributes = MobAttributes::from_metadata(metadata);
+
+        Self {
+            no_action_time: 0,
+            on_ground,
+            y_body_rot_degrees: y_rot_degrees,
+            y_head_rot_degrees: y_rot_degrees,
+            attributes,
+            eye_height: metadata.standing_eye_height() as f64,
+            delta_movement,
+            pathfinding_malus,
+            random,
+            species,
+            goal_selector,
+            navigation: GroundPathNavigation::default(),
+            move_control: MoveControl::default(),
+            jump_control: JumpControl::default(),
+            look_control: LookControl::default(),
+        }
+    }
+
     pub(crate) fn sync_from_entity(&mut self, entity: ServerEntityState) {
         self.on_ground = entity.on_ground;
         self.y_body_rot_degrees = entity.y_rot_degrees;
@@ -170,6 +217,10 @@ impl MobRuntimeState {
 
     pub(crate) const fn delta_movement(&self) -> Vec3d {
         self.delta_movement
+    }
+
+    pub(crate) fn chicken_egg_time(&self) -> Option<i32> {
+        self.species.chicken().map(|chicken| chicken.egg_time())
     }
 
     pub(crate) fn available_goal_count(&self) -> usize {

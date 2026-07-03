@@ -1,6 +1,7 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 1 landed, Slice 2 next.
+Status: active; Slice 3A entity record foundation landed, scheduler entity
+host integration next.
 
 ## Purpose
 
@@ -34,7 +35,7 @@ Read before implementation:
 
 ## Current Native State
 
-Live Rust after Slice 1 has:
+Live Rust after Slice 3A has:
 
 - `native/crates/mclone-server/src/persistence.rs`
 - `ChunkSnapshotStore`
@@ -42,6 +43,7 @@ Live Rust after Slice 1 has:
 - `FilesystemChunkSnapshotStore`
 - `WorldStore`
 - `ChunkRecord`
+- `EntityChunkRecord` / `EntitySaveRecord`
 - `PersistenceActor` / `PersistenceMailbox`
 - `NullWorldStore` / `MemoryWorldStore`
 - `ChunkSnapshotWorldStore`
@@ -49,18 +51,16 @@ Live Rust after Slice 1 has:
 - synchronous `load_chunk` / `save_chunk`
 - `ChunkScheduler` dirty chunk tracking and save-before-unload for current block
   mutations
+- entity chunk load/save request and completion types in the shared mailbox
+- entity-store pack/hydrate helpers for Cow, Chicken, and Item records
 
 This is useful but still too narrow:
 
 - actor execution is still same-thread/in-process
-- the scheduler still reaches persistence through a blocking compatibility
-  facade
-- dirty/unload holder state does not yet wait on actor acknowledgements
-- no entity chunk storage
+- entity chunk storage is not yet wired into scheduler load/unload holder state
 - no player/world/saved-data records
 - no web IndexedDB adapter
 - no Android or dedicated-server world-dir wiring
-- no clear durable-vs-cache priority at the actor/backend boundary
 
 `docs/loading-persistence.md` contains richer target vocabulary than the live
 Rust path. Treat live Rust as the source of current behavior and reconcile the
@@ -245,13 +245,16 @@ Validation landed:
 
 Deferred to the next chunk:
 
-- entity chunk records remain the next persistence family to define and hydrate.
+- entity chunk load/save remains to be wired into scheduler holder lifecycle.
 
 ### Slice 3: Entity Chunk Record Foundation
 
 Add logical entity persistence while keeping physical storage in memory first.
 
-Deliverables:
+Status: Slice 3A foundation landed 2026-07-03; Slice 3B scheduler/host
+integration remains.
+
+Landed shape:
 
 - `EntityChunkRecord`
 - `EntitySaveRecord` with the field set and per-kind payloads from the
@@ -259,6 +262,16 @@ Deliverables:
 - stable UUID identity in saved records; runtime `EntityId` stays session-local
 - chunk-addressed save/load API separate from block chunks
 - empty entity chunk records
+- `MemoryWorldStore` stores entity chunks; `NullWorldStore` treats them as
+  transient; snapshot-only backends fail explicitly for entity chunks
+- `PersistenceActor` applies pending-write visibility, revision replacement,
+  durable priority, flush, and close semantics to entity chunk writes
+- `ServerEntityStore` can pack/hydrate Cow, Chicken, and Item records with
+  stable kind/item codes; Chicken saves egg time, Item saves stack and pickup
+  delay, and fresh runtime ids preserve saved persistent ids
+
+Still deferred to Slice 3B:
+
 - dirty entity chunk tracking
 - save-on-unload semantics
 - generated original mobs enter the persistent entity path
@@ -266,7 +279,20 @@ Deliverables:
   generation-time entity placement, even when the block chunk record was
   discarded as incompatible cache and the terrain regenerated
 
-Validation:
+Validation landed:
+
+- entity chunk actor load sees pending same-key writes
+- newer entity chunk revision supersedes stale queued writes
+- flush waits for durable entity chunk writes while cache entity writes remain
+  pending but visible to loads
+- close drains durable entity chunk writes and skips cache entity writes
+- entity-store record pack/hydrate preserves persistent ids while assigning
+  fresh runtime ids
+- empty entity chunk hydration removes existing persistent entities in that
+  chunk
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server`
+
+Validation still needed with Slice 3B:
 
 - generated passive animal survives chunk unload/reload
 - killed generated passive animal does not reappear from seed-time generation
@@ -409,19 +435,18 @@ one platform before the shared host contract is clear.
 
 ## Next Likely Implementation Chunk
 
-Proceed with **Slice 2: Host Dirty/Unload Integration Through Actor**.
+Proceed with **Slice 3B: Entity Chunk Host Integration**.
 
 Reasoning:
 
-- Slice 1 has the shared contract, pending-write map, durability lanes, and
-  synchronous compatibility facade.
-- The remaining architectural risk is now scheduler residency: dirty holders
-  should stay resident until durable save acknowledgements arrive, and async
-  load completions must be integrated through holder state rather than direct
-  blocking calls.
-- This should land before entity chunk records or physical durable storage, so
-  entity persistence and SQLite/IndexedDB do not inherit the current blocking
-  save-before-unload behavior.
+- Slice 3A has the shared entity record shape, memory/null backend behavior,
+  actor semantics, and entity-store pack/hydrate helpers.
+- The remaining entity persistence risk is scheduler residency: entity chunk
+  load completions, dirty entity chunk tracking, and save-before-unload
+  acknowledgements need to follow the same non-blocking host lifecycle as block
+  chunk records.
+- This should land before SQLite/IndexedDB so durable backends do not inherit a
+  missing or platform-local entity lifecycle.
 
 ## Validation Gates
 

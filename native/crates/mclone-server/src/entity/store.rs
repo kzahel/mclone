@@ -6,6 +6,10 @@ use mclone_core::{Aabb, BlockPos, BlockStateId, ChunkPos, Vec3d};
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind, ItemKind, ItemStackSnapshot};
 
+use crate::persistence::{
+    ChunkStoreError, ChunkStoreResult, ENTITY_CHUNK_RECORD_VERSION, EntityChunkRecord,
+    EntityPersistentId, EntitySavePayload, EntitySaveRecord, ItemStackSaveRecord,
+};
 use crate::players::ServerPlayerId;
 
 use super::ServerEntityState;
@@ -23,6 +27,7 @@ const PLAYER_PICKUP_INFLATE_Y: f64 = 0.5;
 const ITEM_MERGE_INFLATE_XZ: f64 = 0.5;
 const ITEM_STATIONARY_MERGE_INTERVAL_TICKS: u64 = 40;
 const ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS: u64 = 2;
+const ENTITY_PERSISTENT_ID_MOST: u64 = 0x6d63_6c6f_6e65_0001;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ItemPickupTarget {
@@ -35,9 +40,11 @@ pub(crate) struct ServerEntityStore {
     entities: BTreeMap<EntityId, ServerEntityState>,
     mobs: BTreeMap<EntityId, MobRuntimeState>,
     items: BTreeMap<EntityId, ItemEntityRuntimeState>,
+    persistent_ids: BTreeMap<EntityId, EntityPersistentId>,
     volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
     next_entity_id: u64,
+    next_persistent_id: u64,
     debug_passive_showcase_ids: Vec<(EntityKind, EntityId)>,
     #[cfg(feature = "physics-rapier")]
     debug_physics_cube_id: Option<EntityId>,
@@ -169,6 +176,67 @@ impl ServerEntityStore {
 
     pub(crate) fn states(&self) -> Vec<ServerEntityState> {
         self.entities.values().copied().collect()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn entity_chunk_record(&self, pos: ChunkPos, revision: u64) -> EntityChunkRecord {
+        let entities = self
+            .entities
+            .values()
+            .copied()
+            .filter(|entity| entity.alive && entity.chunk_pos() == pos)
+            .filter(|entity| !self.volatile_entities.contains(&entity.id))
+            .filter_map(|entity| self.entity_save_record(entity))
+            .collect::<Vec<_>>();
+        EntityChunkRecord::new(pos, revision, entities)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn hydrate_entity_chunk_record(
+        &mut self,
+        record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<Vec<ServerEntityState>> {
+        if record.codec_version != ENTITY_CHUNK_RECORD_VERSION {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "unsupported entity chunk record version {}",
+                record.codec_version
+            )));
+        }
+
+        let removed_ids = self
+            .entities
+            .values()
+            .copied()
+            .filter(|entity| entity.chunk_pos() == record.pos)
+            .filter(|entity| !self.volatile_entities.contains(&entity.id))
+            .filter(|entity| entity_kind_code(entity.kind).is_some())
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+        for id in removed_ids {
+            self.remove_entity(id);
+        }
+
+        let mut seen_persistent_ids = BTreeSet::new();
+        let mut states = Vec::with_capacity(record.entities.len());
+        for saved in &record.entities {
+            if !seen_persistent_ids.insert(saved.persistent_id) {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "entity chunk ({}, {}) contained duplicate persistent id {:?}",
+                    record.pos.x, record.pos.z, saved.persistent_id
+                )));
+            }
+            let state = self.insert_saved_entity(saved)?;
+            if state.chunk_pos() != record.pos {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "entity {:?} decoded into chunk {:?}, expected {:?}",
+                    saved.persistent_id,
+                    state.chunk_pos(),
+                    record.pos
+                )));
+            }
+            states.push(state);
+        }
+        Ok(states)
     }
 
     pub(crate) fn natural_spawn_category_counts(&self) -> MobCategoryCounts {
@@ -490,11 +558,27 @@ impl ServerEntityStore {
         EntityId(self.next_entity_id)
     }
 
+    fn allocate_persistent_id(&mut self) -> EntityPersistentId {
+        loop {
+            self.next_persistent_id = self.next_persistent_id.saturating_add(1);
+            let persistent_id =
+                EntityPersistentId::new(ENTITY_PERSISTENT_ID_MOST, self.next_persistent_id);
+            if !self
+                .persistent_ids
+                .values()
+                .any(|existing| *existing == persistent_id)
+            {
+                return persistent_id;
+            }
+        }
+    }
+
     fn remove_entity(&mut self, id: EntityId) -> Option<ServerEntityState> {
         let mut state = self.entities.remove(&id)?;
         state.alive = false;
         self.mobs.remove(&id);
         self.items.remove(&id);
+        self.persistent_ids.remove(&id);
         self.volatile_entities.remove(&id);
         self.tick_list.remove(id);
         Some(state)
@@ -523,6 +607,8 @@ impl ServerEntityStore {
             MobRuntimeState::from_spawn(id, metadata, state.on_ground, state.y_rot_degrees),
         );
         self.entities.insert(id, state);
+        let persistent_id = self.allocate_persistent_id();
+        self.persistent_ids.insert(id, persistent_id);
         state
     }
 
@@ -548,7 +634,168 @@ impl ServerEntityStore {
         debug_assert_eq!(item.stack(), stack);
         self.items.insert(id, item);
         self.entities.insert(id, state);
+        let persistent_id = self.allocate_persistent_id();
+        self.persistent_ids.insert(id, persistent_id);
         state
+    }
+
+    #[allow(dead_code)]
+    fn insert_saved_entity(
+        &mut self,
+        saved: &EntitySaveRecord,
+    ) -> ChunkStoreResult<ServerEntityState> {
+        if !saved.position.is_finite() || !saved.delta_movement.is_finite() {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "entity {:?} had non-finite position or movement",
+                saved.persistent_id
+            )));
+        }
+        if self
+            .persistent_ids
+            .values()
+            .any(|existing| *existing == saved.persistent_id)
+        {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "entity {:?} duplicated an existing persistent id",
+                saved.persistent_id
+            )));
+        }
+
+        let id = self.allocate_entity_id();
+        let state = match (saved.kind.as_str(), &saved.payload) {
+            ("minecraft:cow", EntitySavePayload::Cow) => {
+                self.insert_saved_passive_mob(id, saved, EntityKind::Cow, None)?
+            }
+            ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => {
+                self.insert_saved_passive_mob(id, saved, EntityKind::Chicken, Some(*egg_time))?
+            }
+            (
+                "minecraft:item",
+                EntitySavePayload::Item {
+                    stack,
+                    pickup_delay,
+                },
+            ) => self.insert_saved_item_entity(id, saved, stack, *pickup_delay)?,
+            (kind, payload) => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "entity {:?} had incompatible kind {kind:?} and payload {payload:?}",
+                    saved.persistent_id
+                )));
+            }
+        };
+        self.persistent_ids.insert(id, saved.persistent_id);
+        if saved.persistent_id.most == ENTITY_PERSISTENT_ID_MOST {
+            self.next_persistent_id = self.next_persistent_id.max(saved.persistent_id.least);
+        }
+        Ok(state)
+    }
+
+    #[allow(dead_code)]
+    fn insert_saved_passive_mob(
+        &mut self,
+        id: EntityId,
+        saved: &EntitySaveRecord,
+        kind: EntityKind,
+        chicken_egg_time: Option<i32>,
+    ) -> ChunkStoreResult<ServerEntityState> {
+        let metadata = EntityMetadata::for_kind(kind).ok_or_else(|| {
+            ChunkStoreError::InvalidData(format!("entity kind {kind:?} has no metadata"))
+        })?;
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            metadata,
+            saved.position,
+            saved.y_rot_degrees,
+            saved.x_rot_degrees,
+            saved.rotation,
+            saved.on_ground,
+        );
+        state.age_ticks = saved.age_ticks;
+        let mob = MobRuntimeState::from_saved(
+            id,
+            metadata,
+            state.on_ground,
+            state.y_rot_degrees,
+            saved.delta_movement,
+            chicken_egg_time,
+        );
+        self.mobs.insert(id, mob);
+        self.entities.insert(id, state);
+        Ok(state)
+    }
+
+    #[allow(dead_code)]
+    fn insert_saved_item_entity(
+        &mut self,
+        id: EntityId,
+        saved: &EntitySaveRecord,
+        stack: &ItemStackSaveRecord,
+        pickup_delay: i32,
+    ) -> ChunkStoreResult<ServerEntityState> {
+        let stack = item_stack_snapshot_from_save(stack)?;
+        let metadata = EntityMetadata::for_kind(EntityKind::Item).expect("item metadata");
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            metadata,
+            saved.position,
+            saved.y_rot_degrees,
+            saved.x_rot_degrees,
+            saved.rotation,
+            saved.on_ground,
+        );
+        state.age_ticks = saved.age_ticks;
+        state.item_stack = Some(stack);
+        let item = ItemEntityRuntimeState::from_saved(stack, saved.delta_movement, pickup_delay);
+        self.items.insert(id, item);
+        self.entities.insert(id, state);
+        Ok(state)
+    }
+
+    #[allow(dead_code)]
+    fn entity_save_record(&self, entity: ServerEntityState) -> Option<EntitySaveRecord> {
+        let kind = entity_kind_code(entity.kind)?;
+        let persistent_id = self
+            .persistent_ids
+            .get(&entity.id)
+            .copied()
+            .unwrap_or_else(|| fallback_persistent_id(entity.id));
+        let delta_movement = self
+            .items
+            .get(&entity.id)
+            .map(ItemEntityRuntimeState::delta_movement)
+            .or_else(|| {
+                self.mobs
+                    .get(&entity.id)
+                    .map(MobRuntimeState::delta_movement)
+            })
+            .unwrap_or(Vec3d::ZERO);
+        let payload = match entity.kind {
+            EntityKind::Cow => EntitySavePayload::Cow,
+            EntityKind::Chicken => EntitySavePayload::Chicken {
+                egg_time: self
+                    .mobs
+                    .get(&entity.id)
+                    .and_then(MobRuntimeState::chicken_egg_time)
+                    .unwrap_or(0),
+            },
+            EntityKind::Item => EntitySavePayload::Item {
+                stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
+                pickup_delay: self.items.get(&entity.id)?.pickup_delay(),
+            },
+            EntityKind::DebugCube => return None,
+        };
+        Some(EntitySaveRecord {
+            persistent_id,
+            kind: kind.to_owned(),
+            position: entity.position,
+            delta_movement,
+            y_rot_degrees: entity.y_rot_degrees,
+            x_rot_degrees: entity.x_rot_degrees,
+            rotation: entity.rotation,
+            on_ground: entity.on_ground,
+            age_ticks: entity.age_ticks,
+            payload,
+        })
     }
 
     #[cfg(test)]
@@ -676,6 +923,39 @@ fn item_merge_due(age_ticks: u64, block_position_changed: bool) -> bool {
         ITEM_STATIONARY_MERGE_INTERVAL_TICKS
     };
     age_ticks % interval == 0
+}
+
+#[allow(dead_code)]
+fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
+    match kind {
+        EntityKind::Cow => Some("minecraft:cow"),
+        EntityKind::Chicken => Some("minecraft:chicken"),
+        EntityKind::Item => Some("minecraft:item"),
+        EntityKind::DebugCube => None,
+    }
+}
+
+#[allow(dead_code)]
+fn item_stack_snapshot_from_save(
+    stack: &ItemStackSaveRecord,
+) -> ChunkStoreResult<ItemStackSnapshot> {
+    let kind = match stack.kind.as_str() {
+        "minecraft:egg" => ItemKind::Egg,
+        kind => {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "unsupported item stack kind {kind:?}"
+            )));
+        }
+    };
+    Ok(ItemStackSnapshot {
+        kind,
+        count: stack.count,
+    })
+}
+
+#[allow(dead_code)]
+fn fallback_persistent_id(id: EntityId) -> EntityPersistentId {
+    EntityPersistentId::new(ENTITY_PERSISTENT_ID_MOST, id.0)
 }
 
 #[cfg(test)]
@@ -855,6 +1135,112 @@ mod tests {
         assert_eq!(snapshot.height, metadata.dimensions.height);
         assert!(store.item_state(id).is_some());
         assert!(store.mob_state(id).is_none());
+    }
+
+    #[test]
+    fn entity_chunk_record_packs_and_hydrates_persistent_entities() {
+        let mut store = ServerEntityStore::default();
+        let chunk = ChunkPos::new(0, 0);
+        let chicken_id = store.insert_passive_mob_for_test(
+            EntityKind::Chicken,
+            Vec3d::new(4.5, 64.0, 4.5),
+            45.0,
+        );
+        let item_id = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 2,
+            },
+            Vec3d::new(5.5, 64.0, 4.5),
+        );
+        store.entities.get_mut(&chicken_id).unwrap().age_ticks = 20;
+        store.entities.get_mut(&item_id).unwrap().age_ticks = 30;
+        store
+            .mobs
+            .get_mut(&chicken_id)
+            .unwrap()
+            .set_chicken_egg_time_for_test(1234);
+        store.set_item_pickup_delay_for_test(item_id, 3);
+
+        let record = store.entity_chunk_record(chunk, 7);
+
+        assert_eq!(record.pos, chunk);
+        assert_eq!(record.revision, 7);
+        assert_eq!(record.entities.len(), 2);
+        let chicken_record = record
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "minecraft:chicken")
+            .expect("chicken record");
+        assert_eq!(
+            chicken_record.payload,
+            EntitySavePayload::Chicken { egg_time: 1234 }
+        );
+        let item_record = record
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "minecraft:item")
+            .expect("item record");
+        assert_eq!(
+            item_record.payload,
+            EntitySavePayload::Item {
+                stack: ItemStackSaveRecord::new("minecraft:egg", 2),
+                pickup_delay: 3,
+            }
+        );
+
+        let mut loaded = ServerEntityStore::default();
+        loaded.next_entity_id = 100;
+        let loaded_states = loaded.hydrate_entity_chunk_record(&record).unwrap();
+
+        assert_eq!(loaded_states.len(), 2);
+        let loaded_chicken = loaded_states
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Chicken)
+            .copied()
+            .expect("loaded chicken");
+        let loaded_item = loaded_states
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Item)
+            .copied()
+            .expect("loaded item");
+        assert_ne!(loaded_chicken.id, chicken_id);
+        assert_ne!(loaded_item.id, item_id);
+        assert_eq!(
+            loaded
+                .mobs
+                .get(&loaded_chicken.id)
+                .unwrap()
+                .chicken_egg_time_for_test(),
+            Some(1234)
+        );
+        assert_eq!(loaded.item_state(loaded_item.id).unwrap().pickup_delay(), 3);
+
+        let resaved = loaded.entity_chunk_record(chunk, 8);
+        let resaved_chicken = resaved
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "minecraft:chicken")
+            .expect("resaved chicken");
+        assert_eq!(
+            resaved_chicken.persistent_id, chicken_record.persistent_id,
+            "persistent id must survive fresh runtime id assignment"
+        );
+    }
+
+    #[test]
+    fn empty_entity_chunk_record_removes_persistent_entities_in_chunk() {
+        let mut store = ServerEntityStore::default();
+        let chunk = ChunkPos::new(0, 0);
+        let id =
+            store.insert_passive_mob_for_test(EntityKind::Cow, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+
+        let loaded = store
+            .hydrate_entity_chunk_record(&EntityChunkRecord::empty(chunk, 2))
+            .unwrap();
+
+        assert!(loaded.is_empty());
+        assert_eq!(store.state(id), None);
     }
 
     #[test]

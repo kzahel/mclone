@@ -12,7 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot};
+use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
+use mclone_protocol::{EntityRotation, ItemStackSnapshot};
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
 use mclone_core::{
@@ -25,6 +26,7 @@ const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
 const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
 
 pub type PersistenceRequestId = u64;
 
@@ -141,6 +143,96 @@ impl ScheduledTickRecord {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityChunkRecord {
+    pub pos: ChunkPos,
+    pub revision: u64,
+    pub codec_version: u32,
+    pub entities: Vec<EntitySaveRecord>,
+}
+
+impl EntityChunkRecord {
+    pub fn new(pos: ChunkPos, revision: u64, entities: Vec<EntitySaveRecord>) -> Self {
+        Self {
+            pos,
+            revision,
+            codec_version: ENTITY_CHUNK_RECORD_VERSION,
+            entities,
+        }
+    }
+
+    pub const fn empty(pos: ChunkPos, revision: u64) -> Self {
+        Self {
+            pos,
+            revision,
+            codec_version: ENTITY_CHUNK_RECORD_VERSION,
+            entities: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct EntityPersistentId {
+    pub most: u64,
+    pub least: u64,
+}
+
+impl EntityPersistentId {
+    pub const fn new(most: u64, least: u64) -> Self {
+        Self { most, least }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntitySaveRecord {
+    pub persistent_id: EntityPersistentId,
+    pub kind: String,
+    pub position: Vec3d,
+    pub delta_movement: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub rotation: Option<EntityRotation>,
+    pub on_ground: bool,
+    pub age_ticks: u64,
+    pub payload: EntitySavePayload,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EntitySavePayload {
+    Cow,
+    Chicken {
+        egg_time: i32,
+    },
+    Item {
+        stack: ItemStackSaveRecord,
+        pickup_delay: i32,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ItemStackSaveRecord {
+    pub kind: String,
+    pub count: u8,
+}
+
+impl ItemStackSaveRecord {
+    pub fn new(kind: impl Into<String>, count: u8) -> Self {
+        Self {
+            kind: kind.into(),
+            count,
+        }
+    }
+}
+
+impl From<ItemStackSnapshot> for ItemStackSaveRecord {
+    fn from(stack: ItemStackSnapshot) -> Self {
+        let kind = match stack.kind {
+            mclone_protocol::ItemKind::Egg => "minecraft:egg",
+        };
+        Self::new(kind, stack.count)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum PlayerRecordKey {
     Uuid(String),
@@ -154,7 +246,7 @@ pub enum WorldRecordKey {
     SavedData(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum WorldStoreRequest {
     LoadChunk {
         request_id: PersistenceRequestId,
@@ -168,6 +260,11 @@ pub enum WorldStoreRequest {
     LoadEntityChunk {
         request_id: PersistenceRequestId,
         pos: ChunkPos,
+    },
+    SaveEntityChunk {
+        request_id: PersistenceRequestId,
+        record: EntityChunkRecord,
+        durability: SaveDurability,
     },
     LoadPlayer {
         request_id: PersistenceRequestId,
@@ -204,6 +301,16 @@ pub enum WorldStoreCompletion {
         pos: ChunkPos,
         result: ChunkStoreResult<StoreWriteOutcome>,
     },
+    EntityChunkLoaded {
+        request_id: PersistenceRequestId,
+        pos: ChunkPos,
+        result: ChunkStoreResult<Option<EntityChunkRecord>>,
+    },
+    EntityChunkSaved {
+        request_id: PersistenceRequestId,
+        pos: ChunkPos,
+        result: ChunkStoreResult<StoreWriteOutcome>,
+    },
     RequestFailed {
         request_id: PersistenceRequestId,
         key: WorldRecordKey,
@@ -224,6 +331,8 @@ impl WorldStoreCompletion {
         match self {
             Self::ChunkLoaded { request_id, .. }
             | Self::ChunkSaved { request_id, .. }
+            | Self::EntityChunkLoaded { request_id, .. }
+            | Self::EntityChunkSaved { request_id, .. }
             | Self::RequestFailed { request_id, .. }
             | Self::FlushComplete { request_id, .. }
             | Self::CloseComplete { request_id, .. } => *request_id,
@@ -239,6 +348,20 @@ pub trait ChunkSnapshotStore: fmt::Debug {
 pub trait WorldStore: fmt::Debug {
     fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>>;
     fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()>;
+
+    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Err(ChunkStoreError::InvalidData(format!(
+            "entity chunk storage is not supported for ({}, {})",
+            pos.x, pos.z
+        )))
+    }
+
+    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+        Err(ChunkStoreError::InvalidData(format!(
+            "entity chunk storage is not supported for ({}, {})",
+            record.pos.x, record.pos.z
+        )))
+    }
 
     fn flush(&mut self) -> ChunkStoreResult<()> {
         Ok(())
@@ -273,11 +396,20 @@ impl WorldStore for NullWorldStore {
     fn save_chunk(&mut self, _record: &ChunkRecord) -> ChunkStoreResult<()> {
         Ok(())
     }
+
+    fn load_entity_chunk(&mut self, _pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Ok(None)
+    }
+
+    fn save_entity_chunk(&mut self, _record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct MemoryWorldStore {
     chunks: BTreeMap<ChunkPos, ChunkRecord>,
+    entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
 }
 
 impl MemoryWorldStore {
@@ -288,6 +420,10 @@ impl MemoryWorldStore {
     pub fn chunk(&self, pos: ChunkPos) -> Option<&ChunkRecord> {
         self.chunks.get(&pos)
     }
+
+    pub fn entity_chunk(&self, pos: ChunkPos) -> Option<&EntityChunkRecord> {
+        self.entity_chunks.get(&pos)
+    }
 }
 
 impl WorldStore for MemoryWorldStore {
@@ -297,6 +433,15 @@ impl WorldStore for MemoryWorldStore {
 
     fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
         self.chunks.insert(record.pos(), record.clone());
+        Ok(())
+    }
+
+    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Ok(self.entity_chunks.get(&pos).cloned())
+    }
+
+    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+        self.entity_chunks.insert(record.pos, record.clone());
         Ok(())
     }
 }
@@ -346,10 +491,37 @@ impl PendingChunkWrite {
     }
 }
 
+#[derive(Clone, Debug)]
+struct PendingEntityChunkWrite {
+    request_id: PersistenceRequestId,
+    record: EntityChunkRecord,
+    durability: SaveDurability,
+}
+
+impl PendingEntityChunkWrite {
+    fn should_replace(&self, existing: &Self) -> bool {
+        if self.record.revision != existing.record.revision {
+            return self.record.revision > existing.record.revision;
+        }
+        match (self.durability, existing.durability) {
+            (SaveDurability::Durable, SaveDurability::Cache) => true,
+            (SaveDurability::Cache, SaveDurability::Durable) => false,
+            _ => true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PendingWriteKey {
+    Chunk(ChunkPos),
+    EntityChunk(ChunkPos),
+}
+
 #[derive(Debug)]
 pub struct PersistenceActor {
     store: Box<dyn WorldStore>,
     pending_chunk_writes: BTreeMap<ChunkPos, PendingChunkWrite>,
+    pending_entity_chunk_writes: BTreeMap<ChunkPos, PendingEntityChunkWrite>,
     completions: VecDeque<WorldStoreCompletion>,
     closed: bool,
 }
@@ -359,6 +531,7 @@ impl PersistenceActor {
         Self {
             store,
             pending_chunk_writes: BTreeMap::new(),
+            pending_entity_chunk_writes: BTreeMap::new(),
             completions: VecDeque::new(),
             closed: false,
         }
@@ -434,6 +607,76 @@ impl PersistenceActor {
         self.pending_chunk_writes.insert(pos, incoming);
     }
 
+    pub fn load_entity_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
+        if self.closed {
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                    request_id,
+                    pos,
+                    result: Err(closed_error()),
+                });
+            return;
+        }
+
+        let result = if let Some(pending) = self.pending_entity_chunk_writes.get(&pos) {
+            Ok(Some(pending.record.clone()))
+        } else {
+            self.store.load_entity_chunk(pos)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                pos,
+                result,
+            });
+    }
+
+    pub fn save_entity_chunk(
+        &mut self,
+        request_id: PersistenceRequestId,
+        record: EntityChunkRecord,
+        durability: SaveDurability,
+    ) {
+        let pos = record.pos;
+        if self.closed {
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkSaved {
+                    request_id,
+                    pos,
+                    result: Err(closed_error()),
+                });
+            return;
+        }
+
+        let incoming = PendingEntityChunkWrite {
+            request_id,
+            record,
+            durability,
+        };
+        if let Some(existing) = self.pending_entity_chunk_writes.get_mut(&pos) {
+            if incoming.should_replace(existing) {
+                let superseded_id = existing.request_id;
+                *existing = incoming;
+                self.completions
+                    .push_back(WorldStoreCompletion::EntityChunkSaved {
+                        request_id: superseded_id,
+                        pos,
+                        result: Ok(StoreWriteOutcome::Superseded),
+                    });
+            } else {
+                self.completions
+                    .push_back(WorldStoreCompletion::EntityChunkSaved {
+                        request_id,
+                        pos,
+                        result: Ok(StoreWriteOutcome::Superseded),
+                    });
+            }
+            return;
+        }
+
+        self.pending_entity_chunk_writes.insert(pos, incoming);
+    }
+
     pub fn fail_reserved_request(&mut self, request_id: PersistenceRequestId, key: WorldRecordKey) {
         let result = if self.closed {
             Err(closed_error())
@@ -461,7 +704,12 @@ impl PersistenceActor {
         }
 
         let mut result =
-            self.process_matching_pending_writes(|pending| pending.durability.is_durable());
+            self.process_matching_pending_chunk_writes(|pending| pending.durability.is_durable());
+        if result.is_ok() {
+            result = self.process_matching_pending_entity_chunk_writes(|pending| {
+                pending.durability.is_durable()
+            });
+        }
         if result.is_ok() {
             result = self.store.flush();
         }
@@ -480,7 +728,12 @@ impl PersistenceActor {
         }
 
         let mut result =
-            self.process_matching_pending_writes(|pending| pending.durability.is_durable());
+            self.process_matching_pending_chunk_writes(|pending| pending.durability.is_durable());
+        if result.is_ok() {
+            result = self.process_matching_pending_entity_chunk_writes(|pending| {
+                pending.durability.is_durable()
+            });
+        }
         for pos in self
             .pending_chunk_writes
             .keys()
@@ -490,6 +743,21 @@ impl PersistenceActor {
             if let Some(pending) = self.pending_chunk_writes.remove(&pos) {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
+                        request_id: pending.request_id,
+                        pos,
+                        result: Ok(StoreWriteOutcome::SkippedOnClose),
+                    });
+            }
+        }
+        for pos in self
+            .pending_entity_chunk_writes
+            .keys()
+            .copied()
+            .collect::<Vec<_>>()
+        {
+            if let Some(pending) = self.pending_entity_chunk_writes.remove(&pos) {
+                self.completions
+                    .push_back(WorldStoreCompletion::EntityChunkSaved {
                         request_id: pending.request_id,
                         pos,
                         result: Ok(StoreWriteOutcome::SkippedOnClose),
@@ -507,10 +775,17 @@ impl PersistenceActor {
     }
 
     pub fn process_one_background_write(&mut self) -> bool {
-        let Some(pos) = self.next_pending_write_pos(true) else {
+        let Some(key) = self.next_pending_write_key(true) else {
             return false;
         };
-        let _ = self.process_pending_write_at(pos);
+        match key {
+            PendingWriteKey::Chunk(pos) => {
+                let _ = self.process_pending_chunk_write_at(pos);
+            }
+            PendingWriteKey::EntityChunk(pos) => {
+                let _ = self.process_pending_entity_chunk_write_at(pos);
+            }
+        }
         true
     }
 
@@ -518,7 +793,7 @@ impl PersistenceActor {
         self.completions.drain(..).collect()
     }
 
-    fn process_matching_pending_writes(
+    fn process_matching_pending_chunk_writes(
         &mut self,
         mut predicate: impl FnMut(&PendingChunkWrite) -> bool,
     ) -> ChunkStoreResult<()> {
@@ -530,7 +805,7 @@ impl PersistenceActor {
         let mut result = Ok(());
         for pos in positions {
             if self.pending_chunk_writes.contains_key(&pos) {
-                let write_result = self.process_pending_write_at(pos);
+                let write_result = self.process_pending_chunk_write_at(pos);
                 if result.is_ok() {
                     result = write_result;
                 }
@@ -539,19 +814,58 @@ impl PersistenceActor {
         result
     }
 
-    fn next_pending_write_pos(&self, include_cache: bool) -> Option<ChunkPos> {
+    fn process_matching_pending_entity_chunk_writes(
+        &mut self,
+        mut predicate: impl FnMut(&PendingEntityChunkWrite) -> bool,
+    ) -> ChunkStoreResult<()> {
+        let positions = self
+            .pending_entity_chunk_writes
+            .iter()
+            .filter_map(|(pos, pending)| predicate(pending).then_some(*pos))
+            .collect::<Vec<_>>();
+        let mut result = Ok(());
+        for pos in positions {
+            if self.pending_entity_chunk_writes.contains_key(&pos) {
+                let write_result = self.process_pending_entity_chunk_write_at(pos);
+                if result.is_ok() {
+                    result = write_result;
+                }
+            }
+        }
+        result
+    }
+
+    fn next_pending_write_key(&self, include_cache: bool) -> Option<PendingWriteKey> {
         if let Some(pos) = self
             .pending_chunk_writes
             .iter()
             .find_map(|(pos, pending)| pending.durability.is_durable().then_some(*pos))
         {
-            return Some(pos);
+            return Some(PendingWriteKey::Chunk(pos));
+        }
+        if let Some(pos) = self
+            .pending_entity_chunk_writes
+            .iter()
+            .find_map(|(pos, pending)| pending.durability.is_durable().then_some(*pos))
+        {
+            return Some(PendingWriteKey::EntityChunk(pos));
         }
         include_cache.then_some(())?;
-        self.pending_chunk_writes.keys().next().copied()
+        self.pending_chunk_writes
+            .keys()
+            .next()
+            .copied()
+            .map(PendingWriteKey::Chunk)
+            .or_else(|| {
+                self.pending_entity_chunk_writes
+                    .keys()
+                    .next()
+                    .copied()
+                    .map(PendingWriteKey::EntityChunk)
+            })
     }
 
-    fn process_pending_write_at(&mut self, pos: ChunkPos) -> ChunkStoreResult<()> {
+    fn process_pending_chunk_write_at(&mut self, pos: ChunkPos) -> ChunkStoreResult<()> {
         let Some(pending) = self.pending_chunk_writes.remove(&pos) else {
             return Ok(());
         };
@@ -559,6 +873,21 @@ impl PersistenceActor {
         let barrier_result = result.as_ref().map(|_| ()).map_err(duplicate_store_error);
         self.completions
             .push_back(WorldStoreCompletion::ChunkSaved {
+                request_id: pending.request_id,
+                pos,
+                result: result.map(|_| StoreWriteOutcome::Written),
+            });
+        barrier_result
+    }
+
+    fn process_pending_entity_chunk_write_at(&mut self, pos: ChunkPos) -> ChunkStoreResult<()> {
+        let Some(pending) = self.pending_entity_chunk_writes.remove(&pos) else {
+            return Ok(());
+        };
+        let result = self.store.save_entity_chunk(&pending.record);
+        let barrier_result = result.as_ref().map(|_| ()).map_err(duplicate_store_error);
+        self.completions
+            .push_back(WorldStoreCompletion::EntityChunkSaved {
                 request_id: pending.request_id,
                 pos,
                 result: result.map(|_| StoreWriteOutcome::Written),
@@ -607,8 +936,17 @@ impl PersistenceMailbox {
 
     pub fn load_entity_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor
-            .fail_reserved_request(request_id, WorldRecordKey::EntityChunk(pos));
+        self.actor.load_entity_chunk(request_id, pos);
+        request_id
+    }
+
+    pub fn save_entity_chunk(
+        &mut self,
+        record: EntityChunkRecord,
+        durability: SaveDurability,
+    ) -> PersistenceRequestId {
+        let request_id = self.next_request_id();
+        self.actor.save_entity_chunk(request_id, record, durability);
         request_id
     }
 
@@ -682,6 +1020,33 @@ impl PersistenceMailbox {
             WorldStoreCompletion::ChunkSaved { result, .. } => result,
             completion => Err(ChunkStoreError::InvalidData(format!(
                 "save_chunk completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn load_entity_chunk_blocking(
+        &mut self,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        let request_id = self.load_entity_chunk(pos);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::EntityChunkLoaded { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "load_entity_chunk completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn save_entity_chunk_blocking(
+        &mut self,
+        record: EntityChunkRecord,
+        durability: SaveDurability,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        let request_id = self.save_entity_chunk(record, durability);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::EntityChunkSaved { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "save_entity_chunk completed with unexpected persistence completion {completion:?}"
             ))),
         }
     }
@@ -1366,6 +1731,21 @@ mod tests {
     }
 
     #[test]
+    fn actor_load_sees_pending_same_entity_chunk_write() {
+        let mut mailbox = PersistenceMailbox::memory();
+        let pos = ChunkPos::new(2, 4);
+        let record = test_entity_chunk_record(pos, 11);
+
+        mailbox.save_entity_chunk(record.clone(), SaveDurability::Durable);
+        let load_id = mailbox.load_entity_chunk(pos);
+
+        assert_eq!(
+            take_loaded_entity_chunk(&mut mailbox, load_id),
+            Some(record)
+        );
+    }
+
+    #[test]
     fn actor_newer_revision_supersedes_stale_queued_write() {
         let mut mailbox = PersistenceMailbox::memory();
         let pos = ChunkPos::new(4, 5);
@@ -1384,6 +1764,28 @@ mod tests {
         );
         let load_id = mailbox.load_chunk(pos);
         assert_eq!(take_loaded_chunk(&mut mailbox, load_id), Some(newer));
+    }
+
+    #[test]
+    fn actor_newer_entity_revision_supersedes_stale_queued_write() {
+        let mut mailbox = PersistenceMailbox::memory();
+        let pos = ChunkPos::new(4, 6);
+        let stale_id =
+            mailbox.save_entity_chunk(test_entity_chunk_record(pos, 1), SaveDurability::Durable);
+        let newer = test_entity_chunk_record(pos, 2);
+        let newer_id = mailbox.save_entity_chunk(newer.clone(), SaveDurability::Cache);
+
+        assert_eq!(
+            take_saved_entity_chunk(&mut mailbox, stale_id),
+            StoreWriteOutcome::Superseded
+        );
+        assert!(mailbox.process_one_background_write());
+        assert_eq!(
+            take_saved_entity_chunk(&mut mailbox, newer_id),
+            StoreWriteOutcome::Written
+        );
+        let load_id = mailbox.load_entity_chunk(pos);
+        assert_eq!(take_loaded_entity_chunk(&mut mailbox, load_id), Some(newer));
     }
 
     #[test]
@@ -1454,15 +1856,30 @@ mod tests {
         let mut mailbox = PersistenceMailbox::memory();
         let durable_pos = ChunkPos::new(12, 0);
         let cache_pos = ChunkPos::new(13, 0);
+        let durable_entity_pos = ChunkPos::new(12, 1);
+        let cache_entity_pos = ChunkPos::new(13, 1);
         let durable_id = mailbox.save_chunk(test_record(durable_pos, 1), SaveDurability::Durable);
         let cache_id = mailbox.save_chunk(test_record(cache_pos, 1), SaveDurability::Cache);
+        let durable_entity_id = mailbox.save_entity_chunk(
+            test_entity_chunk_record(durable_entity_pos, 1),
+            SaveDurability::Durable,
+        );
+        let cache_entity_id = mailbox.save_entity_chunk(
+            test_entity_chunk_record(cache_entity_pos, 1),
+            SaveDurability::Cache,
+        );
         let flush_id = mailbox.flush();
 
         assert_eq!(
             take_saved_chunk(&mut mailbox, durable_id),
             StoreWriteOutcome::Written
         );
+        assert_eq!(
+            take_saved_entity_chunk(&mut mailbox, durable_entity_id),
+            StoreWriteOutcome::Written
+        );
         assert!(mailbox.take_completion(cache_id).is_none());
+        assert!(mailbox.take_completion(cache_entity_id).is_none());
         take_flush_complete(&mut mailbox, flush_id);
         let durable_load_id = mailbox.load_chunk(durable_pos);
         assert_eq!(
@@ -1470,6 +1887,13 @@ mod tests {
                 .unwrap()
                 .revision(),
             ChunkRevision(1)
+        );
+        let durable_entity_load_id = mailbox.load_entity_chunk(durable_entity_pos);
+        assert_eq!(
+            take_loaded_entity_chunk(&mut mailbox, durable_entity_load_id)
+                .unwrap()
+                .revision,
+            1
         );
         let cache_load_id = mailbox.load_chunk(cache_pos);
         assert_eq!(
@@ -1479,6 +1903,14 @@ mod tests {
             ChunkRevision(1),
             "loads still see the pending cache write before it reaches the backend"
         );
+        let cache_entity_load_id = mailbox.load_entity_chunk(cache_entity_pos);
+        assert_eq!(
+            take_loaded_entity_chunk(&mut mailbox, cache_entity_load_id)
+                .unwrap()
+                .revision,
+            1,
+            "entity loads still see the pending cache write before it reaches the backend"
+        );
     }
 
     #[test]
@@ -1486,8 +1918,18 @@ mod tests {
         let mut mailbox = PersistenceMailbox::memory();
         let durable_pos = ChunkPos::new(14, 0);
         let cache_pos = ChunkPos::new(15, 0);
+        let durable_entity_pos = ChunkPos::new(14, 1);
+        let cache_entity_pos = ChunkPos::new(15, 1);
         let durable_id = mailbox.save_chunk(test_record(durable_pos, 3), SaveDurability::Durable);
         let cache_id = mailbox.save_chunk(test_record(cache_pos, 3), SaveDurability::Cache);
+        let durable_entity_id = mailbox.save_entity_chunk(
+            test_entity_chunk_record(durable_entity_pos, 3),
+            SaveDurability::Durable,
+        );
+        let cache_entity_id = mailbox.save_entity_chunk(
+            test_entity_chunk_record(cache_entity_pos, 3),
+            SaveDurability::Cache,
+        );
         let close_id = mailbox.close();
 
         assert_eq!(
@@ -1495,7 +1937,15 @@ mod tests {
             StoreWriteOutcome::Written
         );
         assert_eq!(
+            take_saved_entity_chunk(&mut mailbox, durable_entity_id),
+            StoreWriteOutcome::Written
+        );
+        assert_eq!(
             take_saved_chunk(&mut mailbox, cache_id),
+            StoreWriteOutcome::SkippedOnClose
+        );
+        assert_eq!(
+            take_saved_entity_chunk(&mut mailbox, cache_entity_id),
             StoreWriteOutcome::SkippedOnClose
         );
         take_close_complete(&mut mailbox, close_id);
@@ -1565,6 +2015,28 @@ mod tests {
         ChunkRecord::from_snapshot(test_snapshot(pos, revision))
     }
 
+    fn test_entity_chunk_record(pos: ChunkPos, revision: u64) -> EntityChunkRecord {
+        EntityChunkRecord::new(pos, revision, vec![test_entity_save_record()])
+    }
+
+    fn test_entity_save_record() -> EntitySaveRecord {
+        EntitySaveRecord {
+            persistent_id: EntityPersistentId::new(0xCAFE, 0xF00D),
+            kind: "minecraft:item".to_owned(),
+            position: Vec3d::new(4.5, 64.0, 8.5),
+            delta_movement: Vec3d::ZERO,
+            y_rot_degrees: 10.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            age_ticks: 12,
+            payload: EntitySavePayload::Item {
+                stack: ItemStackSaveRecord::new("minecraft:egg", 3),
+                pickup_delay: 7,
+            },
+        }
+    }
+
     fn take_loaded_chunk(
         mailbox: &mut PersistenceMailbox,
         request_id: PersistenceRequestId,
@@ -1578,11 +2050,37 @@ mod tests {
         }
     }
 
+    fn take_loaded_entity_chunk(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> Option<EntityChunkRecord> {
+        match mailbox
+            .take_completion(request_id)
+            .expect("missing entity chunk load completion")
+        {
+            WorldStoreCompletion::EntityChunkLoaded { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
     fn take_saved_chunk(
         mailbox: &mut PersistenceMailbox,
         request_id: PersistenceRequestId,
     ) -> StoreWriteOutcome {
         take_save_result(mailbox, request_id).unwrap()
+    }
+
+    fn take_saved_entity_chunk(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> StoreWriteOutcome {
+        match mailbox
+            .take_completion(request_id)
+            .expect("missing entity chunk save completion")
+        {
+            WorldStoreCompletion::EntityChunkSaved { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
     }
 
     fn take_save_result(

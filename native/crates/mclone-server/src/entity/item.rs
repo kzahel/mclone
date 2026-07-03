@@ -38,6 +38,19 @@ impl ItemEntityRuntimeState {
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn from_saved(
+        stack: ItemStackSnapshot,
+        delta_movement: Vec3d,
+        pickup_delay: i32,
+    ) -> Self {
+        Self {
+            stack,
+            delta_movement,
+            pickup_delay,
+        }
+    }
+
     pub(crate) fn stack(&self) -> ItemStackSnapshot {
         self.stack
     }
@@ -62,7 +75,7 @@ impl ItemEntityRuntimeState {
             .map(|stack| (stack, self.pickup_delay.max(other.pickup_delay)))
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn delta_movement(&self) -> Vec3d {
         self.delta_movement
     }
@@ -77,7 +90,7 @@ impl ItemEntityRuntimeState {
         self.pickup_delay > 0
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn pickup_delay(&self) -> i32 {
         self.pickup_delay
     }

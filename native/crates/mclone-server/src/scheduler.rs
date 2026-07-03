@@ -2380,6 +2380,14 @@ impl ChunkScheduler {
                 self.handle_chunk_save_completion(request_id, pos, result)?;
                 Ok(Vec::new())
             }
+            WorldStoreCompletion::EntityChunkLoaded { result, .. } => {
+                result.map(|_| ())?;
+                Ok(Vec::new())
+            }
+            WorldStoreCompletion::EntityChunkSaved { result, .. } => {
+                result.map(|_| ())?;
+                Ok(Vec::new())
+            }
             WorldStoreCompletion::RequestFailed { result, .. }
             | WorldStoreCompletion::FlushComplete { result, .. }
             | WorldStoreCompletion::CloseComplete { result, .. } => {

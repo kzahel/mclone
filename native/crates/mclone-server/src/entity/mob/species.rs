@@ -23,6 +23,23 @@ impl MobSpeciesState {
         }
     }
 
+    pub(super) fn from_saved(
+        kind: EntityKind,
+        random: &mut SimpleRandomSource,
+        egg_time: Option<i32>,
+    ) -> Self {
+        match kind {
+            EntityKind::Cow => Self::Cow,
+            EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::from_saved(
+                egg_time.unwrap_or_else(|| next_egg_time(random)),
+            )),
+            EntityKind::DebugCube | EntityKind::Item => {
+                debug_assert!(false, "non-mob entities do not use mob species state");
+                Self::Cow
+            }
+        }
+    }
+
     pub(super) fn ai_step(
         &mut self,
         on_ground: bool,
@@ -35,7 +52,6 @@ impl MobSpeciesState {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn chicken(&self) -> Option<&ChickenRuntimeState> {
         match self {
             Self::Cow => None,
@@ -79,6 +95,20 @@ impl ChickenRuntimeState {
         }
     }
 
+    fn from_saved(egg_time: i32) -> Self {
+        Self {
+            flap: 0.0,
+            flap_speed: 0.0,
+            old_flap_speed: 0.0,
+            old_flap: 0.0,
+            flapping: 1.0,
+            next_flap: 1.0,
+            egg_time,
+            is_chicken_jockey: false,
+            pending_egg_lays: 0,
+        }
+    }
+
     fn ai_step(
         &mut self,
         on_ground: bool,
@@ -114,7 +144,6 @@ impl ChickenRuntimeState {
         self.flap_speed
     }
 
-    #[cfg(test)]
     pub(super) fn egg_time(&self) -> i32 {
         self.egg_time
     }
