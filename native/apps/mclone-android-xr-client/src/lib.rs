@@ -4318,13 +4318,15 @@ mod android {
                 self.max_upload.upload_backpressured
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_RECORD_CACHE ready_set_calls={} ready_set_changed={} ready_set_unchanged={} ready_set_backpressured={} ready_set_backpressured_changed={} ready_set_backpressured_unchanged={} prepared_rebuilds={} prepared_rebuild_frames={} prepared_rebuild_total_ms={:.3} prepared_rebuild_avg_ms={:.3} prepared_rebuild_max_ms={:.3} cumulative_rebuild_max_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_RECORD_CACHE ready_set_calls={} ready_set_changed={} ready_set_unchanged={} ready_set_backpressured={} ready_set_backpressured_changed={} ready_set_backpressured_unchanged={} ready_set_skipped={} ready_set_backpressured_skipped={} prepared_rebuilds={} prepared_rebuild_frames={} prepared_rebuild_total_ms={:.3} prepared_rebuild_avg_ms={:.3} prepared_rebuild_max_ms={:.3} cumulative_rebuild_max_ms={:.3}",
                 record_cache_delta.ready_set_calls,
                 record_cache_delta.ready_set_changed_calls,
                 record_cache_delta.ready_set_unchanged_calls,
                 record_cache_delta.ready_set_upload_backpressured_calls,
                 record_cache_delta.ready_set_upload_backpressured_changed_calls,
                 record_cache_delta.ready_set_upload_backpressured_unchanged_calls,
+                record_cache_delta.ready_set_skipped_calls,
+                record_cache_delta.ready_set_upload_backpressured_skipped_calls,
                 record_cache_delta.prepared_record_rebuilds,
                 self.record_rebuild_frames,
                 self.record_rebuild_total_ms,
@@ -4701,6 +4703,10 @@ mod android {
             ready_set_upload_backpressured_unchanged_calls: a
                 .ready_set_upload_backpressured_unchanged_calls
                 .max(b.ready_set_upload_backpressured_unchanged_calls),
+            ready_set_skipped_calls: a.ready_set_skipped_calls.max(b.ready_set_skipped_calls),
+            ready_set_upload_backpressured_skipped_calls: a
+                .ready_set_upload_backpressured_skipped_calls
+                .max(b.ready_set_upload_backpressured_skipped_calls),
             prepared_record_rebuilds: a.prepared_record_rebuilds.max(b.prepared_record_rebuilds),
             prepared_record_rebuild_total_ms: a
                 .prepared_record_rebuild_total_ms

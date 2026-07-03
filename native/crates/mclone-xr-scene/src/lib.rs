@@ -24,8 +24,8 @@ use mclone_app_runtime::session::{
     ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
 };
 use mclone_app_runtime::{
-    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, debug_block_palette_overlay, elapsed_ms,
-    set_player_appearance_command_for_ui_model,
+    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, TraversalReadySectionCache,
+    debug_block_palette_overlay, elapsed_ms, set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
@@ -931,6 +931,7 @@ where
     player_collision_box_visible: bool,
     player_model: GamePlayerModel,
     draw: TexturedSectionDrawResources,
+    traversal_ready_sections: TraversalReadySectionCache,
     section_uploads: RenderSectionUploadCoordinator,
     actors: ActorDrawResources,
     far_lod: FarTerrainLodRenderer,
@@ -1083,6 +1084,7 @@ where
             player_collision_box_visible: false,
             player_model: GamePlayerModel::default(),
             draw,
+            traversal_ready_sections: TraversalReadySectionCache::default(),
             section_uploads: RenderSectionUploadCoordinator::default(),
             actors: ActorDrawResources::new(
                 device,
@@ -1188,6 +1190,7 @@ where
             player_collision_box_visible: false,
             player_model: GamePlayerModel::default(),
             draw: started.draw,
+            traversal_ready_sections: TraversalReadySectionCache::default(),
             section_uploads: RenderSectionUploadCoordinator::default(),
             actors: ActorDrawResources::new(
                 device,
@@ -3026,6 +3029,40 @@ where
         }
     }
 
+    fn refresh_traversal_ready_sections(
+        &mut self,
+        camera_position: Vec3,
+        upload_backpressured: bool,
+        timing: &mut XrTerrainFrameTiming,
+    ) -> usize {
+        let ready_start = Instant::now();
+        let draw_section_generation = self.draw.traversal_ready_source_generation();
+        let refresh = {
+            let runtime = self
+                .runtime
+                .as_ref()
+                .expect("runtime presence checked before ready refresh");
+            self.traversal_ready_sections.refresh(
+                runtime.core(),
+                camera_position,
+                draw_section_generation,
+            )
+        };
+        timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
+        let ready_publish_start = Instant::now();
+        if refresh.refreshed {
+            self.draw.set_traversal_ready_sections_with_context(
+                self.traversal_ready_sections.ready_sections(),
+                upload_backpressured,
+            );
+        } else {
+            self.draw
+                .record_traversal_ready_sections_skipped(upload_backpressured);
+        }
+        timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
+        refresh.section_count
+    }
+
     fn poll_runtime_and_upload(
         &mut self,
         device: &wgpu::Device,
@@ -3061,21 +3098,23 @@ where
         let poll_start = Instant::now();
         let poll_changed = self.poll().context("poll XR terrain runtime")?;
         timing.runtime_poll_ms = elapsed_ms(poll_start.elapsed());
-        let runtime = self
-            .runtime
-            .as_ref()
-            .expect("runtime presence checked before poll");
-        let poll_summary = xr_poll_diagnostics_upload_summary(runtime.last_poll_diagnostics());
-        let has_runtime_render_work = runtime.has_pending_render_work(camera_position);
+        let (poll_summary, has_runtime_render_work) = {
+            let runtime = self
+                .runtime
+                .as_ref()
+                .expect("runtime presence checked before poll");
+            (
+                xr_poll_diagnostics_upload_summary(runtime.last_poll_diagnostics()),
+                runtime.has_pending_render_work(camera_position),
+            )
+        };
         if !poll_changed && !has_runtime_render_work && !self.section_uploads.has_pending_work() {
-            let ready_start = Instant::now();
-            let ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
-            timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
-            let traversal_ready_section_count = ready_sections.len();
-            let ready_publish_start = Instant::now();
-            self.draw
-                .set_traversal_ready_sections_with_context(&ready_sections, false);
-            timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
+            let traversal_ready_section_count =
+                self.refresh_traversal_ready_sections(camera_position, false, timing);
+            let runtime = self
+                .runtime
+                .as_ref()
+                .expect("runtime presence checked before poll");
             let upload_queue = self.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
                 poll_changed,
@@ -3309,20 +3348,15 @@ where
                 .as_ref()
                 .map_or(0, |runtime| runtime.render_compile_pending_job_count());
         }
-        let ready_start = Instant::now();
+        let traversal_ready_section_count = self.refresh_traversal_ready_sections(
+            camera_position,
+            upload_frame_decision.upload_backpressured,
+            timing,
+        );
         let runtime = self
             .runtime
             .as_ref()
             .expect("runtime presence checked before section sync");
-        let ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
-        timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
-        let traversal_ready_section_count = ready_sections.len();
-        let ready_publish_start = Instant::now();
-        self.draw.set_traversal_ready_sections_with_context(
-            &ready_sections,
-            upload_frame_decision.upload_backpressured,
-        );
-        timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
         self.render_stats.section_count = self.draw.section_count();
         self.render_stats.index_count = self.draw.index_count();
         self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
@@ -4585,6 +4619,7 @@ where
         self.runtime = Some(runtime);
         self.camera = camera;
         self.draw = draw;
+        self.traversal_ready_sections.clear();
         self.render_stats = RenderStreamStats {
             section_count,
             index_count,
@@ -4678,6 +4713,7 @@ where
         self.last_ui_draw_cache_stats = UiDrawCacheStats::default();
         self.rendered_frames = 0;
         self.prefetched_live_upload = None;
+        self.traversal_ready_sections.clear();
         self.section_uploads.clear();
     }
 

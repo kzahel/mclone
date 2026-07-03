@@ -1,8 +1,8 @@
 # 128: Terrain Render Pipeline Coordination
 
-Status: active architecture parent; resident cached-section dirty flags and
-ready-set upload-backpressure attribution landed, broader coordinator lifecycle
-remains
+Status: active architecture parent; resident cached-section dirty flags,
+ready-set upload-backpressure attribution, and versioned traversal-ready
+publication landed; broader coordinator lifecycle remains
 Workstream: shared native Rust terrain runtime, render session, compiler, upload, and XR frame pacing
 
 ## Impetus
@@ -1421,6 +1421,74 @@ Next implementation implication:
   `ready_set_backpressured > 0`. The July 3 RD7 orbit did not hit that condition,
   so it cannot decide whether a narrower upload-backpressured skip is useful.
 
+Versioned traversal-ready publication:
+
+- Implemented July 3, 2026 as the shared keyed fast path proposed above.
+- `mclone-render-session` exposes a render-section cache generation and a compact
+  near-camera readiness key: the set of section columns inside the 24-block
+  missing-neighbor exception radius.
+- `mclone-app-runtime` owns `TraversalReadySectionCache`, which refreshes only
+  when the stamp changes: interest center, render distance, render-section cache
+  generation, loaded chunk positions, near-camera column set, or draw-resource
+  section generation.
+- XR uses that shared cache before publishing traversal-ready sections. Matching
+  stamps skip both full ready-set recomputation and draw-resource ready publish.
+- `TexturedSectionRecordCacheStats` now records skipped publishes separately as
+  `ready_set_skipped` and `ready_set_backpressured_skipped`.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session near_camera_readiness_columns_track_exception_membership -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session cached_sections_apply_build_report_and_remove_unloaded_chunks -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime traversal_ready_section_cache_skips_until_stamp_changes -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render record_cache_stats_track_upload_backpressured_ready_set_context -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render -- --nocapture`
+- `cd native && cargo ndk -t arm64-v8a --platform 28 check --package mclone-android-xr-client --lib`
+- `cargo test --manifest-path native/Cargo.toml`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, `2 / 16 / 64`, 45 seconds.
+
+Measurement:
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Ready-set calls | Runtime ready max | Key tail |
+|---|---:|---|---:|---|---|---|
+| `2 / 16 / 64` ready-set attribution | 16 | 15.147 / 17.714 / 19.393 / 28.131 ms | 70.7% | calls 2961; changed 10; unchanged 2951; skipped n/a | ready sections 1.243 ms; ready publish 4.328 ms | poll 7.284 ms; upload apply 7.418 ms; stereo poll wait 9.723 ms |
+| `2 / 16 / 64` versioned traversal-ready | 11 | 14.893 / 17.600 / 21.704 / 26.451 ms | 59.9% | calls 178; changed 10; unchanged 168; skipped 2833; backpressured skipped 0 | ready sections 1.462 ms; ready publish 1.322 ms | upload apply 6.109 ms; shared records 3.266 ms; left-eye encode 6.338 ms; stereo poll wait 9.806 ms |
+
+Interpretation:
+
+- The fast path is doing the intended work. Actual ready publishes dropped from
+  per-frame (`2961`) to `178`, with `2833` skipped publishes and the same `10`
+  changed ready sets.
+- The maximum ready-publish bucket dropped from `4.328 ms` to `1.322 ms`.
+  Ready-section computation remained low (`1.462 ms` max), so this removes the
+  broad hidden ready phase from most frames.
+- The run still did not exercise upload-backpressured ready skips:
+  `ready_set_backpressured_skipped=0` and upload phase `backpressured=false`.
+  Keep the closeout note to force that condition later, but do not block the
+  main coordinator work on it.
+- Frame pacing improved on average and over-budget percentage (`70.7%` to
+  `59.9%`) and Meta dropped frames (`16` to `11`), but p99 moved up
+  (`19.393 ms` to `21.704 ms`). Treat the win as real for ready-phase cost,
+  not as a complete frame-pacing fix.
+- The remaining visible tails are now upload apply, prepared/shared draw-record
+  maintenance, eye encode, and XR poll/wait behavior. Traversal-ready
+  publication is no longer the first place to spend a slice.
+
+Next implementation implication:
+
+- Keep the shared traversal-ready cache and counters.
+- Move the next coordinator slice to draw-record/encode maintenance: make
+  prepared-record rebuilds more explicitly lifecycle-driven and attribute the
+  `shared_records` / eye encode tails by changed section count, section layer,
+  and prepared-record rebuild cause.
+- Do not tune `2 / 16 / 64` again until the draw-record/encode path is separated
+  from upload and ready-publication cost.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1485,16 +1553,18 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Use the new attribution counters to implement a shared, versioned
-traversal-ready publication phase. The July 3 RD7 orbit showed `2951 / 2961`
-ready publishes were unchanged, but it did not hit the upload-backpressured path
-at all. That means the next safe implementation chunk is not a blind
-upload-backpressure skip; it is a keyed fast path that avoids recompute/publish
-when visible draw resources, render-neighbor readiness, and the camera/view
-near-neighbor exception inputs are unchanged.
+Use the versioned traversal-ready cache as the new baseline and move to
+draw-record/encode maintenance. The July 3 RD7 orbit skipped `2833 / 3011`
+ready publishes and reduced ready publish max to `1.322 ms`, so traversal-ready
+publication is no longer the obvious broad per-frame cost. The next safe chunk
+is to attach prepared-record rebuilds more tightly to section lifecycle and add
+attribution for `shared_records` / eye encode tails by changed section count,
+section layer, and rebuild cause.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of
-the time. The next run should tell us whether shared phase ownership reduces
-submit/ready/upload tails and clarifies the limiting phase, not whether one more
-isolated budget number looks better.
+the time. The next run should tell us whether draw-record/encode lifecycle
+ownership reduces the remaining tails, not whether one more isolated budget
+number looks better. Keep the deferred closeout note to force a
+`ready_set_backpressured > 0` run, because neither July 3 RD7 orbit hit that
+condition.

@@ -508,6 +508,8 @@ pub struct TexturedSectionRecordCacheStats {
     pub ready_set_upload_backpressured_calls: u64,
     pub ready_set_upload_backpressured_changed_calls: u64,
     pub ready_set_upload_backpressured_unchanged_calls: u64,
+    pub ready_set_skipped_calls: u64,
+    pub ready_set_upload_backpressured_skipped_calls: u64,
     pub prepared_record_rebuilds: u64,
     pub prepared_record_rebuild_total_ms: f64,
     pub prepared_record_rebuild_max_ms: f64,
@@ -528,6 +530,13 @@ impl TexturedSectionRecordCacheStats {
             } else {
                 self.ready_set_upload_backpressured_unchanged_calls += 1;
             }
+        }
+    }
+
+    pub fn record_ready_set_skip(&mut self, upload_backpressured: bool) {
+        self.ready_set_skipped_calls += 1;
+        if upload_backpressured {
+            self.ready_set_upload_backpressured_skipped_calls += 1;
         }
     }
 
@@ -559,6 +568,12 @@ impl TexturedSectionRecordCacheStats {
             ready_set_upload_backpressured_unchanged_calls: self
                 .ready_set_upload_backpressured_unchanged_calls
                 .saturating_sub(baseline.ready_set_upload_backpressured_unchanged_calls),
+            ready_set_skipped_calls: self
+                .ready_set_skipped_calls
+                .saturating_sub(baseline.ready_set_skipped_calls),
+            ready_set_upload_backpressured_skipped_calls: self
+                .ready_set_upload_backpressured_skipped_calls
+                .saturating_sub(baseline.ready_set_upload_backpressured_skipped_calls),
             prepared_record_rebuilds: self
                 .prepared_record_rebuilds
                 .saturating_sub(baseline.prepared_record_rebuilds),
@@ -2202,6 +2217,7 @@ pub struct TexturedSectionDrawResources {
     sections: BTreeMap<RenderSectionKey, GpuTexturedChunkMesh>,
     visibility_sections: BTreeMap<RenderSectionKey, VisibilitySet>,
     traversal_ready_sections: BTreeSet<RenderSectionKey>,
+    section_set_generation: u64,
     atlas: GpuChunkTextureAtlas,
     // Slice F (docs/tactical/106): the prepared culling records only change when
     // the section set / readiness changes (upload, removal, traversal refresh),
@@ -2240,6 +2256,7 @@ impl TexturedSectionDrawResources {
             sections: BTreeMap::new(),
             visibility_sections: BTreeMap::new(),
             traversal_ready_sections: BTreeSet::new(),
+            section_set_generation: 0,
             atlas,
             cached_records: RefCell::new(None),
             records_dirty: Cell::new(true),
@@ -2277,6 +2294,7 @@ impl TexturedSectionDrawResources {
         if sections.is_empty() && removed.is_empty() {
             return Ok(TexturedSectionUploadReport::default());
         }
+        self.section_set_generation = self.section_set_generation.wrapping_add(1);
         // Slice F: the section set / meshes change here, so the cached culling
         // records must be rebuilt on the next prepare.
         self.records_dirty.set(true);
@@ -2318,6 +2336,12 @@ impl TexturedSectionDrawResources {
         self.set_traversal_ready_sections_with_context(ready_sections, false);
     }
 
+    pub fn record_traversal_ready_sections_skipped(&self, upload_backpressured: bool) {
+        let mut stats = self.record_cache_stats.get();
+        stats.record_ready_set_skip(upload_backpressured);
+        self.record_cache_stats.set(stats);
+    }
+
     pub fn set_traversal_ready_sections_with_context(
         &mut self,
         ready_sections: &BTreeSet<RenderSectionKey>,
@@ -2345,6 +2369,10 @@ impl TexturedSectionDrawResources {
 
     pub fn traversal_ready_section_count(&self) -> usize {
         self.traversal_ready_sections.len()
+    }
+
+    pub const fn traversal_ready_source_generation(&self) -> u64 {
+        self.section_set_generation
     }
 
     pub fn record_cache_stats(&self) -> TexturedSectionRecordCacheStats {
@@ -3932,6 +3960,8 @@ mod tests {
         stats.record_ready_set_call(false, true);
         stats.record_ready_set_call(true, false);
         stats.record_ready_set_call(true, true);
+        stats.record_ready_set_skip(false);
+        stats.record_ready_set_skip(true);
 
         assert_eq!(stats.ready_set_calls, 3);
         assert_eq!(stats.ready_set_changed_calls, 2);
@@ -3939,15 +3969,20 @@ mod tests {
         assert_eq!(stats.ready_set_upload_backpressured_calls, 2);
         assert_eq!(stats.ready_set_upload_backpressured_changed_calls, 1);
         assert_eq!(stats.ready_set_upload_backpressured_unchanged_calls, 1);
+        assert_eq!(stats.ready_set_skipped_calls, 2);
+        assert_eq!(stats.ready_set_upload_backpressured_skipped_calls, 1);
 
         let delta = stats.sample_delta(baseline);
         assert_eq!(delta.ready_set_calls, 3);
         assert_eq!(delta.ready_set_upload_backpressured_calls, 2);
         assert_eq!(delta.ready_set_upload_backpressured_changed_calls, 1);
         assert_eq!(delta.ready_set_upload_backpressured_unchanged_calls, 1);
+        assert_eq!(delta.ready_set_skipped_calls, 2);
+        assert_eq!(delta.ready_set_upload_backpressured_skipped_calls, 1);
 
         let mut next = stats;
         next.record_ready_set_call(true, false);
+        next.record_ready_set_skip(true);
         let next_delta = next.sample_delta(stats);
         assert_eq!(next_delta.ready_set_calls, 1);
         assert_eq!(next_delta.ready_set_changed_calls, 0);
@@ -3955,6 +3990,8 @@ mod tests {
         assert_eq!(next_delta.ready_set_upload_backpressured_calls, 1);
         assert_eq!(next_delta.ready_set_upload_backpressured_changed_calls, 0);
         assert_eq!(next_delta.ready_set_upload_backpressured_unchanged_calls, 1);
+        assert_eq!(next_delta.ready_set_skipped_calls, 1);
+        assert_eq!(next_delta.ready_set_upload_backpressured_skipped_calls, 1);
     }
 
     #[test]

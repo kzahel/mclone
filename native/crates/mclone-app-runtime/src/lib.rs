@@ -33,7 +33,8 @@ use mclone_protocol::{
 use mclone_render_session::{
     EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileDispatcher,
     RenderSectionRemovalMode, RenderSectionSession, build_client_textured_sections,
-    render_section_chunk_pos, render_section_neighbor_readiness, sort_chunk_positions_by_distance,
+    render_section_chunk_pos, render_section_near_camera_readiness_columns,
+    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
     sort_dirty_section_chunks_by_distance,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -309,6 +310,60 @@ impl TimedRenderSectionCacheUpdate {
     pub fn merge(&mut self, other: Self) {
         self.cache_update.merge(other.cache_update);
         self.timing.merge(other.timing);
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TraversalReadySectionStamp {
+    pub interest_center: ChunkPos,
+    pub render_distance: u32,
+    pub render_section_cache_generation: u64,
+    pub loaded_chunks: BTreeSet<ChunkPos>,
+    pub near_camera_columns: BTreeSet<ChunkPos>,
+    pub draw_section_generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TraversalReadySectionRefresh {
+    pub refreshed: bool,
+    pub section_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TraversalReadySectionCache {
+    stamp: Option<TraversalReadySectionStamp>,
+    ready_sections: BTreeSet<RenderSectionKey>,
+}
+
+impl TraversalReadySectionCache {
+    pub fn refresh(
+        &mut self,
+        runtime: &SingleViewRuntime,
+        camera_position: Vec3,
+        draw_section_generation: u64,
+    ) -> TraversalReadySectionRefresh {
+        let stamp = runtime.traversal_ready_section_stamp(camera_position, draw_section_generation);
+        if self.stamp.as_ref() == Some(&stamp) {
+            return TraversalReadySectionRefresh {
+                refreshed: false,
+                section_count: self.ready_sections.len(),
+            };
+        }
+        self.ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
+        self.stamp = Some(stamp);
+        TraversalReadySectionRefresh {
+            refreshed: true,
+            section_count: self.ready_sections.len(),
+        }
+    }
+
+    pub fn ready_sections(&self) -> &BTreeSet<RenderSectionKey> {
+        &self.ready_sections
+    }
+
+    pub fn clear(&mut self) {
+        self.stamp = None;
+        self.ready_sections.clear();
     }
 }
 
@@ -1862,6 +1917,21 @@ impl SingleViewRuntime {
             .collect()
     }
 
+    pub fn traversal_ready_section_stamp(
+        &self,
+        camera_position: Vec3,
+        draw_section_generation: u64,
+    ) -> TraversalReadySectionStamp {
+        TraversalReadySectionStamp {
+            interest_center: self.interest_center,
+            render_distance: self.render_distance,
+            render_section_cache_generation: self.render_session().section_cache_generation(),
+            loaded_chunks: self.client().loaded_chunk_positions().collect(),
+            near_camera_columns: render_section_near_camera_readiness_columns(camera_position),
+            draw_section_generation,
+        }
+    }
+
     pub fn render_section_within_render_distance(&self, key: RenderSectionKey) -> bool {
         let distance = i32::try_from(self.render_distance).unwrap_or(i32::MAX);
         (key.chunk_x - self.interest_center.x)
@@ -2293,6 +2363,30 @@ mod tests {
         assert_eq!(chunk_tracking_radius_for_render_distance(2), 3);
         assert_eq!(chunk_tracking_radius_for_render_distance(3), 3);
         assert_eq!(chunk_tracking_radius_for_render_distance(4), 4);
+    }
+
+    #[test]
+    fn traversal_ready_section_cache_skips_until_stamp_changes() {
+        let runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 2, 3);
+        let mut cache = TraversalReadySectionCache::default();
+
+        let first = cache.refresh(&runtime, Vec3::new(0.0, 64.0, 0.0), 0);
+        assert!(first.refreshed);
+        assert_eq!(first.section_count, 0);
+
+        let second = cache.refresh(&runtime, Vec3::new(0.25, 64.0, 0.25), 0);
+        assert!(!second.refreshed);
+        assert_eq!(second.section_count, 0);
+
+        let draw_changed = cache.refresh(&runtime, Vec3::new(0.25, 64.0, 0.25), 1);
+        assert!(draw_changed.refreshed);
+
+        let camera_near_set_changed = cache.refresh(&runtime, Vec3::new(64.0, 64.0, 0.0), 1);
+        assert!(camera_near_set_changed.refreshed);
+
+        cache.clear();
+        let after_clear = cache.refresh(&runtime, Vec3::new(64.0, 64.0, 0.0), 1);
+        assert!(after_clear.refreshed);
     }
 
     #[test]

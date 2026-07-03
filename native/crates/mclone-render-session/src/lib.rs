@@ -327,6 +327,7 @@ impl CachedTexturedRenderSectionSlot {
 pub struct CachedTexturedRenderSections {
     sections: BTreeMap<RenderSectionKey, CachedTexturedRenderSectionSlot>,
     section_keys_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    generation: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1100,11 +1101,16 @@ impl RenderSectionNeighborReadiness {
     }
 }
 
+/// Horizontal distance below which a render section is treated as ready even
+/// without fully loaded neighbors.
+const RENDER_NEIGHBOR_READY_DISTANCE: f32 = 24.0;
+
 /// Horizontal distance (squared) below which a render section is treated as ready even
 /// without fully loaded neighbors. Native keeps an exact client snapshot radius (unlike
 /// Java's overfetched client chunk cache), so this near-camera exception keeps the
 /// boundary ring meshing while flying above an otherwise loaded column.
-const RENDER_NEIGHBOR_READY_DISTANCE_SQ: f32 = 24.0 * 24.0;
+const RENDER_NEIGHBOR_READY_DISTANCE_SQ: f32 =
+    RENDER_NEIGHBOR_READY_DISTANCE * RENDER_NEIGHBOR_READY_DISTANCE;
 
 /// Shared camera-distance neighbor readiness used by both the desktop and web streaming
 /// loops (067 Stage 3). Sections near the camera are always ready; farther sections wait
@@ -1124,6 +1130,45 @@ pub fn render_section_neighbor_readiness(
     } else {
         RenderSectionNeighborReadiness::DeferredMissingNeighbors
     }
+}
+
+/// Compact key for the part of neighbor readiness that depends on the camera.
+/// Readiness only cares whether a render-section column is inside the fixed
+/// near-camera exception radius, so callers can compare this small set instead
+/// of invalidating traversal-ready state for every sub-block camera movement.
+pub fn render_section_near_camera_readiness_columns(camera_position: Vec3) -> BTreeSet<ChunkPos> {
+    if !camera_position.x.is_finite() || !camera_position.z.is_finite() {
+        return BTreeSet::new();
+    }
+    let min_chunk_x =
+        render_section_center_chunk_coord_floor(camera_position.x - RENDER_NEIGHBOR_READY_DISTANCE)
+            - 1;
+    let max_chunk_x =
+        render_section_center_chunk_coord_floor(camera_position.x + RENDER_NEIGHBOR_READY_DISTANCE)
+            + 1;
+    let min_chunk_z =
+        render_section_center_chunk_coord_floor(camera_position.z - RENDER_NEIGHBOR_READY_DISTANCE)
+            - 1;
+    let max_chunk_z =
+        render_section_center_chunk_coord_floor(camera_position.z + RENDER_NEIGHBOR_READY_DISTANCE)
+            + 1;
+    let mut columns = BTreeSet::new();
+    for chunk_x in min_chunk_x..=max_chunk_x {
+        let center_x = chunk_middle_block_coord(chunk_x) as f32;
+        for chunk_z in min_chunk_z..=max_chunk_z {
+            let center_z = chunk_middle_block_coord(chunk_z) as f32;
+            let dx = center_x - camera_position.x;
+            let dz = center_z - camera_position.z;
+            if dx * dx + dz * dz <= RENDER_NEIGHBOR_READY_DISTANCE_SQ {
+                columns.insert(ChunkPos::new(chunk_x, chunk_z));
+            }
+        }
+    }
+    columns
+}
+
+fn render_section_center_chunk_coord_floor(center_coord: f32) -> i32 {
+    ((center_coord - CHUNK_WIDTH as f32 * 0.5) / CHUNK_WIDTH as f32).floor() as i32
 }
 
 /// World-space center of a render section, used for distance ordering/readiness.
@@ -3298,6 +3343,10 @@ impl RenderSectionSession {
         self.cache.dirty_section_keys()
     }
 
+    pub fn section_cache_generation(&self) -> u64 {
+        self.cache.generation()
+    }
+
     /// Whether any dirty chunk/section is ready to make compile progress this frame —
     /// either a cached chunk/section that is no longer loaded (removal work) or a loaded,
     /// not-in-flight section whose neighbors are ready. Mirrors the planning gate so the
@@ -4461,6 +4510,10 @@ impl CachedTexturedRenderSections {
         self.sections.keys().copied()
     }
 
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub fn section_keys_for_chunk(
         &self,
         pos: ChunkPos,
@@ -4575,6 +4628,9 @@ impl CachedTexturedRenderSections {
 
     fn insert_section(&mut self, section: TexturedRenderSectionMesh) {
         let key = section.key;
+        if !self.sections.contains_key(&key) {
+            self.generation = self.generation.wrapping_add(1);
+        }
         self.sections
             .insert(key, CachedTexturedRenderSectionSlot::new(section));
         self.section_keys_by_chunk
@@ -4585,6 +4641,7 @@ impl CachedTexturedRenderSections {
 
     fn remove_section(&mut self, key: RenderSectionKey) -> Option<TexturedRenderSectionMesh> {
         let section = self.sections.remove(&key)?.mesh;
+        self.generation = self.generation.wrapping_add(1);
         let pos = render_section_chunk_pos(key);
         if let Some(keys) = self.section_keys_by_chunk.get_mut(&pos) {
             keys.remove(&key);
@@ -6799,17 +6856,28 @@ mod tests {
         assert_eq!(update.rebuilt_section_count(), 2);
         assert!(cache.contains_section(key));
         assert!(cache.contains_section(second_key));
+        assert_eq!(cache.generation(), 2);
         assert!(cache.contains_chunk(chunk));
         assert_eq!(
             cache.section_keys_for_chunk(chunk).collect::<BTreeSet<_>>(),
             BTreeSet::from([key, second_key])
         );
 
+        let replacement = cache.apply_build_report(
+            &BTreeSet::from([key]),
+            test_build_report([key]),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+        assert_eq!(replacement.rebuilt_section_count(), 1);
+        assert_eq!(cache.generation(), 2);
+
         let section_removal = cache.remove_sections(&BTreeSet::new(), &BTreeSet::from([key]));
 
         assert_eq!(section_removal.removed_section_count(), 1);
         assert!(!cache.contains_section(key));
         assert!(cache.contains_section(second_key));
+        assert_eq!(cache.generation(), 3);
         assert!(cache.contains_chunk(chunk));
         assert_eq!(
             cache.section_keys_for_chunk(chunk).collect::<BTreeSet<_>>(),
@@ -6822,6 +6890,23 @@ mod tests {
         assert!(!cache.contains_section(second_key));
         assert!(!cache.contains_chunk(chunk));
         assert!(cache.section_keys_for_chunk(chunk).next().is_none());
+        assert_eq!(cache.generation(), 4);
+    }
+
+    #[test]
+    fn near_camera_readiness_columns_track_exception_membership() {
+        let camera = Vec3::new(8.0, 64.0, 8.0);
+        let near_columns = render_section_near_camera_readiness_columns(camera);
+
+        assert!(near_columns.contains(&ChunkPos::new(0, 0)));
+        assert!(near_columns.contains(&ChunkPos::new(1, 0)));
+        assert!(!near_columns.contains(&ChunkPos::new(2, 0)));
+
+        let key = RenderSectionKey::new(1, 4, 0);
+        assert_eq!(
+            render_section_neighbor_readiness(&ClientRuntime::local_integrated(), key, camera),
+            RenderSectionNeighborReadiness::ReadyNearCamera
+        );
     }
 
     #[test]
