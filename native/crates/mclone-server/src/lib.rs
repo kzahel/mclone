@@ -2729,7 +2729,14 @@ mod tests {
         );
         assert!(second_report.block_ticking_chunks.is_empty());
         assert!(second_report.entity_ticking_chunks.is_empty());
-        assert!(second_report.events.is_empty());
+        assert_eq!(
+            second_report
+                .events
+                .iter()
+                .filter(|event| matches!(event, ChunkSchedulerEvent::HolderUnloaded { .. }))
+                .count(),
+            DEFAULT_PENDING_UNLOAD_BUDGET
+        );
         assert_eq!(
             scheduler.pending_unload_count(),
             active_ticket_square_count(CHUNK_LEVEL_FULL) - DEFAULT_PENDING_UNLOAD_BUDGET
@@ -3107,7 +3114,13 @@ mod tests {
 
         assert_eq!(scheduler.ticket_tick(), 2);
         assert_eq!(scheduler.ticketed_chunk_count(), 0);
-        assert!(events.is_empty());
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ChunkSchedulerEvent::HolderUnloaded { .. }))
+                .count(),
+            DEFAULT_PENDING_UNLOAD_BUDGET
+        );
         assert_eq!(
             scheduler.pending_unload_count(),
             active_ticket_square_count(CHUNK_LEVEL_FULL) - DEFAULT_PENDING_UNLOAD_BUDGET

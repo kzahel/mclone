@@ -1333,6 +1333,10 @@ impl IntegratedServer {
                     self.loading_progress.clear_chunk(pos);
                     self.chunk_tracking.queue_unload_for_tracking_players(pos);
                 }
+                ChunkSchedulerEvent::HolderUnloaded { pos } => {
+                    let removed = self.entities.discard_volatile_entities_in_chunk(pos);
+                    self.reconcile_entity_subjects(removed, true);
+                }
                 ChunkSchedulerEvent::SectionBlockUpdates {
                     pos,
                     section_y,
@@ -2636,6 +2640,50 @@ mod tests {
         }
 
         panic!("volatile natural spawning did not reach a creature cadence tick");
+    }
+
+    #[test]
+    fn volatile_entities_are_discarded_when_ticket_loaded_chunk_fully_unloads() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        server.set_debug_passive_showcase_enabled(false);
+        server.set_volatile_natural_spawning_enabled(false);
+        let player = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
+        let entity = server.entities.spawn_volatile_passive_mob(
+            EntityKind::Cow,
+            Vec3d::new(8.5, 64.0, 8.5),
+            0.0,
+        );
+        server.reconcile_entity_subjects([entity], true);
+        let updates = server
+            .drain_chunk_updates_for_target(CommandTarget::Dedicated(player))
+            .expect("drain volatile spawn update");
+        assert_eq!(
+            first_entity_snapshot_of_kind(&updates, EntityKind::Cow).map(|snapshot| snapshot.id),
+            Some(entity.id)
+        );
+
+        let updates =
+            set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(64, 0), 0);
+
+        assert!(has_entity_remove(&updates, entity.id));
+        assert!(
+            server.entities.state(entity.id).is_some(),
+            "leaving the visible range should remove the observer pair, not discard the entity"
+        );
+
+        for _ in 0..128 {
+            let report = server
+                .try_simulation_tick_report_for_player(player)
+                .expect("tick dedicated player while pending unloads drain");
+            if server.entities.state(entity.id).is_none() {
+                assert!(report.pending_unloads_processed > 0);
+                return;
+            }
+        }
+
+        panic!("volatile entity was not discarded after its chunk fully unloaded");
     }
 
     #[test]

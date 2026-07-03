@@ -41,6 +41,10 @@ impl ServerEntityTickList {
     pub(crate) fn iteration_ids(&self) -> Vec<EntityId> {
         self.active.iter().copied().collect()
     }
+
+    pub(crate) fn remove(&mut self, id: EntityId) {
+        self.active.remove(&id);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -312,6 +312,9 @@ pub enum ChunkSchedulerEvent {
     Unloaded {
         pos: ChunkPos,
     },
+    HolderUnloaded {
+        pos: ChunkPos,
+    },
     SectionBlockUpdates {
         pos: ChunkPos,
         section_y: i32,
@@ -498,8 +501,9 @@ impl ChunkScheduler {
         let publish_completed_us = simulation_timing_elapsed_us(publish_start);
 
         let pending_unload_start = simulation_timing_start();
-        let pending_unloads_processed =
-            self.process_pending_unloads(DEFAULT_PENDING_UNLOAD_BUDGET)?;
+        let (pending_unloads_processed, unload_events) =
+            self.process_pending_unloads_with_events(DEFAULT_PENDING_UNLOAD_BUDGET)?;
+        events.extend(unload_events);
         let pending_unload_us = simulation_timing_elapsed_us(pending_unload_start);
         Ok(ChunkSchedulerTickReport {
             ticket_tick: self.ticket_tick(),
@@ -1673,8 +1677,15 @@ impl ChunkScheduler {
     }
 
     pub fn process_pending_unloads(&mut self, max_chunks: usize) -> ChunkStoreResult<usize> {
+        Ok(self.process_pending_unloads_with_events(max_chunks)?.0)
+    }
+
+    fn process_pending_unloads_with_events(
+        &mut self,
+        max_chunks: usize,
+    ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>)> {
         if max_chunks == 0 || self.pending_unloads.is_empty() {
-            return Ok(0);
+            return Ok((0, Vec::new()));
         }
 
         let active_levels = self.distance_manager.active_levels();
@@ -1685,6 +1696,7 @@ impl ChunkScheduler {
             .take(max_chunks)
             .collect::<Vec<_>>();
         let mut processed = 0;
+        let mut events = Vec::new();
 
         for pos in candidates {
             if active_levels.contains_key(&pos) {
@@ -1706,9 +1718,10 @@ impl ChunkScheduler {
             self.holders.remove(&pos);
             self.pending_unloads.remove(&pos);
             processed += 1;
+            events.push(ChunkSchedulerEvent::HolderUnloaded { pos });
         }
 
-        Ok(processed)
+        Ok((processed, events))
     }
 
     pub(crate) fn reconcile_ticketed_holders(

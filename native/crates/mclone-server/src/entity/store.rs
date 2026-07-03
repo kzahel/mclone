@@ -35,6 +35,7 @@ pub(crate) struct ServerEntityStore {
     entities: BTreeMap<EntityId, ServerEntityState>,
     mobs: BTreeMap<EntityId, MobRuntimeState>,
     items: BTreeMap<EntityId, ItemEntityRuntimeState>,
+    volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
     next_entity_id: u64,
     debug_passive_showcase_ids: Vec<(EntityKind, EntityId)>,
@@ -196,7 +197,28 @@ impl ServerEntityStore {
         y_rot_degrees: f32,
     ) -> ServerEntityState {
         let id = self.allocate_entity_id();
-        self.insert_passive_mob(id, kind, position, y_rot_degrees)
+        let state = self.insert_passive_mob(id, kind, position, y_rot_degrees);
+        self.volatile_entities.insert(id);
+        state
+    }
+
+    pub(crate) fn discard_volatile_entities_in_chunk(
+        &mut self,
+        pos: ChunkPos,
+    ) -> Vec<ServerEntityState> {
+        let ids = self
+            .volatile_entities
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.entities
+                    .get(id)
+                    .is_some_and(|entity| entity.chunk_pos() == pos)
+            })
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .filter_map(|id| self.remove_entity(id))
+            .collect()
     }
 
     pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
@@ -307,8 +329,7 @@ impl ServerEntityStore {
             }
         }
         for id in removed_ids {
-            self.entities.remove(&id);
-            self.items.remove(&id);
+            self.remove_entity(id);
         }
         updated.extend(self.merge_item_entities(&merge_due_ids));
         for (position, y_rot_degrees) in egg_spawns {
@@ -377,8 +398,7 @@ impl ServerEntityStore {
             }
         }
         for id in removed_ids {
-            self.entities.remove(&id);
-            self.items.remove(&id);
+            self.remove_entity(id);
         }
         updated
     }
@@ -423,8 +443,7 @@ impl ServerEntityStore {
             }
         }
         for id in removed_ids {
-            self.entities.remove(&id);
-            self.items.remove(&id);
+            self.remove_entity(id);
         }
         updated
     }
@@ -469,6 +488,16 @@ impl ServerEntityStore {
     fn allocate_entity_id(&mut self) -> EntityId {
         self.next_entity_id = self.next_entity_id.saturating_add(1);
         EntityId(self.next_entity_id)
+    }
+
+    fn remove_entity(&mut self, id: EntityId) -> Option<ServerEntityState> {
+        let mut state = self.entities.remove(&id)?;
+        state.alive = false;
+        self.mobs.remove(&id);
+        self.items.remove(&id);
+        self.volatile_entities.remove(&id);
+        self.tick_list.remove(id);
+        Some(state)
     }
 
     fn insert_passive_mob(
@@ -742,6 +771,49 @@ mod tests {
                 .natural_spawn_category_counts()
                 .get(MobCategory::Creature),
             1
+        );
+    }
+
+    #[test]
+    fn volatile_passive_entities_discard_only_on_full_chunk_unload() {
+        let mut store = ServerEntityStore::default();
+        let volatile =
+            store.spawn_volatile_passive_mob(EntityKind::Cow, Vec3d::new(8.5, 64.0, 8.5), 0.0);
+        let retained =
+            store.insert_passive_mob_for_test(EntityKind::Chicken, Vec3d::new(9.5, 64.0, 8.5), 0.0);
+        let other_chunk =
+            store.spawn_volatile_passive_mob(EntityKind::Chicken, Vec3d::new(24.5, 64.0, 8.5), 0.0);
+
+        store.tick_stationary(
+            &[ChunkPos::new(0, 0), ChunkPos::new(1, 0)],
+            &[],
+            flat_ground,
+        );
+        store.tick_stationary(&[], &[], flat_ground);
+        assert!(store.state(volatile.id).is_some());
+        assert!(store.mob_state(volatile.id).is_some());
+        assert_eq!(
+            store.diagnostics(),
+            ServerEntityStoreDiagnostics {
+                stored_entities: 3,
+                ticking_entities: 0
+            }
+        );
+
+        let removed = store.discard_volatile_entities_in_chunk(ChunkPos::new(0, 0));
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].id, volatile.id);
+        assert!(!removed[0].alive);
+        assert_eq!(store.state(volatile.id), None);
+        assert!(store.mob_state(volatile.id).is_none());
+        assert!(store.state(retained).is_some());
+        assert!(store.state(other_chunk.id).is_some());
+        assert_eq!(
+            store
+                .natural_spawn_category_counts()
+                .get(MobCategory::Creature),
+            2
         );
     }
 
