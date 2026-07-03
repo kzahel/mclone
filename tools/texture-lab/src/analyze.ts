@@ -62,14 +62,17 @@ async function runPack(args: PackArgs): Promise<void> {
     // Bring both tiles onto a shared grid (the smaller of the two, usually the
     // 16x16 vanilla size) before measuring, so scale-sensitive features compare
     // apples-to-apples instead of rewarding the candidate for having more pixels.
+    // The native image rides along as the alpha source: the alpha-weighted
+    // downsample manufactures semi-alpha edge pixels, so alpha/cutout features
+    // are measured at authored resolution.
     const matched = matchResolution([texture, reference]);
     results.push({
       name: texture.name,
       candidateNative: `${texture.width}x${texture.height}`,
       referenceNative: reference ? `${reference.width}x${reference.height}` : undefined,
       comparedAt: `${matched.width}x${matched.height}`,
-      candidate: analyzeTexture(matched.images[0]!),
-      reference: matched.images[1] ? analyzeTexture(matched.images[1]) : undefined,
+      candidate: analyzeTexture(matched.images[0]!, texture),
+      reference: reference && matched.images[1] ? analyzeTexture(matched.images[1], reference) : undefined,
     });
   }
 
@@ -103,10 +106,11 @@ async function runCompare(args: CompareArgs): Promise<void> {
   // Same apples-to-apples rule as pack mode: drop every tile to the smallest
   // shared grid before measuring, so two candidates (and vanilla) are judged at
   // one resolution regardless of whether they were authored at 16x16 or 32x32.
+  // Native images ride along as alpha sources (see pack mode).
   const matched = matchResolution([a, b, reference]);
-  const featuresA = analyzeTexture(matched.images[0]!);
-  const featuresB = analyzeTexture(matched.images[1]!);
-  const featuresRef = matched.images[2] ? analyzeTexture(matched.images[2]) : undefined;
+  const featuresA = analyzeTexture(matched.images[0]!, a);
+  const featuresB = analyzeTexture(matched.images[1]!, b);
+  const featuresRef = reference && matched.images[2] ? analyzeTexture(matched.images[2], reference) : undefined;
   const comparison = compareCandidates(featuresA, featuresB, featuresRef);
 
   if (args.json) {

@@ -44,9 +44,20 @@ local vanilla counterpart, and ends with a `biggest gaps vs vanilla` list to
 drive the next revision. Beyond value/color statistics it measures palette
 concentration (top-8 color share), structure vs speckle (color run length),
 dominant grain direction and strength (catches diagonal streaks the row/column
-banding test cannot see), and internal motif repetition (stamped macro
-noise/masks show as a high repetition peak). The candidate is downsampled to the vanilla grid first,
-so a 32x32 tile and a 16x16 vanilla texture are compared apples-to-apples. The
+banding test cannot see), internal motif repetition (stamped macro
+noise/masks show as a high repetition peak), detail spread (clustering of local
+contrast — bunched detail stamps when tiled), distribution shape (Earth Mover's
+Distance between candidate and vanilla luminance/hue histograms), and
+alpha/cutout discipline (semi-alpha share — vanilla cutout alpha is binary —
+plus silhouette island structure and dark-fringe halo detection, all measured
+at the tile's native resolution since downsampling manufactures semi-alpha
+edges). The candidate is downsampled to the vanilla grid first,
+so a 32x32 tile and a 16x16 vanilla texture are compared apples-to-apples.
+Far-LOD material tiles (`assets/mclone/lod/...`) resolve a vanilla counterpart
+too — the `_lod` authoring suffix is stripped for the lookup — so the whole LOD
+family is measured against vanilla, not only the runtime-replacement textures;
+hue rows report n/a below the neutral-saturation floor (tint-driven grayscale
+like vanilla leaves has no meaningful hue direction to chase). The
 numbers are directional guidance, not a pass/fail gate. Scope it to one or a few
 textures with `--texture <name>`, or add `--json` for tool consumption.
 

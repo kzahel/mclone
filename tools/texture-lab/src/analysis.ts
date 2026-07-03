@@ -20,11 +20,24 @@ import type { RgbaImage } from "./png";
 // - grain:     dominant stroke direction and strength from gradients — catches
 //              the diagonal streaks the axis-aligned banding test cannot see
 // - scale:     is the variation large-scale or fine noise (does it survive shrink)
+// - spread:    is the detail spread across the tile or bunched in one corner
+//              (detail clustering — clustered detail stamps when tiled)
 // - repeats:   strongest internal self-similarity at a non-trivial offset —
 //              stamped motifs from masks/macro noise show up here
 // - defects:   sparkle pixels and one-way lighting gradients (authoring mistakes)
 // - blobs:     how big are the darkest/lightest clusters (catches oversized pits)
+// - alpha:     cutout coverage, binary-alpha discipline (semi-alpha share),
+//              silhouette structure (solid islands), and edge halo risk. These
+//              are measured on the NATIVE tile, not the shared grid, because the
+//              alpha-weighted area downsample manufactures semi-alpha edge
+//              pixels that the authored art does not have.
 // - seam:      does the tile wrap cleanly left-right and top-bottom
+//
+// Besides the scalar features, each texture also carries normalized luminance
+// and hue histograms. Those never appear as rows on their own; they exist so a
+// comparison can compute an Earth Mover's Distance between candidate and
+// reference distributions (see PAIR_ROWS) — one scalar for "same tone/hue
+// SHAPE", which mean/std/span all miss.
 
 export interface LuminanceStats {
   min: number;
@@ -42,11 +55,17 @@ export interface TextureFeatures {
   height: number;
   opaquePixels: number;
   transparentShare: number;
+  semiAlphaShare: number;
+  solidIslandCount: number;
+  solidIslandMaxShare: number;
+  edgeInteriorDelta: number;
   distinctColors: number;
   quantizedColors: number;
   top8ColorShare: number;
   distinctLevels: number;
   luminance: LuminanceStats;
+  luminanceHistogram: number[];
+  hueHistogram: number[];
   meanHueDeg: number;
   hueSpreadDeg: number;
   meanSaturation: number;
@@ -64,6 +83,7 @@ export interface TextureFeatures {
   midRetention: number;
   coarseRetention: number;
   localContrast: number;
+  detailClustering: number;
   colorRunLength: number;
   repetitionPeak: number;
   sparklePixels: number;
@@ -106,8 +126,25 @@ const REPETITION_MIN_SHIFT = 3;
 // isotropic 16x16 field lands near 0.055 by random walk alone), so the angle is
 // reported as n/a instead of a random direction.
 const GRAIN_ANGLE_MIN_DIRECTIONALITY = 0.1;
+// The vanilla cutout shaders discard fragments with alpha < 0.1, so this is the
+// render-visible silhouette threshold: at or above it a pixel draws at full
+// color (cutout does not blend), below it the pixel vanishes.
+const CUTOUT_SOLID_ALPHA = 26;
+// Below this mean saturation a texture is effectively neutral. The vanilla
+// split is bimodal: tint-driven grayscale (leaves 0.017, grass 0.005) and gray
+// rock (andesite 0.015, gravel 0.043) sit at 0.00-0.04, while genuinely colored
+// materials start at iron_ore's 0.082 (clay 0.10, sand 0.26, dirt 0.50). Hue
+// direction, spread, and hue-distribution distance report n/a below this: the
+// hue of a few faint pixels is noise, not a target to chase.
+const NEUTRAL_SATURATION = 0.05;
+// Block edge for the detail-clustering measure: local contrast is averaged per
+// 4x4 block and the spread across blocks says whether detail covers the tile or
+// bunches in one corner (which stamps when tiled).
+const CLUSTERING_BLOCK = 4;
+const LUMINANCE_HISTOGRAM_BINS = 32;
+const HUE_HISTOGRAM_BINS = 36;
 
-export function analyzeTexture(image: RgbaImage): TextureFeatures {
+export function analyzeTexture(image: RgbaImage, alphaSource: RgbaImage = image): TextureFeatures {
   const { width, height, data } = image;
   const pixelCount = width * height;
 
@@ -121,12 +158,12 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
   const quantIds = new Map<string, number>();
   // Per-pixel quantized-color id (-1 = transparent) for the run-length measure.
   const quantId = new Int32Array(pixelCount).fill(-1);
-  let transparent = 0;
   let sumSaturation = 0;
   let sumWarmCool = 0;
   let hueSin = 0;
   let hueCos = 0;
   let hueWeight = 0;
+  const hueHistogram = new Array<number>(HUE_HISTOGRAM_BINS).fill(0);
 
   for (let i = 0; i < pixelCount; i += 1) {
     const r = data[i * 4]!;
@@ -136,7 +173,6 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
     const l = luminance(r, g, b);
     grid[i] = l;
     if (a === 0) {
-      transparent += 1;
       continue;
     }
     opaqueAlpha[i] = 1;
@@ -158,10 +194,13 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
     sumSaturation += max > 0 ? chroma / max : 0;
     sumWarmCool += (r - b) / 255;
     if (chroma > 0) {
-      const hueRad = (hueDegrees(r, g, b, max, chroma) * Math.PI) / 180;
+      const hueDeg = hueDegrees(r, g, b, max, chroma);
+      const hueRad = (hueDeg * Math.PI) / 180;
       hueSin += chroma * Math.sin(hueRad);
       hueCos += chroma * Math.cos(hueRad);
       hueWeight += chroma;
+      const bin = Math.min(HUE_HISTOGRAM_BINS - 1, Math.floor((hueDeg / 360) * HUE_HISTOGRAM_BINS));
+      hueHistogram[bin] = hueHistogram[bin]! + chroma;
     }
   }
 
@@ -194,12 +233,24 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
 
   const bias = lightingBias(grid, width, height);
   const grain = grainDirection(grid, width, height);
+  const alpha = alphaFeatures(alphaSource);
+  const meanSaturation = opaqueCount > 0 ? sumSaturation / opaqueCount : 0;
+  const hueDefined = hueWeight > 0 && meanSaturation >= NEUTRAL_SATURATION;
+  if (hueWeight > 0) {
+    for (let bin = 0; bin < HUE_HISTOGRAM_BINS; bin += 1) {
+      hueHistogram[bin] = hueHistogram[bin]! / hueWeight;
+    }
+  }
 
   return {
     width,
     height,
     opaquePixels: opaqueCount,
-    transparentShare: pixelCount > 0 ? transparent / pixelCount : 0,
+    transparentShare: alpha.transparentShare,
+    semiAlphaShare: alpha.semiAlphaShare,
+    solidIslandCount: alpha.solidIslandCount,
+    solidIslandMaxShare: alpha.solidIslandMaxShare,
+    edgeInteriorDelta: alpha.edgeInteriorDelta,
     distinctColors: colorCounts.size,
     quantizedColors: quantizedCounts.size,
     top8ColorShare: topColorShare(quantizedCounts, opaqueCount),
@@ -214,9 +265,11 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
       p50: percentile(sorted, 50),
       p90: percentile(sorted, 90),
     },
-    meanHueDeg: hueWeight > 0 ? wrapDegrees((Math.atan2(hueSin, hueCos) * 180) / Math.PI) : Number.NaN,
-    hueSpreadDeg: hueWeight > 0 ? hueSpread(hueSin, hueCos, hueWeight) : Number.NaN,
-    meanSaturation: opaqueCount > 0 ? sumSaturation / opaqueCount : 0,
+    luminanceHistogram: luminanceHistogram(opaqueLum),
+    hueHistogram,
+    meanHueDeg: hueDefined ? wrapDegrees((Math.atan2(hueSin, hueCos) * 180) / Math.PI) : Number.NaN,
+    hueSpreadDeg: hueDefined ? hueSpread(hueSin, hueCos, hueWeight) : Number.NaN,
+    meanSaturation,
     warmCool: opaqueCount > 0 ? sumWarmCool / opaqueCount : 0,
     dominantColorShare: opaqueCount > 0 ? maxCount(colorCounts) / opaqueCount : 0,
     dominantBinShare: dominantLuminanceBinShare(opaqueLum),
@@ -231,6 +284,7 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
     midRetention: stdFull > 0 ? stdHalf / stdFull : 0,
     coarseRetention: stdFull > 0 ? stdQuarter / stdFull : 0,
     localContrast: localContrast(grid, width, height),
+    detailClustering: detailClustering(grid, width, height),
     colorRunLength: colorRunLength(quantId, width, height),
     repetitionPeak: repetitionPeak(grid, width, height),
     sparklePixels: sparkleCount(grid, opaqueAlpha, width, height),
@@ -405,6 +459,174 @@ function localContrast(grid: Float64Array, width: number, height: number): numbe
     }
   }
   return samples > 0 ? sum / samples : 0;
+}
+
+// Coefficient of variation of mean local contrast across CLUSTERING_BLOCK-sized
+// blocks. localContrast says how much grain there is overall; this says whether
+// it is spread across the tile (low) or bunched in one region (high). Bunched
+// detail reads fine on the single tile but stamps visibly when tiled. NaN when
+// the tile is smaller than two blocks (nothing to compare).
+function detailClustering(grid: Float64Array, width: number, height: number): number {
+  const blocksX = Math.ceil(width / CLUSTERING_BLOCK);
+  const blocksY = Math.ceil(height / CLUSTERING_BLOCK);
+  if (blocksX * blocksY < 2) {
+    return Number.NaN;
+  }
+  const sums = new Float64Array(blocksX * blocksY);
+  const counts = new Float64Array(blocksX * blocksY);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const here = grid[y * width + x]!;
+      const right = grid[y * width + ((x + 1) % width)]!;
+      const down = grid[((y + 1) % height) * width + x]!;
+      const block = Math.floor(y / CLUSTERING_BLOCK) * blocksX + Math.floor(x / CLUSTERING_BLOCK);
+      sums[block] = sums[block]! + (Math.abs(here - right) + Math.abs(here - down)) / 2;
+      counts[block] = counts[block]! + 1;
+    }
+  }
+  const blockMeans: number[] = [];
+  for (let block = 0; block < sums.length; block += 1) {
+    blockMeans.push(counts[block]! > 0 ? sums[block]! / counts[block]! : 0);
+  }
+  const mean = average(blockMeans);
+  if (mean <= 1e-9) {
+    return 0;
+  }
+  return std(blockMeans) / mean;
+}
+
+interface AlphaFeatures {
+  transparentShare: number;
+  semiAlphaShare: number;
+  solidIslandCount: number;
+  solidIslandMaxShare: number;
+  edgeInteriorDelta: number;
+}
+
+// Alpha/cutout measures, computed on the NATIVE tile (see analyzeTexture's
+// alphaSource): the alpha-weighted area downsample used to match resolutions
+// manufactures semi-alpha edge pixels, so measuring these on the shared grid
+// would flag clean binary-alpha art. "Solid" means at or above the vanilla
+// cutout discard threshold — the render-visible silhouette. Island stats and
+// the edge/interior split are NaN for a tile with no cutout (fully solid),
+// where a silhouette does not exist.
+function alphaFeatures(image: RgbaImage): AlphaFeatures {
+  const { width, height, data } = image;
+  const pixelCount = width * height;
+  const solid = new Float64Array(pixelCount);
+  let transparent = 0;
+  let semi = 0;
+  let solidCount = 0;
+  for (let i = 0; i < pixelCount; i += 1) {
+    const a = data[i * 4 + 3]!;
+    if (a === 0) {
+      transparent += 1;
+    } else if (a < 255) {
+      semi += 1;
+    }
+    if (a >= CUTOUT_SOLID_ALPHA) {
+      solid[i] = 1;
+      solidCount += 1;
+    }
+  }
+  if (solidCount === pixelCount || solidCount === 0) {
+    return {
+      transparentShare: pixelCount > 0 ? transparent / pixelCount : 0,
+      semiAlphaShare: pixelCount > 0 ? semi / pixelCount : 0,
+      solidIslandCount: Number.NaN,
+      solidIslandMaxShare: Number.NaN,
+      edgeInteriorDelta: Number.NaN,
+    };
+  }
+  const islands = blobStats(solid, width, height, (v) => v > 0.5);
+
+  // Silhouette edge = solid pixel with a non-solid 4-neighbour (torus, so a
+  // sprite surrounded by transparent margin behaves the same as a tiled leaf
+  // texture with wrapping holes). A strongly negative delta is the dark fringe
+  // left by compositing on black / anti-aliasing — the classic cutout halo.
+  let edgeSum = 0;
+  let edgeCount = 0;
+  let interiorSum = 0;
+  let interiorCount = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (solid[index] === 0) {
+        continue;
+      }
+      const l = luminance(data[index * 4]!, data[index * 4 + 1]!, data[index * 4 + 2]!);
+      const isEdge =
+        solid[y * width + ((x + 1) % width)] === 0 ||
+        solid[y * width + ((x - 1 + width) % width)] === 0 ||
+        solid[((y + 1) % height) * width + x] === 0 ||
+        solid[((y - 1 + height) % height) * width + x] === 0;
+      if (isEdge) {
+        edgeSum += l;
+        edgeCount += 1;
+      } else {
+        interiorSum += l;
+        interiorCount += 1;
+      }
+    }
+  }
+  return {
+    transparentShare: transparent / pixelCount,
+    semiAlphaShare: semi / pixelCount,
+    solidIslandCount: islands.count,
+    solidIslandMaxShare: solidCount > 0 ? islands.max / solidCount : Number.NaN,
+    edgeInteriorDelta:
+      edgeCount > 0 && interiorCount > 0 ? edgeSum / edgeCount - interiorSum / interiorCount : Number.NaN,
+  };
+}
+
+// Normalized luminance histogram over opaque pixels. Not reported as a row —
+// it feeds the Earth Mover's Distance in PAIR_ROWS.
+function luminanceHistogram(values: number[]): number[] {
+  const bins = new Array<number>(LUMINANCE_HISTOGRAM_BINS).fill(0);
+  if (values.length === 0) {
+    return bins;
+  }
+  for (const l of values) {
+    const bin = Math.min(LUMINANCE_HISTOGRAM_BINS - 1, Math.floor((l / 256) * LUMINANCE_HISTOGRAM_BINS));
+    bins[bin] = bins[bin]! + 1;
+  }
+  return bins.map((count) => count / values.length);
+}
+
+// Earth Mover's Distance between two normalized linear histograms, reported in
+// value units (0..255): the mean distance each unit of tone mass must travel to
+// turn one distribution into the other. Unlike mean/std deltas it also sees
+// shape differences — bimodal vs unimodal at the same mean scores > 0.
+function linearEmd(a: number[], b: number[], valueRange: number): number {
+  const bins = Math.max(a.length, b.length);
+  let cumulative = 0;
+  let total = 0;
+  for (let bin = 0; bin < bins; bin += 1) {
+    cumulative += (a[bin] ?? 0) - (b[bin] ?? 0);
+    total += Math.abs(cumulative);
+  }
+  return total * (valueRange / bins);
+}
+
+// Circular Earth Mover's Distance for hue histograms, in degrees. The optimal
+// transport on a circle shifts the linear cumulative-difference curve by its
+// median (a standard result), so mass may move either way around the wheel;
+// red-vs-magenta scores small even though they sit at opposite ends linearly.
+function circularEmd(a: number[], b: number[], periodDegrees: number): number {
+  const bins = Math.max(a.length, b.length);
+  const cumulative: number[] = [];
+  let running = 0;
+  for (let bin = 0; bin < bins; bin += 1) {
+    running += (a[bin] ?? 0) - (b[bin] ?? 0);
+    cumulative.push(running);
+  }
+  const sorted = [...cumulative].sort((x, y) => x - y);
+  const median = sorted[Math.floor(bins / 2)] ?? 0;
+  let total = 0;
+  for (const c of cumulative) {
+    total += Math.abs(c - median);
+  }
+  return total * (periodDegrees / bins);
 }
 
 // Pixel share covered by the TOP_COLOR_COVERAGE most common quantized colors.
@@ -715,6 +937,7 @@ const FEATURE_ROWS: FeatureRow[] = [
   { label: "mid retention", value: (f) => f.midRetention, digits: 2, scale: 0.08, hint: "half-scale structure; the mid layer" },
   { label: "coarse retention", value: (f) => f.coarseRetention, digits: 2, scale: 0.08, hint: "high = large-scale, low = fine noise" },
   { label: "local contrast", value: (f) => f.localContrast, digits: 1, scale: 4, hint: "grain busyness" },
+  { label: "detail clustering", value: (f) => f.detailClustering, digits: 2, scale: 0.2, hint: "high = detail bunched in one region" },
   { label: "color run length", value: (f) => f.colorRunLength, digits: 1, scale: 0.5, hint: "same-tone runs; near 1 = speckle field" },
   { label: "repetition peak", value: (f) => f.repetitionPeak, digits: 2, scale: 0.08, hint: "internal motif repeats; stamping is high" },
   { label: "sparkle pixels", value: (f) => f.sparklePixels, digits: 0, scale: 2, hint: "lone twinkly pixels; lower is safer" },
@@ -724,8 +947,46 @@ const FEATURE_ROWS: FeatureRow[] = [
   { label: "light blob max %", value: (f) => f.lightBlobMaxShare, digits: 2, scale: 0.02, percent: true, hint: "biggest light cluster (tile %)" },
   { label: "dark blob count", value: (f) => f.darkBlobCount, digits: 0, scale: 4, hint: "scattered pits vs one clump" },
   { label: "light blob count", value: (f) => f.lightBlobCount, digits: 0, scale: 4 },
+  { label: "transparent share", value: (f) => f.transparentShare, digits: 0, scale: 0.05, percent: true, hint: "cutout coverage; measured at native res" },
+  { label: "semi-alpha share", value: (f) => f.semiAlphaShare, digits: 1, scale: 0.01, percent: true, hint: "0<a<255 pixels; cutout wants ~0" },
+  { label: "solid islands", value: (f) => f.solidIslandCount, digits: 0, scale: 3, hint: "silhouette pieces; n/a if no cutout" },
+  { label: "island max %", value: (f) => f.solidIslandMaxShare, digits: 0, scale: 0.15, percent: true, hint: "biggest piece's share of solid pixels" },
+  { label: "edge vs interior lum", value: (f) => f.edgeInteriorDelta, digits: 1, scale: 8, hint: "silhouette fringe; strongly <0 = dark halo" },
   { label: "seam left-right", value: (f) => f.seamLeftRight, digits: 3, scale: 0.04, hint: "0 = perfect wrap" },
   { label: "seam top-bottom", value: (f) => f.seamTopBottom, digits: 3, scale: 0.04 },
+];
+
+// Rows that only exist as a candidate-vs-reference distance (no single-texture
+// value): Earth Mover's Distances between the stored histograms. The reference
+// value is definitionally 0 ("vanilla is zero away from itself"), so deviation
+// is always >= 0 and direction is always "higher". They join the gap ranking
+// and the compare-mode tournament exactly like scalar rows.
+interface PairRow {
+  label: string;
+  distance: (candidate: TextureFeatures, reference: TextureFeatures) => number;
+  digits?: number;
+  scale: number;
+  hint?: string;
+}
+
+const PAIR_ROWS: PairRow[] = [
+  {
+    label: "luminance emd",
+    distance: (c, r) => linearEmd(c.luminanceHistogram, r.luminanceHistogram, 256),
+    digits: 1,
+    scale: 8,
+    hint: "tone distribution shape distance; 0 = same",
+  },
+  {
+    label: "hue emd (deg)",
+    distance: (c, r) =>
+      c.meanSaturation >= NEUTRAL_SATURATION && r.meanSaturation >= NEUTRAL_SATURATION
+        ? circularEmd(c.hueHistogram, r.hueHistogram, 360)
+        : Number.NaN,
+    digits: 0,
+    scale: 10,
+    hint: "hue distribution distance; n/a if neutral",
+  },
 ];
 
 export interface FeatureGap {
@@ -789,6 +1050,14 @@ export function featureGaps(candidate: TextureFeatures, reference: TextureFeatur
       deviation: dev,
     });
   }
+  for (const row of PAIR_ROWS) {
+    const dist = row.distance(candidate, reference);
+    const dev = dist / row.scale;
+    if (!Number.isFinite(dev) || dev <= 1) {
+      continue;
+    }
+    gaps.push({ label: row.label, direction: "higher", candidate: dist, reference: 0, deviation: dev });
+  }
   gaps.sort((a, b) => Math.abs(b.deviation) - Math.abs(a.deviation));
   return gaps.slice(0, limit);
 }
@@ -824,6 +1093,16 @@ export function formatComparison(
       );
     } else {
       lines.push(`${row.label.padEnd(labelWidth)}  ${"—".padStart(10)}  ${candText.padStart(10)}  ${"—".padStart(3)}   ${row.hint ?? ""}`);
+    }
+  }
+  if (reference) {
+    for (const row of PAIR_ROWS) {
+      const dist = row.distance(candidate, reference);
+      const distText = Number.isNaN(dist) ? "n/a" : dist.toFixed(row.digits ?? 1);
+      const read = Number.isFinite(dist) ? readHint(dist / row.scale) : " ";
+      lines.push(
+        `${row.label.padEnd(labelWidth)}  ${"0".padStart(10)}  ${distText.padStart(10)}  ${read.padStart(3)}   ${row.hint ?? ""}`,
+      );
     }
   }
 
@@ -929,6 +1208,37 @@ export function compareCandidates(
     rows.push({ label: row.label, reference: row.value(reference), a: aValue, b: bValue, devA, devB, closer });
   }
 
+  // Distribution distances join the tournament like scalar rows: each
+  // candidate's value is its EMD to vanilla, and vanilla's own column is the
+  // definitional 0. Without a reference there is no distance to score, so the
+  // rows are omitted rather than shown as raw a-vs-b values.
+  if (reference) {
+    for (const row of PAIR_ROWS) {
+      const distA = row.distance(a, reference);
+      const distB = row.distance(b, reference);
+      const devA = distA / row.scale;
+      const devB = distB / row.scale;
+      if (!Number.isFinite(devA) || !Number.isFinite(devB)) {
+        rows.push({ label: row.label, reference: 0, a: distA, b: distB, devA, devB, closer: "n/a" });
+        continue;
+      }
+      totalDistanceA += devA;
+      totalDistanceB += devB;
+      let closer: Closer;
+      if (Math.abs(devA - devB) <= CLOSENESS_MARGIN) {
+        closer = "tie";
+        ties += 1;
+      } else if (devA < devB) {
+        closer = "a";
+        aWins += 1;
+      } else {
+        closer = "b";
+        bWins += 1;
+      }
+      rows.push({ label: row.label, reference: 0, a: distA, b: distB, devA, devB, closer });
+    }
+  }
+
   let winner: Closer = "tie";
   if (!reference) {
     winner = "n/a";
@@ -1012,7 +1322,7 @@ export function formatCandidateComparison(
   return lines.join("\n");
 }
 
-function formatValue(row: FeatureRow, value: number): string {
+function formatValue(row: { digits?: number | undefined; percent?: boolean | undefined }, value: number): string {
   if (Number.isNaN(value)) {
     return "n/a";
   }
@@ -1023,6 +1333,8 @@ function formatValue(row: FeatureRow, value: number): string {
 }
 
 function formatGapValue(label: string, value: number): string {
-  const row = FEATURE_ROWS.find((candidate) => candidate.label === label);
+  const row =
+    FEATURE_ROWS.find((candidate) => candidate.label === label) ??
+    PAIR_ROWS.find((candidate) => candidate.label === label);
   return row ? formatValue(row, value) : value.toFixed(1);
 }

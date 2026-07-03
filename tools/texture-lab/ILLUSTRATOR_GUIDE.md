@@ -217,15 +217,34 @@ saturation, warm-cool cast), **structure quality** (grain direction/strength
 for streaks — including the diagonals the row/col banding test misses; color
 run length for connected planes vs speckle; repetition peak for stamped
 motifs; top-8 color share for palette concentration; mid/coarse retention and
-value skew for scale and tone shape), and common **defects** (sparkle pixels,
-one-way lighting bias). Each report ends with a `biggest gaps vs vanilla`
-list: the features the candidate sits furthest from vanilla on, worst first.
+value skew for scale and tone shape; detail clustering for grain bunched in
+one region, which stamps when tiled), **distribution shape** (`luminance emd`
+and `hue emd`, the Earth Mover's Distance between candidate and vanilla
+histograms — one scalar for "same tone/hue shape" that catches, say, bimodal
+vs unimodal at the same mean, which mean/std/span all miss), **alpha/cutout
+discipline** (semi-alpha share, solid island count and share, edge-vs-interior
+fringe), and common **defects** (sparkle pixels, one-way lighting bias). Each
+report ends with a `biggest gaps vs vanilla` list: the features the candidate
+sits furthest from vanilla on, worst first.
 
-Two of those numbers map directly to recurring authoring failures. A `color run
-length` near 1 with low `grain strength` is the "flat field plus dots" texture
-that has not been structurally authored yet — vanilla lays its few tones out in
-connected planes and strokes. A high `repetition peak` is the stamped-motif
-artifact that otherwise only shows up when a human stares at the repeat panel.
+Several of those numbers map directly to recurring authoring failures. A
+`color run length` near 1 with low `grain strength` is the "flat field plus
+dots" texture that has not been structurally authored yet — vanilla lays its
+few tones out in connected planes and strokes. A high `repetition peak` is the
+stamped-motif artifact that otherwise only shows up when a human stares at the
+repeat panel. A nonzero `semi-alpha share` on a cutout texture is anti-aliased
+or blended alpha: vanilla cutout alpha is strictly binary, and semi-alpha
+pixels pop in and out at the alpha test and halo at distance. A strongly
+negative `edge vs interior lum` is the dark silhouette fringe left by
+compositing on black.
+
+Alpha features are measured on the **native tile**, not the shared grid — the
+alpha-weighted downsample manufactures semi-alpha edge pixels that the
+authored art does not have, and the analyzer must not punish clean binary
+alpha for that. `solid` means at or above the vanilla cutout discard threshold
+(alpha 0.1): the render-visible silhouette. Island stats describe silhouette
+structure — a grass plant is several thin blades (many islands, small max
+share); a blobby candidate is one fat island.
 
 The loop:
 
@@ -259,7 +278,9 @@ threshold. The goal is an informed decision, not a number you hit.
 Defects are different from taste. A broken seam (`seam left-right` /
 `seam top-bottom` well above 0), `sparkle pixels`, a one-way `lighting bias`,
 an oversized `dark/light blob max %`, a `repetition peak` well above the
-vanilla counterpart (stamped motif), or a strong `grain strength` on a tile
+vanilla counterpart (stamped motif), a nonzero `semi-alpha share` on a cutout
+texture, a strongly negative `edge vs interior lum` (dark halo fringe), or a
+strong `grain strength` on a tile
 that must be rotation-safe are usually authoring mistakes, not style choices.
 Treat those as must-fix-or-justify even when the aesthetic features look
 right. Hue, saturation, contrast, and scale are taste — keep those directional
