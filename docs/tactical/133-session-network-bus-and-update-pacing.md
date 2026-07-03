@@ -8,8 +8,9 @@ update pump landed; Slice 3A batched dirty intent and resident cache lookup
 landed; Slice 3B local integrated producer-side decoded update queue landed;
 Slice 3C local integrated chunk-interest unload hysteresis landed; Slice 3D
 resident cached-section dirty flags landed; Slice 3E local chunk-view churn
-validation landed; remote/web bus convergence and broader terrain coordinator
-lifecycle remain active
+validation landed; Slice 3F Quest-controlled chunk-view churn validation
+landed and reproduced the unload client-apply tail; remote/web bus convergence
+and broader terrain coordinator lifecycle remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -103,6 +104,10 @@ ordered queue behind a common policy boundary.
   `SendOnly` and switched pose sync to it.
 - `LocalSingleViewSceneRuntime::set_chunk_view` sends the view command only;
   resulting snapshots/unloads arrive through the runtime pump.
+- The local `NativeSingleViewSessionRuntime::set_chunk_view` wrapper now
+  preserves that deferred-update local path instead of routing through the
+  default immediate-drain gameplay helper. Remote dedicated still keeps current
+  request/response behavior.
 - `LocalSingleViewSceneRuntime::poll` applies updates in strict receive order
   under the default elapsed-time budget, while startup and `poll_until_idle`
   use an explicit unlimited pump.
@@ -550,17 +555,78 @@ Validation (Slice 3E):
   `unload_apply_ms=0.125`, `unload_dirty_ms=0.073`,
   `unload_client_ms=0.051`, `max_queue_depth_before_poll=11`.
 
+### Slice 3F - Quest-Controlled Chunk-View Churn Lane
+
+Goal: reproduce or clear the intermittent Quest unload/update-apply tail under a
+controlled chunk-interest workload, without headset locomotion noise.
+
+- [x] Fix the local `NativeSingleViewSessionRuntime::set_chunk_view` wrapper so
+  XR/local session interest changes use the local send-only chunk-view path and
+  leave resulting updates for the normal runtime pump.
+- [x] Add Android XR startup/probe flags:
+  `--perf-chunk-view-churn`, `--perf-churn-interval-seconds`, and
+  `--perf-churn-offset-chunks`.
+- [x] Add shared XR scene automation that keeps input stationary, then toggles
+  the runtime interest center during the timed sample.
+- [x] Add Quest validator support and marker checks for
+  `mode=chunk-view-churn` plus `MCLONE_ANDROID_XR_CHUNK_VIEW_CHURN`.
+- [x] Validate on headset with the current `2 / 16 / 64` measurement lane.
+
+Recorded Slice 3F result:
+
+- Quest chunk-view churn lane passed:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-churn-summary.txt --log /tmp/mclone-quest-openxr-churn-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+- The app settled first, then alternated chunk interest between `(0, 0)` and
+  `(16, 0)` every 3 seconds:
+  `MCLONE_ANDROID_XR_PERF_SETTLED mode=chunk-view-churn
+  settle_seconds=35.365`, followed by repeated
+  `MCLONE_ANDROID_XR_CHUNK_VIEW_CHURN` markers.
+- Frame result:
+  `sample_seconds=45.011`, `submitted_fps=70.36`, `runtime_fps=70.36`,
+  `app_work_avg_ms=8.048`, `app_work_p95_ms=16.164`,
+  `app_work_p99_ms=18.531`, `app_over_period_pct=12.2`,
+  `frame_max_ms=41.432`.
+- Update result:
+  `max_runtime_poll_ms=20.654`, `apply_updates_ms=20.605`,
+  `dirty_mark_ms=1.880`, `client_apply_ms=19.323`, `updates=254`,
+  `unload_updates=204`, `server_update_queue_depth=418`,
+  `server_update_queue_bytes=11151295`,
+  `server_update_oldest_applied_age_ms=124.335`.
+- Specific update attribution:
+  `unload_ms=20.605`, `unload_dirty_ms=1.711`,
+  `unload_client_ms=19.323`, with no mixed-update batches.
+- Terrain pipeline pressure was also visible:
+  `upload_limited=true`, `accept_limited=true`, `backpressured=true`,
+  `deferred_sections=3328`, `ready_sections=2432`,
+  `queued_upload_removed_sections=1920`.
+
+Validation (Slice 3F):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime native_single_view_session_runtime_local_interest_change_defers_updates_until_poll -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene --lib`
+  passed.
+- `cargo ndk -t arm64-v8a --platform 28 check --package mclone-android-xr-client --lib`
+  passed.
+- `bash -n android-xr/validate-quest-openxr.sh` passed.
+- Quest validation command above passed and wrote:
+  `/tmp/mclone-quest-openxr-churn-summary.txt` and
+  `/tmp/mclone-quest-openxr-churn-logcat.txt`.
+
 Slice 3 conclusion: the local integrated update pump now follows the intended
 thin-apply shape for resident dirty marking: producer-side decode, strict
 receive-order application, resident flag flips, and bounded compile/upload
 pull-work. Remaining frame misses are no longer explained by hidden command
 drain, render-thread decode, full-cache dirty scans, or resident dirty-set
 insertion. The local deterministic churn test did not reproduce a multi-ms
-client unload tail on desktop/shared runtime, so do not change pump policy from
-that path alone. The next local Quest work should move to a Quest-controlled
-chunk-view churn lane under the terrain coordinator/render cost tracks (`128`,
-`119`, `117`), while this tactical's remaining bus work is remote TCP and web
-convergence.
+client unload tail on desktop/shared runtime, but the Quest-controlled churn
+lane did reproduce it: the worst update-pump frame was dominated by chunk
+unload client apply. The next local Quest work should target update-batch
+granularity and `ClientRuntime` unload bookkeeping before changing broad pump
+policy. Keep receive order; any additional divergence should stop between
+ordered update records or make oversized lifecycle batches splittable instead
+of reordering them. This tactical's remaining bus work is still remote TCP and
+web convergence.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
@@ -625,6 +691,11 @@ another doc, explicitly decide where these remaining valuable items live:
 - Exact oldest pending update age: current diagnostics expose applied update
   age and queued bytes/depth, but the mpsc-backed runner still cannot peek the
   oldest pending update without a transport-side metadata queue.
+- Oversized lifecycle/update batches: Quest churn reproduced a single
+  update-pump frame with `204` unload updates and `19.323 ms` unload
+  client-apply. Before closing this tactical, either split/budget those ordered
+  lifecycle records or explicitly move the work to the terrain/client-runtime
+  coordinator track.
 - Remote TCP session actor: native remote still needs a real inbound update
   bus and producer-side decode so `SendOnly` works outside local integrated
   play.
@@ -636,7 +707,7 @@ another doc, explicitly decide where these remaining valuable items live:
 
 ## Measurement Plan
 
-Primary lane:
+Product movement lane:
 
 ```bash
 node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
@@ -647,6 +718,29 @@ node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
   --perf-seconds 45 \
   --perf-settled-orbit \
   --perf-orbit-speed 4.3 \
+  --perf-metrics \
+  --wait-seconds 270 \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 7 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Controlled unload/update-pump repro lane:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
   --perf-metrics \
   --wait-seconds 270 \
   --view-pose 0,120,-96,180 \

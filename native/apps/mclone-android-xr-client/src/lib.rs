@@ -77,6 +77,8 @@ mod android {
     const ANDROID_XR_SESSION_SMOKE_SEED: i64 = 246_813_579;
     const ANDROID_XR_PERF_FALLBACK_TARGET_HZ: f64 = 72.0;
     const ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND: f64 = 4.3;
+    const ANDROID_XR_PERF_DEFAULT_CHURN_INTERVAL_SECONDS: f64 = 3.0;
+    const ANDROID_XR_PERF_DEFAULT_CHURN_OFFSET_CHUNKS: i32 = 16;
     const ANDROID_XR_PERF_SETTLE_MIN_SECONDS: f64 = 5.0;
     const ANDROID_XR_PERF_SETTLE_QUIET_FRAMES: u64 = 45;
     const ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES: u64 = 120;
@@ -236,6 +238,7 @@ mod android {
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
         perf_settled_orbit: Option<AndroidXrPerfOrbit>,
+        perf_chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
@@ -267,6 +270,7 @@ mod android {
                 perf_seconds: None,
                 perf_flight: None,
                 perf_settled_orbit: None,
+                perf_chunk_view_churn: None,
                 perf_settled_stationary: false,
                 perf_frozen_render: false,
                 perf_metrics: false,
@@ -381,6 +385,21 @@ mod android {
         speed_blocks_per_second: f64,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct AndroidXrPerfChunkViewChurn {
+        interval_seconds: f64,
+        offset_chunks: i32,
+    }
+
+    impl Default for AndroidXrPerfChunkViewChurn {
+        fn default() -> Self {
+            Self {
+                interval_seconds: ANDROID_XR_PERF_DEFAULT_CHURN_INTERVAL_SECONDS,
+                offset_chunks: ANDROID_XR_PERF_DEFAULT_CHURN_OFFSET_CHUNKS,
+            }
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum AndroidXrSessionSmoke {
         NewWorld,
@@ -478,6 +497,32 @@ mod android {
                             speed,
                         )?,
                     });
+                }
+                "--perf-chunk-view-churn" => {
+                    options
+                        .perf_chunk_view_churn
+                        .get_or_insert_with(AndroidXrPerfChunkViewChurn::default);
+                }
+                "--perf-churn-interval-seconds" => {
+                    let interval_seconds =
+                        parse_next::<f64>(&mut argv, "--perf-churn-interval-seconds")?;
+                    let churn = options
+                        .perf_chunk_view_churn
+                        .get_or_insert_with(AndroidXrPerfChunkViewChurn::default);
+                    churn.interval_seconds = validate_perf_churn_interval_seconds(
+                        "--perf-churn-interval-seconds",
+                        interval_seconds,
+                    )?;
+                }
+                "--perf-churn-offset-chunks" => {
+                    let offset_chunks = parse_next::<i32>(&mut argv, "--perf-churn-offset-chunks")?;
+                    let churn = options
+                        .perf_chunk_view_churn
+                        .get_or_insert_with(AndroidXrPerfChunkViewChurn::default);
+                    churn.offset_chunks = validate_perf_churn_offset_chunks(
+                        "--perf-churn-offset-chunks",
+                        offset_chunks,
+                    )?;
                 }
                 "--perf-settled-stationary" => {
                     options.perf_settled_stationary = true;
@@ -581,6 +626,9 @@ mod android {
         if options.perf_settled_orbit.is_some() && options.perf_seconds.is_none() {
             bail!("--perf-settled-orbit requires --perf-seconds");
         }
+        if options.perf_chunk_view_churn.is_some() && options.perf_seconds.is_none() {
+            bail!("--perf-chunk-view-churn requires --perf-seconds");
+        }
         if options.perf_settled_stationary && options.perf_seconds.is_none() {
             bail!("--perf-settled-stationary requires --perf-seconds");
         }
@@ -593,11 +641,23 @@ mod android {
         if options.perf_settled_orbit.is_some() && options.perf_settled_stationary {
             bail!("--perf-settled-orbit cannot be combined with --perf-settled-stationary");
         }
+        if options.perf_chunk_view_churn.is_some() && options.perf_flight.is_some() {
+            bail!("--perf-chunk-view-churn cannot be combined with --perf-flight");
+        }
+        if options.perf_chunk_view_churn.is_some() && options.perf_settled_orbit.is_some() {
+            bail!("--perf-chunk-view-churn cannot be combined with --perf-settled-orbit");
+        }
+        if options.perf_chunk_view_churn.is_some() && options.perf_settled_stationary {
+            bail!("--perf-chunk-view-churn cannot be combined with --perf-settled-stationary");
+        }
         if options.perf_frozen_render && options.perf_seconds.is_none() {
             bail!("--perf-frozen-render requires --perf-seconds");
         }
         if options.perf_frozen_render && options.perf_flight.is_some() {
             bail!("--perf-frozen-render cannot be combined with --perf-flight");
+        }
+        if options.perf_frozen_render && options.perf_chunk_view_churn.is_some() {
+            bail!("--perf-frozen-render cannot be combined with --perf-chunk-view-churn");
         }
         if options.multiview_proof && options.terrain_multiview_proof {
             bail!("--multiview-proof cannot be combined with --terrain-multiview-proof");
@@ -682,6 +742,7 @@ mod android {
             if options.perf_seconds.is_some()
                 || options.perf_flight.is_some()
                 || options.perf_settled_orbit.is_some()
+                || options.perf_chunk_view_churn.is_some()
                 || options.perf_settled_stationary
                 || options.perf_frozen_render
                 || options.perf_metrics
@@ -733,6 +794,20 @@ mod android {
             bail!("{flag} must be a finite positive number");
         }
         Ok(speed_blocks_per_second)
+    }
+
+    fn validate_perf_churn_interval_seconds(flag: &str, interval_seconds: f64) -> Result<f64> {
+        if !interval_seconds.is_finite() || interval_seconds <= 0.0 {
+            bail!("{flag} must be a finite positive number");
+        }
+        Ok(interval_seconds)
+    }
+
+    fn validate_perf_churn_offset_chunks(flag: &str, offset_chunks: i32) -> Result<i32> {
+        if offset_chunks <= 0 {
+            bail!("{flag} must be greater than zero");
+        }
+        Ok(offset_chunks)
     }
 
     fn validate_display_refresh_rate(rate: f32) -> Result<f32> {
@@ -978,6 +1053,15 @@ mod android {
         } else {
             log::info!("Android XR performance settled orbit: <none>");
         }
+        if let Some(churn) = startup_options.perf_chunk_view_churn {
+            log::info!(
+                "Android XR performance chunk-view churn: interval={:.3}s offset_chunks={}",
+                churn.interval_seconds,
+                churn.offset_chunks
+            );
+        } else {
+            log::info!("Android XR performance chunk-view churn: <none>");
+        }
         log::info!(
             "Android XR performance settled stationary: {}",
             startup_options.perf_settled_stationary
@@ -1086,6 +1170,7 @@ mod android {
             startup_options.perf_seconds,
             startup_options.perf_flight,
             startup_options.perf_settled_orbit,
+            startup_options.perf_chunk_view_churn,
             startup_options.perf_settled_stationary,
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
@@ -1121,6 +1206,7 @@ mod android {
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
         perf_settled_orbit: Option<AndroidXrPerfOrbit>,
+        perf_chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
@@ -1556,9 +1642,11 @@ mod android {
                 perf_seconds,
                 perf_flight,
                 perf_settled_orbit,
+                perf_chunk_view_churn,
                 perf_settled_stationary,
                 perf_frozen_render,
                 perf_metrics,
+                [scene_options.chunk_x, scene_options.chunk_z],
                 startup_view_pose,
                 scene_options.render_distance,
                 scene_options.render_compile_worker_count,
@@ -1669,9 +1757,11 @@ mod android {
             perf_seconds,
             perf_flight,
             perf_settled_orbit,
+            perf_chunk_view_churn,
             perf_settled_stationary,
             perf_frozen_render,
             perf_metrics,
+            [scene_options.chunk_x, scene_options.chunk_z],
             startup_view_pose,
             scene_options.render_distance,
             scene_options.render_compile_worker_count,
@@ -2855,9 +2945,11 @@ mod android {
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
         perf_settled_orbit: Option<AndroidXrPerfOrbit>,
+        perf_chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        startup_center: [i32; 2],
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_distance: u32,
         render_compile_worker_count: usize,
@@ -2878,8 +2970,10 @@ mod android {
             perf_seconds,
             perf_flight,
             perf_settled_orbit,
+            perf_chunk_view_churn,
             perf_settled_stationary,
             perf_frozen_render,
+            startup_center,
             render_distance,
             render_compile_worker_count,
             skip_actors,
@@ -3258,6 +3352,10 @@ mod android {
         Stationary {
             frozen_render: bool,
         },
+        ChunkViewChurn {
+            center_x: i32,
+            center_z: i32,
+        },
     }
 
     #[derive(Clone, Copy, Debug, Default)]
@@ -3432,8 +3530,10 @@ mod android {
         requested_seconds: Option<u64>,
         flight: Option<AndroidXrPerfFlight>,
         settled_orbit: Option<AndroidXrPerfOrbit>,
+        chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         settled_stationary: bool,
         frozen_render: bool,
+        chunk_view_churn_base_center: [i32; 2],
         render_distance: u32,
         render_compile_worker_count: usize,
         skip_actors: bool,
@@ -3458,8 +3558,10 @@ mod android {
             requested_seconds: Option<u64>,
             flight: Option<AndroidXrPerfFlight>,
             settled_orbit: Option<AndroidXrPerfOrbit>,
+            chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
             settled_stationary: bool,
             frozen_render: bool,
+            chunk_view_churn_base_center: [i32; 2],
             render_distance: u32,
             render_compile_worker_count: usize,
             skip_actors: bool,
@@ -3481,8 +3583,10 @@ mod android {
                 requested_seconds,
                 flight,
                 settled_orbit,
+                chunk_view_churn,
                 settled_stationary,
                 frozen_render,
+                chunk_view_churn_base_center,
                 render_distance,
                 render_compile_worker_count,
                 skip_actors,
@@ -3504,13 +3608,20 @@ mod android {
         }
 
         fn automation(&self) -> Option<AndroidXrPerfAutomation> {
-            let needs_settle = self.settled_stationary || self.settled_orbit.is_some();
+            let needs_settle = self.settled_stationary
+                || self.settled_orbit.is_some()
+                || self.chunk_view_churn.is_some();
             if needs_settle && self.requested_seconds.is_some() && !self.completed {
                 if let (Some(active), Some(orbit)) = (self.active.as_ref(), self.settled_orbit) {
                     return Some(AndroidXrPerfAutomation::Orbit {
                         speed_blocks_per_second: orbit.speed_blocks_per_second,
                         elapsed_seconds: active.started.elapsed().as_secs_f64(),
                     });
+                }
+                if let (Some(active), Some(churn)) = (self.active.as_ref(), self.chunk_view_churn) {
+                    let [center_x, center_z] =
+                        self.chunk_view_churn_center(churn, active.started.elapsed());
+                    return Some(AndroidXrPerfAutomation::ChunkViewChurn { center_x, center_z });
                 }
                 return Some(AndroidXrPerfAutomation::Stationary {
                     frozen_render: self.frozen_render && self.active.is_some(),
@@ -3525,6 +3636,23 @@ mod android {
             }
         }
 
+        fn chunk_view_churn_center(
+            &self,
+            churn: AndroidXrPerfChunkViewChurn,
+            elapsed: Duration,
+        ) -> [i32; 2] {
+            let step = (elapsed.as_secs_f64() / churn.interval_seconds).floor() as i64;
+            let offset_x = if step % 2 == 0 {
+                0
+            } else {
+                churn.offset_chunks
+            };
+            [
+                self.chunk_view_churn_base_center[0].saturating_add(offset_x),
+                self.chunk_view_churn_base_center[1],
+            ]
+        }
+
         fn maybe_start_after_rendered_frame(
             &mut self,
             frame_stats: XrFrameStats,
@@ -3536,10 +3664,13 @@ mod android {
             if self.completed || self.active.is_some() {
                 return false;
             }
-            let needs_settle = self.settled_stationary || self.settled_orbit.is_some();
+            let needs_settle = self.settled_stationary
+                || self.settled_orbit.is_some()
+                || self.chunk_view_churn.is_some();
             let mode = android_xr_perf_mode_label(
                 self.flight,
                 self.settled_orbit,
+                self.chunk_view_churn,
                 self.settled_stationary,
                 self.frozen_render,
             );
@@ -3554,6 +3685,11 @@ mod android {
                         .map(|orbit| orbit.speed_blocks_per_second)
                 })
                 .unwrap_or(0.0);
+            let chunk_view_churn_interval_seconds = self
+                .chunk_view_churn
+                .map_or(0.0, |churn| churn.interval_seconds);
+            let chunk_view_churn_offset_chunks =
+                self.chunk_view_churn.map_or(0, |churn| churn.offset_chunks);
             let settle_seconds = self
                 .settle_started
                 .map_or(0.0, |started| started.elapsed().as_secs_f64());
@@ -3573,7 +3709,7 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_path.label(),
@@ -3584,6 +3720,8 @@ mod android {
                 self.render_distance,
                 self.render_compile_worker_count,
                 flight_speed,
+                chunk_view_churn_interval_seconds,
+                chunk_view_churn_offset_chunks,
                 settle_seconds,
                 ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
                 self.settle_frames,
@@ -3647,6 +3785,7 @@ mod android {
                         self.settled_orbit
                             .map(|orbit| orbit.speed_blocks_per_second)
                     }),
+                chunk_view_churn: self.chunk_view_churn,
                 settle_seconds,
                 settle_frames: self.settle_frames,
                 settle_quiet_frames: self.settle_quiet_frames,
@@ -3774,6 +3913,7 @@ mod android {
         xr_eye_size: [u32; 2],
         mode_label: &'static str,
         flight_speed_blocks_per_second: Option<f64>,
+        chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         settle_seconds: f64,
         settle_frames: u64,
         settle_quiet_frames: u64,
@@ -3926,6 +4066,11 @@ mod android {
                 0.0
             };
             let flight_speed = self.flight_speed_blocks_per_second.unwrap_or(0.0);
+            let chunk_view_churn_interval_seconds = self
+                .chunk_view_churn
+                .map_or(0.0, |churn| churn.interval_seconds);
+            let chunk_view_churn_offset_chunks =
+                self.chunk_view_churn.map_or(0, |churn| churn.offset_chunks);
             let flight_distance_blocks =
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
@@ -3938,7 +4083,7 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
@@ -3953,6 +4098,8 @@ mod android {
                 self.render_distance,
                 self.render_compile_worker_count,
                 flight_speed,
+                chunk_view_churn_interval_seconds,
+                chunk_view_churn_offset_chunks,
                 flight_distance_blocks,
                 self.settle_seconds,
                 ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -5469,11 +5616,14 @@ mod android {
     fn android_xr_perf_mode_label(
         flight: Option<AndroidXrPerfFlight>,
         settled_orbit: Option<AndroidXrPerfOrbit>,
+        chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         settled_stationary: bool,
         frozen_render: bool,
     ) -> &'static str {
         if frozen_render {
             "stationary-frozen-render"
+        } else if chunk_view_churn.is_some() {
+            "chunk-view-churn"
         } else if settled_orbit.is_some() {
             "settled-orbit"
         } else if settled_stationary {
@@ -5610,6 +5760,9 @@ mod android {
                 frozen_render = freeze_runtime;
                 terrain.apply_automated_stationary_input()
             }
+            Some(AndroidXrPerfAutomation::ChunkViewChurn { center_x, center_z }) => terrain
+                .apply_automated_chunk_view_churn(center_x, center_z)
+                .context("apply Android XR automated chunk-view churn")?,
             None => terrain
                 .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
                 .context("apply Android XR controller locomotion")?,
@@ -5732,6 +5885,9 @@ mod android {
                 frozen_render = freeze_runtime;
                 terrain.apply_automated_stationary_input()
             }
+            Some(AndroidXrPerfAutomation::ChunkViewChurn { center_x, center_z }) => terrain
+                .apply_automated_chunk_view_churn(center_x, center_z)
+                .context("apply Android XR automated chunk-view churn")?,
             None => terrain
                 .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
                 .context("apply Android XR controller locomotion")?,

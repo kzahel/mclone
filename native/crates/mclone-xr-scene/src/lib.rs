@@ -2826,6 +2826,34 @@ where
         timing
     }
 
+    pub fn apply_automated_chunk_view_churn(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+    ) -> Result<XrLocomotionTiming> {
+        let mut timing = self.apply_automated_stationary_input();
+        if self.local_startup.is_some() {
+            return Ok(timing);
+        }
+        let Some(runtime) = self.runtime.as_mut() else {
+            return Ok(timing);
+        };
+        let center = ChunkPos::new(center_x, center_z);
+        let interest_start = Instant::now();
+        let changed = runtime
+            .set_interest_center(center)
+            .context("set XR automated chunk-view churn interest center")?;
+        timing.commit_interest_ms = elapsed_ms(interest_start.elapsed());
+        if changed {
+            log::info!(
+                "MCLONE_ANDROID_XR_CHUNK_VIEW_CHURN center_x={} center_z={} changed=true",
+                center.x,
+                center.z
+            );
+        }
+        Ok(timing)
+    }
+
     pub fn frame_summary(&self) -> XrTerrainFrameSummary {
         self.frame_summary_with_timing(
             XrTerrainFrameTiming::default(),

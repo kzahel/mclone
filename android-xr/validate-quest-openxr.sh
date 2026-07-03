@@ -44,6 +44,9 @@ PERF_FLIGHT="${MCLONE_ANDROID_XR_PERF_FLIGHT:-0}"
 PERF_FLIGHT_SPEED="${MCLONE_ANDROID_XR_PERF_FLIGHT_SPEED:-}"
 PERF_SETTLED_ORBIT="${MCLONE_ANDROID_XR_PERF_SETTLED_ORBIT:-0}"
 PERF_ORBIT_SPEED="${MCLONE_ANDROID_XR_PERF_ORBIT_SPEED:-}"
+PERF_CHUNK_VIEW_CHURN="${MCLONE_ANDROID_XR_PERF_CHUNK_VIEW_CHURN:-0}"
+PERF_CHURN_INTERVAL_SECONDS="${MCLONE_ANDROID_XR_PERF_CHURN_INTERVAL_SECONDS:-}"
+PERF_CHURN_OFFSET_CHUNKS="${MCLONE_ANDROID_XR_PERF_CHURN_OFFSET_CHUNKS:-}"
 PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
 PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
 PERF_METRICS="${MCLONE_ANDROID_XR_PERF_METRICS:-0}"
@@ -65,6 +68,9 @@ XR_RENDER_SCALE="${MCLONE_ANDROID_XR_RENDER_SCALE:-}"
 XR_DISPLAY_REFRESH_RATE="${MCLONE_ANDROID_XR_DISPLAY_REFRESH_RATE:-}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
+fi
+if [[ -n "$PERF_CHURN_INTERVAL_SECONDS" || -n "$PERF_CHURN_OFFSET_CHUNKS" ]]; then
+    PERF_CHUNK_VIEW_CHURN=1
 fi
 
 usage() {
@@ -148,6 +154,16 @@ Options:
   --perf-orbit-speed N
                      Orbit speed in blocks/second. Implies
                      --perf-settled-orbit. Default: 4.3.
+  --perf-chunk-view-churn
+                     Start the timed sample only after the settled gate, then
+                     alternate the chunk interest center without headset
+                     locomotion to exercise client apply/update pacing.
+  --perf-churn-interval-seconds N
+                     Seconds between chunk-interest toggles. Implies
+                     --perf-chunk-view-churn. Default: 3.
+  --perf-churn-offset-chunks N
+                     Positive X chunk offset for the churn target. Implies
+                     --perf-chunk-view-churn. Default: 16.
   --perf-settled-stationary
                      During --perf-seconds, disable locomotion and start the
                      timed sample only after terrain generation, render
@@ -544,6 +560,22 @@ while [[ $# -gt 0 ]]; do
             PERF_ORBIT_SPEED="$2"
             shift 2
             ;;
+        --perf-chunk-view-churn)
+            PERF_CHUNK_VIEW_CHURN=1
+            shift
+            ;;
+        --perf-churn-interval-seconds)
+            require_arg "$1" "${2:-}"
+            PERF_CHUNK_VIEW_CHURN=1
+            PERF_CHURN_INTERVAL_SECONDS="$2"
+            shift 2
+            ;;
+        --perf-churn-offset-chunks)
+            require_arg "$1" "${2:-}"
+            PERF_CHUNK_VIEW_CHURN=1
+            PERF_CHURN_OFFSET_CHUNKS="$2"
+            shift 2
+            ;;
         --perf-settled-stationary)
             PERF_SETTLED_STATIONARY=1
             shift
@@ -690,7 +722,7 @@ if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--multiview-proof cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_CHUNK_VIEW_CHURN" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--multiview-proof cannot be combined with performance probes"
     fi
 fi
@@ -704,7 +736,7 @@ if [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--terrain-multiview-proof cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_CHUNK_VIEW_CHURN" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--terrain-multiview-proof cannot be combined with performance probes"
     fi
 fi
@@ -721,7 +753,7 @@ if [[ "$TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--terrain-multiview-perf cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_CHUNK_VIEW_CHURN" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--terrain-multiview-perf cannot be combined with frame performance probes"
     fi
 fi
@@ -738,7 +770,7 @@ if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--sky-terrain-multiview-perf cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_CHUNK_VIEW_CHURN" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--sky-terrain-multiview-perf cannot be combined with frame performance probes"
     fi
 fi
@@ -752,7 +784,7 @@ if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--sky-terrain-actors-multiview-perf cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_CHUNK_VIEW_CHURN" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--sky-terrain-actors-multiview-perf cannot be combined with frame performance probes"
     fi
 fi
@@ -813,7 +845,7 @@ if [[ -n "$PERF_SECONDS" ]]; then
         mclone_die "--perf-seconds cannot be combined with --session-smoke in the first perf probe"
     fi
     if [[ -z "$WAIT_SECONDS_EXPLICIT" ]]; then
-        if [[ "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_SETTLED_ORBIT" == "1" ]]; then
+        if [[ "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_CHUNK_VIEW_CHURN" == "1" ]]; then
             WAIT_SECONDS=$((10#$PERF_SECONDS + 180))
         else
             WAIT_SECONDS=$((10#$PERF_SECONDS + 30))
@@ -825,6 +857,9 @@ if [[ "$PERF_FLIGHT" == "1" && -z "$PERF_SECONDS" ]]; then
 fi
 if [[ "$PERF_SETTLED_ORBIT" == "1" && -z "$PERF_SECONDS" ]]; then
     mclone_die "--perf-settled-orbit requires --perf-seconds"
+fi
+if [[ "$PERF_CHUNK_VIEW_CHURN" == "1" && -z "$PERF_SECONDS" ]]; then
+    mclone_die "--perf-chunk-view-churn requires --perf-seconds"
 fi
 if [[ "$PERF_SETTLED_STATIONARY" == "1" && -z "$PERF_SECONDS" ]]; then
     mclone_die "--perf-settled-stationary requires --perf-seconds"
@@ -838,11 +873,23 @@ fi
 if [[ "$PERF_SETTLED_ORBIT" == "1" && "$PERF_SETTLED_STATIONARY" == "1" ]]; then
     mclone_die "--perf-settled-orbit cannot be combined with --perf-settled-stationary"
 fi
+if [[ "$PERF_CHUNK_VIEW_CHURN" == "1" && "$PERF_FLIGHT" == "1" ]]; then
+    mclone_die "--perf-chunk-view-churn cannot be combined with --perf-flight"
+fi
+if [[ "$PERF_CHUNK_VIEW_CHURN" == "1" && "$PERF_SETTLED_ORBIT" == "1" ]]; then
+    mclone_die "--perf-chunk-view-churn cannot be combined with --perf-settled-orbit"
+fi
+if [[ "$PERF_CHUNK_VIEW_CHURN" == "1" && "$PERF_SETTLED_STATIONARY" == "1" ]]; then
+    mclone_die "--perf-chunk-view-churn cannot be combined with --perf-settled-stationary"
+fi
 if [[ "$PERF_FROZEN_RENDER" == "1" && -z "$PERF_SECONDS" ]]; then
     mclone_die "--perf-frozen-render requires --perf-seconds"
 fi
 if [[ "$PERF_FROZEN_RENDER" == "1" && "$PERF_FLIGHT" == "1" ]]; then
     mclone_die "--perf-frozen-render cannot be combined with --perf-flight"
+fi
+if [[ "$PERF_FROZEN_RENDER" == "1" && "$PERF_CHUNK_VIEW_CHURN" == "1" ]]; then
+    mclone_die "--perf-frozen-render cannot be combined with --perf-chunk-view-churn"
 fi
 if [[ "$PERF_FROZEN_RENDER" == "1" && "$START_VIEW_POSE" == "0" ]]; then
     mclone_die "--perf-frozen-render requires --view-pose X,Y,Z,YAW_DEGREES"
@@ -852,6 +899,12 @@ if [[ -n "$PERF_FLIGHT_SPEED" ]]; then
 fi
 if [[ -n "$PERF_ORBIT_SPEED" ]]; then
     validate_positive_number "--perf-orbit-speed" "$PERF_ORBIT_SPEED"
+fi
+if [[ -n "$PERF_CHURN_INTERVAL_SECONDS" ]]; then
+    validate_positive_number "--perf-churn-interval-seconds" "$PERF_CHURN_INTERVAL_SECONDS"
+fi
+if [[ -n "$PERF_CHURN_OFFSET_CHUNKS" ]]; then
+    validate_positive_integer "--perf-churn-offset-chunks" "$PERF_CHURN_OFFSET_CHUNKS"
 fi
 
 cd "$REPO_ROOT"
@@ -923,6 +976,15 @@ if [[ "$PERF_SETTLED_ORBIT" == "1" ]]; then
     STARTUP_ARGV+=(--perf-settled-orbit)
     if [[ -n "$PERF_ORBIT_SPEED" ]]; then
         STARTUP_ARGV+=(--perf-orbit-speed "$PERF_ORBIT_SPEED")
+    fi
+fi
+if [[ "$PERF_CHUNK_VIEW_CHURN" == "1" ]]; then
+    STARTUP_ARGV+=(--perf-chunk-view-churn)
+    if [[ -n "$PERF_CHURN_INTERVAL_SECONDS" ]]; then
+        STARTUP_ARGV+=(--perf-churn-interval-seconds "$PERF_CHURN_INTERVAL_SECONDS")
+    fi
+    if [[ -n "$PERF_CHURN_OFFSET_CHUNKS" ]]; then
+        STARTUP_ARGV+=(--perf-churn-offset-chunks "$PERF_CHURN_OFFSET_CHUNKS")
     fi
 fi
 if [[ "$PERF_SETTLED_STATIONARY" == "1" ]]; then
@@ -1237,6 +1299,23 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
         if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*mode=settled-orbit .*settle_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR perf settled orbit summary marker was not seen; see $LOG_PATH"
+        fi
+    fi
+    if [[ "$PERF_CHUNK_VIEW_CHURN" == "1" ]]; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SETTLED .*mode=chunk-view-churn" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf chunk-view churn settled marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*mode=chunk-view-churn .*chunk_view_churn_interval_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf chunk-view churn start marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*mode=chunk-view-churn .*chunk_view_churn_interval_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf chunk-view churn summary marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -F "MCLONE_ANDROID_XR_CHUNK_VIEW_CHURN" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR chunk-view churn command marker was not seen; see $LOG_PATH"
+        fi
+        if [[ -n "$PERF_CHURN_OFFSET_CHUNKS" ]] && ! grep -E "MCLONE_ANDROID_XR_PERF_START .*chunk_view_churn_offset_chunks=${PERF_CHURN_OFFSET_CHUNKS}" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf chunk-view churn offset marker was not seen; see $LOG_PATH"
         fi
     fi
     if [[ "$PERF_SETTLED_STATIONARY" == "1" ]]; then

@@ -896,13 +896,21 @@ where
         render_distance: u32,
         chunk_tracking_radius: u32,
     ) -> Result<bool> {
-        let Some(command) =
-            self.core_mut()
-                .set_chunk_view_command(center, render_distance, chunk_tracking_radius)
-        else {
-            return Ok(false);
-        };
-        self.send_gameplay_command(command)
+        match self {
+            Self::Local(scene) => {
+                scene.set_chunk_view(center, render_distance, chunk_tracking_radius)
+            }
+            Self::RemoteDedicated(scene) => {
+                let Some(command) = scene.core_mut().set_chunk_view_command(
+                    center,
+                    render_distance,
+                    chunk_tracking_radius,
+                ) else {
+                    return Ok(false);
+                };
+                scene.send_gameplay_command(command)
+            }
+        }
     }
 
     pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
@@ -2110,5 +2118,31 @@ mod tests {
         );
         assert_eq!(runtime.session_status(), None);
         assert_eq!(runtime.loaded_chunk_count(), 1);
+    }
+
+    #[test]
+    fn native_single_view_session_runtime_local_interest_change_defers_updates_until_poll() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let initial_center = ChunkPos::new(0, 0);
+        let next_center = ChunkPos::new(1, 0);
+        let mut runtime = NativeSingleViewSessionRuntime::<NoRemoteSession>::local(
+            LocalSingleViewSceneOptions::new(12345, initial_center, 0).with_lighting_enabled(false),
+        )
+        .unwrap();
+        runtime.poll_until_idle().unwrap();
+        assert!(runtime.client().chunk_snapshot(initial_center).is_some());
+        assert!(runtime.client().chunk_snapshot(next_center).is_none());
+
+        assert!(runtime.set_interest_center(next_center).unwrap());
+        assert_eq!(runtime.stats().interest_center, next_center);
+        assert!(runtime.client().chunk_snapshot(initial_center).is_some());
+        assert!(runtime.client().chunk_snapshot(next_center).is_none());
+
+        runtime.poll_until_idle().unwrap();
+        assert!(runtime.client().chunk_snapshot(initial_center).is_none());
+        assert!(runtime.client().chunk_snapshot(next_center).is_some());
     }
 }
