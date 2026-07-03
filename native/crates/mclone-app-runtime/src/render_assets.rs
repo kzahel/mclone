@@ -934,6 +934,23 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn textured_mesh_assets_load_from_real_extracted_assets_when_present() {
+        let root = extracted_asset_root();
+        if !root.exists() {
+            return;
+        }
+        let source = FilesystemAssetSource::new(root);
+
+        let assets = load_textured_mesh_assets_from_source(&source).unwrap();
+
+        assert!(assets.atlas.width > 0);
+        assert!(assets.atlas.height > 0);
+        assert!(assets.catalog.get(mclone_core::BlockStateId(105)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(106)).is_some());
+    }
+
+    #[test]
     fn render_compile_worker_rejects_zero_slots() {
         let error =
             RenderSectionCompileWorker::with_worker_count(TexturedMeshCatalog::default(), 0)

@@ -238,6 +238,12 @@ the current asset tree reports `minecraft:cactus[age=0]` as missing the
 `age=0` blockstate variant. That failure is outside this catalog contract
 slice.
 
+Follow-up: the cactus/sugar-cane asset-load blocker is cleared in the shared
+asset resolver. Known non-model properties such as cactus/sugar-cane `age=0`
+now resolve through vanilla's empty blockstate model variant, while unknown
+properties still fail. The focused `mclone-assets` / `mclone-mesh` /
+`mclone-app-runtime` test set passed after the fix.
+
 ### Slice 2: Session Requests Carry Local World Identity
 
 Refactor the session coordinator vocabulary:

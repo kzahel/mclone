@@ -180,6 +180,13 @@ fn collect_files(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn extracted_asset_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("reference/minecraft-1.17.1/extracted")
+    }
+
     #[test]
     fn memory_source_reads_and_lists_pack_paths() {
         let mut source = MemoryAssetSource::new();
@@ -254,7 +261,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn filesystem_source_reads_real_extracted_asset_when_present() {
-        let root = std::path::PathBuf::from("../reference/minecraft-1.17.1/extracted");
+        let root = extracted_asset_root();
         if !root.exists() {
             return;
         }

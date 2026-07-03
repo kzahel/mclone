@@ -57,17 +57,28 @@ impl BlockStateRecord {
         if asset.variants_for_key(&variant_key).is_some() {
             return Some(variant_key);
         }
-        if self.can_use_empty_fluid_model_variant() && asset.variants_for_key("").is_some() {
+        if self.can_use_empty_model_variant(asset) {
             return Some(String::new());
         }
         None
     }
 
-    fn can_use_empty_fluid_model_variant(&self) -> bool {
-        self.block.namespace() == "minecraft"
-            && matches!(self.block.path(), "water" | "lava")
-            && self.properties.len() == 1
-            && self.properties.contains_key("level")
+    fn can_use_empty_model_variant(&self, asset: &BlockStateAsset) -> bool {
+        !self.properties.is_empty()
+            && self.block.namespace() == "minecraft"
+            && asset.variant_keys.len() == 1
+            && asset.variants_for_key("").is_some()
+            && self
+                .properties
+                .keys()
+                .all(|property| self.property_uses_empty_model_variant(property))
+    }
+
+    fn property_uses_empty_model_variant(&self, property: &str) -> bool {
+        matches!(
+            (self.block.path(), property),
+            ("water" | "lava", "level") | ("cactus" | "sugar_cane" | "kelp", "age")
+        )
     }
 }
 
@@ -503,6 +514,13 @@ mod tests {
     use super::*;
     use crate::{FilesystemAssetSource, MemoryAssetSource};
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn extracted_asset_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("reference/minecraft-1.17.1/extracted")
+    }
+
     #[test]
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
@@ -768,10 +786,72 @@ mod tests {
         assert_eq!(record.asset_variant_key(asset), Some(String::new()));
     }
 
+    #[test]
+    fn age_states_use_base_asset_variant_when_vanilla_model_is_unkeyed() {
+        let mut source = MemoryAssetSource::new();
+        for block in ["cactus", "sugar_cane", "kelp"] {
+            source.insert_text(
+                AssetPath::new(format!("assets/minecraft/blockstates/{block}.json")),
+                format!(r#"{{"variants":{{"":{{"model":"minecraft:block/{block}"}}}}}}"#),
+            );
+        }
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let mut registry = BlockStateRegistry::new();
+        for (id, block) in [(105, "cactus"), (106, "sugar_cane"), (107, "kelp")] {
+            registry
+                .register(BlockStateRecord::new(
+                    BlockStateId(id),
+                    ResourceLocation::parse(&format!("minecraft:{block}")).unwrap(),
+                    [("age", "0")],
+                ))
+                .unwrap();
+        }
+
+        registry.validate_blockstate_assets(&index).unwrap();
+        for block in ["cactus", "sugar_cane", "kelp"] {
+            let asset = index
+                .get(&ResourceLocation::parse(&format!("minecraft:{block}")).unwrap())
+                .unwrap();
+            let record = registry
+                .by_id(
+                    registry
+                        .id_for_key(&format!("minecraft:{block}[age=0]"))
+                        .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(record.asset_variant_key(asset), Some(String::new()));
+        }
+    }
+
+    #[test]
+    fn unknown_properties_do_not_use_base_asset_variant() {
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/stone.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#,
+        );
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let mut registry = BlockStateRegistry::new();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(1),
+                ResourceLocation::parse("minecraft:stone").unwrap(),
+                [("bogus", "true")],
+            ))
+            .unwrap();
+
+        let error = registry.validate_blockstate_assets(&index).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("minecraft:stone[bogus=true] references missing blockstate variant")
+        );
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn real_extracted_minecraft_blockstates_cover_terrain_mvp_registry() {
-        let root = std::path::PathBuf::from("../reference/minecraft-1.17.1/extracted");
+        let root = extracted_asset_root();
         if !root.exists() {
             return;
         }

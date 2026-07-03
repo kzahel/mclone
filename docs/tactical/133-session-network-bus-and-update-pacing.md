@@ -13,9 +13,9 @@ landed and reproduced the unload client-apply tail; Slice 3G default
 unload-count pump cap landed and reduced the Quest unload tail but did not
 eliminate it; Slice 3H client entity-by-chunk unload index landed and cut the
 Quest update-pump tail below 4 ms; Slice 3I batched packed-section patching
-landed, with Quest remeasurement blocked by the current cactus asset-load
-issue; remote/web bus convergence and broader terrain coordinator lifecycle
-remain active
+landed; the cactus/sugar-cane asset-load blocker is cleared locally, with
+Quest remeasurement still pending; remote/web bus convergence and broader
+terrain coordinator lifecycle remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -740,6 +740,11 @@ Validation (Slice 3I):
   known blocker is also recorded in `136-world-catalog-and-crud-ui.md`.
 - Quest chunk-view churn was not rerun for Slice 3I because the same textured
   asset load failure blocks the runtime startup path needed for measurement.
+- Follow-up validation after the asset-load fix passed
+  `cargo test --manifest-path native/Cargo.toml -p mclone-assets -p mclone-mesh -p mclone-app-runtime -- --nocapture`.
+  The fix keeps simulation-facing `age=0` states for cactus/sugar cane while
+  allowing known non-model block properties to resolve through vanilla's empty
+  blockstate model variant.
 
 Slice 3 conclusion: the local integrated update pump now follows the intended
 thin-apply shape for resident dirty marking: producer-side decode, strict
@@ -754,9 +759,10 @@ unloads applied in one normal frame, and the client entity-by-chunk index
 removed the worst O(unloads * live entities) client-replica scan. The measured
 Quest update-pump max is now below 4 ms in the churn lane, and the worst sampled
 frames are no longer update-apply frames. Remaining valuable local work before
-closing this slice is to remeasure after the cactus asset-load blocker is
-cleared, then inspect residual unload dirty marking and retune or remove the
-unload-count cap if the thin-apply target holds. Keep receive order; any
+closing this slice is to remeasure Quest chunk-view churn now that the local
+cactus/sugar-cane asset-load blocker is cleared, then inspect residual unload
+dirty marking and retune or remove the unload-count cap if the thin-apply target
+holds. Keep receive order; any
 additional divergence should stop between ordered update records or make
 oversized lifecycle batches splittable instead of reordering them. This
 tactical's remaining bus work is still remote TCP and web convergence.
@@ -829,8 +835,8 @@ another doc, explicitly decide where these remaining valuable items live:
   client-apply. A default count cap now limits the normal frame pump to `16`
   unload updates, and the client entity-by-chunk index cut the capped Quest
   update-pump max to `3.913 ms` apply / `3.882 ms` client apply. Before closing
-  this tactical, remeasure after the batched section-block patching slice and
-  the current cactus asset-load blocker are cleared; then either inspect
+  this tactical, remeasure after the batched section-block patching slice now
+  that the cactus/sugar-cane asset-load blocker is cleared; then either inspect
   residual unload dirty marking, or explicitly move that work to the
   terrain/client-runtime coordinator track.
 - Remote TCP session actor: native remote still needs a real inbound update

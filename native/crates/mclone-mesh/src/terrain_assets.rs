@@ -322,9 +322,16 @@ mod tests {
     use image::ImageEncoder;
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn extracted_asset_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("reference/minecraft-1.17.1/extracted")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn loads_real_extracted_textured_terrain_assets_when_present() {
-        let root = std::path::PathBuf::from("../reference/minecraft-1.17.1/extracted");
+        let root = extracted_asset_root();
         if !root.exists() {
             return;
         }

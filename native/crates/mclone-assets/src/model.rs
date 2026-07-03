@@ -539,6 +539,13 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use crate::{BlockStateAssetIndex, FilesystemAssetSource};
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn extracted_asset_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("reference/minecraft-1.17.1/extracted")
+    }
+
     #[test]
     fn block_model_resolves_parent_texture_reference_chain() {
         let source = model_source_with_cube_and_stone();
@@ -619,7 +626,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn real_extracted_minecraft_models_bake_terrain_mvp_atlas_materials() {
-        let root = std::path::PathBuf::from("../reference/minecraft-1.17.1/extracted");
+        let root = extracted_asset_root();
         if !root.exists() {
             return;
         }
