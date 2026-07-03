@@ -166,6 +166,7 @@ interface CandidateReport {
 }
 
 const DEFAULT_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!#$%&*+-/:;<=>?@^_|~";
+const MIN_REVIEW_GRID_SCALE = 4;
 
 const args = parseArgs(process.argv.slice(2));
 await run(args);
@@ -418,7 +419,7 @@ function drawReviewRow(
 
   const distance16 = areaDownsample(row.image, 16, 16);
   drawScaled(sheet, distance16, 1074, top + 10, 6);
-  drawGrid(sheet, 1074, top + 10, 16, 16, 6, grid);
+  drawAdaptiveGrid(sheet, 1074, top + 10, 16, 16, 6, grid);
 
   drawMipStrip64(sheet, row.image, 1206, top + 10, grid);
 
@@ -459,7 +460,7 @@ function drawFitWithGrid(sheet: RgbaImage, image: RgbaImage, x: number, y: numbe
   const display = image.width > maxSize || image.height > maxSize ? areaDownsample(image, maxSize, maxSize) : image;
   const scale = Math.max(1, Math.floor(maxSize / Math.max(display.width, display.height)));
   drawScaled(sheet, display, x, y, scale);
-  drawGrid(sheet, x, y, display.width, display.height, scale, grid);
+  drawAdaptiveGrid(sheet, x, y, display.width, display.height, scale, grid);
 }
 
 function drawMipStrip64(sheet: RgbaImage, image: RgbaImage, x: number, y: number, grid: Rgba): void {
@@ -469,8 +470,31 @@ function drawMipStrip64(sheet: RgbaImage, image: RgbaImage, x: number, y: number
     const scale = 64 / size;
     const panelX = x + index * 84;
     drawScaled(sheet, mip, panelX, y, scale);
-    drawGrid(sheet, panelX, y, size, size, scale, grid);
+    drawAdaptiveGrid(sheet, panelX, y, size, size, scale, grid);
   }
+}
+
+function drawAdaptiveGrid(
+  sheet: RgbaImage,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  scale: number,
+  color: Rgba,
+): void {
+  if (scale >= MIN_REVIEW_GRID_SCALE) {
+    drawGrid(sheet, x, y, width, height, scale, color);
+    return;
+  }
+  drawImageBorder(sheet, x, y, width * scale, height * scale, color);
+}
+
+function drawImageBorder(sheet: RgbaImage, x: number, y: number, width: number, height: number, color: Rgba): void {
+  drawRect(sheet, x, y, width, 1, color);
+  drawRect(sheet, x, y + height - 1, width, 1, color);
+  drawRect(sheet, x, y, 1, height, color);
+  drawRect(sheet, x + width - 1, y, 1, height, color);
 }
 
 function makePaletteEntries(palette: PaletteSpec, selectedNames: string[], selectedSymbols: string[]): PaletteEntry[] {
