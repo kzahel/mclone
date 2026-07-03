@@ -65,8 +65,8 @@ pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
     ChunkStoreError, ChunkStoreResult, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore,
     PersistenceActor, PersistenceMailbox, PersistenceRequestId, PlayerRecordKey, SaveDurability,
-    StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey, WorldStore,
-    WorldStoreCompletion, WorldStoreRequest,
+    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey,
+    WorldStore, WorldStoreCompletion, WorldStoreRequest,
 };
 pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,
@@ -2217,6 +2217,32 @@ mod tests {
     }
 
     #[test]
+    fn fluid_tick_list_packs_and_removes_chunk_ticks() {
+        let mut ticks = FluidTickList::new();
+        let water = WorldBlockPos::new(8, 120, 8);
+        let lava = WorldBlockPos::new(9, 121, 8);
+        let other_chunk = WorldBlockPos::new(24, 120, 8);
+
+        ticks.schedule_tick(water, FluidKind::Water, 5, 10);
+        ticks.schedule_tick(lava, FluidKind::Lava, 1, 12);
+        ticks.schedule_tick(other_chunk, FluidKind::Water, 3, 10);
+
+        assert_eq!(
+            ticks.scheduled_chunk_tick_records(ChunkPos::new(0, 0), 12),
+            vec![
+                ScheduledTickRecord::new(lava, "minecraft:lava", 1),
+                ScheduledTickRecord::new(water, "minecraft:water", 3),
+            ]
+        );
+
+        assert_eq!(ticks.remove_chunk_ticks(ChunkPos::new(0, 0)), 2);
+        assert!(!ticks.has_scheduled_tick(water, FluidKind::Water));
+        assert!(!ticks.has_scheduled_tick(lava, FluidKind::Lava));
+        assert!(ticks.has_scheduled_tick(other_chunk, FluidKind::Water));
+        assert_eq!(ticks.size(), 1);
+    }
+
+    #[test]
     fn fluid_kind_accepts_generated_and_persisted_tick_targets() {
         assert_eq!(
             FluidKind::from_target("minecraft:water"),
@@ -2661,6 +2687,49 @@ mod tests {
         assert_ne!(server.scheduler().block_at_world(below), Some(WATER));
     }
 
+    #[test]
+    fn loaded_chunk_record_hydrates_scheduled_fluid_ticks() {
+        let store = SharedMemoryWorldStore::new();
+        let pos = ChunkPos::new(0, 0);
+        let source = WorldBlockPos::new(8, 120, 8);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Light,
+            ChunkRevision(7),
+            0,
+            16,
+            &vec![mclone_core::AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+        .with_light_sections(true, Vec::new());
+        store.chunks.borrow_mut().insert(
+            pos,
+            ChunkRecord::from_snapshot(snapshot).with_scheduled_fluid_ticks(vec![
+                ScheduledTickRecord::new(source, "minecraft:water", 0),
+            ]),
+        );
+        let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: pos,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+
+        assert!(
+            snapshot_update_for(&updates, pos).is_some(),
+            "stored chunk should publish without regenerating"
+        );
+        assert!(
+            server
+                .liquid_ticks
+                .has_scheduled_tick(source, FluidKind::Water),
+            "stored scheduled fluid tick should hydrate into the host tick queue"
+        );
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload() {
@@ -2673,7 +2742,7 @@ mod tests {
         };
         let source = WorldBlockPos::new(8, 120, 8);
         let below = source.below();
-        let mut server = IntegratedServer::with_chunk_store(
+        let mut server = IntegratedServer::with_world_store(
             12_345,
             Box::new(FilesystemChunkSnapshotStore::new(&root)),
         );
@@ -2684,6 +2753,7 @@ mod tests {
         server.liquid_ticks = FluidTickList::new();
         server.scheduler_mut().set_block_at_world(source, WATER);
         server.scheduler_mut().set_block_at_world(below, AIR);
+        server.schedule_fluid_tick(source, FluidKind::Water, 0);
 
         handle_command_and_poll(
             &mut server,
@@ -2693,36 +2763,31 @@ mod tests {
                 chunk_tracking_radius: 0,
             }),
         );
-        server
-            .scheduler_mut()
-            .process_pending_unloads(usize::MAX)
-            .unwrap();
+        let deferred = server.simulation_tick_report();
+        assert_eq!(deferred.fluid_ticks_executed, 0);
+        assert_eq!(deferred.deferred_fluid_ticks, 1);
+        assert_eq!(deferred.scheduled_fluid_ticks, 1);
         assert!(
             server.scheduler().holder(ChunkPos::new(0, 0)).is_some(),
             "dirty pending-unload holders should stay resident until the durable save acks"
         );
         try_poll_server_until_persistence_idle(&mut server).unwrap();
-        server
-            .scheduler_mut()
-            .process_pending_unloads(usize::MAX)
-            .unwrap();
+        for _ in 0..32 {
+            if server.scheduler().holder(ChunkPos::new(0, 0)).is_none() {
+                break;
+            }
+            server.simulation_tick_report();
+            try_poll_server_until_persistence_idle(&mut server).unwrap();
+        }
         assert!(
             server.scheduler().holder(ChunkPos::new(0, 0)).is_none(),
             "the original chunk should be fully removed from scheduler holders"
         );
-
-        server.liquid_ticks = FluidTickList::new();
-        server.schedule_fluid_tick(source, FluidKind::Water, 0);
-        let deferred = server.simulation_tick_report();
-
-        assert_eq!(deferred.fluid_ticks_executed, 0);
-        assert_eq!(deferred.deferred_fluid_ticks, 1);
-        assert_eq!(deferred.scheduled_fluid_ticks, 1);
         assert!(
-            server
+            !server
                 .liquid_ticks
                 .has_scheduled_tick(source, FluidKind::Water),
-            "a due tick outside any entity-ticking holder should stay pending"
+            "live fluid ticks for a fully unloaded chunk should be packed into storage and pruned"
         );
 
         let updates =
@@ -2731,10 +2796,18 @@ mod tests {
             snapshot_update_for(&updates, ChunkPos::new(0, 0)).is_some(),
             "the original chunk should reload from the snapshot store"
         );
+        assert!(
+            server
+                .liquid_ticks
+                .has_scheduled_tick(source, FluidKind::Water),
+            "the saved due fluid tick should hydrate from the stored chunk record"
+        );
         let executed = server.simulation_tick_report();
 
-        assert_eq!(executed.deferred_fluid_ticks, 0);
-        assert_eq!(executed.fluid_ticks_executed, 1);
+        assert!(
+            executed.fluid_ticks_executed >= 1,
+            "the hydrated source tick should execute after the chunk becomes entity-ticking"
+        );
         assert_eq!(
             server.scheduler().block_at_world(below),
             Some(WATER_LEVEL_8),
@@ -3431,6 +3504,42 @@ mod tests {
         assert_eq!(holder.residency(), ChunkResidency::Generated);
         assert!(!holder.is_dirty());
         assert_eq!(scheduler.dirty_chunk_count(), 0);
+    }
+
+    #[test]
+    fn generated_light_cache_record_keeps_generated_fluid_ticks() {
+        let store = SharedMemoryWorldStore::new();
+        let chunks = store.chunks.clone();
+        let center = ChunkPos::new(117, -128);
+        let mut scheduler = ChunkScheduler::with_world_store(12_345, Box::new(store));
+
+        apply_interest_and_poll(
+            &mut scheduler,
+            ChunkView {
+                center,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            },
+        );
+        poll_scheduler_until_persistence_idle(&mut scheduler);
+
+        let record = chunks
+            .borrow()
+            .get(&center)
+            .cloned()
+            .expect("center chunk should have a cache record");
+        assert_eq!(record.snapshot.status, ChunkStatus::Light);
+        assert!(
+            record.scheduled_fluid_ticks.len() >= 90,
+            "watery oracle chunk should persist generated fluid ticks, got {}",
+            record.scheduled_fluid_ticks.len()
+        );
+        assert!(
+            record
+                .scheduled_fluid_ticks
+                .iter()
+                .all(|tick| tick.pos.chunk_pos() == center)
+        );
     }
 
     #[test]

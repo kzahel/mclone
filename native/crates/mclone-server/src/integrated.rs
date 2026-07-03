@@ -8,7 +8,8 @@
 use std::time::Duration;
 
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Vec3d, obfuscate_biome_zoom_seed,
+    AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Vec3d,
+    obfuscate_biome_zoom_seed,
 };
 #[cfg(feature = "physics-rapier")]
 use mclone_protocol::EntityRotation;
@@ -56,11 +57,12 @@ use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemot
 use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
-    ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkScheduler,
-    ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind,
-    FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerPhysicsStepReport,
-    ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
-    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
+    ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
+    ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult,
+    FluidKind, FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics,
+    ServerPhysicsStepReport, ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
+    WorldBlockPos, WorldStore,
 };
 
 #[cfg(feature = "physics-rapier")]
@@ -171,6 +173,10 @@ impl IntegratedServer {
 
     pub fn with_chunk_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
         Self::with_scheduler(seed, ChunkScheduler::with_store(seed, store))
+    }
+
+    pub fn with_world_store(seed: i64, store: Box<dyn WorldStore>) -> Self {
+        Self::with_scheduler(seed, ChunkScheduler::with_world_store(seed, store))
     }
 
     pub(crate) fn with_player_chunk_tracking_policy(
@@ -522,7 +528,11 @@ impl IntegratedServer {
         self.ensure_target_exists(target)?;
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
-        let report = self.scheduler.tick_report()?;
+        let simulation_tick = self.simulation_tick;
+        let liquid_ticks = &self.liquid_ticks;
+        let report = self.scheduler.tick_report_with_record_builder(|snapshot| {
+            chunk_record_with_live_ticks(snapshot, liquid_ticks, simulation_tick)
+        })?;
         let scheduler_report_us = simulation_timing_elapsed_us(scheduler_start);
         let scheduler_event_count = report.events.len();
         let scheduler_apply_start = simulation_timing_start();
@@ -1022,7 +1032,12 @@ impl IntegratedServer {
     }
 
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
-        self.scheduler.save_dirty_chunks()
+        let simulation_tick = self.simulation_tick;
+        let liquid_ticks = &self.liquid_ticks;
+        self.scheduler
+            .save_dirty_chunks_with_record_builder(|snapshot| {
+                chunk_record_with_live_ticks(snapshot, liquid_ticks, simulation_tick)
+            })
     }
 
     fn set_chunk_view_for_target(
@@ -1334,6 +1349,7 @@ impl IntegratedServer {
                     self.chunk_tracking.queue_unload_for_tracking_players(pos);
                 }
                 ChunkSchedulerEvent::HolderUnloaded { pos } => {
+                    self.liquid_ticks.remove_chunk_ticks(pos);
                     let removed = self.entities.discard_volatile_entities_in_chunk(pos);
                     self.reconcile_entity_subjects(removed, true);
                 }
@@ -1820,6 +1836,16 @@ fn runtime_chunk_target_status(scheduler: &ChunkScheduler) -> mclone_core::Chunk
     } else {
         mclone_core::ChunkStatus::Features
     }
+}
+
+fn chunk_record_with_live_ticks(
+    snapshot: &ChunkSnapshot,
+    liquid_ticks: &FluidTickList,
+    simulation_tick: u64,
+) -> ChunkRecord {
+    ChunkRecord::from_snapshot(snapshot.clone()).with_scheduled_fluid_ticks(
+        liquid_ticks.scheduled_chunk_tick_records(snapshot.pos, simulation_tick),
+    )
 }
 
 fn natural_spawn_tick_seed(world_seed: i64, game_time: u64) -> i64 {

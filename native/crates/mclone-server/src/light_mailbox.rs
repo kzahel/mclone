@@ -21,6 +21,7 @@ use crate::job_codec::{decode_light_status_response, encode_light_status_request
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::PendingLightStatusBatch;
 use crate::light_world::RetainedInitialLightState;
+use crate::persistence::ScheduledTickRecord;
 use crate::timing::{timing_elapsed_us, timing_start};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
@@ -30,6 +31,7 @@ use crate::{LightStatusMailboxKind, WorkerFrameMetrics};
 pub(crate) struct CompletedLightStatus {
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
+    pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
     pub(crate) light_sections: Vec<PackedLightSection>,
     pub(crate) batch_compute_leader: bool,
     pub(crate) compute_us: u128,
@@ -52,6 +54,7 @@ impl CompletedLightStatus {
                 Self {
                     pos: pending.pos,
                     feature_snapshot: pending.feature_snapshot,
+                    scheduled_fluid_ticks: pending.scheduled_fluid_ticks,
                     light_sections,
                     batch_compute_leader,
                     compute_us: if batch_compute_leader { compute_us } else { 0 },

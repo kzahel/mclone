@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot};
+use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot};
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
 use mclone_core::{
@@ -22,7 +22,7 @@ use mclone_core::{
 #[cfg(any(test, not(target_arch = "wasm32")))]
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
 #[cfg(any(test, not(target_arch = "wasm32")))]
-const SNAPSHOT_FORMAT_VERSION: u32 = 4;
+const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 
@@ -79,6 +79,8 @@ impl SaveDurability {
 pub struct ChunkRecord {
     pub snapshot: ChunkSnapshot,
     pub light_algorithm_version: Option<u32>,
+    pub scheduled_block_ticks: Vec<ScheduledTickRecord>,
+    pub scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
 }
 
 impl ChunkRecord {
@@ -89,6 +91,8 @@ impl ChunkRecord {
         Self {
             snapshot,
             light_algorithm_version,
+            scheduled_block_ticks: Vec::new(),
+            scheduled_fluid_ticks: Vec::new(),
         }
     }
 
@@ -96,6 +100,8 @@ impl ChunkRecord {
         Self {
             snapshot,
             light_algorithm_version: None,
+            scheduled_block_ticks: Vec::new(),
+            scheduled_fluid_ticks: Vec::new(),
         }
     }
 
@@ -105,6 +111,33 @@ impl ChunkRecord {
 
     pub const fn revision(&self) -> ChunkRevision {
         self.snapshot.revision
+    }
+
+    pub fn with_scheduled_block_ticks(mut self, ticks: Vec<ScheduledTickRecord>) -> Self {
+        self.scheduled_block_ticks = ticks;
+        self
+    }
+
+    pub fn with_scheduled_fluid_ticks(mut self, ticks: Vec<ScheduledTickRecord>) -> Self {
+        self.scheduled_fluid_ticks = ticks;
+        self
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledTickRecord {
+    pub pos: BlockPos,
+    pub target: String,
+    pub delay: i32,
+}
+
+impl ScheduledTickRecord {
+    pub fn new(pos: BlockPos, target: impl Into<String>, delay: i32) -> Self {
+        Self {
+            pos,
+            target: target.into(),
+            delay,
+        }
     }
 }
 
@@ -873,6 +906,16 @@ fn write_chunk_record(writer: &mut impl Write, record: &ChunkRecord) -> ChunkSto
         write_light_section(writer, section)?;
     }
     write_optional_u32(writer, record.light_algorithm_version)?;
+    write_scheduled_ticks(
+        writer,
+        &record.scheduled_block_ticks,
+        "scheduled block tick count",
+    )?;
+    write_scheduled_ticks(
+        writer,
+        &record.scheduled_fluid_ticks,
+        "scheduled fluid tick count",
+    )?;
     writer.flush()?;
     Ok(())
 }
@@ -936,6 +979,11 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
     } else {
         None
     };
+    let (scheduled_block_ticks, scheduled_fluid_ticks) = if version >= 5 {
+        (read_scheduled_ticks(reader)?, read_scheduled_ticks(reader)?)
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     Ok(ChunkRecord {
         snapshot: ChunkSnapshot {
@@ -950,6 +998,71 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
             light_sections,
         },
         light_algorithm_version,
+        scheduled_block_ticks,
+        scheduled_fluid_ticks,
+    })
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_scheduled_ticks(
+    writer: &mut impl Write,
+    ticks: &[ScheduledTickRecord],
+    name: &str,
+) -> ChunkStoreResult<()> {
+    write_len(writer, ticks.len(), name)?;
+    for tick in ticks {
+        write_block_pos(writer, tick.pos)?;
+        write_string(writer, &tick.target, "scheduled tick target")?;
+        write_i32(writer, tick.delay)?;
+    }
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_scheduled_ticks(reader: &mut impl Read) -> ChunkStoreResult<Vec<ScheduledTickRecord>> {
+    let tick_count = read_len(reader)?;
+    let mut ticks = Vec::with_capacity(tick_count);
+    for _ in 0..tick_count {
+        ticks.push(ScheduledTickRecord {
+            pos: read_block_pos(reader)?,
+            target: read_string(reader)?,
+            delay: read_i32(reader)?,
+        });
+    }
+    Ok(ticks)
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_block_pos(writer: &mut impl Write, pos: BlockPos) -> ChunkStoreResult<()> {
+    write_i32(writer, pos.x)?;
+    write_i32(writer, pos.y)?;
+    write_i32(writer, pos.z)?;
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_block_pos(reader: &mut impl Read) -> ChunkStoreResult<BlockPos> {
+    Ok(BlockPos::new(
+        read_i32(reader)?,
+        read_i32(reader)?,
+        read_i32(reader)?,
+    ))
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_string(writer: &mut impl Write, value: &str, name: &str) -> ChunkStoreResult<()> {
+    write_len(writer, value.len(), name)?;
+    writer.write_all(value.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_string(reader: &mut impl Read) -> ChunkStoreResult<String> {
+    let len = read_len(reader)?;
+    let mut bytes = vec![0; len];
+    reader.read_exact(&mut bytes)?;
+    String::from_utf8(bytes).map_err(|error| {
+        ChunkStoreError::InvalidData(format!("scheduled tick target was not UTF-8: {error}"))
     })
 }
 
@@ -1221,6 +1334,16 @@ mod tests {
                 )],
             ),
             light_algorithm_version: Some(CHUNK_LIGHT_ALGORITHM_VERSION),
+            scheduled_block_ticks: vec![ScheduledTickRecord::new(
+                BlockPos::new(1, 64, 2),
+                "minecraft:sand",
+                2,
+            )],
+            scheduled_fluid_ticks: vec![ScheduledTickRecord::new(
+                BlockPos::new(3, 63, 4),
+                "minecraft:water",
+                5,
+            )],
         };
         let mut bytes = Vec::new();
 

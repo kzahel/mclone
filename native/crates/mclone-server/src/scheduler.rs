@@ -50,8 +50,8 @@ use crate::loading_progress::{
 };
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
-    PersistenceMailbox, PersistenceRequestId, SaveDurability, StoreWriteOutcome, WorldStore,
-    WorldStoreCompletion,
+    PersistenceMailbox, PersistenceRequestId, SaveDurability, ScheduledTickRecord,
+    StoreWriteOutcome, WorldStore, WorldStoreCompletion,
 };
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
@@ -192,6 +192,38 @@ impl FluidTickList {
 
     pub(crate) fn size(&self) -> usize {
         self.scheduled_keys.len()
+    }
+
+    pub(crate) fn scheduled_chunk_tick_records(
+        &self,
+        chunk_pos: ChunkPos,
+        game_time: u64,
+    ) -> Vec<ScheduledTickRecord> {
+        self.scheduled_ticks
+            .iter()
+            .filter(|entry| entry.key.pos.chunk_pos() == chunk_pos)
+            .map(|entry| {
+                ScheduledTickRecord::new(
+                    entry.key.pos,
+                    scheduled_fluid_tick_target(entry.key.fluid),
+                    remaining_tick_delay(entry.trigger_tick, game_time),
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn remove_chunk_ticks(&mut self, chunk_pos: ChunkPos) -> usize {
+        let entries = self
+            .scheduled_ticks
+            .iter()
+            .filter(|entry| entry.key.pos.chunk_pos() == chunk_pos)
+            .copied()
+            .collect::<Vec<_>>();
+        for entry in &entries {
+            self.scheduled_ticks.remove(entry);
+            self.scheduled_keys.remove(&entry.key);
+        }
+        entries.len()
     }
 
     #[cfg(test)]
@@ -531,6 +563,15 @@ impl ChunkScheduler {
     }
 
     pub fn tick_report(&mut self) -> ChunkStoreResult<ChunkSchedulerTickReport> {
+        self.tick_report_with_record_builder(|snapshot| {
+            ChunkRecord::from_snapshot(snapshot.clone())
+        })
+    }
+
+    pub(crate) fn tick_report_with_record_builder(
+        &mut self,
+        mut record_builder: impl FnMut(&ChunkSnapshot) -> ChunkRecord,
+    ) -> ChunkStoreResult<ChunkSchedulerTickReport> {
         let total_start = simulation_timing_start();
         let purge_start = simulation_timing_start();
         self.distance_manager.purge_stale_tickets();
@@ -545,8 +586,11 @@ impl ChunkScheduler {
         let publish_completed_us = simulation_timing_elapsed_us(publish_start);
 
         let pending_unload_start = simulation_timing_start();
-        let (pending_unloads_processed, unload_events) =
-            self.process_pending_unloads_with_events(DEFAULT_PENDING_UNLOAD_BUDGET)?;
+        let (pending_unloads_processed, unload_events) = self
+            .process_pending_unloads_with_events_and_record_builder(
+                DEFAULT_PENDING_UNLOAD_BUDGET,
+                &mut record_builder,
+            )?;
         events.extend(unload_events);
         let pending_unload_us = simulation_timing_elapsed_us(pending_unload_start);
         Ok(ChunkSchedulerTickReport {
@@ -1709,6 +1753,15 @@ impl ChunkScheduler {
     }
 
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
+        self.save_dirty_chunks_with_record_builder(|snapshot| {
+            ChunkRecord::from_snapshot(snapshot.clone())
+        })
+    }
+
+    pub(crate) fn save_dirty_chunks_with_record_builder(
+        &mut self,
+        mut record_builder: impl FnMut(&ChunkSnapshot) -> ChunkRecord,
+    ) -> ChunkStoreResult<usize> {
         let dirty_chunks = self.dirty_chunks.iter().copied().collect::<Vec<_>>();
         let mut queued = 0;
         for pos in dirty_chunks {
@@ -1717,7 +1770,11 @@ impl ChunkScheduler {
                 continue;
             };
             if holder.dirty {
-                if self.queue_holder_save(&holder, SaveDurability::Durable) {
+                if self.queue_holder_save_with_record_builder(
+                    &holder,
+                    SaveDurability::Durable,
+                    &mut record_builder,
+                ) {
                     queued += 1;
                 }
             } else {
@@ -1735,6 +1792,16 @@ impl ChunkScheduler {
     fn process_pending_unloads_with_events(
         &mut self,
         max_chunks: usize,
+    ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>)> {
+        let mut record_builder =
+            |snapshot: &ChunkSnapshot| ChunkRecord::from_snapshot(snapshot.clone());
+        self.process_pending_unloads_with_events_and_record_builder(max_chunks, &mut record_builder)
+    }
+
+    fn process_pending_unloads_with_events_and_record_builder(
+        &mut self,
+        max_chunks: usize,
+        record_builder: &mut impl FnMut(&ChunkSnapshot) -> ChunkRecord,
     ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>)> {
         if max_chunks == 0 || self.pending_unloads.is_empty() {
             return Ok((0, Vec::new()));
@@ -1763,7 +1830,11 @@ impl ChunkScheduler {
             };
 
             if holder.dirty {
-                self.queue_holder_save(&holder, SaveDurability::Durable);
+                self.queue_holder_save_with_record_builder(
+                    &holder,
+                    SaveDurability::Durable,
+                    record_builder,
+                );
                 continue;
             }
 
@@ -2025,10 +2096,15 @@ impl ChunkScheduler {
                     pos.x, pos.z
                 )
             });
-            events.extend(fluid_tick_events_from_generated_chunk(&chunk));
+            let scheduled_fluid_ticks = scheduled_fluid_tick_records_from_generated_chunk(&chunk);
+            events.extend(fluid_tick_events_from_records(&scheduled_fluid_ticks)?);
             let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, false);
-            self.queue_snapshot_save(&snapshot, SaveDurability::Cache);
+            self.queue_record_save(
+                ChunkRecord::from_snapshot(snapshot.clone())
+                    .with_scheduled_fluid_ticks(scheduled_fluid_ticks.clone()),
+                SaveDurability::Cache,
+            );
             events.push(ChunkSchedulerEvent::StatusChanged {
                 pos,
                 status: ChunkStatus::Features,
@@ -2051,6 +2127,7 @@ impl ChunkScheduler {
                         pos,
                         snapshot,
                         chunk,
+                        scheduled_fluid_ticks,
                         generated.iter(),
                         retained_dependencies.iter(),
                     ));
@@ -2134,7 +2211,11 @@ impl ChunkScheduler {
             let pos = snapshot.pos;
 
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, false);
-            self.queue_snapshot_save(&snapshot, SaveDurability::Cache);
+            self.queue_record_save(
+                ChunkRecord::from_snapshot(snapshot.clone())
+                    .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks),
+                SaveDurability::Cache,
+            );
             events.push(ChunkSchedulerEvent::StatusChanged {
                 pos,
                 status: ChunkStatus::Light,
@@ -2331,12 +2412,11 @@ impl ChunkScheduler {
         let Some(record) = record else {
             return self.mark_stored_chunk_miss(pos, pending.target_status);
         };
-        let snapshot = record.snapshot;
-        if snapshot.status < pending.target_status {
+        if record.snapshot.status < pending.target_status {
             return self.mark_stored_chunk_miss(pos, pending.target_status);
         }
 
-        self.publish_loaded_snapshot(pos, snapshot, pending.target_status)
+        self.publish_loaded_record(pos, record, pending.target_status)
     }
 
     fn mark_stored_chunk_miss(
@@ -2348,12 +2428,14 @@ impl ChunkScheduler {
         Ok(Vec::new())
     }
 
-    fn publish_loaded_snapshot(
+    fn publish_loaded_record(
         &mut self,
         pos: ChunkPos,
-        snapshot: ChunkSnapshot,
+        record: ChunkRecord,
         target_status: ChunkStatus,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let scheduled_fluid_ticks = record.scheduled_fluid_ticks.clone();
+        let snapshot = record.snapshot;
         let snapshot = if self.lighting_enabled {
             hydrate_loaded_light_snapshot(snapshot)?
         } else {
@@ -2419,6 +2501,7 @@ impl ChunkScheduler {
                 step: ChunkStatusStep::Ready,
             });
         }
+        events.extend(fluid_tick_events_from_records(&scheduled_fluid_ticks)?);
 
         if self
             .distance_manager
@@ -2435,20 +2518,21 @@ impl ChunkScheduler {
         Ok(events)
     }
 
-    fn queue_holder_save(&mut self, holder: &ChunkHolder, durability: SaveDurability) -> bool {
+    fn queue_holder_save_with_record_builder(
+        &mut self,
+        holder: &ChunkHolder,
+        durability: SaveDurability,
+        record_builder: &mut impl FnMut(&ChunkSnapshot) -> ChunkRecord,
+    ) -> bool {
         let Some(snapshot) = holder.snapshot() else {
             return false;
         };
-        self.queue_snapshot_save(snapshot, durability)
+        self.queue_record_save(record_builder(snapshot), durability)
     }
 
-    fn queue_snapshot_save(
-        &mut self,
-        snapshot: &ChunkSnapshot,
-        durability: SaveDurability,
-    ) -> bool {
-        let pos = snapshot.pos;
-        let revision = snapshot.revision;
+    fn queue_record_save(&mut self, record: ChunkRecord, durability: SaveDurability) -> bool {
+        let pos = record.pos();
+        let revision = record.revision();
         if let Some(existing_id) = self.pending_chunk_save_by_pos.get(&pos).copied()
             && let Some(existing) = self.pending_chunk_saves.get(&existing_id)
             && !pending_save_should_replace(revision, durability, existing)
@@ -2456,9 +2540,7 @@ impl ChunkScheduler {
             return false;
         }
 
-        let request_id = self
-            .store
-            .save_chunk(ChunkRecord::from_snapshot(snapshot.clone()), durability);
+        let request_id = self.store.save_chunk(record, durability);
         self.pending_chunk_saves.insert(
             request_id,
             PendingChunkSave {
@@ -2609,20 +2691,61 @@ fn pending_save_should_replace(
     }
 }
 
-fn fluid_tick_events_from_generated_chunk(chunk: &GeneratedChunk) -> Vec<ChunkSchedulerEvent> {
+fn scheduled_fluid_tick_records_from_generated_chunk(
+    chunk: &GeneratedChunk,
+) -> Vec<ScheduledTickRecord> {
     chunk
         .liquid_ticks()
         .iter()
-        .filter_map(fluid_tick_event_from_generated_tick)
+        .filter_map(scheduled_fluid_tick_record_from_generated_tick)
         .collect()
 }
 
-fn fluid_tick_event_from_generated_tick(tick: &ScheduledTick) -> Option<ChunkSchedulerEvent> {
-    Some(ChunkSchedulerEvent::FluidTickScheduled {
-        pos: WorldBlockPos::new(tick.x, tick.y, tick.z),
-        fluid: FluidKind::from_target(&tick.target)?,
+fn scheduled_fluid_tick_record_from_generated_tick(
+    tick: &ScheduledTick,
+) -> Option<ScheduledTickRecord> {
+    let fluid = FluidKind::from_target(&tick.target)?;
+    Some(ScheduledTickRecord::new(
+        WorldBlockPos::new(tick.x, tick.y, tick.z),
+        scheduled_fluid_tick_target(fluid),
+        tick.delay,
+    ))
+}
+
+fn fluid_tick_events_from_records(
+    ticks: &[ScheduledTickRecord],
+) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+    ticks
+        .iter()
+        .map(fluid_tick_event_from_record)
+        .collect::<ChunkStoreResult<Vec<_>>>()
+}
+
+fn fluid_tick_event_from_record(
+    tick: &ScheduledTickRecord,
+) -> ChunkStoreResult<ChunkSchedulerEvent> {
+    let fluid = FluidKind::from_target(&tick.target).ok_or_else(|| {
+        ChunkStoreError::InvalidData(format!(
+            "scheduled fluid tick target '{}' is not a known fluid",
+            tick.target
+        ))
+    })?;
+    Ok(ChunkSchedulerEvent::FluidTickScheduled {
+        pos: tick.pos,
+        fluid,
         delay: tick.delay,
     })
+}
+
+pub(crate) const fn scheduled_fluid_tick_target(fluid: FluidKind) -> &'static str {
+    match fluid {
+        FluidKind::Water => "minecraft:water",
+        FluidKind::Lava => "minecraft:lava",
+    }
+}
+
+fn remaining_tick_delay(trigger_tick: u64, game_time: u64) -> i32 {
+    i32::try_from(trigger_tick.saturating_sub(game_time)).unwrap_or(i32::MAX)
 }
 
 fn block_change_affects_light(old_block: RawBlockId, new_block: RawBlockId) -> bool {

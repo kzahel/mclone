@@ -190,10 +190,11 @@ ChunkScheduler actor integration
   keep dirty pending-unload holders resident until durable save ack
   queue generated-clean cache writes separately from durable dirty writes
   flush durable dirty saves through the actor lane
+  pack/hydrate scheduled fluid ticks through chunk records
 ```
 
 The synchronous facade remains only as compatibility/testing glue around the
-same mailbox. Scheduled fluid/block ticks still need to move into chunk records
+same mailbox. Scheduled block ticks still need to move into chunk records
 instead of living only in host tick queues.
 
 Browser singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote host uses file-backed JSON records under a save root. Unit tests generally use memory storage.

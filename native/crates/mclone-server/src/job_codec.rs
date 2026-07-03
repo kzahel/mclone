@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
+use mclone_core::{BlockPos, ChunkPos, ChunkSnapshot, PackedLightSection};
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
 use mclone_worldgen::levelgen::{
@@ -17,6 +17,7 @@ use crate::light_mailbox::CompletedLightStatus;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_sky_light_includes_chunk;
+use crate::persistence::ScheduledTickRecord;
 
 const WORLDGEN_REQUEST_MAGIC: u32 = 0x5747_4A52;
 const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
@@ -432,10 +433,31 @@ impl FrameWriter {
         Ok(())
     }
 
+    fn write_tick_record(&mut self, tick: &ScheduledTickRecord) -> Result<(), String> {
+        self.write_i32(tick.pos.x);
+        self.write_i32(tick.pos.y);
+        self.write_i32(tick.pos.z);
+        self.write_string("scheduled tick target", &tick.target)?;
+        self.write_i32(tick.delay);
+        Ok(())
+    }
+
     fn write_ticks(&mut self, field: &str, ticks: &[ScheduledTick]) -> Result<(), String> {
         self.write_len(field, ticks.len())?;
         for tick in ticks {
             self.write_tick(tick)?;
+        }
+        Ok(())
+    }
+
+    fn write_tick_records(
+        &mut self,
+        field: &str,
+        ticks: &[ScheduledTickRecord],
+    ) -> Result<(), String> {
+        self.write_len(field, ticks.len())?;
+        for tick in ticks {
+            self.write_tick_record(tick)?;
         }
         Ok(())
     }
@@ -503,6 +525,10 @@ impl FrameWriter {
     fn write_pending_light_status(&mut self, status: &PendingLightStatus) -> Result<(), String> {
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
+        self.write_tick_records(
+            "light status scheduled fluid ticks",
+            &status.scheduled_fluid_ticks,
+        )?;
         self.write_bytes("light status raw blocks", status.raw_blocks())?;
         self.write_len(
             "light status neighbor blocks",
@@ -521,6 +547,10 @@ impl FrameWriter {
     ) -> Result<(), String> {
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
+        self.write_tick_records(
+            "completed light status scheduled fluid ticks",
+            &status.scheduled_fluid_ticks,
+        )?;
         self.write_len("completed light sections", status.light_sections.len())?;
         for section in &status.light_sections {
             self.write_light_section(section)?;
@@ -750,8 +780,25 @@ impl<'a> FrameReader<'a> {
         Ok(ScheduledTick::new(x, y, z, target, delay))
     }
 
+    fn read_tick_record(&mut self) -> Result<ScheduledTickRecord, String> {
+        let x = self.read_i32()?;
+        let y = self.read_i32()?;
+        let z = self.read_i32()?;
+        let target = self.read_string("scheduled tick target")?;
+        let delay = self.read_i32()?;
+        Ok(ScheduledTickRecord::new(
+            BlockPos::new(x, y, z),
+            target,
+            delay,
+        ))
+    }
+
     fn read_ticks(&mut self, field: &str) -> Result<Vec<ScheduledTick>, String> {
         self.read_vec(field, FrameReader::read_tick)
+    }
+
+    fn read_tick_records(&mut self, field: &str) -> Result<Vec<ScheduledTickRecord>, String> {
+        self.read_vec(field, FrameReader::read_tick_record)
     }
 
     fn read_generated_chunk(&mut self) -> Result<GeneratedChunk, String> {
@@ -830,6 +877,7 @@ impl<'a> FrameReader<'a> {
     fn read_pending_light_status(&mut self) -> Result<PendingLightStatus, String> {
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
+        let scheduled_fluid_ticks = self.read_tick_records("light status scheduled fluid ticks")?;
         let raw_blocks = self.read_bytes("light status raw blocks")?;
         let neighbor_blocks = self.read_vec("light status neighbor blocks", |reader| {
             let pos = reader.read_chunk_pos()?;
@@ -842,11 +890,17 @@ impl<'a> FrameReader<'a> {
             raw_blocks,
             neighbor_blocks,
         ))
+        .map(|mut status| {
+            status.scheduled_fluid_ticks = scheduled_fluid_ticks;
+            status
+        })
     }
 
     fn read_completed_light_status(&mut self) -> Result<CompletedLightStatus, String> {
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
+        let scheduled_fluid_ticks =
+            self.read_tick_records("completed light status scheduled fluid ticks")?;
         let light_sections =
             self.read_vec("completed light sections", FrameReader::read_light_section)?;
         let batch_compute_leader = self.read_bool()?;
@@ -855,6 +909,7 @@ impl<'a> FrameReader<'a> {
         Ok(CompletedLightStatus {
             pos,
             feature_snapshot,
+            scheduled_fluid_ticks,
             light_sections,
             batch_compute_leader,
             compute_us,

@@ -16,12 +16,13 @@ use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
 use crate::lighting_seed::provisional_sky_light_includes_chunk;
-use crate::persistence::{ChunkStoreError, ChunkStoreResult};
+use crate::persistence::{ChunkStoreError, ChunkStoreResult, ScheduledTickRecord};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PendingLightStatus {
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
+    pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
     raw_blocks: Vec<RawBlockId>,
     neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
 }
@@ -36,6 +37,7 @@ impl PendingLightStatus {
         Self {
             pos,
             feature_snapshot,
+            scheduled_fluid_ticks: Vec::new(),
             raw_blocks,
             neighbor_blocks,
         }
@@ -45,6 +47,7 @@ impl PendingLightStatus {
         pos: ChunkPos,
         feature_snapshot: ChunkSnapshot,
         chunk: &GeneratedChunk,
+        scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
         generated_chunks: impl IntoIterator<Item = (&'a ChunkPos, &'a GeneratedChunk)>,
         retained_dependencies: impl IntoIterator<Item = (&'a ChunkPos, &'a MutableChunkBlockBuffer)>,
     ) -> Self {
@@ -69,6 +72,7 @@ impl PendingLightStatus {
         Self {
             pos,
             feature_snapshot,
+            scheduled_fluid_ticks,
             raw_blocks: chunk.blocks().to_vec(),
             neighbor_blocks,
         }
