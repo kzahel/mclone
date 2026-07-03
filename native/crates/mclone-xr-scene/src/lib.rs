@@ -3904,10 +3904,6 @@ where
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
             .map(|_| ())
             .with_context(|| format!("wait for {label} submission"))?;
-        device
-            .poll(wgpu::PollType::Wait)
-            .map(|_| ())
-            .with_context(|| format!("wait for {label} device idle"))?;
         Ok(())
     }
 
