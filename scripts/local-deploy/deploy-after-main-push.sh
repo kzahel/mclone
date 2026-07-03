@@ -38,7 +38,7 @@ Usage:
   $0 --status
 
 The pre-push hook calls --schedule. A background worker then waits until the
-remote branch reports the pushed SHA before running 'pnpm deploy'.
+remote branch reports the pushed SHA before running 'pnpm run deploy'.
 EOF
 }
 
@@ -353,25 +353,25 @@ run_worker() {
 
     local deploy_start_epoch
     deploy_start_epoch="$(epoch_seconds)"
-    log "starting pnpm deploy for $sha"
-    write_summary "deploying" "$sha" "$remote" "$branch" "running pnpm deploy"
-    if (cd "$DEPLOY_WORKTREE" && pnpm deploy); then
+    log "starting pnpm run deploy for $sha"
+    write_summary "deploying" "$sha" "$remote" "$branch" "running pnpm run deploy"
+    if (cd "$DEPLOY_WORKTREE" && pnpm run deploy); then
       local deploy_end_epoch total_seconds deploy_seconds
       deploy_end_epoch="$(epoch_seconds)"
       deploy_seconds="$((deploy_end_epoch - deploy_start_epoch))"
       total_seconds="$(elapsed_since_desired)"
-      log "pnpm deploy succeeded for $sha"
+      log "pnpm run deploy succeeded for $sha"
       write_tsv "$COMPLETED_FILE" "$sha" "$remote" "$branch" "$(timestamp)" "$total_seconds" "$deploy_seconds" "$DEPLOY_WORKTREE"
-      write_summary "succeeded" "$sha" "$remote" "$branch" "pnpm deploy succeeded" "$total_seconds" "$deploy_seconds"
+      write_summary "succeeded" "$sha" "$remote" "$branch" "pnpm run deploy succeeded" "$total_seconds" "$deploy_seconds"
       if desired_still_matches "$sha" "$remote" "$branch"; then
         rm -f "$DESIRED_FILE"
       fi
     else
       local status=$?
-      log "pnpm deploy failed for $sha with exit code $status"
+      log "pnpm run deploy failed for $sha with exit code $status"
       local deploy_seconds
       deploy_seconds="$(( $(epoch_seconds) - deploy_start_epoch ))"
-      record_failure "$sha" "$remote" "$branch" "deploy-failed" "pnpm deploy exited with $status after ${deploy_seconds}s" "$(elapsed_since_desired)"
+      record_failure "$sha" "$remote" "$branch" "deploy-failed" "pnpm run deploy exited with $status after ${deploy_seconds}s" "$(elapsed_since_desired)"
       exit "$status"
     fi
   done

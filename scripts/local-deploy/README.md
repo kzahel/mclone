@@ -5,12 +5,12 @@ It is intentionally local automation rather than a GitHub-hosted workflow.
 
 ## Why This Exists
 
-The project already deploys with `pnpm deploy`, which builds the Rust/WASM web
+The project already deploys with `pnpm run deploy`, which builds the Rust/WASM web
 bundle, uploads it to R2, and deploys the Cloudflare Worker. That command depends
 on this machine's native Rust/pnpm setup, Cloudflare authentication, ignored
 Minecraft reference assets, and incremental build cache.
 
-The usual wrapper, `git push && pnpm deploy`, does not work well when another
+The usual wrapper, `git push && pnpm run deploy`, does not work well when another
 tool performs the push. Git also has no normal client-side `post-push` hook.
 The lightweight compromise here is a `pre-push` hook that schedules work in the
 background, then lets the push continue.
@@ -37,7 +37,7 @@ Deploys run from a reusable sibling worktree:
 
 The worker resets that worktree to the pushed commit, links local ignored inputs
 such as `reference/minecraft-1.17.1` and `node_modules` when present, then runs
-`pnpm deploy` there. This keeps the active checkout free for immediate follow-up
+`pnpm run deploy` there. This keeps the active checkout free for immediate follow-up
 editing while preserving an incremental build cache in the deploy worktree.
 
 ## Commands
@@ -72,7 +72,7 @@ answer "what deployed?" or "what failed?" without scraping the full log.
 - `deploy.log`: complete append-only worker log.
 
 `total_seconds` measures from hook scheduling to final success or failure.
-`deploy_seconds` measures the `pnpm deploy` command itself.
+`deploy_seconds` measures the `pnpm run deploy` command itself.
 
 ## Tunables
 
