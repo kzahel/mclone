@@ -62,7 +62,11 @@ pub use loading_progress::{
     ChunkLoadingProgressStats,
 };
 pub use persistence::{
-    ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
+    CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
+    ChunkStoreError, ChunkStoreResult, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore,
+    PersistenceActor, PersistenceMailbox, PersistenceRequestId, PlayerRecordKey, SaveDurability,
+    StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey, WorldStore,
+    WorldStoreCompletion, WorldStoreRequest,
 };
 pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,

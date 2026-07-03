@@ -7,7 +7,7 @@ This document has two jobs:
 1. Describe Minecraft Java 1.17.1's loading and persistence model closely enough to guide parity work.
 2. Describe where `mclone` intentionally or accidentally diverges today, with immediate fixes separated from acceptable deferrals.
 
-[`architecture.md`](./architecture.md) owns runtime boundaries. [`runtime-data-model.md`](./runtime-data-model.md) owns logical chunk and block-state facts. [`protocol.md`](./protocol.md) owns host/client messages. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns scheduler rules that keep player/session authority responsive while chunk jobs run. [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) owns vanilla status order, finality, lighting gates, and chunk publication gates. [`structures.md`](./structures.md) owns the structure-specific start/reference/placement model inside the status pipeline.
+[`architecture.md`](./architecture.md) owns runtime boundaries. [`runtime-data-model.md`](./runtime-data-model.md) owns logical chunk and block-state facts. [`protocol.md`](./protocol.md) owns host/client messages. [`persistence-architecture.md`](./persistence-architecture.md) owns the broader shared persistence target for chunks, entity chunks, player data, saved data, and platform backends. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns scheduler rules that keep player/session authority responsive while chunk jobs run. [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) owns vanilla status order, finality, lighting gates, and chunk publication gates. [`structures.md`](./structures.md) owns the structure-specific start/reference/placement model inside the status pipeline.
 
 ## Core Rule
 
@@ -166,19 +166,33 @@ This is the main policy distinction:
 
 `mclone` has an engine-native storage boundary:
 
-- `native/crates/mclone-server/src/persistence.rs` defines `ChunkSnapshotStore`, `NullChunkSnapshotStore`, and `FilesystemChunkSnapshotStore`.
+- `native/crates/mclone-server/src/persistence.rs` defines the shared
+  `WorldStore` contract, `ChunkRecord`, `PersistenceActor`,
+  `PersistenceMailbox`, `NullWorldStore`, `MemoryWorldStore`,
+  `ChunkSnapshotWorldStore`, and the current `ChunkSnapshotStore`
+  compatibility layer.
 - `native/crates/mclone-server/src/scheduler.rs` owns dirty holder tracking, save-on-unload, and `save_dirty_chunks()`.
 - `native/crates/mclone-server/src/integrated.rs` exposes integrated-server save/reload behavior to native clients.
 
-The adapter contract is deliberately smaller than vanilla NBT:
+The shared store contract is completion-based, but the scheduler still uses a
+synchronous compatibility facade in the first implementation slice:
 
 ```text
-load chunk snapshot
-save chunk snapshot
-process pending unloads
-save dirty resident chunks
-close
+WorldStore requests/completions
+  load/save chunk records
+  pending same-key write visibility
+  cache/durable write lanes
+  flush/close
+
+ChunkScheduler compatibility facade
+  load chunk snapshot
+  save chunk snapshot
+  process pending unloads
+  save dirty resident chunks
 ```
+
+The next persistence slice moves dirty/unload holder behavior onto actor
+acknowledgements instead of blocking through this facade.
 
 Browser singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote host uses file-backed JSON records under a save root. Unit tests generally use memory storage.
 

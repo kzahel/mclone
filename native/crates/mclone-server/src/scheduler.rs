@@ -48,7 +48,7 @@ use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::loading_progress::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
 };
-use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, NullChunkSnapshotStore};
+use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, SynchronousPersistenceFacade};
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
     ChunkSchedulerTickReport, ChunkSchedulerTickTiming, simulation_timing_elapsed_us,
@@ -367,15 +367,22 @@ pub struct ChunkScheduler {
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
     next_revision: u64,
-    store: Box<dyn ChunkSnapshotStore>,
+    store: SynchronousPersistenceFacade,
 }
 
 impl ChunkScheduler {
     pub fn new(seed: i64) -> Self {
-        Self::with_store(seed, Box::<NullChunkSnapshotStore>::default())
+        Self::with_persistence(seed, SynchronousPersistenceFacade::transient())
     }
 
     pub fn with_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
+        Self::with_persistence(
+            seed,
+            SynchronousPersistenceFacade::from_chunk_snapshot_store(store),
+        )
+    }
+
+    pub fn with_persistence(seed: i64, store: SynchronousPersistenceFacade) -> Self {
         Self {
             seed,
             lighting_enabled: true,
@@ -432,7 +439,7 @@ impl ChunkScheduler {
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
             next_revision: 1,
-            store,
+            store: SynchronousPersistenceFacade::from_chunk_snapshot_store(store),
         }
     }
 
