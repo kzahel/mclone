@@ -56,6 +56,7 @@ use mclone_ui::{
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET: Duration = Duration::from_millis(2);
+pub const DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET: usize = 16;
 // Count-cap unload bursts so many small ordered records cannot fit under the
 // elapsed frame budget and still create a large client-apply tail.
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_UNLOAD_UPDATE_BUDGET: usize = 16;
@@ -823,6 +824,9 @@ pub struct GameplayCommandTiming {
 pub struct RuntimePollTiming {
     pub total_ms: f64,
     pub drain_updates_ms: f64,
+    pub client_deferred_chunk_drop_ms: f64,
+    pub client_deferred_chunk_drop_items: usize,
+    pub client_deferred_chunk_drop_backlog_items: usize,
     pub update_pump_stalled: bool,
     pub update_pump_stall_count: usize,
     pub server_update_applied_bytes: usize,
@@ -849,6 +853,9 @@ pub struct RuntimePollDiagnostics {
     pub flush_commands_ms: f64,
     pub poll_total_ms: f64,
     pub drain_updates_ms: f64,
+    pub client_deferred_chunk_drop_ms: f64,
+    pub client_deferred_chunk_drop_items: usize,
+    pub client_deferred_chunk_drop_backlog_items: usize,
     pub update_pump_stalled: bool,
     pub update_pump_stall_count: usize,
     pub server_update_applied_bytes: usize,
@@ -1134,6 +1141,14 @@ impl SingleViewRuntime {
         self.last_poll_diagnostics
     }
 
+    pub fn deferred_client_chunk_drop_item_count(&self) -> usize {
+        self.client().deferred_chunk_drop_item_count()
+    }
+
+    pub fn drain_deferred_client_chunk_drop_items(&mut self, budget: usize) -> usize {
+        self.client_mut().drain_deferred_chunk_drop_items(budget)
+    }
+
     pub fn set_interest_center_command(&mut self, center: ChunkPos) -> Option<ClientCommand> {
         self.set_chunk_view_command(center, self.render_distance, self.chunk_tracking_radius)
     }
@@ -1252,6 +1267,10 @@ impl SingleViewRuntime {
             flush_commands_ms: timing.total_ms,
             poll_total_ms: timing.total_ms,
             drain_updates_ms: timing.drain_updates_ms,
+            client_deferred_chunk_drop_ms: timing.client_deferred_chunk_drop_ms,
+            client_deferred_chunk_drop_items: timing.client_deferred_chunk_drop_items,
+            client_deferred_chunk_drop_backlog_items: timing
+                .client_deferred_chunk_drop_backlog_items,
             update_pump_stalled: timing.update_pump_stalled,
             update_pump_stall_count: timing.update_pump_stall_count,
             server_update_applied_bytes: timing.server_update_applied_bytes,

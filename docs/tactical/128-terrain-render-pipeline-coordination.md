@@ -1710,17 +1710,26 @@ confirmed the section-block client tail improved to `1.997 ms`, but the max
 update-pump bucket moved back to unload client apply:
 `max_runtime_poll_ms=6.551`, `apply_updates_ms=6.531`,
 `client_apply_ms=6.158`, `unload_client_ms=6.158`, with `unload_updates=16`.
+A follow-up deferred client snapshot payload drop queue then kept logical
+unloads immediate while moving old payload destruction out of apply. The same
+Quest churn lane now reports `unload_client_ms=0.021`,
+`apply_updates_ms=2.066`, `client_apply_ms=1.997`,
+`deferred_chunk_drop_ms=3.011` at a `16` item cleanup budget, and
+`deferred_chunk_drop_backlog_items=3078`.
 
-The next implementation chunk should inspect unload client snapshot
-removal/drop cost and residual unload dirty marking before changing broad pump
-policy. Keep receive order. The count cap is now a guardrail for the normal
-frame pump, not the final fix; after the remaining update-apply costs are
-thinner, retune or remove the cap based on the same Quest chunk-view churn lane.
+The next implementation chunk should move back to terrain dirty-to-drawable
+coordination rather than broad update-pump policy: upload apply, ready-section
+admission/publication, and per-eye encode/submit are now the recurring Quest
+worst-frame families. Keep receive order. The unload count cap and 16-item
+deferred cleanup budget are guardrails for the current normal frame pump; retune
+them only if the same Quest chunk-view churn lane shows backlog or cleanup cost
+becoming the next dominant problem.
 
 Keep upload apply and per-eye encode on the short list. The churn run also
 showed terrain pipeline pressure. After the entity-index slice, update apply no
 longer appeared in the worst sampled frames; the recurring tails were terrain
-poll wait, upload apply, and eye encode/submit.
+poll wait, upload apply, and eye encode/submit. After the deferred-drop slice,
+that remains true: the top sampled frames had zero or small update-apply work.
 
 Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
 default policy. It was the best held-capacity result, but the controlled churn

@@ -33,10 +33,11 @@ use crate::session::{
     SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
 };
 use crate::{
-    DEFAULT_RENDER_CHUNK_MESH_BUDGET, GameplayCommandTiming, GameplayCommandUpdatePolicy,
-    RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget,
-    RuntimeUpdatePumpReport, SingleViewRuntime, SingleViewRuntimeStats,
-    TimedRenderSectionCacheUpdate, chunk_tracking_radius_for_render_distance, elapsed_ms,
+    DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET, DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimePollTiming,
+    RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget, RuntimeUpdatePumpReport, SingleViewRuntime,
+    SingleViewRuntimeStats, TimedRenderSectionCacheUpdate,
+    chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 
@@ -459,6 +460,13 @@ impl LocalSingleViewSceneRuntime {
         let poll_start = Instant::now();
         let pump_report = self.pump_runner_updates_report(budget)?;
         let changed = pump_report.apply_report.changed;
+        let deferred_drop_start = Instant::now();
+        let client_deferred_chunk_drop_items = self
+            .core
+            .drain_deferred_client_chunk_drop_items(DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET);
+        let client_deferred_chunk_drop_ms = elapsed_ms(deferred_drop_start.elapsed());
+        let client_deferred_chunk_drop_backlog_items =
+            self.core.deferred_client_chunk_drop_item_count();
         let (
             runner_diagnostics,
             poll_diagnostics_ms,
@@ -469,6 +477,9 @@ impl LocalSingleViewSceneRuntime {
             RuntimePollTiming {
                 total_ms: elapsed_ms(poll_start.elapsed()),
                 drain_updates_ms: pump_report.drain_updates_ms,
+                client_deferred_chunk_drop_ms,
+                client_deferred_chunk_drop_items,
+                client_deferred_chunk_drop_backlog_items,
                 update_pump_stalled: pump_report.stalled,
                 update_pump_stall_count: pump_report.stall_count,
                 server_update_applied_bytes: pump_report.update_bytes,
@@ -565,13 +576,15 @@ impl LocalSingleViewSceneRuntime {
             poll_ms += elapsed_ms(poll_start.elapsed());
             polls += 1;
             let diagnostics = self.server_runner_diagnostics()?;
-            if runner_idle(&diagnostics) {
+            if runner_idle(&diagnostics) && self.core.deferred_client_chunk_drop_item_count() == 0 {
                 return Ok((polls, poll_ms));
             }
             if Instant::now() >= deadline {
                 bail!("timed out waiting for local single-view worldgen jobs");
             }
-            if diagnostics.update_queue_depth == 0 {
+            if diagnostics.update_queue_depth == 0
+                && self.core.deferred_client_chunk_drop_item_count() == 0
+            {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
@@ -1930,13 +1943,20 @@ mod tests {
         let mut unload_client_apply_ms = 0.0_f64;
         let mut max_unload_apply_ms = 0.0_f64;
         let mut max_unload_client_apply_ms = 0.0_f64;
+        let mut deferred_chunk_drop_items = 0_usize;
+        let mut deferred_chunk_drop_ms = 0.0_f64;
+        let mut max_deferred_chunk_drop_ms = 0.0_f64;
+        let mut max_deferred_chunk_drop_backlog_items = 0_usize;
         let mut max_queue_depth_before_poll = 0_usize;
 
         loop {
             let runner_diagnostics_before = runtime.server_runner_diagnostics().unwrap();
             max_queue_depth_before_poll =
                 max_queue_depth_before_poll.max(runner_diagnostics_before.update_queue_depth);
-            if polls > 0 && runner_idle(&runner_diagnostics_before) {
+            if polls > 0
+                && runner_idle(&runner_diagnostics_before)
+                && runtime.core().deferred_client_chunk_drop_item_count() == 0
+            {
                 break;
             }
 
@@ -1959,13 +1979,21 @@ mod tests {
             max_unload_apply_ms = max_unload_apply_ms.max(diagnostics.unload_update_apply_ms);
             max_unload_client_apply_ms =
                 max_unload_client_apply_ms.max(diagnostics.unload_update_client_apply_ms);
+            deferred_chunk_drop_items += diagnostics.client_deferred_chunk_drop_items;
+            deferred_chunk_drop_ms += diagnostics.client_deferred_chunk_drop_ms;
+            max_deferred_chunk_drop_ms =
+                max_deferred_chunk_drop_ms.max(diagnostics.client_deferred_chunk_drop_ms);
+            max_deferred_chunk_drop_backlog_items = max_deferred_chunk_drop_backlog_items
+                .max(diagnostics.client_deferred_chunk_drop_backlog_items);
 
             let runner_diagnostics = runtime.server_runner_diagnostics().unwrap();
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for churned chunk view to settle; runner={runner_diagnostics:?}"
             );
-            if runner_diagnostics.update_queue_depth == 0 {
+            if runner_diagnostics.update_queue_depth == 0
+                && runtime.core().deferred_client_chunk_drop_item_count() == 0
+            {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
@@ -1996,8 +2024,13 @@ mod tests {
             unload_client_apply_ms > 0.0,
             "unload updates should populate client-replica apply timing"
         );
+        assert!(
+            deferred_chunk_drop_items >= old_positions.len(),
+            "old chunk snapshot payload items should be deferred and drained after unload apply"
+        );
+        assert_eq!(runtime.core().deferred_client_chunk_drop_item_count(), 0);
         eprintln!(
-            "local_chunk_view_churn_attributes_unload_apply polls={polls} changed_polls={changed_polls} snapshots={snapshot_updates} section_updates={section_block_updates} unloads={unload_updates} other={other_updates} unload_apply_ms={unload_apply_ms:.3} unload_dirty_ms={unload_dirty_mark_ms:.3} unload_client_ms={unload_client_apply_ms:.3} max_unload_apply_ms={max_unload_apply_ms:.3} max_unload_client_ms={max_unload_client_apply_ms:.3} max_queue_depth_before_poll={max_queue_depth_before_poll}"
+            "local_chunk_view_churn_attributes_unload_apply polls={polls} changed_polls={changed_polls} snapshots={snapshot_updates} section_updates={section_block_updates} unloads={unload_updates} other={other_updates} unload_apply_ms={unload_apply_ms:.3} unload_dirty_ms={unload_dirty_mark_ms:.3} unload_client_ms={unload_client_apply_ms:.3} max_unload_apply_ms={max_unload_apply_ms:.3} max_unload_client_ms={max_unload_client_apply_ms:.3} deferred_chunk_drop_items={deferred_chunk_drop_items} deferred_chunk_drop_ms={deferred_chunk_drop_ms:.3} max_deferred_chunk_drop_ms={max_deferred_chunk_drop_ms:.3} max_deferred_chunk_drop_backlog_items={max_deferred_chunk_drop_backlog_items} max_queue_depth_before_poll={max_queue_depth_before_poll}"
         );
     }
 

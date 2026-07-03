@@ -72,6 +72,8 @@ pub struct ClientRuntime {
     biome_zoom_seed: Option<i64>,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
+    deferred_chunk_drops: VecDeque<ChunkSnapshot>,
+    deferred_chunk_drop_items: usize,
     day_time: u64,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
@@ -88,6 +90,8 @@ impl ClientRuntime {
             biome_zoom_seed: None,
             chunk_view: None,
             chunks: BTreeMap::new(),
+            deferred_chunk_drops: VecDeque::new(),
+            deferred_chunk_drop_items: 0,
             day_time: 0,
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
@@ -134,10 +138,14 @@ impl ClientRuntime {
                 self.biome_zoom_seed = Some(biome_zoom_seed);
             }
             ServerUpdate::ChunkSnapshot(snapshot) => {
-                self.chunks.insert(snapshot.pos, snapshot);
+                if let Some(previous) = self.chunks.insert(snapshot.pos, snapshot) {
+                    self.defer_chunk_snapshot_drop(previous);
+                }
             }
             ServerUpdate::ChunkUnload { pos } => {
-                self.chunks.remove(&pos);
+                if let Some(snapshot) = self.chunks.remove(&pos) {
+                    self.defer_chunk_snapshot_drop(snapshot);
+                }
                 self.remove_entities_in_chunk(pos);
             }
             ServerUpdate::SectionBlockUpdates {
@@ -214,8 +222,22 @@ impl ClientRuntime {
         self.chunks.len()
     }
 
+    pub fn deferred_chunk_drop_item_count(&self) -> usize {
+        self.deferred_chunk_drop_items
+    }
+
+    pub fn drain_deferred_chunk_drop_items(&mut self, budget: usize) -> usize {
+        let mut drained = 0;
+        while drained < budget && self.drain_one_deferred_chunk_drop_item() {
+            drained += 1;
+        }
+        drained
+    }
+
     pub fn clear_server_replica(&mut self) {
         self.chunks.clear();
+        self.deferred_chunk_drops.clear();
+        self.deferred_chunk_drop_items = 0;
         self.player_position_updates.clear();
         self.remote_players.clear();
         self.remote_player_walk_distances.clear();
@@ -264,6 +286,51 @@ impl ClientRuntime {
                     .map(ActorPresentation::entity),
             )
             .collect()
+    }
+
+    fn defer_chunk_snapshot_drop(&mut self, snapshot: ChunkSnapshot) {
+        let item_count = chunk_snapshot_drop_item_count(&snapshot);
+        if item_count == 0 {
+            return;
+        }
+        self.deferred_chunk_drop_items += item_count;
+        self.deferred_chunk_drops.push_back(snapshot);
+    }
+
+    fn drain_one_deferred_chunk_drop_item(&mut self) -> bool {
+        loop {
+            let Some(mut snapshot) = self.deferred_chunk_drops.pop_front() else {
+                return false;
+            };
+
+            if let Some(light_section) = snapshot.light_sections.pop() {
+                if chunk_snapshot_has_drop_items(&snapshot) {
+                    self.deferred_chunk_drops.push_front(snapshot);
+                }
+                drop(light_section);
+                self.deferred_chunk_drop_items -= 1;
+                return true;
+            }
+
+            if let Some(section) = snapshot.sections.pop() {
+                if chunk_snapshot_has_drop_items(&snapshot) {
+                    self.deferred_chunk_drops.push_front(snapshot);
+                }
+                drop(section);
+                self.deferred_chunk_drop_items -= 1;
+                return true;
+            }
+
+            if !snapshot.biomes.is_empty() {
+                let biomes = std::mem::take(&mut snapshot.biomes);
+                if chunk_snapshot_has_drop_items(&snapshot) {
+                    self.deferred_chunk_drops.push_front(snapshot);
+                }
+                drop(biomes);
+                self.deferred_chunk_drop_items -= 1;
+                return true;
+            }
+        }
     }
 
     pub fn drain_player_position_updates(
@@ -387,6 +454,16 @@ fn entity_chunk_pos(snapshot: &EntitySnapshot) -> ChunkPos {
     BlockPos::containing(snapshot.position).chunk_pos()
 }
 
+fn chunk_snapshot_has_drop_items(snapshot: &ChunkSnapshot) -> bool {
+    chunk_snapshot_drop_item_count(snapshot) > 0
+}
+
+fn chunk_snapshot_drop_item_count(snapshot: &ChunkSnapshot) -> usize {
+    usize::from(!snapshot.biomes.is_empty())
+        + snapshot.sections.len()
+        + snapshot.light_sections.len()
+}
+
 fn remote_player_horizontal_distance(
     previous: &RemotePlayerUpdate,
     next: &RemotePlayerUpdate,
@@ -465,13 +542,15 @@ mod tests {
     #[test]
     fn client_runtime_hydrates_and_unloads_chunk_snapshots() {
         let mut runtime = ClientRuntime::local_integrated();
+        let mut blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        blocks[0] = BlockStateId(1);
         let snapshot = ChunkSnapshot::from_block_state_ids(
             ChunkPos::new(0, 0),
             ChunkStatus::Surface,
             ChunkRevision(1),
             0,
             16,
-            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+            &blocks,
         );
 
         runtime.apply_update(ServerUpdate::ChunkSnapshot(snapshot.clone()));
@@ -485,6 +564,45 @@ mod tests {
 
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), None);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
+        assert_eq!(runtime.drain_deferred_chunk_drop_items(0), 0);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
+        assert_eq!(runtime.drain_deferred_chunk_drop_items(1), 1);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
+    }
+
+    #[test]
+    fn client_runtime_defers_replaced_chunk_snapshot_drop() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let mut first_blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        first_blocks[0] = BlockStateId(1);
+        let mut second_blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        second_blocks[0] = BlockStateId(2);
+        let first = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &first_blocks,
+        );
+        let second = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(2),
+            0,
+            16,
+            &second_blocks,
+        );
+
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(first));
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(second.clone()));
+
+        assert_eq!(runtime.loaded_chunk_count(), 1);
+        assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), Some(&second));
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
+        assert_eq!(runtime.drain_deferred_chunk_drop_items(usize::MAX), 1);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
     }
 
     #[test]
@@ -598,6 +716,7 @@ mod tests {
         assert_eq!(runtime.host(), ClientHost::RemoteDedicated);
         assert_eq!(runtime.chunk_view(), Some(&view));
         assert_eq!(runtime.loaded_chunk_count(), 0);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
         assert_eq!(runtime.remote_player_count(), 0);
         assert_eq!(runtime.entity_count(), 0);
         assert_eq!(runtime.drain_player_position_updates().count(), 0);

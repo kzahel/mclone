@@ -13,8 +13,9 @@ landed and reproduced the unload client-apply tail; Slice 3G default
 unload-count pump cap landed and reduced the Quest unload tail but did not
 eliminate it; Slice 3H client entity-by-chunk unload index landed and cut the
 Quest update-pump tail below 4 ms; Slice 3I batched packed-section patching
-landed and Quest remeasurement showed the section-block client tail improved
-while residual unload client apply became the max update-pump bucket;
+landed and improved the section-block client tail; Slice 3J deferred client
+chunk snapshot payload drops landed and removed the Quest unload client-apply
+tail while making cleanup cost explicit in poll diagnostics;
 remote/web bus convergence and broader terrain coordinator lifecycle remain
 active
 Workstream: shared native Rust app runtime, local integrated server runner,
@@ -771,27 +772,78 @@ Recorded Slice 3I result:
   `upload_limited=true`, `accept_limited=true`, `backpressured=true`,
   `queued_upload_removed_sections=1504`, `max_runtime_upload_apply_ms=6.008`.
 
+### Slice 3J - Deferred Client Chunk Snapshot Payload Drops
+
+Goal: keep chunk unload and replacement semantics immediate while moving large
+old `ChunkSnapshot` payload destruction out of the client update-apply bucket.
+
+- [x] Queue removed/replaced `ChunkSnapshot`s inside `ClientRuntime` instead of
+  dropping their section/light/biome payloads inline during
+  `ChunkUnload`/replacement apply.
+- [x] Drain deferred snapshot payload items from the normal local integrated
+  poll path with an explicit 16-item per-poll budget.
+- [x] Keep `chunk_snapshot(pos)` and `loaded_chunk_count()` semantics immediate:
+  unloaded chunks disappear from the client replica before their old payloads
+  are cleaned up.
+- [x] Make `poll_until_idle` wait for the deferred cleanup queue so tests and
+  startup helpers do not leave retained old snapshot memory behind.
+- [x] Surface `deferred_chunk_drop_ms`, drained item count, and backlog items
+  through runtime/XR/Quest perf diagnostics.
+
+Validation (Slice 3J):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-client -- --nocapture`
+  passed (`89` tests).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+  passed (`73` tests). The local churn probe reported `9` unloads,
+  `max_unload_client_ms=0.008`, `deferred_chunk_drop_items=73`,
+  `max_deferred_chunk_drop_ms=0.013`, and zero deferred backlog at settle.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene` passed.
+- Quest chunk-view churn validation passed with the same `2 / 16 / 64` lane,
+  writing
+  `/tmp/mclone-quest-openxr-churn-deferred-drop-items-16-summary.txt` and
+  `/tmp/mclone-quest-openxr-churn-deferred-drop-items-16-logcat.txt`.
+
+Recorded Slice 3J result:
+
+- The unload client-apply tail collapsed:
+  `unload_ms=1.158`, `unload_dirty_ms=1.145`,
+  `unload_client_ms=0.021`, down from Slice 3I's `6.531`, `1.750`, and
+  `6.158`.
+- The remaining update-apply max is now section block client application:
+  `section_ms=2.062`, `section_dirty_ms=0.074`,
+  `section_client_ms=1.996`. Overall update apply is
+  `apply_updates_ms=2.066`, `dirty_mark_ms=1.883`,
+  `client_apply_ms=1.997`.
+- Deferred cleanup is now visible and bounded separately from apply:
+  `deferred_chunk_drop_ms=3.011`,
+  `deferred_chunk_drop_items=16`,
+  `deferred_chunk_drop_backlog_items=3078`, and
+  `max_runtime_poll_ms=3.018`.
+- Queue age remained in the same rough band under the churn lane:
+  `server_update_queue_depth=406`,
+  `server_update_oldest_applied_age_ms=228.713`.
+- Worst sampled frames still did not point at update apply. Top frames had
+  zero or small update-apply work and were dominated by terrain poll wait, eye
+  encode/submit, and upload apply.
+- Terrain upload pressure remained active:
+  `upload_limited=true`, `accept_limited=true`, `backpressured=true`,
+  `queued_upload_removed_sections=1408`, `max_runtime_upload_apply_ms=5.217`.
+
 Slice 3 conclusion: the local integrated update pump now follows the intended
 thin-apply shape for resident dirty marking: producer-side decode, strict
-receive-order application, resident flag flips, and bounded compile/upload
-pull-work. Remaining frame misses are no longer explained by hidden command
-drain, render-thread decode, full-cache dirty scans, or resident dirty-set
-insertion. The local deterministic churn test did not reproduce a multi-ms
-client unload tail on desktop/shared runtime, but the Quest-controlled churn
-lane did reproduce it: the worst update-pump frame was dominated by chunk
-unload client apply. The default unload-count cap now bounds the number of
-unloads applied in one normal frame, and the client entity-by-chunk index
-removed the worst O(unloads * live entities) client-replica scan. The measured
-Quest update-pump max is now below 4 ms in the churn lane, and the worst sampled
-frames are no longer update-apply frames. Batched section patching reduced the
-section-block client tail, but residual unload client apply is again the max
-update-pump bucket in the controlled churn lane. Remaining valuable local work
-before closing this slice is to inspect unload client snapshot removal/drop
-cost and residual unload dirty marking, then retune or remove the unload-count
-cap if the thin-apply target holds. Keep receive order; any
+receive-order application, resident flag flips, deferred old-payload cleanup,
+and bounded compile/upload pull-work. Remaining frame misses are no longer
+explained by hidden command drain, render-thread decode, full-cache dirty
+scans, resident dirty-set insertion, entity cleanup scans, or old chunk
+snapshot destruction in the unload apply bucket. Keep receive order; any
 additional divergence should stop between ordered update records or make
 oversized lifecycle batches splittable instead of reordering them. This
-tactical's remaining bus work is still remote TCP and web convergence.
+tactical's remaining bus work is still remote TCP and web convergence. Local
+integrated performance follow-up should move primarily back to the terrain
+dirty-to-drawable coordinator (`128`): upload apply, ready-section admission,
+per-eye encode/submit, and possible retuning of the explicit deferred-drop
+budget if sustained movement shows memory/backlog pressure.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
@@ -859,11 +911,13 @@ another doc, explicitly decide where these remaining valuable items live:
 - Oversized lifecycle/update batches: Quest churn reproduced a single
   update-pump frame with `204` unload updates and `19.323 ms` unload
   client-apply. A default count cap now limits the normal frame pump to `16`
-  unload updates, and the client entity-by-chunk index cut the capped Quest
-  update-pump max to `3.913 ms` apply / `3.882 ms` client apply. Before closing
-  this tactical, inspect the remaining unload client snapshot removal/drop cost
-  and residual unload dirty marking, or explicitly move that work to the
-  terrain/client-runtime coordinator track.
+  unload updates, the client entity-by-chunk index removed the O(unloads *
+  live entities) cleanup scan, and deferred old snapshot payload cleanup moved
+  the capped unload client tail to `0.021 ms`. Deferred cleanup is now explicit
+  poll work (`3.011 ms` max at a 16-item budget in the latest Quest churn
+  run). Keep this note as the easy-to-find place to retune the cleanup budget
+  or split payload items further if sustained movement shows memory/backlog
+  pressure.
 - Remote TCP session actor: native remote still needs a real inbound update
   bus and producer-side decode so `SendOnly` works outside local integrated
   play.
