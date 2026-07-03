@@ -483,6 +483,104 @@ fn rgb8_alpha(color: u32, alpha: f32) -> [f32; 4] {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Copy, Debug)]
+    struct PaletteTintCase {
+        biome_id: i32,
+        biome_key: &'static str,
+        grass: u32,
+        foliage: u32,
+        water: u32,
+    }
+
+    const FIRST_PALETTE_TINT_CASES: &[PaletteTintCase] = &[
+        PaletteTintCase {
+            biome_id: 1,
+            biome_key: "minecraft:plains",
+            grass: 0x91_bd_59,
+            foliage: 0x77_ab_2f,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 2,
+            biome_key: "minecraft:desert",
+            grass: 0xb5_b7_55,
+            foliage: 0xae_b4_55,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 6,
+            biome_key: "minecraft:swamp",
+            grass: 0x64_71_39,
+            foliage: SWAMP_GRASS_COLOR_LIGHT,
+            water: 0x61_7b_64,
+        },
+        PaletteTintCase {
+            biome_id: 29,
+            biome_key: "minecraft:dark_forest",
+            grass: 0x50_7a_32,
+            foliage: 0x59_9b_35,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 5,
+            biome_key: "minecraft:taiga",
+            grass: 0x86_b7_83,
+            foliage: 0x68_9b_68,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 12,
+            biome_key: "minecraft:snowy_tundra",
+            grass: 0x80_b4_97,
+            foliage: 0x60_93_80,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 37,
+            biome_key: "minecraft:badlands",
+            grass: 0x90_81_4d,
+            foliage: 0x9e_81_4d,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 44,
+            biome_key: "minecraft:warm_ocean",
+            grass: 0x8e_b9_71,
+            foliage: 0x71_a7_4d,
+            water: WARM_OCEAN_WATER_COLOR,
+        },
+    ];
+
+    #[test]
+    fn first_palette_matrix_tint_groups_match_java_visual_facts() {
+        let catalog = TexturedMeshCatalog::default();
+
+        for case in FIRST_PALETTE_TINT_CASES {
+            assert_eq!(
+                block_tint(&catalog, TexturedBlockTint::Grass, 0, 64, 0, |_, _, _| case
+                    .biome_id),
+                rgb8(case.grass),
+                "{} grass tint",
+                case.biome_key
+            );
+            assert_eq!(
+                block_tint(&catalog, TexturedBlockTint::Foliage, 0, 64, 0, |_, _, _| {
+                    case.biome_id
+                }),
+                rgb8(case.foliage),
+                "{} foliage tint",
+                case.biome_key
+            );
+            assert_eq!(
+                blended_liquid_color(TexturedFluidKind::Water, 0, 64, 0, 1.0, |_, _, _| case
+                    .biome_id),
+                rgb8_alpha(case.water, 0.72),
+                "{} water tint",
+                case.biome_key
+            );
+        }
+    }
+
     #[test]
     fn dark_forest_grass_modifier_matches_java_constant() {
         let color = grass_color(&TexturedMeshCatalog::default(), biome_visual(29), -94, 348);

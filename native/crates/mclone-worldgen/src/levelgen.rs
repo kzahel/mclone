@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::block::{AIR, RawBlockId};
+use crate::block::AIR;
 #[cfg(test)]
 use crate::feature::{FEATURES_WRITE_RADIUS_CUTOFF, FeatureRegion};
 #[cfg(test)]
@@ -40,7 +40,10 @@ use feature_batch::{
 mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
-    use crate::block::{STONE, WATER};
+    use crate::block::{
+        GRASS_BLOCK, ICE, PACKED_ICE, RED_SAND, RawBlockId, SAND, SNOW, SNOW_BLOCK, STONE,
+        TERRACOTTA, WATER, is_air_like, is_water,
+    };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
     use serde::Deserialize;
@@ -51,6 +54,108 @@ mod tests {
         -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
     ];
     const BEDROCK: u8 = 3;
+
+    #[derive(Clone, Copy, Debug)]
+    struct PaletteMatrixCase {
+        seed: i64,
+        chunk_x: i32,
+        chunk_z: i32,
+        biome_key: &'static str,
+        surface_family: SurfaceFamily,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum SurfaceFamily {
+        Grass,
+        Sand,
+        Snow,
+        Badlands,
+        Swamp,
+        Water,
+    }
+
+    impl SurfaceFamily {
+        const fn name(self) -> &'static str {
+            match self {
+                Self::Grass => "grass",
+                Self::Sand => "sand",
+                Self::Snow => "snow",
+                Self::Badlands => "badlands",
+                Self::Swamp => "swamp grass/water",
+                Self::Water => "water",
+            }
+        }
+
+        const fn contains(self, block: RawBlockId) -> bool {
+            match self {
+                Self::Grass => block == GRASS_BLOCK,
+                Self::Sand => block == SAND,
+                Self::Snow => matches!(block, SNOW | SNOW_BLOCK | ICE | PACKED_ICE),
+                Self::Badlands => matches!(block, RED_SAND | TERRACOTTA),
+                Self::Swamp => block == GRASS_BLOCK || is_water(block),
+                Self::Water => is_water(block),
+            }
+        }
+    }
+
+    const FIRST_PALETTE_MATRIX_CASES: &[PaletteMatrixCase] = &[
+        PaletteMatrixCase {
+            seed: 16,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:plains",
+            surface_family: SurfaceFamily::Grass,
+        },
+        PaletteMatrixCase {
+            seed: 38,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:desert",
+            surface_family: SurfaceFamily::Sand,
+        },
+        PaletteMatrixCase {
+            seed: 7,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:swamp",
+            surface_family: SurfaceFamily::Swamp,
+        },
+        PaletteMatrixCase {
+            seed: 44,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:dark_forest",
+            surface_family: SurfaceFamily::Grass,
+        },
+        PaletteMatrixCase {
+            seed: 125,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:taiga",
+            surface_family: SurfaceFamily::Grass,
+        },
+        PaletteMatrixCase {
+            seed: 42,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:snowy_tundra",
+            surface_family: SurfaceFamily::Snow,
+        },
+        PaletteMatrixCase {
+            seed: 147,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:badlands",
+            surface_family: SurfaceFamily::Badlands,
+        },
+        PaletteMatrixCase {
+            seed: 26,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:warm_ocean",
+            surface_family: SurfaceFamily::Water,
+        },
+    ];
 
     #[derive(Debug, Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -1068,6 +1173,44 @@ mod tests {
     }
 
     #[test]
+    fn first_palette_matrix_rows_have_expected_biome_and_surface_family() {
+        for case in FIRST_PALETTE_MATRIX_CASES {
+            let biome_source = OverworldBiomeSource::new(case.seed, false, false);
+            let primary = biome_source.get_primary_biome_definition(case.chunk_x, case.chunk_z);
+            assert_eq!(
+                primary.key(),
+                case.biome_key,
+                "primary biome for seed {} chunk ({}, {})",
+                case.seed,
+                case.chunk_x,
+                case.chunk_z
+            );
+
+            let center_x = chunk_min_block_coord(case.chunk_x) + 8;
+            let center_z = chunk_min_block_coord(case.chunk_z) + 8;
+            let center_biome =
+                biome_source.get_block_position_biome_definition(case.seed, center_x, center_z);
+            assert_eq!(
+                center_biome.key(),
+                case.biome_key,
+                "block-position biome at ({center_x}, {center_z}) for seed {}",
+                case.seed
+            );
+
+            let chunk = generate_overworld_features_chunk(case.seed, case.chunk_x, case.chunk_z);
+            let family_columns = count_top_surface_family(&chunk, case.surface_family);
+            assert!(
+                family_columns > 0,
+                "seed {} chunk ({}, {}) had no top-surface {} columns",
+                case.seed,
+                case.chunk_x,
+                case.chunk_z,
+                case.surface_family.name()
+            );
+        }
+    }
+
+    #[test]
     fn generated_features_chunk_adds_visible_decoration_blocks() {
         let features = generate_overworld_features_chunk(12345, 0, 0);
         let feature_block_count = features.block_count(crate::block::OAK_LOG)
@@ -1909,6 +2052,30 @@ mod tests {
             snapshot.sections[0].unpack_block_state_ids()[0],
             mclone_core::BlockStateId(STONE as u32)
         );
+    }
+
+    fn count_top_surface_family(chunk: &GeneratedChunk, family: SurfaceFamily) -> usize {
+        let mut count = 0;
+        for local_z in 0..GeneratedChunk::WIDTH {
+            for local_x in 0..GeneratedChunk::WIDTH {
+                if top_non_air_block(chunk, local_x, local_z)
+                    .is_some_and(|block| family.contains(block))
+                {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    fn top_non_air_block(chunk: &GeneratedChunk, local_x: i32, local_z: i32) -> Option<RawBlockId> {
+        for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+            let block = chunk.block_at_y(local_x, y, local_z).raw();
+            if !is_air_like(block) {
+                return Some(block);
+            }
+        }
+        None
     }
 
     fn assert_panic_message(work: impl FnOnce() + panic::UnwindSafe, expected: &str) {
