@@ -281,14 +281,14 @@ Landed:
   targets that would place the head/body into obstruction.
 - [x] Keep vertical room-scale HMD motion out of target validity. Teleport can
   intentionally change body height; leaning forward into a block cannot.
-- [ ] Add a native latest-only worker mailbox for desktop OpenXR and Android XR
+- [x] Add a native latest-only worker mailbox for desktop OpenXR and Android XR
   so path search stays off the XR render/frame thread.
 - [x] Add a flat/offscreen test entry point that exercises the same query and
   target validation without requiring XR.
 - [x] Add the desktop flat debug input adapter: hold-to-preview, mouse-look aim
   updates, release-to-commit, and synthetic left-hand origin/upward-biased aim
   feeding the shared query.
-- [ ] Keep web/WASM XR-worker support documented as intentionally absent while
+- [x] Keep web/WASM XR-worker support documented as intentionally absent while
   web has no XR target, without making the shared evaluator non-wasm or XR-only.
 
 Landed:
@@ -311,6 +311,16 @@ Landed:
 - Added provisional desktop debug world lines for the preview arc, feet marker,
   and vertically aligned dot. This validates the shared resolver interactively;
   the full XR/multiview preview overlay remains part of Slice 3.
+- Added `mclone-client::TeleportCollisionSnapshot` plus a native latest-only
+  `NativeTeleportPreviewWorker`. The worker owns a compact query-window
+  collision snapshot, replaces pending requests as aim changes, and returns
+  sequenced completed previews for adapters to display/commit.
+- Switched the desktop flat debug adapter to the native worker path. It submits
+  changed mouse-look intents, renders the latest completed preview, and commits
+  only that completed preview on release.
+- Web/WASM still shares the evaluator and collision snapshot types, but the
+  native OS-thread worker export is intentionally unavailable on `wasm32`; the
+  future web path should provide the same mailbox shape over Web Workers.
 
 ## Slice 3 - Preview Overlay
 

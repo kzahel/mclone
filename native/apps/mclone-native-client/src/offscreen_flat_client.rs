@@ -35,6 +35,7 @@ use crate::ui::DebugPaneStats;
 
 const DEFAULT_OFFSCREEN_FRAME_MS: f64 = 1000.0 / 60.0;
 const MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS: usize = 65_536;
+const OFFSCREEN_BLINK_DEBUG_PREVIEW_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OffscreenFlatClientScreenshotReport {
@@ -789,8 +790,16 @@ fn configure_screenshot_scene(
     }
     host.driver.player_collision_box_visible = options.player_collision_box;
     host.driver.camera.set_view_mode(options.camera_view);
-    if options.blink_debug && !host.driver.begin_desktop_blink_debug() {
-        bail!("offscreen Blink debug preview requires an active runtime");
+    if options.blink_debug {
+        if !host.driver.begin_desktop_blink_debug() {
+            bail!("offscreen Blink debug preview requires an active runtime");
+        }
+        if !host
+            .driver
+            .wait_for_desktop_blink_debug_preview(OFFSCREEN_BLINK_DEBUG_PREVIEW_TIMEOUT)
+        {
+            bail!("offscreen Blink debug preview worker timed out");
+        }
     }
     Ok(())
 }

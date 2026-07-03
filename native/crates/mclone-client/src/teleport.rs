@@ -1,4 +1,10 @@
 use std::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::fmt;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread;
 
 use mclone_core::{Aabb, BlockPos, BlockStateId, Vec3d};
 use mclone_path::{
@@ -37,6 +43,93 @@ where
 {
     fn block_state_at(&self, pos: BlockPos) -> Option<BlockStateId> {
         self(pos)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TeleportCollisionSnapshot {
+    bounds: Option<TeleportCollisionSnapshotBounds>,
+    blocks: BTreeMap<BlockPos, BlockStateId>,
+}
+
+impl TeleportCollisionSnapshot {
+    pub fn capture<W>(world: &W, intent: TeleportIntent, config: TeleportConfig) -> Self
+    where
+        W: TeleportCollisionWorld + ?Sized,
+    {
+        let Some(bounds) = teleport_collision_snapshot_bounds(intent, config) else {
+            return Self::empty();
+        };
+        let mut blocks = BTreeMap::new();
+        for y in bounds.min.y..=bounds.max.y {
+            for z in bounds.min.z..=bounds.max.z {
+                for x in bounds.min.x..=bounds.max.x {
+                    let pos = BlockPos::new(x, y, z);
+                    if let Some(state) = world.block_state_at(pos) {
+                        blocks.insert(pos, state);
+                    }
+                }
+            }
+        }
+        Self {
+            bounds: Some(bounds),
+            blocks,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            bounds: None,
+            blocks: BTreeMap::new(),
+        }
+    }
+
+    pub const fn bounds(&self) -> Option<TeleportCollisionSnapshotBounds> {
+        self.bounds
+    }
+
+    pub fn block_count(&self) -> usize {
+        self.blocks.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+}
+
+impl Default for TeleportCollisionSnapshot {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl TeleportCollisionWorld for TeleportCollisionSnapshot {
+    fn block_state_at(&self, pos: BlockPos) -> Option<BlockStateId> {
+        if self.bounds.is_some_and(|bounds| !bounds.contains(pos)) {
+            return None;
+        }
+        self.blocks.get(&pos).copied()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TeleportCollisionSnapshotBounds {
+    pub min: BlockPos,
+    pub max: BlockPos,
+}
+
+impl TeleportCollisionSnapshotBounds {
+    pub const fn new(min: BlockPos, max: BlockPos) -> Self {
+        Self { min, max }
+    }
+
+    pub const fn contains(self, pos: BlockPos) -> bool {
+        self.min.x <= pos.x
+            && pos.x <= self.max.x
+            && self.min.y <= pos.y
+            && pos.y <= self.max.y
+            && self.min.z <= pos.z
+            && pos.z <= self.max.z
     }
 }
 
@@ -156,6 +249,214 @@ impl TeleportPreview {
 
     pub const fn is_valid(&self) -> bool {
         self.validity.is_valid()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub type TeleportPreviewRequestId = u64;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TeleportPreviewRequest {
+    pub id: TeleportPreviewRequestId,
+    pub intent: TeleportIntent,
+    pub config: TeleportConfig,
+    pub collision: TeleportCollisionSnapshot,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TeleportPreviewResult {
+    pub id: TeleportPreviewRequestId,
+    pub preview: TeleportPreview,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub enum TeleportPreviewWorkerError {
+    Spawn(std::io::Error),
+    Disconnected,
+    QueuePoisoned,
+    Shutdown,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl fmt::Display for TeleportPreviewWorkerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Spawn(error) => write!(f, "failed to spawn teleport preview worker: {error}"),
+            Self::Disconnected => write!(f, "teleport preview worker disconnected"),
+            Self::QueuePoisoned => write!(f, "teleport preview worker queue was poisoned"),
+            Self::Shutdown => write!(f, "teleport preview worker has shut down"),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::error::Error for TeleportPreviewWorkerError {}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub struct NativeTeleportPreviewWorker {
+    queue: Arc<NativeTeleportPreviewQueue>,
+    receiver: mpsc::Receiver<TeleportPreviewResult>,
+    handle: Option<thread::JoinHandle<()>>,
+    next_request_id: TeleportPreviewRequestId,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeTeleportPreviewWorker {
+    pub fn new() -> Result<Self, TeleportPreviewWorkerError> {
+        let queue = Arc::new(NativeTeleportPreviewQueue::new());
+        let (sender, receiver) = mpsc::channel();
+        let handle = {
+            let queue = Arc::clone(&queue);
+            thread::Builder::new()
+                .name("mclone-teleport-preview".to_owned())
+                .spawn(move || run_native_teleport_preview_worker(queue, sender))
+                .map_err(TeleportPreviewWorkerError::Spawn)?
+        };
+        Ok(Self {
+            queue,
+            receiver,
+            handle: Some(handle),
+            next_request_id: 0,
+        })
+    }
+
+    pub fn submit_from_world<W>(
+        &mut self,
+        world: &W,
+        intent: TeleportIntent,
+        config: TeleportConfig,
+    ) -> Result<TeleportPreviewRequestId, TeleportPreviewWorkerError>
+    where
+        W: TeleportCollisionWorld + ?Sized,
+    {
+        let collision = TeleportCollisionSnapshot::capture(world, intent, config);
+        self.submit_snapshot(intent, config, collision)
+    }
+
+    pub fn submit_snapshot(
+        &mut self,
+        intent: TeleportIntent,
+        config: TeleportConfig,
+        collision: TeleportCollisionSnapshot,
+    ) -> Result<TeleportPreviewRequestId, TeleportPreviewWorkerError> {
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
+        let id = self.next_request_id;
+        self.queue.submit(TeleportPreviewRequest {
+            id,
+            intent,
+            config,
+            collision,
+        })?;
+        Ok(id)
+    }
+
+    pub fn try_recv_latest(
+        &mut self,
+    ) -> Result<Option<TeleportPreviewResult>, TeleportPreviewWorkerError> {
+        let mut latest = None;
+        loop {
+            match self.receiver.try_recv() {
+                Ok(result) => latest = Some(result),
+                Err(mpsc::TryRecvError::Empty) => return Ok(latest),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err(TeleportPreviewWorkerError::Disconnected);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for NativeTeleportPreviewWorker {
+    fn drop(&mut self) {
+        self.queue.shutdown();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct NativeTeleportPreviewQueue {
+    state: Mutex<NativeTeleportPreviewQueueState>,
+    request_available: Condvar,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct NativeTeleportPreviewQueueState {
+    latest: Option<TeleportPreviewRequest>,
+    shutdown: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeTeleportPreviewQueue {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(NativeTeleportPreviewQueueState {
+                latest: None,
+                shutdown: false,
+            }),
+            request_available: Condvar::new(),
+        }
+    }
+
+    fn submit(&self, request: TeleportPreviewRequest) -> Result<(), TeleportPreviewWorkerError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| TeleportPreviewWorkerError::QueuePoisoned)?;
+        if state.shutdown {
+            return Err(TeleportPreviewWorkerError::Shutdown);
+        }
+        state.latest = Some(request);
+        self.request_available.notify_one();
+        Ok(())
+    }
+
+    fn take_next_blocking(&self) -> Option<TeleportPreviewRequest> {
+        let mut state = self.state.lock().ok()?;
+        loop {
+            if state.shutdown {
+                return None;
+            }
+            if state.latest.is_some() {
+                return state.latest.take();
+            }
+            state = self.request_available.wait(state).ok()?;
+        }
+    }
+
+    fn shutdown(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.shutdown = true;
+            state.latest = None;
+            self.request_available.notify_all();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_native_teleport_preview_worker(
+    queue: Arc<NativeTeleportPreviewQueue>,
+    sender: mpsc::Sender<TeleportPreviewResult>,
+) {
+    while let Some(request) = queue.take_next_blocking() {
+        let preview = resolve_teleport_preview(&request.collision, request.intent, request.config);
+        if sender
+            .send(TeleportPreviewResult {
+                id: request.id,
+                preview,
+            })
+            .is_err()
+        {
+            break;
+        }
     }
 }
 
@@ -313,6 +614,78 @@ impl SearchBasis {
             aim_y: aim.y.clamp(-0.75, 0.75),
         })
     }
+}
+
+fn teleport_collision_snapshot_bounds(
+    intent: TeleportIntent,
+    config: TeleportConfig,
+) -> Option<TeleportCollisionSnapshotBounds> {
+    let config = sanitize_config(config);
+    let basis = SearchBasis::new(intent)?;
+    let start_node = BlockPos::containing(basis.start_feet);
+    let xz_margin = config.body_width * 0.5 + 1.0;
+    let lateral_extent = config.candidate_radius + xz_margin + 0.75;
+    let progress_min = -1.0;
+    let progress_max = config.max_distance + 1.0;
+    let mut min_x = f64::INFINITY;
+    let mut min_z = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_z = f64::NEG_INFINITY;
+
+    include_snapshot_xz_point(
+        basis.start_feet,
+        xz_margin,
+        &mut min_x,
+        &mut min_z,
+        &mut max_x,
+        &mut max_z,
+    );
+    include_snapshot_xz_point(
+        basis.origin,
+        xz_margin,
+        &mut min_x,
+        &mut min_z,
+        &mut max_x,
+        &mut max_z,
+    );
+    for progress in [progress_min, progress_max] {
+        for lateral in [-lateral_extent, lateral_extent] {
+            let point = basis
+                .origin
+                .add(basis.forward.scale(progress))
+                .add(basis.right.scale(lateral));
+            include_snapshot_xz_point(
+                point, xz_margin, &mut min_x, &mut min_z, &mut max_x, &mut max_z,
+            );
+        }
+    }
+
+    Some(TeleportCollisionSnapshotBounds::new(
+        BlockPos::new(
+            min_x.floor() as i32,
+            start_node.y - config.max_drop_blocks - 1,
+            min_z.floor() as i32,
+        ),
+        BlockPos::new(
+            max_x.floor() as i32,
+            start_node.y + config.max_step_up_blocks + config.body_height.ceil() as i32 + 1,
+            max_z.floor() as i32,
+        ),
+    ))
+}
+
+fn include_snapshot_xz_point(
+    point: Vec3d,
+    margin: f64,
+    min_x: &mut f64,
+    min_z: &mut f64,
+    max_x: &mut f64,
+    max_z: &mut f64,
+) {
+    *min_x = (*min_x).min(point.x - margin);
+    *min_z = (*min_z).min(point.z - margin);
+    *max_x = (*max_x).max(point.x + margin);
+    *max_z = (*max_z).max(point.z + margin);
 }
 
 fn sanitize_config(mut config: TeleportConfig) -> TeleportConfig {
@@ -841,5 +1214,76 @@ mod tests {
             (feet.z - block_center_z).abs() > 0.1,
             "target feet should keep the continuous preferred placement: {feet:?}"
         );
+    }
+
+    #[test]
+    fn collision_snapshot_preserves_loaded_air_and_solid_blocks() {
+        let world = TestWorld::with_flat_floor(-1..=5, -2..=2);
+        let (intent, config) = forward_intent(3.0);
+
+        let snapshot = TeleportCollisionSnapshot::capture(&world, intent, config);
+
+        assert!(snapshot.block_count() > 0);
+        assert_eq!(snapshot.block_state_at(BlockPos::new(0, 0, 0)), Some(SOLID));
+        assert_eq!(
+            snapshot.block_state_at(BlockPos::new(0, 1, 0)),
+            Some(AIR_BLOCK_STATE_ID)
+        );
+        assert_eq!(snapshot.block_state_at(BlockPos::new(32, 1, 0)), None);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_preview_queue_replaces_pending_request_with_latest() {
+        let queue = NativeTeleportPreviewQueue::new();
+        let (intent, config) = forward_intent(2.0);
+        let collision = TeleportCollisionSnapshot::empty();
+
+        queue
+            .submit(TeleportPreviewRequest {
+                id: 1,
+                intent,
+                config,
+                collision: collision.clone(),
+            })
+            .expect("submit first");
+        queue
+            .submit(TeleportPreviewRequest {
+                id: 2,
+                intent,
+                config,
+                collision,
+            })
+            .expect("submit second");
+
+        let request = queue.take_next_blocking().expect("pending request");
+        assert_eq!(request.id, 2);
+        queue.shutdown();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_preview_worker_resolves_submitted_snapshot() {
+        let world = TestWorld::with_flat_floor(-1..=5, -2..=2);
+        let (intent, config) = forward_intent(3.0);
+        let mut worker = NativeTeleportPreviewWorker::new().expect("worker");
+
+        let id = worker
+            .submit_from_world(&world, intent, config)
+            .expect("submit preview request");
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(result) = worker.try_recv_latest().expect("worker result") {
+                assert_eq!(result.id, id);
+                assert_eq!(result.preview.validity, TeleportValidityReason::Valid);
+                assert!(result.preview.target_feet.is_some());
+                return;
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(2),
+                "timed out waiting for native teleport preview worker"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 }

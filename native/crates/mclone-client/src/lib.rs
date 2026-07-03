@@ -49,9 +49,15 @@ pub use player::{
     no_clip_displacement, sphere_intersects_solid_blocks, view_vector,
     view_vector_from_rot_degrees,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use teleport::{
-    TeleportCollisionWorld, TeleportConfig, TeleportIntent, TeleportPreview,
-    TeleportResolverDiagnostics, TeleportValidityReason, resolve_teleport_preview,
+    NativeTeleportPreviewWorker, TeleportPreviewRequest, TeleportPreviewRequestId,
+    TeleportPreviewResult, TeleportPreviewWorkerError,
+};
+pub use teleport::{
+    TeleportCollisionSnapshot, TeleportCollisionSnapshotBounds, TeleportCollisionWorld,
+    TeleportConfig, TeleportIntent, TeleportPreview, TeleportResolverDiagnostics,
+    TeleportValidityReason, resolve_teleport_preview,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

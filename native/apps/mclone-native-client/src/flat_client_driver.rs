@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use mclone_app_runtime::far_lod::{
@@ -18,8 +19,9 @@ use mclone_app_runtime::set_player_appearance_command_for_ui_model;
 use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
-    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT, TeleportConfig, TeleportIntent,
-    TeleportPreview, TeleportValidityReason, resolve_teleport_preview,
+    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT, NativeTeleportPreviewWorker,
+    TeleportConfig, TeleportIntent, TeleportPreview, TeleportPreviewRequestId,
+    TeleportPreviewResult, TeleportValidityReason,
 };
 use mclone_core::{BlockStateId, Vec3d};
 use mclone_input::{
@@ -134,6 +136,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
     desktop_blink_debug: DesktopBlinkDebugState,
+    desktop_blink_debug_worker: Option<NativeTeleportPreviewWorker>,
     underwater_effect: UnderwaterEffectState,
     seed_reroll_state: u64,
 }
@@ -183,6 +186,10 @@ pub(crate) struct FlatClientSectionSync {
 pub(crate) struct DesktopBlinkDebugState {
     active: bool,
     preview: Option<TeleportPreview>,
+    first_request_id: Option<TeleportPreviewRequestId>,
+    latest_request_id: Option<TeleportPreviewRequestId>,
+    preview_request_id: Option<TeleportPreviewRequestId>,
+    last_submitted_intent: Option<TeleportIntent>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -330,6 +337,7 @@ impl FlatClientDriver {
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
             desktop_blink_debug: DesktopBlinkDebugState::default(),
+            desktop_blink_debug_worker: None,
             underwater_effect: UnderwaterEffectState::new(),
             seed_reroll_state: initial_seed_reroll_state(scene.seed),
         }
@@ -393,7 +401,16 @@ impl FlatClientDriver {
             self.desktop_blink_debug = DesktopBlinkDebugState::default();
             return false;
         }
+        if !self.ensure_desktop_blink_debug_worker() {
+            self.desktop_blink_debug = DesktopBlinkDebugState::default();
+            return false;
+        }
         self.desktop_blink_debug.active = true;
+        self.desktop_blink_debug.preview = None;
+        self.desktop_blink_debug.first_request_id = None;
+        self.desktop_blink_debug.latest_request_id = None;
+        self.desktop_blink_debug.preview_request_id = None;
+        self.desktop_blink_debug.last_submitted_intent = None;
         self.update_desktop_blink_debug_preview();
         true
     }
@@ -406,9 +423,23 @@ impl FlatClientDriver {
         if !self.desktop_blink_debug.active {
             return false;
         }
-        let before = self.desktop_blink_debug.preview.clone();
-        self.desktop_blink_debug.preview = self.resolve_desktop_blink_debug_preview();
-        self.desktop_blink_debug.preview != before
+        let mut changed = self.submit_desktop_blink_debug_request();
+        changed |= self.poll_desktop_blink_debug_worker();
+        changed
+    }
+
+    pub(crate) fn wait_for_desktop_blink_debug_preview(&mut self, timeout: Duration) -> bool {
+        let start = Instant::now();
+        loop {
+            self.update_desktop_blink_debug_preview();
+            if self.desktop_blink_debug.preview.is_some() {
+                return true;
+            }
+            if start.elapsed() >= timeout {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     pub(crate) fn commit_desktop_blink_debug(
@@ -422,7 +453,7 @@ impl FlatClientDriver {
             return Ok(DesktopBlinkDebugCommitStatus::NoRuntime);
         }
 
-        self.update_desktop_blink_debug_preview();
+        self.poll_desktop_blink_debug_worker();
         self.desktop_blink_debug.active = false;
         let Some(preview) = self.desktop_blink_debug.preview.take() else {
             return Ok(DesktopBlinkDebugCommitStatus::NoValidPreview {
@@ -452,13 +483,86 @@ impl FlatClientDriver {
         })
     }
 
-    fn resolve_desktop_blink_debug_preview(&self) -> Option<TeleportPreview> {
-        let runtime = self.runtime.as_ref()?;
-        Some(resolve_teleport_preview(
-            runtime.client(),
-            desktop_blink_debug_intent(&self.camera),
-            desktop_blink_debug_config(),
-        ))
+    fn ensure_desktop_blink_debug_worker(&mut self) -> bool {
+        if self.desktop_blink_debug_worker.is_some() {
+            return true;
+        }
+        match NativeTeleportPreviewWorker::new() {
+            Ok(worker) => {
+                self.desktop_blink_debug_worker = Some(worker);
+                true
+            }
+            Err(error) => {
+                log::warn!("failed to start desktop Blink debug worker: {error}");
+                false
+            }
+        }
+    }
+
+    fn submit_desktop_blink_debug_request(&mut self) -> bool {
+        let intent = desktop_blink_debug_intent(&self.camera);
+        if self.desktop_blink_debug.last_submitted_intent == Some(intent) {
+            return false;
+        }
+        let Some(runtime) = self.runtime.as_ref() else {
+            return false;
+        };
+        let Some(worker) = self.desktop_blink_debug_worker.as_mut() else {
+            return false;
+        };
+        match worker.submit_from_world(runtime.client(), intent, desktop_blink_debug_config()) {
+            Ok(request_id) => {
+                self.desktop_blink_debug
+                    .first_request_id
+                    .get_or_insert(request_id);
+                self.desktop_blink_debug.latest_request_id = Some(request_id);
+                self.desktop_blink_debug.last_submitted_intent = Some(intent);
+                true
+            }
+            Err(error) => {
+                log::warn!("desktop Blink debug preview submit failed: {error}");
+                self.desktop_blink_debug_worker = None;
+                false
+            }
+        }
+    }
+
+    fn poll_desktop_blink_debug_worker(&mut self) -> bool {
+        let Some(worker) = self.desktop_blink_debug_worker.as_mut() else {
+            return false;
+        };
+        match worker.try_recv_latest() {
+            Ok(Some(result)) => self.accept_desktop_blink_debug_result(result),
+            Ok(None) => false,
+            Err(error) => {
+                log::warn!("desktop Blink debug preview worker failed: {error}");
+                self.desktop_blink_debug_worker = None;
+                false
+            }
+        }
+    }
+
+    fn accept_desktop_blink_debug_result(&mut self, result: TeleportPreviewResult) -> bool {
+        if !self.desktop_blink_debug.active {
+            return false;
+        }
+        if self
+            .desktop_blink_debug
+            .first_request_id
+            .is_some_and(|first_request_id| result.id < first_request_id)
+        {
+            return false;
+        }
+        if self
+            .desktop_blink_debug
+            .preview_request_id
+            .is_some_and(|preview_request_id| result.id <= preview_request_id)
+        {
+            return false;
+        }
+        self.desktop_blink_debug.preview = Some(result.preview);
+        self.desktop_blink_debug.preview_request_id = Some(result.id);
+        true
     }
 
     pub(crate) fn ui_is_active(&self) -> bool {
