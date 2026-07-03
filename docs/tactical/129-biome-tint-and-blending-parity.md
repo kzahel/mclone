@@ -1,6 +1,6 @@
 # 129: Biome Tint And Blending Parity
 
-Status: proposed
+Status: active; first parity slices landed, remaining audit/cache/diagnostic work planned
 Workstream: shared native Rust terrain mesh, render-session tint inputs, and vanilla visual parity
 
 ## Impetus
@@ -19,8 +19,13 @@ and vanilla grass colormap showed:
   `#6a7039`,
 - vanilla default biome blending radius `2` turns those into a 5x5 block
   average, for example center direct `#4c763c` becomes blended `#54743b`,
-- our current renderer still applies a hash-like swamp modifier per block and
-  does not average colors over the blend radius.
+- the old renderer applied a hash-like swamp modifier per block and did not
+  average colors over the blend radius.
+
+The swamp noise, seeded block-position biome lookup, default radius-2 blend, and
+basic water blend have since landed in `mclone-mesh`. This tactical remains open
+for the remaining `BlockColors` audit, upper-half plant sampling, compile-local
+tint caching, and visual/debug validation.
 
 This is not terrain generation, decoration, or feature breadth. It is a visual
 parity lane for how block models and liquid faces get their tint color during
@@ -65,6 +70,7 @@ Current tinting is concentrated in:
 
 - `native/crates/mclone-mesh/src/builder.rs`
 - `native/crates/mclone-mesh/src/catalog.rs`
+- `native/crates/mclone-mesh/src/tint.rs`
 - `native/crates/mclone-worldgen/src/biome.rs`
 - `native/crates/mclone-worldgen/src/surface.rs`
 
@@ -79,23 +85,36 @@ Current strengths:
 - The recent metadata audit added regression coverage for water colors,
   colormap climate inputs, swamp/badlands overrides, birch/spruce constants,
   and the dark-forest modifier constant.
+- `mclone-mesh::tint` now uses the Java swamp
+  `Biome.BIOME_INFO_NOISE` permutation and has source-derived sample coverage.
+- `mclone-mesh::tint` now averages grass, foliage, and water colors over the
+  Java default 5x5 block window with `BIOME_BLEND_RADIUS = 2`.
+- `mclone-mesh::builder` now resolves seeded tint biome reads through a local
+  `FuzzyOffsetConstantColumnBiomeZoomer` translation when the mesh input carries
+  `biome_zoom_seed`.
+- `mclone-mesh::catalog` already maps the current rendered grass, fern,
+  large-fern, potted-fern, sugar-cane, leaf, vine, and water consumers onto the
+  appropriate tint families.
 
 Current gaps:
 
-- Mesh tinting receives one `biome_id` per block from the chunk biome container,
-  effectively a quart-cell lookup.
-- Mesh tinting does not resolve block-position biomes through the fuzzy biome
-  zoomer.
-- Mesh tinting does not perform vanilla biome color blending.
-- Swamp grass uses `coarse_position_noise(...)`, a placeholder hash, instead of
-  Java's `Biome.BIOME_INFO_NOISE`.
-- Water tint currently uses one local biome id for each liquid face; it should
-  go through the same average color path as Java water.
+- Radius `0` / configurable blend-radius plumbing remains a target; the current
+  radius is a shared compile-time default.
+- Seeded fuzzy lookup depends on mesh inputs carrying a world/zoom seed and
+  enough neighboring biome data. Region-edge behavior still belongs with the
+  broader render compile-region parity work.
+- Tinting still repeats the 25-sample blend work per tinted query; there is no
+  Java-like `BlockTintCache` or native compile-local equivalent yet.
 - Tall grass / large fern upper-half behavior needs an audit before broadening
   plant tint parity, because Java samples the block below for upper halves.
-- The tint code lives inside `mclone-mesh` while some required biome/noise facts
-  live in `mclone-worldgen`; the shared owner boundary needs to avoid pulling
-  full worldgen into renderer-only workers unless that is intentional.
+- The remaining `BlockColors` surface still needs an explicit current-content
+  audit so future rendered blocks do not silently choose the wrong tint path.
+- Pixel/debug probes for swamp, dark forest, river/forest boundary, ocean
+  boundary, and badlands captures are still missing.
+- The tint code lives inside `mclone-mesh`, with a small local translation of
+  `BIOME_INFO_NOISE`; keep this shared renderer-facing boundary unless a future
+  crate split can reuse worldgen noise helpers without pulling full worldgen
+  into renderer-only workers.
 
 ## Target Shape
 
@@ -146,57 +165,63 @@ and XR render compilation.
 
 ### Slice A: Swamp Modifier Parity
 
-Status: planned.
+Status: landed for code/test coverage; visual recapture remains under Slice F.
 
-Replace `coarse_position_noise(...)` in the mesh tint path with Java's
+`coarse_position_noise(...)` has been replaced in the mesh tint path with Java's
 `Biome.BIOME_INFO_NOISE` behavior:
 
-- expose or move a small `biome_info_noise_value(x, z)` helper from the existing
-  worldgen surface implementation,
-- implement the exact `x * 0.0225`, `z * 0.0225`, threshold `-0.1` rule,
-- add regression coverage for seed-independent swamp grass samples against a
-  Java oracle fixture or hardcoded source-derived sample points,
-- recapture seed `1124` around `(-51, 76, 193)`.
+- `mclone-mesh::tint` carries a fixed
+  `PerlinSimplexNoise(new WorldgenRandom(2345L), [0])` permutation for
+  renderer-side use,
+- it implements the exact `x * 0.0225`, `z * 0.0225`, threshold `-0.1` rule,
+- `swamp_grass_modifier_matches_java_biome_info_noise` covers source-derived
+  sample points including `(-51, 193)`.
 
-This is the first recommended slice because it directly explains the latest
-swamp screenshot even before biome blend averaging lands.
+The helper was kept local to `mclone-mesh` instead of exposing
+`mclone-worldgen::surface::biome_info_noise()` because the renderer-facing tint
+path only needs this fixed swamp-color lookup, not full surface generation.
 
 ### Slice B: Block-Position Biome Lookup For Tints
 
-Status: planned.
+Status: landed for seeded mesh inputs; compile-region edge coverage remains
+tracked with `127-render-compile-region-parity.md`.
 
-Stop using the local quart-cell biome id as the final block tint biome:
+Mesh tinting no longer has to use the local quart-cell biome id as the final
+block tint biome:
 
-- pass enough context into mesh compilation to resolve block-position biomes,
-  either through a render-region biome source view or through a cached callback,
-- use `FuzzyOffsetConstantColumnBiomeZoomer` behavior for overworld tint
-  positions,
-- ensure neighbor chunks/regions provide enough biome data for blend samples
-  near chunk and render-section edges.
+- `TexturedChunkMeshInput::with_world_seed(...)` / `with_biome_zoom_seed(...)`
+  passes the seed context into mesh compilation,
+- `biome_id_at_world_or_default(...)` uses
+  `fuzzy_offset_constant_column_biome_id(...)` when a zoom seed is available,
+- tests cover reference quart cases and seeded lookup through neighboring chunk
+  biome containers.
 
-This overlaps with `127-render-compile-region-parity.md`: biome/tint reads are
-one more reason the compile region needs a named boundary instead of an
+This still overlaps with `127-render-compile-region-parity.md`: biome/tint reads
+are one more reason the compile region needs a named boundary instead of an
 arbitrary snapshot vector.
 
 ### Slice C: Vanilla Blend Radius 2
 
-Status: planned.
+Status: landed for the Java default radius; configurable radius and radius-0
+diagnostics remain planned.
 
-Implement Java's RGB channel average for grass, foliage, and water:
+Java's default RGB channel average is now implemented for grass, foliage, and
+water:
 
 - default radius `2`,
-- radius `0` diagnostic path,
 - fixed square sample count `(2r + 1)^2`,
 - integer channel averaging matching Java truncation,
-- shared options plumbing only after the resolver exists.
+- focused tests for the 5x5 block window and water blend averaging.
 
-Add focused tests for radius-0 versus radius-2 at known mixed-color positions.
-The seed `1124`, block `(-51, 76, 193)` swamp case is a good regression because
-Java center direct `#4c763c` blends to `#54743b`.
+The seed `1124`, block `(-51, 76, 193)` swamp case remains a useful screenshot
+regression because Java center direct `#4c763c` blends to `#54743b`.
 
 ### Slice D: Tint Cache And Compile Cost
 
 Status: planned.
+
+This is now the highest-value performance follow-up in this tactical after the
+default blending path landed.
 
 Avoid doing 25 full biome/color resolutions for every tinted face:
 
@@ -214,6 +239,10 @@ already the invalidation boundary.
 
 Status: planned.
 
+This is now the highest-value correctness follow-up in this tactical after the
+default blending path landed. Start with tall grass and large fern upper-half
+sampling because Java explicitly samples `pos.below()` for upper halves.
+
 Audit all current block tint consumers against Java `BlockColors`:
 
 - grass block,
@@ -226,6 +255,12 @@ Audit all current block tint consumers against Java `BlockColors`:
 - vines if/when rendered,
 - water, bubble columns, and water cauldron if/when rendered,
 - lily pad if/when rendered.
+
+Current native catalog coverage already includes grass block, grass, fern, large
+fern, potted fern, sugar cane, oak/jungle/acacia/dark-oak leaves, vine,
+birch/spruce fixed foliage, and water. The audit should therefore verify
+position/state semantics and document deferred consumers, not blindly enable
+everything listed above.
 
 Only implement content that exists in the current native asset/block surface,
 but document each deferred block so future content does not silently pick the
