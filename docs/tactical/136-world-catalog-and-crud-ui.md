@@ -1,8 +1,8 @@
 # 136: World Catalog And CRUD UI
 
-Status: active; Slices 1-2 shared catalog contract and catalog-aware session
-request vocabulary landed 2026-07-03. Owns follow-up persistence lifecycle work
-from closed
+Status: active; Slices 1-3 shared catalog contract, catalog-aware session
+request vocabulary, and the native filesystem/SQLite catalog backend landed
+2026-07-03. Owns follow-up persistence lifecycle work from closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -79,18 +79,22 @@ Relevant landed pieces:
   `CreateLocalWorld { options }` / `OpenLocalWorld { id }`; seed-only
   developer/headless/menu paths now go through a compatibility helper that
   creates a local-world request with `LocalWorldCreateOptions`.
+- Slice 3 added native `NativeWorldCatalog` support: one directory per
+  `LocalWorldId`, a `world.json` catalog summary, and `world.sqlite3` opened
+  through `SqliteWorldStore::open_world_dir`.
 
 Gaps:
 
-- There is no native/web/Android catalog backend yet.
+- There is no web/Android catalog backend yet, and the native backend is not
+  wired to the visible desktop menu/lifecycle path yet.
 - `ActiveSessionDescriptor::LocalWorld` can carry save id/display name, but
   live menu-driven local sessions are still transient seed-only until catalog
   create/open wiring exists.
 - `mclone-native-client --world-dir PATH` and web
   `worldStorage=indexeddb&worldId=...` are startup/query selectors, not in-game
   UI.
-- Native SQLite has a metadata table, but no shared world-summary record family
-  is used by UI.
+- Native catalog summaries now live beside the database in `world.json`; the
+  SQLite metadata table remains store-internal and is not the UI summary source.
 - Web IndexedDB has chunk/entity stores keyed by `worldId`, but no visible
   browser world list/create/delete UI.
 - Android app-private world roots are still pending.
@@ -304,6 +308,8 @@ cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
 
 ### Slice 3: Native Catalog Backend
 
+Status: landed 2026-07-03.
+
 Implement the first catalog backend for desktop validation:
 
 - world root directory
@@ -325,8 +331,40 @@ Metadata should include at least:
 Validation:
 
 - create/list/open/delete unit tests using temp dirs
-- restart/open test proves a block edit survives through catalog open
+- reopen test proves a chunk record survives through catalog-opened SQLite
+  storage
 - delete removes the directory only when no session is active
+
+Recorded Slice 3 result:
+
+- Added native-only `NativeWorldCatalog` in `mclone_app_runtime::world_catalog`
+  with a persistent-local capability surface and shared
+  `WorldCatalogRequest`/`WorldCatalogResponse` dispatch.
+- Stores each catalog world under `<world-root>/<LocalWorldId>/` with
+  `world.json` metadata and `world.sqlite3` initialized/opened by the existing
+  `SqliteWorldStore::open_world_dir` backend.
+- `create_world` validates display/id facts, suffixes duplicate display-name
+  IDs, rejects duplicate requested IDs, initializes SQLite, stamps schema,
+  target Minecraft version, mclone package version, created time, and
+  last-played time, and cleans up the world directory if initialization fails.
+- `list_worlds` reads catalog summaries and sorts by last-played/created time;
+  `open_world` updates last-played and validates SQLite availability;
+  `open_sqlite_world_store` returns the opened summary/path plus the durable
+  store for session wiring; `delete_world` reuses the shared active-world
+  rejection before removing the world directory.
+- Direct `--world-dir` startup remains unchanged as a developer bypass; this
+  backend is ready for menu/lifecycle wiring in the next slice.
+
+Validation after Slice 3 on 2026-07-03:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime world_catalog
+```
+
+The catalog-specific test filter passed 13/13, including create/list/open/delete
+coverage, request dispatch, duplicate requested-id rejection, missing-world
+errors, active-world delete rejection, and a catalog-opened SQLite store
+round-tripping a chunk record across reopen.
 
 ### Slice 4: Shared UI Screens
 

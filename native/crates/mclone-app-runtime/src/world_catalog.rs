@@ -3,12 +3,25 @@ use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_server::SqliteWorldStore;
 use serde::{Deserialize, Serialize};
 
 pub const LOCAL_WORLD_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const LOCAL_WORLD_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 pub const LOCAL_WORLD_ID_MAX_LEN: usize = 64;
 pub const LOCAL_WORLD_DISPLAY_NAME_MAX_CHARS: usize = 64;
+pub const NATIVE_WORLD_METADATA_FILE: &str = "world.json";
+pub const NATIVE_WORLD_BACKEND_LABEL: &str = "native-sqlite";
 
 const DEFAULT_LOCAL_WORLD_ID: &str = "world";
 
@@ -361,6 +374,342 @@ pub fn validate_delete_inactive_world(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeWorldCatalog {
+    root: PathBuf,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeWorldCatalog {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub const fn capabilities(&self) -> WorldCatalogCapabilities {
+        WorldCatalogCapabilities::persistent_local()
+    }
+
+    pub fn handle_request(
+        &self,
+        request: WorldCatalogRequest,
+        active_world: Option<&LocalWorldId>,
+    ) -> WorldCatalogResult<WorldCatalogResponse> {
+        match request {
+            WorldCatalogRequest::ListWorlds => Ok(WorldCatalogResponse::WorldList {
+                capabilities: self.capabilities(),
+                worlds: self.list_worlds()?,
+            }),
+            WorldCatalogRequest::CreateWorld { options } => {
+                Ok(WorldCatalogResponse::WorldCreated {
+                    summary: self.create_world(options)?,
+                })
+            }
+            WorldCatalogRequest::OpenWorld { id } => Ok(WorldCatalogResponse::WorldOpened {
+                summary: self.open_world(&id)?.summary,
+            }),
+            WorldCatalogRequest::DeleteWorld { id } => {
+                self.delete_world(&id, active_world)?;
+                Ok(WorldCatalogResponse::WorldDeleted { id })
+            }
+        }
+    }
+
+    pub fn list_worlds(&self) -> WorldCatalogResult<Vec<LocalWorldSummary>> {
+        let mut worlds = Vec::new();
+        if !self.root.exists() {
+            return Ok(worlds);
+        }
+
+        let entries = fs::read_dir(&self.root)
+            .map_err(|error| storage_error("failed to read local world catalog", error))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                storage_error("failed to read local world catalog entry", error)
+            })?;
+            if !entry
+                .file_type()
+                .map_err(|error| {
+                    storage_error("failed to inspect local world catalog entry", error)
+                })?
+                .is_dir()
+            {
+                continue;
+            }
+
+            let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Ok(id) = LocalWorldId::new(file_name) else {
+                continue;
+            };
+            if !self.metadata_path(&id).exists() {
+                continue;
+            }
+            worlds.push(self.read_summary(&id)?);
+        }
+
+        worlds.sort_by(|a, b| {
+            let a_last_played = a.last_played_unix_millis.unwrap_or(a.created_unix_millis);
+            let b_last_played = b.last_played_unix_millis.unwrap_or(b.created_unix_millis);
+            b_last_played
+                .cmp(&a_last_played)
+                .then_with(|| a.display_name.cmp(&b.display_name))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(worlds)
+    }
+
+    pub fn create_world(
+        &self,
+        options: LocalWorldCreateOptions,
+    ) -> WorldCatalogResult<LocalWorldSummary> {
+        fs::create_dir_all(&self.root)
+            .map_err(|error| storage_error("failed to create local world catalog", error))?;
+
+        let existing_ids = self.existing_world_ids()?;
+        let id = options.resolve_id(existing_ids.iter())?;
+        if existing_ids.contains(&id) {
+            return Err(duplicate_world_id(&id));
+        }
+
+        let world_dir = self.world_dir(&id);
+        fs::create_dir(&world_dir).map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                duplicate_world_id(&id)
+            } else {
+                storage_error(
+                    format!(
+                        "failed to create local world directory `{}`",
+                        world_dir.display()
+                    ),
+                    error,
+                )
+            }
+        })?;
+
+        let created_unix_millis = now_unix_millis();
+        let mut summary = LocalWorldSummary::new(
+            id.clone(),
+            options.display_name,
+            options.seed,
+            created_unix_millis,
+        )?;
+        summary.last_played_unix_millis = Some(created_unix_millis);
+        summary.mclone_version = Some(env!("CARGO_PKG_VERSION").to_owned());
+        summary.backend_label = Some(NATIVE_WORLD_BACKEND_LABEL.to_owned());
+
+        if let Err(error) = SqliteWorldStore::open_world_dir(&world_dir) {
+            let _ = fs::remove_dir_all(&world_dir);
+            return Err(storage_error(
+                format!(
+                    "failed to initialize local world database `{}`",
+                    world_dir.display()
+                ),
+                error,
+            ));
+        }
+
+        if let Err(error) = self.write_summary(&summary) {
+            let _ = fs::remove_dir_all(&world_dir);
+            return Err(error);
+        }
+
+        Ok(summary)
+    }
+
+    pub fn open_world(&self, id: &LocalWorldId) -> WorldCatalogResult<NativeOpenedWorld> {
+        let opened = self.open_world_summary(id)?;
+        SqliteWorldStore::open_world_dir(&opened.dir).map_err(|error| {
+            storage_error(
+                format!(
+                    "failed to open local world database `{}`",
+                    opened.dir.display()
+                ),
+                error,
+            )
+        })?;
+        Ok(opened)
+    }
+
+    pub fn open_sqlite_world_store(
+        &self,
+        id: &LocalWorldId,
+    ) -> WorldCatalogResult<(NativeOpenedWorld, SqliteWorldStore)> {
+        let opened = self.open_world_summary(id)?;
+        let store = SqliteWorldStore::open_world_dir(&opened.dir).map_err(|error| {
+            storage_error(
+                format!(
+                    "failed to open local world database `{}`",
+                    opened.dir.display()
+                ),
+                error,
+            )
+        })?;
+        Ok((opened, store))
+    }
+
+    pub fn delete_world(
+        &self,
+        id: &LocalWorldId,
+        active_world: Option<&LocalWorldId>,
+    ) -> WorldCatalogResult<LocalWorldSummary> {
+        let summary = self.read_summary(id)?;
+        summary.can_delete(active_world, self.capabilities())?;
+        let world_dir = self.world_dir(id);
+        fs::remove_dir_all(&world_dir).map_err(|error| {
+            storage_error(
+                format!(
+                    "failed to delete local world directory `{}`",
+                    world_dir.display()
+                ),
+                error,
+            )
+        })?;
+        Ok(summary)
+    }
+
+    pub fn world_dir(&self, id: &LocalWorldId) -> PathBuf {
+        self.root.join(id.as_str())
+    }
+
+    pub fn metadata_path(&self, id: &LocalWorldId) -> PathBuf {
+        self.world_dir(id).join(NATIVE_WORLD_METADATA_FILE)
+    }
+
+    fn open_world_summary(&self, id: &LocalWorldId) -> WorldCatalogResult<NativeOpenedWorld> {
+        let mut summary = self.read_summary(id)?;
+        if !summary.compatible {
+            return Err(WorldCatalogError::new(
+                WorldCatalogErrorKind::IncompatibleSchema,
+                format!(
+                    "local world `{}` is not compatible with catalog schema {} and Minecraft target {}",
+                    summary.id,
+                    LOCAL_WORLD_CATALOG_SCHEMA_VERSION,
+                    LOCAL_WORLD_TARGET_MINECRAFT_VERSION
+                ),
+            ));
+        }
+        summary.last_played_unix_millis = Some(now_unix_millis());
+        self.write_summary(&summary)?;
+        Ok(NativeOpenedWorld {
+            dir: self.world_dir(id),
+            summary,
+        })
+    }
+
+    fn read_summary(&self, id: &LocalWorldId) -> WorldCatalogResult<LocalWorldSummary> {
+        let metadata_path = self.metadata_path(id);
+        let bytes = fs::read(&metadata_path).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                world_not_found(id)
+            } else {
+                storage_error(
+                    format!(
+                        "failed to read local world metadata `{}`",
+                        metadata_path.display()
+                    ),
+                    error,
+                )
+            }
+        })?;
+        let mut summary: LocalWorldSummary = serde_json::from_slice(&bytes).map_err(|error| {
+            storage_error(
+                format!(
+                    "failed to parse local world metadata `{}`",
+                    metadata_path.display()
+                ),
+                error,
+            )
+        })?;
+        if &summary.id != id {
+            return Err(storage_failure(format!(
+                "local world metadata `{}` identified `{}` but directory is `{}`",
+                metadata_path.display(),
+                summary.id,
+                id
+            )));
+        }
+
+        normalize_display_name(summary.display_name.clone())?;
+        summary.compatible = summary.storage_schema_version == LOCAL_WORLD_CATALOG_SCHEMA_VERSION
+            && summary.target_minecraft_version == LOCAL_WORLD_TARGET_MINECRAFT_VERSION;
+        Ok(summary)
+    }
+
+    fn write_summary(&self, summary: &LocalWorldSummary) -> WorldCatalogResult<()> {
+        let metadata_path = self.metadata_path(&summary.id);
+        let bytes = serde_json::to_vec_pretty(summary).map_err(|error| {
+            storage_error(
+                format!(
+                    "failed to encode local world metadata `{}`",
+                    metadata_path.display()
+                ),
+                error,
+            )
+        })?;
+        fs::write(&metadata_path, bytes).map_err(|error| {
+            storage_error(
+                format!(
+                    "failed to write local world metadata `{}`",
+                    metadata_path.display()
+                ),
+                error,
+            )
+        })
+    }
+
+    fn existing_world_ids(&self) -> WorldCatalogResult<BTreeSet<LocalWorldId>> {
+        let mut ids = BTreeSet::new();
+        if !self.root.exists() {
+            return Ok(ids);
+        }
+
+        let entries = fs::read_dir(&self.root)
+            .map_err(|error| storage_error("failed to read local world catalog", error))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                storage_error("failed to read local world catalog entry", error)
+            })?;
+            if !entry
+                .file_type()
+                .map_err(|error| {
+                    storage_error("failed to inspect local world catalog entry", error)
+                })?
+                .is_dir()
+            {
+                continue;
+            }
+
+            let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if let Ok(id) = LocalWorldId::new(file_name) {
+                ids.insert(id);
+            }
+        }
+        Ok(ids)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeOpenedWorld {
+    pub summary: LocalWorldSummary,
+    pub dir: PathBuf,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeOpenedWorld {
+    pub fn database_path(&self) -> PathBuf {
+        SqliteWorldStore::database_path_for_world_dir(&self.dir)
+    }
+}
+
 fn normalize_display_name(display_name: String) -> WorldCatalogResult<String> {
     let trimmed = display_name.trim();
     if trimmed.is_empty() {
@@ -432,6 +781,40 @@ fn invalid_world_id(value: &str, reason: impl Into<String>) -> WorldCatalogError
     WorldCatalogError::new(WorldCatalogErrorKind::InvalidWorldId, message)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn world_not_found(id: &LocalWorldId) -> WorldCatalogError {
+    WorldCatalogError::new(
+        WorldCatalogErrorKind::WorldNotFound,
+        format!("local world `{id}` was not found"),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn duplicate_world_id(id: &LocalWorldId) -> WorldCatalogError {
+    WorldCatalogError::new(
+        WorldCatalogErrorKind::DuplicateWorldId,
+        format!("local world `{id}` already exists"),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn storage_failure(message: impl Into<String>) -> WorldCatalogError {
+    WorldCatalogError::new(WorldCatalogErrorKind::StorageFailure, message)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn storage_error(context: impl Into<String>, error: impl fmt::Display) -> WorldCatalogError {
+    storage_failure(format!("{}: {error}", context.into()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
 fn slug_from_display_name(display_name: &str) -> String {
     let mut slug = String::new();
     let mut pending_separator = false;
@@ -478,6 +861,18 @@ fn suffixed_world_id_candidate(base: &str, suffix_index: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::path::{Path, PathBuf};
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use mclone_core::{
+        BlockStateId, CHUNK_SECTION_VOLUME, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    use mclone_server::{ChunkRecord, WorldStore};
 
     #[test]
     fn display_names_normalize_to_safe_world_ids() {
@@ -591,5 +986,219 @@ mod tests {
                 .kind,
             WorldCatalogErrorKind::UnsupportedOperation
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_catalog_creates_lists_opens_and_deletes_worlds() {
+        let temp = TestTempDir::new("native-catalog-crud");
+        let catalog = NativeWorldCatalog::new(temp.path().join("worlds"));
+
+        assert_eq!(
+            catalog.capabilities(),
+            WorldCatalogCapabilities::persistent_local()
+        );
+        assert_eq!(catalog.root(), temp.path().join("worlds").as_path());
+        assert!(catalog.list_worlds().unwrap().is_empty());
+
+        let first = catalog
+            .create_world(LocalWorldCreateOptions::new("My World", 123).unwrap())
+            .unwrap();
+        let second = catalog
+            .create_world(LocalWorldCreateOptions::new("My World", 456).unwrap())
+            .unwrap();
+
+        assert_eq!(first.id.as_str(), "my-world");
+        assert_eq!(second.id.as_str(), "my-world-2");
+        assert_eq!(
+            first.backend_label.as_deref(),
+            Some(NATIVE_WORLD_BACKEND_LABEL)
+        );
+        assert_eq!(
+            first.mclone_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert!(first.last_played_unix_millis.is_some());
+        assert!(catalog.metadata_path(&first.id).exists());
+        assert!(catalog.world_dir(&first.id).is_dir());
+
+        let listed = catalog.list_worlds().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().any(|summary| summary.id == first.id));
+        assert!(listed.iter().any(|summary| summary.id == second.id));
+
+        let opened = catalog.open_world(&first.id).unwrap();
+        assert_eq!(opened.summary.id, first.id);
+        assert_eq!(opened.dir, catalog.world_dir(&opened.summary.id));
+        assert!(opened.database_path().exists());
+
+        let error = catalog
+            .delete_world(&opened.summary.id, Some(&opened.summary.id))
+            .unwrap_err();
+        assert_eq!(error.kind, WorldCatalogErrorKind::ActiveWorld);
+
+        catalog
+            .delete_world(&opened.summary.id, Some(&second.id))
+            .unwrap();
+        assert!(!catalog.world_dir(&opened.summary.id).exists());
+
+        let remaining = catalog.list_worlds().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, second.id);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_catalog_rejects_duplicate_requested_world_id() {
+        let temp = TestTempDir::new("native-catalog-duplicate-id");
+        let catalog = NativeWorldCatalog::new(temp.path().join("worlds"));
+        let requested_id = LocalWorldId::new("fixed-world").unwrap();
+        let first_options = LocalWorldCreateOptions::new("First", 1)
+            .unwrap()
+            .with_requested_id(requested_id.clone());
+        let second_options = LocalWorldCreateOptions::new("Second", 2)
+            .unwrap()
+            .with_requested_id(requested_id);
+
+        catalog.create_world(first_options).unwrap();
+        let error = catalog.create_world(second_options).unwrap_err();
+
+        assert_eq!(error.kind, WorldCatalogErrorKind::DuplicateWorldId);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_catalog_request_dispatch_returns_shared_responses() {
+        let temp = TestTempDir::new("native-catalog-dispatch");
+        let catalog = NativeWorldCatalog::new(temp.path().join("worlds"));
+        let created = catalog
+            .handle_request(
+                WorldCatalogRequest::CreateWorld {
+                    options: LocalWorldCreateOptions::new("Dispatch", 11).unwrap(),
+                },
+                None,
+            )
+            .unwrap();
+        let id = match created {
+            WorldCatalogResponse::WorldCreated { summary } => summary.id,
+            response => panic!("unexpected response: {response:?}"),
+        };
+
+        let listed = catalog
+            .handle_request(WorldCatalogRequest::ListWorlds, None)
+            .unwrap();
+        match listed {
+            WorldCatalogResponse::WorldList {
+                capabilities,
+                worlds,
+            } => {
+                assert_eq!(capabilities, WorldCatalogCapabilities::persistent_local());
+                assert_eq!(worlds.len(), 1);
+                assert_eq!(worlds[0].id, id);
+            }
+            response => panic!("unexpected response: {response:?}"),
+        }
+
+        let opened = catalog
+            .handle_request(WorldCatalogRequest::OpenWorld { id: id.clone() }, None)
+            .unwrap();
+        assert!(matches!(
+            opened,
+            WorldCatalogResponse::WorldOpened { ref summary } if summary.id == id
+        ));
+
+        let deleted = catalog
+            .handle_request(WorldCatalogRequest::DeleteWorld { id: id.clone() }, None)
+            .unwrap();
+        assert_eq!(deleted, WorldCatalogResponse::WorldDeleted { id });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_catalog_opened_sqlite_store_persists_chunk_records_across_reopen() {
+        let temp = TestTempDir::new("native-catalog-sqlite-reopen");
+        let catalog = NativeWorldCatalog::new(temp.path().join("worlds"));
+        let summary = catalog
+            .create_world(LocalWorldCreateOptions::new("Durable", 99).unwrap())
+            .unwrap();
+        let chunk_pos = ChunkPos::new(4, -5);
+        let record = test_record(chunk_pos, 42);
+
+        {
+            let (opened, mut store) = catalog.open_sqlite_world_store(&summary.id).unwrap();
+            assert_eq!(opened.summary.id, summary.id);
+            assert_eq!(store.path(), opened.database_path().as_path());
+            store.save_chunk(&record).unwrap();
+            store.flush().unwrap();
+            store.close().unwrap();
+        }
+
+        {
+            let (_opened, mut reopened) = catalog.open_sqlite_world_store(&summary.id).unwrap();
+            assert_eq!(reopened.load_chunk(chunk_pos).unwrap(), Some(record));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_catalog_reports_missing_world_for_open_and_delete() {
+        let temp = TestTempDir::new("native-catalog-missing");
+        let catalog = NativeWorldCatalog::new(temp.path().join("worlds"));
+        let id = LocalWorldId::new("missing").unwrap();
+
+        assert_eq!(
+            catalog.open_world(&id).unwrap_err().kind,
+            WorldCatalogErrorKind::WorldNotFound
+        );
+        assert_eq!(
+            catalog.delete_world(&id, None).unwrap_err().kind,
+            WorldCatalogErrorKind::WorldNotFound
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn test_record(pos: ChunkPos, revision: u64) -> ChunkRecord {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Features,
+            ChunkRevision(revision),
+            0,
+            16,
+            &vec![BlockStateId(1); CHUNK_SECTION_VOLUME],
+        );
+        ChunkRecord::from_snapshot(snapshot)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[derive(Debug)]
+    struct TestTempDir {
+        path: PathBuf,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl TestTempDir {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+            let path = std::env::temp_dir().join(format!(
+                "mclone-app-runtime-{name}-{}-{}-{}",
+                std::process::id(),
+                now_unix_millis(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 }

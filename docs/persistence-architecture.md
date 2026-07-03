@@ -368,6 +368,14 @@ Current durable native backend:
 - dedicated server and desktop local-integrated runner shutdown drain dirty
   writes and close the persistence actor
 
+The first native world catalog layer now lives above `WorldStore` as
+`mclone_app_runtime::world_catalog::NativeWorldCatalog`. It treats the world
+root as a set of `<LocalWorldId>/` directories, writes UI-facing summaries to
+`world.json`, initializes/opens the existing `world.sqlite3` through
+`SqliteWorldStore::open_world_dir`, and deletes only inactive catalog-managed
+world directories. The catalog owns list/create/open/delete container policy;
+`WorldStore` remains the API for records inside the one opened world.
+
 SQLite is a pragmatic starting point because it gives indexing, transactions,
 schema migration, and fewer small-file problems. `rusqlite` with the bundled
 feature cross-compiles cleanly to Android and Quest, and web uses IndexedDB,
