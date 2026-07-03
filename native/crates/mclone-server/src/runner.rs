@@ -1,17 +1,17 @@
 //! Integrated server runner boundary.
 //!
 //! The runner owns the `IntegratedServer` and its tick loop. Client/runtime code
-//! talks to it through encoded protocol frames so local integrated mode exercises
-//! the same command/update wire shape as remote transports.
+//! talks to it through encoded command protocol frames and decoded update
+//! envelopes. Local integrated mode still accounts update queue bytes using the
+//! shared update codec, but the runtime pump does not decode update payloads on
+//! the render thread.
 
 use std::error::Error;
 use std::fmt;
 
 use mclone_protocol::{ClientCommand, ProtocolCodecError, ServerUpdate};
 #[cfg(not(target_arch = "wasm32"))]
-use mclone_protocol::{
-    decode_client_command, decode_server_update, encode_client_command, encode_server_update,
-};
+use mclone_protocol::{decode_client_command, encode_client_command, encode_server_update};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::IntegratedServer;
@@ -643,7 +643,8 @@ mod native {
     }
 
     struct NativeQueuedServerUpdate {
-        frame: Vec<u8>,
+        update: ServerUpdate,
+        encoded_len: usize,
         queued_at: Instant,
     }
 
@@ -774,14 +775,13 @@ mod native {
         fn try_recv_update(&mut self) -> ServerRunnerResult<Option<ServerUpdateEnvelope>> {
             match self.update_rx.try_recv() {
                 Ok(queued) => {
-                    let encoded_len = queued.frame.len();
                     let queued_age = queued.queued_at.elapsed();
                     self.update_queue_depth.fetch_sub(1, Ordering::SeqCst);
                     self.update_queue_bytes
-                        .fetch_sub(encoded_len, Ordering::SeqCst);
+                        .fetch_sub(queued.encoded_len, Ordering::SeqCst);
                     Ok(Some(ServerUpdateEnvelope {
-                        update: decode_server_update(&queued.frame)?,
-                        encoded_len,
+                        update: queued.update,
+                        encoded_len: queued.encoded_len,
                         queued_age,
                     }))
                 }
@@ -948,32 +948,26 @@ mod native {
             let mut last_gameplay_tick = None;
             for _ in 0..frame.gameplay_ticks {
                 let wall_start = Instant::now();
-                let report = server.try_simulation_tick_report_with_physics_steps(0)?;
+                let mut report = server.try_simulation_tick_report_with_physics_steps(0)?;
                 let wall_us = wall_start.elapsed().as_micros();
-                publish_updates(
-                    &update_tx,
-                    update_queue_depth,
-                    update_queue_bytes,
-                    &report.updates,
-                )?;
+                let updates = std::mem::take(&mut report.updates);
+                publish_updates(&update_tx, update_queue_depth, update_queue_bytes, updates)?;
                 last_gameplay_tick = Some((report, wall_us));
             }
 
             let mut physics_wall_us = 0;
             let mut physics_report = None;
+            let mut physics_published_updates = false;
             if frame.physics_steps > 0 {
                 let wall_start = Instant::now();
-                let report = server.try_physics_step_report_with_step_dt(
+                let mut report = server.try_physics_step_report_with_step_dt(
                     frame.physics_steps,
                     timing_state.physics_step_dt_seconds(),
                 )?;
                 physics_wall_us = wall_start.elapsed().as_micros();
-                publish_updates(
-                    &update_tx,
-                    update_queue_depth,
-                    update_queue_bytes,
-                    &report.updates,
-                )?;
+                let updates = std::mem::take(&mut report.updates);
+                physics_published_updates = !updates.is_empty();
+                publish_updates(&update_tx, update_queue_depth, update_queue_bytes, updates)?;
                 physics_report = Some(report);
             }
 
@@ -989,7 +983,7 @@ mod native {
                         .timing
                         .total_us
                         .saturating_add(physics_report.timing.total_us);
-                    force_detail_after_tick |= !physics_report.updates.is_empty();
+                    force_detail_after_tick |= physics_published_updates;
                 }
                 refresh_diagnostics(
                     diagnostics,
@@ -1007,7 +1001,7 @@ mod native {
                     None,
                     force_detail_after_tick,
                 );
-            } else if let Some(physics_report) = physics_report {
+            } else if physics_report.is_some() {
                 refresh_diagnostics(
                     diagnostics,
                     server,
@@ -1019,7 +1013,7 @@ mod native {
                     true,
                     Some(false),
                     None,
-                    !physics_report.updates.is_empty(),
+                    physics_published_updates,
                 );
             }
 
@@ -1156,7 +1150,7 @@ mod native {
                     .map_err(ServerRunnerError::from);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 let updates = result?;
-                publish_updates(update_tx, update_queue_depth, update_queue_bytes, &updates)?;
+                publish_updates(update_tx, update_queue_depth, update_queue_bytes, updates)?;
                 refresh_diagnostics(
                     diagnostics,
                     server,
@@ -1190,15 +1184,15 @@ mod native {
         update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         update_queue_depth: &AtomicUsize,
         update_queue_bytes: &AtomicUsize,
-        updates: &[ServerUpdate],
+        updates: Vec<ServerUpdate>,
     ) -> ServerRunnerResult<()> {
         for update in updates {
-            let frame = encode_server_update(update)?;
-            let encoded_len = frame.len();
+            let encoded_len = encode_server_update(&update)?.len();
             update_queue_depth.fetch_add(1, Ordering::SeqCst);
             update_queue_bytes.fetch_add(encoded_len, Ordering::SeqCst);
             let queued = NativeQueuedServerUpdate {
-                frame,
+                update,
+                encoded_len,
                 queued_at: Instant::now(),
             };
             if update_tx.send(queued).is_err() {
@@ -1481,6 +1475,30 @@ mod native {
                 WorkerFrameTransportKind::SharedMemory
             );
             assert_eq!(shared.transport_kind.label(), "shared-memory");
+        }
+
+        #[test]
+        fn native_runner_publish_updates_queues_decoded_updates_with_encoded_byte_accounting() {
+            let (update_tx, update_rx) = mpsc::channel();
+            let update_queue_depth = AtomicUsize::new(0);
+            let update_queue_bytes = AtomicUsize::new(0);
+            let update = ServerUpdate::TimeUpdate { day_time: 42 };
+            let expected_len = encode_server_update(&update).unwrap().len();
+
+            publish_updates(
+                &update_tx,
+                &update_queue_depth,
+                &update_queue_bytes,
+                vec![update.clone()],
+            )
+            .unwrap();
+
+            assert_eq!(update_queue_depth.load(Ordering::SeqCst), 1);
+            assert_eq!(update_queue_bytes.load(Ordering::SeqCst), expected_len);
+            let queued = update_rx.try_recv().unwrap();
+            assert_eq!(queued.update, update);
+            assert_eq!(queued.encoded_len, expected_len);
+            assert!(queued.queued_at.elapsed() < Duration::from_secs(1));
         }
 
         #[test]

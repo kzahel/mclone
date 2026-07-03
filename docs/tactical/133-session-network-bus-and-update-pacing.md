@@ -5,7 +5,8 @@ landed for local integrated play; direction revised 2026-07-03 to strict
 receive-order update application (vanilla parity) with a frame-budget stall,
 replacing the earlier priority-class plan; Slice 2 local integrated ordered
 update pump landed; Slice 3A batched dirty intent and resident cache lookup
-landed; full thin apply and source pacing remain active
+landed; Slice 3B local integrated producer-side decoded update queue landed;
+full resident dirty slots and source pacing remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -84,10 +85,12 @@ ordered queue behind a common policy boundary.
 
 - `NativeIntegratedServerRunner` already has a command channel and update
   channel.
-- `NativeIntegratedServerRunner::try_recv_update` receives one update frame at
-  a time and preserves queue depth/byte accounting; `drain_updates` remains as
-  an unlimited compatibility helper. Decode still happens on the caller side
-  in this slice; producer-side decoded updates are Slice 3/Slice 4 work.
+- `NativeIntegratedServerRunner::try_recv_update` receives one decoded update
+  envelope at a time and preserves queue depth/byte accounting. The runner
+  still uses the shared update codec on the server thread to compute
+  `encoded_len` for diagnostics, but the runtime pump no longer decodes local
+  integrated update payloads. `drain_updates` remains as an unlimited
+  compatibility helper.
 - `send_gameplay_command*` helpers default to `DrainImmediately`; Slice 1 added
   `SendOnly` and switched pose sync to it.
 - `LocalSingleViewSceneRuntime::set_chunk_view` sends the view command only;
@@ -307,9 +310,11 @@ safety valve.
   of ordered-set insertion per update. This is the `131` Finding 3.3 diagnosis
   and should land as part of, or aligned with, `128`'s resident-lifecycle
   direction — not a separate renderer shortcut.
-- [ ] Move update payload decode off the render thread: the integrated runner
-  publishes decoded updates; remote transports decode on the session thread
-  (Slice 4).
+- [x] Slice 3B: move local integrated update payload decode off the render
+  thread. The native runner queues decoded `ServerUpdate` envelopes and keeps
+  encoded byte accounting as producer-side metadata.
+- [ ] Move remote transport update payload decode off the render thread:
+  remote transports decode on the session thread (Slice 4).
 - [ ] Interest hysteresis: verify the unload margin is wider than the load margin
   so a path oscillating near a chunk boundary does not thrash full row swaps
   (the measured 15-snapshot + 15-unload bursts). Vanilla keeps chunks resident
@@ -328,7 +333,7 @@ Recorded Slice 3A result:
 - Added regression coverage for duplicate snapshot dirtying, duplicate
   section-update dirtying, and resident cache index removal.
 
-Validation:
+Validation (Slice 3A):
 
 - `cargo test --manifest-path native/Cargo.toml -p mclone-render-session -- --nocapture`
   passed.
@@ -356,6 +361,52 @@ Validation:
   - Overall frame pacing improved but remains marginal:
     `app_work_avg_ms=13.788`, `app_work_p95_ms=15.803`,
     `headroom_avg_ms=0.101`, `app_over_period_pct=42.4`.
+
+Recorded Slice 3B result:
+
+- `NativeQueuedServerUpdate` now stores a decoded `ServerUpdate` plus
+  `encoded_len`/`queued_at` metadata instead of an encoded frame. The native
+  runner computes encoded length on the producer side for queue-byte
+  diagnostics, then moves the owned update into the queue.
+- `NativeIntegratedServerRunner::try_recv_update` no longer calls
+  `decode_server_update`; it only updates queue counters and returns the
+  decoded envelope.
+- Simulation, physics, and command-produced update vectors are moved into the
+  queue instead of cloned through a caller-side decode path.
+- Added regression coverage:
+  `native_runner_publish_updates_queues_decoded_updates_with_encoded_byte_accounting`.
+
+Validation (Slice 3B):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml` passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- Quest RD7 settled-orbit lane passed with actors enabled:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+  Summary artifacts:
+  `/tmp/mclone-quest-openxr-perf-summary.txt` and
+  `/tmp/mclone-quest-openxr-logcat.txt`.
+- Quest result highlights compared with the post-Slice 3A run:
+  - Locomotion command update drain remained collapsed:
+    `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`,
+    `max_updates=0`.
+  - Runtime receive/decode drain tail collapsed:
+    `drain_updates_ms=0.094` versus `8.294`, and
+    `poll_total_ms=3.263` versus `8.320`.
+  - Apply remains dominated by client state mutation and dirty marking:
+    `apply_updates_ms=3.253`, `dirty_mark_ms=1.231`,
+    `client_apply_ms=3.232`, with `updates=37`.
+  - Queue pressure improved again:
+    `server_update_queue_depth=3` versus `13`,
+    `server_update_queue_bytes=191` versus `319782`,
+    `server_update_oldest_applied_age_ms=31.586` versus `32.234`.
+  - Overall frame pacing improved slightly but remains marginal:
+    `app_work_avg_ms=13.751`, `app_work_p95_ms=15.864`,
+    `headroom_avg_ms=0.138`, `app_over_period_pct=41.1`.
 
 Success means a chunk-scale update applies at parse-plus-flag-flip cost (well
 below the current ~0.13 ms), the default budget absorbs a 15+15 burst within a

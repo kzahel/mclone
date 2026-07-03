@@ -2,9 +2,10 @@
 
 Status: target architecture; Slice 1 send-only high-frequency command policy
 and Slice 2 local integrated ordered update pump landed; Slice 3A batched dirty
-intent and resident cache lookup landed; revised 2026-07-03 to adopt the
-vanilla ordered-stream update model (thin apply plus a frame-budget stall) and
-drop the earlier priority-class design; remaining implementation tracked in
+intent and resident cache lookup landed; Slice 3B local integrated producer-side
+decoded update queue landed; revised 2026-07-03 to adopt the vanilla
+ordered-stream update model (thin apply plus a frame-budget stall) and drop the
+earlier priority-class design; remaining implementation tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -95,16 +96,19 @@ integrated play: pose sync and chunk view changes enqueue commands, while
 order under an elapsed-time budget, with unlimited drain paths reserved for
 startup and idle waits.
 
-Compared to the reference shape, local integrated play still has two costly
-gaps:
+Compared to the reference shape, local integrated play still has one costly
+gap:
 
-- The new `try_recv_update` path still decodes update frames on the
-  app/render thread at receive time, where vanilla decodes on the IO side.
 - Slice 3A now batches server-update dirty intent and uses a resident
   chunk-to-section-key cache index, so duplicate updates no longer multiply
   neighborhood fanout or full-cache scans. Render dirty state is still
   ordered-set backed, where vanilla flips a boolean on a resident
   render-section slot.
+
+Slice 3B moved local integrated update decode/conversion to the runner side:
+`try_recv_update` now returns already-decoded `ServerUpdate` envelopes with
+encoded byte metadata, so the local runtime pump no longer decodes update
+payloads.
 
 Native remote dedicated is even more request/response-shaped today:
 `NativeClientSession::send_command` writes one command and blocks reading one
@@ -265,8 +269,8 @@ Local integrated:
 - The runtime update pump drains and applies inbound updates in receive order
   under the frame budget. Undrained updates stay in the channel so queue depth
   remains observable and idle/bootstrap checks keep working.
-- Move update payload decode to the runner side so the pump applies
-  already-decoded updates. This remains pending after Slice 2.
+- Update payload decode/conversion happens on the runner side; the pump applies
+  already-decoded local integrated updates.
 
 Native remote TCP:
 
