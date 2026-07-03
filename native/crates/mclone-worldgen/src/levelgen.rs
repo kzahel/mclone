@@ -41,14 +41,15 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
-        CACTUS, CLAY, COARSE_DIRT, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN,
-        FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, KELP, KELP_PLANT,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
-        PACKED_ICE, PODZOL, POPPY, RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1,
-        SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
-        SPRUCE_LOG, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA,
-        TUBE_CORAL_BLOCK, WATER, is_air_like, is_water,
+        ACACIA_LEAVES, ACACIA_LOG, BAMBOO, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK,
+        BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
+        DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
+        JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER,
+        MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL, POPPY,
+        RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
+        SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, is_air_like,
+        is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -137,6 +138,8 @@ mod tests {
         WarmOceanCoralSeaPickles,
         DarkForestCanopyMushrooms,
         SavannaAcacia,
+        JungleTrees,
+        BambooJungle,
     }
 
     impl FeatureFamily {
@@ -156,6 +159,8 @@ mod tests {
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
                 Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
                 Self::SavannaAcacia => "savanna acacia trees",
+                Self::JungleTrees => "jungle log/leaves trees",
+                Self::BambooJungle => "bamboo plus jungle log/leaves vegetation",
             }
         }
 
@@ -201,6 +206,8 @@ mod tests {
                     MUSHROOM_STEM,
                 ],
                 Self::SavannaAcacia => &[ACACIA_LOG, ACACIA_LEAVES],
+                Self::JungleTrees => &[JUNGLE_LOG, JUNGLE_LEAVES],
+                Self::BambooJungle => &[BAMBOO, JUNGLE_LOG, JUNGLE_LEAVES],
             }
         }
 
@@ -240,6 +247,14 @@ mod tests {
                 }
                 Self::SavannaAcacia => {
                     chunk.block_count(ACACIA_LOG) > 0 && chunk.block_count(ACACIA_LEAVES) > 0
+                }
+                Self::JungleTrees => {
+                    chunk.block_count(JUNGLE_LOG) > 0 && chunk.block_count(JUNGLE_LEAVES) > 0
+                }
+                Self::BambooJungle => {
+                    chunk.block_count(BAMBOO) > 0
+                        && chunk.block_count(JUNGLE_LOG) > 0
+                        && chunk.block_count(JUNGLE_LEAVES) > 0
                 }
                 _ => self
                     .blocks()
@@ -368,7 +383,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:jungle",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::JungleTrees),
         },
         PaletteMatrixCase {
             seed: 2235,
@@ -376,7 +391,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:jungle_edge",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::JungleTrees),
         },
         PaletteMatrixCase {
             seed: 10,
@@ -528,7 +543,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:jungle_hills",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::JungleTrees),
         },
         PaletteMatrixCase {
             seed: 4,
@@ -672,7 +687,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:modified_jungle",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::JungleTrees),
         },
         PaletteMatrixCase {
             seed: 314_096,
@@ -680,7 +695,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:modified_jungle_edge",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::JungleTrees),
         },
         PaletteMatrixCase {
             seed: 48,
@@ -763,12 +778,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 626,
+            seed: 1263,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:bamboo_jungle",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::BambooJungle),
         },
         PaletteMatrixCase {
             seed: 1000,
@@ -776,7 +791,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:bamboo_jungle_hills",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::BambooJungle),
         },
     ];
 

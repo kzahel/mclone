@@ -130,6 +130,9 @@ pub const RED_MUSHROOM_BLOCK: RawBlockId = 124;
 pub const MUSHROOM_STEM: RawBlockId = 125;
 pub const ACACIA_LOG: RawBlockId = 126;
 pub const ACACIA_LEAVES: RawBlockId = 127;
+pub const JUNGLE_LOG: RawBlockId = 128;
+pub const JUNGLE_LEAVES: RawBlockId = 129;
+pub const BAMBOO: RawBlockId = 130;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -187,6 +190,9 @@ impl GeneratedBlockId {
     pub const MUSHROOM_STEM: Self = Self(MUSHROOM_STEM);
     pub const ACACIA_LOG: Self = Self(ACACIA_LOG);
     pub const ACACIA_LEAVES: Self = Self(ACACIA_LEAVES);
+    pub const JUNGLE_LOG: Self = Self(JUNGLE_LOG);
+    pub const JUNGLE_LEAVES: Self = Self(JUNGLE_LEAVES);
+    pub const BAMBOO: Self = Self(BAMBOO);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -242,6 +248,7 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | TALL_SEAGRASS_UPPER
             | KELP
             | KELP_PLANT
+            | BAMBOO
             | SEA_PICKLE_1
             | SEA_PICKLE_2
             | SEA_PICKLE_3
@@ -367,7 +374,7 @@ pub const fn lava_block_for_level(level: u8) -> Option<RawBlockId> {
 pub const fn is_leaves(block_id: RawBlockId) -> bool {
     matches!(
         block_id,
-        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES | ACACIA_LEAVES
+        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES | ACACIA_LEAVES | JUNGLE_LEAVES
     )
 }
 
@@ -439,6 +446,9 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         MUSHROOM_STEM => "minecraft:mushroom_stem",
         ACACIA_LOG => "minecraft:acacia_log",
         ACACIA_LEAVES => "minecraft:acacia_leaves",
+        JUNGLE_LOG => "minecraft:jungle_log",
+        JUNGLE_LEAVES => "minecraft:jungle_leaves",
+        BAMBOO => "minecraft:bamboo",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -509,6 +519,7 @@ mod tests {
         assert_eq!(block_light_opacity(SPRUCE_LEAVES), 1);
         assert_eq!(block_light_opacity(DARK_OAK_LEAVES), 1);
         assert_eq!(block_light_opacity(ACACIA_LEAVES), 1);
+        assert_eq!(block_light_opacity(JUNGLE_LEAVES), 1);
         assert_eq!(block_light_opacity(AIR), 0);
         assert_eq!(block_light_opacity(CAVE_AIR), 0);
         assert_eq!(block_light_opacity(WATER), 1);
@@ -524,6 +535,7 @@ mod tests {
         assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
         assert_eq!(block_light_opacity(KELP), 0);
         assert_eq!(block_light_opacity(KELP_PLANT), 0);
+        assert_eq!(block_light_opacity(BAMBOO), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
@@ -562,5 +574,8 @@ mod tests {
         assert_eq!(block_name(MUSHROOM_STEM), "minecraft:mushroom_stem");
         assert_eq!(block_name(ACACIA_LOG), "minecraft:acacia_log");
         assert_eq!(block_name(ACACIA_LEAVES), "minecraft:acacia_leaves");
+        assert_eq!(block_name(JUNGLE_LOG), "minecraft:jungle_log");
+        assert_eq!(block_name(JUNGLE_LEAVES), "minecraft:jungle_leaves");
+        assert_eq!(block_name(BAMBOO), "minecraft:bamboo");
     }
 }

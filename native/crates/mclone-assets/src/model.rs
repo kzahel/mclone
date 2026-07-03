@@ -638,7 +638,9 @@ mod tests {
         let mut model_refs = BTreeSet::new();
         for record in registry.records() {
             let asset = index.get(&record.block).unwrap();
-            if let Some(variant_key) = record.asset_variant_key(asset) {
+            if asset.variant_keys.is_empty() {
+                model_refs.extend(asset.model_refs.iter().cloned());
+            } else if let Some(variant_key) = record.asset_variant_key(asset) {
                 let variants = asset.variants_for_key(&variant_key).unwrap();
                 for variant in variants {
                     model_refs.insert(variant.model.clone());

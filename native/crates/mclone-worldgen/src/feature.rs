@@ -3,6 +3,7 @@ use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{BlockPos, HeightmapType};
 use crate::prng::RandomSource;
 
+mod bamboo;
 mod configured;
 mod context;
 mod disk;
@@ -21,14 +22,14 @@ mod top_layer;
 mod tree;
 
 pub use configured::{
-    BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecoratedFeatureConfiguration,
-    DiskConfiguration, DripstoneClusterConfiguration, FloatProvider, FoliagePlacerConfiguration,
-    GlowLichenConfiguration, HugeMushroomConfiguration, HugeMushroomKind, LakeConfiguration,
-    OreConfiguration, OreTarget, OreTargetBlockState, RandomFeatureConfiguration,
-    RandomPatchConfiguration, SeagrassConfiguration, SimpleBlockConfiguration,
-    SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
-    StraightTrunkPlacerConfiguration, TreeConfiguration, TrunkPlacerConfiguration,
-    TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
+    BambooConfiguration, BasicTreeConfiguration, ConfiguredFeature, CoralShape,
+    DecoratedFeatureConfiguration, DiskConfiguration, DripstoneClusterConfiguration, FloatProvider,
+    FoliagePlacerConfiguration, GlowLichenConfiguration, HugeMushroomConfiguration,
+    HugeMushroomKind, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
+    RandomFeatureConfiguration, RandomPatchConfiguration, SeagrassConfiguration,
+    SimpleBlockConfiguration, SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration,
+    SpringConfiguration, StraightTrunkPlacerConfiguration, TreeConfiguration,
+    TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use placed::{
@@ -167,6 +168,7 @@ impl ConfiguredFeature {
             Self::Coral(shape) => ocean::place_coral(world, random, origin, *shape),
             Self::SeaPickle(config) => ocean::place_sea_pickle(world, random, origin, *config),
             Self::Seagrass(config) => ocean::place_seagrass(world, random, origin, *config),
+            Self::Bamboo(config) => bamboo::place_bamboo(world, random, origin, *config),
             Self::Kelp => ocean::place_kelp(world, random, origin),
             Self::Ore(config) => ore::place_ore(world, random, origin, config),
             Self::FreezeTopLayer => top_layer::place_freeze_top_layer(world, biomes, origin),
@@ -256,16 +258,17 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK,
-        BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE,
-        DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
-        DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE,
-        DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK,
-        GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
-        IRON_ORE, KELP, KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA,
-        MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE, SAND,
-        SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES,
-        STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
+        ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG,
+        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CAVE_AIR, CLAY,
+        COAL_ORE, COPPER_ORE, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE,
+        DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
+        DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE,
+        DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
+        HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LAPIS_ORE,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, POPPY,
+        RED_MUSHROOM_BLOCK, REDSTONE_ORE, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
+        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER,
+        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -915,6 +918,27 @@ mod tests {
     }
 
     #[test]
+    fn jungle_tree_places_jungle_log_and_leaves() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(6);
+        let feature = ConfiguredFeature::tree(TreeConfiguration::jungle());
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert!(count_blocks(&chunk, JUNGLE_LOG) > 0);
+        assert!(count_blocks(&chunk, JUNGLE_LEAVES) > 0);
+    }
+
+    #[test]
+    fn bamboo_feature_places_java_height_column() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(7);
+        let feature = ConfiguredFeature::bamboo(BambooConfiguration::new(1.0));
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert!(count_blocks(&chunk, BAMBOO) >= 5);
+    }
+
+    #[test]
     fn huge_mushrooms_place_cap_and_stem_blocks() {
         let mut brown_chunk = flat_grass_chunk();
         let mut brown_random = WorldgenRandom::new(3);
@@ -1135,6 +1159,159 @@ mod tests {
             shattered_feature.decorators.first(),
             Some(&ConfiguredDecorator::count_extra(2, 0.1, 1))
         );
+    }
+
+    #[test]
+    fn jungle_feature_table_uses_vanilla_jungle_selectors() {
+        let jungle = overworld_features_for_biome(get_layered_biome_by_id(21));
+        let modified = overworld_features_for_biome(get_layered_biome_by_id(149));
+        let edge = overworld_features_for_biome(get_layered_biome_by_id(23));
+
+        let light_bamboo = jungle
+            .iter()
+            .find(|feature| {
+                matches!(
+                    feature.feature,
+                    ConfiguredFeature::Bamboo(BambooConfiguration { probability: 0.0 })
+                )
+            })
+            .expect("jungle light bamboo feature");
+        assert_eq!(
+            light_bamboo.decorators,
+            vec![
+                ConfiguredDecorator::count(16),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
+        );
+
+        let jungle_tree = jungle
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("jungle tree selector");
+        assert_eq!(
+            jungle_tree.decorators,
+            tables::tree_threshold_decorators(50, 0.1, 1)
+        );
+        match &jungle_tree.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::fancy_oak()),
+                            0.1,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::jungle_bush()),
+                            0.5,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::mega_jungle()),
+                            0.33333334,
+                        ),
+                    ]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::jungle())
+                );
+            }
+            other => panic!("expected jungle random selector, got {other:?}"),
+        }
+
+        assert!(!modified.iter().any(|feature| {
+            matches!(
+                feature.feature,
+                ConfiguredFeature::Bamboo(BambooConfiguration { probability: 0.0 })
+            )
+        }));
+
+        let edge_tree = edge
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("jungle edge tree selector");
+        assert_eq!(
+            edge_tree.decorators,
+            tables::tree_threshold_decorators(2, 0.1, 1)
+        );
+        match &edge_tree.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(config.features.len(), 2);
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::jungle())
+                );
+            }
+            other => panic!("expected jungle edge random selector, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bamboo_jungle_feature_table_includes_bamboo_and_vegetation_selector() {
+        let bamboo_jungle = overworld_features_for_biome(get_layered_biome_by_id(168));
+
+        let bamboo = bamboo_jungle
+            .iter()
+            .find(|feature| {
+                matches!(
+                    feature.feature,
+                    ConfiguredFeature::Bamboo(BambooConfiguration { probability: 0.2 })
+                )
+            })
+            .expect("bamboo jungle bamboo feature");
+        assert_eq!(
+            bamboo.decorators,
+            vec![
+                ConfiguredDecorator::count_noise_biased(160, 80.0, 0.3),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::WorldSurface),
+            ]
+        );
+
+        let vegetation = bamboo_jungle
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("bamboo vegetation selector");
+        assert_eq!(
+            vegetation.decorators,
+            tables::tree_threshold_decorators(30, 0.1, 1)
+        );
+        match &vegetation.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::fancy_oak()),
+                            0.05,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::jungle_bush()),
+                            0.15,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::mega_jungle()),
+                            0.7,
+                        ),
+                    ]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::random_patch(tables::jungle_grass_patch_config())
+                );
+            }
+            other => panic!("expected bamboo random selector, got {other:?}"),
+        }
     }
 
     #[test]

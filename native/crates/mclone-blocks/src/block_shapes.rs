@@ -74,6 +74,7 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         ),
         terrain_id::CACTUS => Some(cactus_outline_shape()),
         terrain_id::SUGAR_CANE => Some(sugar_cane_shape()),
+        terrain_id::BAMBOO => Some(bamboo_outline_shape()),
         terrain_id::SEAGRASS => Some(seagrass_shape()),
         terrain_id::TALL_SEAGRASS_LOWER | terrain_id::TALL_SEAGRASS_UPPER => {
             Some(tall_seagrass_shape())
@@ -124,6 +125,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::WALL_TORCH_SOUTH
         | terrain_id::WALL_TORCH_WEST => None,
         terrain_id::CACTUS => Some(cactus_collision_shape()),
+        terrain_id::BAMBOO => Some(bamboo_collision_shape()),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         id if is_fluid(BlockStateId(id)) => None,
         _ => Some(full_block()),
@@ -162,6 +164,15 @@ fn cactus_collision_shape() -> LocalShape {
 
 fn sugar_cane_shape() -> LocalShape {
     local_box(2.0 / 16.0, 0.0, 2.0 / 16.0, 14.0 / 16.0, 1.0, 14.0 / 16.0)
+}
+
+fn bamboo_outline_shape() -> LocalShape {
+    local_box(5.0 / 16.0, 0.0, 5.0 / 16.0, 11.0 / 16.0, 1.0, 11.0 / 16.0)
+        .with_offset(OffsetKind::Xz)
+}
+
+fn bamboo_collision_shape() -> LocalShape {
+    local_box(6.5 / 16.0, 0.0, 6.5 / 16.0, 9.5 / 16.0, 1.0, 9.5 / 16.0).with_offset(OffsetKind::Xz)
 }
 
 fn seagrass_shape() -> LocalShape {
@@ -394,6 +405,8 @@ mod tests {
             terrain_id::MUSHROOM_STEM,
             terrain_id::ACACIA_LOG,
             terrain_id::ACACIA_LEAVES,
+            terrain_id::JUNGLE_LOG,
+            terrain_id::JUNGLE_LEAVES,
         ] {
             assert_eq!(
                 block_collision_aabb(state(id), BlockPos::new(1, 2, 3)),
@@ -465,6 +478,30 @@ mod tests {
         assert_eq!(
             block_collision_aabb(state(terrain_id::CACTUS), pos),
             Some(Aabb::new(0.0625, 0.0, 0.0625, 0.9375, 0.9375, 0.9375))
+        );
+        let offset = java_block_offset_xz(pos);
+        assert_eq!(
+            shape_for(state(terrain_id::BAMBOO), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(
+                offset.x + 0.3125,
+                0.0,
+                offset.z + 0.3125,
+                offset.x + 0.6875,
+                1.0,
+                offset.z + 0.6875,
+            ))
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::BAMBOO), pos),
+            Some(Aabb::new(
+                offset.x + 0.40625,
+                0.0,
+                offset.z + 0.40625,
+                offset.x + 0.59375,
+                1.0,
+                offset.z + 0.59375,
+            ))
         );
     }
 

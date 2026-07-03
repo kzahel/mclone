@@ -161,7 +161,9 @@ fn selected_model_refs(
         let asset = blockstates.get(&record.block).ok_or_else(|| {
             TexturedTerrainAssetError::MissingBlockStateAsset(record.block.clone())
         })?;
-        if let Some(variant_key) = record.asset_variant_key(asset) {
+        if asset.variant_keys.is_empty() && !asset.model_refs.is_empty() {
+            refs.extend(asset.model_refs.iter().cloned());
+        } else if let Some(variant_key) = record.asset_variant_key(asset) {
             let variants = asset.variants_for_key(&variant_key).ok_or_else(|| {
                 TexturedTerrainAssetError::MissingBlockStateVariant {
                     block: record.block.clone(),

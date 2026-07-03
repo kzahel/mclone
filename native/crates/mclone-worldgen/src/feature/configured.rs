@@ -1,8 +1,8 @@
 use crate::block::{
     ACACIA_LEAVES, ACACIA_LOG, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BROWN_MUSHROOM_BLOCK,
-    DARK_OAK_LEAVES, DARK_OAK_LOG, DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, LAVA, MUSHROOM_STEM,
-    OAK_LEAVES, OAK_LOG, RED_MUSHROOM_BLOCK, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF,
-    WATER,
+    DARK_OAK_LEAVES, DARK_OAK_LOG, DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, JUNGLE_LEAVES,
+    JUNGLE_LOG, LAVA, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, RED_MUSHROOM_BLOCK, RawBlockId,
+    SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF, WATER,
 };
 use crate::placement::{ConfiguredDecorator, CountConfiguration, IntProvider};
 use crate::prng::RandomSource;
@@ -309,6 +309,19 @@ impl Eq for SeagrassConfiguration {}
 impl SeagrassConfiguration {
     pub const fn new(tall_probability: f32) -> Self {
         Self { tall_probability }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BambooConfiguration {
+    pub probability: f32,
+}
+
+impl Eq for BambooConfiguration {}
+
+impl BambooConfiguration {
+    pub const fn new(probability: f32) -> Self {
+        Self { probability }
     }
 }
 
@@ -669,6 +682,48 @@ impl TreeConfiguration {
             TwoLayersFeatureSize::new(1, 0, 2),
         )
     }
+
+    pub const fn jungle() -> Self {
+        Self::new(
+            JUNGLE_LOG,
+            JUNGLE_LEAVES,
+            TrunkPlacerConfiguration::straight(4, 8, 0),
+            FoliagePlacerConfiguration::Blob {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(0),
+                height: 3,
+            },
+            TwoLayersFeatureSize::new(1, 0, 1),
+        )
+    }
+
+    pub const fn mega_jungle() -> Self {
+        Self::new(
+            JUNGLE_LOG,
+            JUNGLE_LEAVES,
+            TrunkPlacerConfiguration::straight(10, 2, 19),
+            FoliagePlacerConfiguration::Blob {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(0),
+                height: 3,
+            },
+            TwoLayersFeatureSize::new(1, 1, 2),
+        )
+    }
+
+    pub const fn jungle_bush() -> Self {
+        Self::new(
+            JUNGLE_LOG,
+            OAK_LEAVES,
+            TrunkPlacerConfiguration::straight(1, 0, 0),
+            FoliagePlacerConfiguration::Blob {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(1),
+                height: 2,
+            },
+            TwoLayersFeatureSize::new(0, 0, 0),
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -890,6 +945,7 @@ pub enum ConfiguredFeature {
     Coral(CoralShape),
     SeaPickle(CountConfiguration),
     Seagrass(SeagrassConfiguration),
+    Bamboo(BambooConfiguration),
     Kelp,
     Ore(OreConfiguration),
     FreezeTopLayer,
@@ -970,6 +1026,10 @@ impl ConfiguredFeature {
 
     pub const fn seagrass(config: SeagrassConfiguration) -> Self {
         Self::Seagrass(config)
+    }
+
+    pub const fn bamboo(config: BambooConfiguration) -> Self {
+        Self::Bamboo(config)
     }
 
     pub const fn kelp() -> Self {

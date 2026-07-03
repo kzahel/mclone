@@ -3,8 +3,9 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_assets::{
-    AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
-    BlockStateVariant, ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
+    AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord,
+    BlockStateRegistry, BlockStateVariant, ModelFaceDirection, ResourceLocation, TextureAtlasPlan,
+    TextureMaterial,
 };
 use mclone_core::BlockStateId;
 
@@ -270,7 +271,7 @@ impl TexturedMeshCatalog {
                 )
             } else if variant_key.is_empty() {
                 (
-                    multipart_primary_model(asset, record.block.path()).ok_or_else(|| {
+                    multipart_primary_model(asset, record).ok_or_else(|| {
                         TexturedMeshError::MissingBlockStateVariant {
                             block: record.block.clone(),
                             variant_key: variant_key.clone(),
@@ -406,8 +407,20 @@ impl TexturedMeshCatalog {
 
 fn multipart_primary_model<'a>(
     asset: &'a mclone_assets::BlockStateAsset,
-    block_path: &str,
+    record: &BlockStateRecord,
 ) -> Option<&'a ResourceLocation> {
+    let block_path = record.block.path();
+    if block_path == "bamboo" {
+        if let Some(age) = record.properties.get("age") {
+            let preferred_bamboo = format!("block/bamboo1_age{age}");
+            if let Some(model) = asset.model_refs.iter().find(|model| {
+                model.namespace() == asset.block.namespace() && model.path() == preferred_bamboo
+            }) {
+                return Some(model);
+            }
+        }
+    }
+
     let preferred = format!("block/{block_path}");
     asset
         .model_refs
@@ -843,6 +856,11 @@ mod tests {
     #[test]
     fn multipart_primary_model_prefers_matching_block_model() {
         let block = ResourceLocation::parse("minecraft:red_mushroom_block").unwrap();
+        let record = mclone_assets::BlockStateRecord::new(
+            BlockStateId(0),
+            block.clone(),
+            [] as [(&str, &str); 0],
+        );
         let asset = mclone_assets::BlockStateAsset {
             block: block.clone(),
             path: mclone_assets::AssetPath::blockstate_json(&block),
@@ -857,8 +875,36 @@ mod tests {
         };
 
         assert_eq!(
-            multipart_primary_model(&asset, "red_mushroom_block").map(ResourceLocation::path),
+            multipart_primary_model(&asset, &record).map(ResourceLocation::path),
             Some("block/red_mushroom_block")
+        );
+    }
+
+    #[test]
+    fn multipart_primary_model_prefers_bamboo_age_stem() {
+        let block = ResourceLocation::parse("minecraft:bamboo").unwrap();
+        let record = mclone_assets::BlockStateRecord::new(
+            BlockStateId(130),
+            block.clone(),
+            [("age", "1"), ("leaves", "none"), ("stage", "0")],
+        );
+        let asset = mclone_assets::BlockStateAsset {
+            block: block.clone(),
+            path: mclone_assets::AssetPath::blockstate_json(&block),
+            variants: BTreeMap::new(),
+            variant_keys: BTreeSet::new(),
+            model_refs: [
+                ResourceLocation::parse("minecraft:block/bamboo1_age0").unwrap(),
+                ResourceLocation::parse("minecraft:block/bamboo1_age1").unwrap(),
+                ResourceLocation::parse("minecraft:block/bamboo_large_leaves").unwrap(),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_eq!(
+            multipart_primary_model(&asset, &record).map(ResourceLocation::path),
+            Some("block/bamboo1_age1")
         );
     }
 }

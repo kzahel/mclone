@@ -15,8 +15,8 @@ use crate::placement::{
 };
 
 use super::{
-    BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecorationStep, DiskConfiguration,
-    DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration,
+    BambooConfiguration, BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecorationStep,
+    DiskConfiguration, DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration,
     HugeMushroomConfiguration, LakeConfiguration, OreConfiguration, PlacedFeature,
     RandomFeatureConfiguration, RandomPatchConfiguration, SeagrassConfiguration,
     SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
@@ -26,6 +26,10 @@ use super::{
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
     WeightedBlockState::new(GRASS, 1),
     WeightedBlockState::new(FERN, 4),
+];
+pub(super) const JUNGLE_GRASS_STATES: [WeightedBlockState; 2] = [
+    WeightedBlockState::new(GRASS, 3),
+    WeightedBlockState::new(FERN, 1),
 ];
 pub(super) const DEFAULT_FLOWER_STATES: [WeightedBlockState; 2] = [
     WeightedBlockState::new(POPPY, 2),
@@ -86,6 +90,14 @@ pub(super) fn overworld_features_for_biome_cached(
         "minecraft:savanna" | "minecraft:savanna_plateau" => savanna_feature_table(false),
         "minecraft:shattered_savanna" | "minecraft:shattered_savanna_plateau" => {
             savanna_feature_table(true)
+        }
+        "minecraft:jungle" | "minecraft:jungle_hills" => jungle_feature_table(true, false),
+        "minecraft:modified_jungle" => jungle_feature_table(false, false),
+        "minecraft:jungle_edge" | "minecraft:modified_jungle_edge" => {
+            jungle_feature_table(false, true)
+        }
+        "minecraft:bamboo_jungle" | "minecraft:bamboo_jungle_hills" => {
+            bamboo_jungle_feature_table()
         }
         "minecraft:ocean" => ocean_feature_table(false),
         "minecraft:deep_ocean" => ocean_feature_table(true),
@@ -216,6 +228,32 @@ fn savanna_feature_table(shattered: bool) -> &'static [PlacedFeature] {
     features
         .get_or_init(|| {
             build_overworld_feature_table("minecraft:savanna", savanna_features(shattered))
+        })
+        .as_slice()
+}
+
+fn jungle_feature_table(light_bamboo: bool, edge: bool) -> &'static [PlacedFeature] {
+    static JUNGLE: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static MODIFIED_JUNGLE: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static JUNGLE_EDGE: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = match (light_bamboo, edge) {
+        (true, false) => &JUNGLE,
+        (false, false) => &MODIFIED_JUNGLE,
+        (false, true) => &JUNGLE_EDGE,
+        (true, true) => &JUNGLE_EDGE,
+    };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:jungle", jungle_features(light_bamboo, edge))
+        })
+        .as_slice()
+}
+
+fn bamboo_jungle_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:bamboo_jungle", bamboo_jungle_features())
         })
         .as_slice()
 }
@@ -688,6 +726,36 @@ fn savanna_features(shattered: bool) -> Vec<PlacedFeature> {
     ]
 }
 
+fn jungle_features(light_bamboo: bool, edge: bool) -> Vec<PlacedFeature> {
+    let mut features = Vec::new();
+    if light_bamboo {
+        features.push(bamboo_light_feature());
+    }
+    features.push(jungle_tree_feature(if edge { 2 } else { 50 }, edge));
+    features.push(default_flower_feature());
+    features.push(jungle_grass_patch_feature());
+    features.push(omitted_vegetal_feature());
+    features.push(omitted_vegetal_feature());
+    features.push(spring_water_feature());
+    features.push(spring_lava_feature());
+    features.push(omitted_vegetal_feature());
+    features
+}
+
+fn bamboo_jungle_features() -> Vec<PlacedFeature> {
+    vec![
+        bamboo_feature(),
+        bamboo_vegetation_feature(),
+        default_flower_feature(),
+        jungle_grass_patch_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
+        omitted_vegetal_feature(),
+    ]
+}
+
 fn ocean_features(deep: bool) -> Vec<PlacedFeature> {
     vec![
         seagrass_feature(48, if deep { 0.8 } else { 0.3 }),
@@ -846,7 +914,62 @@ fn savanna_tree_feature(count: i32) -> PlacedFeature {
     )
 }
 
-fn tree_threshold_decorators(
+fn jungle_tree_feature(count: i32, edge: bool) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        jungle_tree_selector(edge),
+        tree_threshold_decorators(count, 0.1, 1),
+    )
+}
+
+fn bamboo_vegetation_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            [
+                WeightedConfiguredFeature::new(
+                    ConfiguredFeature::tree(TreeConfiguration::fancy_oak()),
+                    0.05,
+                ),
+                WeightedConfiguredFeature::new(
+                    ConfiguredFeature::tree(TreeConfiguration::jungle_bush()),
+                    0.15,
+                ),
+                WeightedConfiguredFeature::new(
+                    ConfiguredFeature::tree(TreeConfiguration::mega_jungle()),
+                    0.7,
+                ),
+            ],
+            ConfiguredFeature::random_patch(jungle_grass_patch_config()),
+        )),
+        tree_threshold_decorators(30, 0.1, 1),
+    )
+}
+
+fn jungle_tree_selector(edge: bool) -> ConfiguredFeature {
+    let mut features = vec![
+        WeightedConfiguredFeature::new(
+            ConfiguredFeature::tree(TreeConfiguration::fancy_oak()),
+            0.1,
+        ),
+        WeightedConfiguredFeature::new(
+            ConfiguredFeature::tree(TreeConfiguration::jungle_bush()),
+            0.5,
+        ),
+    ];
+    if !edge {
+        features.push(WeightedConfiguredFeature::new(
+            ConfiguredFeature::tree(TreeConfiguration::mega_jungle()),
+            0.33333334,
+        ));
+    }
+    ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+        features,
+        ConfiguredFeature::tree(TreeConfiguration::jungle()),
+    ))
+}
+
+pub(super) fn tree_threshold_decorators(
     count: i32,
     extra_chance: f32,
     extra_count: i32,
@@ -931,6 +1054,35 @@ fn taiga_grass_patch_feature() -> PlacedFeature {
             ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
         ],
     )
+}
+
+fn jungle_grass_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(jungle_grass_patch_config()),
+        vec![
+            ConfiguredDecorator::count(25),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
+pub(super) fn jungle_grass_patch_config() -> RandomPatchConfiguration {
+    RandomPatchConfiguration {
+        state: GRASS,
+        weighted_states: &JUNGLE_GRASS_STATES,
+        tries: 32,
+        xspread: 7,
+        yspread: 3,
+        zspread: 7,
+        project: true,
+        can_replace: false,
+        double_plant: false,
+        column_height: None,
+        need_water: false,
+        place_on: &[],
+    }
 }
 
 fn large_fern_patch_feature() -> PlacedFeature {
@@ -1089,6 +1241,30 @@ fn sugar_cane_patch(count: i32) -> PlacedFeature {
             place_on: &[],
         },
         count,
+    )
+}
+
+fn bamboo_light_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::bamboo(BambooConfiguration::new(0.0)),
+        vec![
+            ConfiguredDecorator::count(16),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
+fn bamboo_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::bamboo(BambooConfiguration::new(0.2)),
+        vec![
+            ConfiguredDecorator::count_noise_biased(160, 80.0, 0.3),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::WorldSurface),
+        ],
     )
 }
 

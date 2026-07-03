@@ -1,8 +1,8 @@
 use crate::block::{
     ACACIA_LEAVES, ACACIA_LOG, AIR, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, DANDELION, DARK_OAK_LEAVES,
-    DARK_OAK_LOG, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY, SPRUCE_LEAVES, SPRUCE_LOG,
-    WATER,
+    DARK_OAK_LOG, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, JUNGLE_LEAVES,
+    JUNGLE_LOG, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY,
+    SPRUCE_LEAVES, SPRUCE_LOG, WATER,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -1051,13 +1051,14 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
             | SPRUCE_LEAVES
             | DARK_OAK_LEAVES
             | ACACIA_LEAVES
+            | JUNGLE_LEAVES
     )
 }
 
 fn is_tree_leaf(block_id: crate::block::RawBlockId) -> bool {
     matches!(
         block_id,
-        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES | ACACIA_LEAVES
+        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES | ACACIA_LEAVES | JUNGLE_LEAVES
     )
 }
 
@@ -1070,7 +1071,7 @@ fn is_free_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     };
     matches!(
         block_id,
-        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | DARK_OAK_LOG | ACACIA_LOG
+        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | DARK_OAK_LOG | ACACIA_LOG | JUNGLE_LOG
     )
 }
 
@@ -1100,6 +1101,8 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
             | DARK_OAK_LOG
             | ACACIA_LEAVES
             | ACACIA_LOG
+            | JUNGLE_LEAVES
+            | JUNGLE_LOG
     )
 }
 

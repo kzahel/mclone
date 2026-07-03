@@ -53,6 +53,9 @@ impl BlockStateRecord {
     }
 
     pub fn asset_variant_key(&self, asset: &BlockStateAsset) -> Option<String> {
+        if asset.variant_keys.is_empty() {
+            return Some(String::new());
+        }
         let variant_key = self.variant_key();
         if asset.variants_for_key(&variant_key).is_some() {
             return Some(variant_key);
@@ -388,6 +391,7 @@ const FACING_SOUTH: &[(&str, &str)] = &[("facing", "south")];
 const FACING_WEST: &[(&str, &str)] = &[("facing", "west")];
 const AGE_0: &[(&str, &str)] = &[("age", "0")];
 const AGE_20: &[(&str, &str)] = &[("age", "20")];
+const BAMBOO_TRUNK: &[(&str, &str)] = &[("age", "1"), ("leaves", "none"), ("stage", "0")];
 const PICKLES_1_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "1"), ("waterlogged", "true")];
 const PICKLES_2_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "2"), ("waterlogged", "true")];
 const PICKLES_3_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "3"), ("waterlogged", "true")];
@@ -533,6 +537,9 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (125, "minecraft:mushroom_stem", EMPTY_PROPS),
     (126, "minecraft:acacia_log", AXIS_Y),
     (127, "minecraft:acacia_leaves", EMPTY_PROPS),
+    (128, "minecraft:jungle_log", AXIS_Y),
+    (129, "minecraft:jungle_leaves", EMPTY_PROPS),
+    (130, "minecraft:bamboo", BAMBOO_TRUNK),
 ];
 
 #[cfg(test)]
@@ -551,7 +558,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 128);
+        assert_eq!(registry.len(), 131);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -784,6 +791,18 @@ mod tests {
             registry.id_for_key("minecraft:acacia_leaves"),
             Some(BlockStateId(127))
         );
+        assert_eq!(
+            registry.id_for_key("minecraft:jungle_log[axis=y]"),
+            Some(BlockStateId(128))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:jungle_leaves"),
+            Some(BlockStateId(129))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(130)).unwrap().canonical_key(),
+            "minecraft:bamboo[age=1,leaves=none,stage=0]"
+        );
     }
 
     #[test]
@@ -884,6 +903,31 @@ mod tests {
         let record = registry.by_id(BlockStateId(72)).unwrap();
         let asset = index
             .get(&ResourceLocation::parse("minecraft:water").unwrap())
+            .unwrap();
+        assert_eq!(record.asset_variant_key(asset), Some(String::new()));
+    }
+
+    #[test]
+    fn multipart_blockstates_accept_exact_state_properties() {
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/bamboo.json"),
+            r#"{"multipart":[{"when":{"age":"1"},"apply":{"model":"minecraft:block/bamboo1_age1"}}]}"#,
+        );
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let mut registry = BlockStateRegistry::new();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(130),
+                ResourceLocation::parse("minecraft:bamboo").unwrap(),
+                [("age", "1"), ("leaves", "none"), ("stage", "0")],
+            ))
+            .unwrap();
+
+        registry.validate_blockstate_assets(&index).unwrap();
+        let record = registry.by_id(BlockStateId(130)).unwrap();
+        let asset = index
+            .get(&ResourceLocation::parse("minecraft:bamboo").unwrap())
             .unwrap();
         assert_eq!(record.asset_variant_key(asset), Some(String::new()));
     }
