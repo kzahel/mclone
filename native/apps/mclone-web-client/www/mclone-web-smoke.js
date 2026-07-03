@@ -699,7 +699,9 @@ function overviewRunnerBusy(frame) {
     && (Number(frame.runnerCommandQueueDepth) > 0
       || Number(frame.runnerUpdateQueueDepth) > 0
       || Number(frame.runnerPendingJobs) > 0
-      || Number(frame.runnerPendingPublications) > 0),
+      || Number(frame.runnerPendingPublications) > 0
+      || Number(frame.runnerPendingPersistenceLoads) > 0
+      || Number(frame.runnerPendingPersistenceSaves) > 0),
   );
 }
 
@@ -712,6 +714,8 @@ function overviewFrameSettled(frame) {
     && Number(frame.runnerUpdateQueueDepth) === 0
     && Number(frame.runnerCommandQueueDepth) === 0
     && Number(frame.runnerPendingPublications) === 0
+    && Number(frame.runnerPendingPersistenceLoads) === 0
+    && Number(frame.runnerPendingPersistenceSaves) === 0
     && Number(frame.residentSectionCount) > 0
   );
 }

@@ -71,6 +71,25 @@ interface IndexedDbWorldRecords {
   entityChunks: IndexedDbRecord[];
 }
 
+interface IndexedDbLoadRequest {
+  kind: "chunk" | "entityChunk";
+  requestId: number;
+  x: number;
+  z: number;
+}
+
+interface IndexedDbLoadCompletion extends IndexedDbLoadRequest {
+  found: boolean;
+  record?: Uint8Array;
+  error?: string;
+}
+
+interface ServicedServerResult {
+  result: Record<string, any>;
+  updates: unknown[];
+  diagnostics: any;
+}
+
 let wasmModulePromise: Promise<WasmModule> | null = null;
 // The resolved wasm module, captured once `startServer` loads it. The packed-frame codec
 // (070 Stage 3) lives in Rust and is reached through this handle, so the SAB packing format has a
@@ -137,32 +156,47 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   wasmModule = module;
   const seed = toBigIntSeed(message.seed);
   const workerConstructor = module.McloneWebIntegratedServerWorker as any;
-  const indexedRecords = message.worldStorage === "indexeddb"
-    ? await loadIndexedDbWorldForStart(message)
-    : null;
   const hasJobWorkers = Boolean(message.jobWorkerUrl)
     && typeof workerConstructor.withJobWorkers === "function";
-  if (indexedRecords) {
+  const indexedDbMode = message.worldStorage === "indexeddb";
+  if (indexedDbMode) {
     if (
       hasJobWorkers
-      && typeof workerConstructor.withJobWorkersAndIndexedDbRecords === "function"
+      && typeof workerConstructor.withJobWorkersAndIndexedDbExternalLoads === "function"
     ) {
-      server = workerConstructor.withJobWorkersAndIndexedDbRecords(
+      await prepareIndexedDbWorldForStart(message);
+      server = workerConstructor.withJobWorkersAndIndexedDbExternalLoads(
         seed,
         String(message.jobWorkerUrl),
         String(message.bindgenJsUrl),
         String(message.bindgenWasmUrl),
-        indexedRecords.chunks,
-        indexedRecords.entityChunks,
       );
-    } else if (typeof workerConstructor.withIndexedDbRecords === "function") {
-      server = workerConstructor.withIndexedDbRecords(
-        seed,
-        indexedRecords.chunks,
-        indexedRecords.entityChunks,
-      );
+    } else if (typeof workerConstructor.withIndexedDbExternalLoads === "function") {
+      await prepareIndexedDbWorldForStart(message);
+      server = workerConstructor.withIndexedDbExternalLoads(seed);
     } else {
-      throw new Error("wasm module does not expose IndexedDB integrated-server constructors");
+      const indexedRecords = await loadIndexedDbWorldForStart(message);
+      if (
+        hasJobWorkers
+        && typeof workerConstructor.withJobWorkersAndIndexedDbRecords === "function"
+      ) {
+        server = workerConstructor.withJobWorkersAndIndexedDbRecords(
+          seed,
+          String(message.jobWorkerUrl),
+          String(message.bindgenJsUrl),
+          String(message.bindgenWasmUrl),
+          indexedRecords.chunks,
+          indexedRecords.entityChunks,
+        );
+      } else if (typeof workerConstructor.withIndexedDbRecords === "function") {
+        server = workerConstructor.withIndexedDbRecords(
+          seed,
+          indexedRecords.chunks,
+          indexedRecords.entityChunks,
+        );
+      } else {
+        throw new Error("wasm module does not expose IndexedDB integrated-server constructors");
+      }
     }
   } else {
     indexedDbWorldId = null;
@@ -200,19 +234,19 @@ async function handleCommand(message: IntegratedServerWorkerMessage): Promise<vo
     postFailure(message.requestId, "integrated server worker is not started");
     return;
   }
+  const activeServer = server;
   const frame = commandFrame(message);
-  const result = server.handleCommandFrame(frame);
-  await saveIndexedDbDirtyRecordsForCurrentWorld(result);
-  const updates = Array.isArray(result.updates) ? [...result.updates] : [];
-  let diagnostics = result.diagnostics;
+  let serviced = await serviceIndexedDbResultForCurrentWorld(
+    activeServer,
+    activeServer.handleCommandFrame(frame),
+  );
+  const updates = [...serviced.updates];
+  let diagnostics = serviced.diagnostics;
   for (let attempt = 0; hasPendingServerJobs(diagnostics) && attempt < 60000; attempt += 1) {
     await waitForJobTurn();
-    const poll = server.poll();
-    await saveIndexedDbDirtyRecordsForCurrentWorld(poll);
-    if (Array.isArray(poll.updates)) {
-      updates.push(...poll.updates);
-    }
-    diagnostics = poll.diagnostics;
+    serviced = await serviceIndexedDbResultForCurrentWorld(activeServer, activeServer.poll());
+    updates.push(...serviced.updates);
+    diagnostics = serviced.diagnostics;
   }
   if (hasPendingServerJobs(diagnostics)) {
     postFailure(message.requestId, "timed out waiting for web integrated server jobs");
@@ -229,17 +263,17 @@ async function handleCommand(message: IntegratedServerWorkerMessage): Promise<vo
 
 async function tickServer(): Promise<void> {
   if (!server || tickInFlight) return;
+  const activeServer = server;
   tickInFlight = true;
   try {
-    const result = server.tick();
-    await saveIndexedDbDirtyRecordsForCurrentWorld(result);
-    if (Number(result.updateCount) > 0) {
+    const serviced = await serviceIndexedDbResultForCurrentWorld(activeServer, activeServer.tick());
+    if (serviced.updates.length > 0) {
       postUpdates({
         ok: true,
         kind: "updates",
         requestId: 0,
-        updates: result.updates,
-        diagnostics: result.diagnostics,
+        updates: serviced.updates,
+        diagnostics: serviced.diagnostics,
       }, null);
     }
   } catch (error) {
@@ -265,6 +299,48 @@ async function shutdown(message: IntegratedServerWorkerMessage): Promise<void> {
     updates: [],
     diagnostics: result.diagnostics,
   });
+}
+
+async function serviceIndexedDbResultForCurrentWorld(
+  activeServer: McloneWebIntegratedServerWorker,
+  initialResult: Record<string, any>,
+): Promise<ServicedServerResult> {
+  let result = initialResult;
+  const updates: unknown[] = [];
+  let diagnostics = result?.diagnostics ?? null;
+  for (let attempt = 0; attempt < 60000; attempt += 1) {
+    if (Array.isArray(result?.updates)) {
+      updates.push(...result.updates);
+    }
+    diagnostics = result?.diagnostics ?? diagnostics;
+    await saveIndexedDbDirtyRecordsForCurrentWorld(result);
+
+    const requests = indexedDbLoadRequestsFromResult(result);
+    if (requests.length === 0) {
+      return { result, updates, diagnostics };
+    }
+    if (!indexedDbWorldId) {
+      throw new Error("IndexedDB load requests were emitted without an active browser world");
+    }
+    const completions = await loadIndexedDbCompletions(indexedDbWorldId, requests);
+    result = (activeServer as any).completeIndexedDbLoadRecords(completions) as Record<string, any>;
+  }
+  throw new Error("timed out servicing IndexedDB persistence load requests");
+}
+
+async function prepareIndexedDbWorldForStart(
+  message: IntegratedServerWorkerMessage,
+): Promise<void> {
+  const worldId = indexedDbWorldIdFromMessage(message);
+  indexedDbWorldId = worldId;
+  const db = await openWorldDb();
+  try {
+    if (message.clearWorldStorage) {
+      await clearIndexedDbWorld(db, worldId);
+    }
+  } finally {
+    db.close();
+  }
 }
 
 async function loadIndexedDbWorldForStart(
@@ -386,6 +462,65 @@ async function saveIndexedDbDirtyRecordsForCurrentWorld(result: Record<string, a
     return;
   }
   await saveIndexedDbDirtyRecords(indexedDbWorldId, result);
+}
+
+function indexedDbLoadRequestsFromResult(result: Record<string, any>): IndexedDbLoadRequest[] {
+  const value = result?.indexedDbLoadRequests;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((request) => {
+    const record = (request ?? {}) as Record<string, unknown>;
+    const kind = String(record.kind ?? "");
+    if (kind !== "chunk" && kind !== "entityChunk") {
+      throw new Error(`unsupported IndexedDB load request kind ${kind}`);
+    }
+    return {
+      kind,
+      requestId: Math.trunc(Number(record.requestId) || 0),
+      x: Math.trunc(Number(record.x) || 0),
+      z: Math.trunc(Number(record.z) || 0),
+    };
+  });
+}
+
+async function loadIndexedDbCompletions(
+  worldId: string,
+  requests: IndexedDbLoadRequest[],
+): Promise<IndexedDbLoadCompletion[]> {
+  if (requests.length === 0) {
+    return [];
+  }
+  const db = await openWorldDb();
+  try {
+    return await Promise.all(
+      requests.map((request) => loadIndexedDbCompletion(db, worldId, request)),
+    );
+  } finally {
+    db.close();
+  }
+}
+
+async function loadIndexedDbCompletion(
+  db: IDBDatabase,
+  worldId: string,
+  request: IndexedDbLoadRequest,
+): Promise<IndexedDbLoadCompletion> {
+  const storeName = request.kind === "chunk" ? WORLD_CHUNK_STORE : WORLD_ENTITY_CHUNK_STORE;
+  const transaction = db.transaction(storeName, "readonly");
+  const requestHandle = transaction
+    .objectStore(storeName)
+    .get([worldId, request.x, request.z]);
+  const record = await idbRequest<unknown>(requestHandle);
+  await transactionDone(transaction);
+  if (!record) {
+    return { ...request, found: false };
+  }
+  return {
+    ...request,
+    found: true,
+    record: normalizeIndexedDbRecord(worldId, record).record,
+  };
 }
 
 async function putIndexedDbRecords(
@@ -639,6 +774,8 @@ function hasPendingServerJobs(diagnostics: any): boolean {
   return (
     Number(diagnostics.pendingJobs) > 0
     || Number(diagnostics.pendingPublications) > 0
+    || Number(diagnostics.pendingPersistenceLoads) > 0
+    || Number(diagnostics.pendingPersistenceSaves) > 0
     || Number(diagnostics.worldgenMailboxPendingJobs) > 0
     || Number(diagnostics.lightStatusMailboxPendingStatuses) > 0
   );

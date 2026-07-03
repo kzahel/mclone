@@ -51,7 +51,7 @@ use crate::loading_progress::{
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
     EntityChunkRecord, PersistenceMailbox, PersistenceRequestId, SaveDurability,
-    ScheduledTickRecord, StoreWriteOutcome, WorldStore, WorldStoreCompletion,
+    ScheduledTickRecord, StoreWriteOutcome, WorldStore, WorldStoreCompletion, WorldStoreRequest,
 };
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
@@ -459,6 +459,10 @@ impl ChunkScheduler {
         Self::with_persistence(seed, PersistenceMailbox::new(store))
     }
 
+    pub fn with_external_load_world_store(seed: i64, store: Box<dyn WorldStore>) -> Self {
+        Self::with_persistence(seed, PersistenceMailbox::external_loads(store))
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub fn with_world_store_and_wasm_job_workers(
         seed: i64,
@@ -466,6 +470,18 @@ impl ChunkScheduler {
         config: WasmServerJobWorkerConfig,
     ) -> Self {
         let mut scheduler = Self::with_world_store(seed, store);
+        scheduler.worldgen_mailbox = WorldgenMailbox::with_wasm_job_worker(config.clone());
+        scheduler.light_mailbox = LightStatusMailbox::with_wasm_job_worker(config);
+        scheduler
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_external_load_world_store_and_wasm_job_workers(
+        seed: i64,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        let mut scheduler = Self::with_external_load_world_store(seed, store);
         scheduler.worldgen_mailbox = WorldgenMailbox::with_wasm_job_worker(config.clone());
         scheduler.light_mailbox = LightStatusMailbox::with_wasm_job_worker(config);
         scheduler
@@ -807,6 +823,21 @@ impl ChunkScheduler {
 
     pub fn pending_persistence_save_count(&self) -> usize {
         self.pending_chunk_saves.len() + self.pending_entity_chunk_saves.len()
+    }
+
+    pub fn pending_external_persistence_request_count(&self) -> usize {
+        self.store.pending_external_request_count()
+    }
+
+    pub fn drain_external_persistence_requests(&mut self) -> Vec<WorldStoreRequest> {
+        self.store.drain_external_requests()
+    }
+
+    pub fn complete_external_persistence_request(
+        &mut self,
+        completion: WorldStoreCompletion,
+    ) -> ChunkStoreResult<()> {
+        self.store.complete_external_request(completion)
     }
 
     pub fn entity_chunks_supported(&self) -> bool {

@@ -13,12 +13,13 @@ use mclone_protocol::{
     encode_client_command, encode_server_update,
 };
 use mclone_server::{
-    ChunkRecord, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServer,
-    IntegratedServerRunner, LightStatusMailboxKind, ServerRunnerDiagnostics, ServerRunnerError,
-    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
-    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind, WorldStore,
-    WorldgenJobSession, WorldgenMailboxKind, compute_light_status_job_frame, decode_chunk_record,
-    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
+    ChunkRecord, ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME,
+    IntegratedServer, IntegratedServerRunner, LightStatusMailboxKind, ServerRunnerDiagnostics,
+    ServerRunnerError, ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics,
+    ServerUpdateEnvelope, WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    WorldStore, WorldStoreCompletion, WorldStoreRequest, WorldgenJobSession, WorldgenMailboxKind,
+    compute_light_status_job_frame, decode_chunk_record, decode_entity_chunk_record,
+    encode_chunk_record, encode_entity_chunk_record,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -1108,6 +1109,8 @@ fn runner_diagnostics_settled(diagnostics: &ServerRunnerDiagnostics) -> bool {
         && diagnostics.update_queue_depth == 0
         && diagnostics.pending_jobs == 0
         && diagnostics.pending_publications == 0
+        && diagnostics.pending_persistence_loads == 0
+        && diagnostics.pending_persistence_saves == 0
         && diagnostics.worldgen_mailbox_pending_jobs == 0
         && diagnostics.light_status_mailbox_pending_statuses == 0
 }
@@ -1306,6 +1309,10 @@ fn parse_diagnostics(
     diagnostics.pending_jobs = number_prop(value, "pendingJobs").unwrap_or(0.0) as usize;
     diagnostics.pending_publications =
         number_prop(value, "pendingPublications").unwrap_or(0.0) as usize;
+    diagnostics.pending_persistence_loads =
+        number_prop(value, "pendingPersistenceLoads").unwrap_or(0.0) as usize;
+    diagnostics.pending_persistence_saves =
+        number_prop(value, "pendingPersistenceSaves").unwrap_or(0.0) as usize;
     diagnostics.worldgen_mailbox_kind = worldgen_mailbox_kind_prop(
         value,
         "worldgenMailboxKind",
@@ -1631,6 +1638,14 @@ impl McloneWebIntegratedServerWorker {
         Ok(Self::from_server(seed, server, Some(state)))
     }
 
+    #[wasm_bindgen(js_name = withIndexedDbExternalLoads)]
+    pub fn with_indexed_db_external_loads(seed: i64) -> Self {
+        let state = Rc::new(RefCell::new(WebIndexedDbWorldStoreState::default()));
+        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
+        let server = IntegratedServer::local_integrated_with_external_load_world_store(seed, store);
+        Self::from_server(seed, server, Some(state))
+    }
+
     #[wasm_bindgen(js_name = withJobWorkersAndIndexedDbRecords)]
     pub fn with_job_workers_and_indexed_db_records(
         seed: i64,
@@ -1650,6 +1665,50 @@ impl McloneWebIntegratedServerWorker {
             WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
         );
         Ok(Self::from_server(seed, server, Some(state)))
+    }
+
+    #[wasm_bindgen(js_name = withJobWorkersAndIndexedDbExternalLoads)]
+    pub fn with_job_workers_and_indexed_db_external_loads(
+        seed: i64,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Self {
+        let state = Rc::new(RefCell::new(WebIndexedDbWorldStoreState::default()));
+        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
+        let server =
+            IntegratedServer::local_integrated_with_external_load_world_store_and_wasm_job_workers(
+                seed,
+                store,
+                WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
+            );
+        Self::from_server(seed, server, Some(state))
+    }
+
+    #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]
+    pub fn complete_indexed_db_load_records(
+        &mut self,
+        completions: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let completions = decode_indexed_db_load_completions_from_js(&completions)
+            .map_err(|error| JsValue::from_str(&error))?;
+        for completion in completions {
+            self.server
+                .scheduler_mut()
+                .complete_external_persistence_request(completion)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        }
+        match self.server.try_poll() {
+            Ok(updates) => {
+                self.refresh_diagnostics(None, false, None);
+                self.worker_response(updates).map_err(JsValue::from)
+            }
+            Err(error) => {
+                let error = error.to_string();
+                self.refresh_diagnostics(None, false, Some(error.clone()));
+                Err(JsValue::from_str(&error))
+            }
+        }
     }
 
     #[wasm_bindgen(js_name = handleCommandFrame)]
@@ -1780,6 +1839,12 @@ impl McloneWebIntegratedServerWorker {
         let response = worker_response(updates, &mut self.diagnostics)?;
         if let Some(state) = &self.indexed_db_state {
             attach_indexed_db_dirty_records(&response, &mut state.borrow_mut())?;
+            attach_indexed_db_load_requests(
+                &response,
+                self.server
+                    .scheduler_mut()
+                    .drain_external_persistence_requests(),
+            )?;
         }
         Ok(response)
     }
@@ -1815,6 +1880,10 @@ impl McloneWebIntegratedServerWorker {
         self.diagnostics.update_queue_depth = 0;
         self.diagnostics.pending_jobs = self.server.pending_job_count();
         self.diagnostics.pending_publications = self.server.pending_publication_count();
+        self.diagnostics.pending_persistence_loads =
+            self.server.scheduler().pending_persistence_load_count();
+        self.diagnostics.pending_persistence_saves =
+            self.server.scheduler().pending_persistence_save_count();
         self.diagnostics.worldgen_mailbox_kind = self.server.scheduler().worldgen_mailbox_kind();
         self.diagnostics.light_status_mailbox_kind =
             self.server.scheduler().light_status_mailbox_kind();
@@ -1930,6 +1999,155 @@ fn attach_indexed_db_dirty_records(
     Ok(())
 }
 
+fn attach_indexed_db_load_requests(
+    response: &JsValue,
+    requests: Vec<WorldStoreRequest>,
+) -> Result<(), String> {
+    let requests = indexed_db_load_requests_to_js(requests)?;
+    Reflect::set(
+        response,
+        &JsValue::from_str("indexedDbLoadRequests"),
+        &requests,
+    )
+    .map_err(|error| format!("failed to attach indexedDB load requests: {error:?}"))?;
+    Ok(())
+}
+
+fn indexed_db_load_requests_to_js(requests: Vec<WorldStoreRequest>) -> Result<Array, String> {
+    let array = Array::new();
+    for request in requests {
+        let object = Object::new();
+        match request {
+            WorldStoreRequest::LoadChunk { request_id, pos } => {
+                set_string(&object, "kind", "chunk")?;
+                set_number(&object, "requestId", request_id as f64)?;
+                set_number(&object, "x", f64::from(pos.x))?;
+                set_number(&object, "z", f64::from(pos.z))?;
+            }
+            WorldStoreRequest::LoadEntityChunk { request_id, pos } => {
+                set_string(&object, "kind", "entityChunk")?;
+                set_number(&object, "requestId", request_id as f64)?;
+                set_number(&object, "x", f64::from(pos.x))?;
+                set_number(&object, "z", f64::from(pos.z))?;
+            }
+            other => {
+                return Err(format!(
+                    "IndexedDB external persistence emitted unsupported request {other:?}"
+                ));
+            }
+        }
+        array.push(&object);
+    }
+    Ok(array)
+}
+
+fn decode_indexed_db_load_completions_from_js(
+    value: &JsValue,
+) -> Result<Vec<WorldStoreCompletion>, String> {
+    let array = value
+        .dyn_ref::<Array>()
+        .ok_or_else(|| "indexedDB load completions must be an array".to_owned())?;
+    let mut completions = Vec::with_capacity(array.length() as usize);
+    for index in 0..array.length() {
+        let value = array.get(index);
+        let kind = string_prop(&value, "kind")
+            .ok_or_else(|| format!("indexedDB load completion {index} is missing kind"))?;
+        let request_id = number_prop(&value, "requestId")
+            .ok_or_else(|| format!("indexedDB load completion {index} is missing requestId"))?
+            as u64;
+        let pos = ChunkPos::new(
+            number_prop(&value, "x")
+                .ok_or_else(|| format!("indexedDB load completion {index} is missing x"))?
+                as i32,
+            number_prop(&value, "z")
+                .ok_or_else(|| format!("indexedDB load completion {index} is missing z"))?
+                as i32,
+        );
+        match kind.as_str() {
+            "chunk" => {
+                let result = decode_indexed_db_chunk_load_result(&value, pos).map_err(|error| {
+                    ChunkStoreError::InvalidData(format!(
+                        "indexedDB chunk load completion {index}: {error}"
+                    ))
+                });
+                completions.push(WorldStoreCompletion::ChunkLoaded {
+                    request_id,
+                    pos,
+                    result,
+                });
+            }
+            "entityChunk" => {
+                let result =
+                    decode_indexed_db_entity_chunk_load_result(&value, pos).map_err(|error| {
+                        ChunkStoreError::InvalidData(format!(
+                            "indexedDB entity chunk load completion {index}: {error}"
+                        ))
+                    });
+                completions.push(WorldStoreCompletion::EntityChunkLoaded {
+                    request_id,
+                    pos,
+                    result,
+                });
+            }
+            _ => {
+                return Err(format!(
+                    "indexedDB load completion {index} has unsupported kind {kind}"
+                ));
+            }
+        }
+    }
+    Ok(completions)
+}
+
+fn decode_indexed_db_chunk_load_result(
+    value: &JsValue,
+    pos: ChunkPos,
+) -> ChunkStoreResult<Option<ChunkRecord>> {
+    if let Some(error) = string_prop(value, "error")
+        && !error.is_empty()
+    {
+        return Err(ChunkStoreError::InvalidData(error));
+    }
+    if bool_prop(value, "found") == Some(false) {
+        return Ok(None);
+    }
+    let bytes = js_record_bytes(value).map_err(ChunkStoreError::InvalidData)?;
+    let record = decode_chunk_record(&bytes)?;
+    if record.pos() != pos {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "record position ({}, {}) does not match requested ({}, {})",
+            record.pos().x,
+            record.pos().z,
+            pos.x,
+            pos.z
+        )));
+    }
+    Ok(Some(record))
+}
+
+fn decode_indexed_db_entity_chunk_load_result(
+    value: &JsValue,
+    pos: ChunkPos,
+) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+    if let Some(error) = string_prop(value, "error")
+        && !error.is_empty()
+    {
+        return Err(ChunkStoreError::InvalidData(error));
+    }
+    if bool_prop(value, "found") == Some(false) {
+        return Ok(None);
+    }
+    let bytes = js_record_bytes(value).map_err(ChunkStoreError::InvalidData)?;
+    let record = decode_entity_chunk_record(&bytes)?;
+    if record.pos != pos {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "record position ({}, {}) does not match requested ({}, {})",
+            record.pos.x, record.pos.z, pos.x, pos.z
+        )));
+    }
+    Ok(Some(record))
+}
+
 fn chunk_records_to_js(records: &BTreeMap<ChunkPos, ChunkRecord>) -> Result<Array, String> {
     let array = Array::new();
     for (pos, record) in records {
@@ -1994,6 +2212,16 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         &object,
         "pendingPublications",
         diagnostics.pending_publications as f64,
+    )?;
+    set_number(
+        &object,
+        "pendingPersistenceLoads",
+        diagnostics.pending_persistence_loads as f64,
+    )?;
+    set_number(
+        &object,
+        "pendingPersistenceSaves",
+        diagnostics.pending_persistence_saves as f64,
     )?;
     set_string(
         &object,

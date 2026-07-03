@@ -1061,6 +1061,8 @@ struct GeneratedChunkRenderReport {
     runner_update_queue_depth: usize,
     runner_pending_jobs: usize,
     runner_pending_publications: usize,
+    runner_pending_persistence_loads: usize,
+    runner_pending_persistence_saves: usize,
     worldgen_mailbox_kind: mclone_server::WorldgenMailboxKind,
     light_status_mailbox_kind: mclone_server::LightStatusMailboxKind,
     worldgen_mailbox_pending_jobs: usize,
@@ -1391,6 +1393,16 @@ impl GeneratedChunkRenderReport {
             &object,
             "runnerPendingPublications",
             self.runner_pending_publications as f64,
+        )?;
+        set_number(
+            &object,
+            "runnerPendingPersistenceLoads",
+            self.runner_pending_persistence_loads as f64,
+        )?;
+        set_number(
+            &object,
+            "runnerPendingPersistenceSaves",
+            self.runner_pending_persistence_saves as f64,
         )?;
         set_string(
             &object,
@@ -4544,6 +4556,8 @@ impl WebChunkRenderSession {
             runner_update_queue_depth: runner_diagnostics.update_queue_depth,
             runner_pending_jobs: runner_diagnostics.pending_jobs,
             runner_pending_publications: runner_diagnostics.pending_publications,
+            runner_pending_persistence_loads: runner_diagnostics.pending_persistence_loads,
+            runner_pending_persistence_saves: runner_diagnostics.pending_persistence_saves,
             worldgen_mailbox_kind: runner_diagnostics.worldgen_mailbox_kind,
             light_status_mailbox_kind: runner_diagnostics.light_status_mailbox_kind,
             worldgen_mailbox_pending_jobs: runner_diagnostics.worldgen_mailbox_pending_jobs,

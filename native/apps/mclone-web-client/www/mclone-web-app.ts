@@ -819,6 +819,8 @@ class WebChunkApp {
     runtime.state.runnerUpdateQueueDepth = report.runnerUpdateQueueDepth;
     runtime.state.runnerPendingJobs = report.runnerPendingJobs;
     runtime.state.runnerPendingPublications = report.runnerPendingPublications;
+    runtime.state.runnerPendingPersistenceLoads = report.runnerPendingPersistenceLoads;
+    runtime.state.runnerPendingPersistenceSaves = report.runnerPendingPersistenceSaves;
     runtime.state.worldgenMailboxKind = report.worldgenMailboxKind;
     runtime.state.lightStatusMailboxKind = report.lightStatusMailboxKind;
     runtime.state.worldgenMailboxPendingJobs = report.worldgenMailboxPendingJobs;

@@ -267,6 +267,8 @@ pub struct ServerRunnerDiagnostics {
     pub update_queue_bytes: usize,
     pub pending_jobs: usize,
     pub pending_publications: usize,
+    pub pending_persistence_loads: usize,
+    pub pending_persistence_saves: usize,
     pub worldgen_mailbox_kind: WorldgenMailboxKind,
     pub light_status_mailbox_kind: LightStatusMailboxKind,
     pub worldgen_mailbox_pending_jobs: usize,
@@ -301,6 +303,8 @@ impl ServerRunnerDiagnostics {
             update_queue_bytes: 0,
             pending_jobs: 0,
             pending_publications: 0,
+            pending_persistence_loads: 0,
+            pending_persistence_saves: 0,
             worldgen_mailbox_kind: WorldgenMailboxKind::Inline,
             light_status_mailbox_kind: LightStatusMailboxKind::Inline,
             worldgen_mailbox_pending_jobs: 0,
@@ -1276,6 +1280,8 @@ mod native {
         let update_queue_bytes = update_queue_bytes.load(Ordering::SeqCst);
         let pending_jobs = server.pending_job_count();
         let pending_publications = server.pending_publication_count();
+        let pending_persistence_loads = server.scheduler().pending_persistence_load_count();
+        let pending_persistence_saves = server.scheduler().pending_persistence_save_count();
         let detail_snapshot = diagnostics_detail_sampler
             .should_refresh(now, force_detail)
             .then(|| DiagnosticsDetailSnapshot::from_server(server));
@@ -1292,6 +1298,8 @@ mod native {
         diagnostics.update_queue_bytes = update_queue_bytes;
         diagnostics.pending_jobs = pending_jobs;
         diagnostics.pending_publications = pending_publications;
+        diagnostics.pending_persistence_loads = pending_persistence_loads;
+        diagnostics.pending_persistence_saves = pending_persistence_saves;
         if let Some(detail_snapshot) = detail_snapshot {
             diagnostics.worldgen_mailbox_kind = detail_snapshot.worldgen_mailbox_kind;
             diagnostics.light_status_mailbox_kind = detail_snapshot.light_status_mailbox_kind;

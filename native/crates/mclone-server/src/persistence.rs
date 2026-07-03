@@ -622,6 +622,12 @@ enum PendingWriteKey {
     EntityChunk(ChunkPos),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExternalLoadKey {
+    Chunk(ChunkPos),
+    EntityChunk(ChunkPos),
+}
+
 #[derive(Debug)]
 pub struct PersistenceActor {
     store: Box<dyn WorldStore>,
@@ -1010,6 +1016,480 @@ impl PersistenceActor {
     }
 }
 
+#[derive(Debug)]
+struct ExternalLoadPersistenceActor {
+    store: Box<dyn WorldStore>,
+    cached_chunk_records: BTreeMap<ChunkPos, PendingChunkWrite>,
+    cached_entity_chunk_records: BTreeMap<ChunkPos, PendingEntityChunkWrite>,
+    pending_external_loads: BTreeMap<PersistenceRequestId, ExternalLoadKey>,
+    external_requests: VecDeque<WorldStoreRequest>,
+    completions: VecDeque<WorldStoreCompletion>,
+    entity_chunks_supported: bool,
+    closed: bool,
+}
+
+impl ExternalLoadPersistenceActor {
+    fn new(store: Box<dyn WorldStore>) -> Self {
+        let entity_chunks_supported = store.supports_entity_chunks();
+        Self {
+            store,
+            cached_chunk_records: BTreeMap::new(),
+            cached_entity_chunk_records: BTreeMap::new(),
+            pending_external_loads: BTreeMap::new(),
+            external_requests: VecDeque::new(),
+            completions: VecDeque::new(),
+            entity_chunks_supported,
+            closed: false,
+        }
+    }
+
+    const fn entity_chunks_supported(&self) -> bool {
+        self.entity_chunks_supported
+    }
+
+    fn send_request(&mut self, request: WorldStoreRequest) {
+        match request {
+            WorldStoreRequest::LoadChunk { request_id, pos } => {
+                self.load_chunk(request_id, pos);
+            }
+            WorldStoreRequest::SaveChunk {
+                request_id,
+                record,
+                durability,
+            } => {
+                self.save_chunk(request_id, record, durability);
+            }
+            WorldStoreRequest::LoadEntityChunk { request_id, pos } => {
+                self.load_entity_chunk(request_id, pos);
+            }
+            WorldStoreRequest::SaveEntityChunk {
+                request_id,
+                record,
+                durability,
+            } => {
+                self.save_entity_chunk(request_id, record, durability);
+            }
+            WorldStoreRequest::LoadPlayer { request_id, player } => {
+                self.fail_reserved_request(request_id, WorldRecordKey::Player(player));
+            }
+            WorldStoreRequest::LoadSavedData { request_id, key } => {
+                self.fail_reserved_request(request_id, WorldRecordKey::SavedData(key));
+            }
+            WorldStoreRequest::Flush { request_id } => {
+                self.flush(request_id);
+            }
+            WorldStoreRequest::Close { request_id } => {
+                self.close(request_id);
+            }
+        }
+    }
+
+    fn load_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
+        if self.closed {
+            self.completions
+                .push_back(WorldStoreCompletion::ChunkLoaded {
+                    request_id,
+                    pos,
+                    result: Err(closed_error()),
+                });
+            return;
+        }
+
+        if let Some(cached) = self.cached_chunk_records.get(&pos) {
+            self.completions
+                .push_back(WorldStoreCompletion::ChunkLoaded {
+                    request_id,
+                    pos,
+                    result: Ok(Some(cached.record.clone())),
+                });
+            return;
+        }
+
+        match self.store.load_chunk(pos) {
+            Ok(Some(record)) => {
+                self.cached_chunk_records.insert(
+                    pos,
+                    PendingChunkWrite {
+                        request_id: 0,
+                        record: record.clone(),
+                        durability: SaveDurability::Durable,
+                    },
+                );
+                self.completions
+                    .push_back(WorldStoreCompletion::ChunkLoaded {
+                        request_id,
+                        pos,
+                        result: Ok(Some(record)),
+                    });
+            }
+            Ok(None) => {
+                self.pending_external_loads
+                    .insert(request_id, ExternalLoadKey::Chunk(pos));
+                self.external_requests
+                    .push_back(WorldStoreRequest::LoadChunk { request_id, pos });
+            }
+            Err(error) => {
+                self.completions
+                    .push_back(WorldStoreCompletion::ChunkLoaded {
+                        request_id,
+                        pos,
+                        result: Err(error),
+                    });
+            }
+        }
+    }
+
+    fn save_chunk(
+        &mut self,
+        request_id: PersistenceRequestId,
+        record: ChunkRecord,
+        durability: SaveDurability,
+    ) {
+        let pos = record.pos();
+        if self.closed {
+            self.completions
+                .push_back(WorldStoreCompletion::ChunkSaved {
+                    request_id,
+                    pos,
+                    result: Err(closed_error()),
+                });
+            return;
+        }
+
+        let incoming = PendingChunkWrite {
+            request_id,
+            record,
+            durability,
+        };
+        if self
+            .cached_chunk_records
+            .get(&pos)
+            .is_some_and(|existing| !incoming.should_replace(existing))
+        {
+            self.completions
+                .push_back(WorldStoreCompletion::ChunkSaved {
+                    request_id,
+                    pos,
+                    result: Ok(StoreWriteOutcome::Superseded),
+                });
+            return;
+        }
+
+        let result = self.store.save_chunk(&incoming.record);
+        if result.is_ok() {
+            self.cached_chunk_records.insert(pos, incoming);
+        }
+        self.completions
+            .push_back(WorldStoreCompletion::ChunkSaved {
+                request_id,
+                pos,
+                result: result.map(|_| StoreWriteOutcome::Written),
+            });
+    }
+
+    fn load_entity_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
+        if self.closed {
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                    request_id,
+                    pos,
+                    result: Err(closed_error()),
+                });
+            return;
+        }
+
+        if !self.entity_chunks_supported {
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                    request_id,
+                    pos,
+                    result: Err(ChunkStoreError::InvalidData(format!(
+                        "entity chunk storage is not supported for ({}, {})",
+                        pos.x, pos.z
+                    ))),
+                });
+            return;
+        }
+
+        if let Some(cached) = self.cached_entity_chunk_records.get(&pos) {
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                    request_id,
+                    pos,
+                    result: Ok(Some(cached.record.clone())),
+                });
+            return;
+        }
+
+        match self.store.load_entity_chunk(pos) {
+            Ok(Some(record)) => {
+                self.cached_entity_chunk_records.insert(
+                    pos,
+                    PendingEntityChunkWrite {
+                        request_id: 0,
+                        record: record.clone(),
+                        durability: SaveDurability::Durable,
+                    },
+                );
+                self.completions
+                    .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                        request_id,
+                        pos,
+                        result: Ok(Some(record)),
+                    });
+            }
+            Ok(None) => {
+                self.pending_external_loads
+                    .insert(request_id, ExternalLoadKey::EntityChunk(pos));
+                self.external_requests
+                    .push_back(WorldStoreRequest::LoadEntityChunk { request_id, pos });
+            }
+            Err(error) => {
+                self.completions
+                    .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                        request_id,
+                        pos,
+                        result: Err(error),
+                    });
+            }
+        }
+    }
+
+    fn save_entity_chunk(
+        &mut self,
+        request_id: PersistenceRequestId,
+        record: EntityChunkRecord,
+        durability: SaveDurability,
+    ) {
+        let pos = record.pos;
+        if self.closed {
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkSaved {
+                    request_id,
+                    pos,
+                    result: Err(closed_error()),
+                });
+            return;
+        }
+
+        let incoming = PendingEntityChunkWrite {
+            request_id,
+            record,
+            durability,
+        };
+        if self
+            .cached_entity_chunk_records
+            .get(&pos)
+            .is_some_and(|existing| !incoming.should_replace(existing))
+        {
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkSaved {
+                    request_id,
+                    pos,
+                    result: Ok(StoreWriteOutcome::Superseded),
+                });
+            return;
+        }
+
+        let result = self.store.save_entity_chunk(&incoming.record);
+        if result.is_ok() {
+            self.cached_entity_chunk_records.insert(pos, incoming);
+        }
+        self.completions
+            .push_back(WorldStoreCompletion::EntityChunkSaved {
+                request_id,
+                pos,
+                result: result.map(|_| StoreWriteOutcome::Written),
+            });
+    }
+
+    fn fail_reserved_request(&mut self, request_id: PersistenceRequestId, key: WorldRecordKey) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            Err(ChunkStoreError::InvalidData(format!(
+                "persistence record family {key:?} is reserved but not implemented"
+            )))
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::RequestFailed {
+                request_id,
+                key,
+                result,
+            });
+    }
+
+    fn flush(&mut self, request_id: PersistenceRequestId) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store.flush()
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::FlushComplete { request_id, result });
+    }
+
+    fn close(&mut self, request_id: PersistenceRequestId) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.closed = true;
+            self.store.close()
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::CloseComplete { request_id, result });
+    }
+
+    fn process_one_background_write(&mut self) -> bool {
+        false
+    }
+
+    fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
+        self.completions.drain(..).collect()
+    }
+
+    fn take_completion(
+        &mut self,
+        request_id: PersistenceRequestId,
+    ) -> Option<WorldStoreCompletion> {
+        let index = self
+            .completions
+            .iter()
+            .position(|completion| completion.request_id() == request_id)?;
+        self.completions.remove(index)
+    }
+
+    fn drain_external_requests(&mut self) -> Vec<WorldStoreRequest> {
+        self.external_requests.drain(..).collect()
+    }
+
+    fn pending_external_request_count(&self) -> usize {
+        self.pending_external_loads.len()
+    }
+
+    fn complete_external_request(
+        &mut self,
+        completion: WorldStoreCompletion,
+    ) -> ChunkStoreResult<()> {
+        match completion {
+            WorldStoreCompletion::ChunkLoaded {
+                request_id,
+                pos,
+                result,
+            } => self.complete_external_chunk_load(request_id, pos, result),
+            WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                pos,
+                result,
+            } => self.complete_external_entity_chunk_load(request_id, pos, result),
+            other => Err(ChunkStoreError::InvalidData(format!(
+                "external persistence backend only accepts load completions, got {other:?}"
+            ))),
+        }
+    }
+
+    fn complete_external_chunk_load(
+        &mut self,
+        request_id: PersistenceRequestId,
+        pos: ChunkPos,
+        result: ChunkStoreResult<Option<ChunkRecord>>,
+    ) -> ChunkStoreResult<()> {
+        match self.pending_external_loads.remove(&request_id) {
+            Some(ExternalLoadKey::Chunk(expected_pos)) if expected_pos == pos => {}
+            Some(other) => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "external chunk load request {request_id} completed for ({}, {}) but was pending for {other:?}",
+                    pos.x, pos.z
+                )));
+            }
+            None => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "external chunk load request {request_id} was not pending"
+                )));
+            }
+        }
+
+        let result = result.and_then(|record| {
+            if let Some(record) = &record {
+                if record.pos() != pos {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "external chunk load request {request_id} returned ({}, {}) for requested ({}, {})",
+                        record.pos().x,
+                        record.pos().z,
+                        pos.x,
+                        pos.z
+                    )));
+                }
+                self.cached_chunk_records.insert(
+                    pos,
+                    PendingChunkWrite {
+                        request_id: 0,
+                        record: record.clone(),
+                        durability: SaveDurability::Durable,
+                    },
+                );
+            }
+            Ok(record)
+        });
+        self.completions
+            .push_back(WorldStoreCompletion::ChunkLoaded {
+                request_id,
+                pos,
+                result,
+            });
+        Ok(())
+    }
+
+    fn complete_external_entity_chunk_load(
+        &mut self,
+        request_id: PersistenceRequestId,
+        pos: ChunkPos,
+        result: ChunkStoreResult<Option<EntityChunkRecord>>,
+    ) -> ChunkStoreResult<()> {
+        match self.pending_external_loads.remove(&request_id) {
+            Some(ExternalLoadKey::EntityChunk(expected_pos)) if expected_pos == pos => {}
+            Some(other) => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "external entity chunk load request {request_id} completed for ({}, {}) but was pending for {other:?}",
+                    pos.x, pos.z
+                )));
+            }
+            None => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "external entity chunk load request {request_id} was not pending"
+                )));
+            }
+        }
+
+        let result = result.and_then(|record| {
+            if let Some(record) = &record {
+                if record.pos != pos {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "external entity chunk load request {request_id} returned ({}, {}) for requested ({}, {})",
+                        record.pos.x, record.pos.z, pos.x, pos.z
+                    )));
+                }
+                self.cached_entity_chunk_records.insert(
+                    pos,
+                    PendingEntityChunkWrite {
+                        request_id: 0,
+                        record: record.clone(),
+                        durability: SaveDurability::Durable,
+                    },
+                );
+            }
+            Ok(record)
+        });
+        self.completions
+            .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                pos,
+                result,
+            });
+        Ok(())
+    }
+}
+
 fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreRequest) {
     match request {
         WorldStoreRequest::LoadChunk { request_id, pos } => {
@@ -1258,6 +1738,7 @@ fn forward_actor_completions(
 #[derive(Debug)]
 enum PersistenceBackend {
     Inline(PersistenceActor),
+    ExternalLoads(ExternalLoadPersistenceActor),
     #[cfg(not(target_arch = "wasm32"))]
     Threaded(ThreadedPersistenceActor),
 }
@@ -1266,6 +1747,7 @@ impl PersistenceBackend {
     fn entity_chunks_supported(&self) -> bool {
         match self {
             Self::Inline(actor) => actor.entity_chunks_supported(),
+            Self::ExternalLoads(actor) => actor.entity_chunks_supported(),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Threaded(actor) => actor.entity_chunks_supported(),
         }
@@ -1274,6 +1756,7 @@ impl PersistenceBackend {
     fn send_request(&mut self, request: WorldStoreRequest) {
         match self {
             Self::Inline(actor) => handle_world_store_request(actor, request),
+            Self::ExternalLoads(actor) => actor.send_request(request),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Threaded(actor) => actor.send_request(request),
         }
@@ -1282,6 +1765,7 @@ impl PersistenceBackend {
     fn close(&mut self, request_id: PersistenceRequestId) {
         match self {
             Self::Inline(actor) => actor.close(request_id),
+            Self::ExternalLoads(actor) => actor.close(request_id),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Threaded(actor) => actor.close(request_id),
         }
@@ -1290,6 +1774,7 @@ impl PersistenceBackend {
     fn process_one_background_write(&mut self) -> bool {
         match self {
             Self::Inline(actor) => actor.process_one_background_write(),
+            Self::ExternalLoads(actor) => actor.process_one_background_write(),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Threaded(actor) => actor.process_one_background_write(),
         }
@@ -1298,6 +1783,7 @@ impl PersistenceBackend {
     fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
         match self {
             Self::Inline(actor) => actor.drain_completions(),
+            Self::ExternalLoads(actor) => actor.drain_completions(),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Threaded(actor) => actor.drain_completions(),
         }
@@ -1315,8 +1801,43 @@ impl PersistenceBackend {
                     .position(|completion| completion.request_id() == request_id)?;
                 actor.completions.remove(index)
             }
+            Self::ExternalLoads(actor) => actor.take_completion(request_id),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Threaded(actor) => actor.take_completion(request_id),
+        }
+    }
+
+    fn drain_external_requests(&mut self) -> Vec<WorldStoreRequest> {
+        match self {
+            Self::ExternalLoads(actor) => actor.drain_external_requests(),
+            Self::Inline(_) => Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(_) => Vec::new(),
+        }
+    }
+
+    fn complete_external_request(
+        &mut self,
+        completion: WorldStoreCompletion,
+    ) -> ChunkStoreResult<()> {
+        match self {
+            Self::ExternalLoads(actor) => actor.complete_external_request(completion),
+            Self::Inline(_) => Err(ChunkStoreError::InvalidData(
+                "inline persistence backend does not accept external completions".to_owned(),
+            )),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(_) => Err(ChunkStoreError::InvalidData(
+                "threaded persistence backend does not accept external completions".to_owned(),
+            )),
+        }
+    }
+
+    fn pending_external_request_count(&self) -> usize {
+        match self {
+            Self::ExternalLoads(actor) => actor.pending_external_request_count(),
+            Self::Inline(_) => 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(_) => 0,
         }
     }
 }
@@ -1331,6 +1852,13 @@ impl PersistenceMailbox {
     pub fn new(store: Box<dyn WorldStore>) -> Self {
         Self {
             backend: PersistenceBackend::Inline(PersistenceActor::new(store)),
+            next_request_id: 1,
+        }
+    }
+
+    pub fn external_loads(store: Box<dyn WorldStore>) -> Self {
+        Self {
+            backend: PersistenceBackend::ExternalLoads(ExternalLoadPersistenceActor::new(store)),
             next_request_id: 1,
         }
     }
@@ -1442,6 +1970,21 @@ impl PersistenceMailbox {
         request_id: PersistenceRequestId,
     ) -> Option<WorldStoreCompletion> {
         self.backend.take_completion(request_id)
+    }
+
+    pub fn drain_external_requests(&mut self) -> Vec<WorldStoreRequest> {
+        self.backend.drain_external_requests()
+    }
+
+    pub fn complete_external_request(
+        &mut self,
+        completion: WorldStoreCompletion,
+    ) -> ChunkStoreResult<()> {
+        self.backend.complete_external_request(completion)
+    }
+
+    pub fn pending_external_request_count(&self) -> usize {
+        self.backend.pending_external_request_count()
     }
 
     pub fn load_chunk_blocking(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
@@ -2615,6 +3158,104 @@ mod tests {
             take_loaded_entity_chunk(&mut mailbox, load_id),
             Some(record)
         );
+    }
+
+    #[test]
+    fn external_load_backend_emits_chunk_load_request_and_caches_completion() {
+        let mut mailbox = PersistenceMailbox::external_loads(Box::<MemoryWorldStore>::default());
+        let pos = ChunkPos::new(3, -5);
+        let record = test_record(pos, 13);
+
+        let load_id = mailbox.load_chunk(pos);
+        assert!(mailbox.take_completion(load_id).is_none());
+        assert_eq!(mailbox.pending_external_request_count(), 1);
+        let requests = mailbox.drain_external_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(mailbox.pending_external_request_count(), 1);
+        assert!(matches!(
+            requests.first(),
+            Some(WorldStoreRequest::LoadChunk {
+                request_id,
+                pos: request_pos,
+            }) if *request_id == load_id && *request_pos == pos
+        ));
+
+        mailbox
+            .complete_external_request(WorldStoreCompletion::ChunkLoaded {
+                request_id: load_id,
+                pos,
+                result: Ok(Some(record.clone())),
+            })
+            .unwrap();
+        assert_eq!(
+            take_loaded_chunk(&mut mailbox, load_id),
+            Some(record.clone())
+        );
+
+        let cached_load_id = mailbox.load_chunk(pos);
+        assert_eq!(
+            take_loaded_chunk(&mut mailbox, cached_load_id),
+            Some(record)
+        );
+        assert!(mailbox.drain_external_requests().is_empty());
+    }
+
+    #[test]
+    fn external_load_backend_emits_entity_chunk_load_request_and_caches_completion() {
+        let mut mailbox = PersistenceMailbox::external_loads(Box::<MemoryWorldStore>::default());
+        let pos = ChunkPos::new(-3, 5);
+        let record = test_entity_chunk_record(pos, 17);
+
+        let load_id = mailbox.load_entity_chunk(pos);
+        let requests = mailbox.drain_external_requests();
+        assert_eq!(requests.len(), 1);
+        assert!(matches!(
+            requests.first(),
+            Some(WorldStoreRequest::LoadEntityChunk {
+                request_id,
+                pos: request_pos,
+            }) if *request_id == load_id && *request_pos == pos
+        ));
+
+        mailbox
+            .complete_external_request(WorldStoreCompletion::EntityChunkLoaded {
+                request_id: load_id,
+                pos,
+                result: Ok(Some(record.clone())),
+            })
+            .unwrap();
+        assert_eq!(
+            take_loaded_entity_chunk(&mut mailbox, load_id),
+            Some(record.clone())
+        );
+
+        let cached_load_id = mailbox.load_entity_chunk(pos);
+        assert_eq!(
+            take_loaded_entity_chunk(&mut mailbox, cached_load_id),
+            Some(record)
+        );
+        assert!(mailbox.drain_external_requests().is_empty());
+    }
+
+    #[test]
+    fn external_load_backend_preserves_save_revision_precedence() {
+        let mut mailbox = PersistenceMailbox::external_loads(Box::<MemoryWorldStore>::default());
+        let pos = ChunkPos::new(4, -6);
+        let durable = test_record(pos, 10);
+        let durable_id = mailbox.save_chunk(durable.clone(), SaveDurability::Durable);
+        let stale_id = mailbox.save_chunk(test_record(pos, 9), SaveDurability::Cache);
+
+        assert_eq!(
+            take_saved_chunk(&mut mailbox, durable_id),
+            StoreWriteOutcome::Written
+        );
+        assert_eq!(
+            take_saved_chunk(&mut mailbox, stale_id),
+            StoreWriteOutcome::Superseded
+        );
+        let load_id = mailbox.load_chunk(pos);
+        assert_eq!(take_loaded_chunk(&mut mailbox, load_id), Some(durable));
+        assert!(mailbox.drain_external_requests().is_empty());
     }
 
     #[test]

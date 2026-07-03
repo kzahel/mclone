@@ -2586,6 +2586,14 @@ function assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels) {
   if (!report.result?.ok || !report.result?.ready) {
     throw new Error(`native web IndexedDB reload probe ended with an unhealthy app state:\n${JSON.stringify(report.result, null, 2)}`);
   }
+  if (
+    Number(report.result.runnerPendingPersistenceLoads) !== 0
+    || Number(report.result.runnerPendingPersistenceSaves) !== 0
+    || Number(report.result.lastReport?.runnerPendingPersistenceLoads) !== 0
+    || Number(report.result.lastReport?.runnerPendingPersistenceSaves) !== 0
+  ) {
+    throw new Error(`native web IndexedDB reload probe did not drain persistence work:\n${JSON.stringify(report.result, null, 2)}`);
+  }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`IndexedDB reload probe canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }

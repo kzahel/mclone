@@ -192,6 +192,17 @@ impl IntegratedServer {
         )
     }
 
+    pub fn local_integrated_with_external_load_world_store(
+        seed: i64,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        Self::with_scheduler_and_player_chunk_tracking_policy(
+            seed,
+            ChunkScheduler::with_external_load_world_store(seed, store),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn try_with_threaded_world_store(
         seed: i64,
@@ -274,6 +285,21 @@ impl IntegratedServer {
         Self::with_scheduler_and_player_chunk_tracking_policy(
             seed,
             ChunkScheduler::with_world_store_and_wasm_job_workers(seed, store, config),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_external_load_world_store_and_wasm_job_workers(
+        seed: i64,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::with_scheduler_and_player_chunk_tracking_policy(
+            seed,
+            ChunkScheduler::with_external_load_world_store_and_wasm_job_workers(
+                seed, store, config,
+            ),
             PlayerChunkTrackingPolicy::java_max(),
         )
     }
