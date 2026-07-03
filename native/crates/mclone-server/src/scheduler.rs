@@ -361,6 +361,11 @@ pub enum ChunkSchedulerEvent {
         fluid: FluidKind,
         delay: i32,
     },
+    BlockTickScheduled {
+        pos: WorldBlockPos,
+        target: String,
+        delay: i32,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -2096,12 +2101,15 @@ impl ChunkScheduler {
                     pos.x, pos.z
                 )
             });
+            let scheduled_block_ticks = scheduled_block_tick_records_from_generated_chunk(&chunk);
             let scheduled_fluid_ticks = scheduled_fluid_tick_records_from_generated_chunk(&chunk);
+            events.extend(block_tick_events_from_records(&scheduled_block_ticks)?);
             events.extend(fluid_tick_events_from_records(&scheduled_fluid_ticks)?);
             let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, false);
             self.queue_record_save(
                 ChunkRecord::from_snapshot(snapshot.clone())
+                    .with_scheduled_block_ticks(scheduled_block_ticks.clone())
                     .with_scheduled_fluid_ticks(scheduled_fluid_ticks.clone()),
                 SaveDurability::Cache,
             );
@@ -2127,6 +2135,7 @@ impl ChunkScheduler {
                         pos,
                         snapshot,
                         chunk,
+                        scheduled_block_ticks,
                         scheduled_fluid_ticks,
                         generated.iter(),
                         retained_dependencies.iter(),
@@ -2213,6 +2222,7 @@ impl ChunkScheduler {
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, false);
             self.queue_record_save(
                 ChunkRecord::from_snapshot(snapshot.clone())
+                    .with_scheduled_block_ticks(completed.scheduled_block_ticks)
                     .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks),
                 SaveDurability::Cache,
             );
@@ -2434,6 +2444,7 @@ impl ChunkScheduler {
         record: ChunkRecord,
         target_status: ChunkStatus,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let scheduled_block_ticks = record.scheduled_block_ticks.clone();
         let scheduled_fluid_ticks = record.scheduled_fluid_ticks.clone();
         let snapshot = record.snapshot;
         let snapshot = if self.lighting_enabled {
@@ -2501,6 +2512,7 @@ impl ChunkScheduler {
                 step: ChunkStatusStep::Ready,
             });
         }
+        events.extend(block_tick_events_from_records(&scheduled_block_ticks)?);
         events.extend(fluid_tick_events_from_records(&scheduled_fluid_ticks)?);
 
         if self
@@ -2689,6 +2701,48 @@ fn pending_save_should_replace(
         (SaveDurability::Cache, SaveDurability::Durable) => false,
         _ => true,
     }
+}
+
+fn scheduled_block_tick_records_from_generated_chunk(
+    chunk: &GeneratedChunk,
+) -> Vec<ScheduledTickRecord> {
+    chunk
+        .block_ticks()
+        .iter()
+        .map(scheduled_tick_record_from_generated_tick)
+        .collect()
+}
+
+fn scheduled_tick_record_from_generated_tick(tick: &ScheduledTick) -> ScheduledTickRecord {
+    ScheduledTickRecord::new(
+        WorldBlockPos::new(tick.x, tick.y, tick.z),
+        tick.target.clone(),
+        tick.delay,
+    )
+}
+
+fn block_tick_events_from_records(
+    ticks: &[ScheduledTickRecord],
+) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+    ticks
+        .iter()
+        .map(block_tick_event_from_record)
+        .collect::<ChunkStoreResult<Vec<_>>>()
+}
+
+fn block_tick_event_from_record(
+    tick: &ScheduledTickRecord,
+) -> ChunkStoreResult<ChunkSchedulerEvent> {
+    if tick.target.is_empty() {
+        return Err(ChunkStoreError::InvalidData(
+            "scheduled block tick target was empty".to_owned(),
+        ));
+    }
+    Ok(ChunkSchedulerEvent::BlockTickScheduled {
+        pos: tick.pos,
+        target: tick.target.clone(),
+        delay: tick.delay,
+    })
 }
 
 fn scheduled_fluid_tick_records_from_generated_chunk(

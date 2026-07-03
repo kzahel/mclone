@@ -19,7 +19,7 @@ use mclone_protocol::{
     SetPlayerAppearanceCommand, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
-use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
+use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
 use mclone_worldgen::prng::SimpleRandomSource;
 
 use crate::NaturalSpawningDiagnostics;
@@ -529,9 +529,10 @@ impl IntegratedServer {
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
         let simulation_tick = self.simulation_tick;
+        let block_ticks = &self.block_ticks;
         let liquid_ticks = &self.liquid_ticks;
         let report = self.scheduler.tick_report_with_record_builder(|snapshot| {
-            chunk_record_with_live_ticks(snapshot, liquid_ticks, simulation_tick)
+            chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
         })?;
         let scheduler_report_us = simulation_timing_elapsed_us(scheduler_start);
         let scheduler_event_count = report.events.len();
@@ -1033,10 +1034,11 @@ impl IntegratedServer {
 
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
         let simulation_tick = self.simulation_tick;
+        let block_ticks = &self.block_ticks;
         let liquid_ticks = &self.liquid_ticks;
         self.scheduler
             .save_dirty_chunks_with_record_builder(|snapshot| {
-                chunk_record_with_live_ticks(snapshot, liquid_ticks, simulation_tick)
+                chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
             })
     }
 
@@ -1274,8 +1276,17 @@ impl IntegratedServer {
                 self.schedule_fluid_tick(request.pos, request.fluid, request.delay);
             }
             for request in block_tick_requests_after_block_change(pos, block_id) {
-                self.block_ticks
-                    .schedule_tick(request.pos, request.delay, self.simulation_tick);
+                let target = self
+                    .scheduler
+                    .block_at_world(request.pos)
+                    .map(block_name)
+                    .unwrap_or("minecraft:air");
+                self.block_ticks.schedule_tick(
+                    request.pos,
+                    target,
+                    request.delay,
+                    self.simulation_tick,
+                );
             }
         }
         changed
@@ -1349,6 +1360,7 @@ impl IntegratedServer {
                     self.chunk_tracking.queue_unload_for_tracking_players(pos);
                 }
                 ChunkSchedulerEvent::HolderUnloaded { pos } => {
+                    self.block_ticks.remove_chunk_ticks(pos);
                     self.liquid_ticks.remove_chunk_ticks(pos);
                     let removed = self.entities.discard_volatile_entities_in_chunk(pos);
                     self.reconcile_entity_subjects(removed, true);
@@ -1364,6 +1376,10 @@ impl IntegratedServer {
                 ChunkSchedulerEvent::FluidTickScheduled { pos, fluid, delay } => {
                     self.liquid_ticks
                         .schedule_tick(pos, fluid, delay, self.simulation_tick);
+                }
+                ChunkSchedulerEvent::BlockTickScheduled { pos, target, delay } => {
+                    self.block_ticks
+                        .schedule_tick(pos, target, delay, self.simulation_tick);
                 }
                 ChunkSchedulerEvent::StatusChanged { pos, status, step } => {
                     self.loading_progress
@@ -1840,12 +1856,17 @@ fn runtime_chunk_target_status(scheduler: &ChunkScheduler) -> mclone_core::Chunk
 
 fn chunk_record_with_live_ticks(
     snapshot: &ChunkSnapshot,
+    block_ticks: &BlockTickList,
     liquid_ticks: &FluidTickList,
     simulation_tick: u64,
 ) -> ChunkRecord {
-    ChunkRecord::from_snapshot(snapshot.clone()).with_scheduled_fluid_ticks(
-        liquid_ticks.scheduled_chunk_tick_records(snapshot.pos, simulation_tick),
-    )
+    ChunkRecord::from_snapshot(snapshot.clone())
+        .with_scheduled_block_ticks(
+            block_ticks.scheduled_chunk_tick_records(snapshot.pos, simulation_tick),
+        )
+        .with_scheduled_fluid_ticks(
+            liquid_ticks.scheduled_chunk_tick_records(snapshot.pos, simulation_tick),
+        )
 }
 
 fn natural_spawn_tick_seed(world_seed: i64, game_time: u64) -> i64 {

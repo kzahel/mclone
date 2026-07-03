@@ -31,6 +31,7 @@ use crate::{LightStatusMailboxKind, WorkerFrameMetrics};
 pub(crate) struct CompletedLightStatus {
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
+    pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
     pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
     pub(crate) light_sections: Vec<PackedLightSection>,
     pub(crate) batch_compute_leader: bool,
@@ -54,6 +55,7 @@ impl CompletedLightStatus {
                 Self {
                     pos: pending.pos,
                     feature_snapshot: pending.feature_snapshot,
+                    scheduled_block_ticks: pending.scheduled_block_ticks,
                     scheduled_fluid_ticks: pending.scheduled_fluid_ticks,
                     light_sections,
                     batch_compute_leader,

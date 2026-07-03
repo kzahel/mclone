@@ -2243,6 +2243,41 @@ mod tests {
     }
 
     #[test]
+    fn block_tick_list_packs_and_removes_chunk_ticks() {
+        let mut ticks = crate::falling_block::BlockTickList::new();
+        let sand = WorldBlockPos::new(8, 120, 8);
+        let gravel = WorldBlockPos::new(9, 121, 8);
+        let other_chunk = WorldBlockPos::new(24, 120, 8);
+
+        ticks.schedule_tick(sand, "minecraft:sand", 5, 10);
+        ticks.schedule_tick(sand, "minecraft:gravel", 1, 10);
+        ticks.schedule_tick(gravel, "minecraft:gravel", 1, 12);
+        ticks.schedule_tick(other_chunk, "minecraft:red_sand", 3, 10);
+
+        assert_eq!(
+            ticks.scheduled_tick_entries(12),
+            vec![
+                (gravel, "minecraft:gravel".to_owned(), 1),
+                (other_chunk, "minecraft:red_sand".to_owned(), 1),
+                (sand, "minecraft:sand".to_owned(), 3),
+            ]
+        );
+        assert_eq!(
+            ticks.scheduled_chunk_tick_records(ChunkPos::new(0, 0), 12),
+            vec![
+                ScheduledTickRecord::new(gravel, "minecraft:gravel", 1),
+                ScheduledTickRecord::new(sand, "minecraft:sand", 3),
+            ]
+        );
+
+        assert_eq!(ticks.remove_chunk_ticks(ChunkPos::new(0, 0)), 2);
+        assert!(!ticks.has_scheduled_tick(sand));
+        assert!(!ticks.has_scheduled_tick(gravel));
+        assert!(ticks.has_scheduled_tick(other_chunk));
+        assert_eq!(ticks.size(), 1);
+    }
+
+    #[test]
     fn fluid_kind_accepts_generated_and_persisted_tick_targets() {
         assert_eq!(
             FluidKind::from_target("minecraft:water"),
@@ -2727,6 +2762,48 @@ mod tests {
                 .liquid_ticks
                 .has_scheduled_tick(source, FluidKind::Water),
             "stored scheduled fluid tick should hydrate into the host tick queue"
+        );
+    }
+
+    #[test]
+    fn loaded_chunk_record_hydrates_scheduled_block_ticks() {
+        let store = SharedMemoryWorldStore::new();
+        let pos = ChunkPos::new(0, 0);
+        let tick_pos = WorldBlockPos::new(8, 120, 8);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Light,
+            ChunkRevision(8),
+            0,
+            16,
+            &vec![mclone_core::AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+        .with_light_sections(true, Vec::new());
+        store.chunks.borrow_mut().insert(
+            pos,
+            ChunkRecord::from_snapshot(snapshot).with_scheduled_block_ticks(vec![
+                ScheduledTickRecord::new(tick_pos, "minecraft:sand", 0),
+            ]),
+        );
+        let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: pos,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+
+        assert!(
+            snapshot_update_for(&updates, pos).is_some(),
+            "stored chunk should publish without regenerating"
+        );
+        assert_eq!(
+            server.scheduled_block_tick_count(),
+            1,
+            "stored scheduled block tick should hydrate into the host tick queue"
         );
     }
 

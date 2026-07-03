@@ -12,6 +12,7 @@ use mclone_worldgen::block::{
 };
 
 use crate::ChunkScheduler;
+use crate::persistence::ScheduledTickRecord;
 
 const FALLING_BLOCK_DELAY_AFTER_PLACE: i32 = 2;
 const MAX_SCHEDULED_BLOCK_TICKS_PER_TICK: usize = 65_536;
@@ -36,11 +37,12 @@ struct BlockTickKey {
     pos: BlockPos,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ScheduledBlockTick {
     trigger_tick: u64,
     sequence: u64,
     key: BlockTickKey,
+    target: String,
 }
 
 impl Ord for ScheduledBlockTick {
@@ -51,6 +53,7 @@ impl Ord for ScheduledBlockTick {
             .then_with(|| self.key.pos.x.cmp(&other.key.pos.x))
             .then_with(|| self.key.pos.y.cmp(&other.key.pos.y))
             .then_with(|| self.key.pos.z.cmp(&other.key.pos.z))
+            .then_with(|| self.target.cmp(&other.target))
     }
 }
 
@@ -85,7 +88,13 @@ impl BlockTickList {
         Self::default()
     }
 
-    pub(crate) fn schedule_tick(&mut self, pos: BlockPos, delay: i32, game_time: u64) {
+    pub(crate) fn schedule_tick(
+        &mut self,
+        pos: BlockPos,
+        target: impl Into<String>,
+        delay: i32,
+        game_time: u64,
+    ) {
         let key = BlockTickKey { pos };
         if !self.scheduled_keys.insert(key) {
             return;
@@ -95,6 +104,7 @@ impl BlockTickList {
             trigger_tick: game_time.saturating_add(delay.max(0) as u64),
             sequence: self.next_sequence,
             key,
+            target: target.into(),
         };
         self.next_sequence = self.next_sequence.saturating_add(1);
         self.scheduled_ticks.insert(entry);
@@ -117,7 +127,7 @@ impl BlockTickList {
             .take_while(|entry| entry.trigger_tick <= game_time)
         {
             if ticking_chunks.contains(&entry.key.pos.chunk_pos()) {
-                due_ticks.push(*entry);
+                due_ticks.push(entry.clone());
                 if due_ticks.len() == MAX_SCHEDULED_BLOCK_TICKS_PER_TICK {
                     break;
                 }
@@ -143,6 +153,61 @@ impl BlockTickList {
     pub(crate) fn size(&self) -> usize {
         self.scheduled_keys.len()
     }
+
+    pub(crate) fn scheduled_chunk_tick_records(
+        &self,
+        chunk_pos: ChunkPos,
+        game_time: u64,
+    ) -> Vec<ScheduledTickRecord> {
+        self.scheduled_ticks
+            .iter()
+            .filter(|entry| entry.key.pos.chunk_pos() == chunk_pos)
+            .map(|entry| {
+                ScheduledTickRecord::new(
+                    entry.key.pos,
+                    entry.target.clone(),
+                    remaining_tick_delay(entry.trigger_tick, game_time),
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn remove_chunk_ticks(&mut self, chunk_pos: ChunkPos) -> usize {
+        let entries = self
+            .scheduled_ticks
+            .iter()
+            .filter(|entry| entry.key.pos.chunk_pos() == chunk_pos)
+            .cloned()
+            .collect::<Vec<_>>();
+        for entry in &entries {
+            self.scheduled_ticks.remove(entry);
+            self.scheduled_keys.remove(&entry.key);
+        }
+        entries.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_scheduled_tick(&self, pos: BlockPos) -> bool {
+        self.scheduled_keys.contains(&BlockTickKey { pos })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scheduled_tick_entries(&self, game_time: u64) -> Vec<(BlockPos, String, i32)> {
+        self.scheduled_ticks
+            .iter()
+            .map(|entry| {
+                (
+                    entry.key.pos,
+                    entry.target.clone(),
+                    remaining_tick_delay(entry.trigger_tick, game_time),
+                )
+            })
+            .collect()
+    }
+}
+
+fn remaining_tick_delay(trigger_tick: u64, game_time: u64) -> i32 {
+    i32::try_from(trigger_tick.saturating_sub(game_time)).unwrap_or(i32::MAX)
 }
 
 pub(crate) fn block_tick_requests_after_block_change(

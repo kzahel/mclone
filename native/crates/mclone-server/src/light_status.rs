@@ -22,6 +22,7 @@ use crate::persistence::{ChunkStoreError, ChunkStoreResult, ScheduledTickRecord}
 pub(crate) struct PendingLightStatus {
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
+    pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
     pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
     raw_blocks: Vec<RawBlockId>,
     neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
@@ -37,6 +38,7 @@ impl PendingLightStatus {
         Self {
             pos,
             feature_snapshot,
+            scheduled_block_ticks: Vec::new(),
             scheduled_fluid_ticks: Vec::new(),
             raw_blocks,
             neighbor_blocks,
@@ -47,6 +49,7 @@ impl PendingLightStatus {
         pos: ChunkPos,
         feature_snapshot: ChunkSnapshot,
         chunk: &GeneratedChunk,
+        scheduled_block_ticks: Vec<ScheduledTickRecord>,
         scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
         generated_chunks: impl IntoIterator<Item = (&'a ChunkPos, &'a GeneratedChunk)>,
         retained_dependencies: impl IntoIterator<Item = (&'a ChunkPos, &'a MutableChunkBlockBuffer)>,
@@ -72,6 +75,7 @@ impl PendingLightStatus {
         Self {
             pos,
             feature_snapshot,
+            scheduled_block_ticks,
             scheduled_fluid_ticks,
             raw_blocks: chunk.blocks().to_vec(),
             neighbor_blocks,

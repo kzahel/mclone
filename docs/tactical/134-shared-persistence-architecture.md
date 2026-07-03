@@ -215,12 +215,12 @@ Landed shape:
   `ChunkStoreResult` path.
 - `ChunkRecord` format v5 carries scheduled block/fluid tick arrays; older
   record versions read with empty tick arrays.
-- generated feature/light cache records preserve generated fluid ticks, so the
-  later light cache write does not supersede the feature cache write with an
+- generated feature/light cache records preserve generated block/fluid ticks, so
+  the later light cache write does not supersede the feature cache write with an
   empty tick list.
-- integrated-host durable saves pack live chunk-local fluid ticks with remaining
-  delays, loaded records hydrate them back into the host fluid tick queue, and
-  fully unloaded holders prune the live queue after the record is already saved.
+- integrated-host durable saves pack live chunk-local block/fluid ticks with
+  remaining delays, loaded records hydrate them back into host tick queues, and
+  fully unloaded holders prune live queues after the record is already saved.
 - `IntegratedServer::with_world_store` opens the shared record path directly;
   `with_chunk_store` remains snapshot-only compatibility glue.
 
@@ -234,17 +234,18 @@ Validation landed:
   scheduler tests
 - existing filesystem reload and fluid pending-unload tests were updated for
   actor acknowledgements
-- generated light cache records keep generated fluid ticks
-- loaded chunk records hydrate scheduled fluid ticks into `IntegratedServer`
+- generated light cache records keep generated block/fluid ticks
+- loaded chunk records hydrate scheduled block/fluid ticks into
+  `IntegratedServer`
 - scheduled fluid ticks survive full unload/reload through file storage without
   manual rescheduling
+- block tick list packing/removal and loaded block-tick hydration are covered by
+  server tests
 - `cargo test --manifest-path native/Cargo.toml -p mclone-server`
 
 Deferred to the next chunk:
 
-- scheduled block ticks still need to pack into chunk records on save and
-  hydrate into host block tick queues on load/promotion. The v5 record shape is
-  present, but the block tick queue still needs to use it.
+- entity chunk records remain the next persistence family to define and hydrate.
 
 ### Slice 3: Entity Chunk Record Foundation
 

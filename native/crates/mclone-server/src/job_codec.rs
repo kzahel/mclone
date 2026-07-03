@@ -526,6 +526,10 @@ impl FrameWriter {
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
         self.write_tick_records(
+            "light status scheduled block ticks",
+            &status.scheduled_block_ticks,
+        )?;
+        self.write_tick_records(
             "light status scheduled fluid ticks",
             &status.scheduled_fluid_ticks,
         )?;
@@ -547,6 +551,10 @@ impl FrameWriter {
     ) -> Result<(), String> {
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
+        self.write_tick_records(
+            "completed light status scheduled block ticks",
+            &status.scheduled_block_ticks,
+        )?;
         self.write_tick_records(
             "completed light status scheduled fluid ticks",
             &status.scheduled_fluid_ticks,
@@ -877,6 +885,7 @@ impl<'a> FrameReader<'a> {
     fn read_pending_light_status(&mut self) -> Result<PendingLightStatus, String> {
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
+        let scheduled_block_ticks = self.read_tick_records("light status scheduled block ticks")?;
         let scheduled_fluid_ticks = self.read_tick_records("light status scheduled fluid ticks")?;
         let raw_blocks = self.read_bytes("light status raw blocks")?;
         let neighbor_blocks = self.read_vec("light status neighbor blocks", |reader| {
@@ -891,6 +900,7 @@ impl<'a> FrameReader<'a> {
             neighbor_blocks,
         ))
         .map(|mut status| {
+            status.scheduled_block_ticks = scheduled_block_ticks;
             status.scheduled_fluid_ticks = scheduled_fluid_ticks;
             status
         })
@@ -899,6 +909,8 @@ impl<'a> FrameReader<'a> {
     fn read_completed_light_status(&mut self) -> Result<CompletedLightStatus, String> {
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
+        let scheduled_block_ticks =
+            self.read_tick_records("completed light status scheduled block ticks")?;
         let scheduled_fluid_ticks =
             self.read_tick_records("completed light status scheduled fluid ticks")?;
         let light_sections =
@@ -909,6 +921,7 @@ impl<'a> FrameReader<'a> {
         Ok(CompletedLightStatus {
             pos,
             feature_snapshot,
+            scheduled_block_ticks,
             scheduled_fluid_ticks,
             light_sections,
             batch_compute_leader,
