@@ -228,12 +228,13 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION,
-        DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
-        DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
-        DIAMOND_ORE, DIORITE, DIRT, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
-        ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, OAK_LEAVES, OAK_LOG,
-        POPPY, REDSTONE_ORE, SAND, SNOW, SPRUCE_LEAVES, STONE, TUFF, WATER,
+        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE,
+        DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE,
+        DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
+        DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
+        GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA,
+        OAK_LEAVES, OAK_LOG, POPPY, REDSTONE_ORE, SAND, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE,
+        TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, DecorationContext, HeightProvider, IntProvider, VerticalAnchor,
@@ -396,6 +397,8 @@ mod tests {
             project: true,
             can_replace: false,
             double_plant: false,
+            column_height: None,
+            need_water: false,
             place_on: &[GRASS_BLOCK],
         });
 
@@ -418,12 +421,74 @@ mod tests {
             project: false,
             can_replace: false,
             double_plant: true,
+            column_height: None,
+            need_water: false,
             place_on: &[],
         });
 
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
         assert_eq!(chunk.get_block_at_y(8, 3, 8), LARGE_FERN_LOWER);
         assert_eq!(chunk.get_block_at_y(8, 4, 8), LARGE_FERN_UPPER);
+    }
+
+    #[test]
+    fn random_patch_column_placer_supports_cactus_and_water_gated_sugar_cane() {
+        let mut cactus_chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        cactus_chunk.set_block_at_y(8, 2, 8, SAND);
+        let mut cactus_random = WorldgenRandom::new(4);
+        let cactus = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: CACTUS,
+            weighted_states: &[],
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: Some(IntProvider::biased_to_bottom(1, 3)),
+            need_water: false,
+            place_on: &[],
+        });
+
+        assert!(cactus.place(
+            &mut cactus_chunk,
+            &mut cactus_random,
+            BlockPos::new(8, 3, 8)
+        ));
+        let cactus_height = (3..=5)
+            .filter(|y| cactus_chunk.get_block_at_y(8, *y, 8) == CACTUS)
+            .count();
+        assert!((1..=3).contains(&cactus_height));
+
+        let mut dry_chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        dry_chunk.set_block_at_y(8, 2, 8, SAND);
+        let sugar_cane = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: SUGAR_CANE,
+            weighted_states: &[],
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: Some(IntProvider::constant(2)),
+            need_water: true,
+            place_on: &[],
+        });
+        let mut dry_random = WorldgenRandom::new(0);
+
+        assert!(!sugar_cane.place(&mut dry_chunk, &mut dry_random, BlockPos::new(8, 3, 8)));
+
+        let mut wet_chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        wet_chunk.set_block_at_y(8, 2, 8, SAND);
+        wet_chunk.set_block_at_y(9, 2, 8, WATER);
+        let mut wet_random = WorldgenRandom::new(0);
+
+        assert!(sugar_cane.place(&mut wet_chunk, &mut wet_random, BlockPos::new(8, 3, 8)));
+        assert_eq!(wet_chunk.get_block_at_y(8, 3, 8), SUGAR_CANE);
+        assert_eq!(wet_chunk.get_block_at_y(8, 4, 8), SUGAR_CANE);
     }
 
     #[test]
@@ -499,6 +564,8 @@ mod tests {
                 project: true,
                 can_replace: false,
                 double_plant: false,
+                column_height: None,
+                need_water: false,
                 place_on: &[GRASS_BLOCK],
             }),
             vec![ConfiguredDecorator::count(2), ConfiguredDecorator::square()],
@@ -796,6 +863,33 @@ mod tests {
                 })
             )
         }));
+    }
+
+    #[test]
+    fn biome_feature_tables_include_desert_badlands_and_swamp_extra_vegetation() {
+        let desert = overworld_features_for_biome(get_layered_biome_by_id(2));
+        let badlands = overworld_features_for_biome(get_layered_biome_by_id(37));
+        let swamp = overworld_features_for_biome(get_layered_biome_by_id(6));
+
+        assert!(has_random_patch(&desert, SUGAR_CANE, 60));
+        assert!(has_random_patch(&desert, CACTUS, 10));
+        assert!(has_random_patch(&badlands, SUGAR_CANE, 13));
+        assert!(has_random_patch(&badlands, CACTUS, 5));
+        assert!(has_random_patch(&swamp, SUGAR_CANE, 20));
+    }
+
+    fn has_random_patch(features: &[PlacedFeature], state: RawBlockId, count: i32) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators.first() == Some(&ConfiguredDecorator::count(count))
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: patch_state,
+                        ..
+                    }) if patch_state == state
+                )
+        })
     }
 
     #[test]

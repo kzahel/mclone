@@ -1,6 +1,7 @@
 use crate::block::{
-    DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, MYCELIUM, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, TERRACOTTA, is_air_like,
+    CACTUS, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER,
+    LARGE_FERN_UPPER, MYCELIUM, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SUGAR_CANE, TERRACOTTA,
+    is_air_like, is_lava, is_water, material_blocks_motion,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -70,9 +71,12 @@ pub(super) fn place_random_patch<W: FeatureWorld>(
             is_air_like(current) || (config.can_replace && is_replaceable_plant(current));
         if can_replace
             && matches_allowed(config.place_on, block_below)
-            && can_survive_simple_plant(state, current, block_below)
+            && (!config.need_water || has_horizontal_water_adjacent_to(world, below))
+            && can_survive_patch_plant(world, state, pos, current, block_below)
         {
-            let did_place = if config.double_plant {
+            let did_place = if let Some(height_provider) = config.column_height {
+                place_column(world, pos, state, height_provider.sample(random))
+            } else if config.double_plant {
                 let lower = world.set_block_world(pos, LARGE_FERN_LOWER);
                 let upper =
                     world.set_block_world(BlockPos::new(pos.x, pos.y + 1, pos.z), LARGE_FERN_UPPER);
@@ -87,6 +91,22 @@ pub(super) fn place_random_patch<W: FeatureWorld>(
     }
 
     placed > 0
+}
+
+fn place_column<W: FeatureWorld>(
+    world: &mut W,
+    origin: BlockPos,
+    state: RawBlockId,
+    height: i32,
+) -> bool {
+    let mut placed = false;
+    for y_offset in 0..height.max(0) {
+        placed |= world.set_block_world(
+            BlockPos::new(origin.x, origin.y + y_offset, origin.z),
+            state,
+        );
+    }
+    placed
 }
 
 pub(super) fn place_flower<W: FeatureWorld>(
@@ -172,6 +192,67 @@ fn can_survive_simple_plant(
             ),
             _ => false,
         }
+}
+
+fn can_survive_patch_plant<W: FeatureWorld>(
+    world: &mut W,
+    block_id: RawBlockId,
+    pos: BlockPos,
+    current: RawBlockId,
+    block_below: RawBlockId,
+) -> bool {
+    if !is_air_like(current) {
+        return false;
+    }
+
+    match block_id {
+        CACTUS => {
+            matches!(block_below, CACTUS | SAND | RED_SAND)
+                && !block_above_is_liquid(world, pos)
+                && !has_horizontal_motion_blocker_or_lava(world, pos)
+        }
+        SUGAR_CANE => {
+            block_below == SUGAR_CANE
+                || (matches!(block_below, GRASS_BLOCK | DIRT | SAND | RED_SAND)
+                    && has_horizontal_water_adjacent_to(
+                        world,
+                        BlockPos::new(pos.x, pos.y - 1, pos.z),
+                    ))
+        }
+        _ => can_survive_simple_plant(block_id, current, block_below),
+    }
+}
+
+fn block_above_is_liquid<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    world
+        .block_at_world(BlockPos::new(pos.x, pos.y + 1, pos.z))
+        .is_some_and(|block_id| is_water(block_id) || is_lava(block_id))
+}
+
+fn has_horizontal_motion_blocker_or_lava<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    horizontal_neighbor_blocks(world, pos)
+        .into_iter()
+        .any(|block_id| {
+            block_id.is_some_and(|block_id| material_blocks_motion(block_id) || is_lava(block_id))
+        })
+}
+
+fn has_horizontal_water_adjacent_to<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    horizontal_neighbor_blocks(world, pos)
+        .into_iter()
+        .any(|block_id| block_id.is_some_and(is_water))
+}
+
+fn horizontal_neighbor_blocks<W: FeatureWorld>(
+    world: &mut W,
+    pos: BlockPos,
+) -> [Option<RawBlockId>; 4] {
+    [
+        world.block_at_world(BlockPos::new(pos.x - 1, pos.y, pos.z)),
+        world.block_at_world(BlockPos::new(pos.x + 1, pos.y, pos.z)),
+        world.block_at_world(BlockPos::new(pos.x, pos.y, pos.z - 1)),
+        world.block_at_world(BlockPos::new(pos.x, pos.y, pos.z + 1)),
+    ]
 }
 
 fn is_replaceable_plant(block_id: RawBlockId) -> bool {

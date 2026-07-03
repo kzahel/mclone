@@ -41,10 +41,10 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        CLAY, COARSE_DIRT, DANDELION, DEAD_BUSH, FERN, GRASS, GRASS_BLOCK, GRAVEL, ICE,
+        CACTUS, CLAY, COARSE_DIRT, DANDELION, DEAD_BUSH, FERN, GRASS, GRASS_BLOCK, GRAVEL, ICE,
         LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL,
         POPPY, RED_SAND, RawBlockId, SAND, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE,
-        TERRACOTTA, WATER, is_air_like, is_water,
+        SUGAR_CANE, TERRACOTTA, WATER, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -124,30 +124,36 @@ mod tests {
     #[derive(Clone, Copy, Debug)]
     enum FeatureFamily {
         PlainsVegetation,
-        DesertDeadBush,
-        SwampNativeSubset,
+        DesertDeadBushCactusSugarCane,
+        SwampNativeSubsetSugarCane,
         TaigaSpruceFern,
         SnowySpruceFern,
-        BadlandsDeadBush,
+        BadlandsDeadBushCactusSugarCane,
     }
 
     impl FeatureFamily {
         fn name(self) -> &'static str {
             match self {
                 Self::PlainsVegetation => "plains grass/flower/oak",
-                Self::DesertDeadBush => "desert dead bush",
-                Self::SwampNativeSubset => "native swamp vegetation/clay subset",
+                Self::DesertDeadBushCactusSugarCane => "desert dead bush plus cactus/sugar cane",
+                Self::SwampNativeSubsetSugarCane => {
+                    "native swamp vegetation/clay subset plus sugar cane"
+                }
                 Self::TaigaSpruceFern => "taiga spruce/fern",
                 Self::SnowySpruceFern => "snowy spruce/fern",
-                Self::BadlandsDeadBush => "badlands dead bush",
+                Self::BadlandsDeadBushCactusSugarCane => {
+                    "badlands dead bush plus cactus/sugar cane"
+                }
             }
         }
 
         fn blocks(self) -> &'static [RawBlockId] {
             match self {
                 Self::PlainsVegetation => &[OAK_LOG, OAK_LEAVES, GRASS, DANDELION, POPPY],
-                Self::DesertDeadBush => &[DEAD_BUSH],
-                Self::SwampNativeSubset => &[OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY],
+                Self::DesertDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
+                Self::SwampNativeSubsetSugarCane => &[
+                    OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE,
+                ],
                 Self::TaigaSpruceFern => &[
                     SPRUCE_LOG,
                     SPRUCE_LEAVES,
@@ -156,7 +162,26 @@ mod tests {
                     LARGE_FERN_UPPER,
                 ],
                 Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
-                Self::BadlandsDeadBush => &[DEAD_BUSH],
+                Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
+            }
+        }
+
+        fn is_present(self, chunk: &GeneratedChunk) -> bool {
+            match self {
+                Self::DesertDeadBushCactusSugarCane | Self::BadlandsDeadBushCactusSugarCane => {
+                    chunk.block_count(DEAD_BUSH) > 0
+                        && (chunk.block_count(CACTUS) + chunk.block_count(SUGAR_CANE)) > 0
+                }
+                Self::SwampNativeSubsetSugarCane => {
+                    [OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY]
+                        .iter()
+                        .any(|block| chunk.block_count(*block) > 0)
+                        && chunk.block_count(SUGAR_CANE) > 0
+                }
+                _ => self
+                    .blocks()
+                    .iter()
+                    .any(|block| chunk.block_count(*block) > 0),
             }
         }
     }
@@ -179,12 +204,12 @@ mod tests {
             feature_family: Some(FeatureFamily::PlainsVegetation),
         },
         PaletteMatrixCase {
-            seed: 38,
+            seed: 49,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:desert",
             surface_family: SurfaceFamily::Sand,
-            feature_family: Some(FeatureFamily::DesertDeadBush),
+            feature_family: Some(FeatureFamily::DesertDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
             seed: 31,
@@ -203,12 +228,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 7,
+            seed: 88,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:swamp",
             surface_family: SurfaceFamily::Swamp,
-            feature_family: Some(FeatureFamily::SwampNativeSubset),
+            feature_family: Some(FeatureFamily::SwampNativeSubsetSugarCane),
         },
         PaletteMatrixCase {
             seed: 39,
@@ -315,12 +340,12 @@ mod tests {
             feature_family: Some(FeatureFamily::SnowySpruceFern),
         },
         PaletteMatrixCase {
-            seed: 147,
+            seed: 2359,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:badlands",
             surface_family: SurfaceFamily::Badlands,
-            feature_family: Some(FeatureFamily::BadlandsDeadBush),
+            feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
             seed: 26,
@@ -1745,14 +1770,14 @@ mod tests {
             );
 
             if let Some(feature_family) = case.feature_family {
-                let feature_blocks = count_feature_family(&chunk, feature_family);
                 assert!(
-                    feature_blocks > 0,
-                    "seed {} chunk ({}, {}) had no {} blocks",
+                    feature_family.is_present(&chunk),
+                    "seed {} chunk ({}, {}) did not satisfy {}; feature block counts: {:?}",
                     case.seed,
                     case.chunk_x,
                     case.chunk_z,
-                    feature_family.name()
+                    feature_family.name(),
+                    feature_block_counts(&chunk, feature_family)
                 );
             }
         }
@@ -2628,12 +2653,15 @@ mod tests {
         counts
     }
 
-    fn count_feature_family(chunk: &GeneratedChunk, family: FeatureFamily) -> usize {
+    fn feature_block_counts(
+        chunk: &GeneratedChunk,
+        family: FeatureFamily,
+    ) -> BTreeMap<&'static str, usize> {
         family
             .blocks()
             .iter()
-            .map(|block| chunk.block_count(*block))
-            .sum()
+            .map(|block| (crate::block::block_name(*block), chunk.block_count(*block)))
+            .collect()
     }
 
     fn count_block_position_biomes_in_chunk(

@@ -72,6 +72,8 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
             )
             .with_offset(OffsetKind::Xz),
         ),
+        terrain_id::CACTUS => Some(cactus_outline_shape()),
+        terrain_id::SUGAR_CANE => Some(sugar_cane_shape()),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         terrain_id::TORCH => Some(torch_shape()),
         terrain_id::WALL_TORCH_NORTH => Some(wall_torch_north_shape()),
@@ -96,11 +98,13 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
         | terrain_id::GLOW_LICHEN
+        | terrain_id::SUGAR_CANE
         | terrain_id::TORCH
         | terrain_id::WALL_TORCH_NORTH
         | terrain_id::WALL_TORCH_EAST
         | terrain_id::WALL_TORCH_SOUTH
         | terrain_id::WALL_TORCH_WEST => None,
+        terrain_id::CACTUS => Some(cactus_collision_shape()),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         id if is_fluid(BlockStateId(id)) => None,
         _ => Some(full_block()),
@@ -120,6 +124,25 @@ fn full_block() -> LocalShape {
 
 fn pointed_dripstone_shape() -> LocalShape {
     local_box(5.0 / 16.0, 0.0, 5.0 / 16.0, 11.0 / 16.0, 1.0, 11.0 / 16.0)
+}
+
+fn cactus_outline_shape() -> LocalShape {
+    local_box(1.0 / 16.0, 0.0, 1.0 / 16.0, 15.0 / 16.0, 1.0, 15.0 / 16.0)
+}
+
+fn cactus_collision_shape() -> LocalShape {
+    local_box(
+        1.0 / 16.0,
+        0.0,
+        1.0 / 16.0,
+        15.0 / 16.0,
+        15.0 / 16.0,
+        15.0 / 16.0,
+    )
+}
+
+fn sugar_cane_shape() -> LocalShape {
+    local_box(2.0 / 16.0, 0.0, 2.0 / 16.0, 14.0 / 16.0, 1.0, 14.0 / 16.0)
 }
 
 fn torch_shape() -> LocalShape {
@@ -255,6 +278,7 @@ mod tests {
             terrain_id::LARGE_FERN_LOWER,
             terrain_id::LARGE_FERN_UPPER,
             terrain_id::GLOW_LICHEN,
+            terrain_id::SUGAR_CANE,
             terrain_id::TORCH,
             terrain_id::WALL_TORCH_NORTH,
             terrain_id::WALL_TORCH_EAST,
@@ -298,6 +322,20 @@ mod tests {
             shape_for(state(terrain_id::LARGE_FERN_LOWER), ShapeUse::Outline)
                 .map(|shape| shape.world_aabb(pos)),
             Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::SUGAR_CANE), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.125, 0.0, 0.125, 0.875, 1.0, 0.875))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::CACTUS), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375))
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::CACTUS), pos),
+            Some(Aabb::new(0.0625, 0.0, 0.0625, 0.9375, 0.9375, 0.9375))
         );
     }
 

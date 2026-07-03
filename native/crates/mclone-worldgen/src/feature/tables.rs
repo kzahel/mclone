@@ -2,11 +2,12 @@ use std::sync::OnceLock;
 
 use crate::biome::BiomeDefinition;
 use crate::block::{
-    ANDESITE, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
-    DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE,
-    DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE,
-    GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, MYCELIUM,
-    PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, TERRACOTTA, TUFF, WATER,
+    ANDESITE, CACTUS, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
+    DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
+    DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
+    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
+    LAVA, MYCELIUM, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SUGAR_CANE,
+    TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -535,13 +536,15 @@ fn mountain_features() -> Vec<PlacedFeature> {
 }
 
 fn desert_features() -> Vec<PlacedFeature> {
-    vec![dead_bush_patch(2)]
+    vec![dead_bush_patch(2), sugar_cane_patch(60), cactus_patch(10)]
 }
 
 fn badlands_features() -> Vec<PlacedFeature> {
     vec![
         tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
         dead_bush_patch(2),
+        sugar_cane_patch(13),
+        cactus_patch(5),
     ]
 }
 
@@ -551,6 +554,7 @@ fn swamp_features() -> Vec<PlacedFeature> {
         grass_patch(GRASS, 2),
         flower_patch(POPPY, 1),
         dead_bush_patch(1),
+        sugar_cane_patch(20),
     ]
 }
 
@@ -655,6 +659,8 @@ fn default_flower_feature() -> PlacedFeature {
             project: true,
             can_replace: false,
             double_plant: false,
+            column_height: None,
+            need_water: false,
             place_on: &[],
         }),
         vec![
@@ -679,6 +685,8 @@ fn forest_grass_patch_feature() -> PlacedFeature {
             project: true,
             can_replace: false,
             double_plant: false,
+            column_height: None,
+            need_water: false,
             place_on: &[],
         }),
         vec![
@@ -701,6 +709,8 @@ fn taiga_grass_patch_feature() -> PlacedFeature {
             project: true,
             can_replace: false,
             double_plant: false,
+            column_height: None,
+            need_water: false,
             place_on: &[],
         }),
         vec![
@@ -723,6 +733,8 @@ fn large_fern_patch_feature() -> PlacedFeature {
             project: false,
             can_replace: false,
             double_plant: true,
+            column_height: None,
+            need_water: false,
             place_on: &[GRASS_BLOCK, DIRT, PODZOL, MYCELIUM],
         }),
         vec![
@@ -795,6 +807,8 @@ fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
             project: true,
             can_replace: false,
             double_plant: false,
+            column_height: None,
+            need_water: false,
             place_on: &[GRASS_BLOCK, DIRT, PODZOL, MYCELIUM],
         },
         count,
@@ -817,7 +831,49 @@ fn dead_bush_patch(count: i32) -> PlacedFeature {
             project: true,
             can_replace: false,
             double_plant: false,
+            column_height: None,
+            need_water: false,
             place_on: &[SAND, RED_SAND, TERRACOTTA, DIRT, GRASS_BLOCK, PODZOL],
+        },
+        count,
+    )
+}
+
+fn cactus_patch(count: i32) -> PlacedFeature {
+    heightmap_double_random_patch_feature(
+        RandomPatchConfiguration {
+            state: CACTUS,
+            weighted_states: &[],
+            tries: 10,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: Some(IntProvider::biased_to_bottom(1, 3)),
+            need_water: false,
+            place_on: &[],
+        },
+        count,
+    )
+}
+
+fn sugar_cane_patch(count: i32) -> PlacedFeature {
+    heightmap_double_random_patch_feature(
+        RandomPatchConfiguration {
+            state: SUGAR_CANE,
+            weighted_states: &[],
+            tries: 20,
+            xspread: 4,
+            yspread: 0,
+            zspread: 4,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: Some(IntProvider::biased_to_bottom(2, 4)),
+            need_water: true,
+            place_on: &[],
         },
         count,
     )
@@ -830,6 +886,21 @@ fn random_patch_feature(config: RandomPatchConfiguration, count: i32) -> PlacedF
         vec![
             ConfiguredDecorator::count(count),
             ConfiguredDecorator::square(),
+        ],
+    )
+}
+
+fn heightmap_double_random_patch_feature(
+    config: RandomPatchConfiguration,
+    count: i32,
+) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(config),
+        vec![
+            ConfiguredDecorator::count(count),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
         ],
     )
 }

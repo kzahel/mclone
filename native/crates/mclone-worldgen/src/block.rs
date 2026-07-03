@@ -107,6 +107,8 @@ pub const WALL_TORCH_NORTH: RawBlockId = 101;
 pub const WALL_TORCH_EAST: RawBlockId = 102;
 pub const WALL_TORCH_SOUTH: RawBlockId = 103;
 pub const WALL_TORCH_WEST: RawBlockId = 104;
+pub const CACTUS: RawBlockId = 105;
+pub const SUGAR_CANE: RawBlockId = 106;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -141,6 +143,8 @@ impl GeneratedBlockId {
     pub const POINTED_DRIPSTONE: Self = Self(POINTED_DRIPSTONE);
     pub const BRICKS: Self = Self(BRICKS);
     pub const TORCH: Self = Self(TORCH);
+    pub const CACTUS: Self = Self(CACTUS);
+    pub const SUGAR_CANE: Self = Self(SUGAR_CANE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -190,6 +194,7 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | WALL_TORCH_EAST
             | WALL_TORCH_SOUTH
             | WALL_TORCH_WEST
+            | SUGAR_CANE
     )
 }
 
@@ -380,6 +385,8 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => {
             "minecraft:wall_torch"
         }
+        CACTUS => "minecraft:cactus",
+        SUGAR_CANE => "minecraft:sugar_cane",
         _ => "minecraft:unknown",
     }
 }
@@ -414,6 +421,8 @@ mod tests {
         assert_eq!(block_light_opacity(POINTED_DRIPSTONE), 0);
         assert_eq!(block_light_opacity(TORCH), 0);
         assert_eq!(block_light_opacity(WALL_TORCH_EAST), 0);
+        assert_eq!(block_light_opacity(CACTUS), 15);
+        assert_eq!(block_light_opacity(SUGAR_CANE), 0);
     }
 
     #[test]
@@ -425,5 +434,7 @@ mod tests {
         assert_eq!(base_block_id(WALL_TORCH_WEST), TORCH);
         assert_eq!(block_name(TORCH), "minecraft:torch");
         assert_eq!(block_name(WALL_TORCH_WEST), "minecraft:wall_torch");
+        assert_eq!(block_name(CACTUS), "minecraft:cactus");
+        assert_eq!(block_name(SUGAR_CANE), "minecraft:sugar_cane");
     }
 }

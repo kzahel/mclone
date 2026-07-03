@@ -131,6 +131,8 @@ pub struct RandomPatchConfiguration {
     pub project: bool,
     pub can_replace: bool,
     pub double_plant: bool,
+    pub column_height: Option<IntProvider>,
+    pub need_water: bool,
     pub place_on: &'static [RawBlockId],
 }
 
@@ -146,6 +148,8 @@ impl RandomPatchConfiguration {
             project: true,
             can_replace: false,
             double_plant: false,
+            column_height: None,
+            need_water: false,
             place_on: &[GRASS_BLOCK],
         }
     }

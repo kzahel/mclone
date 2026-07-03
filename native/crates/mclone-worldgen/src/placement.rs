@@ -282,6 +282,10 @@ pub enum IntProvider {
         min_inclusive: i32,
         max_inclusive: i32,
     },
+    BiasedToBottom {
+        min_inclusive: i32,
+        max_inclusive: i32,
+    },
 }
 
 impl IntProvider {
@@ -291,6 +295,13 @@ impl IntProvider {
 
     pub const fn uniform(min_inclusive: i32, max_inclusive: i32) -> Self {
         Self::Uniform {
+            min_inclusive,
+            max_inclusive,
+        }
+    }
+
+    pub const fn biased_to_bottom(min_inclusive: i32, max_inclusive: i32) -> Self {
+        Self::BiasedToBottom {
             min_inclusive,
             max_inclusive,
         }
@@ -307,6 +318,17 @@ impl IntProvider {
                     min_inclusive
                 } else {
                     random_between_inclusive(random, min_inclusive, max_inclusive)
+                }
+            }
+            Self::BiasedToBottom {
+                min_inclusive,
+                max_inclusive,
+            } => {
+                if min_inclusive > max_inclusive {
+                    min_inclusive
+                } else {
+                    let outer = random.next_int_bound(max_inclusive - min_inclusive + 1);
+                    min_inclusive + random.next_int_bound(outer + 1)
                 }
             }
         }
