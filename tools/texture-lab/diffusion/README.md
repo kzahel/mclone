@@ -169,3 +169,33 @@ candidate against the owned 16x16 macro mask, the current authored texture,
 the projected source pixels, a 3x3 tile preview, a 16x16 distance preview, and
 64/32/16/8 mip views. For 128px projections the 3x3 tile panel uses a 64px
 view so 64px and 128px candidates can be judged on the same distance read.
+
+## Archive Freeze Candidates
+
+Raw diffusion output is not committed to git, but freeze candidates should be
+archived as a durable local artifact bundle before their ASCII mask is copied
+into pack source. The bundle keeps the raw candidate PNG, prepared input,
+diffusion manifest, projection reports, projected masks, a review sheet, hashes,
+and a source-ready provenance comment.
+
+```sh
+pnpm --dir tools/texture-lab project-diffusion -- \
+  --manifest /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
+  --candidate candidate-seed4201-strength0p580 \
+  --candidate candidate-seed4205-strength0p580 \
+  --texture stone \
+  --palette-colors pit,mid,base,light \
+  --symbols pmbh \
+  --resolutions 64 \
+  --review-sheet \
+  --review-top 2 \
+  --review-resolution 64 \
+  --archive-bundle /tmp/mclone-texture-lab/diffusion-archive/stone-dressed-freeze-candidates-2026-07-03 \
+  --out /tmp/mclone-texture-lab/diffusion-projection/stone-dressed-freeze-64
+```
+
+The archive bundle includes `archive-manifest.json` as its machine-readable
+index and `source-provenance-comment.txt` under each candidate directory.
+Exact byte-for-byte diffusion regeneration across another machine is still not
+guaranteed; reprojection from the archived raw candidate PNG is deterministic
+for the same texture-lab code and pack source.

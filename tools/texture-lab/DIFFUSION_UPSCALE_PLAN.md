@@ -337,6 +337,24 @@ Local validation on macOS/M4/MPS:
     `candidate-seed4201-strength0p580` for the quietest natural stone, or
     `candidate-seed4205-strength0p580` if the desired direction is more
     visibly horizontal dressed courses.
+- M3c provenance/archive support is implemented:
+  - `project-diffusion` accepts `--archive-bundle [dir]`. It writes a durable
+    local bundle outside git containing `archive-manifest.json`, the source
+    diffusion manifest, owned original/prepared inputs, raw candidate PNGs,
+    raw 3x3 tiles, projected PNGs, ASCII masks, projection reports, optional
+    review sheet, and `source-provenance-comment.txt` for each candidate.
+  - The archive verifies expected SHA-256 hashes for raw candidates and input
+    PNGs when those hashes are present in the diffusion manifest.
+  - Current stone freeze-candidate bundle:
+    `/tmp/mclone-texture-lab/diffusion-archive/stone-dressed-freeze-candidates-2026-07-03/`.
+    It archives `candidate-seed4201-strength0p580` and
+    `candidate-seed4205-strength0p580` at 64px.
+  - Reproducibility position: the bundle is enough to preserve the exact raw
+    artifacts and deterministically reproject them. It is not a guarantee that
+    another machine can re-run diffusion and produce the same raw PNG bytes;
+    seeds, prompts, versions, model id, input hashes, and preprocessing knobs
+    are recorded, but device kernels and model-cache revisions can still
+    diverge.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

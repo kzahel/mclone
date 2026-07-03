@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import type { PaletteSpec } from "./dsl";
 import {
@@ -30,6 +32,8 @@ interface ProjectArgs {
   reviewSheetPath: string | undefined;
   reviewTop: number;
   reviewResolution: number | undefined;
+  archiveBundle: boolean;
+  archiveBundlePath: string | undefined;
 }
 
 interface DiffusionManifest {
@@ -41,14 +45,23 @@ interface DiffusionManifest {
   negative_prompt?: string;
   prompt?: string;
   prompt_preset?: string;
+  guidance_scale?: number;
+  runtime?: Record<string, unknown>;
+  safety_checker_enabled?: boolean;
+  seamless_patch?: Record<string, unknown>;
   scheduler?: string;
   steps?: number;
+  torch_dtype?: string;
+  versions?: Record<string, string>;
 }
 
 interface DiffusionInput {
   path?: string;
   original_sha256?: string;
   original_size?: [number, number];
+  prepared_png?: string;
+  prepared_png_sha256?: string;
+  prepared_pixels_sha256?: string;
   prepared_size?: [number, number];
   preprocess?: Record<string, unknown>;
 }
@@ -225,6 +238,7 @@ async function run(args: ProjectArgs): Promise<void> {
   await fs.writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   console.log(`Wrote ${summaryPath}`);
 
+  let reviewPath: string | undefined;
   if (args.reviewSheet) {
     const reviewResolution = args.reviewResolution ?? args.resolutions[0]!;
     const reviewSheet = await makeProjectionReviewSheet(reports, {
@@ -233,9 +247,23 @@ async function run(args: ProjectArgs): Promise<void> {
       reviewResolution,
       top: args.reviewTop,
     });
-    const reviewPath = args.reviewSheetPath ?? path.join(args.outDir, `projection-review-${reviewResolution}.png`);
+    reviewPath = args.reviewSheetPath ?? path.join(args.outDir, `projection-review-${reviewResolution}.png`);
     await fs.writeFile(reviewPath, encodePng(reviewSheet));
     console.log(`Wrote ${reviewPath}`);
+  }
+
+  if (args.archiveBundle) {
+    const archivePath = args.archiveBundlePath ?? path.join(args.outDir, "archive-bundle");
+    await writeArchiveBundle(reports, {
+      args,
+      entries,
+      manifest,
+      manifestDir,
+      reviewPath,
+      summaryPath,
+      archivePath,
+    });
+    console.log(`Wrote ${archivePath}`);
   }
 }
 
@@ -495,6 +523,278 @@ function drawImageBorder(sheet: RgbaImage, x: number, y: number, width: number, 
   drawRect(sheet, x, y + height - 1, width, 1, color);
   drawRect(sheet, x, y, 1, height, color);
   drawRect(sheet, x + width - 1, y, 1, height, color);
+}
+
+interface ArchiveContext {
+  args: ProjectArgs;
+  entries: PaletteEntry[];
+  manifest: DiffusionManifest;
+  manifestDir: string;
+  reviewPath: string | undefined;
+  summaryPath: string;
+  archivePath: string;
+}
+
+interface ArchivedFile {
+  path: string;
+  sha256: string;
+}
+
+async function writeArchiveBundle(reports: CandidateReport[], context: ArchiveContext): Promise<void> {
+  await fs.rm(context.archivePath, { recursive: true, force: true });
+  await fs.mkdir(context.archivePath, { recursive: true });
+
+  const manifestFile = await copyRequiredFile(
+    context.args.manifestPath,
+    path.join(context.archivePath, "diffusion-manifest.json"),
+  );
+  const summaryFile = await copyRequiredFile(
+    context.summaryPath,
+    path.join(context.archivePath, "projection-summary.json"),
+  );
+  const reviewFile = context.reviewPath
+    ? await copyOptionalFile(context.reviewPath, path.join(context.archivePath, path.basename(context.reviewPath)))
+    : undefined;
+  const inputOriginalFile = context.manifest.input?.path
+    ? await copyOptionalFile(
+        resolvePath(context.manifestDir, context.manifest.input.path),
+        path.join(context.archivePath, "input-original.png"),
+        context.manifest.input.original_sha256,
+      )
+    : undefined;
+  const inputPreparedFile = context.manifest.input?.prepared_png
+    ? await copyOptionalFile(
+        resolvePath(context.manifestDir, context.manifest.input.prepared_png),
+        path.join(context.archivePath, "input-prepared.png"),
+        context.manifest.input.prepared_png_sha256,
+      )
+    : undefined;
+
+  const candidates: unknown[] = [];
+  for (const report of reports) {
+    const candidateDir = path.join(context.archivePath, "candidates", sanitizeFileStem(report.candidate.id));
+    await fs.mkdir(candidateDir, { recursive: true });
+    const rawFile = await copyRequiredFile(
+      resolvePath(context.manifestDir, report.candidate.png),
+      path.join(candidateDir, "raw.png"),
+      report.candidate.sha256,
+    );
+    const rawTileFile = report.candidate.tile3x3_png
+      ? await copyOptionalFile(
+          resolvePath(context.manifestDir, report.candidate.tile3x3_png),
+          path.join(candidateDir, "raw-tile3x3.png"),
+        )
+      : undefined;
+    const projectionReportFile = await copyRequiredFile(
+      projectionReportPath(context.args.outDir, report.candidate.id),
+      path.join(candidateDir, "projection-report.json"),
+    );
+    const resolutionFiles: unknown[] = [];
+    for (const resolution of report.resolutions) {
+      resolutionFiles.push({
+        resolution: resolution.resolution,
+        png: await copyRequiredFile(resolution.png, path.join(candidateDir, `projected-${resolution.resolution}.png`)),
+        mask: await copyRequiredFile(
+          resolution.mask,
+          path.join(candidateDir, `projected-${resolution.resolution}.mask.txt`),
+        ),
+        triage: resolution.triage,
+        correction: resolution.correction,
+        quantization: resolution.quantization,
+        seam: resolution.seam,
+      });
+    }
+
+    const provenanceComment = makeSourceProvenanceComment(report, {
+      args: context.args,
+      entries: context.entries,
+      manifest: context.manifest,
+      manifestFile,
+      rawFile,
+      archivePath: context.archivePath,
+    });
+    const commentPath = path.join(candidateDir, "source-provenance-comment.txt");
+    await fs.writeFile(commentPath, provenanceComment);
+    const commentFile = await hashExistingFile(commentPath);
+
+    candidates.push({
+      id: report.candidate.id,
+      seed: report.candidate.seed,
+      strength: report.candidate.strength,
+      raw: rawFile,
+      rawTile: rawTileFile,
+      projectionReport: projectionReportFile,
+      sourceProvenanceComment: commentFile,
+      resolutions: resolutionFiles,
+    });
+  }
+
+  const archiveManifest = {
+    schemaVersion: 1,
+    createdAt: new Date().toISOString(),
+    gitCommit: currentGitCommit(),
+    command: {
+      cwd: process.cwd(),
+      argv: process.argv.slice(2),
+    },
+    reproducibility: {
+      diffusion:
+        "Best-effort only across machines. This bundle stores seeds, prompts, versions, model id, input hashes, and raw PNG hashes, but diffusion kernels and model cache revisions can still change byte output.",
+      projection:
+        "Deterministic from the archived raw candidate PNG, texture pack source, palette selection, symbols, and project-diffusion implementation at gitCommit.",
+      sourcePolicy:
+        "Do not commit raw diffusion PNGs. Freeze accepted ASCII masks into pack source with the source-provenance-comment text.",
+    },
+    texture: context.args.texture,
+    resolutions: context.args.resolutions,
+    palette: {
+      colors: context.entries.map((entry) => entry.name),
+      symbols: Object.fromEntries(context.entries.map((entry) => [entry.name, entry.symbol])),
+    },
+    diffusion: {
+      manifest: manifestFile,
+      inputOriginal: inputOriginalFile,
+      inputPrepared: inputPreparedFile,
+      modelId: context.manifest.model_id,
+      promptPreset: context.manifest.prompt_preset,
+      prompt: context.manifest.prompt,
+      negativePrompt: context.manifest.negative_prompt,
+      guidanceScale: context.manifest.guidance_scale,
+      scheduler: context.manifest.scheduler,
+      steps: context.manifest.steps,
+      torchDtype: context.manifest.torch_dtype,
+      versions: context.manifest.versions,
+      runtime: context.manifest.runtime,
+      safetyCheckerEnabled: context.manifest.safety_checker_enabled,
+      seamlessPatch: context.manifest.seamless_patch,
+    },
+    projectionSummary: summaryFile,
+    reviewSheet: reviewFile,
+    candidates,
+  };
+  const archiveManifestPath = path.join(context.archivePath, "archive-manifest.json");
+  await fs.writeFile(archiveManifestPath, `${JSON.stringify(archiveManifest, null, 2)}\n`);
+  await fs.writeFile(path.join(context.archivePath, "README.md"), makeArchiveReadme(archiveManifest));
+}
+
+function projectionReportPath(outDir: string, candidateId: string): string {
+  return path.join(outDir, sanitizeFileStem(candidateId), `${candidateId}-projection-report.json`);
+}
+
+async function copyRequiredFile(source: string, target: string, expectedSha256?: string): Promise<ArchivedFile> {
+  const copied = await copyOptionalFile(source, target, expectedSha256);
+  if (!copied) {
+    throw new Error(`Required archive source '${source}' does not exist`);
+  }
+  return copied;
+}
+
+async function copyOptionalFile(
+  source: string,
+  target: string,
+  expectedSha256?: string,
+): Promise<ArchivedFile | undefined> {
+  try {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const bytes = await fs.readFile(source);
+    const sha256 = sha256Hex(bytes);
+    if (expectedSha256 && sha256 !== expectedSha256) {
+      throw new Error(`SHA mismatch for '${source}': got ${sha256}, expected ${expectedSha256}`);
+    }
+    await fs.writeFile(target, bytes);
+    return { path: target, sha256 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && !expectedSha256) {
+      console.warn(`Skipping optional archive file '${source}': missing`);
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function hashExistingFile(file: string): Promise<ArchivedFile> {
+  return {
+    path: file,
+    sha256: sha256Hex(await fs.readFile(file)),
+  };
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function currentGitCommit(): string | undefined {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function makeSourceProvenanceComment(
+  report: CandidateReport,
+  context: {
+    args: ProjectArgs;
+    entries: PaletteEntry[];
+    manifest: DiffusionManifest;
+    manifestFile: ArchivedFile;
+    rawFile: ArchivedFile;
+    archivePath: string;
+  },
+): string {
+  const lines = [
+    "/*",
+    " * Diffusion projection provenance:",
+    ` * candidate: ${report.candidate.id}`,
+    ` * raw_candidate_sha256: ${context.rawFile.sha256}`,
+    ` * diffusion_manifest_sha256: ${context.manifestFile.sha256}`,
+    ` * archive_bundle: ${context.archivePath}`,
+    ` * model_id: ${context.manifest.model_id ?? "unknown"}`,
+    ` * prompt_preset: ${context.manifest.prompt_preset ?? "none"}`,
+    ` * prompt: ${context.manifest.prompt ?? "unknown"}`,
+    ` * negative_prompt: ${context.manifest.negative_prompt ?? "none"}`,
+    ` * seed: ${report.candidate.seed ?? "unknown"}`,
+    ` * strength: ${report.candidate.strength ?? "unknown"}`,
+    ` * steps: ${context.manifest.steps ?? "unknown"}`,
+    ` * scheduler: ${context.manifest.scheduler ?? "unknown"}`,
+    ` * guidance_scale: ${context.manifest.guidance_scale ?? "unknown"}`,
+    ` * input_sha256: ${context.manifest.input?.original_sha256 ?? "unknown"}`,
+    ` * prepared_input_sha256: ${context.manifest.input?.prepared_png_sha256 ?? "unknown"}`,
+    ` * preprocess: ${JSON.stringify(context.manifest.input?.preprocess ?? {})}`,
+    ` * projection_resolutions: ${context.args.resolutions.join(",")}`,
+    ` * projection_palette: ${context.entries.map((entry) => entry.name).join(",")}`,
+    ` * projection_symbols: ${context.entries.map((entry) => entry.symbol).join("")}`,
+    " * projection: area downsample -> Oklab palette quantize -> deterministic macro majority correction",
+    " * note: exact diffusion regeneration across machines is not guaranteed; the archived raw PNG is the exact proposal artifact.",
+    " */",
+    "",
+  ];
+  return lines.join("\n");
+}
+
+function makeArchiveReadme(archiveManifest: {
+  texture: string;
+  resolutions: number[];
+  candidates: unknown[];
+}): string {
+  return `# Texture Diffusion Archive Bundle
+
+Texture: \`${archiveManifest.texture}\`
+
+Resolutions: \`${archiveManifest.resolutions.join(",")}\`
+
+Candidate count: \`${archiveManifest.candidates.length}\`
+
+This bundle is the durable handoff for diffusion proposal artifacts. It keeps
+raw PNGs, projected masks, projection reports, source-ready provenance comments,
+and hashes together outside git.
+
+Exact byte-for-byte diffusion regeneration across another machine is not
+guaranteed. Reprojection from the archived raw candidate PNGs is deterministic
+for the same texture-lab code and pack source.
+
+Use \`archive-manifest.json\` as the machine-readable index.
+`;
 }
 
 function makePaletteEntries(palette: PaletteSpec, selectedNames: string[], selectedSymbols: string[]): PaletteEntry[] {
@@ -1044,7 +1344,7 @@ function parseArgs(argv: string[]): ProjectArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
     throw new Error(
-      "Usage: tsx src/project-diffusion.ts <texture.ts> --manifest <manifest.json> --texture <name> [--candidate <id>]... [--resolutions 32,64,128] [--palette-colors a,b,c] [--symbols abc] [--out <dir>] [--limit <n>] [--review-sheet [path]] [--review-top <n>] [--review-resolution <n>]",
+      "Usage: tsx src/project-diffusion.ts <texture.ts> --manifest <manifest.json> --texture <name> [--candidate <id>]... [--resolutions 32,64,128] [--palette-colors a,b,c] [--symbols abc] [--out <dir>] [--limit <n>] [--review-sheet [path]] [--review-top <n>] [--review-resolution <n>] [--archive-bundle [dir]]",
     );
   }
 
@@ -1060,6 +1360,8 @@ function parseArgs(argv: string[]): ProjectArgs {
   let reviewSheetPath: string | undefined;
   let reviewTop = 8;
   let reviewResolution: number | undefined;
+  let archiveBundle = false;
+  let archiveBundlePath: string | undefined;
 
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]!;
@@ -1154,6 +1456,13 @@ function parseArgs(argv: string[]): ProjectArgs {
       }
       reviewResolution = parsed;
       index += 1;
+    } else if (arg === "--archive-bundle") {
+      archiveBundle = true;
+      const next = argv[index + 1];
+      if (next && !next.startsWith("-")) {
+        archiveBundlePath = next;
+        index += 1;
+      }
     } else {
       throw new Error(`Unknown argument '${arg}'`);
     }
@@ -1180,6 +1489,8 @@ function parseArgs(argv: string[]): ProjectArgs {
     reviewSheetPath,
     reviewTop,
     reviewResolution,
+    archiveBundle,
+    archiveBundlePath,
   };
 }
 
