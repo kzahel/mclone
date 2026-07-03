@@ -41,11 +41,13 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        CACTUS, CLAY, COARSE_DIRT, DANDELION, DEAD_BUSH, FERN, GRASS, GRASS_BLOCK, GRAVEL, ICE,
-        KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG,
-        PACKED_ICE, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SEAGRASS, SNOW, SNOW_BLOCK,
-        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER,
-        TERRACOTTA, WATER, is_air_like, is_water,
+        BRAIN_CORAL_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT, DANDELION, DEAD_BUSH,
+        FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, KELP,
+        KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE,
+        PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
+        SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, is_air_like,
+        is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -131,6 +133,7 @@ mod tests {
         SnowySpruceFern,
         BadlandsDeadBushCactusSugarCane,
         OceanWaterPlants,
+        WarmOceanCoralSeaPickles,
     }
 
     impl FeatureFamily {
@@ -147,6 +150,7 @@ mod tests {
                     "badlands dead bush plus cactus/sugar cane"
                 }
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
+                Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
             }
         }
 
@@ -173,6 +177,17 @@ mod tests {
                     KELP,
                     KELP_PLANT,
                 ],
+                Self::WarmOceanCoralSeaPickles => &[
+                    TUBE_CORAL_BLOCK,
+                    BRAIN_CORAL_BLOCK,
+                    BUBBLE_CORAL_BLOCK,
+                    FIRE_CORAL_BLOCK,
+                    HORN_CORAL_BLOCK,
+                    SEA_PICKLE_1,
+                    SEA_PICKLE_2,
+                    SEA_PICKLE_3,
+                    SEA_PICKLE_4,
+                ],
             }
         }
 
@@ -187,6 +202,20 @@ mod tests {
                         .iter()
                         .any(|block| chunk.block_count(*block) > 0)
                         && chunk.block_count(SUGAR_CANE) > 0
+                }
+                Self::WarmOceanCoralSeaPickles => {
+                    [
+                        TUBE_CORAL_BLOCK,
+                        BRAIN_CORAL_BLOCK,
+                        BUBBLE_CORAL_BLOCK,
+                        FIRE_CORAL_BLOCK,
+                        HORN_CORAL_BLOCK,
+                    ]
+                    .iter()
+                    .any(|block| chunk.block_count(*block) > 0)
+                        && [SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4]
+                            .iter()
+                            .any(|block| chunk.block_count(*block) > 0)
                 }
                 _ => self
                     .blocks()
@@ -358,12 +387,12 @@ mod tests {
             feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
-            seed: 26,
+            seed: 2696,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:warm_ocean",
             surface_family: SurfaceFamily::Water,
-            feature_family: Some(FeatureFamily::OceanWaterPlants),
+            feature_family: Some(FeatureFamily::WarmOceanCoralSeaPickles),
         },
         PaletteMatrixCase {
             seed: 6,

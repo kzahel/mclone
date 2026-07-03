@@ -66,6 +66,7 @@ fn java_no_collision(block: &ResourceLocation) -> bool {
             | "tall_seagrass"
             | "kelp"
             | "kelp_plant"
+            | "sea_pickle"
             | "torch"
             | "wall_torch"
     )
@@ -148,6 +149,19 @@ fn java_light_emission(record: &BlockStateRecord) -> u8 {
     if matches!(path, "torch" | "wall_torch") {
         return 14;
     }
+    if matches!(path, "sea_pickle")
+        && record
+            .properties
+            .get("waterlogged")
+            .is_some_and(|value| value == "true")
+    {
+        let pickles = record
+            .properties
+            .get("pickles")
+            .and_then(|value| value.parse::<u8>().ok())
+            .unwrap_or(1);
+        return 3 + 3 * pickles.clamp(1, 4);
+    }
     if matches!(path, "redstone_ore" | "deepslate_redstone_ore")
         && record
             .properties
@@ -187,6 +201,7 @@ fn java_material_blocks_motion(block: &ResourceLocation) -> bool {
             | "tall_seagrass"
             | "kelp"
             | "kelp_plant"
+            | "sea_pickle"
             | "torch"
             | "wall_torch"
     )
@@ -228,6 +243,7 @@ fn java_bush_like_block(block: &ResourceLocation) -> bool {
             | "tall_seagrass"
             | "kelp"
             | "kelp_plant"
+            | "sea_pickle"
     )
 }
 
@@ -357,6 +373,7 @@ mod tests {
             "minecraft:tall_seagrass",
             "minecraft:kelp",
             "minecraft:kelp_plant",
+            "minecraft:sea_pickle",
             "minecraft:glow_lichen",
         ] {
             let facts = block_render_facts(&record(block), false);
@@ -392,6 +409,35 @@ mod tests {
 
         assert_eq!(dark.light_emission, 0);
         assert_eq!(lit.light_emission, 9);
+    }
+
+    #[test]
+    fn live_sea_pickle_emission_scales_with_pickle_count() {
+        let one = block_render_facts(
+            &record_with_props(
+                "minecraft:sea_pickle",
+                &[("pickles", "1"), ("waterlogged", "true")],
+            ),
+            false,
+        );
+        let four = block_render_facts(
+            &record_with_props(
+                "minecraft:sea_pickle",
+                &[("pickles", "4"), ("waterlogged", "true")],
+            ),
+            false,
+        );
+        let dry = block_render_facts(
+            &record_with_props(
+                "minecraft:sea_pickle",
+                &[("pickles", "4"), ("waterlogged", "false")],
+            ),
+            false,
+        );
+
+        assert_eq!(one.light_emission, 6);
+        assert_eq!(four.light_emission, 15);
+        assert_eq!(dry.light_emission, 0);
     }
 
     #[test]

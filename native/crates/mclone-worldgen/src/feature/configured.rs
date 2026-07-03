@@ -2,7 +2,7 @@ use crate::block::{
     ANDESITE, BIRCH_LEAVES, BIRCH_LOG, DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, LAVA, OAK_LEAVES,
     OAK_LOG, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF, WATER,
 };
-use crate::placement::{ConfiguredDecorator, IntProvider};
+use crate::placement::{ConfiguredDecorator, CountConfiguration, IntProvider};
 use crate::prng::RandomSource;
 
 const WATER_SPRING_VALID_BLOCKS: [RawBlockId; 4] = [STONE, GRANITE, DIORITE, ANDESITE];
@@ -645,6 +645,19 @@ impl RandomFeatureConfiguration {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SimpleRandomFeatureConfiguration {
+    pub features: Vec<ConfiguredFeature>,
+}
+
+impl SimpleRandomFeatureConfiguration {
+    pub fn new(features: impl Into<Vec<ConfiguredFeature>>) -> Self {
+        Self {
+            features: features.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecoratedFeatureConfiguration {
     pub feature: Box<ConfiguredFeature>,
@@ -661,6 +674,13 @@ impl DecoratedFeatureConfiguration {
             decorators: decorators.into(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoralShape {
+    Tree,
+    Claw,
+    Mushroom,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -758,7 +778,10 @@ pub enum ConfiguredFeature {
     BasicTree(BasicTreeConfiguration),
     Tree(TreeConfiguration),
     RandomSelector(RandomFeatureConfiguration),
+    SimpleRandomSelector(SimpleRandomFeatureConfiguration),
     Decorated(DecoratedFeatureConfiguration),
+    Coral(CoralShape),
+    SeaPickle(CountConfiguration),
     Seagrass(SeagrassConfiguration),
     Kelp,
     Ore(OreConfiguration),
@@ -818,8 +841,20 @@ impl ConfiguredFeature {
         Self::RandomSelector(config)
     }
 
+    pub fn simple_random_selector(config: SimpleRandomFeatureConfiguration) -> Self {
+        Self::SimpleRandomSelector(config)
+    }
+
     pub fn decorated(config: DecoratedFeatureConfiguration) -> Self {
         Self::Decorated(config)
+    }
+
+    pub const fn coral(shape: CoralShape) -> Self {
+        Self::Coral(shape)
+    }
+
+    pub const fn sea_pickle(config: CountConfiguration) -> Self {
+        Self::SeaPickle(config)
     }
 
     pub const fn seagrass(config: SeagrassConfiguration) -> Self {

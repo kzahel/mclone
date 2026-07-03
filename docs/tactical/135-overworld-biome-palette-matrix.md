@@ -1,8 +1,9 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, seven supported feature-family groups, and 13 F-checked
-matrix rows landed, including cactus/sugar-cane extras and ocean water plants
+overworld tint IDs, eight supported feature-family groups, and 13 F-checked
+matrix rows landed, including cactus/sugar-cane extras, ocean water plants, and
+warm-ocean coral/sea-pickle palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -149,7 +150,7 @@ notes.
 | 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, dead bush plus cactus/sugar-cane family checked; wooded variants gap | seed `2359`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 38 | `minecraft:wooded_badlands_plateau` | badlands | terracotta/red sand checked; wooded plateau trees gap | seed `86`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand checked | seed `84`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water/sand, seagrass checked; coral/sea-pickle gap | seed `26`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water/sand, seagrass plus coral blocks/sea pickles checked; coral plants/fans gap | seed `2696`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 45 | `minecraft:lukewarm_ocean` | ocean-lukewarm | bright water/sand, seagrass/kelp water plants checked | seed `6`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 46 | `minecraft:cold_ocean` | ocean-cold | cold water checked; gravel/grass seafloor, seagrass/kelp checked | seed `5`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 47 | `minecraft:deep_warm_ocean` | ocean-warm | tint checked; Java 1.17 final ocean mixer appears not to emit this registered ID | no B/S fixture | `[ ] B [x] T [ ] S [ ] F` |
@@ -213,17 +214,20 @@ Landed:
   top-surface column in the row's expected surface family.
 - The same worldgen probe now asserts currently supported visible feature
   families for plains, desert, swamp, taiga, snowy tundra, badlands, and ocean
-  water plants. Desert and badlands now require dead bush plus
-  cactus/sugar-cane family coverage; swamp requires the native vegetation/clay
-  subset plus sugar cane; generated non-frozen ocean rows require the
-  seagrass/tall-seagrass/kelp block family. The assertions are intentionally
-  broad block-family checks, not exact decorated counts.
+  water plants, plus warm-ocean coral blocks and sea pickles. Desert and
+  badlands now require dead bush plus cactus/sugar-cane family coverage; swamp
+  requires the native vegetation/clay subset plus sugar cane; generated
+  non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
+  the warm-ocean row requires at least one live coral block and one sea pickle
+  state. The assertions are intentionally broad block-family checks, not exact
+  decorated counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
-  plant generated block IDs; synthetic asset registry mappings; basic shared
-  shape/material/render facts; Java-style reduced random-patch column placement;
-  Java-style seagrass and kelp feature placement; the `NoiseBasedDecorator`
-  count path used by kelp; and desert/badlands/swamp/ocean feature table
-  entries.
+  plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
+  state IDs; synthetic asset registry mappings; basic shared
+  shape/material/render/light facts; Java-style reduced random-patch column
+  placement; Java-style seagrass, kelp, sea-pickle, and broad coral
+  tree/claw/mushroom placement; the `NoiseBasedDecorator` count path used by
+  kelp/coral; and desert/badlands/swamp/ocean feature table entries.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
   asserts every matrix row's grass, foliage, and water tint output through the
   shared tint resolver by tint group, including the two registered rows without
@@ -239,20 +243,23 @@ Documented gaps from this slice:
   falls through to the default land feature table because dark oak and mushroom
   feature families are not modeled.
 - Java normal/cold/lukewarm ocean water-plant tables are represented by broad
-  seagrass/kelp checks, and warm ocean now has seagrass. Native still omits the
-  `SEAGRASS_SIMPLE` carving-mask decorator path, coral, sea pickles, and
-  waterlogged/fluid-state modeling for water plants in the raw generated block
-  lane.
+  seagrass/kelp checks, and warm ocean now has seagrass, live coral blocks, and
+  sea pickles. Native still omits the `SEAGRASS_SIMPLE` carving-mask decorator
+  path, coral plants, coral fans/wall fans, exact coral mismatch parity, and
+  full waterlogged/fluid-state modeling for water plants in the raw generated
+  block lane.
 - Java swamp includes water lilies, mushrooms, and swamp seagrass/extras; native
   currently checks only the oak/grass/dead-bush/clay subset that exists.
 
 ## Suggested Next Slice
 
-Move from B/T/S coverage to visible feature-family breadth:
+Move from B/T/S coverage to visible land feature-family breadth:
 
 1. Pick one missing block/feature family with high palette value and port it
-   narrowly from Java: warm-ocean coral/sea pickles, dark oak plus huge
-   mushrooms, acacia, bamboo, jungle vines, lily pads, or berry bushes.
+   narrowly from Java. The strongest next row is dark forest: dark oak plus
+   huge mushrooms would turn the existing dark-forest B/T/S fixture into a real
+   visible palette check. Other good follow-ups are acacia, bamboo, jungle
+   vines, lily pads, or berry bushes.
 2. Add `F` checks to this matrix only when the supporting block IDs/features
    exist in native and the check is a broad deterministic block-family probe.
 3. Move any exact decorated mismatch-bucket work into `103`.

@@ -114,6 +114,15 @@ pub const TALL_SEAGRASS_LOWER: RawBlockId = 108;
 pub const TALL_SEAGRASS_UPPER: RawBlockId = 109;
 pub const KELP: RawBlockId = 110;
 pub const KELP_PLANT: RawBlockId = 111;
+pub const TUBE_CORAL_BLOCK: RawBlockId = 112;
+pub const BRAIN_CORAL_BLOCK: RawBlockId = 113;
+pub const BUBBLE_CORAL_BLOCK: RawBlockId = 114;
+pub const FIRE_CORAL_BLOCK: RawBlockId = 115;
+pub const HORN_CORAL_BLOCK: RawBlockId = 116;
+pub const SEA_PICKLE_1: RawBlockId = 117;
+pub const SEA_PICKLE_2: RawBlockId = 118;
+pub const SEA_PICKLE_3: RawBlockId = 119;
+pub const SEA_PICKLE_4: RawBlockId = 120;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -155,6 +164,15 @@ impl GeneratedBlockId {
     pub const TALL_SEAGRASS_UPPER: Self = Self(TALL_SEAGRASS_UPPER);
     pub const KELP: Self = Self(KELP);
     pub const KELP_PLANT: Self = Self(KELP_PLANT);
+    pub const TUBE_CORAL_BLOCK: Self = Self(TUBE_CORAL_BLOCK);
+    pub const BRAIN_CORAL_BLOCK: Self = Self(BRAIN_CORAL_BLOCK);
+    pub const BUBBLE_CORAL_BLOCK: Self = Self(BUBBLE_CORAL_BLOCK);
+    pub const FIRE_CORAL_BLOCK: Self = Self(FIRE_CORAL_BLOCK);
+    pub const HORN_CORAL_BLOCK: Self = Self(HORN_CORAL_BLOCK);
+    pub const SEA_PICKLE_1: Self = Self(SEA_PICKLE_1);
+    pub const SEA_PICKLE_2: Self = Self(SEA_PICKLE_2);
+    pub const SEA_PICKLE_3: Self = Self(SEA_PICKLE_3);
+    pub const SEA_PICKLE_4: Self = Self(SEA_PICKLE_4);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -210,6 +228,10 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | TALL_SEAGRASS_UPPER
             | KELP
             | KELP_PLANT
+            | SEA_PICKLE_1
+            | SEA_PICKLE_2
+            | SEA_PICKLE_3
+            | SEA_PICKLE_4
     )
 }
 
@@ -233,9 +255,31 @@ pub const fn block_light_emission(block_id: RawBlockId) -> u8 {
             MAGMA_BLOCK => 3,
             GLOW_LICHEN => 7,
             TORCH | WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => 14,
+            SEA_PICKLE_1 => 6,
+            SEA_PICKLE_2 => 9,
+            SEA_PICKLE_3 => 12,
+            SEA_PICKLE_4 => 15,
             _ => 0,
         }
     }
+}
+
+pub const fn is_coral_block(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        TUBE_CORAL_BLOCK
+            | BRAIN_CORAL_BLOCK
+            | BUBBLE_CORAL_BLOCK
+            | FIRE_CORAL_BLOCK
+            | HORN_CORAL_BLOCK
+    )
+}
+
+pub const fn is_sea_pickle(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        SEA_PICKLE_1 | SEA_PICKLE_2 | SEA_PICKLE_3 | SEA_PICKLE_4
+    )
 }
 
 pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
@@ -406,6 +450,12 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         TALL_SEAGRASS_LOWER | TALL_SEAGRASS_UPPER => "minecraft:tall_seagrass",
         KELP => "minecraft:kelp",
         KELP_PLANT => "minecraft:kelp_plant",
+        TUBE_CORAL_BLOCK => "minecraft:tube_coral_block",
+        BRAIN_CORAL_BLOCK => "minecraft:brain_coral_block",
+        BUBBLE_CORAL_BLOCK => "minecraft:bubble_coral_block",
+        FIRE_CORAL_BLOCK => "minecraft:fire_coral_block",
+        HORN_CORAL_BLOCK => "minecraft:horn_coral_block",
+        SEA_PICKLE_1 | SEA_PICKLE_2 | SEA_PICKLE_3 | SEA_PICKLE_4 => "minecraft:sea_pickle",
         _ => "minecraft:unknown",
     }
 }
@@ -422,6 +472,8 @@ mod tests {
         assert_eq!(block_light_emission(GLOW_LICHEN), 7);
         assert_eq!(block_light_emission(TORCH), 14);
         assert_eq!(block_light_emission(WALL_TORCH_NORTH), 14);
+        assert_eq!(block_light_emission(SEA_PICKLE_1), 6);
+        assert_eq!(block_light_emission(SEA_PICKLE_4), 15);
         assert_eq!(block_light_emission(STONE), 0);
     }
 
@@ -446,6 +498,8 @@ mod tests {
         assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
         assert_eq!(block_light_opacity(KELP), 0);
         assert_eq!(block_light_opacity(KELP_PLANT), 0);
+        assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
+        assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
     }
 
     #[test]
@@ -463,5 +517,8 @@ mod tests {
         assert_eq!(block_name(TALL_SEAGRASS_UPPER), "minecraft:tall_seagrass");
         assert_eq!(block_name(KELP), "minecraft:kelp");
         assert_eq!(block_name(KELP_PLANT), "minecraft:kelp_plant");
+        assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
+        assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
+        assert_eq!(block_name(SEA_PICKLE_4), "minecraft:sea_pickle");
     }
 }

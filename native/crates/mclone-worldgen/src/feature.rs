@@ -20,13 +20,13 @@ mod top_layer;
 mod tree;
 
 pub use configured::{
-    BasicTreeConfiguration, ConfiguredFeature, DecoratedFeatureConfiguration, DiskConfiguration,
-    DripstoneClusterConfiguration, FloatProvider, FoliagePlacerConfiguration,
+    BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecoratedFeatureConfiguration,
+    DiskConfiguration, DripstoneClusterConfiguration, FloatProvider, FoliagePlacerConfiguration,
     GlowLichenConfiguration, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
     RandomFeatureConfiguration, RandomPatchConfiguration, SeagrassConfiguration,
-    SimpleBlockConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
-    StraightTrunkPlacerConfiguration, TreeConfiguration, TrunkPlacerConfiguration,
-    TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
+    SimpleBlockConfiguration, SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration,
+    SpringConfiguration, StraightTrunkPlacerConfiguration, TreeConfiguration,
+    TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use placed::{
@@ -153,9 +153,14 @@ impl ConfiguredFeature {
             Self::RandomSelector(config) => {
                 place_random_selector(world, biomes, random, origin, config)
             }
+            Self::SimpleRandomSelector(config) => {
+                place_simple_random_selector(world, biomes, random, origin, config)
+            }
             Self::Decorated(config) => {
                 placed::place_configured_decorated_feature(world, biomes, random, origin, config)
             }
+            Self::Coral(shape) => ocean::place_coral(world, random, origin, *shape),
+            Self::SeaPickle(config) => ocean::place_sea_pickle(world, random, origin, *config),
             Self::Seagrass(config) => ocean::place_seagrass(world, random, origin, *config),
             Self::Kelp => ocean::place_kelp(world, random, origin),
             Self::Ore(config) => ore::place_ore(world, random, origin, config),
@@ -187,6 +192,21 @@ fn place_random_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
     config
         .default_feature
         .place_with_biomes(world, biomes, random, origin)
+}
+
+fn place_simple_random_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
+    world: &mut W,
+    biomes: &B,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: &SimpleRandomFeatureConfiguration,
+) -> bool {
+    if config.features.is_empty() {
+        return false;
+    }
+
+    let index = random.next_int_bound(config.features.len() as i32) as usize;
+    config.features[index].place_with_biomes(world, biomes, random, origin)
 }
 
 fn project_to_surface<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<BlockPos> {
@@ -231,16 +251,19 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE,
-        DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE,
-        DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
-        DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
-        GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, KELP, KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER,
-        LARGE_FERN_UPPER, LAVA, OAK_LEAVES, OAK_LOG, POPPY, REDSTONE_ORE, SAND, SEAGRASS, SNOW,
-        SPRUCE_LEAVES, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUFF, WATER,
+        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS,
+        CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
+        DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE,
+        DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK,
+        GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
+        IRON_ORE, KELP, KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA,
+        OAK_LEAVES, OAK_LOG, POPPY, REDSTONE_ORE, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
+        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER,
+        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
-        ConfiguredDecorator, DecorationContext, HeightProvider, IntProvider, VerticalAnchor,
+        ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
+        VerticalAnchor,
     };
     use crate::prng::WorldgenRandom;
     use mclone_core::CHUNK_WIDTH;
@@ -533,6 +556,50 @@ mod tests {
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 0, 8)));
         assert_eq!(count_blocks(&chunk, KELP), 1);
         assert!(count_blocks(&chunk, KELP_PLANT) > 0);
+    }
+
+    #[test]
+    fn sea_pickle_feature_places_waterlogged_pickles_on_ocean_floor() {
+        let mut chunk = flat_ocean_chunk();
+        let mut random = WorldgenRandom::new(3);
+        let feature = ConfiguredFeature::sea_pickle(CountConfiguration::new(20));
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 0, 8)));
+        assert!(
+            [SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4]
+                .iter()
+                .any(|state| count_blocks(&chunk, *state) > 0)
+        );
+    }
+
+    #[test]
+    fn coral_features_place_live_coral_blocks_in_water() {
+        for (shape, seed) in [
+            (CoralShape::Tree, 4),
+            (CoralShape::Claw, 5),
+            (CoralShape::Mushroom, 6),
+        ] {
+            let mut chunk = flat_ocean_chunk();
+            let mut random = WorldgenRandom::new(seed);
+            let feature = ConfiguredFeature::coral(shape);
+
+            assert!(
+                feature.place(&mut chunk, &mut random, BlockPos::new(8, 2, 8)),
+                "{shape:?}"
+            );
+            assert!(
+                [
+                    TUBE_CORAL_BLOCK,
+                    BRAIN_CORAL_BLOCK,
+                    BUBBLE_CORAL_BLOCK,
+                    FIRE_CORAL_BLOCK,
+                    HORN_CORAL_BLOCK,
+                ]
+                .iter()
+                .any(|state| count_blocks(&chunk, *state) > 0),
+                "{shape:?}"
+            );
+        }
     }
 
     #[test]
@@ -920,6 +987,56 @@ mod tests {
         assert!(has_random_patch(&badlands, SUGAR_CANE, 13));
         assert!(has_random_patch(&badlands, CACTUS, 5));
         assert!(has_random_patch(&swamp, SUGAR_CANE, 20));
+    }
+
+    #[test]
+    fn warm_ocean_feature_table_includes_coral_and_sea_pickles() {
+        let warm_ocean = overworld_features_for_biome(get_layered_biome_by_id(44));
+
+        let coral = warm_ocean
+            .iter()
+            .find(|feature| matches!(feature.feature, ConfiguredFeature::SimpleRandomSelector(_)))
+            .expect("warm ocean coral vegetation feature");
+        assert_eq!(coral.step, DecorationStep::VegetalDecoration);
+        assert_eq!(
+            coral.decorators,
+            vec![
+                ConfiguredDecorator::count_noise_biased(20, 400.0, 0.0),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+            ]
+        );
+        match &coral.feature {
+            ConfiguredFeature::SimpleRandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        ConfiguredFeature::coral(CoralShape::Tree),
+                        ConfiguredFeature::coral(CoralShape::Claw),
+                        ConfiguredFeature::coral(CoralShape::Mushroom),
+                    ]
+                );
+            }
+            other => panic!("expected simple random coral selector, got {other:?}"),
+        }
+
+        let sea_pickle = warm_ocean
+            .iter()
+            .find(|feature| {
+                matches!(
+                    feature.feature,
+                    ConfiguredFeature::SeaPickle(config) if config == CountConfiguration::new(20)
+                )
+            })
+            .expect("warm ocean sea pickle feature");
+        assert_eq!(
+            sea_pickle.decorators,
+            vec![
+                ConfiguredDecorator::chance(16),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+            ]
+        );
     }
 
     fn has_random_patch(features: &[PlacedFeature], state: RawBlockId, count: i32) -> bool {

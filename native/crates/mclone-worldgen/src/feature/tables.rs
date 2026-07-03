@@ -15,11 +15,11 @@ use crate::placement::{
 };
 
 use super::{
-    BasicTreeConfiguration, ConfiguredFeature, DecorationStep, DiskConfiguration,
+    BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecorationStep, DiskConfiguration,
     DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration, LakeConfiguration,
     OreConfiguration, PlacedFeature, RandomFeatureConfiguration, RandomPatchConfiguration,
-    SeagrassConfiguration, SmallDripstoneConfiguration, SpringConfiguration, TreeConfiguration,
-    WeightedBlockState, WeightedConfiguredFeature,
+    SeagrassConfiguration, SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration,
+    SpringConfiguration, TreeConfiguration, WeightedBlockState, WeightedConfiguredFeature,
 };
 
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
@@ -646,7 +646,15 @@ fn lukewarm_ocean_features(deep: bool) -> Vec<PlacedFeature> {
 }
 
 fn warm_ocean_features(deep: bool) -> Vec<PlacedFeature> {
-    vec![seagrass_feature(80, if deep { 0.8 } else { 0.3 })]
+    if deep {
+        vec![seagrass_feature(80, 0.8)]
+    } else {
+        vec![
+            warm_ocean_vegetation_feature(),
+            seagrass_feature(80, 0.3),
+            sea_pickle_feature(),
+        ]
+    }
 }
 
 fn default_land_features() -> Vec<PlacedFeature> {
@@ -984,6 +992,34 @@ fn kelp_feature(noise_to_count_ratio: i32) -> PlacedFeature {
         ConfiguredFeature::kelp(),
         vec![
             ConfiguredDecorator::count_noise_biased(noise_to_count_ratio, 80.0, 0.0),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+        ],
+    )
+}
+
+fn warm_ocean_vegetation_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::simple_random_selector(SimpleRandomFeatureConfiguration::new([
+            ConfiguredFeature::coral(CoralShape::Tree),
+            ConfiguredFeature::coral(CoralShape::Claw),
+            ConfiguredFeature::coral(CoralShape::Mushroom),
+        ])),
+        vec![
+            ConfiguredDecorator::count_noise_biased(20, 400.0, 0.0),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+        ],
+    )
+}
+
+fn sea_pickle_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::sea_pickle(CountConfiguration::new(20)),
+        vec![
+            ConfiguredDecorator::chance(16),
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
         ],

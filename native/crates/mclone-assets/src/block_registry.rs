@@ -388,6 +388,10 @@ const FACING_SOUTH: &[(&str, &str)] = &[("facing", "south")];
 const FACING_WEST: &[(&str, &str)] = &[("facing", "west")];
 const AGE_0: &[(&str, &str)] = &[("age", "0")];
 const AGE_20: &[(&str, &str)] = &[("age", "20")];
+const PICKLES_1_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "1"), ("waterlogged", "true")];
+const PICKLES_2_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "2"), ("waterlogged", "true")];
+const PICKLES_3_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "3"), ("waterlogged", "true")];
+const PICKLES_4_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "4"), ("waterlogged", "true")];
 const LEVEL_0: &[(&str, &str)] = &[("level", "0")];
 const LEVEL_1: &[(&str, &str)] = &[("level", "1")];
 const LEVEL_2: &[(&str, &str)] = &[("level", "2")];
@@ -513,6 +517,15 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (109, "minecraft:tall_seagrass", HALF_UPPER),
     (110, "minecraft:kelp", AGE_20),
     (111, "minecraft:kelp_plant", EMPTY_PROPS),
+    (112, "minecraft:tube_coral_block", EMPTY_PROPS),
+    (113, "minecraft:brain_coral_block", EMPTY_PROPS),
+    (114, "minecraft:bubble_coral_block", EMPTY_PROPS),
+    (115, "minecraft:fire_coral_block", EMPTY_PROPS),
+    (116, "minecraft:horn_coral_block", EMPTY_PROPS),
+    (117, "minecraft:sea_pickle", PICKLES_1_WATERLOGGED_TRUE),
+    (118, "minecraft:sea_pickle", PICKLES_2_WATERLOGGED_TRUE),
+    (119, "minecraft:sea_pickle", PICKLES_3_WATERLOGGED_TRUE),
+    (120, "minecraft:sea_pickle", PICKLES_4_WATERLOGGED_TRUE),
 ];
 
 #[cfg(test)]
@@ -531,7 +544,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 112);
+        assert_eq!(registry.len(), 121);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -707,6 +720,34 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:kelp_plant"),
             Some(BlockStateId(111))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:tube_coral_block"),
+            Some(BlockStateId(112))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:brain_coral_block"),
+            Some(BlockStateId(113))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:bubble_coral_block"),
+            Some(BlockStateId(114))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:fire_coral_block"),
+            Some(BlockStateId(115))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:horn_coral_block"),
+            Some(BlockStateId(116))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:sea_pickle[pickles=1,waterlogged=true]"),
+            Some(BlockStateId(117))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(120)).unwrap().canonical_key(),
+            "minecraft:sea_pickle[pickles=4,waterlogged=true]"
         );
     }
 

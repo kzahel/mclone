@@ -36,6 +36,15 @@ pub mod terrain_id {
     pub const TALL_SEAGRASS_UPPER: u32 = 109;
     pub const KELP: u32 = 110;
     pub const KELP_PLANT: u32 = 111;
+    pub const TUBE_CORAL_BLOCK: u32 = 112;
+    pub const BRAIN_CORAL_BLOCK: u32 = 113;
+    pub const BUBBLE_CORAL_BLOCK: u32 = 114;
+    pub const FIRE_CORAL_BLOCK: u32 = 115;
+    pub const HORN_CORAL_BLOCK: u32 = 116;
+    pub const SEA_PICKLE_1: u32 = 117;
+    pub const SEA_PICKLE_2: u32 = 118;
+    pub const SEA_PICKLE_3: u32 = 119;
+    pub const SEA_PICKLE_4: u32 = 120;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

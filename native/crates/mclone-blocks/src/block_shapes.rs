@@ -80,6 +80,10 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         }
         terrain_id::KELP => Some(kelp_head_shape()),
         terrain_id::KELP_PLANT => Some(full_block()),
+        terrain_id::SEA_PICKLE_1 => Some(sea_pickle_shape(1)),
+        terrain_id::SEA_PICKLE_2 => Some(sea_pickle_shape(2)),
+        terrain_id::SEA_PICKLE_3 => Some(sea_pickle_shape(3)),
+        terrain_id::SEA_PICKLE_4 => Some(sea_pickle_shape(4)),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         terrain_id::TORCH => Some(torch_shape()),
         terrain_id::WALL_TORCH_NORTH => Some(wall_torch_north_shape()),
@@ -110,6 +114,10 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::TALL_SEAGRASS_UPPER
         | terrain_id::KELP
         | terrain_id::KELP_PLANT
+        | terrain_id::SEA_PICKLE_1
+        | terrain_id::SEA_PICKLE_2
+        | terrain_id::SEA_PICKLE_3
+        | terrain_id::SEA_PICKLE_4
         | terrain_id::TORCH
         | terrain_id::WALL_TORCH_NORTH
         | terrain_id::WALL_TORCH_EAST
@@ -173,6 +181,43 @@ fn tall_seagrass_shape() -> LocalShape {
 
 fn kelp_head_shape() -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, 9.0 / 16.0, 1.0)
+}
+
+fn sea_pickle_shape(pickles: u32) -> LocalShape {
+    match pickles {
+        1 => local_box(
+            6.0 / 16.0,
+            0.0,
+            6.0 / 16.0,
+            10.0 / 16.0,
+            6.0 / 16.0,
+            10.0 / 16.0,
+        ),
+        2 => local_box(
+            3.0 / 16.0,
+            0.0,
+            3.0 / 16.0,
+            13.0 / 16.0,
+            6.0 / 16.0,
+            13.0 / 16.0,
+        ),
+        3 => local_box(
+            2.0 / 16.0,
+            0.0,
+            2.0 / 16.0,
+            14.0 / 16.0,
+            6.0 / 16.0,
+            14.0 / 16.0,
+        ),
+        _ => local_box(
+            2.0 / 16.0,
+            0.0,
+            2.0 / 16.0,
+            14.0 / 16.0,
+            7.0 / 16.0,
+            14.0 / 16.0,
+        ),
+    }
 }
 
 fn torch_shape() -> LocalShape {
@@ -314,6 +359,10 @@ mod tests {
             terrain_id::TALL_SEAGRASS_UPPER,
             terrain_id::KELP,
             terrain_id::KELP_PLANT,
+            terrain_id::SEA_PICKLE_1,
+            terrain_id::SEA_PICKLE_2,
+            terrain_id::SEA_PICKLE_3,
+            terrain_id::SEA_PICKLE_4,
             terrain_id::TORCH,
             terrain_id::WALL_TORCH_NORTH,
             terrain_id::WALL_TORCH_EAST,
@@ -382,6 +431,16 @@ mod tests {
             shape_for(state(terrain_id::KELP_PLANT), ShapeUse::Outline)
                 .map(|shape| shape.world_aabb(pos)),
             Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::SEA_PICKLE_1), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.375, 0.0, 0.375, 0.625, 0.375, 0.625))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::SEA_PICKLE_4), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.125, 0.0, 0.125, 0.875, 0.4375, 0.875))
         );
         assert_eq!(
             shape_for(state(terrain_id::CACTUS), ShapeUse::Outline)
