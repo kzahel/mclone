@@ -311,6 +311,32 @@ Local validation on macOS/M4/MPS:
     review sheet for the top dressed/hewn projections with 3x3 tiling,
     baselines, and mip/distance previews, then decide whether 64px or 128px is
     worth carrying into `stone.ts`.
+- M3b review sheets are implemented:
+  - `project-diffusion` accepts `--review-sheet`, `--review-top <n>`, and
+    `--review-resolution <n>`. The sheet sorts projected candidates by triage
+    score and shows each row with metrics, the owned 16x16 macro baseline, the
+    current authored texture baseline, source pixels, a 3x3 tile preview, a
+    16x16 distance preview, and 64/32/16/8 mip views.
+  - Review outputs:
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-dressed-m2b-64/projection-review-64.png`,
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-hewn-m2b-64/projection-review-64.png`,
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-dressed-shortlist-128/projection-review-128.png`,
+    and
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-hewn-shortlist-128/projection-review-128.png`.
+  - Visual read: dressed-courses is still the better prompt family. Its top
+    64px candidates read as rough natural stone with some broad clouding and
+    horizontal course hints. Hewn-horizontal remains useful prompt evidence but
+    tends toward vertical panel seams, diagonal veins, or marble-like fracture
+    structure.
+  - 128px shortlist read: correction cost improves, but the 64-view tile and
+    mip panels do not show enough visible benefit to justify freezing a 128px
+    source yet. Current recommendation is to freeze a 64px dressed candidate
+    first, then validate in-engine distance/mip behavior before considering a
+    larger source.
+  - Best freeze candidates by combined metric/visual read:
+    `candidate-seed4201-strength0p580` for the quietest natural stone, or
+    `candidate-seed4205-strength0p580` if the desired direction is more
+    visibly horizontal dressed courses.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

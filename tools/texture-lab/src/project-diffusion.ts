@@ -1,9 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { PaletteSpec } from "./dsl";
-import { areaDownsample, resolveColor, type Rgba } from "./image";
+import {
+  areaDownsample,
+  drawGrid,
+  drawRect,
+  drawScaled,
+  drawTiledScaled,
+  resolveColor,
+  solidImage,
+  type Rgba,
+} from "./image";
 import { loadTexturePack } from "./load";
 import { decodePng, encodePng, type RgbaImage } from "./png";
+import { renderTexture, type RenderedTexture } from "./compositor";
+import { drawPixelText, pad3 } from "./text";
 
 interface ProjectArgs {
   input: string;
@@ -15,6 +26,10 @@ interface ProjectArgs {
   paletteColors: string[];
   symbols: string[];
   limit: number | undefined;
+  reviewSheet: boolean;
+  reviewSheetPath: string | undefined;
+  reviewTop: number;
+  reviewResolution: number | undefined;
 }
 
 interface DiffusionManifest {
@@ -175,6 +190,7 @@ async function run(args: ProjectArgs): Promise<void> {
   await fs.mkdir(args.outDir, { recursive: true });
 
   const reports: CandidateReport[] = [];
+  const renderedTexture = renderTexture(pack, args.texture, texture);
   for (const candidate of candidates) {
     const report = await projectCandidate(candidate, {
       args,
@@ -207,6 +223,19 @@ async function run(args: ProjectArgs): Promise<void> {
   const summaryPath = path.join(args.outDir, "projection-summary.json");
   await fs.writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   console.log(`Wrote ${summaryPath}`);
+
+  if (args.reviewSheet) {
+    const reviewResolution = args.reviewResolution ?? args.resolutions[0]!;
+    const reviewSheet = await makeProjectionReviewSheet(reports, {
+      currentTexture: renderedTexture,
+      macroReference,
+      reviewResolution,
+      top: args.reviewTop,
+    });
+    const reviewPath = args.reviewSheetPath ?? path.join(args.outDir, `projection-review-${reviewResolution}.png`);
+    await fs.writeFile(reviewPath, encodePng(reviewSheet));
+    console.log(`Wrote ${reviewPath}`);
+  }
 }
 
 interface ProjectContext {
@@ -285,6 +314,163 @@ async function projectCandidate(candidate: DiffusionCandidate, context: ProjectC
   await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`Wrote ${reportPath}`);
   return report;
+}
+
+interface ProjectionReviewOptions {
+  currentTexture: RenderedTexture;
+  macroReference: QuantizedImage | undefined;
+  reviewResolution: number;
+  top: number;
+}
+
+interface ProjectionReviewRow {
+  report: CandidateReport;
+  resolution: ResolutionReport;
+  image: RgbaImage;
+}
+
+async function makeProjectionReviewSheet(
+  reports: CandidateReport[],
+  options: ProjectionReviewOptions,
+): Promise<RgbaImage> {
+  const selected = reports
+    .map((report) => {
+      const resolution = report.resolutions.find((item) => item.resolution === options.reviewResolution);
+      return resolution ? { report, resolution } : undefined;
+    })
+    .filter((item): item is { report: CandidateReport; resolution: ResolutionReport } => Boolean(item))
+    .sort((a, b) => a.resolution.triage.score - b.resolution.triage.score)
+    .slice(0, options.top);
+
+  if (selected.length === 0) {
+    throw new Error(`No projected candidates have review resolution ${options.reviewResolution}`);
+  }
+
+  const rows: ProjectionReviewRow[] = [];
+  for (const item of selected) {
+    rows.push({
+      ...item,
+      image: decodePng(await fs.readFile(item.resolution.png)),
+    });
+  }
+
+  const background: Rgba = [30, 32, 32, 255];
+  const panel: Rgba = [48, 51, 50, 255];
+  const text: Rgba = [219, 224, 220, 255];
+  const dimText: Rgba = [152, 159, 154, 255];
+  const grid: Rgba = [80, 84, 82, 255];
+  const sheetWidth = 1576;
+  const headerHeight = 64;
+  const rowHeight = 316;
+  const sheet = solidImage(sheetWidth, headerHeight + rows.length * rowHeight + 16, background);
+
+  drawPixelText(sheet, `DIFFUSION REVIEW ${options.reviewResolution}`, 16, 18, 2, text);
+  drawPixelText(sheet, "TOP BY TRIAGE SCORE", 460, 22, 1, dimText);
+  drawColumnLabels(sheet, headerHeight - 24, dimText);
+
+  for (const [index, row] of rows.entries()) {
+    const y = headerHeight + index * rowHeight;
+    drawReviewRow(sheet, row, options, y, panel, text, dimText, grid);
+  }
+
+  return sheet;
+}
+
+function drawColumnLabels(sheet: RgbaImage, y: number, color: Rgba): void {
+  drawPixelText(sheet, "METRICS", 16, y, 1, color);
+  drawPixelText(sheet, "MACRO", 292, y, 1, color);
+  drawPixelText(sheet, "CURRENT", 424, y, 1, color);
+  drawPixelText(sheet, "SOURCE", 560, y, 1, color);
+  drawPixelText(sheet, "TILE 3X3", 754, y, 1, color);
+  drawPixelText(sheet, "DIST 16", 898, y, 1, color);
+  drawPixelText(sheet, "MIPS", 1110, y, 1, color);
+}
+
+function drawReviewRow(
+  sheet: RgbaImage,
+  row: ProjectionReviewRow,
+  options: ProjectionReviewOptions,
+  y: number,
+  panel: Rgba,
+  text: Rgba,
+  dimText: Rgba,
+  grid: Rgba,
+): void {
+  const top = y + 12;
+  drawRect(sheet, 16, top, 252, 288, panel);
+  drawRect(sheet, 284, top, 116, 116, panel);
+  drawRect(sheet, 416, top, 116, 116, panel);
+  drawRect(sheet, 548, top, 272, 288, panel);
+  drawRect(sheet, 836, top, 212, 212, panel);
+  drawRect(sheet, 1064, top, 116, 116, panel);
+  drawRect(sheet, 1196, top, 364, 116, panel);
+
+  drawMetricText(sheet, row, 28, top + 18, text, dimText);
+
+  if (options.macroReference) {
+    drawFitWithGrid(sheet, options.macroReference.image, 294, top + 10, 96, grid);
+  }
+  drawFitWithGrid(sheet, options.currentTexture, 426, top + 10, 96, grid);
+  drawFitWithGrid(sheet, row.image, 556, top + 10, 256, grid);
+
+  const tileImage = row.image.width > 64 || row.image.height > 64 ? areaDownsample(row.image, 64, 64) : row.image;
+  drawTiledScaled(sheet, tileImage, 846, top + 10, 3, 3, 1);
+
+  const distance16 = areaDownsample(row.image, 16, 16);
+  drawScaled(sheet, distance16, 1074, top + 10, 6);
+  drawGrid(sheet, 1074, top + 10, 16, 16, 6, grid);
+
+  drawMipStrip64(sheet, row.image, 1206, top + 10, grid);
+
+  drawPixelText(sheet, "MACRO", 310, top + 132, 1, dimText);
+  drawPixelText(sheet, "CURRENT", 430, top + 132, 1, dimText);
+  drawPixelText(sheet, `${row.image.width}`, 556, top + 276, 1, dimText);
+  drawPixelText(sheet, tileImage.width === row.image.width ? "TILE" : "TILE 64 VIEW", 850, top + 224, 1, dimText);
+  drawPixelText(sheet, "DISTANCE", 1070, top + 132, 1, dimText);
+  drawPixelText(sheet, "64 32 16 08", 1206, top + 88, 1, dimText);
+}
+
+function drawMetricText(sheet: RgbaImage, row: ProjectionReviewRow, x: number, y: number, text: Rgba, dimText: Rgba): void {
+  const seed = row.report.candidate.seed ?? 0;
+  const strength = Math.round((row.report.candidate.strength ?? 0) * 100);
+  const score = Math.round(row.resolution.triage.score * 100);
+  const corrected = Math.round((row.resolution.correction?.correctedPixelRate ?? 0) * 100);
+  const seam = Math.round(Math.max(row.resolution.seam.xWrap.meanAbsRgb, row.resolution.seam.yWrap.meanAbsRgb));
+  const isolated = Math.round(row.resolution.detail.isolatedPixelRate * 100);
+  const qerr = Math.round(row.resolution.quantization.meanOklabError * 1000);
+  const lines: [string, string][] = [
+    ["SEED", seed.toString()],
+    ["STR", pad3(strength)],
+    ["SCORE", pad3(score)],
+    ["CORR", pad3(corrected)],
+    ["SEAM", pad3(seam)],
+    ["ISO", pad3(isolated)],
+    ["QERR", pad3(qerr)],
+  ];
+  for (const [index, [label, value]] of lines.entries()) {
+    const lineY = y + index * 30;
+    drawPixelText(sheet, label, x, lineY, 1, dimText);
+    drawPixelText(sheet, value, x + 108, lineY, 2, text);
+  }
+  drawPixelText(sheet, row.resolution.triage.status.toUpperCase(), x, y + 236, 1, text);
+}
+
+function drawFitWithGrid(sheet: RgbaImage, image: RgbaImage, x: number, y: number, maxSize: number, grid: Rgba): void {
+  const display = image.width > maxSize || image.height > maxSize ? areaDownsample(image, maxSize, maxSize) : image;
+  const scale = Math.max(1, Math.floor(maxSize / Math.max(display.width, display.height)));
+  drawScaled(sheet, display, x, y, scale);
+  drawGrid(sheet, x, y, display.width, display.height, scale, grid);
+}
+
+function drawMipStrip64(sheet: RgbaImage, image: RgbaImage, x: number, y: number, grid: Rgba): void {
+  const levels = [64, 32, 16, 8];
+  for (const [index, size] of levels.entries()) {
+    const mip = image.width === size && image.height === size ? image : areaDownsample(image, size, size);
+    const scale = 64 / size;
+    const panelX = x + index * 84;
+    drawScaled(sheet, mip, panelX, y, scale);
+    drawGrid(sheet, panelX, y, size, size, scale, grid);
+  }
 }
 
 function makePaletteEntries(palette: PaletteSpec, selectedNames: string[], selectedSymbols: string[]): PaletteEntry[] {
@@ -834,7 +1020,7 @@ function parseArgs(argv: string[]): ProjectArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
     throw new Error(
-      "Usage: tsx src/project-diffusion.ts <texture.ts> --manifest <manifest.json> --texture <name> [--candidate <id>]... [--resolutions 32,64,128] [--palette-colors a,b,c] [--symbols abc] [--out <dir>] [--limit <n>]",
+      "Usage: tsx src/project-diffusion.ts <texture.ts> --manifest <manifest.json> --texture <name> [--candidate <id>]... [--resolutions 32,64,128] [--palette-colors a,b,c] [--symbols abc] [--out <dir>] [--limit <n>] [--review-sheet [path]] [--review-top <n>] [--review-resolution <n>]",
     );
   }
 
@@ -846,6 +1032,10 @@ function parseArgs(argv: string[]): ProjectArgs {
   let paletteColors: string[] = [];
   let symbols: string[] = [];
   let limit: number | undefined;
+  let reviewSheet = false;
+  let reviewSheetPath: string | undefined;
+  let reviewTop = 8;
+  let reviewResolution: number | undefined;
 
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]!;
@@ -911,6 +1101,35 @@ function parseArgs(argv: string[]): ProjectArgs {
       }
       limit = parsed;
       index += 1;
+    } else if (arg === "--review-sheet") {
+      reviewSheet = true;
+      const next = argv[index + 1];
+      if (next && !next.startsWith("-")) {
+        reviewSheetPath = next;
+        index += 1;
+      }
+    } else if (arg === "--review-top") {
+      const next = argv[index + 1];
+      if (!next) {
+        throw new Error("--review-top requires a positive integer");
+      }
+      const parsed = Number.parseInt(next, 10);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(`--review-top must be a positive integer, got '${next}'`);
+      }
+      reviewTop = parsed;
+      index += 1;
+    } else if (arg === "--review-resolution") {
+      const next = argv[index + 1];
+      if (!next) {
+        throw new Error("--review-resolution requires a positive integer");
+      }
+      const parsed = Number.parseInt(next, 10);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(`--review-resolution must be a positive integer, got '${next}'`);
+      }
+      reviewResolution = parsed;
+      index += 1;
     } else {
       throw new Error(`Unknown argument '${arg}'`);
     }
@@ -933,6 +1152,10 @@ function parseArgs(argv: string[]): ProjectArgs {
     paletteColors,
     symbols,
     limit,
+    reviewSheet,
+    reviewSheetPath,
+    reviewTop,
+    reviewResolution,
   };
 }
 
