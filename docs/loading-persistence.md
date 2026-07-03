@@ -169,8 +169,8 @@ This is the main policy distinction:
 - `native/crates/mclone-server/src/persistence.rs` defines the shared
   `WorldStore` contract, `ChunkRecord`, `PersistenceActor`,
   `PersistenceMailbox`, `NullWorldStore`, `MemoryWorldStore`,
-  `ChunkSnapshotWorldStore`, and the current `ChunkSnapshotStore`
-  compatibility layer.
+  native `SqliteWorldStore`, `ChunkSnapshotWorldStore`, and the current
+  `ChunkSnapshotStore` compatibility layer.
 - `native/crates/mclone-server/src/scheduler.rs` owns dirty holder tracking, save-on-unload, and `save_dirty_chunks()`.
 - `native/crates/mclone-server/src/integrated.rs` exposes integrated-server save/reload behavior to native clients.
 
@@ -205,7 +205,12 @@ and are wired through scheduler/integrated-host load, dirty-save, and unload
 handling for `WorldStore` backends that opt into entity chunks. Snapshot-only
 compatibility stores remain chunk-only.
 
-Browser singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote host uses file-backed JSON records under a save root. Unit tests generally use memory storage.
+Native `SqliteWorldStore` persists block and entity chunk records in one
+SQLite database and can run through the threaded mailbox. It is not yet wired
+into native app or dedicated-server world-dir startup paths. Browser
+singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote
+host uses file-backed JSON records under a save root. Unit tests generally use
+memory storage.
 
 ### Save Identity And Compatibility
 

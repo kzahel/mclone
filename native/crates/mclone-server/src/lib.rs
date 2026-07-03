@@ -61,6 +61,8 @@ pub use loading_progress::{
     ChunkLoadingProgress, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,
     ChunkLoadingProgressStats,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use persistence::SqliteWorldStore;
 pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
     ChunkStoreError, ChunkStoreResult, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore,

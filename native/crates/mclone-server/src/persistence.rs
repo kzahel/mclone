@@ -15,6 +15,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use rusqlite::{Connection, OptionalExtension, params};
+
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
 use mclone_protocol::{EntityRotation, ItemStackSnapshot};
 
@@ -27,6 +30,10 @@ use mclone_core::{
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
 #[cfg(any(test, not(target_arch = "wasm32")))]
 const SNAPSHOT_FORMAT_VERSION: u32 = 5;
+#[cfg(any(test, not(target_arch = "wasm32")))]
+const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
+#[cfg(not(target_arch = "wasm32"))]
+const SQLITE_WORLD_SCHEMA_VERSION: i64 = 1;
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
@@ -58,6 +65,11 @@ impl From<io::Error> for ChunkStoreError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sqlite_error(error: rusqlite::Error) -> ChunkStoreError {
+    ChunkStoreError::InvalidData(format!("sqlite world store error: {error}"))
 }
 
 fn duplicate_store_error(error: &ChunkStoreError) -> ChunkStoreError {
@@ -1654,6 +1666,211 @@ impl WorldStore for FilesystemChunkSnapshotStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub struct SqliteWorldStore {
+    path: PathBuf,
+    connection: Connection,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SqliteWorldStore {
+    pub fn new(path: impl Into<PathBuf>) -> ChunkStoreResult<Self> {
+        let path = path.into();
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)?;
+        }
+        let connection = Connection::open(&path).map_err(sqlite_error)?;
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 PRAGMA synchronous = FULL;",
+            )
+            .map_err(sqlite_error)?;
+        let _ = connection.query_row("PRAGMA journal_mode = WAL", [], |row| {
+            row.get::<_, String>(0)
+        });
+        initialize_sqlite_world_schema(&connection)?;
+        Ok(Self { path, connection })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldStore for SqliteWorldStore {
+    fn supports_entity_chunks(&self) -> bool {
+        true
+    }
+
+    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+        let blob = self
+            .connection
+            .query_row(
+                "SELECT record_blob FROM chunk_records WHERE x = ?1 AND z = ?2",
+                params![pos.x, pos.z],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        let Some(blob) = blob else {
+            return Ok(None);
+        };
+        let record = read_chunk_record(&mut blob.as_slice())?;
+        if record.pos() != pos {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "sqlite chunk record for ({}, {}) contained position ({}, {})",
+                pos.x,
+                pos.z,
+                record.pos().x,
+                record.pos().z
+            )));
+        }
+        Ok(Some(record))
+    }
+
+    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+        let mut blob = Vec::new();
+        write_chunk_record(&mut blob, record)?;
+        self.connection
+            .execute(
+                "INSERT INTO chunk_records (x, z, codec_version, revision, record_blob)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(x, z) DO UPDATE SET
+                    codec_version = excluded.codec_version,
+                    revision = excluded.revision,
+                    record_blob = excluded.record_blob",
+                params![
+                    record.pos().x,
+                    record.pos().z,
+                    SNAPSHOT_FORMAT_VERSION,
+                    record.revision().0.to_string(),
+                    blob
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        let blob = self
+            .connection
+            .query_row(
+                "SELECT record_blob FROM entity_chunk_records WHERE x = ?1 AND z = ?2",
+                params![pos.x, pos.z],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        let Some(blob) = blob else {
+            return Ok(None);
+        };
+        let record = read_entity_chunk_record(&mut blob.as_slice())?;
+        if record.pos != pos {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "sqlite entity chunk record for ({}, {}) contained position ({}, {})",
+                pos.x, pos.z, record.pos.x, record.pos.z
+            )));
+        }
+        Ok(Some(record))
+    }
+
+    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+        let mut blob = Vec::new();
+        write_entity_chunk_record(&mut blob, record)?;
+        self.connection
+            .execute(
+                "INSERT INTO entity_chunk_records (x, z, codec_version, revision, record_blob)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(x, z) DO UPDATE SET
+                    codec_version = excluded.codec_version,
+                    revision = excluded.revision,
+                    record_blob = excluded.record_blob",
+                params![
+                    record.pos.x,
+                    record.pos.z,
+                    record.codec_version,
+                    record.revision.to_string(),
+                    blob
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> ChunkStoreResult<()> {
+        let _busy: i64 = self
+            .connection
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(0))
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    fn close(&mut self) -> ChunkStoreResult<()> {
+        self.flush()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn initialize_sqlite_world_schema(connection: &Connection) -> ChunkStoreResult<()> {
+    let user_version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if user_version != 0 && user_version != SQLITE_WORLD_SCHEMA_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported sqlite world schema version {user_version}; expected {SQLITE_WORLD_SCHEMA_VERSION}"
+        )));
+    }
+
+    connection
+        .execute_batch(
+            "BEGIN IMMEDIATE;
+             CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS chunk_records (
+                x INTEGER NOT NULL,
+                z INTEGER NOT NULL,
+                codec_version INTEGER NOT NULL,
+                revision TEXT NOT NULL,
+                record_blob BLOB NOT NULL,
+                PRIMARY KEY (x, z)
+             );
+             CREATE TABLE IF NOT EXISTS entity_chunk_records (
+                x INTEGER NOT NULL,
+                z INTEGER NOT NULL,
+                codec_version INTEGER NOT NULL,
+                revision TEXT NOT NULL,
+                record_blob BLOB NOT NULL,
+                PRIMARY KEY (x, z)
+             );
+             CREATE TABLE IF NOT EXISTS player_records (
+                player_key TEXT PRIMARY KEY,
+                codec_version INTEGER NOT NULL,
+                revision TEXT NOT NULL,
+                record_blob BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS saved_data_records (
+                data_key TEXT PRIMARY KEY,
+                codec_version INTEGER NOT NULL,
+                revision TEXT NOT NULL,
+                record_blob BLOB NOT NULL
+             );
+             INSERT OR IGNORE INTO metadata (key, value)
+                VALUES ('schema_version', '1');
+             PRAGMA user_version = 1;
+             COMMIT;",
+        )
+        .map_err(sqlite_error)?;
+    Ok(())
+}
+
 #[cfg(test)]
 fn write_snapshot(writer: &mut impl Write, snapshot: &ChunkSnapshot) -> ChunkStoreResult<()> {
     write_chunk_record(writer, &ChunkRecord::from_snapshot(snapshot.clone()))
@@ -1779,6 +1996,207 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
         scheduled_block_ticks,
         scheduled_fluid_ticks,
     })
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_entity_chunk_record(
+    writer: &mut impl Write,
+    record: &EntityChunkRecord,
+) -> ChunkStoreResult<()> {
+    writer.write_all(ENTITY_CHUNK_MAGIC)?;
+    write_u32(writer, ENTITY_CHUNK_RECORD_VERSION)?;
+    write_i32(writer, record.pos.x)?;
+    write_i32(writer, record.pos.z)?;
+    write_u64(writer, record.revision)?;
+    write_u32(writer, record.codec_version)?;
+    write_len(writer, record.entities.len(), "entity count")?;
+    for entity in &record.entities {
+        write_entity_save_record(writer, entity)?;
+    }
+    writer.flush()?;
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityChunkRecord> {
+    let mut magic = [0_u8; ENTITY_CHUNK_MAGIC.len()];
+    reader.read_exact(&mut magic)?;
+    if &magic != ENTITY_CHUNK_MAGIC {
+        return Err(ChunkStoreError::InvalidData(
+            "entity chunk record had invalid magic".to_owned(),
+        ));
+    }
+    let version = read_u32(reader)?;
+    if version != ENTITY_CHUNK_RECORD_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported entity chunk record version {version}"
+        )));
+    }
+    let pos = ChunkPos::new(read_i32(reader)?, read_i32(reader)?);
+    let revision = read_u64(reader)?;
+    let codec_version = read_u32(reader)?;
+    if codec_version != ENTITY_CHUNK_RECORD_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported entity chunk codec version {codec_version}"
+        )));
+    }
+    let entity_count = read_len(reader)?;
+    let mut entities = Vec::with_capacity(entity_count);
+    for _ in 0..entity_count {
+        entities.push(read_entity_save_record(reader)?);
+    }
+    Ok(EntityChunkRecord {
+        pos,
+        revision,
+        codec_version,
+        entities,
+    })
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_entity_save_record(
+    writer: &mut impl Write,
+    record: &EntitySaveRecord,
+) -> ChunkStoreResult<()> {
+    write_u64(writer, record.persistent_id.most)?;
+    write_u64(writer, record.persistent_id.least)?;
+    write_string(writer, &record.kind, "entity kind")?;
+    write_vec3d(writer, record.position)?;
+    write_vec3d(writer, record.delta_movement)?;
+    write_f32(writer, record.y_rot_degrees)?;
+    write_f32(writer, record.x_rot_degrees)?;
+    write_optional_rotation(writer, record.rotation)?;
+    write_bool(writer, record.on_ground)?;
+    write_u64(writer, record.age_ticks)?;
+    write_entity_save_payload(writer, &record.payload)
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_entity_save_record(reader: &mut impl Read) -> ChunkStoreResult<EntitySaveRecord> {
+    let persistent_id = EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?);
+    let kind = read_string(reader)?;
+    let position = read_vec3d(reader)?;
+    let delta_movement = read_vec3d(reader)?;
+    let y_rot_degrees = read_f32(reader)?;
+    let x_rot_degrees = read_f32(reader)?;
+    let rotation = read_optional_rotation(reader)?;
+    let on_ground = read_bool(reader)?;
+    let age_ticks = read_u64(reader)?;
+    let payload = read_entity_save_payload(reader)?;
+    Ok(EntitySaveRecord {
+        persistent_id,
+        kind,
+        position,
+        delta_movement,
+        y_rot_degrees,
+        x_rot_degrees,
+        rotation,
+        on_ground,
+        age_ticks,
+        payload,
+    })
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_entity_save_payload(
+    writer: &mut impl Write,
+    payload: &EntitySavePayload,
+) -> ChunkStoreResult<()> {
+    match payload {
+        EntitySavePayload::Cow => write_u8(writer, 0),
+        EntitySavePayload::Chicken { egg_time } => {
+            write_u8(writer, 1)?;
+            write_i32(writer, *egg_time)
+        }
+        EntitySavePayload::Item {
+            stack,
+            pickup_delay,
+        } => {
+            write_u8(writer, 2)?;
+            write_item_stack_save_record(writer, stack)?;
+            write_i32(writer, *pickup_delay)
+        }
+    }
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySavePayload> {
+    match read_u8(reader)? {
+        0 => Ok(EntitySavePayload::Cow),
+        1 => Ok(EntitySavePayload::Chicken {
+            egg_time: read_i32(reader)?,
+        }),
+        2 => Ok(EntitySavePayload::Item {
+            stack: read_item_stack_save_record(reader)?,
+            pickup_delay: read_i32(reader)?,
+        }),
+        value => Err(ChunkStoreError::InvalidData(format!(
+            "unknown entity save payload kind {value}"
+        ))),
+    }
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_item_stack_save_record(
+    writer: &mut impl Write,
+    stack: &ItemStackSaveRecord,
+) -> ChunkStoreResult<()> {
+    write_string(writer, &stack.kind, "item stack kind")?;
+    write_u8(writer, stack.count)
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_item_stack_save_record(reader: &mut impl Read) -> ChunkStoreResult<ItemStackSaveRecord> {
+    Ok(ItemStackSaveRecord::new(
+        read_string(reader)?,
+        read_u8(reader)?,
+    ))
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_vec3d(writer: &mut impl Write, value: Vec3d) -> ChunkStoreResult<()> {
+    write_f64(writer, value.x)?;
+    write_f64(writer, value.y)?;
+    write_f64(writer, value.z)
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_vec3d(reader: &mut impl Read) -> ChunkStoreResult<Vec3d> {
+    Ok(Vec3d::new(
+        read_f64(reader)?,
+        read_f64(reader)?,
+        read_f64(reader)?,
+    ))
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_optional_rotation(
+    writer: &mut impl Write,
+    rotation: Option<EntityRotation>,
+) -> ChunkStoreResult<()> {
+    match rotation {
+        Some(rotation) => {
+            write_bool(writer, true)?;
+            write_f32(writer, rotation.x)?;
+            write_f32(writer, rotation.y)?;
+            write_f32(writer, rotation.z)?;
+            write_f32(writer, rotation.w)
+        }
+        None => write_bool(writer, false),
+    }
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_optional_rotation(reader: &mut impl Read) -> ChunkStoreResult<Option<EntityRotation>> {
+    if !read_bool(reader)? {
+        return Ok(None);
+    }
+    Ok(Some(EntityRotation {
+        x: read_f32(reader)?,
+        y: read_f32(reader)?,
+        z: read_f32(reader)?,
+        w: read_f32(reader)?,
+    }))
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
@@ -2064,6 +2482,32 @@ fn read_u64(reader: &mut impl Read) -> ChunkStoreResult<u64> {
     Ok(u64::from_le_bytes(bytes))
 }
 
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_f32(writer: &mut impl Write, value: f32) -> ChunkStoreResult<()> {
+    writer.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_f32(reader: &mut impl Read) -> ChunkStoreResult<f32> {
+    let mut bytes = [0_u8; 4];
+    reader.read_exact(&mut bytes)?;
+    Ok(f32::from_le_bytes(bytes))
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_f64(writer: &mut impl Write, value: f64) -> ChunkStoreResult<()> {
+    writer.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_f64(reader: &mut impl Read) -> ChunkStoreResult<f64> {
+    let mut bytes = [0_u8; 8];
+    reader.read_exact(&mut bytes)?;
+    Ok(f64::from_le_bytes(bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2127,6 +2571,40 @@ mod tests {
 
         write_chunk_record(&mut bytes, &record).unwrap();
         let decoded = read_chunk_record(&mut bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn binary_entity_chunk_record_format_roundtrips_entities() {
+        let record = EntityChunkRecord::new(
+            ChunkPos::new(-7, 9),
+            42,
+            vec![
+                test_entity_save_record(),
+                EntitySaveRecord {
+                    persistent_id: EntityPersistentId::new(0xABCD, 0x1234),
+                    kind: "minecraft:chicken".to_owned(),
+                    position: Vec3d::new(-1.0, 70.5, 3.25),
+                    delta_movement: Vec3d::new(0.1, -0.2, 0.3),
+                    y_rot_degrees: 45.0,
+                    x_rot_degrees: -12.0,
+                    rotation: Some(EntityRotation {
+                        x: 0.0,
+                        y: 0.5,
+                        z: 0.0,
+                        w: 0.8660254,
+                    }),
+                    on_ground: false,
+                    age_ticks: 77,
+                    payload: EntitySavePayload::Chicken { egg_time: 1234 },
+                },
+            ],
+        );
+        let mut bytes = Vec::new();
+
+        write_entity_chunk_record(&mut bytes, &record).unwrap();
+        let decoded = read_entity_chunk_record(&mut bytes.as_slice()).unwrap();
 
         assert_eq!(decoded, record);
     }
@@ -2480,6 +2958,84 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn sqlite_world_store_roundtrips_chunk_and_entity_records_across_reopen() {
+        let root = unique_temp_dir("sqlite_world_store_roundtrips_records");
+        let path = root.join("world.sqlite3");
+        let chunk_pos = ChunkPos::new(21, -3);
+        let entity_pos = ChunkPos::new(21, -2);
+        let chunk = test_record(chunk_pos, 14);
+        let entity_chunk = test_entity_chunk_record(entity_pos, 15);
+
+        {
+            let mut store = SqliteWorldStore::new(&path).unwrap();
+            assert!(store.supports_entity_chunks());
+            store.save_chunk(&chunk).unwrap();
+            store.save_entity_chunk(&entity_chunk).unwrap();
+            store.flush().unwrap();
+            store.close().unwrap();
+        }
+
+        {
+            let mut reopened = SqliteWorldStore::new(&path).unwrap();
+            assert_eq!(reopened.path(), path.as_path());
+            assert_eq!(reopened.load_chunk(chunk_pos).unwrap(), Some(chunk));
+            assert_eq!(
+                reopened.load_entity_chunk(entity_pos).unwrap(),
+                Some(entity_chunk)
+            );
+            assert_eq!(reopened.load_chunk(ChunkPos::new(99, 99)).unwrap(), None);
+            assert_eq!(
+                reopened.load_entity_chunk(ChunkPos::new(99, 99)).unwrap(),
+                None
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn threaded_sqlite_world_store_persists_durable_records_across_reopen() {
+        let root = unique_temp_dir("threaded_sqlite_world_store_persists_records");
+        let path = root.join("world.sqlite3");
+        let chunk_pos = ChunkPos::new(22, 3);
+        let entity_pos = ChunkPos::new(22, 4);
+        let chunk = test_record(chunk_pos, 16);
+        let entity_chunk = test_entity_chunk_record(entity_pos, 17);
+
+        {
+            let store = SqliteWorldStore::new(&path).unwrap();
+            let mut mailbox = PersistenceMailbox::threaded(Box::new(store)).unwrap();
+            let chunk_save_id = mailbox.save_chunk(chunk.clone(), SaveDurability::Durable);
+            let entity_save_id =
+                mailbox.save_entity_chunk(entity_chunk.clone(), SaveDurability::Durable);
+            let close_id = mailbox.close();
+
+            assert_eq!(
+                take_saved_chunk_wait(&mut mailbox, chunk_save_id),
+                StoreWriteOutcome::Written
+            );
+            assert_eq!(
+                take_saved_entity_chunk_wait(&mut mailbox, entity_save_id),
+                StoreWriteOutcome::Written
+            );
+            take_close_complete_wait(&mut mailbox, close_id);
+        }
+
+        {
+            let mut reopened = SqliteWorldStore::new(&path).unwrap();
+            assert_eq!(reopened.load_chunk(chunk_pos).unwrap(), Some(chunk));
+            assert_eq!(
+                reopened.load_entity_chunk(entity_pos).unwrap(),
+                Some(entity_chunk)
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn test_snapshot(pos: ChunkPos, revision: u64) -> ChunkSnapshot {
         ChunkSnapshot::from_block_state_ids(
             pos,
@@ -2627,6 +3183,17 @@ mod tests {
     ) -> StoreWriteOutcome {
         match take_completion_wait(mailbox, request_id) {
             WorldStoreCompletion::ChunkSaved { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_saved_entity_chunk_wait(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> StoreWriteOutcome {
+        match take_completion_wait(mailbox, request_id) {
+            WorldStoreCompletion::EntityChunkSaved { result, .. } => result.unwrap(),
             completion => panic!("unexpected completion: {completion:?}"),
         }
     }

@@ -1,7 +1,7 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 4A native threaded mailbox landed, native durable backend
-next.
+Status: active; Slice 4B SQLite world-store foundation landed, app/dedicated
+world-dir wiring next.
 
 ## Purpose
 
@@ -35,7 +35,7 @@ Read before implementation:
 
 ## Current Native State
 
-Live Rust after Slice 3B has:
+Live Rust after Slice 4B has:
 
 - `native/crates/mclone-server/src/persistence.rs`
 - `ChunkSnapshotStore`
@@ -47,6 +47,7 @@ Live Rust after Slice 3B has:
 - `PersistenceActor` / `PersistenceMailbox`
 - optional native-thread `PersistenceMailbox` backend for `Send` stores
 - `NullWorldStore` / `MemoryWorldStore`
+- native `SqliteWorldStore` for durable block/entity chunk records
 - `ChunkSnapshotWorldStore`
 - `SynchronousPersistenceFacade`
 - synchronous `load_chunk` / `save_chunk`
@@ -63,10 +64,10 @@ Live Rust after Slice 3B has:
 
 This is useful but still too narrow:
 
-- no physical durable native backend for block and entity records
+- the durable native backend is not wired into app/dedicated world-open paths
 - no player/world/saved-data records
 - no web IndexedDB adapter
-- no Android or dedicated-server world-dir wiring
+- no Android app-private or dedicated-server world-dir wiring
 
 `docs/loading-persistence.md` contains richer target vocabulary than the live
 Rust path. Treat live Rust as the source of current behavior and reconcile the
@@ -329,8 +330,9 @@ Add the first real durable native backend, and move the actor off the server
 thread in the same slice. Landing real disk IO without the offload would
 reintroduce exactly the blocking this design exists to avoid.
 
-Status: Slice 4A native threaded mailbox landed 2026-07-03; physical durable
-backend still pending.
+Status: Slice 4A native threaded mailbox landed 2026-07-03; Slice 4B SQLite
+world-store foundation landed 2026-07-03. App/dedicated world-dir wiring still
+pending.
 
 Deliverables beyond the backend:
 
@@ -368,6 +370,19 @@ Recommended first backend:
 - WAL mode where supported
 - schema version and compatibility checks
 
+Landed backend shape:
+
+- `SqliteWorldStore` is a native `WorldStore` backed by one SQLite database.
+- It stores versioned engine-native chunk blobs using the existing
+  `ChunkRecord` binary codec.
+- It stores versioned entity chunk blobs using the new `EntityChunkRecord`
+  binary codec for Cow, Chicken, and Item save records.
+- It creates metadata, chunk, entity chunk, player placeholder, and saved-data
+  placeholder tables, and records schema version through `PRAGMA user_version`.
+- It enables WAL where supported and checkpoints on `flush` / `close`.
+- The backend is native-only and exported from `mclone-server`; WASM builds do
+  not pull in SQLite.
+
 Alternative allowed if SQLite integration is blocked:
 
 - filesystem records under a world root, still behind the same `WorldStore`
@@ -376,10 +391,15 @@ Alternative allowed if SQLite integration is blocked:
 
 Validation:
 
-- desktop native creates a named world dir/db
-- chunk edit persists across process restart
-- generated animal persists across process restart
-- killed generated animal remains gone across process restart
+- direct SQLite store reopen preserves chunk and entity chunk records
+- threaded mailbox plus SQLite store reopen preserves durable chunk and entity
+  chunk writes
+- desktop native app wiring creates a named world dir/db
+- chunk edit persists across process restart after app wiring
+- generated animal persists across process restart after generated-original
+  entity persistence lands
+- killed generated animal remains gone across process restart after tombstone
+  suppression lands
 - explicit transient world still discards all state
 - a deliberately slow store fake does not inflate host tick time; this is
   covered for the threaded mailbox foundation
@@ -478,7 +498,7 @@ one platform before the shared host contract is clear.
 
 ## Next Likely Implementation Chunk
 
-Proceed with **Slice 4B: Native Durable Backend**.
+Proceed with **Slice 5: Dedicated Server World Dir**.
 
 Reasoning:
 
@@ -486,12 +506,11 @@ Reasoning:
   scheduler/mailbox lifecycle for world-store-backed hosts.
 - Slice 4A moved native `Send` stores behind an optional worker-thread mailbox,
   so real native IO no longer needs to run on the server thread.
-- The remaining persistence risk is physical durability: block and entity
-  records need a transactional world backend instead of memory or snapshot-only
-  compatibility storage.
-- Landing the native durable backend before IndexedDB/Android keeps platform
-  adapters behind the same `WorldStore` contract instead of forcing browser or
-  app-local policy into gameplay code.
+- Slice 4B added the transactional SQLite `WorldStore` foundation for block and
+  entity chunk records.
+- The remaining native risk is lifecycle wiring: native/dedicated hosts need a
+  world-dir/open mode, threaded SQLite store construction, flush/close on clean
+  shutdown, and process-restart smokes.
 
 ## Validation Gates
 

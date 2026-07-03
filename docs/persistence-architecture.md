@@ -341,16 +341,18 @@ The current `FilesystemChunkSnapshotStore` is a useful compatibility scaffold
 and now implements `WorldStore`, but it remains chunk-only and synchronous.
 Likewise, `ChunkSnapshotWorldStore` is snapshot-only compatibility glue and does
 not advertise entity chunk support.
-Future native backends should keep the same logical contract while replacing
-the physical format and moving real IO off the server thread.
+Native `SqliteWorldStore` is the first durable block/entity chunk backend behind
+the same logical contract. It is not yet wired into app or dedicated world-dir
+startup paths.
 
-Recommended first durable native backend:
+Current durable native backend:
 
 - one SQLite database per world
-- blob columns for engine-native chunk/entity/player records
-- metadata and schema tables
+- blob columns for engine-native chunk/entity records
+- player and saved-data placeholder tables
+- metadata and schema tables with `PRAGMA user_version`
 - WAL mode where supported
-- explicit transaction boundaries for flush/close
+- checkpoint on flush/close
 
 SQLite is a pragmatic starting point because it gives indexing, transactions,
 schema migration, and fewer small-file problems. `rusqlite` with the bundled
