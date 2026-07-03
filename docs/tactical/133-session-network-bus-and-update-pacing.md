@@ -12,8 +12,10 @@ validation landed; Slice 3F Quest-controlled chunk-view churn validation
 landed and reproduced the unload client-apply tail; Slice 3G default
 unload-count pump cap landed and reduced the Quest unload tail but did not
 eliminate it; Slice 3H client entity-by-chunk unload index landed and cut the
-Quest update-pump tail below 4 ms; remote/web bus convergence and broader
-terrain coordinator lifecycle remain active
+Quest update-pump tail below 4 ms; Slice 3I batched packed-section patching
+landed, with Quest remeasurement blocked by the current cactus asset-load
+issue; remote/web bus convergence and broader terrain coordinator lifecycle
+remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -709,6 +711,36 @@ Validation (Slice 3H):
 - Quest validation command passed:
   `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-churn-entity-index-summary.txt --log /tmp/mclone-quest-openxr-churn-entity-index-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
 
+### Slice 3I - Batched Section Block Patching
+
+Goal: make `SectionBlockUpdates` client apply thin by avoiding repeated
+unpack/repack work for multiple block changes in the same packed section.
+
+- [x] Add `ChunkSnapshot::patch_section_blocks`, preserving ordered per-block
+  semantics while unpacking the target packed section once and repacking it
+  once after all changes.
+- [x] Keep `patch_section_block` as the single-block compatibility wrapper.
+- [x] Route `ClientRuntime::apply_section_block_updates` through the batch API.
+- [x] Route the server snapshot replay helper through the same batch API so
+  shared snapshot semantics stay aligned.
+- [x] Cover multi-block batches, no-op batches, all-air removal, and duplicate
+  same-position update ordering in core tests; extend the client section-update
+  test to apply multiple updates from one packet.
+
+Validation (Slice 3I):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-core -p mclone-client -p mclone-server -- --nocapture`
+  passed.
+- `cargo ndk -t arm64-v8a --platform 28 check --package mclone-android-xr-client --lib`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-core -p mclone-client -p mclone-server -p mclone-app-runtime -- --nocapture`
+  ran but app-runtime's textured local-single-view tests failed before this
+  patch's runtime path could be measured because the current asset tree cannot
+  load `minecraft:cactus[age=0]` (`age=0` blockstate variant missing). That
+  known blocker is also recorded in `136-world-catalog-and-crud-ui.md`.
+- Quest chunk-view churn was not rerun for Slice 3I because the same textured
+  asset load failure blocks the runtime startup path needed for measurement.
+
 Slice 3 conclusion: the local integrated update pump now follows the intended
 thin-apply shape for resident dirty marking: producer-side decode, strict
 receive-order application, resident flag flips, and bounded compile/upload
@@ -722,12 +754,12 @@ unloads applied in one normal frame, and the client entity-by-chunk index
 removed the worst O(unloads * live entities) client-replica scan. The measured
 Quest update-pump max is now below 4 ms in the churn lane, and the worst sampled
 frames are no longer update-apply frames. Remaining valuable local work before
-closing this slice is to inspect the section-block client patch tail and
-residual unload dirty marking, then retune or remove the unload-count cap if the
-thin-apply target holds. Keep receive order; any additional divergence should
-stop between ordered update records or make oversized lifecycle batches
-splittable instead of reordering them. This tactical's remaining bus work is
-still remote TCP and web convergence.
+closing this slice is to remeasure after the cactus asset-load blocker is
+cleared, then inspect residual unload dirty marking and retune or remove the
+unload-count cap if the thin-apply target holds. Keep receive order; any
+additional divergence should stop between ordered update records or make
+oversized lifecycle batches splittable instead of reordering them. This
+tactical's remaining bus work is still remote TCP and web convergence.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
@@ -797,8 +829,9 @@ another doc, explicitly decide where these remaining valuable items live:
   client-apply. A default count cap now limits the normal frame pump to `16`
   unload updates, and the client entity-by-chunk index cut the capped Quest
   update-pump max to `3.913 ms` apply / `3.882 ms` client apply. Before closing
-  this tactical, either inspect the remaining section-block client patch tail
-  plus residual unload dirty marking, or explicitly move that work to the
+  this tactical, remeasure after the batched section-block patching slice and
+  the current cactus asset-load blocker are cleared; then either inspect
+  residual unload dirty marking, or explicitly move that work to the
   terrain/client-runtime coordinator track.
 - Remote TCP session actor: native remote still needs a real inbound update
   bus and producer-side decode so `SendOnly` works outside local integrated

@@ -1818,17 +1818,17 @@ mod tests {
             if *pos != snapshot.pos {
                 continue;
             }
-            for update in updates {
-                if snapshot.patch_section_block(
-                    *section_y,
-                    update.local_x as i32,
-                    update.local_y as i32,
-                    update.local_z as i32,
-                    update.block_state,
-                ) {
-                    applied += 1;
-                }
-            }
+            applied += snapshot.patch_section_blocks(
+                *section_y,
+                updates.iter().map(|update| {
+                    (
+                        update.local_x as i32,
+                        update.local_y as i32,
+                        update.local_z as i32,
+                        update.block_state,
+                    )
+                }),
+            );
         }
         applied
     }

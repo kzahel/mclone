@@ -1703,13 +1703,18 @@ applied update age to `235.992 ms`. A follow-up client entity-by-chunk index
 removed the O(unloads * live entities) unload cleanup scan and improved the
 same lane to `3.925` / `3.913` / `3.882 ms`. The remaining max update-apply
 categories were section block client patching (`3.913 ms`) and residual unload
-dirty/client work (`3.614 ms`).
+dirty/client work (`3.614 ms`). A shared packed-section batch patcher has now
+landed so one `SectionBlockUpdates` packet unpacks and repacks the target
+section once instead of once per block update, but the Quest churn lane has not
+yet been remeasured because the current textured asset tree fails to load
+`minecraft:cactus[age=0]`.
 
-The next implementation chunk should inspect the section-block client patch
-tail and residual unload dirty marking before changing broad pump policy. Keep
-receive order. The count cap is now a guardrail for the normal frame pump, not
-the final fix; after the remaining update-apply costs are thinner, retune or
-remove the cap based on the same Quest chunk-view churn lane.
+The next implementation chunk should clear the cactus asset-load blocker,
+rerun app-runtime plus the Quest chunk-view churn lane, then inspect residual
+unload dirty marking before changing broad pump policy. Keep receive order. The
+count cap is now a guardrail for the normal frame pump, not the final fix; after
+the remaining update-apply costs are thinner, retune or remove the cap based on
+the same Quest chunk-view churn lane.
 
 Keep upload apply and per-eye encode on the short list. The churn run also
 showed terrain pipeline pressure. After the entity-index slice, update apply no

@@ -297,23 +297,23 @@ impl ClientRuntime {
         let Some(snapshot) = self.chunks.get_mut(&pos) else {
             return false;
         };
-        let mut changed = false;
-        for update in updates {
-            if update.local_x as i32 >= CHUNK_WIDTH
-                || update.local_y as i32 >= SECTION_HEIGHT
-                || update.local_z as i32 >= CHUNK_WIDTH
-            {
-                continue;
-            }
-            changed |= snapshot.patch_section_block(
-                section_y,
-                update.local_x as i32,
-                update.local_y as i32,
-                update.local_z as i32,
-                update.block_state,
-            );
-        }
-        changed
+        snapshot.patch_section_blocks(
+            section_y,
+            updates.iter().filter_map(|update| {
+                if update.local_x as i32 >= CHUNK_WIDTH
+                    || update.local_y as i32 >= SECTION_HEIGHT
+                    || update.local_z as i32 >= CHUNK_WIDTH
+                {
+                    return None;
+                }
+                Some((
+                    update.local_x as i32,
+                    update.local_y as i32,
+                    update.local_z as i32,
+                    update.block_state,
+                ))
+            }),
+        ) > 0
     }
 
     fn apply_entity_update(&mut self, update: EntityUpdate) {
@@ -903,20 +903,27 @@ mod tests {
         runtime.apply_update(ServerUpdate::SectionBlockUpdates {
             pos: ChunkPos::new(0, 0),
             section_y: 0,
-            updates: vec![SectionBlockUpdate {
-                local_x: 1,
-                local_y: 2,
-                local_z: 3,
-                block_state: BlockStateId(42),
-            }],
+            updates: vec![
+                SectionBlockUpdate {
+                    local_x: 1,
+                    local_y: 2,
+                    local_z: 3,
+                    block_state: BlockStateId(42),
+                },
+                SectionBlockUpdate {
+                    local_x: 4,
+                    local_y: 5,
+                    local_z: 6,
+                    block_state: BlockStateId(43),
+                },
+            ],
         });
 
         let snapshot = runtime.chunk_snapshot(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(snapshot.sections.len(), 1);
-        assert_eq!(
-            snapshot.sections[0].unpack_block_state_ids()[chunk_section_index(1, 2, 3)],
-            BlockStateId(42)
-        );
+        let blocks = snapshot.sections[0].unpack_block_state_ids();
+        assert_eq!(blocks[chunk_section_index(1, 2, 3)], BlockStateId(42));
+        assert_eq!(blocks[chunk_section_index(4, 5, 6)], BlockStateId(43));
     }
 
     #[test]

@@ -275,21 +275,35 @@ impl ChunkSnapshot {
         local_z: i32,
         block_state: BlockStateId,
     ) -> bool {
-        assert!(
-            (0..CHUNK_WIDTH).contains(&local_x),
-            "local_x {local_x} out of section bounds"
-        );
-        assert!(
-            (0..SECTION_HEIGHT).contains(&local_y),
-            "local_y {local_y} out of section bounds"
-        );
-        assert!(
-            (0..CHUNK_WIDTH).contains(&local_z),
-            "local_z {local_z} out of section bounds"
-        );
+        self.patch_section_blocks(section_y, [(local_x, local_y, local_z, block_state)]) > 0
+    }
+
+    pub fn patch_section_blocks(
+        &mut self,
+        section_y: i32,
+        updates: impl IntoIterator<Item = (i32, i32, i32, BlockStateId)>,
+    ) -> usize {
+        let updates = updates.into_iter().collect::<Vec<_>>();
+        if updates.is_empty() {
+            return 0;
+        }
+        for (local_x, local_y, local_z, _) in updates.iter().copied() {
+            assert!(
+                (0..CHUNK_WIDTH).contains(&local_x),
+                "local_x {local_x} out of section bounds"
+            );
+            assert!(
+                (0..SECTION_HEIGHT).contains(&local_y),
+                "local_y {local_y} out of section bounds"
+            );
+            assert!(
+                (0..CHUNK_WIDTH).contains(&local_z),
+                "local_z {local_z} out of section bounds"
+            );
+        }
         let section_base_y = section_y * SECTION_HEIGHT;
         if section_base_y < self.min_y || section_base_y >= self.min_y + self.height {
-            return false;
+            return 0;
         }
 
         let section_index = self
@@ -300,11 +314,19 @@ impl ChunkSnapshot {
             || vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
             |index| self.sections[index].unpack_block_state_ids(),
         );
-        let block_index = chunk_section_index(local_x, local_y, local_z);
-        if blocks[block_index] == block_state {
-            return false;
+
+        let mut changed = 0;
+        for (local_x, local_y, local_z, block_state) in updates {
+            let block_index = chunk_section_index(local_x, local_y, local_z);
+            if blocks[block_index] == block_state {
+                continue;
+            }
+            blocks[block_index] = block_state;
+            changed += 1;
         }
-        blocks[block_index] = block_state;
+        if changed == 0 {
+            return 0;
+        }
 
         if blocks
             .iter()
@@ -313,7 +335,7 @@ impl ChunkSnapshot {
             if let Some(index) = section_index {
                 self.sections.remove(index);
             }
-            return true;
+            return changed;
         }
 
         let packed = PackedChunkSection::pack(section_y, &blocks);
@@ -323,7 +345,7 @@ impl ChunkSnapshot {
             self.sections.push(packed);
             self.sections.sort_by_key(|section| section.section_y);
         }
-        true
+        changed
     }
 }
 
@@ -518,6 +540,74 @@ mod tests {
         assert!(!snapshot.patch_section_block(0, 1, 2, 3, BlockStateId(7)));
 
         assert!(snapshot.patch_section_block(0, 1, 2, 3, AIR_BLOCK_STATE_ID));
+        assert!(snapshot.sections.is_empty());
+    }
+
+    #[test]
+    fn chunk_snapshot_batches_section_block_patches() {
+        let mut snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+
+        assert_eq!(
+            snapshot.patch_section_blocks(
+                0,
+                [
+                    (1, 2, 3, BlockStateId(7)),
+                    (4, 5, 6, BlockStateId(9)),
+                ],
+            ),
+            2
+        );
+        assert_eq!(snapshot.sections.len(), 1);
+        let blocks = snapshot.sections[0].unpack_block_state_ids();
+        assert_eq!(blocks[chunk_section_index(1, 2, 3)], BlockStateId(7));
+        assert_eq!(blocks[chunk_section_index(4, 5, 6)], BlockStateId(9));
+
+        assert_eq!(
+            snapshot.patch_section_blocks(
+                0,
+                [
+                    (1, 2, 3, BlockStateId(7)),
+                    (4, 5, 6, BlockStateId(9)),
+                ],
+            ),
+            0
+        );
+
+        assert_eq!(
+            snapshot.patch_section_blocks(
+                0,
+                [(1, 2, 3, AIR_BLOCK_STATE_ID), (4, 5, 6, AIR_BLOCK_STATE_ID),],
+            ),
+            2
+        );
+        assert!(snapshot.sections.is_empty());
+    }
+
+    #[test]
+    fn chunk_snapshot_batch_patch_preserves_order_for_duplicate_blocks() {
+        let mut snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+
+        assert_eq!(
+            snapshot.patch_section_blocks(
+                0,
+                [(1, 2, 3, BlockStateId(7)), (1, 2, 3, AIR_BLOCK_STATE_ID),],
+            ),
+            2
+        );
         assert!(snapshot.sections.is_empty());
     }
 
