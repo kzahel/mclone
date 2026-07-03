@@ -228,6 +228,7 @@ mod tests {
                 server_runner_kind: Some(mclone_server::ServerRunnerKind::NativeThread),
                 server_command_queue_depth: 1,
                 server_update_queue_depth: 2,
+                server_update_queue_bytes: 2048,
                 interest_center: ChunkPos::new(3, -4),
                 render_distance: 2,
                 chunk_tracking_radius: 3,

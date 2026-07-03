@@ -264,6 +264,7 @@ pub struct ServerRunnerDiagnostics {
     pub awaiting_tick: bool,
     pub command_queue_depth: usize,
     pub update_queue_depth: usize,
+    pub update_queue_bytes: usize,
     pub pending_jobs: usize,
     pub pending_publications: usize,
     pub worldgen_mailbox_kind: WorldgenMailboxKind,
@@ -297,6 +298,7 @@ impl ServerRunnerDiagnostics {
             awaiting_tick: false,
             command_queue_depth: 0,
             update_queue_depth: 0,
+            update_queue_bytes: 0,
             pending_jobs: 0,
             pending_publications: 0,
             worldgen_mailbox_kind: WorldgenMailboxKind::Inline,
@@ -393,10 +395,26 @@ impl From<ChunkStoreError> for ServerRunnerError {
 pub trait IntegratedServerRunner {
     fn kind(&self) -> ServerRunnerKind;
     fn send_command(&mut self, command: ClientCommand) -> ServerRunnerResult<()>;
-    fn drain_updates(&mut self) -> ServerRunnerResult<Vec<ServerUpdate>>;
+    fn try_recv_update(&mut self) -> ServerRunnerResult<Option<ServerUpdateEnvelope>>;
+
+    fn drain_updates(&mut self) -> ServerRunnerResult<Vec<ServerUpdate>> {
+        let mut updates = Vec::new();
+        while let Some(envelope) = self.try_recv_update()? {
+            updates.push(envelope.update);
+        }
+        Ok(updates)
+    }
+
     fn poll_diagnostics(&self) -> ServerRunnerResult<ServerRunnerDiagnostics>;
     fn request_shutdown(&mut self);
     fn join_shutdown(&mut self) -> ServerRunnerResult<()>;
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ServerUpdateEnvelope {
+    pub update: ServerUpdate,
+    pub encoded_len: usize,
+    pub queued_age: std::time::Duration,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -615,12 +633,18 @@ mod native {
     #[derive(Debug)]
     pub struct NativeIntegratedServerRunner {
         command_tx: Option<mpsc::Sender<NativeRunnerControl>>,
-        update_rx: mpsc::Receiver<Vec<u8>>,
+        update_rx: mpsc::Receiver<NativeQueuedServerUpdate>,
         command_queue_depth: Arc<AtomicUsize>,
         update_queue_depth: Arc<AtomicUsize>,
+        update_queue_bytes: Arc<AtomicUsize>,
         diagnostics: Arc<Mutex<ServerRunnerDiagnostics>>,
         join: Option<JoinHandle<ServerRunnerResult<()>>>,
         shutdown_requested: bool,
+    }
+
+    struct NativeQueuedServerUpdate {
+        frame: Vec<u8>,
+        queued_at: Instant,
     }
 
     impl NativeIntegratedServerRunner {
@@ -630,6 +654,7 @@ mod native {
             let (ready_tx, ready_rx) = mpsc::channel();
             let command_queue_depth = Arc::new(AtomicUsize::new(0));
             let update_queue_depth = Arc::new(AtomicUsize::new(0));
+            let update_queue_bytes = Arc::new(AtomicUsize::new(0));
             let mut initial_diagnostics = ServerRunnerDiagnostics::initial(
                 ServerRunnerKind::NativeThread,
                 config.seed,
@@ -641,6 +666,7 @@ mod native {
 
             let thread_command_depth = Arc::clone(&command_queue_depth);
             let thread_update_depth = Arc::clone(&update_queue_depth);
+            let thread_update_bytes = Arc::clone(&update_queue_bytes);
             let thread_diagnostics = Arc::clone(&diagnostics);
             let join = thread::Builder::new()
                 .name("mclone integrated server".to_owned())
@@ -651,6 +677,7 @@ mod native {
                         update_tx,
                         thread_command_depth,
                         thread_update_depth,
+                        thread_update_bytes,
                         thread_diagnostics,
                         ready_tx,
                     )
@@ -677,6 +704,7 @@ mod native {
                 update_rx,
                 command_queue_depth,
                 update_queue_depth,
+                update_queue_bytes,
                 diagnostics,
                 join: Some(join),
                 shutdown_requested: false,
@@ -686,6 +714,7 @@ mod native {
         pub fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
             diagnostics.command_queue_depth = self.command_queue_depth.load(Ordering::SeqCst);
             diagnostics.update_queue_depth = self.update_queue_depth.load(Ordering::SeqCst);
+            diagnostics.update_queue_bytes = self.update_queue_bytes.load(Ordering::SeqCst);
             if let Some(refreshed_at) = diagnostics.diagnostics_detail_refreshed_at {
                 diagnostics.diagnostics_detail_age_ms = duration_ms(refreshed_at.elapsed());
             }
@@ -742,18 +771,21 @@ mod native {
             Ok(())
         }
 
-        fn drain_updates(&mut self) -> ServerRunnerResult<Vec<ServerUpdate>> {
-            let mut updates = Vec::new();
-            loop {
-                match self.update_rx.try_recv() {
-                    Ok(frame) => {
-                        self.update_queue_depth.fetch_sub(1, Ordering::SeqCst);
-                        updates.push(decode_server_update(&frame)?);
-                    }
-                    Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {
-                        return Ok(updates);
-                    }
+        fn try_recv_update(&mut self) -> ServerRunnerResult<Option<ServerUpdateEnvelope>> {
+            match self.update_rx.try_recv() {
+                Ok(queued) => {
+                    let encoded_len = queued.frame.len();
+                    let queued_age = queued.queued_at.elapsed();
+                    self.update_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                    self.update_queue_bytes
+                        .fetch_sub(encoded_len, Ordering::SeqCst);
+                    Ok(Some(ServerUpdateEnvelope {
+                        update: decode_server_update(&queued.frame)?,
+                        encoded_len,
+                        queued_age,
+                    }))
                 }
+                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => Ok(None),
             }
         }
 
@@ -799,9 +831,10 @@ mod native {
     fn run_native_integrated_server(
         config: NativeIntegratedServerRunnerConfig,
         command_rx: mpsc::Receiver<NativeRunnerControl>,
-        update_tx: mpsc::Sender<Vec<u8>>,
+        update_tx: mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: Arc<AtomicUsize>,
         update_queue_depth: Arc<AtomicUsize>,
+        update_queue_bytes: Arc<AtomicUsize>,
         diagnostics: Arc<Mutex<ServerRunnerDiagnostics>>,
         ready_tx: mpsc::Sender<Result<(), String>>,
     ) -> ServerRunnerResult<()> {
@@ -826,6 +859,7 @@ mod native {
             &server,
             &command_queue_depth,
             &update_queue_depth,
+            &update_queue_bytes,
             &mut diagnostics_detail_sampler,
             None,
             true,
@@ -842,6 +876,7 @@ mod native {
             update_tx,
             &command_queue_depth,
             &update_queue_depth,
+            &update_queue_bytes,
             &diagnostics,
             &mut diagnostics_detail_sampler,
         );
@@ -850,6 +885,7 @@ mod native {
             &server,
             &command_queue_depth,
             &update_queue_depth,
+            &update_queue_bytes,
             &mut diagnostics_detail_sampler,
             None,
             false,
@@ -864,9 +900,10 @@ mod native {
         server: &mut IntegratedServer,
         mut timing_state: NativeRunnerTimingState,
         command_rx: mpsc::Receiver<NativeRunnerControl>,
-        update_tx: mpsc::Sender<Vec<u8>>,
+        update_tx: mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
+        update_queue_bytes: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
     ) -> ServerRunnerResult<()> {
@@ -880,6 +917,7 @@ mod native {
                     &update_tx,
                     command_queue_depth,
                     update_queue_depth,
+                    update_queue_bytes,
                     diagnostics,
                     diagnostics_detail_sampler,
                     next_tick - now,
@@ -897,6 +935,7 @@ mod native {
                 &update_tx,
                 command_queue_depth,
                 update_queue_depth,
+                update_queue_bytes,
                 diagnostics,
                 diagnostics_detail_sampler,
                 &mut timing_state,
@@ -911,7 +950,12 @@ mod native {
                 let wall_start = Instant::now();
                 let report = server.try_simulation_tick_report_with_physics_steps(0)?;
                 let wall_us = wall_start.elapsed().as_micros();
-                publish_updates(&update_tx, update_queue_depth, &report.updates)?;
+                publish_updates(
+                    &update_tx,
+                    update_queue_depth,
+                    update_queue_bytes,
+                    &report.updates,
+                )?;
                 last_gameplay_tick = Some((report, wall_us));
             }
 
@@ -924,7 +968,12 @@ mod native {
                     timing_state.physics_step_dt_seconds(),
                 )?;
                 physics_wall_us = wall_start.elapsed().as_micros();
-                publish_updates(&update_tx, update_queue_depth, &report.updates)?;
+                publish_updates(
+                    &update_tx,
+                    update_queue_depth,
+                    update_queue_bytes,
+                    &report.updates,
+                )?;
                 physics_report = Some(report);
             }
 
@@ -947,6 +996,7 @@ mod native {
                     server,
                     command_queue_depth,
                     update_queue_depth,
+                    update_queue_bytes,
                     diagnostics_detail_sampler,
                     Some(ServerRunnerTickDiagnostics::from_report(
                         &report,
@@ -963,6 +1013,7 @@ mod native {
                     server,
                     command_queue_depth,
                     update_queue_depth,
+                    update_queue_bytes,
                     diagnostics_detail_sampler,
                     None,
                     true,
@@ -982,9 +1033,10 @@ mod native {
     fn recv_until_next_tick(
         server: &mut IntegratedServer,
         command_rx: &mpsc::Receiver<NativeRunnerControl>,
-        update_tx: &mpsc::Sender<Vec<u8>>,
+        update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
+        update_queue_bytes: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
         timeout: Duration,
@@ -998,6 +1050,7 @@ mod native {
                 update_tx,
                 command_queue_depth,
                 update_queue_depth,
+                update_queue_bytes,
                 diagnostics,
                 diagnostics_detail_sampler,
                 timing_state,
@@ -1011,9 +1064,10 @@ mod native {
     fn drain_available_commands(
         server: &mut IntegratedServer,
         command_rx: &mpsc::Receiver<NativeRunnerControl>,
-        update_tx: &mpsc::Sender<Vec<u8>>,
+        update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
+        update_queue_bytes: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
         timing_state: &mut NativeRunnerTimingState,
@@ -1028,6 +1082,7 @@ mod native {
                         update_tx,
                         command_queue_depth,
                         update_queue_depth,
+                        update_queue_bytes,
                         diagnostics,
                         diagnostics_detail_sampler,
                         timing_state,
@@ -1045,9 +1100,10 @@ mod native {
     fn process_control(
         server: &mut IntegratedServer,
         control: NativeRunnerControl,
-        update_tx: &mpsc::Sender<Vec<u8>>,
+        update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
+        update_queue_bytes: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
         timing_state: &mut NativeRunnerTimingState,
@@ -1069,6 +1125,7 @@ mod native {
                     server,
                     command_queue_depth,
                     update_queue_depth,
+                    update_queue_bytes,
                     diagnostics_detail_sampler,
                     None,
                     true,
@@ -1084,6 +1141,7 @@ mod native {
                     server,
                     command_queue_depth,
                     update_queue_depth,
+                    update_queue_bytes,
                     diagnostics_detail_sampler,
                     None,
                     true,
@@ -1098,12 +1156,13 @@ mod native {
                     .map_err(ServerRunnerError::from);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 let updates = result?;
-                publish_updates(update_tx, update_queue_depth, &updates)?;
+                publish_updates(update_tx, update_queue_depth, update_queue_bytes, &updates)?;
                 refresh_diagnostics(
                     diagnostics,
                     server,
                     command_queue_depth,
                     update_queue_depth,
+                    update_queue_bytes,
                     diagnostics_detail_sampler,
                     None,
                     true,
@@ -1128,15 +1187,23 @@ mod native {
     }
 
     fn publish_updates(
-        update_tx: &mpsc::Sender<Vec<u8>>,
+        update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         update_queue_depth: &AtomicUsize,
+        update_queue_bytes: &AtomicUsize,
         updates: &[ServerUpdate],
     ) -> ServerRunnerResult<()> {
         for update in updates {
             let frame = encode_server_update(update)?;
+            let encoded_len = frame.len();
             update_queue_depth.fetch_add(1, Ordering::SeqCst);
-            if update_tx.send(frame).is_err() {
+            update_queue_bytes.fetch_add(encoded_len, Ordering::SeqCst);
+            let queued = NativeQueuedServerUpdate {
+                frame,
+                queued_at: Instant::now(),
+            };
+            if update_tx.send(queued).is_err() {
                 update_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                update_queue_bytes.fetch_sub(encoded_len, Ordering::SeqCst);
                 return Err(ServerRunnerError::UpdateChannelClosed);
             }
         }
@@ -1148,6 +1215,7 @@ mod native {
         server: &IntegratedServer,
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
+        update_queue_bytes: &AtomicUsize,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
         tick: Option<ServerRunnerTickDiagnostics>,
         running: bool,
@@ -1159,6 +1227,7 @@ mod native {
         let day_time = server.day_time();
         let command_queue_depth = command_queue_depth.load(Ordering::SeqCst);
         let update_queue_depth = update_queue_depth.load(Ordering::SeqCst);
+        let update_queue_bytes = update_queue_bytes.load(Ordering::SeqCst);
         let pending_jobs = server.pending_job_count();
         let pending_publications = server.pending_publication_count();
         let detail_snapshot = diagnostics_detail_sampler
@@ -1174,6 +1243,7 @@ mod native {
         diagnostics.day_time = day_time;
         diagnostics.command_queue_depth = command_queue_depth;
         diagnostics.update_queue_depth = update_queue_depth;
+        diagnostics.update_queue_bytes = update_queue_bytes;
         diagnostics.pending_jobs = pending_jobs;
         diagnostics.pending_publications = pending_publications;
         if let Some(detail_snapshot) = detail_snapshot {

@@ -1,9 +1,10 @@
 # Session Network Architecture
 
 Status: target architecture; Slice 1 send-only high-frequency command policy
-landed for local integrated play; revised 2026-07-03 to adopt the vanilla
-ordered-stream update model (thin apply plus a frame-budget stall) and drop
-the earlier priority-class design; remaining implementation tracked in
+and Slice 2 local integrated ordered update pump landed; revised 2026-07-03 to
+adopt the vanilla ordered-stream update model (thin apply plus a frame-budget
+stall) and drop the earlier priority-class design; remaining implementation
+tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -88,16 +89,20 @@ The bad coupling is API-level: `send_gameplay_command_timed` sends a command,
 drains the update queue, and applies every drained update before returning
 (fixed for pose sync by the Slice 1 `SendOnly` policy).
 
-Compared to the reference shape, local integrated play also has three costly
-gaps beyond the API coupling:
+Slice 2 removed the high-frequency and view-change drain coupling in local
+integrated play: pose sync and chunk view changes enqueue commands, while
+`LocalSingleViewSceneRuntime::poll` applies received updates in strict receive
+order under an elapsed-time budget, with unlimited drain paths reserved for
+startup and idle waits.
 
-- `drain_updates` decodes every pending update frame on the app/render thread
-  at the drain point, where vanilla decodes on the IO side.
+Compared to the reference shape, local integrated play still has two costly
+gaps:
+
+- The new `try_recv_update` path still decodes update frames on the
+  app/render thread at receive time, where vanilla decodes on the IO side.
 - Render dirty marking is ordered-set insertion churn per update (~0.13 ms per
   chunk-scale update measured in `130`), where vanilla flips a boolean on a
   resident render-section slot.
-- `set_chunk_view` still performs an immediate unbudgeted drain inside the
-  movement/interest path even after Slice 1.
 
 Native remote dedicated is even more request/response-shaped today:
 `NativeClientSession::send_command` writes one command and blocks reading one
@@ -253,13 +258,13 @@ Local integrated:
 
 - Keep `NativeIntegratedServerRunner` as the authoritative server actor.
 - Keep command and update channels.
-- Remove update draining from command send helpers (`send_gameplay_command*`
-  landed in Slice 1; `set_chunk_view` still pending).
+- Remove update draining from command send helpers (`SendOnly` for pose sync
+  landed in Slice 1; `set_chunk_view` landed in Slice 2).
 - The runtime update pump drains and applies inbound updates in receive order
   under the frame budget. Undrained updates stay in the channel so queue depth
   remains observable and idle/bootstrap checks keep working.
 - Move update payload decode to the runner side so the pump applies
-  already-decoded updates.
+  already-decoded updates. This remains pending after Slice 2.
 
 Native remote TCP:
 

@@ -404,6 +404,12 @@ struct FrameBudgetProbeFrameReport {
     poll_apply_updates_ms: f64,
     poll_dirty_mark_ms: f64,
     poll_client_apply_updates_ms: f64,
+    update_pump_stalled: bool,
+    update_pump_stall_count: usize,
+    server_update_queue_depth: usize,
+    server_update_queue_bytes: usize,
+    server_update_applied_bytes: usize,
+    server_update_oldest_applied_age_ms: f64,
     poll_scheduler_events: usize,
     poll_updates: usize,
     poll_snapshot_updates: usize,
@@ -473,6 +479,12 @@ impl Default for FrameBudgetProbeFrameReport {
             poll_apply_updates_ms: 0.0,
             poll_dirty_mark_ms: 0.0,
             poll_client_apply_updates_ms: 0.0,
+            update_pump_stalled: false,
+            update_pump_stall_count: 0,
+            server_update_queue_depth: 0,
+            server_update_queue_bytes: 0,
+            server_update_applied_bytes: 0,
+            server_update_oldest_applied_age_ms: 0.0,
             poll_scheduler_events: 0,
             poll_updates: 0,
             poll_snapshot_updates: 0,
@@ -928,6 +940,30 @@ impl FrameBudgetProbeReport {
             println!(
                 "      \"poll_client_apply_updates_ms\": {:.3},",
                 frame.poll_client_apply_updates_ms
+            );
+            println!(
+                "      \"update_pump_stalled\": {},",
+                frame.update_pump_stalled
+            );
+            println!(
+                "      \"update_pump_stall_count\": {},",
+                frame.update_pump_stall_count
+            );
+            println!(
+                "      \"server_update_queue_depth\": {},",
+                frame.server_update_queue_depth
+            );
+            println!(
+                "      \"server_update_queue_bytes\": {},",
+                frame.server_update_queue_bytes
+            );
+            println!(
+                "      \"server_update_applied_bytes\": {},",
+                frame.server_update_applied_bytes
+            );
+            println!(
+                "      \"server_update_oldest_applied_age_ms\": {:.3},",
+                frame.server_update_oldest_applied_age_ms
             );
             println!(
                 "      \"poll_scheduler_events\": {},",
@@ -1415,6 +1451,13 @@ pub(crate) fn run_frame_budget_probe(
             report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
             report.poll_dirty_mark_ms = poll_diagnostics.dirty_mark_ms;
             report.poll_client_apply_updates_ms = poll_diagnostics.client_apply_updates_ms;
+            report.update_pump_stalled = poll_diagnostics.update_pump_stalled;
+            report.update_pump_stall_count = poll_diagnostics.update_pump_stall_count;
+            report.server_update_queue_depth = poll_diagnostics.server_update_queue_depth;
+            report.server_update_queue_bytes = poll_diagnostics.server_update_queue_bytes;
+            report.server_update_applied_bytes = poll_diagnostics.server_update_applied_bytes;
+            report.server_update_oldest_applied_age_ms =
+                poll_diagnostics.server_update_oldest_applied_age_ms;
             report.poll_scheduler_events = poll_diagnostics.scheduler_events;
             report.poll_updates = poll_diagnostics.updates;
             report.poll_snapshot_updates = poll_diagnostics.snapshot_updates;

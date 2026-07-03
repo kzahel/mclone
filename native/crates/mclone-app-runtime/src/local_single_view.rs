@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -32,13 +33,14 @@ use crate::session::{
 };
 use crate::{
     DEFAULT_RENDER_CHUNK_MESH_BUDGET, GameplayCommandTiming, GameplayCommandUpdatePolicy,
-    RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime,
-    SingleViewRuntimeStats, TimedRenderSectionCacheUpdate,
-    chunk_tracking_radius_for_render_distance, elapsed_ms,
+    RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget,
+    RuntimeUpdatePumpReport, SingleViewRuntime, SingleViewRuntimeStats,
+    TimedRenderSectionCacheUpdate, chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+static REMOTE_DEDICATED_SEND_ONLY_IGNORED_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalSingleViewSceneOptions {
@@ -158,7 +160,9 @@ impl LocalSingleViewStartupPump {
 
     pub fn step(&mut self, camera_position: Vec3) -> Result<LocalSingleViewStartupStep> {
         let poll_start = Instant::now();
-        let mut changed = self.runtime.poll()?;
+        let mut changed = self
+            .runtime
+            .poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())?;
         let poll_ms = elapsed_ms(poll_start.elapsed());
         self.poll_count += 1;
         self.poll_ms += poll_ms;
@@ -362,7 +366,6 @@ impl LocalSingleViewSceneRuntime {
         self.server_runner
             .send_command(command)
             .context("failed to send local single-view chunk view command")?;
-        let _ = self.drain_runner_updates_report()?;
         Ok(true)
     }
 
@@ -436,19 +439,13 @@ impl LocalSingleViewSceneRuntime {
     }
 
     pub fn poll(&mut self) -> Result<bool> {
+        self.poll_with_update_budget(RuntimeUpdatePumpBudget::default())
+    }
+
+    pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
         let poll_start = Instant::now();
-        let drain_start = Instant::now();
-        let updates = self
-            .server_runner
-            .drain_updates()
-            .context("failed to drain local single-view integrated server updates")?;
-        let drain_updates_ms = elapsed_ms(drain_start.elapsed());
-        let apply_report = if updates.is_empty() {
-            RuntimeUpdateApplyReport::default()
-        } else {
-            self.core.apply_server_updates_report(updates)
-        };
-        let changed = apply_report.changed;
+        let pump_report = self.pump_runner_updates_report(budget)?;
+        let changed = pump_report.apply_report.changed;
         let (
             runner_diagnostics,
             poll_diagnostics_ms,
@@ -458,15 +455,56 @@ impl LocalSingleViewSceneRuntime {
         self.core.finish_poll_diagnostics(
             RuntimePollTiming {
                 total_ms: elapsed_ms(poll_start.elapsed()),
-                drain_updates_ms,
+                drain_updates_ms: pump_report.drain_updates_ms,
+                update_pump_stalled: pump_report.stalled,
+                update_pump_stall_count: pump_report.stall_count,
+                server_update_applied_bytes: pump_report.update_bytes,
+                server_update_oldest_applied_age_ms: pump_report.oldest_applied_update_age_ms,
                 poll_diagnostics_ms,
                 diagnostics_refreshed,
                 diagnostics_cache_age_ms,
             },
-            apply_report,
+            pump_report.apply_report,
             runner_diagnostics.as_ref(),
         );
         Ok(changed)
+    }
+
+    fn pump_runner_updates_report(
+        &mut self,
+        budget: RuntimeUpdatePumpBudget,
+    ) -> Result<RuntimeUpdatePumpReport> {
+        let pump_start = Instant::now();
+        let mut report = RuntimeUpdatePumpReport::default();
+        loop {
+            let drain_start = Instant::now();
+            let envelope = self
+                .server_runner
+                .try_recv_update()
+                .context("failed to receive local single-view integrated server update")?;
+            report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
+            let Some(envelope) = envelope else {
+                return Ok(report);
+            };
+
+            report.update_bytes = report.update_bytes.saturating_add(envelope.encoded_len);
+            report.oldest_applied_update_age_ms = report
+                .oldest_applied_update_age_ms
+                .max(elapsed_ms(envelope.queued_age));
+            let apply_report = self.core.apply_server_updates_report(vec![envelope.update]);
+            report.apply_report.accumulate(apply_report);
+
+            if budget.exhausted_after_update(pump_start.elapsed(), report.apply_report.updates) {
+                let diagnostics = self.server_runner_diagnostics()?;
+                report.remaining_queue_depth = diagnostics.update_queue_depth;
+                report.remaining_queue_bytes = diagnostics.update_queue_bytes;
+                if diagnostics.update_queue_depth > 0 {
+                    report.stalled = true;
+                    report.stall_count = 1;
+                }
+                return Ok(report);
+            }
+        }
     }
 
     fn poll_runner_diagnostics_for_frame(
@@ -510,7 +548,7 @@ impl LocalSingleViewSceneRuntime {
         let mut poll_ms = 0.0_f64;
         loop {
             let poll_start = Instant::now();
-            self.poll()?;
+            self.poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())?;
             poll_ms += elapsed_ms(poll_start.elapsed());
             polls += 1;
             let diagnostics = self.server_runner_diagnostics()?;
@@ -655,17 +693,6 @@ impl LocalSingleViewSceneRuntime {
         self.server_runner
             .poll_diagnostics()
             .context("failed to poll local single-view integrated server diagnostics")
-    }
-
-    fn drain_runner_updates_report(&mut self) -> Result<RuntimeUpdateApplyReport> {
-        let updates = self
-            .server_runner
-            .drain_updates()
-            .context("failed to drain local single-view integrated server updates")?;
-        if updates.is_empty() {
-            return Ok(RuntimeUpdateApplyReport::default());
-        }
-        Ok(self.core.apply_server_updates_report(updates))
     }
 }
 
@@ -1393,8 +1420,15 @@ where
     pub fn send_gameplay_command_with_update_policy_timed(
         &mut self,
         command: ClientCommand,
-        _policy: GameplayCommandUpdatePolicy,
+        policy: GameplayCommandUpdatePolicy,
     ) -> Result<(bool, GameplayCommandTiming)> {
+        if matches!(policy, GameplayCommandUpdatePolicy::SendOnly)
+            && !REMOTE_DEDICATED_SEND_ONLY_IGNORED_LOGGED.swap(true, Ordering::Relaxed)
+        {
+            log::warn!(
+                "remote dedicated session still ignores SendOnly command policy; native TCP session actor is tracked by tactical 133 Slice 4"
+            );
+        }
         let total_start = Instant::now();
         let changed =
             dispatch_remote_dedicated_command(&mut self.core, &mut self.session, command)?;
@@ -1755,6 +1789,82 @@ mod tests {
     }
 
     #[test]
+    fn local_set_chunk_view_defers_update_application_until_poll() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mut runtime = LocalSingleViewSceneRuntime::new(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false),
+        )
+        .unwrap();
+        runtime.poll_until_idle().unwrap();
+
+        let next_center = ChunkPos::new(1, 0);
+        assert!(
+            runtime
+                .set_chunk_view(next_center, 0, chunk_tracking_radius_for_render_distance(0))
+                .unwrap()
+        );
+        assert!(runtime.client().chunk_snapshot(next_center).is_none());
+
+        wait_for_update_queue_depth(&runtime, 1);
+        assert!(
+            runtime
+                .poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())
+                .unwrap()
+        );
+        assert!(runtime.client().chunk_snapshot(next_center).is_some());
+    }
+
+    #[test]
+    fn local_update_pump_applies_one_update_when_budget_is_exhausted() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mut runtime = LocalSingleViewSceneRuntime::new(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false),
+        )
+        .unwrap();
+        runtime.poll_until_idle().unwrap();
+        let old_center = ChunkPos::new(0, 0);
+        let next_center = ChunkPos::new(1, 0);
+
+        assert!(
+            runtime
+                .set_chunk_view(next_center, 0, chunk_tracking_radius_for_render_distance(0))
+                .unwrap()
+        );
+        wait_for_update_queue_depth(&runtime, 2);
+
+        assert!(
+            runtime
+                .poll_with_update_budget(RuntimeUpdatePumpBudget::MaxElapsed(Duration::ZERO))
+                .unwrap()
+        );
+        let diagnostics = runtime.core().last_poll_diagnostics();
+        assert_eq!(diagnostics.updates, 1);
+        assert!(diagnostics.update_pump_stalled);
+        assert_eq!(diagnostics.update_pump_stall_count, 1);
+        assert!(diagnostics.server_update_queue_depth > 0);
+        assert!(diagnostics.server_update_queue_bytes > 0);
+
+        runtime.poll_until_idle().unwrap();
+        assert!(runtime.client().chunk_snapshot(next_center).is_some());
+        assert!(runtime.client().chunk_snapshot(old_center).is_none());
+        assert_eq!(
+            runtime
+                .server_runner_diagnostics()
+                .unwrap()
+                .update_queue_depth,
+            0
+        );
+    }
+
+    #[test]
     fn local_single_view_runtime_applies_simulation_cadence_control() {
         if !extracted_asset_root().exists() {
             return;
@@ -1791,6 +1901,21 @@ mod tests {
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for runtime cadence diagnostics"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn wait_for_update_queue_depth(runtime: &LocalSingleViewSceneRuntime, min_depth: usize) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let diagnostics = runtime.server_runner_diagnostics().unwrap();
+            if diagnostics.update_queue_depth >= min_depth {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for update queue depth {min_depth}; diagnostics={diagnostics:?}"
             );
             std::thread::sleep(Duration::from_millis(1));
         }

@@ -3,7 +3,8 @@
 Status: active tracking doc; Slice 1 send-only high-frequency command policy
 landed for local integrated play; direction revised 2026-07-03 to strict
 receive-order update application (vanilla parity) with a frame-budget stall,
-replacing the earlier priority-class plan; Slice 2 ordered update pump is next
+replacing the earlier priority-class plan; Slice 2 local integrated ordered
+update pump landed; Slice 3 thin apply and source pacing is next
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -82,24 +83,23 @@ ordered queue behind a common policy boundary.
 
 - `NativeIntegratedServerRunner` already has a command channel and update
   channel.
-- `NativeIntegratedServerRunner::drain_updates` drains the whole update channel
-  when asked and decodes every update frame on the calling (app/render)
-  thread.
+- `NativeIntegratedServerRunner::try_recv_update` receives one update frame at
+  a time and preserves queue depth/byte accounting; `drain_updates` remains as
+  an unlimited compatibility helper. Decode still happens on the caller side
+  in this slice; producer-side decoded updates are Slice 3/Slice 4 work.
 - `send_gameplay_command*` helpers default to `DrainImmediately`; Slice 1 added
   `SendOnly` and switched pose sync to it.
-- `LocalSingleViewSceneRuntime::set_chunk_view` still sends the view command
-  and immediately drains/applies all pending updates on the caller thread.
-  After Slice 1 this is the last opportunistic drain in the movement/interest
-  path, and it fires exactly on chunk-boundary crossings where bursts exist.
-- `LocalSingleViewSceneRuntime::poll` drains/applies updates and runs every
-  frame in all three client lanes (desktop `poll_runtime`, XR
-  `poll_runtime_and_upload`, perf harness), so the owned pump point exists.
+- `LocalSingleViewSceneRuntime::set_chunk_view` sends the view command only;
+  resulting snapshots/unloads arrive through the runtime pump.
+- `LocalSingleViewSceneRuntime::poll` applies updates in strict receive order
+  under the default elapsed-time budget, while startup and `poll_until_idle`
+  use an explicit unlimited pump.
 - `poll_until_idle` treats runner idle plus `update_queue_depth == 0` as done.
   Slice 2 must keep undrained updates observable (leave them in the channel)
   so idle and startup/bootstrap semantics stay correct.
 - Native remote TCP still blocks the caller in `NativeClientSession::send_command`
-  while reading one response batch, and it ignores the `SendOnly` policy
-  (documented temporary limitation until Slice 4).
+  while reading one response batch, and it ignores the `SendOnly` policy. A
+  one-time warning now surfaces that temporary limitation until Slice 4.
 - Web remote WebSocket is event-driven underneath, but the Rust-facing session
   is still shaped as command exchange.
 
@@ -170,7 +170,9 @@ Validation:
   passed.
 - `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
   passed.
-- Quest RD7 settled-orbit perf has not been rerun yet for this slice.
+- A pure Slice 1 Quest RD7 baseline was not captured before Slice 2 landed.
+  The post-Slice 2 Quest run below confirms the locomotion command drain/apply
+  tail stayed collapsed.
 
 ### Slice 2 - Ordered Update Pump With Frame Budget
 
@@ -180,36 +182,101 @@ instead of blowing one frame.
 
 - [ ] Re-run the Quest RD7 settled-orbit lane on Slice 1 first (the unchecked
   item above) to baseline where the cost moved before changing the pump.
-- [ ] Pump loop: while budget remains, receive the next update frame from the
+  Superseded in practice by the post-Slice 2 run recorded below.
+- [x] Pump loop: while budget remains, receive the next update frame from the
   channel, decode, apply; stop when the budget is exhausted; always apply at
   least one pending update per pump so progress is guaranteed. Undrained
   frames stay in the channel so `update_queue_depth`, `poll_until_idle`, and
   bootstrap semantics keep working. Do not add a second runtime-side pending
   queue.
-- [ ] Budget definition: elapsed-time budget checked between updates (default
+- [x] Budget definition: elapsed-time budget checked between updates (default
   ~2 ms, to be measured), with an unlimited setting for loading/bootstrap
   states and tests. A count-based budget (K≈4 chunk-scale updates per frame,
   per `131` Finding 3.1) is an acceptable first cut, but time is the target
   because update apply costs are heterogeneous.
-- [ ] Remove the immediate drain from `set_chunk_view`; view changes become
+- [x] Remove the immediate drain from `set_chunk_view`; view changes become
   send-only and their resulting updates arrive through the pump.
-- [ ] Surface (one-time log or diagnostics flag) when a `SendOnly` command is
+- [x] Surface (one-time log or diagnostics flag) when a `SendOnly` command is
   sent on a transport that ignores the policy (remote dedicated until
   Slice 4), so the asymmetry is visible instead of silent.
-- [ ] Diagnostics per pump: applied count, remaining queue depth, oldest
-  queued update age, bytes queued, stall occurrences, and
+- [x] Diagnostics per pump: applied count, remaining queue depth, bytes queued,
+  bytes applied, oldest applied update age, stall occurrences, and
   drain/decode/apply/dirty-mark time.
-- [ ] Tests: receive order preserved when a stall splits a
+- [ ] Exact oldest pending update age. The current mpsc-backed runner exposes
+  applied update age and queued bytes/depth, but cannot peek the oldest pending
+  frame without a transport-side metadata queue.
+- [x] Tests: receive order preserved when a stall splits a
   snapshot -> section-mutation -> unload sequence for one chunk across
-  frames; correction round-trip under `SendOnly` completes within a bounded
-  number of pump passes; a single over-budget update still applies (progress
-  guarantee); `poll_until_idle` still drains fully.
-- [ ] Measure the same Quest RD7 lane with actors enabled.
+  frames; a single over-budget update still applies (progress guarantee);
+  `set_chunk_view` defers updates until poll; `poll_until_idle` still drains
+  fully.
+- [ ] Correction round-trip under `SendOnly` completes within a bounded number
+  of pump passes.
+- [x] Measure the same Quest RD7 lane with actors enabled.
+
+Recorded result:
+
+- Added `RuntimeUpdatePumpBudget::{MaxElapsed, Unlimited}` and local
+  integrated polling via `poll_with_update_budget`.
+- Added `NativeIntegratedServerRunner::try_recv_update`, per-frame queue byte
+  accounting, queued-age reporting for applied updates, and a full-drain helper
+  built from the same single-frame receive path.
+- `LocalSingleViewStartupPump` and `poll_until_idle` use the unlimited budget;
+  normal frame polling uses the default elapsed-time budget and always applies
+  at least one pending update.
+- `LocalSingleViewSceneRuntime::set_chunk_view` no longer drains or applies
+  updates immediately.
+- Remote dedicated logs once when `SendOnly` is requested on the still
+  request/response-shaped transport.
+- Diagnostics now expose update-pump stalls, queued bytes, applied bytes,
+  oldest applied update age, and the existing drain/apply/dirty/client timing
+  in flat perf and Android XR summaries.
+- Added regression coverage:
+  `split_update_application_preserves_snapshot_mutation_unload_order`,
+  `local_set_chunk_view_defers_update_application_until_poll`, and
+  `local_update_pump_applies_one_update_when_budget_is_exhausted`.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-server -p mclone-app-runtime -p mclone-xr-scene -p mclone-native-client`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml` passed.
+- Quest RD7 settled-orbit lane passed with actors enabled:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+  Summary artifacts:
+  `/tmp/mclone-quest-openxr-perf-summary.txt` and
+  `/tmp/mclone-quest-openxr-logcat.txt`.
+- Quest result highlights:
+  - `MCLONE_ANDROID_XR_PERF_LOCOMOTION_COMMAND`:
+    `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`,
+    `max_updates=0`.
+  - `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX`:
+    `poll_total_ms=3.439`, `drain_updates_ms=0.712`,
+    `apply_updates_ms=3.425`, `dirty_mark_ms=1.963`,
+    `client_apply_ms=3.402`, `updates=20`.
+  - `MCLONE_ANDROID_XR_PERF_UPLOAD_MAX`:
+    `update_pump_stalled=true`, `server_update_queue_depth=27`,
+    `server_update_queue_bytes=893140`,
+    `server_update_applied_bytes=748000`,
+    `server_update_oldest_applied_age_ms=54.119`.
+  - Overall frame pacing remains over budget:
+    `app_work_avg_ms=14.281`, `app_work_p95_ms=16.478`,
+    `headroom_avg_ms=-0.392`, `app_over_period_pct=57.8`.
 
 Success means worst-frame snapshots no longer show multi-ms update apply or
 dirty marking hidden inside locomotion or a single pump pass, runtime update
 work is bounded and attributed, and no update is ever applied out of receive
 order.
+
+Slice 2 conclusion: the locomotion-command tail is gone and the update burst is
+now visible under runtime poll, with queue stalls recorded. Runtime apply is
+still too fat for Quest: a single pump pass can exceed the nominal budget
+because the budget is checked between updates and per-update dirty/client apply
+cost remains high. Continue directly to Slice 3.
 
 ### Slice 3 - Thin Apply And Source Pacing
 

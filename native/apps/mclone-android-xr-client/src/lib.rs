@@ -4279,8 +4279,14 @@ mod android {
                 self.max_render.terrain_multiview_poll_wait_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} accepted_results={} queued_completed_results={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} queued_upload_sections={} queued_upload_removed_sections={} ready_sections={}",
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} update_pump_stalled={} update_pump_stall_count={} server_update_queue_depth={} server_update_queue_bytes={} server_update_applied_bytes={} server_update_oldest_applied_age_ms={:.3} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} accepted_results={} queued_completed_results={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} queued_upload_sections={} queued_upload_removed_sections={} ready_sections={}",
                 self.upload_work_frames,
+                self.max_upload.update_pump_stalled,
+                self.max_upload.update_pump_stall_count,
+                self.max_upload.server_update_queue_depth,
+                self.max_upload.server_update_queue_bytes,
+                self.max_upload.server_update_applied_bytes,
+                self.max_upload.server_update_oldest_applied_age_ms,
                 self.max_upload.rebuilt_section_count,
                 self.max_upload.removed_section_count,
                 self.max_upload.rebuilt_vertex_count,
@@ -5138,6 +5144,14 @@ mod android {
             poll_client_apply_updates_ms: a
                 .poll_client_apply_updates_ms
                 .max(b.poll_client_apply_updates_ms),
+            update_pump_stalled: a.update_pump_stalled || b.update_pump_stalled,
+            update_pump_stall_count: a.update_pump_stall_count.max(b.update_pump_stall_count),
+            server_update_applied_bytes: a
+                .server_update_applied_bytes
+                .max(b.server_update_applied_bytes),
+            server_update_oldest_applied_age_ms: a
+                .server_update_oldest_applied_age_ms
+                .max(b.server_update_oldest_applied_age_ms),
             poll_diagnostics_ms: a.poll_diagnostics_ms.max(b.poll_diagnostics_ms),
             poll_diagnostics_refreshed: a.poll_diagnostics_refreshed
                 || b.poll_diagnostics_refreshed,
@@ -5165,6 +5179,7 @@ mod android {
                 .server_command_queue_depth
                 .max(b.server_command_queue_depth),
             server_update_queue_depth: a.server_update_queue_depth.max(b.server_update_queue_depth),
+            server_update_queue_bytes: a.server_update_queue_bytes.max(b.server_update_queue_bytes),
             server_pending_jobs: a.server_pending_jobs.max(b.server_pending_jobs),
             server_pending_publications: a
                 .server_pending_publications

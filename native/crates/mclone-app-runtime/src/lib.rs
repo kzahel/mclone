@@ -11,8 +11,9 @@ pub mod session;
 pub mod startup_args;
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use glam::Vec3;
@@ -52,6 +53,7 @@ use mclone_ui::{
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
+pub const DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET: Duration = Duration::from_millis(2);
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -600,6 +602,60 @@ pub struct RuntimeUpdateApplyReport {
     pub unload_updates: usize,
 }
 
+impl RuntimeUpdateApplyReport {
+    pub fn accumulate(&mut self, other: Self) {
+        self.changed |= other.changed;
+        self.total_ms += other.total_ms;
+        self.dirty_mark_ms += other.dirty_mark_ms;
+        self.client_apply_updates_ms += other.client_apply_updates_ms;
+        self.updates += other.updates;
+        self.snapshot_updates += other.snapshot_updates;
+        self.section_block_updates += other.section_block_updates;
+        self.unload_updates += other.unload_updates;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeUpdatePumpBudget {
+    Unlimited,
+    MaxElapsed(Duration),
+}
+
+impl RuntimeUpdatePumpBudget {
+    pub const fn default_frame() -> Self {
+        Self::MaxElapsed(DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET)
+    }
+
+    pub const fn unlimited() -> Self {
+        Self::Unlimited
+    }
+
+    pub fn exhausted_after_update(self, elapsed: Duration, applied_updates: usize) -> bool {
+        match self {
+            Self::Unlimited => false,
+            Self::MaxElapsed(max_elapsed) => applied_updates > 0 && elapsed >= max_elapsed,
+        }
+    }
+}
+
+impl Default for RuntimeUpdatePumpBudget {
+    fn default() -> Self {
+        Self::default_frame()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RuntimeUpdatePumpReport {
+    pub apply_report: RuntimeUpdateApplyReport,
+    pub drain_updates_ms: f64,
+    pub update_bytes: usize,
+    pub oldest_applied_update_age_ms: f64,
+    pub stalled: bool,
+    pub stall_count: usize,
+    pub remaining_queue_depth: usize,
+    pub remaining_queue_bytes: usize,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GameplayCommandUpdatePolicy {
     #[default]
@@ -625,6 +681,10 @@ pub struct GameplayCommandTiming {
 pub struct RuntimePollTiming {
     pub total_ms: f64,
     pub drain_updates_ms: f64,
+    pub update_pump_stalled: bool,
+    pub update_pump_stall_count: usize,
+    pub server_update_applied_bytes: usize,
+    pub server_update_oldest_applied_age_ms: f64,
     pub poll_diagnostics_ms: f64,
     pub diagnostics_refreshed: bool,
     pub diagnostics_cache_age_ms: f64,
@@ -641,11 +701,16 @@ pub struct RuntimePollDiagnostics {
     pub server_runner_kind: Option<ServerRunnerKind>,
     pub server_command_queue_depth: usize,
     pub server_update_queue_depth: usize,
+    pub server_update_queue_bytes: usize,
     pub server_pending_jobs: usize,
     pub server_pending_publications: usize,
     pub flush_commands_ms: f64,
     pub poll_total_ms: f64,
     pub drain_updates_ms: f64,
+    pub update_pump_stalled: bool,
+    pub update_pump_stall_count: usize,
+    pub server_update_applied_bytes: usize,
+    pub server_update_oldest_applied_age_ms: f64,
     pub poll_diagnostics_ms: f64,
     pub diagnostics_refreshed: bool,
     pub diagnostics_cache_age_ms: f64,
@@ -700,6 +765,7 @@ pub struct SingleViewRuntimeStats {
     pub server_runner_kind: Option<ServerRunnerKind>,
     pub server_command_queue_depth: usize,
     pub server_update_queue_depth: usize,
+    pub server_update_queue_bytes: usize,
     pub interest_center: ChunkPos,
     pub render_distance: u32,
     pub chunk_tracking_radius: u32,
@@ -1019,6 +1085,10 @@ impl SingleViewRuntime {
             flush_commands_ms: timing.total_ms,
             poll_total_ms: timing.total_ms,
             drain_updates_ms: timing.drain_updates_ms,
+            update_pump_stalled: timing.update_pump_stalled,
+            update_pump_stall_count: timing.update_pump_stall_count,
+            server_update_applied_bytes: timing.server_update_applied_bytes,
+            server_update_oldest_applied_age_ms: timing.server_update_oldest_applied_age_ms,
             poll_diagnostics_ms: timing.poll_diagnostics_ms,
             diagnostics_refreshed: timing.diagnostics_refreshed,
             diagnostics_cache_age_ms: timing.diagnostics_cache_age_ms,
@@ -1926,6 +1996,8 @@ impl SingleViewRuntime {
                 .map_or(0, |diagnostics| diagnostics.command_queue_depth),
             server_update_queue_depth: runner_diagnostics
                 .map_or(0, |diagnostics| diagnostics.update_queue_depth),
+            server_update_queue_bytes: runner_diagnostics
+                .map_or(0, |diagnostics| diagnostics.update_queue_bytes),
             interest_center: self.interest_center,
             render_distance: self.render_distance,
             chunk_tracking_radius: self.chunk_tracking_radius,
@@ -2000,6 +2072,7 @@ impl SingleViewRuntime {
         diagnostics.server_runner_kind = Some(runner_diagnostics.kind);
         diagnostics.server_command_queue_depth = runner_diagnostics.command_queue_depth;
         diagnostics.server_update_queue_depth = runner_diagnostics.update_queue_depth;
+        diagnostics.server_update_queue_bytes = runner_diagnostics.update_queue_bytes;
         diagnostics.server_pending_jobs = runner_diagnostics.pending_jobs;
         diagnostics.server_pending_publications = runner_diagnostics.pending_publications;
         diagnostics.server_diagnostics_detail_refreshes =
@@ -2371,6 +2444,42 @@ mod tests {
         assert_eq!(runtime.snapshot_update_count(), 1);
         assert_eq!(runtime.section_block_update_count(), 1);
         assert_eq!(runtime.unload_update_count(), 1);
+    }
+
+    #[test]
+    fn split_update_application_preserves_snapshot_mutation_unload_order() {
+        let pos = ChunkPos::new(0, 0);
+        let mut runtime = SingleViewRuntime::local_integrated(pos, 0, 0);
+
+        let snapshot = empty_runtime_test_snapshot(pos);
+        let snapshot_report =
+            runtime.apply_server_updates_report(vec![ServerUpdate::ChunkSnapshot(snapshot)]);
+        assert_eq!(snapshot_report.updates, 1);
+        assert!(runtime.client().chunk_snapshot(pos).is_some());
+        assert_eq!(
+            runtime.block_state_at_world(1, 2, 3),
+            Some(AIR_BLOCK_STATE_ID)
+        );
+
+        let mutation_report =
+            runtime.apply_server_updates_report(vec![ServerUpdate::SectionBlockUpdates {
+                pos,
+                section_y: 0,
+                updates: vec![mclone_protocol::SectionBlockUpdate {
+                    local_x: 1,
+                    local_y: 2,
+                    local_z: 3,
+                    block_state: BlockStateId(1),
+                }],
+            }]);
+        assert_eq!(mutation_report.updates, 1);
+        assert_eq!(runtime.block_state_at_world(1, 2, 3), Some(BlockStateId(1)));
+
+        let unload_report =
+            runtime.apply_server_updates_report(vec![ServerUpdate::ChunkUnload { pos }]);
+        assert_eq!(unload_report.updates, 1);
+        assert!(runtime.client().chunk_snapshot(pos).is_none());
+        assert_eq!(runtime.block_state_at_world(1, 2, 3), None);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
