@@ -540,6 +540,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (128, "minecraft:jungle_log", AXIS_Y),
     (129, "minecraft:jungle_leaves", EMPTY_PROPS),
     (130, "minecraft:bamboo", BAMBOO_TRUNK),
+    (131, "minecraft:lily_pad", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -558,7 +559,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 131);
+        assert_eq!(registry.len(), 132);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -802,6 +803,10 @@ mod tests {
         assert_eq!(
             registry.by_id(BlockStateId(130)).unwrap().canonical_key(),
             "minecraft:bamboo[age=1,leaves=none,stage=0]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:lily_pad"),
+            Some(BlockStateId(131))
         );
     }
 

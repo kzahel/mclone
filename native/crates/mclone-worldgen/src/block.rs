@@ -133,6 +133,7 @@ pub const ACACIA_LEAVES: RawBlockId = 127;
 pub const JUNGLE_LOG: RawBlockId = 128;
 pub const JUNGLE_LEAVES: RawBlockId = 129;
 pub const BAMBOO: RawBlockId = 130;
+pub const LILY_PAD: RawBlockId = 131;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -193,6 +194,7 @@ impl GeneratedBlockId {
     pub const JUNGLE_LOG: Self = Self(JUNGLE_LOG);
     pub const JUNGLE_LEAVES: Self = Self(JUNGLE_LEAVES);
     pub const BAMBOO: Self = Self(BAMBOO);
+    pub const LILY_PAD: Self = Self(LILY_PAD);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -249,6 +251,7 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | KELP
             | KELP_PLANT
             | BAMBOO
+            | LILY_PAD
             | SEA_PICKLE_1
             | SEA_PICKLE_2
             | SEA_PICKLE_3
@@ -449,6 +452,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         JUNGLE_LOG => "minecraft:jungle_log",
         JUNGLE_LEAVES => "minecraft:jungle_leaves",
         BAMBOO => "minecraft:bamboo",
+        LILY_PAD => "minecraft:lily_pad",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -536,6 +540,7 @@ mod tests {
         assert_eq!(block_light_opacity(KELP), 0);
         assert_eq!(block_light_opacity(KELP_PLANT), 0);
         assert_eq!(block_light_opacity(BAMBOO), 0);
+        assert_eq!(block_light_opacity(LILY_PAD), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
@@ -577,5 +582,6 @@ mod tests {
         assert_eq!(block_name(JUNGLE_LOG), "minecraft:jungle_log");
         assert_eq!(block_name(JUNGLE_LEAVES), "minecraft:jungle_leaves");
         assert_eq!(block_name(BAMBOO), "minecraft:bamboo");
+        assert_eq!(block_name(LILY_PAD), "minecraft:lily_pad");
     }
 }

@@ -44,7 +44,7 @@ mod tests {
         ACACIA_LEAVES, ACACIA_LOG, BAMBOO, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK,
         BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
         DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
-        JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER,
+        JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD,
         MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL, POPPY,
         RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
         SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE,
@@ -130,7 +130,7 @@ mod tests {
     enum FeatureFamily {
         PlainsVegetation,
         DesertDeadBushCactusSugarCane,
-        SwampNativeSubsetSugarCane,
+        SwampNativeSubsetSugarCaneLilyPad,
         TaigaSpruceFern,
         SnowySpruceFern,
         BadlandsDeadBushCactusSugarCane,
@@ -147,8 +147,8 @@ mod tests {
             match self {
                 Self::PlainsVegetation => "plains grass/flower/oak",
                 Self::DesertDeadBushCactusSugarCane => "desert dead bush plus cactus/sugar cane",
-                Self::SwampNativeSubsetSugarCane => {
-                    "native swamp vegetation/clay subset plus sugar cane"
+                Self::SwampNativeSubsetSugarCaneLilyPad => {
+                    "native swamp vegetation/clay subset plus sugar cane/lily pad"
                 }
                 Self::TaigaSpruceFern => "taiga spruce/fern",
                 Self::SnowySpruceFern => "snowy spruce/fern",
@@ -168,8 +168,8 @@ mod tests {
             match self {
                 Self::PlainsVegetation => &[OAK_LOG, OAK_LEAVES, GRASS, DANDELION, POPPY],
                 Self::DesertDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
-                Self::SwampNativeSubsetSugarCane => &[
-                    OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE,
+                Self::SwampNativeSubsetSugarCaneLilyPad => &[
+                    OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE, LILY_PAD,
                 ],
                 Self::TaigaSpruceFern => &[
                     SPRUCE_LOG,
@@ -217,11 +217,12 @@ mod tests {
                     chunk.block_count(DEAD_BUSH) > 0
                         && (chunk.block_count(CACTUS) + chunk.block_count(SUGAR_CANE)) > 0
                 }
-                Self::SwampNativeSubsetSugarCane => {
+                Self::SwampNativeSubsetSugarCaneLilyPad => {
                     [OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY]
                         .iter()
                         .any(|block| chunk.block_count(*block) > 0)
                         && chunk.block_count(SUGAR_CANE) > 0
+                        && chunk.block_count(LILY_PAD) > 0
                 }
                 Self::WarmOceanCoralSeaPickles => {
                     [
@@ -306,12 +307,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 88,
+            seed: 376,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:swamp",
             surface_family: SurfaceFamily::Swamp,
-            feature_family: Some(FeatureFamily::SwampNativeSubsetSugarCane),
+            feature_family: Some(FeatureFamily::SwampNativeSubsetSugarCaneLilyPad),
         },
         PaletteMatrixCase {
             seed: 39,

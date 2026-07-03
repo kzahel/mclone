@@ -2,9 +2,9 @@
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
 overworld tint IDs, twelve supported feature-family groups, and 26 F-checked
-matrix rows landed, including cactus/sugar-cane extras, ocean water plants,
-warm-ocean coral/sea-pickle, dark-forest canopy/mushroom, savanna acacia,
-jungle tree, and bamboo-jungle palette coverage
+matrix rows landed, including cactus/sugar-cane extras, swamp lily pads, ocean
+water plants, warm-ocean coral/sea-pickle, dark-forest canopy/mushroom, savanna
+acacia, jungle tree, and bamboo-jungle palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -119,7 +119,7 @@ notes.
 | 3 | `minecraft:mountains` | mountains | grass/stone/gravel mountain surface checked, sparse trees | seed `31`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 4 | `minecraft:forest` | forest | forest grass tint/surface checked, oak/birch trees/flowers | seed `0`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 5 | `minecraft:taiga` | taiga | spruce trees, ferns; berries gap | seed `125`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus sugar cane; lily pads/seagrass gap | seed `88`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus sugar cane and lily pads; mushrooms/seagrass/pumpkin gap | seed `376`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 7 | `minecraft:river` | river | river water checked, banks/seagrass gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice checked, icebergs/blue ice gap | seed `333`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice checked | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -219,7 +219,7 @@ Landed:
   and huge mushroom block families, savanna acacia trees, jungle log/leaves
   trees, and bamboo-jungle bamboo plus jungle log/leaves vegetation. Desert and
   badlands now require dead bush plus cactus/sugar-cane family coverage; swamp
-  requires the native vegetation/clay subset plus sugar cane; generated
+  requires the native vegetation/clay subset plus sugar cane and lily pads; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
@@ -229,10 +229,12 @@ Landed:
   not exact decorated counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
-  state IDs; dark oak log/leaves IDs; huge mushroom cap/stem IDs; acacia
-  log/leaves IDs; jungle log/leaves IDs; bamboo trunk ID; synthetic asset registry mappings; basic shared
+  state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; dark oak
+  log/leaves IDs; huge mushroom cap/stem IDs; acacia log/leaves IDs; jungle
+  log/leaves IDs; bamboo trunk ID; synthetic asset registry mappings; basic shared
   shape/material/render/light facts; Java-style reduced random-patch column
-  placement; Java-style seagrass, kelp, sea-pickle, and broad coral
+  placement; Java-style waterlily random-patch placement; Java-style seagrass,
+  kelp, sea-pickle, and broad coral
   tree/claw/mushroom placement; broad Java-shaped dark oak tree, huge mushroom,
   acacia forking-trunk/flat-canopy placement, jungle tree/bush/mega-jungle
   selector placement, and bamboo column/podzol-disk placement; the
@@ -272,18 +274,19 @@ Documented gaps from this slice:
   path, coral plants, coral fans/wall fans, exact coral mismatch parity, and
   full waterlogged/fluid-state modeling for water plants in the raw generated
   block lane.
-- Java swamp includes water lilies, mushrooms, and swamp seagrass/extras; native
-  currently checks only the oak/grass/dead-bush/clay subset that exists.
+- Java swamp now has high-signal water-lily coverage. Exact parity is still
+  incomplete: brown/red mushroom patches, swamp seagrass/extras, pumpkin, and
+  exact decorated counts remain later `103` work.
 
 ## Suggested Next Slice
 
 Move from B/T/S coverage to visible land feature-family breadth:
 
 1. Pick one missing block/feature family with high palette value and port it
-   narrowly from Java. The strongest next row is swamp lily pads because it
-   adds a distinctive water-surface silhouette to an already F-checked swamp
-   row. Other good follow-ups are berry bushes, mushroom-field mushrooms, or a
-   birch/tall-birch F-check sweep.
+   narrowly from Java. The strongest next row is mushroom-field huge mushrooms:
+   the block IDs and huge-mushroom feature support already exist, and it would
+   turn a distinct mycelium biome from B/T/S-only into visible F coverage. Other
+   good follow-ups are berry bushes or a birch/tall-birch F-check sweep.
 2. Add `F` checks to this matrix only when the supporting block IDs/features
    exist in native and the check is a broad deterministic block-family probe.
 3. Move any exact decorated mismatch-bucket work into `103`.

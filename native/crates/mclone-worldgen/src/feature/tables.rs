@@ -6,7 +6,7 @@ use crate::block::{
     DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
     FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
-    LAVA, MYCELIUM, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SUGAR_CANE,
+    LAVA, LILY_PAD, MYCELIUM, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SUGAR_CANE,
     TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
@@ -694,6 +694,7 @@ fn swamp_features() -> Vec<PlacedFeature> {
         grass_patch(GRASS, 2),
         flower_patch(POPPY, 1),
         dead_bush_patch(1),
+        waterlily_patch_feature(),
         sugar_cane_patch(20),
     ]
 }
@@ -1062,6 +1063,31 @@ fn jungle_grass_patch_feature() -> PlacedFeature {
         ConfiguredFeature::random_patch(jungle_grass_patch_config()),
         vec![
             ConfiguredDecorator::count(25),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
+fn waterlily_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: LILY_PAD,
+            weighted_states: &[],
+            tries: 10,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        }),
+        vec![
+            ConfiguredDecorator::count(4),
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
         ],

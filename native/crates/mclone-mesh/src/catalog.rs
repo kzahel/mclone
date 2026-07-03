@@ -50,6 +50,7 @@ pub enum TexturedBlockTint {
     Foliage,
     BirchFoliage,
     EvergreenFoliage,
+    LilyPad,
 }
 
 impl TexturedBlockFace {
@@ -442,6 +443,7 @@ fn textured_block_tint(block_path: &str, tintindex: i32) -> TexturedBlockTint {
         }
         "birch_leaves" => TexturedBlockTint::BirchFoliage,
         "spruce_leaves" => TexturedBlockTint::EvergreenFoliage,
+        "lily_pad" => TexturedBlockTint::LilyPad,
         _ => TexturedBlockTint::None,
     }
 }
@@ -851,6 +853,15 @@ mod tests {
             textured_terrain_render_layer("tinted_glass", false),
             TexturedTerrainRenderLayer::Translucent
         );
+    }
+
+    #[test]
+    fn textured_block_tint_classifies_vanilla_tintindex_blocks() {
+        assert_eq!(
+            textured_block_tint("lily_pad", 0),
+            TexturedBlockTint::LilyPad
+        );
+        assert_eq!(textured_block_tint("lily_pad", -1), TexturedBlockTint::None);
     }
 
     #[test]

@@ -55,6 +55,7 @@ pub mod terrain_id {
     pub const JUNGLE_LOG: u32 = 128;
     pub const JUNGLE_LEAVES: u32 = 129;
     pub const BAMBOO: u32 = 130;
+    pub const LILY_PAD: u32 = 131;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

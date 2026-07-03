@@ -75,6 +75,7 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         terrain_id::CACTUS => Some(cactus_outline_shape()),
         terrain_id::SUGAR_CANE => Some(sugar_cane_shape()),
         terrain_id::BAMBOO => Some(bamboo_outline_shape()),
+        terrain_id::LILY_PAD => Some(lily_pad_shape()),
         terrain_id::SEAGRASS => Some(seagrass_shape()),
         terrain_id::TALL_SEAGRASS_LOWER | terrain_id::TALL_SEAGRASS_UPPER => {
             Some(tall_seagrass_shape())
@@ -126,6 +127,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::WALL_TORCH_WEST => None,
         terrain_id::CACTUS => Some(cactus_collision_shape()),
         terrain_id::BAMBOO => Some(bamboo_collision_shape()),
+        terrain_id::LILY_PAD => Some(lily_pad_shape()),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         id if is_fluid(BlockStateId(id)) => None,
         _ => Some(full_block()),
@@ -173,6 +175,17 @@ fn bamboo_outline_shape() -> LocalShape {
 
 fn bamboo_collision_shape() -> LocalShape {
     local_box(6.5 / 16.0, 0.0, 6.5 / 16.0, 9.5 / 16.0, 1.0, 9.5 / 16.0).with_offset(OffsetKind::Xz)
+}
+
+fn lily_pad_shape() -> LocalShape {
+    local_box(
+        1.0 / 16.0,
+        0.0,
+        1.0 / 16.0,
+        15.0 / 16.0,
+        1.5 / 16.0,
+        15.0 / 16.0,
+    )
 }
 
 fn seagrass_shape() -> LocalShape {
@@ -502,6 +515,15 @@ mod tests {
                 1.0,
                 offset.z + 0.59375,
             ))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::LILY_PAD), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.0625, 0.0, 0.0625, 0.9375, 0.09375, 0.9375))
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::LILY_PAD), pos),
+            Some(Aabb::new(0.0625, 0.0, 0.0625, 0.9375, 0.09375, 0.9375))
         );
     }
 

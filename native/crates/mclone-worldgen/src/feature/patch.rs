@@ -1,7 +1,7 @@
 use crate::block::{
-    CACTUS, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, MYCELIUM, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SUGAR_CANE, TERRACOTTA,
-    is_air_like, is_lava, is_water, material_blocks_motion,
+    CACTUS, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, ICE,
+    LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD, MYCELIUM, PODZOL, POPPY, RED_SAND, RawBlockId,
+    SAND, SUGAR_CANE, TERRACOTTA, is_air_like, is_lava, is_water, material_blocks_motion,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -219,6 +219,7 @@ fn can_survive_patch_plant<W: FeatureWorld>(
                         BlockPos::new(pos.x, pos.y - 1, pos.z),
                     ))
         }
+        LILY_PAD => is_water(block_below) || block_below == ICE,
         _ => can_survive_simple_plant(block_id, current, block_below),
     }
 }

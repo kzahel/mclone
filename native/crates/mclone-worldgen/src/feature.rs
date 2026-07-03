@@ -265,8 +265,8 @@ mod tests {
         DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE,
         DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
         HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LAPIS_ORE,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, POPPY,
-        RED_MUSHROOM_BLOCK, REDSTONE_ORE, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILY_PAD, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG,
+        POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
         SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER,
         TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
@@ -538,6 +538,36 @@ mod tests {
         assert!(sugar_cane.place(&mut wet_chunk, &mut wet_random, BlockPos::new(8, 3, 8)));
         assert_eq!(wet_chunk.get_block_at_y(8, 3, 8), SUGAR_CANE);
         assert_eq!(wet_chunk.get_block_at_y(8, 4, 8), SUGAR_CANE);
+    }
+
+    #[test]
+    fn random_patch_places_lily_pad_on_projected_water_surface() {
+        let lily_pad = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: LILY_PAD,
+            weighted_states: &[],
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        });
+
+        let mut ocean_chunk = flat_ocean_chunk();
+        let mut ocean_random = WorldgenRandom::new(0);
+
+        assert!(lily_pad.place(&mut ocean_chunk, &mut ocean_random, BlockPos::new(8, 0, 8)));
+        assert_eq!(ocean_chunk.get_block_at_y(8, 11, 8), LILY_PAD);
+
+        let mut grass_chunk = flat_grass_chunk();
+        let mut grass_random = WorldgenRandom::new(0);
+
+        assert!(!lily_pad.place(&mut grass_chunk, &mut grass_random, BlockPos::new(8, 0, 8)));
+        assert_eq!(grass_chunk.get_block_at_y(8, 3, 8), AIR);
     }
 
     #[test]
@@ -1058,6 +1088,55 @@ mod tests {
         assert!(has_random_patch(&badlands, SUGAR_CANE, 13));
         assert!(has_random_patch(&badlands, CACTUS, 5));
         assert!(has_random_patch(&swamp, SUGAR_CANE, 20));
+        assert!(has_random_patch(&swamp, LILY_PAD, 4));
+    }
+
+    #[test]
+    fn swamp_feature_table_includes_java_waterlily_patch() {
+        let swamp = overworld_features_for_biome(get_layered_biome_by_id(6));
+        let waterlily = swamp
+            .iter()
+            .find(|feature| {
+                matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: LILY_PAD,
+                        ..
+                    })
+                )
+            })
+            .expect("swamp waterlily feature");
+
+        assert_eq!(
+            waterlily.decorators,
+            vec![
+                ConfiguredDecorator::count(4),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
+        );
+        match &waterlily.feature {
+            ConfiguredFeature::RandomPatch(config) => {
+                assert_eq!(
+                    *config,
+                    RandomPatchConfiguration {
+                        state: LILY_PAD,
+                        weighted_states: &[],
+                        tries: 10,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: true,
+                        can_replace: false,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[],
+                    }
+                );
+            }
+            other => panic!("expected waterlily random patch, got {other:?}"),
+        }
     }
 
     #[test]

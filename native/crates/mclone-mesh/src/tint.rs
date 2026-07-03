@@ -59,6 +59,7 @@ where
         )),
         TexturedBlockTint::BirchFoliage => rgb8(0x80_a7_55),
         TexturedBlockTint::EvergreenFoliage => rgb8(0x61_99_61),
+        TexturedBlockTint::LilyPad => rgb8(0x20_80_30),
     }
 }
 
@@ -893,6 +894,17 @@ mod tests {
                 |_, _, _| 1
             ),
             rgb8(0x61_99_61)
+        );
+        assert_eq!(
+            block_tint(
+                &TexturedMeshCatalog::default(),
+                TexturedBlockTint::LilyPad,
+                0,
+                64,
+                0,
+                |_, _, _| 1
+            ),
+            rgb8(0x20_80_30)
         );
     }
 }
