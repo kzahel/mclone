@@ -1,6 +1,7 @@
 # 135: Overworld Biome Palette Matrix
 
-Status: active parent; first eight biome/tint/visible-surface probes landed
+Status: active parent; first eight biome/tint/visible-surface probes and six
+supported feature-family probes landed
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -102,21 +103,23 @@ path samples the vanilla colormaps unless an override/modifier is listed.
 ## Biome Matrix
 
 Legend for `Checks`: `B` biome identity, `T` tint RGB, `S` surface family,
-`F` visible palette feature family.
+`F` currently supported visible palette feature family. `F` is not exact
+decorated feature parity; rows can still list missing vanilla families in the
+notes.
 
 | ID | Biome | Tint group | Surface / palette focus | Fixture | Checks |
 |---:|---|---|---|---|---|
 | 0 | `minecraft:ocean` | ocean-default | water, default ocean seafloor, kelp/seagrass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 1 | `minecraft:plains` | plains | grass surface, grass/flower patches, oak/birch mix | seed `16`, chunk `(0,0)`; seeds `16`, `17` exist in `103` | `[x] B [x] T [x] S [ ] F` |
-| 2 | `minecraft:desert` | desert | sand/sandstone, cactus, dead bush, desert lakes | seed `38`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 1 | `minecraft:plains` | plains | grass surface, grass/flower patches, oak vegetation | seed `16`, chunk `(0,0)`; seeds `16`, `17` exist in `103` | `[x] B [x] T [x] S [x] F` |
+| 2 | `minecraft:desert` | desert | sand/sandstone, dead bush checked; cactus/desert extras gap | seed `38`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 3 | `minecraft:mountains` | mountains | grass/stone mountain surface, sparse trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 4 | `minecraft:forest` | forest | forest grass, oak/birch trees, flowers | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 5 | `minecraft:taiga` | taiga | spruce trees, ferns, berries | seed `125`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 6 | `minecraft:swamp` | swamp | swamp grass/water, clay, swamp trees, lily pads/seagrass | seed `7`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 5 | `minecraft:taiga` | taiga | spruce trees, ferns; berries gap | seed `125`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset; lily pads/seagrass gap | seed `7`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 7 | `minecraft:river` | river | river water, banks, seagrass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water, icebergs, blue ice | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 12 | `minecraft:snowy_tundra` | frozen-land | snow over grass, snowy vegetation | seed `42`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 12 | `minecraft:snowy_tundra` | frozen-land | snow over grass, native snowy spruce/fern subset | seed `42`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 13 | `minecraft:snowy_mountains` | frozen-land | snowy mountain surface | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 14 | `minecraft:mushroom_fields` | mushroom | mycelium, mushrooms, no normal hostile palette | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition | TBD | `[ ] B [ ] T [ ] S [ ] F` |
@@ -133,7 +136,7 @@ Legend for `Checks`: `B` biome identity, `T` tint RGB, `S` surface family,
 | 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach, cold water | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 27 | `minecraft:birch_forest` | birch | birch leaves/trunks, forest grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 28 | `minecraft:birch_forest_hills` | birch | birch hill trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier, dark oak canopy, mushrooms | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier checked; dark oak/mushroom gap | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 30 | `minecraft:snowy_taiga` | snowy-taiga | snowy spruce, ferns, berries | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 31 | `minecraft:snowy_taiga_hills` | snowy-taiga | snowy spruce hill variant | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt feel, giant taiga trees, ferns | TBD | `[ ] B [ ] T [ ] S [ ] F` |
@@ -141,10 +144,10 @@ Legend for `Checks`: `B` biome identity, `T` tint RGB, `S` surface family,
 | 34 | `minecraft:wooded_mountains` | mountains | mountain surface with trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 35 | `minecraft:savanna` | savanna | dry grass tint, acacia trees, tall grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau, acacia/grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, dead bush | seed `147`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, dead bush checked; cactus/sugar-cane gap | seed `147`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 38 | `minecraft:wooded_badlands_plateau` | badlands | terracotta/red sand, wooded plateau trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water, sand, coral/sea pickles | seed `26`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water/sand checked; coral/sea-pickle/seagrass gap | seed `26`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 45 | `minecraft:lukewarm_ocean` | ocean-lukewarm | bright water, sand, seagrass/kelp | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 46 | `minecraft:cold_ocean` | ocean-cold | cold water, gravel/grass seafloor, kelp | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 47 | `minecraft:deep_warm_ocean` | ocean-warm | deep turquoise water, sand | TBD | `[ ] B [ ] T [ ] S [ ] F` |
@@ -191,35 +194,45 @@ Legend for `Checks`: `B` biome identity, `T` tint RGB, `S` surface family,
 - Exact decorated block parity remains owned by `103`; this matrix can point a
   row at a `103` fixture once that biome needs mismatch-bucket work.
 
-## First Slice
+## Landed Slices
 
 Landed:
 
-- `mclone-worldgen::levelgen::tests::first_palette_matrix_rows_have_expected_biome_and_surface_family`
+- `mclone-worldgen::levelgen::tests::first_palette_matrix_rows_have_expected_biome_surface_and_supported_feature_family`
   records representative `(0,0)` seeds for plains, desert, swamp, dark forest,
   taiga, snowy tundra, badlands, and warm ocean.
 - The worldgen probe asserts primary biome identity, block-position biome
   identity at the chunk center, and at least one visible `FEATURES` top-surface
   column in the row's expected surface family.
+- The same worldgen probe now asserts currently supported visible feature
+  families for plains, desert, swamp, taiga, snowy tundra, and badlands. The
+  assertions are intentionally broad block-family checks, not exact decorated
+  counts.
 - `mclone-mesh::tint::tests::first_palette_matrix_tint_groups_match_java_visual_facts`
   asserts the first eight rows' grass, foliage, and water tint outputs through
   the shared tint resolver. The swamp grass value is the default radius-2 blend
   at the origin, `#647139`, not the direct light swamp color.
 
-Feature-family probes are intentionally still unchecked. Add those after the
-biome, tint, and visible-surface facts stay stable.
+Documented gaps from this slice:
+
+- Java desert and badlands include cactus and sugar cane paths; native does not
+  yet have cactus or sugar cane block IDs/features.
+- Java dark forest uses dark oak plus huge mushroom selection; native currently
+  falls through to the default land feature table because dark oak and mushroom
+  feature families are not modeled.
+- Java warm ocean uses seagrass, sea pickles, and coral; native does not yet
+  have those block IDs/features.
+- Java swamp includes water lilies, mushrooms, and swamp seagrass/extras; native
+  currently checks only the oak/grass/dead-bush/clay subset that exists.
 
 ## Suggested Next Slice
 
-Add the first `F` checks for the same eight rows without trying to reach exact
-decorated chunk parity:
+Expand deterministic palette coverage before screenshot-led validation:
 
-1. desert: cactus/dead-bush family presence,
-2. taiga: spruce/fern family presence,
-3. dark forest: dark-oak/mushroom family presence or documented current gap,
-4. badlands: red-sand/terracotta/dead-bush family presence,
-5. warm ocean: sand/water plus current coral/seagrass support or documented
-   current gap.
-
-Keep these as deterministic block-family probes first. Move any row that needs
-mismatch-bucket-driven feature porting into `103`.
+1. Add B/T/S fixtures for the remaining tint groups with easy seed/chunk
+   representatives: ocean-default, river, forest, birch, mountains, savanna,
+   mushroom, lukewarm/cold/frozen ocean, beach, and snowy beach.
+2. Keep `F` checks to currently supported block families, and document missing
+   vanilla families in this matrix.
+3. Move rows that need exact decorated mismatch buckets into `103`; move rows
+   that need new block IDs/features into focused feature-port tacticals.

@@ -41,8 +41,9 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        GRASS_BLOCK, ICE, PACKED_ICE, RED_SAND, RawBlockId, SAND, SNOW, SNOW_BLOCK, STONE,
-        TERRACOTTA, WATER, is_air_like, is_water,
+        CLAY, DANDELION, DEAD_BUSH, FERN, GRASS, GRASS_BLOCK, ICE, LARGE_FERN_LOWER,
+        LARGE_FERN_UPPER, OAK_LEAVES, OAK_LOG, PACKED_ICE, POPPY, RED_SAND, RawBlockId, SAND, SNOW,
+        SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, WATER, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -62,6 +63,7 @@ mod tests {
         chunk_z: i32,
         biome_key: &'static str,
         surface_family: SurfaceFamily,
+        feature_family: Option<FeatureFamily>,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -98,6 +100,46 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, Debug)]
+    enum FeatureFamily {
+        PlainsVegetation,
+        DesertDeadBush,
+        SwampNativeSubset,
+        TaigaSpruceFern,
+        SnowySpruceFern,
+        BadlandsDeadBush,
+    }
+
+    impl FeatureFamily {
+        fn name(self) -> &'static str {
+            match self {
+                Self::PlainsVegetation => "plains grass/flower/oak",
+                Self::DesertDeadBush => "desert dead bush",
+                Self::SwampNativeSubset => "native swamp vegetation/clay subset",
+                Self::TaigaSpruceFern => "taiga spruce/fern",
+                Self::SnowySpruceFern => "snowy spruce/fern",
+                Self::BadlandsDeadBush => "badlands dead bush",
+            }
+        }
+
+        fn blocks(self) -> &'static [RawBlockId] {
+            match self {
+                Self::PlainsVegetation => &[OAK_LOG, OAK_LEAVES, GRASS, DANDELION, POPPY],
+                Self::DesertDeadBush => &[DEAD_BUSH],
+                Self::SwampNativeSubset => &[OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY],
+                Self::TaigaSpruceFern => &[
+                    SPRUCE_LOG,
+                    SPRUCE_LEAVES,
+                    FERN,
+                    LARGE_FERN_LOWER,
+                    LARGE_FERN_UPPER,
+                ],
+                Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
+                Self::BadlandsDeadBush => &[DEAD_BUSH],
+            }
+        }
+    }
+
     const FIRST_PALETTE_MATRIX_CASES: &[PaletteMatrixCase] = &[
         PaletteMatrixCase {
             seed: 16,
@@ -105,6 +147,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:plains",
             surface_family: SurfaceFamily::Grass,
+            feature_family: Some(FeatureFamily::PlainsVegetation),
         },
         PaletteMatrixCase {
             seed: 38,
@@ -112,6 +155,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:desert",
             surface_family: SurfaceFamily::Sand,
+            feature_family: Some(FeatureFamily::DesertDeadBush),
         },
         PaletteMatrixCase {
             seed: 7,
@@ -119,6 +163,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:swamp",
             surface_family: SurfaceFamily::Swamp,
+            feature_family: Some(FeatureFamily::SwampNativeSubset),
         },
         PaletteMatrixCase {
             seed: 44,
@@ -126,6 +171,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:dark_forest",
             surface_family: SurfaceFamily::Grass,
+            feature_family: None,
         },
         PaletteMatrixCase {
             seed: 125,
@@ -133,6 +179,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:taiga",
             surface_family: SurfaceFamily::Grass,
+            feature_family: Some(FeatureFamily::TaigaSpruceFern),
         },
         PaletteMatrixCase {
             seed: 42,
@@ -140,6 +187,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:snowy_tundra",
             surface_family: SurfaceFamily::Snow,
+            feature_family: Some(FeatureFamily::SnowySpruceFern),
         },
         PaletteMatrixCase {
             seed: 147,
@@ -147,6 +195,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:badlands",
             surface_family: SurfaceFamily::Badlands,
+            feature_family: Some(FeatureFamily::BadlandsDeadBush),
         },
         PaletteMatrixCase {
             seed: 26,
@@ -154,6 +203,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:warm_ocean",
             surface_family: SurfaceFamily::Water,
+            feature_family: None,
         },
     ];
 
@@ -1173,7 +1223,7 @@ mod tests {
     }
 
     #[test]
-    fn first_palette_matrix_rows_have_expected_biome_and_surface_family() {
+    fn first_palette_matrix_rows_have_expected_biome_surface_and_supported_feature_family() {
         for case in FIRST_PALETTE_MATRIX_CASES {
             let biome_source = OverworldBiomeSource::new(case.seed, false, false);
             let primary = biome_source.get_primary_biome_definition(case.chunk_x, case.chunk_z);
@@ -1207,6 +1257,18 @@ mod tests {
                 case.chunk_z,
                 case.surface_family.name()
             );
+
+            if let Some(feature_family) = case.feature_family {
+                let feature_blocks = count_feature_family(&chunk, feature_family);
+                assert!(
+                    feature_blocks > 0,
+                    "seed {} chunk ({}, {}) had no {} blocks",
+                    case.seed,
+                    case.chunk_x,
+                    case.chunk_z,
+                    feature_family.name()
+                );
+            }
         }
     }
 
@@ -2066,6 +2128,14 @@ mod tests {
             }
         }
         count
+    }
+
+    fn count_feature_family(chunk: &GeneratedChunk, family: FeatureFamily) -> usize {
+        family
+            .blocks()
+            .iter()
+            .map(|block| chunk.block_count(*block))
+            .sum()
     }
 
     fn top_non_air_block(chunk: &GeneratedChunk, local_x: i32, local_z: i32) -> Option<RawBlockId> {
