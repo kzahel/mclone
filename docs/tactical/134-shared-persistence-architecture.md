@@ -130,12 +130,12 @@ Add a storage-facing contract without changing physical storage yet.
 The contract is completion-based, not blocking: request and completion enums
 are the shared surface, because web/IndexedDB cannot serve a blocking call
 from inside the host worker. Blocking convenience wrappers are native-only
-helpers. The scheduler keeps calling through a synchronous facade in this
-slice; async load integration through the holder state machine is Slice 2.
+helpers. Slice 2 moved the scheduler to the mailbox path; the synchronous
+facade remains only as compatibility/testing glue.
 
 Actor lifetime equals world lifetime: the actor is created at world open and
 torn down at world close, so there is no session-epoch protocol. Dropping load
-results after chunk interest changes is host bookkeeping in Slice 2.
+results after chunk interest changes is host bookkeeping in the scheduler.
 
 Landed shape:
 
@@ -160,9 +160,9 @@ Landed shape:
 
 Implementation notes:
 
-- `ChunkScheduler` now owns `SynchronousPersistenceFacade`; existing callers can
-  still pass `Box<dyn ChunkSnapshotStore>` through `ChunkScheduler::with_store`
-  and `IntegratedServer::with_chunk_store`.
+- `ChunkScheduler` now owns `PersistenceMailbox`; existing callers can still
+  pass `Box<dyn ChunkSnapshotStore>` through `ChunkScheduler::with_store` and
+  `IntegratedServer::with_chunk_store`.
 - `FilesystemChunkSnapshotStore` remains the compatibility file scaffold and
   also implements `WorldStore`.
 - The binary snapshot shim now writes format v4 with an optional
@@ -192,29 +192,44 @@ Exit criteria:
 
 Move current scheduler save-before-unload behavior onto actor acknowledgements.
 
-Deliverables:
+Landed shape:
 
-- scheduler loads become async through the holder state machine, replacing the
-  Slice 1 synchronous facade
-- load results that complete after chunk interest goes away are dropped by
-  host bookkeeping
-- resident dirty holders stay alive while required durable saves are pending
-- returning interest resurrects a pending-unload holder instead of reading stale
-  storage
-- foreground loads consult pending writes before backend loads
-- generated-clean cache saves are distinguishable from durable dirty saves
-- pending scheduled fluid ticks (and future block ticks) pack into chunk
-  records on save and hydrate into host tick queues on load/promotion, instead
-  of load-time settling
-- storage errors surface through scheduler/runtime diagnostics
+- `ChunkScheduler` schedules chunk loads through `PersistenceMailbox` and
+  integrates completions during `poll`.
+- load misses are batched back through ticket reconciliation before generation,
+  preserving center-first worldgen/light behavior.
+- load completions are ignored when interest has disappeared before the result
+  is integrated.
+- dirty holders queue durable saves and remain resident while a required save
+  acknowledgement is pending.
+- returning interest removes the pending-unload marker and continues using the
+  resident holder, including dirty edits whose durable save has not completed.
+- generated-clean publish paths queue discardable cache saves instead of marking
+  generated chunks dirty.
+- foreground loads see actor-pending same-chunk writes before backend reads via
+  `PersistenceActor::load_chunk`.
+- explicit `save_dirty_chunks()` flushes durable writes through the actor lane.
+- scheduler/runtime callers receive persistence errors through the existing
+  `ChunkStoreResult` path.
 
-Validation:
+Validation landed:
 
 - dirty block edit survives unload/reload through memory store
 - clean generated cache miss regenerates instead of failing the world
 - stale cache write cannot overwrite a later dirty block edit
 - pending-unload holder is resurrected when interest returns before save ack
-- pending fluid tick survives unload/reload and resumes instead of re-settling
+- generated-clean cache writes are distinguishable from durable dirty saves in
+  scheduler tests
+- existing filesystem reload and fluid pending-unload tests were updated for
+  actor acknowledgements
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server`
+
+Deferred to the next chunk:
+
+- pending scheduled fluid ticks, and future block ticks, still need to pack into
+  chunk records on save and hydrate into host tick queues on load/promotion.
+  The current slice keeps dirty chunk data safe, but tick queues remain outside
+  `ChunkRecord`.
 
 ### Slice 3: Entity Chunk Record Foundation
 

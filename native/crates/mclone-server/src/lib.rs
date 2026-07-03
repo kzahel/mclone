@@ -74,7 +74,8 @@ pub use player_chunk_tracking::{
 pub use players::ServerPlayerId;
 pub use runner::{
     IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind,
-    ServerRunnerResult, ServerRunnerTickDiagnostics, WorkerFrameMetrics, WorkerFrameTransportKind,
+    ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WorkerFrameMetrics,
+    WorkerFrameTransportKind,
 };
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{
@@ -98,6 +99,8 @@ pub use types::{
 
 #[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use std::{cell::RefCell, rc::Rc};
 
 #[cfg(test)]
 use lighting_seed::{
@@ -182,6 +185,30 @@ mod tests {
     };
     use serde_json::Value;
 
+    #[derive(Clone, Debug, Default)]
+    struct SharedMemoryWorldStore {
+        chunks: Rc<RefCell<BTreeMap<ChunkPos, ChunkRecord>>>,
+    }
+
+    impl SharedMemoryWorldStore {
+        fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    impl WorldStore for SharedMemoryWorldStore {
+        fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+            Ok(self.chunks.borrow().get(&pos).cloned())
+        }
+
+        fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+            self.chunks
+                .borrow_mut()
+                .insert(record.pos(), record.clone());
+            Ok(())
+        }
+    }
+
     fn apply_interest_and_poll(
         scheduler: &mut ChunkScheduler,
         interest: ChunkView,
@@ -203,6 +230,18 @@ mod tests {
             }
         }
         panic!("timed out waiting for scheduler worldgen jobs");
+    }
+
+    fn poll_scheduler_until_persistence_idle(scheduler: &mut ChunkScheduler) {
+        for _ in 0..60_000 {
+            if scheduler.pending_persistence_load_count() == 0
+                && scheduler.pending_persistence_save_count() == 0
+            {
+                return;
+            }
+            scheduler.poll().unwrap();
+        }
+        panic!("timed out waiting for scheduler persistence actor");
     }
 
     #[test]
@@ -991,6 +1030,20 @@ mod tests {
             }
         }
         panic!("timed out waiting for integrated server worldgen jobs");
+    }
+
+    fn try_poll_server_until_persistence_idle(
+        server: &mut IntegratedServer,
+    ) -> ChunkStoreResult<()> {
+        for _ in 0..60_000 {
+            if server.scheduler().pending_persistence_load_count() == 0
+                && server.scheduler().pending_persistence_save_count() == 0
+            {
+                return Ok(());
+            }
+            let _ = server.try_poll()?;
+        }
+        panic!("timed out waiting for integrated server persistence actor");
     }
 
     fn assert_liquid_oracle_fixture_matches(server: &IntegratedServer, fixture_json: &str) {
@@ -1838,7 +1891,7 @@ mod tests {
                 loaded_snapshot_chunks: 25,
                 dependency_holder_chunks: 29 * 29 - 25,
                 ready_dependency_chunks: 23 * 23,
-                dirty_chunks: 25,
+                dirty_chunks: 0,
                 pending_jobs: 0,
                 completed_jobs: 1,
                 total_seeded_dependency_chunks: 0,
@@ -2645,6 +2698,15 @@ mod tests {
             .process_pending_unloads(usize::MAX)
             .unwrap();
         assert!(
+            server.scheduler().holder(ChunkPos::new(0, 0)).is_some(),
+            "dirty pending-unload holders should stay resident until the durable save acks"
+        );
+        try_poll_server_until_persistence_idle(&mut server).unwrap();
+        server
+            .scheduler_mut()
+            .process_pending_unloads(usize::MAX)
+            .unwrap();
+        assert!(
             server.scheduler().holder(ChunkPos::new(0, 0)).is_none(),
             "the original chunk should be fully removed from scheduler holders"
         );
@@ -2822,12 +2884,10 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(scheduler.pending_job_count(), 1);
+        assert_eq!(scheduler.pending_job_count(), 0);
+        assert_eq!(scheduler.pending_persistence_load_count(), 9);
         assert_eq!(scheduler.loaded_chunk_count(), 0);
-        assert_eq!(
-            scheduler.job(ChunkJobId(1)).map(|job| job.state),
-            Some(ChunkJobState::Running)
-        );
+        assert_eq!(scheduler.job_count(), 0);
         assert!(
             events
                 .iter()
@@ -2843,7 +2903,14 @@ mod tests {
             9
         );
 
-        let ready_events = poll_scheduler_until_idle(&mut scheduler);
+        let mut ready_events = scheduler.poll().unwrap();
+        assert_eq!(scheduler.pending_persistence_load_count(), 0);
+        assert_eq!(scheduler.pending_job_count(), 1);
+        assert_eq!(
+            scheduler.job(ChunkJobId(1)).map(|job| job.state),
+            Some(ChunkJobState::Running)
+        );
+        ready_events.extend(poll_scheduler_until_idle(&mut scheduler));
         assert_eq!(scheduler.pending_job_count(), 0);
         assert_eq!(scheduler.loaded_chunk_count(), 9);
         assert!(
@@ -2932,6 +2999,7 @@ mod tests {
                 chunk_tracking_radius: 0,
             })
             .unwrap();
+        assert!(scheduler.poll().unwrap().is_empty());
         assert!(scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30)));
 
         let first_events = scheduler.poll().unwrap();
@@ -3024,6 +3092,8 @@ mod tests {
 
         let first_events = scheduler.apply_interest(interest.clone()).unwrap();
         assert_eq!(first_events.len(), 9 * 6);
+        assert_eq!(scheduler.pending_persistence_load_count(), 9);
+        assert!(scheduler.poll().unwrap().is_empty());
         assert_eq!(scheduler.pending_job_count(), 1);
         assert_eq!(scheduler.job_count(), 1);
 
@@ -3206,7 +3276,7 @@ mod tests {
             Some(FORCED_TICKET_LEVEL)
         );
         assert_eq!(scheduler.loaded_chunk_count(), 9);
-        assert_eq!(scheduler.process_pending_unloads(usize::MAX).unwrap(), 0);
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
         assert!(scheduler.holder(pos).is_some());
     }
 
@@ -3338,7 +3408,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_chunks_are_dirty_until_saved() {
+    fn generated_chunks_queue_clean_cache_saves() {
         let mut scheduler = ChunkScheduler::new(12_345);
         apply_interest_and_poll(
             &mut scheduler,
@@ -3351,15 +3421,118 @@ mod tests {
 
         let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(holder.residency(), ChunkResidency::Generated);
-        assert!(holder.is_dirty());
-        assert_eq!(scheduler.dirty_chunk_count(), 9);
-
-        assert_eq!(scheduler.save_dirty_chunks().unwrap(), 9);
-
-        let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
-        assert_eq!(holder.residency(), ChunkResidency::Saved);
         assert!(!holder.is_dirty());
         assert_eq!(scheduler.dirty_chunk_count(), 0);
+
+        assert_eq!(scheduler.save_dirty_chunks().unwrap(), 0);
+        poll_scheduler_until_persistence_idle(&mut scheduler);
+
+        let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(holder.residency(), ChunkResidency::Generated);
+        assert!(!holder.is_dirty());
+        assert_eq!(scheduler.dirty_chunk_count(), 0);
+    }
+
+    #[test]
+    fn dirty_block_edit_survives_unload_reload_through_memory_store() {
+        let store = SharedMemoryWorldStore::new();
+        let interest = ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        };
+        let edited = WorldBlockPos::new(8, 80, 8);
+
+        let mut scheduler = ChunkScheduler::with_world_store(12_345, Box::new(store.clone()));
+        apply_interest_and_poll(&mut scheduler, interest.clone());
+        let replacement = if scheduler.block_at_world(edited) == Some(STONE) {
+            AIR
+        } else {
+            STONE
+        };
+        assert!(scheduler.set_block_at_world(edited, replacement));
+        assert_eq!(scheduler.dirty_chunk_count(), 1);
+
+        scheduler
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(100, 100),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
+        assert!(
+            scheduler.holder(ChunkPos::new(0, 0)).is_some(),
+            "dirty pending-unload holder should wait for durable save completion"
+        );
+        poll_scheduler_until_persistence_idle(&mut scheduler);
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
+        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
+
+        let mut reloaded = ChunkScheduler::with_world_store(12_345, Box::new(store));
+        apply_interest_and_poll(&mut reloaded, interest);
+        assert_eq!(reloaded.block_at_world(edited), Some(replacement));
+        assert_eq!(
+            reloaded
+                .holder(ChunkPos::new(0, 0))
+                .map(ChunkHolder::residency),
+            Some(ChunkResidency::LoadedFromStore)
+        );
+    }
+
+    #[test]
+    fn clean_generated_cache_miss_regenerates_without_store_error() {
+        let mut scheduler =
+            ChunkScheduler::with_world_store(12_345, Box::new(SharedMemoryWorldStore::new()));
+        let events = apply_interest_and_poll(
+            &mut scheduler,
+            ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            },
+        );
+
+        assert_eq!(scheduler.job_count(), 1);
+        assert_eq!(scheduler.loaded_chunk_count(), 9);
+        assert_eq!(snapshot_ready_count(&without_fluid_tick_events(&events)), 1);
+    }
+
+    #[test]
+    fn dirty_pending_unload_holder_is_rescued_before_save_ack() {
+        let store = SharedMemoryWorldStore::new();
+        let interest = ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        };
+        let edited = WorldBlockPos::new(8, 80, 8);
+        let mut scheduler = ChunkScheduler::with_world_store(12_345, Box::new(store));
+
+        apply_interest_and_poll(&mut scheduler, interest.clone());
+        let replacement = if scheduler.block_at_world(edited) == Some(STONE) {
+            AIR
+        } else {
+            STONE
+        };
+        assert!(scheduler.set_block_at_world(edited, replacement));
+        scheduler
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(100, 100),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
+        assert!(scheduler.is_pending_unload(ChunkPos::new(0, 0)));
+        assert_eq!(scheduler.pending_persistence_save_count(), 1);
+
+        scheduler.apply_interest(interest).unwrap();
+        assert!(!scheduler.is_pending_unload(ChunkPos::new(0, 0)));
+        assert_eq!(scheduler.block_at_world(edited), Some(replacement));
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
+        poll_scheduler_until_persistence_idle(&mut scheduler);
+        assert_eq!(scheduler.block_at_world(edited), Some(replacement));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -3384,7 +3557,7 @@ mod tests {
             let snapshot = snapshot_update_for(&updates, ChunkPos::new(0, 0))
                 .expect("updates should include the resident chunk snapshot");
             assert_eq!(server.scheduler().job_count(), 1);
-            assert_eq!(server.scheduler().dirty_chunk_count(), 9);
+            assert_eq!(server.scheduler().dirty_chunk_count(), 0);
             assert_eq!(
                 server
                     .scheduler()
@@ -3394,7 +3567,8 @@ mod tests {
                 ChunkResidency::Generated
             );
 
-            assert_eq!(server.save_dirty_chunks().unwrap(), 9);
+            assert_eq!(server.save_dirty_chunks().unwrap(), 0);
+            try_poll_server_until_persistence_idle(&mut server).unwrap();
             assert_eq!(server.scheduler().dirty_chunk_count(), 0);
             assert_eq!(
                 server
@@ -3402,7 +3576,7 @@ mod tests {
                     .holder(ChunkPos::new(0, 0))
                     .unwrap()
                     .residency(),
-                ChunkResidency::Saved
+                ChunkResidency::Generated
             );
             snapshot.clone()
         };

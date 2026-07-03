@@ -551,7 +551,9 @@ impl WebLoopbackHost {
             }
         }
         for _ in 0..60_000 {
-            if self.server.pending_job_count() == 0 {
+            if self.server.pending_job_count() == 0
+                && self.server.scheduler().pending_persistence_load_count() == 0
+            {
                 break;
             }
             self.poll_server_updates(&mut protocol_codec_roundtrip)?;
@@ -559,9 +561,11 @@ impl WebLoopbackHost {
                 wait_for_worker_tick();
             }
         }
-        if self.server.pending_job_count() > 0 {
+        if self.server.pending_job_count() > 0
+            || self.server.scheduler().pending_persistence_load_count() > 0
+        {
             return Err(ProtocolCodecError::InvalidData(
-                "timed out waiting for web loopback worldgen jobs",
+                "timed out waiting for web loopback chunk load jobs",
             ));
         }
         self.poll_server_updates(&mut protocol_codec_roundtrip)?;

@@ -15,8 +15,8 @@ use mclone_protocol::{
 use mclone_server::{
     INITIAL_DAY_TIME, IntegratedServer, IntegratedServerRunner, LightStatusMailboxKind,
     ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
-    ServerRunnerTickDiagnostics, WasmServerJobWorkerConfig, WorkerFrameMetrics,
-    WorkerFrameTransportKind, WorldgenJobSession, WorldgenMailboxKind,
+    ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WasmServerJobWorkerConfig,
+    WorkerFrameMetrics, WorkerFrameTransportKind, WorldgenJobSession, WorldgenMailboxKind,
     compute_light_status_job_frame,
 };
 use wasm_bindgen::JsCast;
@@ -655,6 +655,18 @@ impl IntegratedServerRunner for WebIntegratedServerRunner {
         let frame = encode_client_command(&command)?;
         self.post_command_frame_fire_and_forget(frame)
             .map_err(ServerRunnerError::ThreadStart)
+    }
+
+    fn try_recv_update(&mut self) -> ServerRunnerResult<Option<ServerUpdateEnvelope>> {
+        let Some(frame) = self.drain_update_frames_budgeted(1).into_iter().next() else {
+            return Ok(None);
+        };
+        let encoded_len = frame.len();
+        Ok(Some(ServerUpdateEnvelope {
+            update: decode_server_update(&frame)?,
+            encoded_len,
+            queued_age: std::time::Duration::ZERO,
+        }))
     }
 
     fn drain_updates(&mut self) -> ServerRunnerResult<Vec<ServerUpdate>> {

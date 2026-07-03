@@ -174,8 +174,8 @@ This is the main policy distinction:
 - `native/crates/mclone-server/src/scheduler.rs` owns dirty holder tracking, save-on-unload, and `save_dirty_chunks()`.
 - `native/crates/mclone-server/src/integrated.rs` exposes integrated-server save/reload behavior to native clients.
 
-The shared store contract is completion-based, but the scheduler still uses a
-synchronous compatibility facade in the first implementation slice:
+The shared store contract is completion-based and the scheduler now polls the
+actor mailbox directly:
 
 ```text
 WorldStore requests/completions
@@ -184,15 +184,17 @@ WorldStore requests/completions
   cache/durable write lanes
   flush/close
 
-ChunkScheduler compatibility facade
-  load chunk snapshot
-  save chunk snapshot
-  process pending unloads
-  save dirty resident chunks
+ChunkScheduler actor integration
+  schedule load before generation
+  drop stale load completions when interest disappears
+  keep dirty pending-unload holders resident until durable save ack
+  queue generated-clean cache writes separately from durable dirty writes
+  flush durable dirty saves through the actor lane
 ```
 
-The next persistence slice moves dirty/unload holder behavior onto actor
-acknowledgements instead of blocking through this facade.
+The synchronous facade remains only as compatibility/testing glue around the
+same mailbox. Scheduled fluid/block ticks still need to move into chunk records
+instead of living only in host tick queues.
 
 Browser singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote host uses file-backed JSON records under a save root. Unit tests generally use memory storage.
 
