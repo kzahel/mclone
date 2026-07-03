@@ -27,7 +27,7 @@ mod android {
         ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
     };
     use mclone_app_runtime::startup_args::{
-        RenderDistanceLimits, StartupArgState, StartupSceneOptions,
+        RenderDistanceLimits, StartupArgState, StartupCameraOptions, StartupSceneOptions,
     };
     use mclone_app_runtime::{
         debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
@@ -558,7 +558,13 @@ mod android {
             startup_options: AndroidStartupOptions,
         ) -> Result<Self> {
             let scene_options = startup_options.scene.clone();
-            let started = start_android_render_scene(device, queue, format, scene_options.clone())?;
+            let started = start_android_render_scene(
+                device,
+                queue,
+                format,
+                scene_options.clone(),
+                startup_options.camera,
+            )?;
             let depth = ChunkDepthTarget::new(device, width, height);
             let render_options = startup_options.render_options;
             let sky =
@@ -1127,7 +1133,13 @@ mod android {
                     "Android replacement request did not describe an active session: {request:?}"
                 )
             })?;
-            let started = match start_android_render_scene(device, queue, format, options.clone()) {
+            let started = match start_android_render_scene(
+                device,
+                queue,
+                format,
+                options.clone(),
+                StartupCameraOptions::default(),
+            ) {
                 Ok(started) => started,
                 Err(error) => {
                     log::error!("failed to start Android session {request:?}: {error:#}");
@@ -1745,6 +1757,7 @@ mod android {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         options: AndroidSceneOptions,
+        camera_options: StartupCameraOptions,
     ) -> Result<StartedAndroidRenderScene> {
         let movement_speed_multiplier = options.movement_speed_multiplier;
         let mut scene = android_single_view_scene_runtime(options)?;
@@ -1752,6 +1765,7 @@ mod android {
         let session_label = active_session_label(scene.active_session());
         let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
         camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
+        apply_startup_camera_options(&mut camera, camera_options);
         let (poll_count, poll_ms) = scene.poll_until_idle()?;
         log::info!(
             "Mclone Android {host_label} runtime idle: session={} polls={} poll_ms={:.1} loaded_chunks={}",
@@ -1884,6 +1898,7 @@ mod android {
     struct AndroidStartupOptions {
         scene: AndroidSceneOptions,
         render_options: TexturedSectionRenderOptions,
+        camera: StartupCameraOptions,
     }
 
     fn parse_android_startup_options(
@@ -1915,6 +1930,7 @@ mod android {
         Ok(AndroidStartupOptions {
             scene: android_scene_options_from_startup(options.scene).validated()?,
             render_options: options.render_options,
+            camera: options.camera,
         })
     }
 
@@ -1947,6 +1963,66 @@ mod android {
             lighting_enabled: scene.lighting_enabled,
             remote_addr: scene.remote_addr,
         }
+    }
+
+    fn apply_startup_camera_options(
+        camera: &mut EngineCameraController,
+        options: StartupCameraOptions,
+    ) {
+        if options.eye.is_none() && options.target.is_none() {
+            return;
+        }
+        let snapshot = camera.snapshot();
+        let eye = options
+            .eye
+            .map(vec3d_from_f32_array)
+            .unwrap_or(snapshot.eye);
+        let (yaw_radians, pitch_radians) = options
+            .target
+            .and_then(|target| look_at_yaw_pitch(eye, vec3d_from_f32_array(target)))
+            .unwrap_or((snapshot.yaw_radians, snapshot.pitch_radians));
+        camera.set_eye_pose(eye, yaw_radians, pitch_radians);
+        if let Some(target) = options.target {
+            log::info!(
+                "Mclone Android startup camera pose: eye=({:.2}, {:.2}, {:.2}) target=({:.2}, {:.2}, {:.2})",
+                eye.x,
+                eye.y,
+                eye.z,
+                target[0],
+                target[1],
+                target[2]
+            );
+        } else {
+            log::info!(
+                "Mclone Android startup camera pose: eye=({:.2}, {:.2}, {:.2}) yaw={:.3} pitch={:.3}",
+                eye.x,
+                eye.y,
+                eye.z,
+                yaw_radians,
+                pitch_radians
+            );
+        }
+    }
+
+    fn look_at_yaw_pitch(eye: Vec3d, target: Vec3d) -> Option<(f64, f64)> {
+        let direction = target.subtract(eye);
+        let length_sqr = direction.length_sqr();
+        if length_sqr <= 1.0e-12 {
+            return None;
+        }
+        let direction = direction.scale(1.0 / length_sqr.sqrt());
+        Some((
+            direction.x.atan2(direction.z),
+            direction.y.clamp(-1.0, 1.0).asin(),
+        ))
+    }
+
+    fn vec3d_from_f32_array(value: [f32; 3]) -> Vec3d {
+        Vec3d::new(
+            f64::from(value[0]),
+            f64::from(value[1]),
+            f64::from(value[2]),
+        )
     }
 
     fn android_game_ui_for_scene(options: &AndroidSceneOptions) -> GameUiHost {

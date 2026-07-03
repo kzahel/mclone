@@ -61,6 +61,10 @@ Options:
                       Add --fullbright VALUE to startup argv.
   --render-color-profile PROFILE
                       Add --render-color-profile PROFILE to startup argv.
+  --screenshot-eye X,Y,Z
+                      Add --screenshot-eye X,Y,Z to startup argv.
+  --screenshot-target X,Y,Z
+                      Add --screenshot-target X,Y,Z to startup argv.
   --touch-swipe SPEC  Inject a touch swipe before capture: x1,y1,x2,y2,duration_ms.
   --session-smoke MODE
                       Inject a shared UI session flow before capture.
@@ -137,7 +141,7 @@ while [[ $# -gt 0 ]]; do
             MCLONE_ANDROID_REMOTE_ADDR="$2"
             shift 2
             ;;
-        --seed|--chunk-x|--chunk-z|--render-distance|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile)
+        --seed|--chunk-x|--chunk-z|--render-distance|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile|--screenshot-eye|--screenshot-target)
             mclone_require_arg "$1" "${2:-}"
             MCLONE_ANDROID_STARTUP_ARGV+=("$1" "$2")
             shift 2

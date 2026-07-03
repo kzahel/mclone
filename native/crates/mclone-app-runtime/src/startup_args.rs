@@ -22,6 +22,8 @@ pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
+pub const ARG_SCREENSHOT_EYE: &str = "--screenshot-eye";
+pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
 
 pub const QUERY_SEED: &str = "seed";
 pub const QUERY_CHUNK_X: &str = "chunkX";
@@ -37,6 +39,8 @@ pub const QUERY_LIGHTING: &str = "lighting";
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
 pub const QUERY_FULLBRIGHT: &str = "fullbright";
 pub const QUERY_RENDER_COLOR_PROFILE: &str = "renderColorProfile";
+pub const QUERY_SCREENSHOT_EYE: &str = "screenshotEye";
+pub const QUERY_SCREENSHOT_TARGET: &str = "screenshotTarget";
 
 pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SEED,
@@ -53,6 +57,8 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SECTION_OCCLUSION,
     QUERY_FULLBRIGHT,
     QUERY_RENDER_COLOR_PROFILE,
+    QUERY_SCREENSHOT_EYE,
+    QUERY_SCREENSHOT_TARGET,
 ];
 
 pub const DEFAULT_STARTUP_SEED: i64 = 12_345;
@@ -109,12 +115,20 @@ impl Default for StartupSceneOptions {
 pub struct StartupOptions {
     pub scene: StartupSceneOptions,
     pub render_options: TexturedSectionRenderOptions,
+    pub camera: StartupCameraOptions,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StartupCameraOptions {
+    pub eye: Option<[f32; 3]>,
+    pub target: Option<[f32; 3]>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StartupArgState {
     scene: StartupSceneOptions,
     render_options: TexturedSectionRenderOptions,
+    camera: StartupCameraOptions,
     fullbright_explicit: bool,
 }
 
@@ -123,6 +137,7 @@ impl StartupArgState {
         Self {
             scene,
             render_options,
+            camera: StartupCameraOptions::default(),
             fullbright_explicit: false,
         }
     }
@@ -188,6 +203,12 @@ impl StartupArgState {
                 self.render_options.color_profile =
                     parse_render_color_profile_arg(ARG_RENDER_COLOR_PROFILE, args.next())?;
             }
+            ARG_SCREENSHOT_EYE => {
+                self.camera.eye = Some(parse_f32_vec3_arg(ARG_SCREENSHOT_EYE, args.next())?);
+            }
+            ARG_SCREENSHOT_TARGET => {
+                self.camera.target = Some(parse_f32_vec3_arg(ARG_SCREENSHOT_TARGET, args.next())?);
+            }
             _ => return Ok(false),
         }
         Ok(true)
@@ -252,6 +273,12 @@ impl StartupArgState {
                 self.render_options.color_profile =
                     parse_render_color_profile_arg(QUERY_RENDER_COLOR_PROFILE, value)?;
             }
+            QUERY_SCREENSHOT_EYE => {
+                self.camera.eye = Some(parse_f32_vec3_arg(QUERY_SCREENSHOT_EYE, value)?);
+            }
+            QUERY_SCREENSHOT_TARGET => {
+                self.camera.target = Some(parse_f32_vec3_arg(QUERY_SCREENSHOT_TARGET, value)?);
+            }
             _ => return Ok(false),
         }
         Ok(true)
@@ -264,6 +291,7 @@ impl StartupArgState {
         StartupOptions {
             scene: self.scene,
             render_options: self.render_options,
+            camera: self.camera,
         }
     }
 }
@@ -337,6 +365,29 @@ pub fn parse_render_color_profile_arg(
     value
         .parse::<RenderColorProfile>()
         .map_err(|message| anyhow::anyhow!("{flag} {message}"))
+}
+
+pub fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
+    let raw = value.with_context(|| format!("{flag} requires x,y,z"))?;
+    let parts = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() != 3 {
+        bail!("{flag} expects x,y,z");
+    }
+    let mut values = [0.0; 3];
+    for (index, part) in parts.into_iter().enumerate() {
+        let value: f32 = part
+            .parse()
+            .with_context(|| format!("invalid {flag} component `{part}`"))?;
+        if !value.is_finite() {
+            bail!("{flag} component `{part}` must be finite");
+        }
+        values[index] = value;
+    }
+    Ok(values)
 }
 
 pub fn parse_render_distance_arg(
@@ -429,6 +480,10 @@ mod tests {
             StartupArgState::default().finish().render_options,
             TexturedSectionRenderOptions::default()
         );
+        assert_eq!(
+            StartupArgState::default().finish().camera,
+            StartupCameraOptions::default()
+        );
     }
 
     #[test]
@@ -453,6 +508,10 @@ mod tests {
             "false",
             ARG_REMOTE_ADDR,
             "127.0.0.1:25565",
+            ARG_SCREENSHOT_EYE,
+            "1.5,62.25,-3",
+            ARG_SCREENSHOT_TARGET,
+            "8,64,8",
         ]);
         assert_eq!(
             options.scene,
@@ -468,6 +527,13 @@ mod tests {
                 movement_speed_multiplier: 2.5,
                 debug_passive_showcase: false,
                 lighting_enabled: true,
+            }
+        );
+        assert_eq!(
+            options.camera,
+            StartupCameraOptions {
+                eye: Some([1.5, 62.25, -3.0]),
+                target: Some([8.0, 64.0, 8.0]),
             }
         );
     }
@@ -517,6 +583,8 @@ mod tests {
             (QUERY_SECTION_OCCLUSION, "false"),
             (QUERY_FULLBRIGHT, "true"),
             (QUERY_RENDER_COLOR_PROFILE, "stylized-bright"),
+            (QUERY_SCREENSHOT_EYE, "1.5,62.25,-3"),
+            (QUERY_SCREENSHOT_TARGET, "8,64,8"),
         ] {
             assert!(
                 state
@@ -552,6 +620,13 @@ mod tests {
         assert_eq!(
             options.render_options.color_profile,
             RenderColorProfile::StylizedBright
+        );
+        assert_eq!(
+            options.camera,
+            StartupCameraOptions {
+                eye: Some([1.5, 62.25, -3.0]),
+                target: Some([8.0, 64.0, 8.0]),
+            }
         );
     }
 

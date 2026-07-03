@@ -446,8 +446,6 @@ impl Cli {
         let mut screenshot_blink_debug = false;
         let mut screenshot_scripted_interaction = false;
         let mut screenshot_remote_settle_ms = 0;
-        let mut screenshot_eye = None;
-        let mut screenshot_target = None;
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
         let mut actor_walk_review_video = None;
         let mut actor_walk_review_options_explicit = false;
@@ -686,13 +684,6 @@ impl Cli {
                     screenshot_remote_settle_ms =
                         parse_screenshot_remote_settle_ms_arg(&arg, args.next())?;
                 }
-                "--screenshot-eye" => {
-                    screenshot_eye = Some(parse_f32_vec3_arg("--screenshot-eye", args.next())?);
-                }
-                "--screenshot-target" => {
-                    screenshot_target =
-                        Some(parse_f32_vec3_arg("--screenshot-target", args.next())?);
-                }
                 "--screenshot-camera-view" => {
                     screenshot_camera_view = parse_camera_view_arg(&arg, args.next())?;
                 }
@@ -867,6 +858,7 @@ impl Cli {
             bail!("--startup-wait applies to window mode and --screenshot");
         }
         let startup_options = startup_args.finish();
+        let startup_camera = startup_options.camera;
         let mut scene = SceneOptions::from_startup_scene(startup_options.scene)?;
         scene.first_person_player_visible = first_person_player_visible;
         scene.simulation_cadence = simulation_cadence;
@@ -927,8 +919,8 @@ impl Cli {
                     blink_debug: screenshot_blink_debug,
                     scripted_interaction: screenshot_scripted_interaction,
                     remote_settle_ms: screenshot_remote_settle_ms,
-                    eye: screenshot_eye,
-                    target: screenshot_target,
+                    eye: startup_camera.eye,
+                    target: startup_camera.target,
                 },
             }),
             Some(HeadlessMode::RendererRebuildSmoke(directory)) => Ok(Self::RendererRebuildSmoke {
@@ -1269,29 +1261,6 @@ fn parse_startup_wait_arg(flag: &str, value: Option<String>) -> Result<StartupWa
             Ok(StartupWaitPolicy::Frames(frames))
         }
     }
-}
-
-fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
-    let raw = value.with_context(|| format!("{flag} requires x,y,z"))?;
-    let parts = raw
-        .split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.len() != 3 {
-        bail!("{flag} expects x,y,z");
-    }
-    let mut values = [0.0; 3];
-    for (index, part) in parts.into_iter().enumerate() {
-        let value: f32 = part
-            .parse()
-            .with_context(|| format!("invalid {flag} component `{part}`"))?;
-        if !value.is_finite() {
-            bail!("{flag} component `{part}` must be finite");
-        }
-        values[index] = value;
-    }
-    Ok(values)
 }
 
 pub(crate) fn parse_screenshot_ui_arg(
