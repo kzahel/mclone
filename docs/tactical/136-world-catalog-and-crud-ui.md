@@ -1,7 +1,8 @@
 # 136: World Catalog And CRUD UI
 
-Status: active; Slice 1 shared identity/catalog contract landed 2026-07-03.
-Owns follow-up persistence lifecycle work from closed
+Status: active; Slices 1-2 shared catalog contract and catalog-aware session
+request vocabulary landed 2026-07-03. Owns follow-up persistence lifecycle work
+from closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -62,7 +63,7 @@ Relevant landed pieces:
 
 - `094-runtime-world-teardown-and-new-world-menu.md` allows no-world title state,
   quit-to-title, and new seed-based local session replacement.
-- `095-shared-session-coordinator.md` owns shared `NewLocalWorld { seed }` and
+- `095-shared-session-coordinator.md` owns shared create/open-local and
   `JoinRemote { endpoint }` request state across desktop, web, Android, and XR.
 - `101-create-world-chunk-progress-screen.md` owns the shared local startup
   progress/pump path.
@@ -72,12 +73,19 @@ Relevant landed pieces:
   architecture pass: host-owned `WorldStore`, native threaded SQLite,
   dedicated/desktop local world-dir wiring, browser IndexedDB chunk/entity
   records, autosave/reload, and browser IndexedDB async load-miss handling.
+- Slice 1 added `mclone_app_runtime::world_catalog` identity, summary,
+  capability, request/response, and UI-suitable error/status types.
+- Slice 2 replaced the seed-only local session request variant with
+  `CreateLocalWorld { options }` / `OpenLocalWorld { id }`; seed-only
+  developer/headless/menu paths now go through a compatibility helper that
+  creates a local-world request with `LocalWorldCreateOptions`.
 
 Gaps:
 
-- There is no shared world catalog.
-- `SessionStartRequest` and `ActiveSessionDescriptor` identify a local session
-  only by seed, not by save id, display name, world root, or storage backend.
+- There is no native/web/Android catalog backend yet.
+- `ActiveSessionDescriptor::LocalWorld` can carry save id/display name, but
+  live menu-driven local sessions are still transient seed-only until catalog
+  create/open wiring exists.
 - `mclone-native-client --world-dir PATH` and web
   `worldStorage=indexeddb&worldId=...` are startup/query selectors, not in-game
   UI.
@@ -246,6 +254,8 @@ properties still fail. The focused `mclone-assets` / `mclone-mesh` /
 
 ### Slice 2: Session Requests Carry Local World Identity
 
+Status: landed 2026-07-03.
+
 Refactor the session coordinator vocabulary:
 
 - replace menu-facing `NewLocalWorld { seed }` with create/open requests that
@@ -262,6 +272,35 @@ Validation:
 
 - session coordinator tests for create/open/remote state transitions
 - desktop and web compile gates after request enum changes
+
+Recorded Slice 2 result:
+
+- Replaced `SessionStartRequest::NewLocalWorld { seed }` with
+  `CreateLocalWorld { options: LocalWorldCreateOptions }` and
+  `OpenLocalWorld { id: LocalWorldId }`.
+- Added `SessionStartRequest::new_seed_local_world(seed)` as the compatibility
+  helper for current reroll, headless, smoke, startup, and transient local
+  paths. Those paths now produce create-local requests instead of owning a
+  seed-only variant.
+- Extended `ActiveSessionDescriptor::LocalWorld` with optional `id` and
+  `display_name`, plus helpers for transient seed worlds and catalog summaries.
+  Persistent descriptors round-trip back to `OpenLocalWorld { id }`; transient
+  descriptors keep using the seed helper.
+- Updated desktop flat, native single-view, web/WASM, flat Android, desktop XR,
+  Android XR, and XR scene replacement/startup code to use the new vocabulary.
+  `OpenLocalWorld` is represented but intentionally rejected by runtime
+  factories until Slice 3 supplies catalog summaries and backends.
+
+Validation after Slice 2 on 2026-07-03:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+pnpm native:web:build
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+```
 
 ### Slice 3: Native Catalog Backend
 

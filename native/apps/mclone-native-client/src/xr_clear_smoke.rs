@@ -735,7 +735,7 @@ fn create_mclone_terrain_state(
 #[cfg(not(target_os = "android"))]
 fn session_start_request_for_desktop_scene(scene: &SceneOptions) -> SessionStartRequest {
     scene.remote_addr.as_ref().map_or(
-        SessionStartRequest::NewLocalWorld { seed: scene.seed },
+        SessionStartRequest::new_seed_local_world(scene.seed),
         |remote_addr| SessionStartRequest::JoinRemote {
             endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
         },
@@ -794,10 +794,11 @@ fn desktop_scene_options_for_xr_request(
     let mut seed = scene.seed;
     let mut remote_addr = None;
     match request {
-        SessionStartRequest::NewLocalWorld {
-            seed: requested_seed,
-        } => {
-            seed = *requested_seed;
+        SessionStartRequest::CreateLocalWorld { options } => {
+            seed = options.seed;
+        }
+        SessionStartRequest::OpenLocalWorld { .. } => {
+            remote_addr = None;
         }
         SessionStartRequest::JoinRemote { endpoint } => {
             remote_addr = Some(endpoint.address.clone());

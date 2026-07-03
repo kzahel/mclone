@@ -1195,7 +1195,7 @@ where
     S: RemoteDedicatedServerSession,
 {
     pub fn local(options: LocalSingleViewSceneOptions) -> Result<Self> {
-        let request = SessionStartRequest::NewLocalWorld { seed: options.seed };
+        let request = SessionStartRequest::new_seed_local_world(options.seed);
         Self::start_with(request, || NativeSingleViewSceneRuntime::local(options))
     }
 
@@ -1203,7 +1203,7 @@ where
         options: LocalSingleViewSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let request = SessionStartRequest::NewLocalWorld { seed: options.seed };
+        let request = SessionStartRequest::new_seed_local_world(options.seed);
         Self::start_with(request, || {
             NativeSingleViewSceneRuntime::local_with_mesh_assets(options, mesh_assets)
         })
@@ -2109,12 +2109,12 @@ mod tests {
         assert_eq!(
             runtime.session_state(),
             &GameSessionState::Active {
-                session: ActiveSessionDescriptor::LocalWorld { seed: 12345 }
+                session: ActiveSessionDescriptor::new_seed_local_world(12345)
             }
         );
         assert_eq!(
             runtime.active_session(),
-            Some(&ActiveSessionDescriptor::LocalWorld { seed: 12345 })
+            Some(&ActiveSessionDescriptor::new_seed_local_world(12345))
         );
         assert_eq!(runtime.session_status(), None);
         assert_eq!(runtime.loaded_chunk_count(), 1);

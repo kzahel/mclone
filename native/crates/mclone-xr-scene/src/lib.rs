@@ -1053,7 +1053,7 @@ where
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
-        let request = SessionStartRequest::NewLocalWorld { seed: scene.seed };
+        let request = SessionStartRequest::new_seed_local_world(scene.seed);
         let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
         camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
         if let Some(view_pose) = startup_view_pose {
@@ -2935,11 +2935,16 @@ where
         request: SessionStartRequest,
     ) -> Result<()> {
         let scene = match &request {
-            SessionStartRequest::NewLocalWorld { seed } => self.local_world_options(*seed),
+            SessionStartRequest::CreateLocalWorld { options } => {
+                self.local_world_options(options.seed)
+            }
+            SessionStartRequest::OpenLocalWorld { .. } => {
+                bail!("XR local world catalog open is not implemented yet")
+            }
             SessionStartRequest::JoinRemote { .. } => self.remote_session_options(),
             SessionStartRequest::Unknown => bail!("unsupported unknown XR replacement session"),
         };
-        if matches!(request, SessionStartRequest::NewLocalWorld { .. }) {
+        if matches!(request, SessionStartRequest::CreateLocalWorld { .. }) {
             return self.begin_local_replacement_start(request, scene);
         }
         self.start_replacement_session(device, queue, request, scene)
@@ -4585,8 +4590,10 @@ where
             .expect("startup must exist after playable step");
         let failure_message = startup.request.default_failure_message();
         let failure_seed = match &startup.request {
-            SessionStartRequest::NewLocalWorld { seed } => Some(*seed),
-            SessionStartRequest::JoinRemote { .. } | SessionStartRequest::Unknown => None,
+            SessionStartRequest::CreateLocalWorld { options } => Some(options.seed),
+            SessionStartRequest::OpenLocalWorld { .. }
+            | SessionStartRequest::JoinRemote { .. }
+            | SessionStartRequest::Unknown => None,
         };
         match self.complete_local_startup(device, queue, startup, step) {
             Ok(()) => Ok(true),
@@ -4688,7 +4695,7 @@ where
         self.clear_transient_world_state();
         self.session_status = StatusOverlay::hidden();
         match descriptor {
-            ActiveSessionDescriptor::LocalWorld { seed } => {
+            ActiveSessionDescriptor::LocalWorld { seed, .. } => {
                 self.ui.set_new_world_seed(seed);
                 self.ui.apply_action(GameUiAction::CreateWorld(seed));
                 log::info!(
@@ -4743,8 +4750,8 @@ where
             startup.request
         );
         self.session_status = StatusOverlay::new(startup.request.default_failure_message(), false);
-        if let SessionStartRequest::NewLocalWorld { seed } = startup.request {
-            self.ui.set_new_world_seed(seed);
+        if let SessionStartRequest::CreateLocalWorld { options } = startup.request {
+            self.ui.set_new_world_seed(options.seed);
         }
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = true;
@@ -4834,7 +4841,7 @@ where
         self.clear_menu_input_state();
         self.session_status = StatusOverlay::hidden();
         match descriptor {
-            ActiveSessionDescriptor::LocalWorld { seed } => {
+            ActiveSessionDescriptor::LocalWorld { seed, .. } => {
                 self.ui.set_new_world_seed(seed);
                 log::info!("XR created local world seed={seed}");
             }
@@ -5012,7 +5019,7 @@ where
                 log::info!("XR new-world seed rerolled to {seed}");
             }
             GameUiAction::CreateWorld(seed) => {
-                let request = SessionStartRequest::NewLocalWorld { seed };
+                let request = SessionStartRequest::new_seed_local_world(seed);
                 if self
                     .replace_session_for_request(device, queue, request)
                     .is_err()
@@ -5394,7 +5401,7 @@ where
 fn xr_game_ui_for_session(session: Option<&ActiveSessionDescriptor>, seed: i64) -> GameUiHost {
     let mut ui = GameUiHost::new();
     ui.set_new_world_seed(match session {
-        Some(ActiveSessionDescriptor::LocalWorld { seed }) => *seed,
+        Some(ActiveSessionDescriptor::LocalWorld { seed, .. }) => *seed,
         Some(ActiveSessionDescriptor::Remote { .. }) | None => seed,
     });
     ui.set_join_remote_addr(match session {
@@ -5434,7 +5441,9 @@ fn local_single_view_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptio
 
 fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {
     match session {
-        Some(ActiveSessionDescriptor::LocalWorld { seed }) => format!("local-world:{seed}"),
+        Some(ActiveSessionDescriptor::LocalWorld { seed, .. }) => {
+            format!("local-world:{seed}")
+        }
         Some(ActiveSessionDescriptor::Remote { endpoint }) => {
             format!("remote:{}", endpoint.address)
         }
@@ -6532,7 +6541,7 @@ mod tests {
     #[test]
     fn xr_game_ui_starts_with_menu_open_for_local_session() {
         let ui = xr_game_ui_for_session(
-            Some(&ActiveSessionDescriptor::LocalWorld { seed: 44 }),
+            Some(&ActiveSessionDescriptor::new_seed_local_world(44)),
             12_345,
         );
 

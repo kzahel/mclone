@@ -1848,14 +1848,17 @@ mod android {
         mesh_assets: TexturedMeshAssets,
     ) -> Result<AndroidXrSceneRuntime> {
         match request {
-            SessionStartRequest::NewLocalWorld { seed } => {
+            SessionStartRequest::CreateLocalWorld { options } => {
                 let mut scene_options = scene_options;
-                scene_options.seed = seed;
+                scene_options.seed = options.seed;
                 AndroidXrSceneRuntime::local_with_mesh_assets(
                     android_xr_local_options(scene_options),
                     mesh_assets,
                 )
                 .context("failed to initialize Android XR replacement local runtime")
+            }
+            SessionStartRequest::OpenLocalWorld { .. } => {
+                bail!("Android XR local world catalog open is not implemented yet")
             }
             SessionStartRequest::JoinRemote { endpoint } => {
                 let session = AndroidXrRemoteServerSession::connect(endpoint.address.as_str())?;
@@ -3055,9 +3058,7 @@ mod android {
                     .replace_session_for_request(
                         &graphics.device,
                         &graphics.queue,
-                        SessionStartRequest::NewLocalWorld {
-                            seed: ANDROID_XR_SESSION_SMOKE_SEED,
-                        },
+                        SessionStartRequest::new_seed_local_world(ANDROID_XR_SESSION_SMOKE_SEED),
                     )
                     .context("run Android XR new-world session smoke replacement")?;
                 session_smoke_started = true;

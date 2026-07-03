@@ -696,7 +696,7 @@ impl FlatClientDriver {
 
     pub(crate) fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
         match descriptor {
-            ActiveSessionDescriptor::LocalWorld { seed } => {
+            ActiveSessionDescriptor::LocalWorld { seed, .. } => {
                 self.ui.apply_action(GameUiAction::CreateWorld(*seed));
                 log::info!("created local world seed={seed}");
             }
@@ -713,7 +713,10 @@ impl FlatClientDriver {
         show_title_on_failure: bool,
     ) {
         match request {
-            SessionStartRequest::NewLocalWorld { seed } => self.ui.set_new_world_seed(*seed),
+            SessionStartRequest::CreateLocalWorld { options } => {
+                self.ui.set_new_world_seed(options.seed);
+            }
+            SessionStartRequest::OpenLocalWorld { .. } => {}
             SessionStartRequest::JoinRemote { endpoint } => {
                 self.ui.set_join_remote_addr(endpoint.address.clone());
             }
@@ -761,7 +764,7 @@ impl FlatClientDriver {
     pub(crate) fn request_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
         let scene = self.local_world_scene(seed);
         self.session.request_start(
-            SessionStartRequest::NewLocalWorld { seed },
+            SessionStartRequest::new_seed_local_world(seed),
             FlatClientPendingSessionStart {
                 scene,
                 arm_mouse_lock,
@@ -809,7 +812,10 @@ impl FlatClientDriver {
         let Some(pending) = self.session.take_pending_start() else {
             return FlatClientSessionUpdate::default();
         };
-        if matches!(&pending.request, SessionStartRequest::NewLocalWorld { .. }) {
+        if matches!(
+            &pending.request,
+            SessionStartRequest::CreateLocalWorld { .. }
+        ) {
             let request = pending.request.clone();
             let show_title_on_failure = pending.payload.show_title_on_failure;
             if let Err(err) =
@@ -2354,7 +2360,7 @@ fn view_forward(yaw_radians: f64, pitch_radians: f64) -> Vec3d {
 
 fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest {
     scene.remote_addr.as_ref().map_or(
-        SessionStartRequest::NewLocalWorld { seed: scene.seed },
+        SessionStartRequest::new_seed_local_world(scene.seed),
         |remote_addr| SessionStartRequest::JoinRemote {
             endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
         },
@@ -2466,11 +2472,14 @@ mod tests {
         assert_eq!(
             driver.session.state(),
             &GameSessionState::Starting {
-                request: SessionStartRequest::NewLocalWorld { seed }
+                request: SessionStartRequest::new_seed_local_world(seed)
             }
         );
         let pending = driver.session.take_pending_start().unwrap();
-        assert_eq!(pending.request, SessionStartRequest::NewLocalWorld { seed });
+        assert_eq!(
+            pending.request,
+            SessionStartRequest::new_seed_local_world(seed)
+        );
         assert_eq!(pending.payload.scene.seed, seed);
         assert_eq!(pending.payload.scene.remote_addr, None);
         assert!(pending.payload.arm_mouse_lock);

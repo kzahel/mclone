@@ -1,3 +1,5 @@
+use crate::world_catalog::{LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GameSessionCoordinator<P> {
     state: GameSessionState,
@@ -160,15 +162,35 @@ impl<S> StartedGameSession<S> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionStartRequest {
-    NewLocalWorld { seed: i64 },
+    CreateLocalWorld { options: LocalWorldCreateOptions },
+    OpenLocalWorld { id: LocalWorldId },
     JoinRemote { endpoint: RemoteSessionEndpoint },
     Unknown,
 }
 
 impl SessionStartRequest {
+    pub fn new_seed_local_world(seed: i64) -> Self {
+        Self::CreateLocalWorld {
+            options: LocalWorldCreateOptions::new(
+                default_seed_local_world_display_name(seed),
+                seed,
+            )
+            .expect("default seed local world display name is valid"),
+        }
+    }
+
+    pub fn create_local_world(options: LocalWorldCreateOptions) -> Self {
+        Self::CreateLocalWorld { options }
+    }
+
+    pub fn open_local_world(id: LocalWorldId) -> Self {
+        Self::OpenLocalWorld { id }
+    }
+
     pub fn starting_message(&self) -> &'static str {
         match self {
-            Self::NewLocalWorld { .. } => "Creating world...",
+            Self::CreateLocalWorld { .. } => "Creating world...",
+            Self::OpenLocalWorld { .. } => "Loading world...",
             Self::JoinRemote { .. } => "Connecting...",
             Self::Unknown => "Starting session...",
         }
@@ -176,7 +198,8 @@ impl SessionStartRequest {
 
     pub fn default_failure_message(&self) -> &'static str {
         match self {
-            Self::NewLocalWorld { .. } => "World creation failed; see log",
+            Self::CreateLocalWorld { .. } => "World creation failed; see log",
+            Self::OpenLocalWorld { .. } => "World load failed; see log",
             Self::JoinRemote { .. } => "Connection failed; see log",
             Self::Unknown => "Session start failed; see log",
         }
@@ -184,32 +207,85 @@ impl SessionStartRequest {
 
     pub fn active_descriptor(&self) -> Option<ActiveSessionDescriptor> {
         match self {
-            Self::NewLocalWorld { seed } => {
-                Some(ActiveSessionDescriptor::LocalWorld { seed: *seed })
-            }
+            Self::CreateLocalWorld { options } => Some(ActiveSessionDescriptor::LocalWorld {
+                seed: options.seed,
+                id: options.requested_id.clone(),
+                display_name: Some(options.display_name.clone()),
+            }),
+            Self::OpenLocalWorld { .. } => None,
             Self::JoinRemote { endpoint } => Some(ActiveSessionDescriptor::Remote {
                 endpoint: endpoint.clone(),
             }),
             Self::Unknown => None,
         }
     }
+
+    pub fn local_seed(&self) -> Option<i64> {
+        match self {
+            Self::CreateLocalWorld { options } => Some(options.seed),
+            Self::OpenLocalWorld { .. } | Self::JoinRemote { .. } | Self::Unknown => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ActiveSessionDescriptor {
-    LocalWorld { seed: i64 },
-    Remote { endpoint: RemoteSessionEndpoint },
+    LocalWorld {
+        seed: i64,
+        id: Option<LocalWorldId>,
+        display_name: Option<String>,
+    },
+    Remote {
+        endpoint: RemoteSessionEndpoint,
+    },
 }
 
 impl ActiveSessionDescriptor {
+    pub fn new_seed_local_world(seed: i64) -> Self {
+        Self::LocalWorld {
+            seed,
+            id: None,
+            display_name: Some(default_seed_local_world_display_name(seed)),
+        }
+    }
+
+    pub fn from_local_world_summary(summary: &LocalWorldSummary) -> Self {
+        Self::LocalWorld {
+            seed: summary.seed,
+            id: Some(summary.id.clone()),
+            display_name: Some(summary.display_name.clone()),
+        }
+    }
+
     pub fn start_request(&self) -> SessionStartRequest {
         match self {
-            Self::LocalWorld { seed } => SessionStartRequest::NewLocalWorld { seed: *seed },
+            Self::LocalWorld { seed, id, .. } => id.clone().map_or_else(
+                || SessionStartRequest::new_seed_local_world(*seed),
+                SessionStartRequest::open_local_world,
+            ),
             Self::Remote { endpoint } => SessionStartRequest::JoinRemote {
                 endpoint: endpoint.clone(),
             },
         }
     }
+
+    pub fn local_seed(&self) -> Option<i64> {
+        match self {
+            Self::LocalWorld { seed, .. } => Some(*seed),
+            Self::Remote { .. } => None,
+        }
+    }
+
+    pub fn local_world_id(&self) -> Option<&LocalWorldId> {
+        match self {
+            Self::LocalWorld { id, .. } => id.as_ref(),
+            Self::Remote { .. } => None,
+        }
+    }
+}
+
+pub fn default_seed_local_world_display_name(seed: i64) -> String {
+    format!("Seed {seed}")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -251,13 +327,15 @@ mod tests {
     #[test]
     fn local_session_start_transitions_through_loading_to_active() {
         let mut coordinator = GameSessionCoordinator::new();
+        let request = SessionStartRequest::new_seed_local_world(42);
+        let descriptor = ActiveSessionDescriptor::new_seed_local_world(42);
 
-        coordinator.request_start(SessionStartRequest::NewLocalWorld { seed: 42 }, "payload");
+        coordinator.request_start(request.clone(), "payload");
 
         assert_eq!(
             coordinator.state(),
             &GameSessionState::Starting {
-                request: SessionStartRequest::NewLocalWorld { seed: 42 }
+                request: request.clone()
             }
         );
         assert_eq!(
@@ -270,17 +348,17 @@ mod tests {
         assert_eq!(
             coordinator.take_pending_start(),
             Some(PendingSessionStart {
-                request: SessionStartRequest::NewLocalWorld { seed: 42 },
+                request,
                 payload: "payload",
             })
         );
 
-        coordinator.complete_start(ActiveSessionDescriptor::LocalWorld { seed: 42 });
+        coordinator.complete_start(descriptor.clone());
 
         assert_eq!(
             coordinator.state(),
             &GameSessionState::Active {
-                session: ActiveSessionDescriptor::LocalWorld { seed: 42 }
+                session: descriptor
             }
         );
         assert_eq!(coordinator.status(), None);
@@ -324,9 +402,9 @@ mod tests {
     fn start_result_updates_state_for_success_and_failure() {
         let mut coordinator = GameSessionCoordinator::<()>::new();
 
-        coordinator.begin_start(SessionStartRequest::NewLocalWorld { seed: 3 });
+        coordinator.begin_start(SessionStartRequest::new_seed_local_world(3));
         let success: SessionStartResult<&str> = Ok(StartedGameSession::new(
-            ActiveSessionDescriptor::LocalWorld { seed: 3 },
+            ActiveSessionDescriptor::new_seed_local_world(3),
             "started",
         ));
         coordinator.apply_start_result(&success);
@@ -334,22 +412,23 @@ mod tests {
         assert_eq!(
             coordinator.state(),
             &GameSessionState::Active {
-                session: ActiveSessionDescriptor::LocalWorld { seed: 3 }
+                session: ActiveSessionDescriptor::new_seed_local_world(3)
             }
         );
         assert_eq!(
             success.unwrap().into_parts(),
-            (ActiveSessionDescriptor::LocalWorld { seed: 3 }, "started")
+            (ActiveSessionDescriptor::new_seed_local_world(3), "started")
         );
 
-        coordinator.begin_start(SessionStartRequest::NewLocalWorld { seed: 4 });
+        let failed_request = SessionStartRequest::new_seed_local_world(4);
+        coordinator.begin_start(failed_request.clone());
         let failure: SessionStartResult<()> = Err(SessionFailure::new("nope"));
         coordinator.apply_start_result(&failure);
 
         assert_eq!(
             coordinator.state(),
             &GameSessionState::Failed {
-                request: SessionStartRequest::NewLocalWorld { seed: 4 },
+                request: failed_request,
                 error: SessionFailure::new("nope"),
             }
         );
@@ -358,32 +437,25 @@ mod tests {
     #[test]
     fn start_pending_with_consumes_pending_and_applies_result() {
         let mut coordinator = GameSessionCoordinator::new();
+        let request = SessionStartRequest::new_seed_local_world(8);
+        let descriptor = ActiveSessionDescriptor::new_seed_local_world(8);
 
-        coordinator.request_start(SessionStartRequest::NewLocalWorld { seed: 8 }, 11);
+        coordinator.request_start(request.clone(), 11);
         let result = coordinator.start_pending_with(|pending| {
-            assert_eq!(
-                pending.request,
-                SessionStartRequest::NewLocalWorld { seed: 8 }
-            );
+            assert_eq!(pending.request, request);
             assert_eq!(pending.payload, 11);
-            Ok(StartedGameSession::new(
-                ActiveSessionDescriptor::LocalWorld { seed: 8 },
-                12,
-            ))
+            Ok(StartedGameSession::new(descriptor.clone(), 12))
         });
 
         assert_eq!(
             result,
-            Some(Ok(StartedGameSession::new(
-                ActiveSessionDescriptor::LocalWorld { seed: 8 },
-                12
-            )))
+            Some(Ok(StartedGameSession::new(descriptor.clone(), 12)))
         );
         assert_eq!(coordinator.take_pending_start(), None);
         assert_eq!(
             coordinator.state(),
             &GameSessionState::Active {
-                session: ActiveSessionDescriptor::LocalWorld { seed: 8 }
+                session: descriptor
             }
         );
     }
@@ -391,14 +463,14 @@ mod tests {
     #[test]
     fn session_start_request_derives_descriptor_and_default_messages() {
         let endpoint = RemoteSessionEndpoint::new("localhost:25565");
-        let local = SessionStartRequest::NewLocalWorld { seed: 99 };
+        let local = SessionStartRequest::new_seed_local_world(99);
         let remote = SessionStartRequest::JoinRemote {
             endpoint: endpoint.clone(),
         };
 
         assert_eq!(
             local.active_descriptor(),
-            Some(ActiveSessionDescriptor::LocalWorld { seed: 99 })
+            Some(ActiveSessionDescriptor::new_seed_local_world(99))
         );
         assert_eq!(
             local.default_failure_message(),
@@ -416,10 +488,52 @@ mod tests {
     }
 
     #[test]
+    fn create_local_world_request_carries_requested_catalog_identity() {
+        let id = LocalWorldId::new("my-world").unwrap();
+        let options = LocalWorldCreateOptions::new("My World", 123)
+            .unwrap()
+            .with_requested_id(id.clone());
+        let request = SessionStartRequest::create_local_world(options);
+
+        assert_eq!(
+            request.active_descriptor(),
+            Some(ActiveSessionDescriptor::LocalWorld {
+                seed: 123,
+                id: Some(id),
+                display_name: Some("My World".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn open_local_world_request_waits_for_catalog_summary_descriptor() {
+        let id = LocalWorldId::new("my-world").unwrap();
+        let request = SessionStartRequest::open_local_world(id.clone());
+        let summary = LocalWorldSummary::new(id.clone(), "My World", 456, 100).unwrap();
+        let descriptor = ActiveSessionDescriptor::from_local_world_summary(&summary);
+
+        assert_eq!(request.starting_message(), "Loading world...");
+        assert_eq!(
+            request.default_failure_message(),
+            "World load failed; see log"
+        );
+        assert_eq!(request.active_descriptor(), None);
+        assert_eq!(
+            descriptor,
+            ActiveSessionDescriptor::LocalWorld {
+                seed: 456,
+                id: Some(id),
+                display_name: Some("My World".to_owned()),
+            }
+        );
+        assert_eq!(descriptor.start_request(), request);
+    }
+
+    #[test]
     fn clear_drops_pending_start() {
         let mut coordinator = GameSessionCoordinator::new();
 
-        coordinator.request_start(SessionStartRequest::NewLocalWorld { seed: 7 }, 9);
+        coordinator.request_start(SessionStartRequest::new_seed_local_world(7), 9);
         coordinator.clear();
 
         assert_eq!(coordinator.state(), &GameSessionState::NoSession);

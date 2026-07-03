@@ -1,22 +1,24 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-4f landed on 2026-06-27. `mclone-app-runtime` now owns
-the platform-neutral session request/state vocabulary and shared start-result
-boundary, including local-world start, remote-join start, active session
-descriptors, pending starts, failure state, status text, and success/failure
-transition policy. Desktop flat consumes that coordinator for initial startup,
-queued New World creation, and the first Join Remote menu flow. Web/WASM uses
-the same coordinator vocabulary for initial local-worker and remote WebSocket
-starts, browser diagnostics, and menu-driven async local-world restart. Web
-Join Remote async reconnect is wired through the same path, but still needs a
-dedicated connect-screen smoke once endpoint editing/input is real. Flat
-Android now consumes the same request vocabulary for initial local/remote
-startup and menu-driven New World / Join Remote replacement while keeping
-Android activity, touch, `wgpu` surface, and TCP adapter ownership in the app
-crate. Desktop XR and Android XR now route shared menu New World / Join Remote
-actions through a shared XR scene replacement hook while keeping OpenXR
-session/swapchain/action ownership in the app hosts. Flat Android New World
-replacement now has an AVD touch-menu smoke, and Android XR New World
+Status: active; Slices 1-4f landed on 2026-06-27, and tactical
+[`136`](136-world-catalog-and-crud-ui.md) Slice 2 later replaced the seed-only
+local session vocabulary with catalog-aware create/open requests on 2026-07-03.
+`mclone-app-runtime` now owns the platform-neutral session request/state
+vocabulary and shared start-result boundary, including local-world create/open,
+remote-join start, active session descriptors, pending starts, failure state,
+status text, and success/failure transition policy. Desktop flat consumes that
+coordinator for initial startup, queued New World creation, and the first Join
+Remote menu flow. Web/WASM uses the same coordinator vocabulary for initial
+local-worker and remote WebSocket starts, browser diagnostics, and menu-driven
+async local-world restart. Web Join Remote async reconnect is wired through the
+same path, but still needs a dedicated connect-screen smoke once endpoint
+editing/input is real. Flat Android now consumes the same request vocabulary for
+initial local/remote startup and menu-driven New World / Join Remote replacement
+while keeping Android activity, touch, `wgpu` surface, and TCP adapter ownership
+in the app crate. Desktop XR and Android XR now route shared menu New World /
+Join Remote actions through a shared XR scene replacement hook while keeping
+OpenXR session/swapchain/action ownership in the app hosts. Flat Android New
+World replacement now has an AVD touch-menu smoke, and Android XR New World
 replacement now has a Quest in-headset launch smoke against the same shared XR
 replacement method. User headset validation says the shared XR menu/pointer
 works mostly fine. Remaining gaps are automated XR controller-click
@@ -29,8 +31,8 @@ World creation is one way to enter a play session. Joining a network host is
 another. Those paths should not become separate desktop/web/XR implementations
 with private lifecycle state. The common part is session coordination:
 
-1. what the user requested (`NewLocalWorld`, `JoinRemote`, future P2P/session
-   host),
+1. what the user requested (`CreateLocalWorld`, `OpenLocalWorld`, `JoinRemote`,
+   future P2P/session host),
 2. whether that request is pending, starting, active, failed, or cleared,
 3. what status/error the UI should show,
 4. when an existing session must be torn down before the next one starts.
@@ -80,6 +82,12 @@ then platform adapters perform the concrete construction and transport work.
 - The coordinator must not own platform resources. It should not know about
   `wgpu::Surface`, `winit`, OpenXR swapchains, browser `WebSocket`, workers, or
   Android activity lifecycle.
+
+Current vocabulary note: historical notes below use the original
+`NewLocalWorld { seed }` name from the first implementation. Tactical 136 Slice
+2 superseded that live Rust variant with `CreateLocalWorld { options }`,
+`OpenLocalWorld { id }`, and the compatibility helper
+`SessionStartRequest::new_seed_local_world(seed)` for current seed-only paths.
 
 ## Implementation Slices
 
@@ -480,9 +488,9 @@ Device results:
 
 ## Open Questions
 
-- Do we want `ActiveSessionDescriptor` to grow world identity/save-slot facts
-  before persistence lands, or keep it seed/endpoint-only until the world list
-  exists?
+- Answered by tactical 136 Slice 2: `ActiveSessionDescriptor::LocalWorld` now
+  carries optional world id/display name facts while seed-only transient paths
+  keep using the compatibility helper.
 - Should "New World" immediately clear an active session before the loading
   frame, or should the old world remain visible until the replacement is ready?
   Current desktop behavior favors the visible loading frame and then swaps.

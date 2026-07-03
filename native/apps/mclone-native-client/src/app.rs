@@ -1697,7 +1697,7 @@ mod tests {
         assert_eq!(
             app.driver.session.state(),
             &GameSessionState::Starting {
-                request: SessionStartRequest::NewLocalWorld { seed: 44 }
+                request: SessionStartRequest::new_seed_local_world(44)
             }
         );
         let status = app.driver.session.status().unwrap();
@@ -1706,7 +1706,7 @@ mod tests {
         let pending = app.driver.session.take_pending_start().unwrap();
         assert_eq!(
             pending.request,
-            SessionStartRequest::NewLocalWorld { seed: 44 }
+            SessionStartRequest::new_seed_local_world(44)
         );
         assert_eq!(pending.payload.scene.seed, 44);
         assert_eq!(pending.payload.scene.remote_addr, None);
@@ -1785,7 +1785,7 @@ mod tests {
         assert_eq!(
             app.driver.session.state(),
             &GameSessionState::Starting {
-                request: SessionStartRequest::NewLocalWorld { seed: 77 }
+                request: SessionStartRequest::new_seed_local_world(77)
             }
         );
         assert!(!app.mouse_lock_requested);

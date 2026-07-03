@@ -1165,7 +1165,7 @@ mod android {
             self.clear_keyboard_mouse_state();
             self.session_status = StatusOverlay::hidden();
             match descriptor {
-                ActiveSessionDescriptor::LocalWorld { seed } => {
+                ActiveSessionDescriptor::LocalWorld { seed, .. } => {
                     self.ui.set_new_world_seed(seed);
                     log::info!("Mclone Android created local world seed={seed}");
                 }
@@ -1321,7 +1321,7 @@ mod android {
                     log::info!("Mclone Android new-world seed rerolled to {seed}");
                 }
                 GameUiAction::CreateWorld(seed) => {
-                    let request = SessionStartRequest::NewLocalWorld { seed };
+                    let request = SessionStartRequest::new_seed_local_world(seed);
                     let options = self.local_world_options(seed);
                     if self
                         .start_replacement_session(device, queue, format, request, options)
@@ -2140,7 +2140,9 @@ mod android {
 
     fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {
         match session {
-            Some(ActiveSessionDescriptor::LocalWorld { seed }) => format!("local-world:{seed}"),
+            Some(ActiveSessionDescriptor::LocalWorld { seed, .. }) => {
+                format!("local-world:{seed}")
+            }
             Some(ActiveSessionDescriptor::Remote { endpoint }) => {
                 format!("remote:{}", endpoint.address)
             }

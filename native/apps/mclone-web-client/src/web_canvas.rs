@@ -2599,7 +2599,7 @@ impl WebChunkRenderSession {
         bindgen_js_url: String,
         bindgen_wasm_url: String,
     ) -> Result<JsValue, JsValue> {
-        let request = SessionStartRequest::NewLocalWorld { seed };
+        let request = SessionStartRequest::new_seed_local_world(seed);
         self.session.begin_start(request.clone());
         let config = WebIntegratedServerRunnerConfig::new(
             seed,
@@ -3086,7 +3086,7 @@ impl WebChunkRenderSession {
             }
             GameUiAction::CreateWorld(seed) => {
                 self.session
-                    .begin_start(SessionStartRequest::NewLocalWorld { seed });
+                    .begin_start(SessionStartRequest::new_seed_local_world(seed));
                 self.status_overlay = StatusOverlay::hidden();
             }
             GameUiAction::JoinRemote => {
@@ -3250,7 +3250,7 @@ impl WebChunkRenderSession {
         Self::new_with_runtime(
             canvas,
             asset_pack_bytes,
-            SessionStartRequest::NewLocalWorld { seed: SMOKE_SEED },
+            SessionStartRequest::new_seed_local_world(SMOKE_SEED),
             WebRuntime::local_integrated(SMOKE_SEED),
             SMOKE_INITIAL_CENTER,
             ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
@@ -3269,7 +3269,7 @@ impl WebChunkRenderSession {
         Self::new_with_runtime(
             canvas,
             asset_pack_bytes,
-            SessionStartRequest::NewLocalWorld { seed },
+            SessionStartRequest::new_seed_local_world(seed),
             runtime,
             SMOKE_INITIAL_CENTER,
             ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
@@ -3291,7 +3291,7 @@ impl WebChunkRenderSession {
         Self::new_with_runtime(
             canvas,
             asset_pack_bytes,
-            SessionStartRequest::NewLocalWorld { seed },
+            SessionStartRequest::new_seed_local_world(seed),
             runtime,
             initial_center,
             movement_speed_multiplier,
@@ -3380,9 +3380,10 @@ impl WebChunkRenderSession {
         .map_err(|error| format!("failed to upload GUI atlas: {error:#}"))?;
         let mut ui = GameUiHost::new_ingame();
         match &session_request {
-            SessionStartRequest::NewLocalWorld { seed } => {
-                ui.set_new_world_seed(*seed);
+            SessionStartRequest::CreateLocalWorld { options } => {
+                ui.set_new_world_seed(options.seed);
             }
+            SessionStartRequest::OpenLocalWorld { .. } => {}
             SessionStartRequest::JoinRemote { endpoint } => {
                 ui.set_new_world_seed(SMOKE_SEED);
                 ui.set_join_remote_addr(endpoint.address.clone());
@@ -3485,9 +3486,10 @@ impl WebChunkRenderSession {
 
     fn reset_runtime_view_state(&mut self, request: &SessionStartRequest) {
         match request {
-            SessionStartRequest::NewLocalWorld { seed } => {
-                self.ui.set_new_world_seed(*seed);
+            SessionStartRequest::CreateLocalWorld { options } => {
+                self.ui.set_new_world_seed(options.seed);
             }
+            SessionStartRequest::OpenLocalWorld { .. } => {}
             SessionStartRequest::JoinRemote { endpoint } => {
                 self.ui.set_join_remote_addr(endpoint.address.clone());
             }
@@ -5146,10 +5148,14 @@ fn write_session_request_to_js_object(
     request: &SessionStartRequest,
 ) -> Result<(), String> {
     match request {
-        SessionStartRequest::NewLocalWorld { seed } => {
+        SessionStartRequest::CreateLocalWorld { options } => {
             set_string(object, "sessionKind", "localWorld")?;
-            set_number(object, "sessionSeed", *seed as f64)?;
-            set_string(object, "sessionSeedText", &seed.to_string())?;
+            set_number(object, "sessionSeed", options.seed as f64)?;
+            set_string(object, "sessionSeedText", &options.seed.to_string())?;
+        }
+        SessionStartRequest::OpenLocalWorld { id } => {
+            set_string(object, "sessionKind", "localWorld")?;
+            set_string(object, "sessionWorldId", id.as_str())?;
         }
         SessionStartRequest::JoinRemote { endpoint } => {
             set_string(object, "sessionKind", "remote")?;
@@ -5167,10 +5173,13 @@ fn write_active_session_to_js_object(
     session: &ActiveSessionDescriptor,
 ) -> Result<(), String> {
     match session {
-        ActiveSessionDescriptor::LocalWorld { seed } => {
+        ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
             set_string(object, "sessionKind", "localWorld")?;
             set_number(object, "sessionSeed", *seed as f64)?;
             set_string(object, "sessionSeedText", &seed.to_string())?;
+            if let Some(id) = id {
+                set_string(object, "sessionWorldId", id.as_str())?;
+            }
         }
         ActiveSessionDescriptor::Remote { endpoint } => {
             set_string(object, "sessionKind", "remote")?;
