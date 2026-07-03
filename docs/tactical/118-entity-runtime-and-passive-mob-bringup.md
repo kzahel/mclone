@@ -24,13 +24,13 @@ landed one-block step-up path expansion and the first `JumpControl` scaffold.
 Slice 5E landed mob movement attribute facts for navigation and jumping. Slice
 5F landed Minecraft-shaped navigation recompute and timeout state. Slice 5G
 landed block-change path recompute triggers and path-trim hooks. The starter
-passive path is now an explicit debug passive showcase, enabled by default,
-while natural spawning remains live-disabled. Slice 8 landed a bounded
-farm-animal biome/placement dry run so biome tables, on-ground animal
-predicates, and cow/chicken AABB collision are no longer missing subsystems;
-Slice 9 landed strict raw-brightness sampling for the dry-run. Gamerules/server
-flags, despawn, persistence, and the live executor remain required before
-natural spawning creates mobs.
+passive path is now an explicit debug passive showcase, enabled by default.
+Slice 8 landed a bounded farm-animal biome/placement dry run so biome tables,
+on-ground animal predicates, and cow/chicken AABB collision are no longer
+missing subsystems. Slice 9 landed strict raw-brightness sampling for the
+dry-run. Slice 10 landed bounded volatile passive natural spawning for
+cow/chicken. These spawned animals are normal in-memory server entities but are
+not yet persisted to disk across process restart.
 
 Pathfinding direction: preserve the Minecraft layering (`Goal` ->
 `PathNavigation` -> path service -> `PathFinder` / `NodeEvaluator` ->
@@ -904,6 +904,57 @@ Landed notes:
 - `NaturalSpawnContext::brightness_checks_ready` now follows scheduler lighting
   mode, so disabled lighting remains an explicit blocker.
 
+## Slice 10 - Bounded Volatile Passive Natural Spawning
+
+Purpose: allow the cow/chicken passive spawn path to create real in-memory
+entities before durable entity persistence is ready, while keeping the
+persistence gap explicit.
+
+Status: landed; live passive spawning is enabled by default in volatile mode.
+
+Implementation sketch:
+
+- Add a `NaturalSpawnConfig::enabled_volatile_passive_creatures()` profile:
+  - `CREATURE` only
+  - friendly persistent categories allowed
+  - hostile categories disabled
+  - despawn and persistence blockers waived for this explicit volatile mode
+- Add `entity::spawning::live` as the bounded live executor:
+  - capped chunks per tick
+  - capped attempts per chunk and per tick
+  - capped spawns per tick
+  - Java-shaped player distance window: farther than 24 blocks and within 128
+    blocks of a player
+  - farm-animal biome table
+  - supported cow/chicken weighted selection from implemented entries
+  - shared on-ground animal placement, raw brightness, and AABB collision
+    checks
+- Keep entity creation owned by `ServerEntityStore` through a narrow
+  `spawn_volatile_passive_mob(...)` entrypoint.
+- Route newly spawned entity states through existing entity tracking so clients
+  receive normal entity snapshots.
+- Expose diagnostics for volatile mode, live attempts, spawns, and live
+  blockers.
+
+Done when:
+
+- Volatile spawning is on by default but can be disabled with a server setting.
+- Lighting-disabled mode still blocks live attempts on brightness.
+- Spawned cow/chicken count toward the existing `CREATURE` cap immediately.
+- Spawned cow/chicken are ordinary mob runtime entities and tick/tracking works
+  through existing systems.
+- The tactical clearly states that these entities are process-local until
+  durable entity persistence lands.
+
+Landed notes:
+
+- Added `entity/spawning/live.rs` for bounded volatile spawn request planning.
+- Added volatile planner configuration without weakening the persistent
+  all-category planner.
+- Added live natural-spawning diagnostics alongside existing dry-run counters.
+- Added `ServerEntityStore::spawn_volatile_passive_mob(...)` using the existing
+  passive mob insertion/runtime path.
+
 ## Validation
 
 Minimum gates for code slices:
@@ -928,10 +979,9 @@ Suggested visible checks:
 - Durable entity persistence adapter and save/unload dirtying.
 - Full `Entity.move(...)` / `LivingEntity.travel(...)` parity.
 - Real pathfinding over loaded world collision.
-- Live natural spawning for `CREATURE` through the `entity::spawning` planner
-  once gamerules/server flags, despawn, persistence, and the live spawn
-  executor are wired.
-- Despawn rules for passive animals and later hostile mobs.
+- Durable natural spawning for persisted entities across server restart.
+- Broader natural spawning beyond volatile `CREATURE` cow/chicken.
+- Despawn rules for later hostile mobs and non-persistent categories.
 - Sounds for passive mobs.
 - Data watcher / tracked data equivalent for richer entity presentation.
 - Web/Android/XR screenshot coverage after desktop validation.

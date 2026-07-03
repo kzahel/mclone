@@ -189,6 +189,16 @@ impl ServerEntityStore {
         counts
     }
 
+    pub(crate) fn spawn_volatile_passive_mob(
+        &mut self,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
+        let id = self.allocate_entity_id();
+        self.insert_passive_mob(id, kind, position, y_rot_degrees)
+    }
+
     pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
         let mut affected_mobs = 0;
         for (id, mob) in &mut self.mobs {
@@ -715,6 +725,24 @@ mod tests {
 
         assert_eq!(counts.get(MobCategory::Creature), 2);
         assert_eq!(counts.get(MobCategory::Misc), 0);
+    }
+
+    #[test]
+    fn volatile_passive_spawn_uses_normal_mob_runtime_and_counts_as_creature() {
+        let mut store = ServerEntityStore::default();
+        let state =
+            store.spawn_volatile_passive_mob(EntityKind::Chicken, Vec3d::new(8.5, 64.0, 8.5), 90.0);
+
+        assert_eq!(state.kind, EntityKind::Chicken);
+        assert_eq!(state.position, Vec3d::new(8.5, 64.0, 8.5));
+        assert!(state.on_ground);
+        assert!(store.mob_state(state.id).is_some());
+        assert_eq!(
+            store
+                .natural_spawn_category_counts()
+                .get(MobCategory::Creature),
+            1
+        );
     }
 
     #[test]

@@ -14,6 +14,15 @@ pub(crate) struct NaturalSpawnConfig {
     pub(crate) allow_friendly_categories: bool,
     pub(crate) allow_hostile_categories: bool,
     pub(crate) allow_persistent_categories: bool,
+    pub(crate) category_set: NaturalSpawnCategorySet,
+    pub(crate) require_despawn_rules: bool,
+    pub(crate) require_persistence: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NaturalSpawnCategorySet {
+    All,
+    CreatureOnly,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,6 +83,9 @@ impl Default for NaturalSpawnConfig {
             allow_friendly_categories: true,
             allow_hostile_categories: true,
             allow_persistent_categories: true,
+            category_set: NaturalSpawnCategorySet::All,
+            require_despawn_rules: true,
+            require_persistence: true,
         }
     }
 }
@@ -103,10 +115,30 @@ impl NaturalSpawnConfig {
             allow_friendly_categories: true,
             allow_hostile_categories: true,
             allow_persistent_categories: true,
+            category_set: NaturalSpawnCategorySet::All,
+            require_despawn_rules: true,
+            require_persistence: true,
+        }
+    }
+
+    pub(crate) const fn enabled_volatile_passive_creatures() -> Self {
+        Self {
+            enabled: true,
+            allow_friendly_categories: true,
+            allow_hostile_categories: false,
+            allow_persistent_categories: true,
+            category_set: NaturalSpawnCategorySet::CreatureOnly,
+            require_despawn_rules: false,
+            require_persistence: false,
         }
     }
 
     pub(crate) const fn allows_category(self, category: MobCategory) -> bool {
+        if matches!(self.category_set, NaturalSpawnCategorySet::CreatureOnly)
+            && !matches!(category, MobCategory::Creature)
+        {
+            return false;
+        }
         let friendly_allowed = if category.is_friendly() {
             self.allow_friendly_categories
         } else {
@@ -158,7 +190,7 @@ impl NaturalSpawnContext {
         }
     }
 
-    pub(crate) fn missing_blockers(self) -> Vec<NaturalSpawnBlocker> {
+    pub(crate) fn missing_blockers(self, config: NaturalSpawnConfig) -> Vec<NaturalSpawnBlocker> {
         let mut blockers = Vec::new();
         if self.spawnable_chunk_count.is_none() || !self.player_distance_spawnable_chunks_ready {
             blockers.push(NaturalSpawnBlocker::PlayerDistanceSpawnableChunks);
@@ -181,10 +213,10 @@ impl NaturalSpawnContext {
         if !self.gamerules_ready {
             blockers.push(NaturalSpawnBlocker::GameRules);
         }
-        if !self.despawn_rules_ready {
+        if config.require_despawn_rules && !self.despawn_rules_ready {
             blockers.push(NaturalSpawnBlocker::DespawnRules);
         }
-        if !self.persistence_ready {
+        if config.require_persistence && !self.persistence_ready {
             blockers.push(NaturalSpawnBlocker::Persistence);
         }
         blockers
@@ -252,7 +284,7 @@ pub(crate) fn plan_natural_spawns(
         };
     }
 
-    let blocked_by = context.missing_blockers();
+    let blocked_by = context.missing_blockers(config);
     if !blocked_by.is_empty() {
         return NaturalSpawnPlan {
             blocked_by,
@@ -466,7 +498,7 @@ mod tests {
         );
 
         assert_eq!(
-            context.missing_blockers(),
+            context.missing_blockers(NaturalSpawnConfig::enabled_all_categories()),
             vec![
                 NaturalSpawnBlocker::BiomeSpawnTables,
                 NaturalSpawnBlocker::PlacementPredicates,
@@ -477,5 +509,29 @@ mod tests {
                 NaturalSpawnBlocker::Persistence,
             ]
         );
+    }
+
+    #[test]
+    fn volatile_passive_creature_config_allows_missing_despawn_and_persistence() {
+        let mut context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
+            400,
+            289,
+            MobCategoryCounts::new(),
+        );
+        context.biome_spawn_tables_ready = true;
+        context.placement_predicates_ready = true;
+        context.brightness_checks_ready = true;
+        context.collision_checks_ready = true;
+        context.gamerules_ready = true;
+
+        let plan = plan_natural_spawns(
+            NaturalSpawnConfig::enabled_volatile_passive_creatures(),
+            context,
+        );
+
+        assert!(!plan.is_blocked());
+        assert_eq!(plan.categories.len(), 1);
+        assert_eq!(creature_plan(&plan).category, MobCategory::Creature);
+        assert!(creature_plan(&plan).should_attempt);
     }
 }

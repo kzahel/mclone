@@ -9,7 +9,7 @@ use crate::game_mode::JAVA_OVERWORLD_MAX_BUILD_HEIGHT;
 use super::biome_tables::farm_animal_spawns_for_biome;
 use super::placements::{SpawnPlacementFailure, check_farm_animal_natural_spawn};
 
-const JAVA_OVERWORLD_MIN_BUILD_HEIGHT: i32 = 0;
+pub(super) const JAVA_OVERWORLD_MIN_BUILD_HEIGHT: i32 = 0;
 const NATURAL_SPAWN_DRY_RUN_MAX_CHUNKS: usize = 8;
 const NATURAL_SPAWN_DRY_RUN_SAMPLE_COLUMNS: [(i32, i32); 4] = [(3, 3), (12, 3), (3, 12), (12, 12)];
 
@@ -32,7 +32,7 @@ pub(crate) struct NaturalSpawnDryRunDiagnostics {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SurfaceProbeFailure {
+pub(super) enum SurfaceProbeFailure {
     MissingBlockData,
     NoSurface,
 }
@@ -129,7 +129,7 @@ impl NaturalSpawnDryRunDiagnostics {
     }
 }
 
-fn top_motion_blocking_no_leaves_feet_y(
+pub(super) fn top_motion_blocking_no_leaves_feet_y(
     x: i32,
     z: i32,
     block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,

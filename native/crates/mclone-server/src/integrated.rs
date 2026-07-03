@@ -19,11 +19,18 @@ use mclone_protocol::{
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
+use mclone_worldgen::prng::SimpleRandomSource;
 
 use crate::NaturalSpawningDiagnostics;
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
-use crate::entity::spawning::dry_run::dry_run_creature_spawn_eligibility;
+use crate::entity::spawning::dry_run::{
+    NaturalSpawnDryRunDiagnostics, dry_run_creature_spawn_eligibility,
+};
+use crate::entity::spawning::live::{
+    VOLATILE_CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, VolatileCreatureSpawnDiagnostics,
+    plan_volatile_creature_spawns,
+};
 use crate::entity::spawning::mob_category::MobCategory;
 use crate::entity::spawning::natural::{
     NaturalSpawnChunkInputs, NaturalSpawnConfig, NaturalSpawnContext, plan_natural_spawns,
@@ -66,6 +73,7 @@ const DEBUG_PHYSICS_CUBE_LAUNCH_SPEED: f64 = 14.0;
 const DEBUG_PHYSICS_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK: u32 = 3;
 const DEFAULT_PHYSICS_STEP_DT_SECONDS: f64 = 1.0 / 60.0;
+const NATURAL_SPAWN_TICK_SEED_MULTIPLIER: i64 = 6_364_136_223_846_793_005;
 
 #[derive(Debug)]
 pub struct IntegratedServer {
@@ -78,6 +86,7 @@ pub struct IntegratedServer {
     day_time: u64,
     day_time_frozen: bool,
     debug_passive_showcase_enabled: bool,
+    volatile_natural_spawning_enabled: bool,
     initial_spawn_center: Option<ChunkPos>,
     player: ServerPlayerState,
     inventory: ServerInventory,
@@ -132,6 +141,23 @@ pub const INITIAL_DAY_TIME: u64 = 1000;
 enum CommandTarget {
     Local,
     Dedicated(ServerPlayerId),
+}
+
+#[derive(Debug)]
+struct NaturalSpawningEvaluation {
+    player_positions: Vec<Vec3d>,
+    chunk_inputs: NaturalSpawnChunkInputs,
+    plan: crate::entity::spawning::natural::NaturalSpawnPlan,
+    creature_state: crate::entity::spawning::spawn_state::CategorySpawnState,
+    creature_cadence_ready: bool,
+    creature_cap_has_room: bool,
+    dry_run: NaturalSpawnDryRunDiagnostics,
+}
+
+#[derive(Debug)]
+struct NaturalSpawningTickResult {
+    diagnostics: NaturalSpawningDiagnostics,
+    spawned_entities: Vec<ServerEntityState>,
 }
 
 impl IntegratedServer {
@@ -212,6 +238,7 @@ impl IntegratedServer {
             day_time: INITIAL_DAY_TIME,
             day_time_frozen: false,
             debug_passive_showcase_enabled: true,
+            volatile_natural_spawning_enabled: true,
             initial_spawn_center: None,
             player: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
@@ -254,6 +281,10 @@ impl IntegratedServer {
 
     pub fn set_debug_passive_showcase_enabled(&mut self, enabled: bool) {
         self.debug_passive_showcase_enabled = enabled;
+    }
+
+    pub fn set_volatile_natural_spawning_enabled(&mut self, enabled: bool) {
+        self.volatile_natural_spawning_enabled = enabled;
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
@@ -613,11 +644,13 @@ impl IntegratedServer {
 
         let entity_tick_start = simulation_timing_start();
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
-        let natural_spawning =
-            self.natural_spawning_diagnostics(simulation_tick, &tick_report.entity_ticking_chunks);
+        let natural_spawning_tick =
+            self.tick_natural_spawning(simulation_tick, &tick_report.entity_ticking_chunks);
+        let natural_spawning = natural_spawning_tick.diagnostics;
         let mob_player_targets = self.mob_player_targets();
         let scheduler = &self.scheduler;
-        let mut entity_updates = self.entities.tick_stationary(
+        let mut entity_updates = natural_spawning_tick.spawned_entities;
+        entity_updates.extend(self.entities.tick_stationary(
             &tick_report.entity_ticking_chunks,
             &mob_player_targets,
             |pos| {
@@ -625,7 +658,7 @@ impl IntegratedServer {
                     .block_at_world(pos)
                     .map(|block| BlockStateId(u32::from(block)))
             },
-        );
+        ));
         let item_pickup_targets = self.item_pickup_targets();
         let local_inventory = &mut self.inventory;
         let dedicated_players = &mut self.dedicated_players;
@@ -785,8 +818,69 @@ impl IntegratedServer {
         game_time: u64,
         entity_ticking_chunks: &[ChunkPos],
     ) -> NaturalSpawningDiagnostics {
-        const LIVE_NATURAL_SPAWNING_ENABLED: bool = false;
+        let evaluation = self.evaluate_natural_spawning(game_time, entity_ticking_chunks);
+        self.natural_spawning_diagnostics_from_evaluation(
+            &evaluation,
+            VolatileCreatureSpawnDiagnostics::default(),
+        )
+    }
 
+    fn tick_natural_spawning(
+        &mut self,
+        game_time: u64,
+        entity_ticking_chunks: &[ChunkPos],
+    ) -> NaturalSpawningTickResult {
+        let evaluation = self.evaluate_natural_spawning(game_time, entity_ticking_chunks);
+        let mut live = VolatileCreatureSpawnDiagnostics::default();
+        let mut spawned_entities = Vec::new();
+
+        if self.volatile_natural_spawning_enabled && !evaluation.plan.is_blocked() {
+            let creature_plan = evaluation
+                .plan
+                .categories
+                .iter()
+                .copied()
+                .find(|category| category.category == MobCategory::Creature);
+            if let Some(creature_plan) = creature_plan.filter(|category| category.should_attempt) {
+                let max_spawns = creature_plan
+                    .cap
+                    .saturating_sub(creature_plan.current_count)
+                    .min(VOLATILE_CREATURE_SPAWN_MAX_SPAWNS_PER_TICK as u32)
+                    as usize;
+                let mut random =
+                    SimpleRandomSource::new(natural_spawn_tick_seed(self.seed, game_time));
+                let result = plan_volatile_creature_spawns(
+                    &evaluation.chunk_inputs.eligible_entity_ticking_chunks,
+                    &evaluation.player_positions,
+                    max_spawns,
+                    &mut random,
+                    |pos| self.scheduler.block_at_world(pos),
+                    |x, z| self.biome_source.block_position_biome_definition(x, z),
+                    |pos| self.scheduler.raw_brightness_at_world(pos, 0),
+                );
+                live = result.diagnostics;
+                spawned_entities.extend(result.requests.into_iter().map(|request| {
+                    self.entities.spawn_volatile_passive_mob(
+                        request.kind,
+                        request.position,
+                        request.y_rot_degrees,
+                    )
+                }));
+                live.spawned = spawned_entities.len();
+            }
+        }
+
+        NaturalSpawningTickResult {
+            diagnostics: self.natural_spawning_diagnostics_from_evaluation(&evaluation, live),
+            spawned_entities,
+        }
+    }
+
+    fn evaluate_natural_spawning(
+        &self,
+        game_time: u64,
+        entity_ticking_chunks: &[ChunkPos],
+    ) -> NaturalSpawningEvaluation {
         let player_positions = self.natural_spawn_player_positions();
         let chunk_inputs = NaturalSpawnChunkInputs::from_players_and_entity_ticking_chunks(
             &player_positions,
@@ -811,39 +905,77 @@ impl IntegratedServer {
         context.placement_predicates_ready = true;
         context.brightness_checks_ready = self.scheduler.lighting_enabled();
         context.collision_checks_ready = true;
-        let plan = plan_natural_spawns(NaturalSpawnConfig::enabled_all_categories(), context);
+        context.gamerules_ready = self.volatile_natural_spawning_enabled;
+        let plan = plan_natural_spawns(self.natural_spawn_config(), context);
         let creature_state = SpawnState::new(spawnable_chunk_count, category_counts)
             .category_state(MobCategory::Creature);
         let creature_cadence_ready =
             MobCategory::Creature.should_run_natural_spawn_at_tick(game_time);
         let creature_cap_has_room = creature_state.has_room();
 
-        NaturalSpawningDiagnostics {
-            live_attempts_enabled: LIVE_NATURAL_SPAWNING_ENABLED,
-            ready_for_live_attempts: !plan.is_blocked(),
-            blocker_count: plan.blocked_by.len(),
-            player_distance_spawnable_chunks: chunk_inputs.player_distance_chunk_count(),
-            eligible_entity_ticking_spawn_chunks: chunk_inputs
-                .eligible_entity_ticking_chunk_count(),
-            creature_count: creature_state.current_count,
-            creature_cap: creature_state.cap,
+        NaturalSpawningEvaluation {
+            player_positions,
+            chunk_inputs,
+            plan,
+            creature_state,
             creature_cadence_ready,
             creature_cap_has_room,
-            creature_should_attempt_if_enabled: creature_cadence_ready && creature_cap_has_room,
-            dry_run_chunks_checked: dry_run.chunks_checked,
-            dry_run_chunk_budget_exhausted: dry_run.chunk_budget_exhausted,
-            dry_run_positions_checked: dry_run.positions_checked,
-            dry_run_biome_supported_positions: dry_run.biome_supported_positions,
-            dry_run_implemented_entries_checked: dry_run.implemented_entries_checked,
-            dry_run_valid_candidates: dry_run.valid_candidates,
-            dry_run_blocked_by_biome: dry_run.blocked_by_biome,
-            dry_run_blocked_missing_block_data: dry_run.blocked_missing_block_data,
-            dry_run_blocked_missing_brightness: dry_run.blocked_missing_brightness,
-            dry_run_blocked_invalid_floor: dry_run.blocked_invalid_floor,
-            dry_run_blocked_space: dry_run.blocked_space,
-            dry_run_blocked_collision: dry_run.blocked_collision,
-            dry_run_blocked_too_dark: dry_run.blocked_too_dark,
-            dry_run_blocked_unsupported: dry_run.blocked_unsupported,
+            dry_run,
+        }
+    }
+
+    fn natural_spawn_config(&self) -> NaturalSpawnConfig {
+        if self.volatile_natural_spawning_enabled {
+            NaturalSpawnConfig::enabled_volatile_passive_creatures()
+        } else {
+            NaturalSpawnConfig::default()
+        }
+    }
+
+    fn natural_spawning_diagnostics_from_evaluation(
+        &self,
+        evaluation: &NaturalSpawningEvaluation,
+        live: VolatileCreatureSpawnDiagnostics,
+    ) -> NaturalSpawningDiagnostics {
+        NaturalSpawningDiagnostics {
+            live_attempts_enabled: self.volatile_natural_spawning_enabled,
+            live_spawns_are_volatile: self.volatile_natural_spawning_enabled,
+            ready_for_live_attempts: !evaluation.plan.is_blocked(),
+            blocker_count: evaluation.plan.blocked_by.len(),
+            player_distance_spawnable_chunks: evaluation.chunk_inputs.player_distance_chunk_count(),
+            eligible_entity_ticking_spawn_chunks: evaluation
+                .chunk_inputs
+                .eligible_entity_ticking_chunk_count(),
+            creature_count: evaluation.creature_state.current_count,
+            creature_cap: evaluation.creature_state.cap,
+            creature_cadence_ready: evaluation.creature_cadence_ready,
+            creature_cap_has_room: evaluation.creature_cap_has_room,
+            creature_should_attempt_if_enabled: evaluation.creature_cadence_ready
+                && evaluation.creature_cap_has_room,
+            live_chunks_checked: live.chunks_checked,
+            live_chunk_budget_exhausted: live.chunk_budget_exhausted,
+            live_attempts: live.attempts,
+            live_spawned: live.spawned,
+            live_spawn_budget_exhausted: live.spawn_budget_exhausted,
+            live_blocked_by_biome: live.blocked_by_biome,
+            live_blocked_missing_block_data: live.blocked_missing_block_data,
+            live_blocked_player_distance: live.blocked_player_distance,
+            live_blocked_world_predicate: live.blocked_world_predicate,
+            live_blocked_unsupported: live.blocked_unsupported,
+            dry_run_chunks_checked: evaluation.dry_run.chunks_checked,
+            dry_run_chunk_budget_exhausted: evaluation.dry_run.chunk_budget_exhausted,
+            dry_run_positions_checked: evaluation.dry_run.positions_checked,
+            dry_run_biome_supported_positions: evaluation.dry_run.biome_supported_positions,
+            dry_run_implemented_entries_checked: evaluation.dry_run.implemented_entries_checked,
+            dry_run_valid_candidates: evaluation.dry_run.valid_candidates,
+            dry_run_blocked_by_biome: evaluation.dry_run.blocked_by_biome,
+            dry_run_blocked_missing_block_data: evaluation.dry_run.blocked_missing_block_data,
+            dry_run_blocked_missing_brightness: evaluation.dry_run.blocked_missing_brightness,
+            dry_run_blocked_invalid_floor: evaluation.dry_run.blocked_invalid_floor,
+            dry_run_blocked_space: evaluation.dry_run.blocked_space,
+            dry_run_blocked_collision: evaluation.dry_run.blocked_collision,
+            dry_run_blocked_too_dark: evaluation.dry_run.blocked_too_dark,
+            dry_run_blocked_unsupported: evaluation.dry_run.blocked_unsupported,
         }
     }
 
@@ -1686,6 +1818,13 @@ fn runtime_chunk_target_status(scheduler: &ChunkScheduler) -> mclone_core::Chunk
     }
 }
 
+fn natural_spawn_tick_seed(world_seed: i64, game_time: u64) -> i64 {
+    world_seed
+        .wrapping_mul(31)
+        .wrapping_add((game_time as i64).wrapping_mul(NATURAL_SPAWN_TICK_SEED_MULTIPLIER))
+        .wrapping_add(0x5DEECE66D)
+}
+
 fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
     chunks.iter().fold(0, |count, _pos| count + 1)
 }
@@ -2423,9 +2562,10 @@ mod tests {
             .expect("tick dedicated player");
         let spawning = report.natural_spawning;
 
-        assert!(!spawning.live_attempts_enabled);
+        assert!(spawning.live_attempts_enabled);
+        assert!(spawning.live_spawns_are_volatile);
         assert!(!spawning.ready_for_live_attempts);
-        assert_eq!(spawning.blocker_count, 4);
+        assert_eq!(spawning.blocker_count, 1);
         assert_eq!(spawning.player_distance_spawnable_chunks, 17 * 17);
         assert!(spawning.eligible_entity_ticking_spawn_chunks > 0);
         assert_eq!(spawning.creature_count, 2);
@@ -2433,6 +2573,8 @@ mod tests {
         assert!(spawning.creature_cap_has_room);
         assert!(!spawning.creature_cadence_ready);
         assert!(!spawning.creature_should_attempt_if_enabled);
+        assert_eq!(spawning.live_attempts, 0);
+        assert_eq!(spawning.live_spawned, 0);
         assert!(spawning.dry_run_chunks_checked > 0);
         assert!(spawning.dry_run_chunks_checked <= 8);
         assert_eq!(
@@ -2441,6 +2583,21 @@ mod tests {
         );
         assert!(spawning.dry_run_positions_checked <= spawning.dry_run_biome_supported_positions);
         assert_eq!(spawning.dry_run_valid_candidates, 0);
+    }
+
+    #[test]
+    fn volatile_natural_spawning_can_be_disabled() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_volatile_natural_spawning_enabled(false);
+
+        let spawning = server.natural_spawning_diagnostics(400, &[]);
+
+        assert!(!spawning.live_attempts_enabled);
+        assert!(!spawning.live_spawns_are_volatile);
+        assert!(!spawning.ready_for_live_attempts);
+        assert_eq!(spawning.blocker_count, 1);
+        assert_eq!(spawning.live_attempts, 0);
+        assert_eq!(spawning.live_spawned, 0);
     }
 
     #[test]
