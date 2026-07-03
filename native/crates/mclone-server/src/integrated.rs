@@ -6,6 +6,8 @@
 //! `ServerChunkCache`; the heavy chunk-management logic lives in the scheduler.
 
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 use std::time::Duration;
 
 use mclone_core::{
@@ -191,6 +193,15 @@ impl IntegratedServer {
             seed,
             ChunkScheduler::try_with_threaded_world_store(seed, store)?,
         ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn try_with_threaded_sqlite_world_dir(
+        seed: i64,
+        world_dir: impl AsRef<Path>,
+    ) -> ChunkStoreResult<Self> {
+        let store = crate::persistence::SqliteWorldStore::open_world_dir(world_dir)?;
+        Self::try_with_threaded_world_store(seed, Box::new(store))
     }
 
     pub(crate) fn with_player_chunk_tracking_policy(
@@ -1077,6 +1088,12 @@ impl IntegratedServer {
             &mut entity_record_builder,
         )?;
         self.dirty_entity_chunks.clear();
+        Ok(queued)
+    }
+
+    pub fn shutdown_persistence(&mut self) -> ChunkStoreResult<usize> {
+        let queued = self.save_dirty_chunks()?;
+        self.scheduler.close_persistence()?;
         Ok(queued)
     }
 

@@ -34,6 +34,8 @@ const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
 #[cfg(not(target_arch = "wasm32"))]
 const SQLITE_WORLD_SCHEMA_VERSION: i64 = 1;
+#[cfg(not(target_arch = "wasm32"))]
+pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
@@ -1695,6 +1697,14 @@ impl SqliteWorldStore {
         });
         initialize_sqlite_world_schema(&connection)?;
         Ok(Self { path, connection })
+    }
+
+    pub fn open_world_dir(world_dir: impl AsRef<Path>) -> ChunkStoreResult<Self> {
+        Self::new(Self::database_path_for_world_dir(world_dir))
+    }
+
+    pub fn database_path_for_world_dir(world_dir: impl AsRef<Path>) -> PathBuf {
+        world_dir.as_ref().join(SQLITE_WORLD_DATABASE_FILE)
     }
 
     pub fn path(&self) -> &Path {

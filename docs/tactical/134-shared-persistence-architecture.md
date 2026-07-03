@@ -1,6 +1,6 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 4B SQLite world-store foundation landed, app/dedicated
+Status: active; Slice 5 dedicated world-dir wiring landed, desktop local
 world-dir wiring next.
 
 ## Purpose
@@ -35,7 +35,7 @@ Read before implementation:
 
 ## Current Native State
 
-Live Rust after Slice 4B has:
+Live Rust after Slice 5 has:
 
 - `native/crates/mclone-server/src/persistence.rs`
 - `ChunkSnapshotStore`
@@ -48,6 +48,8 @@ Live Rust after Slice 4B has:
 - optional native-thread `PersistenceMailbox` backend for `Send` stores
 - `NullWorldStore` / `MemoryWorldStore`
 - native `SqliteWorldStore` for durable block/entity chunk records
+- native `SqliteWorldStore::open_world_dir` using `world.sqlite3`
+- `IntegratedServer::try_with_threaded_sqlite_world_dir`
 - `ChunkSnapshotWorldStore`
 - `SynchronousPersistenceFacade`
 - synchronous `load_chunk` / `save_chunk`
@@ -61,13 +63,18 @@ Live Rust after Slice 4B has:
   save-before-holder-unload acknowledgement handling
 - integrated-host entity record hydration, dirty entity chunk tracking, and
   chunk-local entity removal after holder unload
+- `ChunkScheduler::close_persistence` and `IntegratedServer::shutdown_persistence`
+  for clean host shutdown
+- dedicated-server `--world-dir`, `--world-root` / `--world-name`, and
+  `--transient` startup modes backed by threaded SQLite persistence
 
 This is useful but still too narrow:
 
-- the durable native backend is not wired into app/dedicated world-open paths
+- the durable native backend is wired into the dedicated server path but not
+  desktop local-integrated app world-open paths
 - no player/world/saved-data records
 - no web IndexedDB adapter
-- no Android app-private or dedicated-server world-dir wiring
+- no Android app-private world-dir wiring
 
 `docs/loading-persistence.md` contains richer target vocabulary than the live
 Rust path. Treat live Rust as the source of current behavior and reconcile the
@@ -394,8 +401,11 @@ Validation:
 - direct SQLite store reopen preserves chunk and entity chunk records
 - threaded mailbox plus SQLite store reopen preserves durable chunk and entity
   chunk writes
-- desktop native app wiring creates a named world dir/db
-- chunk edit persists across process restart after app wiring
+- dedicated server wiring creates a named world dir/db
+- chunk edit persists across dedicated server process restart
+- desktop native app wiring creates a named world dir/db after local-integrated
+  world selection lands
+- chunk edit persists across desktop app process restart after app wiring
 - generated animal persists across process restart after generated-original
   entity persistence lands
 - killed generated animal remains gone across process restart after tombstone
@@ -408,6 +418,8 @@ Validation:
 
 Wire durable persistence into the dedicated server app without changing the
 shared policy.
+
+Status: landed 2026-07-03.
 
 Deliverables:
 
@@ -422,6 +434,24 @@ Validation:
 - native dedicated smoke with persistent block edit
 - native client reconnect sees saved state
 - no renderer dependency in dedicated storage path
+
+Landed shape:
+
+- `SqliteWorldStore::open_world_dir` maps a world directory to
+  `world.sqlite3`.
+- `IntegratedServer::try_with_threaded_sqlite_world_dir` constructs the
+  dedicated host with the native threaded persistence actor and SQLite store.
+- `ChunkScheduler::close_persistence` and
+  `IntegratedServer::shutdown_persistence` drain dirty durable writes and close
+  the actor on clean shutdown.
+- `mclone-dedicated-server` accepts `--world-dir PATH`, `--world-root PATH`
+  plus `--world-name NAME`, and explicit `--transient`.
+- The dedicated loop opens the world inside the loop thread, preserving the
+  current non-`Send` server internals while still keeping SQLite IO off the
+  server tick thread.
+- A dedicated restart test breaks a block through the native TCP client path,
+  closes the server, reopens the same world directory, and verifies the block
+  edit from the reloaded snapshot.
 
 ### Slice 6: Browser IndexedDB Backend
 
@@ -498,19 +528,18 @@ one platform before the shared host contract is clear.
 
 ## Next Likely Implementation Chunk
 
-Proceed with **Slice 5: Dedicated Server World Dir**.
+Proceed with **Slice 5B: Desktop Native Local World Dir**.
 
 Reasoning:
 
-- Slice 3B moved block chunks and entity chunks behind the same shared
-  scheduler/mailbox lifecycle for world-store-backed hosts.
-- Slice 4A moved native `Send` stores behind an optional worker-thread mailbox,
-  so real native IO no longer needs to run on the server thread.
-- Slice 4B added the transactional SQLite `WorldStore` foundation for block and
-  entity chunk records.
-- The remaining native risk is lifecycle wiring: native/dedicated hosts need a
-  world-dir/open mode, threaded SQLite store construction, flush/close on clean
-  shutdown, and process-restart smokes.
+- Slice 5 proved the world-dir/open/shutdown path through the renderer-free
+  dedicated app and native TCP client.
+- Desktop local-integrated still starts transient worlds through
+  `NativeIntegratedServerRunnerConfig`, so normal native app sessions cannot
+  yet use the durable backend.
+- The next native risk is routing a selected local world directory through the
+  shared app-runtime runner config without moving persistence policy into the
+  desktop app crate.
 
 ## Validation Gates
 

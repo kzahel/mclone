@@ -881,6 +881,12 @@ mod native {
             &diagnostics,
             &mut diagnostics_detail_sampler,
         );
+        let result = match (result, server.shutdown_persistence()) {
+            (Ok(()), Ok(_)) => Ok(()),
+            (Err(error), Ok(_)) => Err(error),
+            (Ok(()), Err(error)) => Err(ServerRunnerError::from(error)),
+            (Err(error), Err(_shutdown_error)) => Err(error),
+        };
         refresh_diagnostics(
             &diagnostics,
             &server,

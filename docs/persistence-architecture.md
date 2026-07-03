@@ -342,8 +342,9 @@ and now implements `WorldStore`, but it remains chunk-only and synchronous.
 Likewise, `ChunkSnapshotWorldStore` is snapshot-only compatibility glue and does
 not advertise entity chunk support.
 Native `SqliteWorldStore` is the first durable block/entity chunk backend behind
-the same logical contract. It is not yet wired into app or dedicated world-dir
-startup paths.
+the same logical contract. The dedicated server can now open it through
+`--world-dir`, `--world-root` / `--world-name`, or explicit `--transient`; the
+desktop local-integrated app path still starts transient worlds.
 
 Current durable native backend:
 
@@ -353,6 +354,8 @@ Current durable native backend:
 - metadata and schema tables with `PRAGMA user_version`
 - WAL mode where supported
 - checkpoint on flush/close
+- dedicated server clean shutdown drains dirty writes and closes the
+  persistence actor
 
 SQLite is a pragmatic starting point because it gives indexing, transactions,
 schema migration, and fewer small-file problems. `rusqlite` with the bundled

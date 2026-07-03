@@ -1816,6 +1816,33 @@ impl ChunkScheduler {
         })
     }
 
+    pub fn close_persistence(&mut self) -> ChunkStoreResult<()> {
+        let request_id = self.store.close();
+        loop {
+            let completions = self.store.drain_completions();
+            let mut made_progress = !completions.is_empty();
+            for completion in completions {
+                match completion {
+                    WorldStoreCompletion::CloseComplete {
+                        request_id: completed_id,
+                        result,
+                    } if completed_id == request_id => return result,
+                    other => {
+                        self.handle_persistence_completion(other)?;
+                    }
+                }
+            }
+            if self.store.process_one_background_write() {
+                made_progress = true;
+            }
+            if !made_progress {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "persistence close request {request_id} did not complete"
+                )));
+            }
+        }
+    }
+
     pub(crate) fn save_dirty_chunks_with_record_builder(
         &mut self,
         mut record_builder: impl FnMut(&ChunkSnapshot) -> ChunkRecord,
