@@ -1,7 +1,8 @@
 # 128: Terrain Render Pipeline Coordination
 
-Status: active architecture parent; resident cached-section dirty flags landed
-via `133` Slice 3D, broader coordinator lifecycle remains
+Status: active architecture parent; resident cached-section dirty flags and
+ready-set upload-backpressure attribution landed, broader coordinator lifecycle
+remains
 Workstream: shared native Rust terrain runtime, render session, compiler, upload, and XR frame pacing
 
 ## Impetus
@@ -1360,6 +1361,66 @@ Next implementation implication:
 - Treat ready-section recomputation/publication as a first-class bus phase,
   because it is repeatedly showing tails in the RD7 lane.
 
+Traversal-ready backpressure attribution:
+
+- Implemented July 3, 2026 without changing rendering behavior.
+- `TexturedSectionRecordCacheStats` now splits traversal-ready publish calls by
+  upload-backpressured context: total, changed, unchanged, backpressured,
+  backpressured-changed, and backpressured-unchanged.
+- XR passes the shared `RenderSectionUploadFrameDecision.upload_backpressured`
+  flag into traversal-ready publication. The existing no-work early path records
+  a non-backpressured ready publish.
+- Android XR logs the counters in
+  `MCLONE_ANDROID_XR_PERF_RECORD_CACHE`.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render record_cache_stats_track_upload_backpressured_ready_set_context -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -- --nocapture`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+- `cargo test --manifest-path native/Cargo.toml`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, `2 / 16 / 64`, 45 seconds.
+
+Measurement:
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Ready-set calls | Upload phase max | Key tail |
+|---|---:|---|---:|---|---|---|
+| `2 / 16 / 64` shared frame decision | 64 | 15.735 / 18.248 / 23.384 / 52.201 ms | 80.5% | not yet split by backpressure | phase events 3; queued lifecycle 160; held lifecycle 64; held jobs 2; upload limited true; accept limited true; backpressured true | submit snapshot 32.169 ms; upload apply 19.191 ms; ready sections 25.926 ms; left-eye encode 24.578 ms |
+| `2 / 16 / 64` ready-set attribution | 16 | 15.147 / 17.714 / 19.393 / 28.131 ms | 70.7% | calls 2961; changed 10; unchanged 2951; backpressured 0; backpressured changed 0; backpressured unchanged 0 | phase events 2; queued lifecycle 16; held lifecycle 16; held jobs 2; upload limited true; accept limited false; backpressured false | poll 7.284 ms; upload apply 7.418 ms; ready publish 4.328 ms; left/right eye encode 3.475/3.851 ms; stereo poll wait 9.723 ms |
+
+Interpretation:
+
+- The attribution counters landed and are visible in the Quest perf line. This
+  slice is instrumentation-only and should not be read as the cause of the
+  better July 3 result; the resident dirty-flag change from `133` is now also in
+  the lane, and run-to-run variability remains significant.
+- The current run did not exercise the precise upload-backpressured ready-publish
+  path: `ready_set_backpressured=0`, and the upload phase max also reported
+  `backpressured=false`.
+- The ready set itself was almost always unchanged (`2951 / 2961` calls), so the
+  expensive work to remove next is broad per-frame ready publication, not a
+  blind upload-backpressured skip alone.
+- The ready publish max dropped to `4.328 ms` in this run, so the highest current
+  tails are no longer exclusively ready publication. Still, a versioned
+  ready-publish phase is the right coordinator step because it removes hidden
+  full-set work from every frame and gives later policy work an explicit input
+  change key.
+
+Next implementation implication:
+
+- Add a shared, versioned traversal-ready phase instead of an
+  upload-backpressure-only skip. It should publish only when one of the inputs
+  changed: visible draw resources, render-neighbor readiness, or the camera/view
+  state that affects the near-camera missing-neighbor exception.
+- Keep the current counters as the guardrail. A correct fast path should drive
+  unchanged ready publishes down without hiding changed publishes during camera
+  movement or upload/removal application.
+- Deferred note for closeout: force or construct a run that actually reports
+  `ready_set_backpressured > 0`. The July 3 RD7 orbit did not hit that condition,
+  so it cannot decide whether a narrower upload-backpressured skip is useful.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1424,12 +1485,13 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Use the shared frame-decision API to bring traversal-ready publication into the
-same coordinated terrain phase. The current slice moved the upload-backpressure
-decision into `mclone-render-session`, but XR still recomputes and publishes the
-ready set after that decision. The next slice should either skip ready
-recompute/publish on upload-backpressured frames when the visible ready set is
-known unchanged, or add counters that prove why it must remain per-frame work.
+Use the new attribution counters to implement a shared, versioned
+traversal-ready publication phase. The July 3 RD7 orbit showed `2951 / 2961`
+ready publishes were unchanged, but it did not hit the upload-backpressured path
+at all. That means the next safe implementation chunk is not a blind
+upload-backpressure skip; it is a keyed fast path that avoids recompute/publish
+when visible draw resources, render-neighbor readiness, and the camera/view
+near-neighbor exception inputs are unchanged.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of

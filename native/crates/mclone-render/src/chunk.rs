@@ -505,12 +505,32 @@ pub struct TexturedSectionRecordCacheStats {
     pub ready_set_calls: u64,
     pub ready_set_changed_calls: u64,
     pub ready_set_unchanged_calls: u64,
+    pub ready_set_upload_backpressured_calls: u64,
+    pub ready_set_upload_backpressured_changed_calls: u64,
+    pub ready_set_upload_backpressured_unchanged_calls: u64,
     pub prepared_record_rebuilds: u64,
     pub prepared_record_rebuild_total_ms: f64,
     pub prepared_record_rebuild_max_ms: f64,
 }
 
 impl TexturedSectionRecordCacheStats {
+    pub fn record_ready_set_call(&mut self, upload_backpressured: bool, changed: bool) {
+        self.ready_set_calls += 1;
+        if changed {
+            self.ready_set_changed_calls += 1;
+        } else {
+            self.ready_set_unchanged_calls += 1;
+        }
+        if upload_backpressured {
+            self.ready_set_upload_backpressured_calls += 1;
+            if changed {
+                self.ready_set_upload_backpressured_changed_calls += 1;
+            } else {
+                self.ready_set_upload_backpressured_unchanged_calls += 1;
+            }
+        }
+    }
+
     pub fn prepared_record_rebuild_avg_ms(self) -> f64 {
         if self.prepared_record_rebuilds == 0 {
             0.0
@@ -530,6 +550,15 @@ impl TexturedSectionRecordCacheStats {
             ready_set_unchanged_calls: self
                 .ready_set_unchanged_calls
                 .saturating_sub(baseline.ready_set_unchanged_calls),
+            ready_set_upload_backpressured_calls: self
+                .ready_set_upload_backpressured_calls
+                .saturating_sub(baseline.ready_set_upload_backpressured_calls),
+            ready_set_upload_backpressured_changed_calls: self
+                .ready_set_upload_backpressured_changed_calls
+                .saturating_sub(baseline.ready_set_upload_backpressured_changed_calls),
+            ready_set_upload_backpressured_unchanged_calls: self
+                .ready_set_upload_backpressured_unchanged_calls
+                .saturating_sub(baseline.ready_set_upload_backpressured_unchanged_calls),
             prepared_record_rebuilds: self
                 .prepared_record_rebuilds
                 .saturating_sub(baseline.prepared_record_rebuilds),
@@ -2286,6 +2315,14 @@ impl TexturedSectionDrawResources {
     }
 
     pub fn set_traversal_ready_sections(&mut self, ready_sections: &BTreeSet<RenderSectionKey>) {
+        self.set_traversal_ready_sections_with_context(ready_sections, false);
+    }
+
+    pub fn set_traversal_ready_sections_with_context(
+        &mut self,
+        ready_sections: &BTreeSet<RenderSectionKey>,
+        upload_backpressured: bool,
+    ) {
         let filtered_ready_sections = self
             .visibility_sections
             .keys()
@@ -2293,13 +2330,12 @@ impl TexturedSectionDrawResources {
             .filter(|key| ready_sections.contains(key))
             .collect();
         let mut stats = self.record_cache_stats.get();
-        stats.ready_set_calls += 1;
-        if filtered_ready_sections == self.traversal_ready_sections {
-            stats.ready_set_unchanged_calls += 1;
+        let changed = filtered_ready_sections != self.traversal_ready_sections;
+        stats.record_ready_set_call(upload_backpressured, changed);
+        if !changed {
             self.record_cache_stats.set(stats);
             return;
         }
-        stats.ready_set_changed_calls += 1;
         self.record_cache_stats.set(stats);
         // Slice F follow-up: readiness flips change cached `traversal_ready`.
         // Reasserting the same ready set should not rebuild prepared records.
@@ -3886,6 +3922,39 @@ mod tests {
         assert_eq!(stats.readiness_culled_section_count, 1);
         assert_eq!(stats.readiness_culled_index_count, 6);
         assert_eq!(stats.graph_culled_section_count, 0);
+    }
+
+    #[test]
+    fn record_cache_stats_track_upload_backpressured_ready_set_context() {
+        let baseline = TexturedSectionRecordCacheStats::default();
+        let mut stats = baseline;
+
+        stats.record_ready_set_call(false, true);
+        stats.record_ready_set_call(true, false);
+        stats.record_ready_set_call(true, true);
+
+        assert_eq!(stats.ready_set_calls, 3);
+        assert_eq!(stats.ready_set_changed_calls, 2);
+        assert_eq!(stats.ready_set_unchanged_calls, 1);
+        assert_eq!(stats.ready_set_upload_backpressured_calls, 2);
+        assert_eq!(stats.ready_set_upload_backpressured_changed_calls, 1);
+        assert_eq!(stats.ready_set_upload_backpressured_unchanged_calls, 1);
+
+        let delta = stats.sample_delta(baseline);
+        assert_eq!(delta.ready_set_calls, 3);
+        assert_eq!(delta.ready_set_upload_backpressured_calls, 2);
+        assert_eq!(delta.ready_set_upload_backpressured_changed_calls, 1);
+        assert_eq!(delta.ready_set_upload_backpressured_unchanged_calls, 1);
+
+        let mut next = stats;
+        next.record_ready_set_call(true, false);
+        let next_delta = next.sample_delta(stats);
+        assert_eq!(next_delta.ready_set_calls, 1);
+        assert_eq!(next_delta.ready_set_changed_calls, 0);
+        assert_eq!(next_delta.ready_set_unchanged_calls, 1);
+        assert_eq!(next_delta.ready_set_upload_backpressured_calls, 1);
+        assert_eq!(next_delta.ready_set_upload_backpressured_changed_calls, 0);
+        assert_eq!(next_delta.ready_set_upload_backpressured_unchanged_calls, 1);
     }
 
     #[test]

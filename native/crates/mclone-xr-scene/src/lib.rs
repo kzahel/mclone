@@ -3073,7 +3073,8 @@ where
             timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
             let traversal_ready_section_count = ready_sections.len();
             let ready_publish_start = Instant::now();
-            self.draw.set_traversal_ready_sections(&ready_sections);
+            self.draw
+                .set_traversal_ready_sections_with_context(&ready_sections, false);
             timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
             let upload_queue = self.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
@@ -3317,7 +3318,10 @@ where
         timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
         let traversal_ready_section_count = ready_sections.len();
         let ready_publish_start = Instant::now();
-        self.draw.set_traversal_ready_sections(&ready_sections);
+        self.draw.set_traversal_ready_sections_with_context(
+            &ready_sections,
+            upload_frame_decision.upload_backpressured,
+        );
         timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
         self.render_stats.section_count = self.draw.section_count();
         self.render_stats.index_count = self.draw.index_count();
