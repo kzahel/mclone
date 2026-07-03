@@ -124,8 +124,13 @@ normal tick/poll path.
 The request surface should be record-oriented:
 
 ```text
+WorldCatalog requests/completions
+  list_worlds()
+  create_world(metadata)
+  open_world(world_id)
+  delete_inactive_world(world_id)
+
 WorldStore requests
-  open_world(metadata)
   load_chunk(pos)
   save_chunk(record, durability)
   load_entity_chunk(pos)
@@ -136,20 +141,24 @@ WorldStore requests
   save_saved_data(key, record, durability)
   flush()
   close()
-  delete_world(world_id)
 
 WorldStore completions
-  world_opened(metadata) / world_open_failed(error)
   record_loaded(key, record | miss)
   save_acknowledged(key) / save_failed(key, error)
   flush_complete
   close_complete
 ```
 
-Reset/migration decisions are host policy. The store exposes primitives —
-metadata reads and `delete_world` — and the host decides whether an
-incompatible world resets, migrates, or refuses to open. There is no
-`reset_incompatible_world` in the store itself.
+Reset/migration decisions are host policy. The catalog exposes local-world
+container primitives, while the opened-world store exposes record primitives.
+The host decides whether an incompatible world resets, migrates, or refuses to
+open. There is no `reset_incompatible_world` in the store itself.
+
+Tactical [`136`](tactical/136-world-catalog-and-crud-ui.md) now owns the
+platform-neutral local-world catalog vocabulary above this opened-world store
+contract. The catalog owns local world ids, summaries, list/create/open/delete
+requests, and inactive-save delete policy. `WorldStore` remains the API for the
+currently opened world's logical records and close/flush lifecycle.
 
 The first implementation can land a narrower subset, but the contract should
 leave room for every record family from the start.

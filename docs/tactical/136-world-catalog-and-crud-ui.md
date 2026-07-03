@@ -1,6 +1,7 @@
 # 136: World Catalog And CRUD UI
 
-Status: proposed; owns follow-up persistence lifecycle work from closed
+Status: active; Slice 1 shared identity/catalog contract landed 2026-07-03.
+Owns follow-up persistence lifecycle work from closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -188,6 +189,8 @@ Deliverables:
 
 ### Slice 1: Shared World Identity And Catalog Contract
 
+Status: landed 2026-07-03.
+
 Add platform-neutral data types without changing visible UI yet:
 
 - `LocalWorldId`
@@ -205,6 +208,35 @@ Validation:
 - unit tests for id normalization, duplicate name handling, and delete-active
   rejection policy at the shared layer
 - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+
+Recorded Slice 1 result:
+
+- Added `mclone_app_runtime::world_catalog` with `LocalWorldId`,
+  `LocalWorldSummary`, `LocalWorldCreateOptions`, `WorldCatalogRequest`,
+  `WorldCatalogResponse`, `WorldCatalogCapabilities`, UI-suitable
+  status/error types, and `validate_delete_inactive_world`.
+- Kept IDs platform-neutral and path-safe: display names normalize to
+  lowercase ASCII slug ids, explicit IDs must already be normalized, and
+  duplicate display-name candidates get deterministic numeric suffixes.
+- Kept delete-active rejection in the shared layer so desktop, web, Android,
+  and XR adapters cannot accidentally expose active-save deletion with private
+  policy.
+- No visible UI, session request, or storage backend behavior changed.
+
+Validation after Slice 1 on 2026-07-03:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime world_catalog
+```
+
+The catalog-specific test filter passed 8/8. The broader
+`cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime` command
+compiled and all `world_catalog` tests passed, but nine unrelated
+`local_single_view` tests failed during textured terrain asset loading because
+the current asset tree reports `minecraft:cactus[age=0]` as missing the
+`age=0` blockstate variant. That failure is outside this catalog contract
+slice.
 
 ### Slice 2: Session Requests Carry Local World Identity
 

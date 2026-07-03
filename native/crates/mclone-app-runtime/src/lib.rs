@@ -9,6 +9,7 @@ pub mod local_single_view;
 pub mod render_assets;
 pub mod session;
 pub mod startup_args;
+pub mod world_catalog;
 
 use std::collections::BTreeSet;
 use std::time::Duration;
