@@ -11,21 +11,24 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.SectionPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.DataPackConfig;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
+import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.levelgen.WorldGenSettings;
 
 public final class VanillaClientScreenshotHarness {
    private static final long POLL_INTERVAL_MILLIS = 50L;
    private static final long GAME_THREAD_TIMEOUT_SECONDS = 60L;
    private static final Field OVERLAY_FIELD = findOverlayField();
+   private static final Field PAUSE_FIELD = findPauseField();
 
    private VanillaClientScreenshotHarness() {
    }
@@ -40,6 +43,7 @@ public final class VanillaClientScreenshotHarness {
       try {
          deleteRecursively(config.gameDir.resolve("saves").resolve(config.worldName));
          Minecraft minecraft = waitForMinecraft(config);
+         configureEarlyCaptureOptions(minecraft);
          waitUntil(config, () -> onGameThread(minecraft, () -> minecraft.level == null && overlay(minecraft) == null), "client startup");
          createWorld(config, minecraft);
          waitUntil(
@@ -54,8 +58,7 @@ public final class VanillaClientScreenshotHarness {
             "singleplayer world"
          );
          configureWorldAndCamera(config, minecraft);
-         BlockPos targetPos = new BlockPos(config.cameraX, config.cameraY, config.cameraZ);
-         waitUntil(config, () -> onGameThread(minecraft, () -> minecraft.level != null && minecraft.level.hasChunkAt(targetPos)), "target chunk");
+         waitUntil(config, () -> onGameThread(minecraft, () -> hasLoadedClientChunks(minecraft, config)), "camera chunk radius");
          sleep(Math.max(0, config.settleFrames) * POLL_INTERVAL_MILLIS);
          capture(config, minecraft);
       } catch (Throwable error) {
@@ -108,13 +111,8 @@ public final class VanillaClientScreenshotHarness {
       onGameThread(
          minecraft,
          () -> {
-            MinecraftServer server = minecraft.getSingleplayerServer();
-            if (server != null) {
-               ServerLevel overworld = server.overworld();
-               overworld.setDayTime(config.dayTime);
-               overworld.setWeatherParameters(1000000, 0, false, false);
-            }
             minecraft.options.hideGui = config.hideGui;
+            minecraft.options.pauseOnLostFocus = false;
             minecraft.options.renderDebug = false;
             minecraft.options.renderDebugCharts = false;
             minecraft.options.renderFpsChart = false;
@@ -122,6 +120,45 @@ public final class VanillaClientScreenshotHarness {
             minecraft.options.framerateLimit = 260;
             minecraft.getWindow().setFramerateLimit(minecraft.options.framerateLimit);
             minecraft.setScreen(null);
+            setPaused(minecraft, false);
+            return null;
+         }
+      );
+
+      MinecraftServer server = onGameThread(minecraft, minecraft::getSingleplayerServer);
+      if (server == null) {
+         throw new IllegalStateException("singleplayer server is not available");
+      }
+
+      onServerThread(
+         server,
+         () -> {
+            ServerLevel overworld = server.overworld();
+            overworld.setDayTime(config.dayTime);
+            overworld.setWeatherParameters(1000000, 0, false, false);
+            if (server.getPlayerList().getPlayers().isEmpty()) {
+               throw new IllegalStateException("singleplayer server has no player");
+            }
+            ServerPlayer player = server.getPlayerList().getPlayers().get(0);
+            player.connection.teleport(config.cameraX, config.cameraY, config.cameraZ, config.yaw, config.pitch);
+            player.yHeadRot = config.yaw;
+            player.yBodyRot = config.yaw;
+            player.yHeadRotO = config.yaw;
+            player.yBodyRotO = config.yaw;
+            player.setOldPosAndRot();
+            player.connection.resetPosition();
+            player.getAbilities().mayfly = true;
+            player.getAbilities().flying = true;
+            player.getAbilities().invulnerable = true;
+            player.onUpdateAbilities();
+            player.getLevel().getChunkSource().move(player);
+            return null;
+         }
+      );
+
+      onGameThread(
+         minecraft,
+         () -> {
             minecraft.player.moveTo(config.cameraX, config.cameraY, config.cameraZ, config.yaw, config.pitch);
             minecraft.player.yHeadRot = config.yaw;
             minecraft.player.yBodyRot = config.yaw;
@@ -132,6 +169,35 @@ public final class VanillaClientScreenshotHarness {
             minecraft.player.getAbilities().flying = true;
             minecraft.player.getAbilities().invulnerable = true;
             minecraft.setCameraEntity(minecraft.player);
+            minecraft.setScreen(null);
+            setPaused(minecraft, false);
+            System.out.println(
+               "mclone vanilla camera configured: seed="
+                  + config.seed
+                  + " player=("
+                  + config.cameraX
+                  + ", "
+                  + config.cameraY
+                  + ", "
+                  + config.cameraZ
+                  + ") chunk=("
+                  + SectionPos.posToSectionCoord(config.cameraX)
+                  + ", "
+                  + SectionPos.posToSectionCoord(config.cameraZ)
+                  + ") waitRadius="
+                  + chunkWaitRadius(config)
+            );
+            return null;
+         }
+      );
+   }
+
+   private static void configureEarlyCaptureOptions(Minecraft minecraft) throws Exception {
+      onGameThread(
+         minecraft,
+         () -> {
+            minecraft.options.pauseOnLostFocus = false;
+            setPaused(minecraft, false);
             return null;
          }
       );
@@ -168,6 +234,33 @@ public final class VanillaClientScreenshotHarness {
       return future.get(GAME_THREAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
    }
 
+   private static <T> T onServerThread(MinecraftServer server, Supplier<T> supplier) throws Exception {
+      CompletableFuture<T> future = server.submit(supplier);
+      return future.get(GAME_THREAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+   }
+
+   private static boolean hasLoadedClientChunks(Minecraft minecraft, Config config) {
+      if (minecraft.level == null) {
+         return false;
+      }
+      int centerX = SectionPos.posToSectionCoord(config.cameraX);
+      int centerZ = SectionPos.posToSectionCoord(config.cameraZ);
+      int radius = chunkWaitRadius(config);
+      for (int z = centerZ - radius; z <= centerZ + radius; z++) {
+         for (int x = centerX - radius; x <= centerX + radius; x++) {
+            if (minecraft.level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false) == null) {
+               return false;
+            }
+         }
+      }
+      System.out.println("mclone vanilla chunks ready: center=(" + centerX + ", " + centerZ + ") radius=" + radius);
+      return true;
+   }
+
+   private static int chunkWaitRadius(Config config) {
+      return Math.min(1, Math.max(0, config.renderDistance));
+   }
+
    private static void waitUntil(Config config, CheckedBooleanSupplier condition, String description) throws Exception {
       long deadline = deadlineNanos(config);
       while (System.nanoTime() < deadline) {
@@ -194,9 +287,30 @@ public final class VanillaClientScreenshotHarness {
       }
    }
 
+   private static void setPaused(Minecraft minecraft, boolean paused) {
+      if (PAUSE_FIELD == null) {
+         return;
+      }
+      try {
+         PAUSE_FIELD.setBoolean(minecraft, paused);
+      } catch (IllegalAccessException error) {
+         throw new RuntimeException(error);
+      }
+   }
+
    private static Field findOverlayField() {
       try {
          Field field = Minecraft.class.getDeclaredField("overlay");
+         field.setAccessible(true);
+         return field;
+      } catch (ReflectiveOperationException error) {
+         return null;
+      }
+   }
+
+   private static Field findPauseField() {
+      try {
+         Field field = Minecraft.class.getDeclaredField("pause");
          field.setAccessible(true);
          return field;
       } catch (ReflectiveOperationException error) {

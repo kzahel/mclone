@@ -6,7 +6,7 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, "..");
@@ -94,14 +94,90 @@ async function main() {
 
   if (options.printArgs || options.launch) {
     fs.mkdirSync(options.gameDir, { recursive: true });
-    const result = spawnSync(javaCommand[0], javaCommand.slice(1), {
-      cwd: ROOT_DIR,
-      stdio: "inherit",
-    });
+    const result = await runJavaCommand(javaCommand, options);
     if (result.status !== 0) {
       throw new Error(`java exited with status ${result.status}`);
     }
   }
+}
+
+async function runJavaCommand(javaCommand, options) {
+  const [executable, ...args] = javaCommand;
+  const previousBundleId = shouldRestoreFocus(options) ? frontmostBundleId() : null;
+  const child = spawn(executable, args, {
+    cwd: ROOT_DIR,
+    stdio: "inherit",
+  });
+  const stopRestoringFocus = startFocusRestorer(previousBundleId);
+  try {
+    return await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (status, signal) => {
+        if (signal) {
+          reject(new Error(`java exited from signal ${signal}`));
+        } else {
+          resolve({ status });
+        }
+      });
+    });
+  } finally {
+    stopRestoringFocus();
+  }
+}
+
+function shouldRestoreFocus(options) {
+  return options.launch && options.screenshot && options.backgroundWindow && minecraftOsName() === "osx";
+}
+
+function startFocusRestorer(bundleId) {
+  if (!bundleId) {
+    return () => {};
+  }
+
+  let attempts = 0;
+  let stopped = false;
+  const restore = () => {
+    if (stopped || attempts >= 24) {
+      return;
+    }
+    attempts += 1;
+    spawn("/usr/bin/open", ["-b", bundleId], {
+      cwd: ROOT_DIR,
+      stdio: "ignore",
+      detached: true,
+    }).unref();
+  };
+
+  const timer = setInterval(restore, 500);
+  restore();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
+function frontmostBundleId() {
+  const front = spawnSync("/usr/bin/lsappinfo", ["front"], {
+    cwd: ROOT_DIR,
+    encoding: "utf8",
+  });
+  if (front.status !== 0) {
+    return null;
+  }
+  const asn = front.stdout.trim().split(/\s+/)[0];
+  if (!asn) {
+    return null;
+  }
+
+  const info = spawnSync("/usr/bin/lsappinfo", ["info", "-only", "bundleID", "-app", asn], {
+    cwd: ROOT_DIR,
+    encoding: "utf8",
+  });
+  if (info.status !== 0) {
+    return null;
+  }
+  const match = info.stdout.match(/"CFBundleIdentifier"="([^"]+)"/);
+  return match ? match[1] : null;
 }
 
 function parseArgs(args) {
@@ -117,6 +193,7 @@ function parseArgs(args) {
     noBuild: false,
     noDownload: false,
     printArgs: false,
+    backgroundWindow: true,
     printCommand: false,
     prismDir: DEFAULT_PRISM_DIR,
     screenshot: null,
@@ -160,6 +237,9 @@ function parseArgs(args) {
         break;
       case "--print-command":
         options.printCommand = true;
+        break;
+      case "--foreground-window":
+        options.backgroundWindow = false;
         break;
       case "--no-build":
         options.noBuild = true;
@@ -258,6 +338,7 @@ options:
   --launch               launch the deobfuscated vanilla client explicitly
   --no-build             skip oracle/build.sh
   --no-download          do not download missing assets or natives
+  --foreground-window    allow launched screenshot windows to stay frontmost
   --game-dir <path>      default: ${DEFAULT_GAME_DIR}
   --assets-dir <path>    default: ${DEFAULT_ASSETS_DIR}
   --natives-dir <path>   default: ${DEFAULT_NATIVES_DIR}
