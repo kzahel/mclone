@@ -1,6 +1,6 @@
 # 138: Flat Render Camera Pose
 
-Status: proposed; Slice A renderer-side pose path landed 2026-07-04
+Status: proposed; Slices A-B renderer and desktop flat pose path landed 2026-07-04
 Workstream: native Rust, shared render/session boundary, desktop validation first
 
 ## Purpose
@@ -166,19 +166,27 @@ Validation:
 
 ### Slice B: Route Desktop Flat Through The New Pose
 
-- [ ] Replace desktop flat `EngineRenderCamera -> ChunkCamera` conversion with
+- [x] Replace desktop flat `EngineRenderCamera -> ChunkCamera` conversion with
       direct shared render-pose/view construction.
-- [ ] Keep `SpectatorCamera` as a compatibility shell if needed, but do not let
+- [x] Keep `SpectatorCamera` as a compatibility shell if needed, but do not let
       it own new render math.
-- [ ] Verify first-person and third-person-back view modes.
-- [ ] Capture and inspect a desktop/offscreen frame looking straight down.
-- [ ] Capture and inspect a desktop/offscreen frame looking straight up.
+- [x] Verify first-person and third-person-back view modes.
+- [x] Capture and inspect a desktop/offscreen frame looking straight down.
+- [x] Capture and inspect a desktop/offscreen frame looking straight up.
+
+Result: desktop/offscreen flat now carries `PerspectiveRenderPose` from
+`mclone-render-session` into `mclone-app-runtime` full-frame rendering. The old
+`ChunkCamera` method remains available for compatibility callers, while the
+player-controlled flat path no longer reconstructs its render view through
+`EngineRenderCamera -> ChunkCamera`.
 
 Validation:
 
-- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
-- the current desktop/offscreen smoke from `docs/platforms.md`
-- screenshots saved under `/tmp`, not in the repo
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-render-session -p mclone-app-runtime -p mclone-native-client`
+- exact down capture inspected:
+  `cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-flat-pose-down.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --startup-wait idle --screenshot-eye 8,80,8 --screenshot-target 8,79,8`
+- exact up capture inspected:
+  `cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-flat-pose-up.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --startup-wait idle --screenshot-eye 8,80,8 --screenshot-target 8,81,8`
 
 ### Slice C: Route Web And Flat Android Through The Same Shared Path
 

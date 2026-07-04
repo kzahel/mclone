@@ -2,9 +2,10 @@ use anyhow::{Context, Result, ensure};
 use mclone_assets::AssetSource;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
-    DEPTH_FORMAT, PreparedTexturedSectionRecords, PreparedTexturedSectionStereoDraw,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
-    TexturedSectionRenderStats, TexturedSectionRenderTiming, TexturedSectionUploadReport,
+    DEPTH_FORMAT, PerspectiveRenderPose, PreparedTexturedSectionRecords,
+    PreparedTexturedSectionStereoDraw, TexturedSectionDrawResources, TexturedSectionRenderOptions,
+    TexturedSectionRenderPhase, TexturedSectionRenderStats, TexturedSectionRenderTiming,
+    TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
@@ -333,6 +334,85 @@ impl FlatRenderResources {
     where
         BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
     {
+        self.render_full_frame_with_view_builder(
+            frame,
+            |size| Ok(camera.render_view(size[0], size[1])),
+            actor_instances,
+            underwater_overlay,
+            sky_clear_color,
+            time_of_day,
+            sun_angle,
+            render_options,
+            selection_outline,
+            world_debug_lines,
+            far_lod_mesh,
+            gui,
+            build_gui_draw,
+            render_stats,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_full_frame_for_pose<BuildGuiDraw>(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        camera: PerspectiveRenderPose,
+        actor_instances: &[ActorInstance],
+        underwater_overlay: Option<UnderwaterOverlay>,
+        sky_clear_color: wgpu::Color,
+        time_of_day: f32,
+        sun_angle: f32,
+        render_options: TexturedSectionRenderOptions,
+        selection_outline: Option<&SelectionOutline>,
+        world_debug_lines: &[WorldGuiLine],
+        far_lod_mesh: Option<&FarTerrainLodMesh>,
+        gui: FullFrameGui,
+        build_gui_draw: BuildGuiDraw,
+        render_stats: &mut RenderStreamStats,
+    ) -> Result<FullFrameRenderSummary>
+    where
+        BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+    {
+        self.render_full_frame_with_view_builder(
+            frame,
+            |size| camera.render_view(size[0], size[1]),
+            actor_instances,
+            underwater_overlay,
+            sky_clear_color,
+            time_of_day,
+            sun_angle,
+            render_options,
+            selection_outline,
+            world_debug_lines,
+            far_lod_mesh,
+            gui,
+            build_gui_draw,
+            render_stats,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_full_frame_with_view_builder<BuildView, BuildGuiDraw>(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        build_render_view: BuildView,
+        actor_instances: &[ActorInstance],
+        underwater_overlay: Option<UnderwaterOverlay>,
+        sky_clear_color: wgpu::Color,
+        time_of_day: f32,
+        sun_angle: f32,
+        render_options: TexturedSectionRenderOptions,
+        selection_outline: Option<&SelectionOutline>,
+        world_debug_lines: &[WorldGuiLine],
+        far_lod_mesh: Option<&FarTerrainLodMesh>,
+        gui: FullFrameGui,
+        build_gui_draw: BuildGuiDraw,
+        render_stats: &mut RenderStreamStats,
+    ) -> Result<FullFrameRenderSummary>
+    where
+        BuildView: FnOnce([u32; 2]) -> Result<ChunkRenderView>,
+        BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+    {
         let RenderFrameContext {
             device,
             queue,
@@ -343,7 +423,7 @@ impl FlatRenderResources {
             .scaled_color
             .as_ref()
             .map_or(target, |scaled| scaled.render_target());
-        let render_view = camera.render_view(render_target.size[0], render_target.size[1]);
+        let render_view = build_render_view(render_target.size)?;
         let selection_render_view =
             render_view_with_underwater_effect(render_view, underwater_overlay);
         let render_frame = RenderFrameContext::new(device, queue, encoder, render_target);

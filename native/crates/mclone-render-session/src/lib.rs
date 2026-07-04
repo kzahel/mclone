@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::{Context, Result, bail};
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use mclone_assets::ActorFigureId;
 use mclone_client::{
     ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
@@ -29,6 +29,7 @@ use mclone_mesh::{
 use mclone_protocol::{
     ClientCommand, EntityKind, ItemKind, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
 };
+use mclone_render::chunk::PerspectiveRenderPose;
 use mclone_render::entity::ActorInstance;
 use mclone_render::gui::WorldGuiLine;
 
@@ -2469,6 +2470,10 @@ impl EngineCameraController {
     pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
         render_camera_from_snapshot_with_view_mode(self.snapshot(), self.view_mode, render_distance)
     }
+
+    pub fn render_pose(&self, render_distance: u32) -> PerspectiveRenderPose {
+        render_pose_from_snapshot_with_view_mode(self.snapshot(), self.view_mode, render_distance)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2637,6 +2642,43 @@ pub fn render_camera_from_snapshot_with_view_mode(
         z_near: 0.05,
         z_far: 700.0 + render_distance as f32 * 128.0,
     }
+}
+
+pub fn render_pose_from_snapshot(
+    snapshot: EngineCameraSnapshot,
+    render_distance: u32,
+) -> PerspectiveRenderPose {
+    render_pose_from_snapshot_with_view_mode(
+        snapshot,
+        EngineCameraViewMode::FirstPerson,
+        render_distance,
+    )
+}
+
+pub fn render_pose_from_snapshot_with_view_mode(
+    snapshot: EngineCameraSnapshot,
+    view_mode: EngineCameraViewMode,
+    render_distance: u32,
+) -> PerspectiveRenderPose {
+    let forward = view_forward(snapshot.yaw_radians, snapshot.pitch_radians);
+    let eye = match view_mode {
+        EngineCameraViewMode::FirstPerson => snapshot.eye,
+        EngineCameraViewMode::ThirdPersonBack => snapshot
+            .eye
+            .add(forward.scale(-THIRD_PERSON_CAMERA_DISTANCE)),
+    };
+    PerspectiveRenderPose::new(
+        glam_vec3_from_vec3d(eye),
+        render_orientation_from_yaw_pitch(snapshot.yaw_radians, snapshot.pitch_radians),
+        64.0_f32.to_radians(),
+        0.05,
+        700.0 + render_distance as f32 * 128.0,
+    )
+}
+
+fn render_orientation_from_yaw_pitch(yaw_radians: f64, pitch_radians: f64) -> Quat {
+    Quat::from_rotation_y((yaw_radians + std::f64::consts::PI) as f32)
+        * Quat::from_rotation_x(pitch_radians as f32)
 }
 
 fn clamp_camera_speed(speed_blocks_per_second: f64) -> f64 {
@@ -4678,6 +4720,13 @@ mod tests {
         );
     }
 
+    fn assert_vec3_close(actual: Vec3, expected: Vec3) {
+        assert!(
+            (actual - expected).length() < 1.0e-6,
+            "expected {actual:?} to be approximately {expected:?}"
+        );
+    }
+
     fn test_build_report(
         keys: impl IntoIterator<Item = RenderSectionKey>,
     ) -> TexturedRenderSectionBuildReport {
@@ -5612,6 +5661,52 @@ mod tests {
         assert_eq!(third.eye, [8.0, 70.0, 4.0]);
         assert_eq!(third.target, [8.0, 70.0, 5.0]);
         assert_eq!(third.z_far, first.z_far);
+
+        let first_pose = render_pose_from_snapshot(snapshot, 2);
+        let third_pose = render_pose_from_snapshot_with_view_mode(
+            snapshot,
+            EngineCameraViewMode::ThirdPersonBack,
+            2,
+        );
+        assert_vec3_close(first_pose.eye, Vec3::new(8.0, 70.0, 8.0));
+        assert_vec3_close(third_pose.eye, Vec3::new(8.0, 70.0, 4.0));
+        assert_eq!(third_pose.z_far, first_pose.z_far);
+    }
+
+    #[test]
+    fn render_pose_uses_engine_yaw_pitch_convention() {
+        let eye = Vec3d::new(8.0, 70.0, 8.0);
+        let forward =
+            render_pose_from_snapshot(EngineCameraSnapshot::from_eye_pose(eye, 0.0, 0.0, 24.0), 0)
+                .render_view(1280, 720)
+                .expect("forward render pose")
+                .camera_forward;
+        let east = render_pose_from_snapshot(
+            EngineCameraSnapshot::from_eye_pose(eye, std::f64::consts::FRAC_PI_2, 0.0, 24.0),
+            0,
+        )
+        .render_view(1280, 720)
+        .expect("east render pose")
+        .camera_forward;
+        let up = render_pose_from_snapshot(
+            EngineCameraSnapshot::from_eye_pose(eye, 0.0, std::f64::consts::FRAC_PI_2, 24.0),
+            0,
+        )
+        .render_view(1280, 720)
+        .expect("up render pose")
+        .camera_forward;
+        let down = render_pose_from_snapshot(
+            EngineCameraSnapshot::from_eye_pose(eye, 0.0, -std::f64::consts::FRAC_PI_2, 24.0),
+            0,
+        )
+        .render_view(1280, 720)
+        .expect("down render pose")
+        .camera_forward;
+
+        assert_vec3_close(forward, Vec3::Z);
+        assert_vec3_close(east, Vec3::X);
+        assert_vec3_close(up, Vec3::Y);
+        assert_vec3_close(down, Vec3::NEG_Y);
     }
 
     #[test]

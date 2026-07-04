@@ -36,7 +36,8 @@ use mclone_input::{
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_protocol::ClientCommand;
 use mclone_render::chunk::{
-    ChunkCamera, ChunkTextureAtlas, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    ChunkTextureAtlas, PerspectiveRenderPose, TexturedSectionRenderOptions,
+    TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::ActorTextureAtlas;
@@ -48,7 +49,7 @@ use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     EngineCameraMovementMode, EngineCameraViewMode, EngineDebugVisualOptions,
     RenderSectionCacheUpdate, actor_instances_from_presentations, engine_debug_world_lines,
-    local_player_actor_instance_for_view, render_camera_from_snapshot_with_view_mode,
+    local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
 };
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
@@ -60,7 +61,7 @@ use mclone_ui::{
     WorldCatalogUiWorldId, touch_controls_mode_label,
 };
 
-use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
+use crate::camera::SpectatorCamera;
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{FramePacingMode, FramePacingUiState, FrameTimingStats};
 use crate::scene_runtime::{
@@ -100,11 +101,11 @@ impl FlatClientCameraView {
     pub(crate) fn from_camera(camera: &EngineCameraController) -> Self {
         let snapshot = camera.snapshot();
         let view_mode = camera.view_mode();
-        let render_camera = render_camera_from_snapshot_with_view_mode(snapshot, view_mode, 0);
+        let render_pose = render_pose_from_snapshot_with_view_mode(snapshot, view_mode, 0);
         Self {
             snapshot,
             eye: glam_vec3_from_vec3d(snapshot.eye),
-            render_eye: glam::Vec3::from_array(render_camera.eye),
+            render_eye: render_pose.eye,
             view_mode,
         }
     }
@@ -116,12 +117,8 @@ impl FlatClientCameraView {
         )
     }
 
-    pub(crate) fn chunk_camera(self, render_distance: u32) -> ChunkCamera {
-        chunk_camera_from_engine(render_camera_from_snapshot_with_view_mode(
-            self.snapshot,
-            self.view_mode,
-            render_distance,
-        ))
+    pub(crate) fn render_pose(self, render_distance: u32) -> PerspectiveRenderPose {
+        render_pose_from_snapshot_with_view_mode(self.snapshot, self.view_mode, render_distance)
     }
 }
 
@@ -241,7 +238,7 @@ pub(crate) struct FlatClientSectionUploadSummary {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FlatClientFrameInputs {
     pub(crate) camera_view: FlatClientCameraView,
-    pub(crate) camera: ChunkCamera,
+    pub(crate) camera: PerspectiveRenderPose,
     pub(crate) sky_clear_color: wgpu::Color,
     pub(crate) time_of_day: f32,
     pub(crate) sun_angle: f32,
@@ -2281,7 +2278,7 @@ impl FlatClientDriver {
     ) -> FlatClientFrameInputs {
         let camera_view = self.camera_view();
         let camera =
-            camera_view.chunk_camera(self.current_render_distance(fallback_render_distance));
+            camera_view.render_pose(self.current_render_distance(fallback_render_distance));
         let sky_clear_color = self.runtime.as_ref().map_or_else(
             mclone_render::default_clear_color,
             WindowSceneRuntime::sky_clear_color,
@@ -2371,7 +2368,7 @@ impl FlatClientDriver {
         let mut render_stats = frame_inputs.render_stats;
         let mut flat_hud_retained_cache = UiDrawCacheStats::default();
         let ui = &mut self.ui;
-        let mut summary = render_resources.render_full_frame(
+        let mut summary = render_resources.render_full_frame_for_pose(
             frame,
             frame_inputs.camera,
             &frame_inputs.actor_instances,
