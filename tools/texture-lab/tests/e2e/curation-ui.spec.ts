@@ -20,6 +20,8 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(index.summary.proceduralPlaceholderCount).toBeGreaterThan(40);
   expect(index.curation.selectedCount).toBe(0);
   expect(index.curation.manifestPath).toContain("generated-assets/texture-lab-playwright/curation/selections.v1.json");
+  expect(index.pack.blockCount).toBe(13);
+  expect(index.blocks.length).toBeGreaterThan(index.pack.blockCount);
 
   const grassCandidatesResponse = await request.get("/api/candidates?texture=grass_block_top");
   await expect(grassCandidatesResponse).toBeOK();

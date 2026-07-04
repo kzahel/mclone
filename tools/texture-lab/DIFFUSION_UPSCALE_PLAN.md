@@ -431,6 +431,13 @@ Local validation on macOS/M4/MPS:
     simple authored placeholder fixtures under the matching vanilla texture
     names so Auto preview can show these model families in rendered context
     before final art is generated.
+  - Vanilla-derived review blocks are now synthesized during curation-index
+    builds. If an authored texture has vanilla block/model usage but no
+    `block(...)` entry in the pack, the lab chooses a representative vanilla
+    block, maps its texture slots to local authored textures, writes a generated
+    block review sheet under `generated-assets`, and includes that block in
+    Auto/Blocks preview. Thin shape textures therefore no longer need manual
+    fixture block definitions.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

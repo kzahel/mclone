@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { discoverTextureCandidates } from "./candidate-index";
 import { buildTextureCurationState } from "./curation";
+import { blockSheetName, deriveVanillaPreviewBlocks, writeVanillaPreviewBlockSheets } from "./vanilla-preview-blocks";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { textureLabOutputRoot } from "../output-root";
@@ -38,10 +39,15 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
         textureEntryFrom(pack, name, texture, outputRoot, blockUsagesByTexture.get(name) ?? [], vanillaUsageSemantics.byTexture),
       ),
   );
+  const vanillaPreviewBlocks = deriveVanillaPreviewBlocks(pack, textures);
+  await writeVanillaPreviewBlockSheets(pack, vanillaPreviewBlocks, outputRoot);
   const blocks = await Promise.all(
-    Object.entries(pack.blocks)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([name, block]) => blockEntryFrom(pack, name, block, outputRoot)),
+    [
+      ...Object.entries(pack.blocks).map(([name, block]) => ({ name, block })),
+      ...vanillaPreviewBlocks,
+    ]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map(({ name, block }) => blockEntryFrom(pack, name, block, outputRoot)),
   );
 
   return {
@@ -237,12 +243,11 @@ function frozenRef(pack: TexturePackAsset, textureName: string): TextureIndexEnt
 }
 
 async function blockEntryFrom(pack: TexturePackAsset, name: string, block: BlockSpec, outputRoot: string): Promise<BlockIndexEntry> {
-  const sheetName = pack.textures[name] ? `${name}-block-sheet.png` : `${name}-sheet.png`;
   return {
     name,
     kind: block.kind,
     faces: blockFaces(block),
-    sheet: await imageRef("Block sheet", path.join(outputRoot, sheetName), "pnpm texture-lab:sheet"),
+    sheet: await imageRef("Block sheet", path.join(outputRoot, blockSheetName(pack, name)), "pnpm texture-lab:sheet"),
   };
 }
 

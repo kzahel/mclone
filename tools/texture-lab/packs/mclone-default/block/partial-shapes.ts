@@ -2,7 +2,7 @@ import type { TextureLabApi } from "../../../src/dsl";
 
 const empty16 = "................";
 
-export function definePartialShapeTextures({ palette, texture, block, mask, speckles }: TextureLabApi): void {
+export function definePartialShapeTextures({ palette, texture, mask, speckles }: TextureLabApi): void {
   palette("partial_shape_cutout", {
     transparent: "#00000000",
     glass: "#b9edf088",
@@ -389,40 +389,4 @@ export function definePartialShapeTextures({ palette, texture, block, mask, spec
     ],
   });
 
-  block("glass-pane", {
-    kind: "pane",
-    faces: {
-      side: "glass",
-      top: "glass_pane_top",
-    },
-  });
-
-  block("rail", {
-    kind: "rail",
-    faces: {
-      top: "rail",
-    },
-  });
-
-  block("torch", {
-    kind: "torch",
-    faces: {
-      side: "torch",
-    },
-  });
-
-  block("oak-door", {
-    kind: "door",
-    faces: {
-      top: "oak_door_top",
-      bottom: "oak_door_bottom",
-    },
-  });
-
-  block("oak-trapdoor", {
-    kind: "trapdoor",
-    faces: {
-      top: "oak_trapdoor",
-    },
-  });
 }

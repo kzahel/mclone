@@ -384,9 +384,13 @@ rendered uses for cube, cross-sprite, flat-ground, and partial-model textures
 when authored block usage is available; alpha-shape diagnostics are secondary
 validation for the model families where centering or cutout coverage matters.
 The block review-sheet renderer has explicit preview kinds for `pane`, `rail`,
-`torch`, `door`, and `trapdoor` fixtures, so partial and thin vanilla model
+`torch`, `door`, and `trapdoor` families, so partial and thin vanilla model
 families can be judged in shape context instead of as cube or raw-texture-only
-art.
+art. When a texture has vanilla usage metadata but no authored pack block, the
+index builder derives a review block from the sampled vanilla block/model usage
+and writes a generated block sheet into `generated-assets`. These derived review
+blocks keep the pack source focused on authored textures; pane/door/rail/torch
+review no longer needs hand-authored `block(...)` fixture entries.
 
 The `mclone-default` grass block module encodes that relationship directly:
 
