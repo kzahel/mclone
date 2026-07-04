@@ -1,9 +1,12 @@
 # 139: Vanilla Chunk Startup Scheduling
 
-Status: proposed priority checkpoint before broader render-pipeline and
+Status: active priority checkpoint before broader render-pipeline and
 streaming-budget follow-ups. Slice A1 landed on 2026-07-04: feature-job size
-diagnostics, current high-radius batch-shape regression coverage, and ignored
-future-contract tests for the Java view halo and bounded startup feature jobs.
+diagnostics, high-radius batch-shape regression coverage, and ignored
+future-contract coverage for the Java view halo.
+Slice C1 landed on 2026-07-04: high-radius startup feature scheduling now emits
+a center-first `3x3` job before streaming the rest of the view in bounded
+background batches.
 Workstream: native Rust, server scheduling, startup readiness, loading UI;
 desktop validation first
 
@@ -16,10 +19,10 @@ coherent at both small and large view distances.
 The immediate bug is visible with high render distance on desktop native:
 `--render-distance 20` can take several minutes before entering the world, and
 `--render-distance 30` can appear stuck on "Creating world..." at `0%`. The UI
-allows the value, but startup currently puts the playable center behind a large
-whole-view generation batch. Separately, the local tracking radius does not use
-Java's `requested + 1` view-distance halo, so the outer render boundary can lack
-neighbor snapshots and look one ring short.
+allows the value, but pre-C1 startup put the playable center behind a large
+whole-view generation batch. Separately, the local tracking radius still does
+not use Java's `requested + 1` view-distance halo, so the outer render boundary
+can lack neighbor snapshots and look one ring short.
 
 This tactical should be treated as a correctness checkpoint before continuing
 large workstreams such as `120` render-compile backpressure and `128` terrain
@@ -183,8 +186,8 @@ not a valid startup gate.
 - [ ] Add scheduler tests proving the center `3x3 FULL` gate is the local
       startup threshold.
 - [x] Add a high-radius regression test and diagnostic assertion that documents
-      the current whole-view startup feature-job shape.
-- [ ] Enable a high-radius scheduling test that proves the first feature request
+      raw whole-view feature-job expansion shape.
+- [x] Enable a high-radius scheduling test that proves the first feature request
       is bounded and center-prioritized, not the whole view.
 - [x] Add diagnostics for feature job target count, feature-center count,
       dependency count, latest job id, and first target so RD20/RD30 failures
@@ -198,11 +201,11 @@ Slice A1 result:
   feature-center counts, dependency counts, latest feature job id, and first
   target.
 - `scheduler_movement_smoke` prints those fields in its JSON metrics block.
-- A passing scheduler regression records the current high-radius startup shape:
-  a radius-33 target set produces one `67x67` target job, `69x69`
-  feature-center set, and `85x85` dependency set.
-- Ignored future-contract tests record the desired Java-shaped render-distance
-  halo and the desired bounded high-radius startup feature job.
+- A passing scheduler regression records raw high-radius feature expansion: a
+  radius-33 target set would produce one `67x67` target job, `69x69`
+  feature-center set, and `85x85` dependency set if submitted as a single job.
+- An ignored future-contract test records the desired Java-shaped
+  render-distance halo.
 
 Validation:
 
@@ -231,23 +234,44 @@ Validation:
 
 ### Slice C: Replace Whole-View Feature Batches
 
-- [ ] Refactor `enqueue_runtime_chunks(...)` so missing feature work is emitted
+- [x] Refactor `enqueue_runtime_chunks(...)` so missing feature work is emitted
       in bounded center-first jobs.
 - [ ] Preserve Java-shaped per-status dependencies instead of expanding every
       target into full terrain dependencies.
-- [ ] Publish completed center chunks as soon as their own dependencies finish;
+- [x] Publish completed center chunks as soon as their own dependencies finish;
       do not wait for far-edge jobs.
-- [ ] Keep light-status scheduling center-first and able to complete the startup
+- [x] Keep light-status scheduling center-first and able to complete the startup
       `3x3` before the full requested view.
-- [ ] Ensure view-distance changes and player movement stream outward instead
+- [x] Ensure view-distance changes and player movement stream outward instead
       of synchronously generating the whole view.
 
-Validation:
+Slice C1 result:
+
+- `enqueue_runtime_chunks(...)` now preserves center-first priority order and
+  submits missing feature work through a bounded helper instead of one
+  whole-view feature job.
+- The first startup-sized candidate set larger than the background limit is
+  capped to `9` target chunks, matching the local center `3x3 FULL` startup
+  gate.
+- Follow-up feature jobs are limited to `128` target chunks and are enqueued
+  only after the previous feature job has fully published, so high view
+  distances stream outward instead of blocking startup behind one large
+  synchronous `GenerateFeatures` request.
+- The high-radius scheduler contract test is enabled and proves that a
+  radius-33 candidate set starts with `9` target chunks, `5x5` feature centers,
+  and `21x21` dependencies, with the center chunk first.
+
+Planned validation:
 
 - `cargo test --manifest-path native/Cargo.toml -p mclone-server`
 - movement/perf smoke at render distances `8`, `12`, and `20`
 - diagnostic check that RD30 no longer creates one startup feature job for the
   entire view
+
+Completed validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server` passed on
+  2026-07-04 (`359` passed, `0` ignored).
 
 ### Slice D: Make Progress Java-Shaped Enough To Be Honest
 

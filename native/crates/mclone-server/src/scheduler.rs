@@ -2222,29 +2222,82 @@ impl ChunkScheduler {
             }
         }
 
-        if !to_generate.is_empty() {
-            to_generate.sort();
-            to_generate.dedup();
-            let (job_id, seeded_dependencies) =
-                self.create_feature_job(&to_generate, priority_centers);
-            for pos in &to_generate {
-                self.stored_chunk_misses.remove(pos);
-                self.holders
-                    .get_mut(pos)
-                    .expect("holder must exist before assigning job")
-                    .assign_status_job(ChunkStatus::Features, job_id);
-            }
-
-            self.mark_job_state(job_id, ChunkJobState::Running);
-            self.worldgen_mailbox.enqueue_features(
-                job_id,
-                self.seed,
-                &to_generate,
-                seeded_dependencies,
-            );
-        }
+        self.enqueue_feature_job_for_missing_targets(to_generate, priority_centers);
 
         Ok(events)
+    }
+
+    fn enqueue_next_pending_feature_job(&mut self) {
+        let priority_centers = self
+            .distance_manager
+            .player_interest_priority_centers()
+            .to_vec();
+        let candidates = self
+            .stored_chunk_misses
+            .iter()
+            .copied()
+            .filter(|pos| {
+                self.holders
+                    .get(pos)
+                    .and_then(|holder| holder.status_slot(ChunkStatus::Features))
+                    .is_some_and(|slot| {
+                        slot.step == ChunkStatusStep::Scheduled && slot.job_id.is_none()
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        let candidates = sorted_chunk_positions_by_priority(candidates, &priority_centers);
+        self.enqueue_feature_job_for_missing_targets(candidates, &priority_centers);
+    }
+
+    fn enqueue_feature_job_for_missing_targets(
+        &mut self,
+        candidates_in_priority_order: Vec<ChunkPos>,
+        priority_centers: &[ChunkPos],
+    ) {
+        if candidates_in_priority_order.is_empty() || self.has_incomplete_feature_status_job() {
+            return;
+        }
+
+        let candidates = dedupe_chunk_positions_preserving_order(candidates_in_priority_order);
+        let target_limit = self.feature_job_target_limit(candidates.len());
+        let job_targets = candidates
+            .into_iter()
+            .take(target_limit)
+            .collect::<Vec<_>>();
+        if job_targets.is_empty() {
+            return;
+        }
+
+        let (job_id, seeded_dependencies) = self.create_feature_job(&job_targets, priority_centers);
+        for pos in &job_targets {
+            self.stored_chunk_misses.remove(pos);
+            self.holders
+                .get_mut(pos)
+                .expect("holder must exist before assigning job")
+                .assign_status_job(ChunkStatus::Features, job_id);
+        }
+
+        self.mark_job_state(job_id, ChunkJobState::Running);
+        self.worldgen_mailbox.enqueue_features(
+            job_id,
+            self.seed,
+            &job_targets,
+            seeded_dependencies,
+        );
+    }
+
+    fn has_incomplete_feature_status_job(&self) -> bool {
+        self.jobs
+            .values()
+            .any(|job| matches!(job.state, ChunkJobState::Queued | ChunkJobState::Running))
+    }
+
+    fn feature_job_target_limit(&self, candidate_count: usize) -> usize {
+        if self.jobs.is_empty() && candidate_count > BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT {
+            STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
+        } else {
+            candidate_count.min(BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT)
+        }
     }
 
     fn publish_completed_worldgen_jobs(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
@@ -2388,6 +2441,7 @@ impl ChunkScheduler {
             self.light_mailbox
                 .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
         }
+        self.enqueue_next_pending_feature_job();
         Ok((events, None))
     }
 
@@ -3235,6 +3289,11 @@ fn sorted_chunk_positions_z_major(positions: BTreeSet<ChunkPos>) -> Vec<ChunkPos
     positions
 }
 
+fn dedupe_chunk_positions_preserving_order(chunks: Vec<ChunkPos>) -> Vec<ChunkPos> {
+    let mut seen = BTreeSet::new();
+    chunks.into_iter().filter(|pos| seen.insert(*pos)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3311,7 +3370,7 @@ mod tests {
     }
 
     #[test]
-    fn high_render_distance_current_startup_job_shape_is_whole_view_sized() {
+    fn raw_high_render_distance_feature_job_shape_is_whole_view_sized() {
         let mut scheduler = ChunkScheduler::new(12_345);
         let targets = square(ChunkPos::new(0, 0), 33)
             .into_iter()
@@ -3340,18 +3399,81 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "tactical 139 Slice C: first high-radius feature job should be bounded to the startup gate"]
     fn high_render_distance_startup_feature_job_should_be_bounded_to_center_gate() {
         let mut scheduler = ChunkScheduler::new(12_345);
-        let targets = square(ChunkPos::new(0, 0), 33)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let center = ChunkPos::new(0, 0);
+        let targets = sorted_chunk_positions_by_priority(square(center, 33), &[center]);
 
-        scheduler.create_feature_job(&targets, &[ChunkPos::new(0, 0)]);
+        scheduler
+            .stored_chunk_misses
+            .extend(targets.iter().copied());
+        scheduler
+            .enqueue_runtime_chunks(
+                targets.clone(),
+                &BTreeSet::new(),
+                ChunkStatus::Light,
+                &[center],
+            )
+            .unwrap();
 
-        assert!(
-            scheduler.metrics().latest_feature_job_target_chunks <= 9,
-            "startup-critical feature job should cover at most the center 3x3 FULL gate"
+        let metrics = scheduler.metrics();
+        assert_eq!(metrics.pending_jobs, 1);
+        assert_eq!(scheduler.job_count(), 1);
+        assert_eq!(metrics.latest_feature_job_first_target, Some(center));
+        assert_eq!(
+            metrics.latest_feature_job_target_chunks,
+            STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
+        );
+        assert_eq!(metrics.latest_feature_job_feature_centers, 5 * 5);
+        assert_eq!(metrics.latest_feature_job_dependency_chunks, 21 * 21);
+        assert_eq!(
+            scheduler.stored_chunk_misses.len(),
+            (67 * 67) - STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
+        );
+
+        scheduler
+            .enqueue_runtime_chunks(targets, &BTreeSet::new(), ChunkStatus::Light, &[center])
+            .unwrap();
+        assert_eq!(
+            scheduler.job_count(),
+            1,
+            "a second feature job should not be queued before the first one completes"
+        );
+    }
+
+    #[test]
+    fn high_render_distance_followup_feature_job_should_use_background_limit() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let center = ChunkPos::new(0, 0);
+        let targets = sorted_chunk_positions_by_priority(square(center, 33), &[center]);
+
+        scheduler
+            .stored_chunk_misses
+            .extend(targets.iter().copied());
+        scheduler
+            .enqueue_runtime_chunks(targets, &BTreeSet::new(), ChunkStatus::Light, &[center])
+            .unwrap();
+        let first_job_id = scheduler.metrics().latest_feature_job_id.unwrap();
+        scheduler.mark_job_complete(
+            first_job_id,
+            OverworldFeatureDependencyCacheReport::default(),
+            OverworldFeatureBatchTiming::default(),
+        );
+
+        scheduler.enqueue_next_pending_feature_job();
+
+        let metrics = scheduler.metrics();
+        assert_eq!(scheduler.job_count(), 2);
+        assert_ne!(metrics.latest_feature_job_id, Some(first_job_id));
+        assert_eq!(
+            metrics.latest_feature_job_target_chunks,
+            BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT
+        );
+        assert_eq!(
+            scheduler.stored_chunk_misses.len(),
+            (67 * 67)
+                - STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
+                - BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT
         );
     }
 
@@ -3568,6 +3690,8 @@ pub(crate) const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 pub(crate) const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
 pub(crate) const DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET: usize = 1;
 const CENTER_PRIORITY_LIGHT_STATUS_BATCH_SIZE: usize = 9;
+const STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 9;
+const BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 128;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;
 
 fn snapshot_is_client_ready_for_lighting_mode(
