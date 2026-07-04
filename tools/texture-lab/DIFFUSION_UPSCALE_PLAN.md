@@ -420,6 +420,12 @@ Local validation on macOS/M4/MPS:
     pack has first sample authored fixtures for grass, fern, and redstone dust.
     This is intentionally simple authored art for model-shape validation, not
     final plant art.
+  - Vanilla usage semantics v1 is now part of the curation index. The lab
+    parses local vanilla blockstates, block models, texture slots, parent
+    families, render layers, and tint indexes into compact per-texture metadata
+    with normalized geometry kinds such as `cross-sprite`, `crop-cross`,
+    `flat-ground`, `cube`, `pane`, `rail`, and `door`. This should become the
+    primary driver for preview choice and authoring constraints.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

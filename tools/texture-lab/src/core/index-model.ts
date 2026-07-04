@@ -67,6 +67,7 @@ export interface TextureIndexEntry {
   frozen: TextureFrozenRef | null;
   authoringRoles: string[];
   blockUsages: TextureBlockUsage[];
+  vanillaUsage: TextureVanillaUsage | null;
   images: {
     currentExport: TextureImageRef;
     runtimeExport: TextureImageRef;
@@ -87,6 +88,35 @@ export interface TextureBlockUsage {
   blockName: string;
   role: TextureRole;
   face: string;
+}
+
+export type TextureVanillaPreviewHint = "cube" | "cross" | "flat" | "partial" | "fluid" | "unknown";
+
+export interface TextureVanillaUsage {
+  texture: string;
+  blockCount: number;
+  useCount: number;
+  geometryKinds: string[];
+  modelFamilies: string[];
+  renderLayers: string[];
+  textureSlots: string[];
+  tintIndexes: number[];
+  tintRoles: string[];
+  previewHint: TextureVanillaPreviewHint;
+  authoringNotes: string[];
+  uses: TextureVanillaUseSummary[];
+}
+
+export interface TextureVanillaUseSummary {
+  block: string;
+  selector: string;
+  model: string;
+  role: "face" | "particle";
+  textureSlot: string | null;
+  face: string | null;
+  geometryKind: string;
+  renderLayer: string;
+  tintindex: number | null;
 }
 
 export interface TextureTintRef {

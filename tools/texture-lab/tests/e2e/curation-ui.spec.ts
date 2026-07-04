@@ -124,6 +124,16 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     if (!texture) {
       throw new Error(`Missing ${textureName} fixture`);
     }
+    expect(texture.vanillaUsage).toMatchObject({
+      previewHint: "cross",
+      geometryKinds: ["cross-sprite"],
+      renderLayers: ["cutout"],
+      tintRoles: ["grass"],
+    });
+    expect(texture.vanillaUsage.textureSlots).toContain(textureName === "grass_cross" ? "cross" : "plant");
+    expect(texture.vanillaUsage.uses.map((use: { block: string }) => use.block)).toContain(
+      textureName === "grass_cross" ? "minecraft:grass" : "minecraft:fern",
+    );
     const exportedResponse = await request.get(`/api/image?path=${encodeURIComponent(texture.images.currentExport.path)}`);
     await expect(exportedResponse).toBeOK();
     const referenceResponse = await request.get(`/api/image?path=${encodeURIComponent(texture.images.minecraftReference.path)}`);
@@ -132,6 +142,16 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
       0.05,
     );
   }
+
+  const redstoneDustDotTexture = index.textures.find((entry: { name: string }) => entry.name === "redstone_dust_dot");
+  expect(redstoneDustDotTexture?.vanillaUsage).toMatchObject({
+    previewHint: "flat",
+    geometryKinds: ["flat-ground"],
+    renderLayers: ["cutout"],
+    textureSlots: ["line"],
+    tintRoles: ["tintindex:0"],
+  });
+  expect(redstoneDustDotTexture?.vanillaUsage.uses.map((use: { block: string }) => use.block)).toContain("minecraft:redstone_wire");
 
   const selectResponse = await request.post("/api/curation/select", {
     data: { textureName: "grass_block_top", candidateId: archivedCandidate.id },
@@ -317,6 +337,9 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await redstoneFaceButton.click();
   await expect(page.locator(".inspector")).toContainText("redstone_dust_dot");
   await expect(page.locator(".inspector")).toContainText("redstone");
+  await expect(page.locator(".inspector")).toContainText("Vanilla Usage");
+  await expect(page.locator(".inspector")).toContainText("flat-ground");
+  await expect(page.locator(".inspector")).toContainText("minecraft:redstone_wire");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-model-shapes.png", fullPage: true });
 
   await page.getByLabel("Search").fill("");

@@ -310,6 +310,9 @@ function TexturePreview({
             {texture.artSource.label}
           </span>
           <span className="chip">{texture.materialFamily}</span>
+          {texture.vanillaUsage && texture.vanillaUsage.previewHint !== "unknown" ? (
+            <span className="chip">{texture.vanillaUsage.previewHint}</span>
+          ) : null}
           <span className="chip">{texture.tiling}</span>
           <span className="chip">{texture.rotation}</span>
           {texture.tintRole ? <span className="chip tintChip">{texture.tintRole}</span> : null}
@@ -586,6 +589,8 @@ function TextureInspector({
         <Field label="authoring" value={texture.authoringRoles.length ? texture.authoringRoles.join(", ") : "none"} />
       </InspectorSection>
 
+      <VanillaUsageInspector texture={texture} />
+
       <InspectorSection title="Block Usage">
         {texture.blockUsages.length ? (
           <div className="usageList">
@@ -610,6 +615,47 @@ function TextureInspector({
   );
 }
 
+function VanillaUsageInspector({ texture }: { texture: TextureIndexEntry }): JSX.Element {
+  const usage = texture.vanillaUsage;
+  return (
+    <InspectorSection title="Vanilla Usage">
+      {usage ? (
+        <>
+          <Field label="texture" value={usage.texture} />
+          <Field label="preview" value={usage.previewHint} />
+          <Field label="geometry" value={joinOrNone(usage.geometryKinds)} />
+          <Field label="families" value={joinOrNone(usage.modelFamilies.slice(0, 5))} />
+          <Field label="layers" value={joinOrNone(usage.renderLayers)} />
+          <Field label="slots" value={joinOrNone(usage.textureSlots)} />
+          <Field label="tint" value={joinOrNone(usage.tintRoles.length ? usage.tintRoles : usage.tintIndexes.map(String))} />
+          <Field label="uses" value={`${usage.useCount} faces/particles across ${usage.blockCount} blocks`} />
+          {usage.authoringNotes.length ? (
+            <div className="reasonList">
+              {usage.authoringNotes.map((note) => (
+                <span key={note}>{note}</span>
+              ))}
+            </div>
+          ) : null}
+          {usage.uses.length ? (
+            <div className="usageList">
+              {usage.uses.slice(0, 12).map((entry) => (
+                <span key={`${entry.block}:${entry.model}:${entry.selector}:${entry.face ?? entry.role}:${entry.textureSlot ?? ""}`}>
+                  {entry.block} / {entry.textureSlot ?? entry.face ?? entry.role} / {entry.geometryKind}
+                </span>
+              ))}
+              {usage.uses.length > 12 ? <span>{usage.uses.length - 12} more vanilla uses</span> : null}
+            </div>
+          ) : (
+            <div className="panelNote">No vanilla blockstate/model use found for this texture.</div>
+          )}
+        </>
+      ) : (
+        <div className="panelNote">No single vanilla block texture counterpart.</div>
+      )}
+    </InspectorSection>
+  );
+}
+
 function sourcePolicyLabel(texture: TextureIndexEntry): string {
   const neutrality = texture.tint?.sourceNeutrality;
   if (!neutrality) {
@@ -631,6 +677,10 @@ function frozenLabel(texture: TextureIndexEntry): string {
     return "none";
   }
   return texture.frozen.codename ? `${texture.frozen.codename} / ${texture.frozen.asset}` : texture.frozen.asset;
+}
+
+function joinOrNone(values: (string | number)[]): string {
+  return values.length ? values.join(", ") : "none";
 }
 
 function CandidateInspector({ candidate }: { candidate: TextureCandidateEntry | null }): JSX.Element {

@@ -74,6 +74,13 @@ export function filteredTextures(state: TextureLabState): TextureIndexEntry[] {
       texture.artSource.label,
       texture.artSource.description,
       texture.tintRole ?? "",
+      texture.vanillaUsage?.previewHint ?? "",
+      ...(texture.vanillaUsage?.geometryKinds ?? []),
+      ...(texture.vanillaUsage?.modelFamilies ?? []),
+      ...(texture.vanillaUsage?.renderLayers ?? []),
+      ...(texture.vanillaUsage?.textureSlots ?? []),
+      ...(texture.vanillaUsage?.tintRoles ?? []),
+      ...(texture.vanillaUsage?.uses.map((usage) => usage.block) ?? []),
       ...texture.tags,
       ...texture.blockUsages.map((usage) => usage.blockName),
     ]

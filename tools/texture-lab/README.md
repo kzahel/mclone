@@ -372,6 +372,16 @@ This is the place to answer questions such as "which cutout decorations are
 still missing?", "which textures must survive 90-degree blockstate rotation?",
 and "which tint-index textures need grass or foliage review?"
 
+The browser curation index also carries a compact version of that usage
+semantics data per authored texture. It resolves the vanilla counterpart's
+blockstate/model usage, model families, normalized geometry kinds such as
+`cross-sprite`, `crop-cross`, `flat-ground`, `cube`, `pane`, `rail`, `door`,
+and `torch`, render layers, texture slots, tint indexes/roles, preview hints,
+and concrete vanilla block examples. This metadata is the preferred source for
+choosing review previews and authoring constraints; alpha-shape diagnostics are
+secondary validation for the model families where centering or cutout coverage
+matters.
+
 The `mclone-default` grass block module encodes that relationship directly:
 
 ```ts

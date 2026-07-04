@@ -6,6 +6,7 @@ import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { textureLabOutputRoot } from "../output-root";
 import { findOrCreateReferencePreviewFile, runtimeCompatTexturePath } from "../reference";
+import { buildVanillaUsageSemantics, vanillaTextureResourceForExportPath } from "../usage-semantics";
 import {
   TEXTURE_LAB_INDEX_SCHEMA_VERSION,
   type BlockFaceIndexEntry,
@@ -29,10 +30,13 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
   const candidateDiscovery = await discoverTextureCandidates(outputRoot, { textureNames: Object.keys(pack.textures) });
   const curation = await buildTextureCurationState(outputRoot, candidateDiscovery.candidates);
   const blockUsagesByTexture = collectBlockUsages(pack);
+  const vanillaUsageSemantics = await buildVanillaUsageSemantics();
   const textures = await Promise.all(
     Object.entries(pack.textures)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([name, texture]) => textureEntryFrom(pack, name, texture, outputRoot, blockUsagesByTexture.get(name) ?? [])),
+      .map(([name, texture]) =>
+        textureEntryFrom(pack, name, texture, outputRoot, blockUsagesByTexture.get(name) ?? [], vanillaUsageSemantics.byTexture),
+      ),
   );
   const blocks = await Promise.all(
     Object.entries(pack.blocks)
@@ -73,6 +77,7 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
       ...buildCandidateWarnings(candidateDiscovery.candidates),
       ...buildCurationWarnings(curation),
       ...candidateDiscovery.warnings,
+      ...vanillaUsageSemantics.warnings,
     ],
   };
 }
@@ -99,6 +104,7 @@ async function textureEntryFrom(
   texture: TextureSpec,
   outputRoot: string,
   blockUsages: TextureBlockUsage[],
+  vanillaUsageByTexture: Map<string, TextureIndexEntry["vanillaUsage"]>,
 ): Promise<TextureIndexEntry> {
   const runtimeCompatPath = runtimeCompatTexturePath(texture.exportPath);
   const currentExportPath = path.join(outputRoot, "pack", texture.exportPath);
@@ -112,6 +118,7 @@ async function textureEntryFrom(
   const tint = texture.tintRole ? pack.tints[texture.tintRole] : undefined;
   const frozen = frozenRef(pack, name);
   const authoringRoles = authoringRolesFrom(texture);
+  const vanillaTexture = vanillaTextureResourceForExportPath(texture.exportPath);
 
   return {
     name,
@@ -141,6 +148,7 @@ async function textureEntryFrom(
     frozen,
     authoringRoles,
     blockUsages: blockUsages.sort(compareBlockUsages),
+    vanillaUsage: vanillaTexture ? vanillaUsageByTexture.get(vanillaTexture) ?? emptyVanillaUsage(vanillaTexture) : null,
     images: {
       currentExport: await imageRef("Current export", currentExportPath, "pnpm texture-lab:export"),
       runtimeExport: await imageRef(
@@ -151,6 +159,23 @@ async function textureEntryFrom(
       minecraftReference: await imageRef("Minecraft reference", referencePath, "./scripts/extract-assets.sh"),
       sheet: await imageRef("Review sheet", sheetPath, "pnpm texture-lab:sheet"),
     },
+  };
+}
+
+function emptyVanillaUsage(texture: string): TextureIndexEntry["vanillaUsage"] {
+  return {
+    texture,
+    blockCount: 0,
+    useCount: 0,
+    geometryKinds: [],
+    modelFamilies: [],
+    renderLayers: [],
+    textureSlots: [],
+    tintIndexes: [],
+    tintRoles: [],
+    previewHint: "unknown",
+    authoringNotes: [],
+    uses: [],
   };
 }
 
