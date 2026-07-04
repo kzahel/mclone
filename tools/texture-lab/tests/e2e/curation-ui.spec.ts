@@ -47,6 +47,28 @@ test("defaults to the system theme and toggles light or dark mode", async ({ pag
   await expect(shell).toHaveAttribute("data-theme", "light");
 });
 
+test("keeps the texture list in its own scroll pane", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+
+  const before = await layoutMetrics(page);
+  expect(before.documentScrollHeight).toBeLessThanOrEqual(before.viewportHeight + 1);
+  expect(before.textureListScrollable).toBe(true);
+  expect(before.previewTop).toBeGreaterThanOrEqual(0);
+  expect(before.previewBottom).toBeLessThanOrEqual(before.viewportHeight);
+
+  await page.locator(".textureList").evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+
+  const after = await layoutMetrics(page);
+  expect(after.textureListScrollTop).toBeGreaterThan(200);
+  expect(after.previewTop).toBe(before.previewTop);
+  expect(after.previewBottom).toBe(before.previewBottom);
+
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-scroll-pane.png", fullPage: true });
+});
+
 test("supports texture filtering, candidate selection, inspector details, keyboard activation, and reindex preservation", async ({
   page,
 }) => {
@@ -109,3 +131,29 @@ test("clears candidate detail when selecting a texture without generated candida
   await expect(page.locator(".inspector")).toContainText("No generated candidate selected.");
   await expect(page.locator(".candidateCard.selected")).toHaveCount(0);
 });
+
+async function layoutMetrics(page: import("@playwright/test").Page): Promise<{
+  documentScrollHeight: number;
+  previewBottom: number;
+  previewTop: number;
+  textureListScrollable: boolean;
+  textureListScrollTop: number;
+  viewportHeight: number;
+}> {
+  return await page.evaluate(() => {
+    const textureList = document.querySelector(".textureList");
+    const previewPane = document.querySelector(".previewPane");
+    if (!(textureList instanceof HTMLElement) || !(previewPane instanceof HTMLElement)) {
+      throw new Error("Missing texture lab layout elements");
+    }
+    const previewRect = previewPane.getBoundingClientRect();
+    return {
+      documentScrollHeight: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
+      previewBottom: Math.round(previewRect.bottom),
+      previewTop: Math.round(previewRect.top),
+      textureListScrollable: textureList.scrollHeight > textureList.clientHeight + 8,
+      textureListScrollTop: Math.round(textureList.scrollTop),
+      viewportHeight: window.innerHeight,
+    };
+  });
+}
