@@ -2143,6 +2143,97 @@ mod tests {
     }
 
     #[test]
+    fn catalog_world_delete_active_world_is_rejected_without_teardown() {
+        let root = unique_temp_world_root("catalog-delete-active");
+        let scene = SceneOptions {
+            seed: 97_531,
+            render_distance: 0,
+            lighting_enabled: false,
+            debug_passive_showcase: false,
+            world_root: Some(root.clone()),
+            ..SceneOptions::default()
+        };
+        let assets = WindowSceneAssets::load().unwrap();
+        let mut app = ChunkApp::new(
+            scene,
+            assets,
+            TexturedSectionRenderOptions::default(),
+            WindowStartIntent::Menu,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
+        );
+
+        app.driver.set_new_world_seed(97_531);
+        let create = app
+            .driver
+            .apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
+        assert!(create.session_start_queued);
+        start_queued_session_immediately(&mut app);
+
+        let created_id = match app.driver.session.state() {
+            GameSessionState::Active { session } => session
+                .local_world_id()
+                .expect("catalog-created session must carry a local world id")
+                .clone(),
+            state => panic!("expected active catalog session, got {state:?}"),
+        };
+        let world_dir = root.join(created_id.as_str());
+        assert!(world_dir.join("world.json").is_file());
+        assert!(world_dir.join("world.sqlite3").is_file());
+        assert!(app.driver.runtime.is_some());
+
+        let state = app.driver.current_ui_render_state(
+            crate::frame_pacing::FramePacingUiState::default(),
+            mclone_ui::BlockPaletteOverlay::hidden(),
+        );
+        let active_row = state
+            .world_catalog
+            .active
+            .expect("active catalog session should mark its world row");
+        assert!(
+            state
+                .world_catalog
+                .entries
+                .iter()
+                .flatten()
+                .any(|entry| entry.id == active_row)
+        );
+
+        let delete = app
+            .driver
+            .apply_ui_action(GameUiAction::DeleteWorld(active_row), ui_action_context());
+        assert!(!delete.session_start_queued);
+        assert!(app.driver.session.take_pending_start().is_none());
+        assert!(app.driver.runtime.is_some());
+        assert!(world_dir.join("world.json").is_file());
+        assert!(world_dir.join("world.sqlite3").is_file());
+        match app.driver.session.state() {
+            GameSessionState::Active { session } => {
+                assert_eq!(session.local_world_id(), Some(&created_id));
+            }
+            state => panic!("expected active catalog session after rejected delete, got {state:?}"),
+        }
+
+        let state = app.driver.current_ui_render_state(
+            crate::frame_pacing::FramePacingUiState::default(),
+            mclone_ui::BlockPaletteOverlay::hidden(),
+        );
+        assert_eq!(state.world_catalog.active, Some(active_row));
+        assert!(state.world_catalog.status.visible);
+        assert!(!state.world_catalog.status.ok);
+        assert!(
+            state
+                .world_catalog
+                .status
+                .message
+                .as_str()
+                .contains("cannot delete active local world")
+        );
+
+        app.teardown_world().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn native_key_codes_map_to_shared_flat_input_controls() {
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::KeyW),
