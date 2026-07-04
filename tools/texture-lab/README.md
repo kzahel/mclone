@@ -186,6 +186,22 @@ pnpm texture-lab:apply-curation
 Tintable selections are validated with the same `sourceNeutrality` policy as
 authored tintable textures before the generated pack is written.
 
+`Request Freeze` writes a local provenance manifest for the selected pack
+candidate without editing source:
+
+```text
+generated-assets/texture-lab/freeze-requests/*.freeze-request.v1.json
+```
+
+The request records texture metadata, prompt/seed/model/projection provenance,
+projected and raw PNG hashes, source-policy validation, and a source-file hint.
+The matching CLI command writes the same request from the current curation
+manifest:
+
+```sh
+pnpm texture-lab:freeze-request -- --texture grass_block_top
+```
+
 The packed overlay command builds the same overrides into a first-party-only
 `.pbp` file without reading the local Mojang extraction:
 
@@ -218,10 +234,11 @@ The test harness builds a deterministic fixture under the gitignored
 server, verifies authored texture indexing, generated candidate discovery,
 allowlisted image serving, candidate selection, inspector details, keyboard
 activation, persisted active-pack selection, generated-pack apply, reindex
-preservation, empty-candidate behavior, system-default dark mode, and manual
-light/dark toggling. Validation screenshots are written to
-`/tmp/mclone-texture-lab-playwright-a2.png`,
-`/tmp/mclone-texture-lab-playwright-curation-pack.png`, and
+preservation, freeze-request writing, empty-candidate behavior,
+system-default dark mode, and manual light/dark toggling. Validation screenshots
+are written to `/tmp/mclone-texture-lab-playwright-a2.png`,
+`/tmp/mclone-texture-lab-playwright-curation-pack.png`,
+`/tmp/mclone-texture-lab-playwright-freeze-request.png`, and
 `/tmp/mclone-texture-lab-playwright-dark-mode.png`.
 
 ## Source Format

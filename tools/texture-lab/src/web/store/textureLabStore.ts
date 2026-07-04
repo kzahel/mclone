@@ -29,6 +29,7 @@ export interface TextureLabState {
   selectCurationCandidate: (textureName: string, candidateId: string) => Promise<void>;
   clearCurationSelection: (textureName: string) => Promise<void>;
   applyCuration: () => Promise<void>;
+  requestFreeze: (textureName: string) => Promise<void>;
   setPreviewMode: (mode: PreviewMode) => void;
   syncSystemTheme: (themeMode: ThemeMode) => void;
   toggleTheme: () => void;
@@ -180,6 +181,20 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
     }
   },
 
+  async requestFreeze(textureName) {
+    set({ loadStatus: "loading", error: null, curationStatus: null });
+    try {
+      const response = await postFreezeRequest(textureName);
+      set({
+        loadStatus: "ready",
+        error: null,
+        curationStatus: `Freeze request written: ${response.request.path}`,
+      });
+    } catch (error) {
+      set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
   setPreviewMode(previewMode) {
     set({ previewMode });
   },
@@ -227,6 +242,16 @@ async function postApplyCuration(): Promise<{
   index: TextureLabIndex;
 }> {
   return fetchJson("/api/curation/apply", { method: "POST" });
+}
+
+async function postFreezeRequest(textureName: string): Promise<{
+  request: { path: string };
+}> {
+  return fetchJson("/api/freeze-request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ textureName }),
+  });
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {

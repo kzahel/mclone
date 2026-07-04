@@ -10,8 +10,9 @@ landed 2026-07-04. Slice A2.7 overview atlas and block-bundle comparison
 views landed 2026-07-04. Slice A2.8 temporary candidate preview selection
 landed 2026-07-04. Slice A2.9 raw/tinted comparison variants landed
 2026-07-04. Slice C0 persisted active-pack candidate selections and generated
-pack apply landed 2026-07-04. Next priority is freeze request manifests for
-durable source promotion.
+pack apply landed 2026-07-04. Slice D0 freeze request manifests landed
+2026-07-04. Next priority is a source-patch CLI that applies reviewed freeze
+requests without browser-side source mutation.
 
 ## Purpose
 
@@ -286,6 +287,11 @@ Keep the first API explicit and file-system constrained:
   - regenerates `pack/` and `runtime-pack/` from authored source plus persisted
     candidate selections, then validates tintable source-neutrality before
     writing generated pack assets
+- `POST /api/freeze-request`
+  - writes a provenance-rich freeze request manifest from the selected pack
+    candidate without mutating source
+- `GET /api/freeze-requests?texture=<name>`
+  - lists local freeze request manifests, optionally filtered by texture
 - `POST /api/reindex`
   - rebuilds the in-memory index after new CLI outputs are generated
 
@@ -294,9 +300,6 @@ Future action endpoints:
 - `POST /api/review-state`
   - writes local favorite/reject/notes/tags changes after active selections are
     stable
-- `POST /api/freeze-request`
-  - writes a provenance-rich freeze request manifest; first implementation can
-    still require an agent to apply the source patch
 - `POST /api/generate`
   - launches diffusion/projection jobs through existing scripts and streams job
     status
@@ -665,16 +668,26 @@ from the first-party texture-pack tactical before accepting the slice.
 
 Make accepted candidates durable, but keep source mutation explicit.
 
-Deliverables:
+Slice D0 landed 2026-07-04:
 
-- add a freeze request manifest containing texture name, codename, candidate id,
-  raw/projection/archive paths, hashes, prompt metadata, palette, resolution,
-  target source file, and intended source symbol mapping
-- allow the UI to create a freeze request only for archived or archivable
+- added freeze request manifests under
+  `generated-assets/texture-lab/freeze-requests/*.freeze-request.v1.json`
+- included texture name, codename, candidate id, raw/projected image paths and
+  hashes, prompt metadata, seed, strength, model id, palette, resolution,
+  source-policy validation summary, and source-file hints
+- allowed the UI to create a freeze request only for archived or archivable
   candidates
-- keep the first source patch agent-mediated or CLI-mediated
+- added `/api/freeze-request`, `/api/freeze-requests`, and
+  `pnpm texture-lab:freeze-request`
+- kept source patches agent/CLI-mediated; the browser still does not mutate
+  source or commit
+
+Remaining deliverables:
+
+- apply a reviewed freeze request to the TypeScript source through an explicit
+  CLI or agent operation
 - require the same deterministic projection and archive checks already used by
-  `project-diffusion`
+  `project-diffusion` during source application
 - do not auto-commit from the UI
 
 Validation:
@@ -760,13 +773,11 @@ Slice A is complete when:
 
 ## Immediate Next Step
 
-Implement Slice D freeze request manifests:
+Implement a freeze-request apply CLI:
 
-1. write a local freeze request from the currently selected pack candidate
-2. include texture name, codename, candidate id, projected image path, raw image
-   path, prompt metadata, seed, strength, model id, palette, resolution, and
-   source-policy validation summary
-3. require archived or archivable candidates before a request can be written
-4. keep source mutation agent/CLI-mediated; the UI should not patch or commit
-   source directly
-5. add Playwright coverage for writing and inspecting a freeze request
+1. read one reviewed `*.freeze-request.v1.json`
+2. verify all referenced image hashes and projection/archive files still match
+3. generate or update the deterministic TypeScript mask/palette/provenance
+   source patch for that texture
+4. keep the browser out of source mutation and commits
+5. add focused validation for applying the grass freeze request

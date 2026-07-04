@@ -63,6 +63,40 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     source: "archive",
   });
 
+  const freezeResponse = await request.post("/api/freeze-request", {
+    data: { textureName: "grass_block_top" },
+  });
+  await expect(freezeResponse).toBeOK();
+  const freezePayload = await freezeResponse.json();
+  expect(freezePayload.request.path).toContain("generated-assets/texture-lab-playwright/freeze-requests/");
+  expect(freezePayload.request.texture).toMatchObject({
+    name: "grass_block_top",
+    exportPath: "assets/mclone/textures/block/grass_block_top.png",
+    source: "tintable",
+    tintRole: "grass",
+  });
+  expect(freezePayload.request.candidate).toMatchObject({
+    id: archivedCandidate.id,
+    codename: "G5101S74",
+    freezeReadiness: "archived",
+    seed: 5101,
+    strength: 0.74,
+    promptPreset: "grass-top-tufts",
+  });
+  expect(freezePayload.request.images.projected.sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(freezePayload.request.images.raw.sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(freezePayload.request.sourcePolicy.errors).toEqual([]);
+  expect(freezePayload.request.sourcePolicy.stats.meanSaturation).toBeLessThan(0.005);
+  expect(freezePayload.request.sourcePatch).toMatchObject({
+    mode: "agent-or-cli-mediated",
+    sourceFileHint: "tools/texture-lab/packs/mclone-default/block/grass-block.ts",
+    textureName: "grass_block_top",
+  });
+  const freezeListResponse = await request.get("/api/freeze-requests?texture=grass_block_top");
+  await expect(freezeListResponse).toBeOK();
+  const freezeList = await freezeListResponse.json();
+  expect(freezeList.requests.map((entry: { path: string }) => entry.path)).toContain(freezePayload.request.path);
+
   const applyResponse = await request.post("/api/curation/apply");
   await expect(applyResponse).toBeOK();
   const applyPayload = await applyResponse.json();
@@ -214,6 +248,11 @@ test("supports texture filtering, candidate selection, inspector details, keyboa
   await expect(page.getByText("Selected candidate for grass_block_top")).toBeVisible();
   await expect(archiveCard).toContainText("Pack");
   await expect(page.getByText("pack G5101S74")).toBeVisible();
+
+  await page.getByRole("button", { name: "Request Freeze" }).click();
+  await expect(page.locator(".statusBanner")).toContainText("Freeze request written:");
+  await expect(page.locator(".statusBanner")).toContainText("freeze-requests");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-freeze-request.png", fullPage: true });
 
   await page.getByRole("button", { name: "Apply Pack" }).click();
   await expect(page.getByText("Applied 1 selection to generated pack")).toBeVisible();

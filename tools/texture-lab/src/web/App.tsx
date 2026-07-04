@@ -57,6 +57,7 @@ export function App(): JSX.Element {
   const selectCurationCandidate = useTextureLabStore((state) => state.selectCurationCandidate);
   const clearCurationSelection = useTextureLabStore((state) => state.clearCurationSelection);
   const applyCuration = useTextureLabStore((state) => state.applyCuration);
+  const requestFreeze = useTextureLabStore((state) => state.requestFreeze);
   const setPreviewMode = useTextureLabStore((state) => state.setPreviewMode);
   const syncSystemTheme = useTextureLabStore((state) => state.syncSystemTheme);
   const toggleTheme = useTextureLabStore((state) => state.toggleTheme);
@@ -200,6 +201,7 @@ export function App(): JSX.Element {
                   onSelectCuration={selectCurationCandidate}
                   onClearCuration={clearCurationSelection}
                   onApplyCuration={applyCuration}
+                  onRequestFreeze={requestFreeze}
                 />
               ) : (
                 <EmptyState loadStatus={loadStatus} />
@@ -259,6 +261,7 @@ function TexturePreview({
   onSelectCuration,
   onClearCuration,
   onApplyCuration,
+  onRequestFreeze,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
@@ -272,6 +275,7 @@ function TexturePreview({
   onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
   onClearCuration: (textureName: string) => Promise<void>;
   onApplyCuration: () => Promise<void>;
+  onRequestFreeze: (textureName: string) => Promise<void>;
 }): JSX.Element {
   return (
     <>
@@ -307,6 +311,7 @@ function TexturePreview({
         onSelectCuration={onSelectCuration}
         onClearCuration={onClearCuration}
         onApplyCuration={onApplyCuration}
+        onRequestFreeze={onRequestFreeze}
       />
     </>
   );
@@ -358,6 +363,7 @@ function CandidateSection({
   onSelectCuration,
   onClearCuration,
   onApplyCuration,
+  onRequestFreeze,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
@@ -371,6 +377,7 @@ function CandidateSection({
   onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
   onClearCuration: (textureName: string) => Promise<void>;
   onApplyCuration: () => Promise<void>;
+  onRequestFreeze: (textureName: string) => Promise<void>;
 }): JSX.Element {
   const sortedCandidates = [...candidates].sort(compareCandidateDisplay);
   const selectedCandidate = sortedCandidates.find((candidate) => candidate.id === selectedCandidateId) ?? null;
@@ -401,6 +408,9 @@ function CandidateSection({
               Clear Pack
             </button>
           ) : null}
+          <button className="inlineButton" type="button" disabled={!curationCandidateId} onClick={() => void onRequestFreeze(texture.name)}>
+            Request Freeze
+          </button>
           {previewCandidateId ? (
             <button className="inlineButton" type="button" onClick={() => onClearPreview(texture.name)}>
               Clear Preview

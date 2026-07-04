@@ -8,6 +8,7 @@ import {
   selectTextureCandidateForCuration,
   TextureCurationError,
 } from "../core/curation";
+import { createTextureFreezeRequest, listTextureFreezeRequests, TextureFreezeRequestError } from "../core/freeze-request";
 import { isHexColor } from "../dsl";
 import { loadTexturePack } from "../load";
 import type { TextureLabIndex } from "../core/index-model";
@@ -102,6 +103,31 @@ export function createTextureLabApi(options: TextureLabApiOptions): TextureLabAp
         const pack = await loadTexturePack(inputPath);
         const result = await applyTextureCuration({ outputRoot, pack, candidates: index.candidates });
         sendJson(response, { result, index: await loadIndex(true) });
+        return true;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/freeze-request") {
+        const body = await readJsonBody<{ textureName?: unknown }>(request);
+        if (typeof body.textureName !== "string") {
+          sendJson(response, { error: "Expected textureName" }, 400);
+          return true;
+        }
+        const index = await loadIndex();
+        const pack = await loadTexturePack(inputPath);
+        const freezeRequest = await createTextureFreezeRequest({
+          outputRoot,
+          pack,
+          packInputPath: inputPath,
+          candidates: index.candidates,
+          textureName: body.textureName,
+        });
+        sendJson(response, { request: freezeRequest });
+        return true;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/freeze-requests") {
+        const textureName = url.searchParams.get("texture") ?? undefined;
+        sendJson(response, { requests: await listTextureFreezeRequests(outputRoot, textureName) });
         return true;
       }
 
@@ -204,6 +230,10 @@ function sendError(response: ServerResponse, error: unknown): void {
     return;
   }
   if (error instanceof TextureCurationError) {
+    sendJson(response, { error: error.message }, error.statusCode);
+    return;
+  }
+  if (error instanceof TextureFreezeRequestError) {
     sendJson(response, { error: error.message }, error.statusCode);
     return;
   }
