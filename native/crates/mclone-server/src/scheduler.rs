@@ -102,6 +102,14 @@ pub struct ChunkSchedulerMetrics {
     pub total_dependency_cache_hits: usize,
     pub total_dependency_cache_misses: usize,
     pub total_retained_dependency_chunks: usize,
+    pub max_feature_job_target_chunks: usize,
+    pub max_feature_job_feature_centers: usize,
+    pub max_feature_job_dependency_chunks: usize,
+    pub latest_feature_job_id: Option<ChunkJobId>,
+    pub latest_feature_job_target_chunks: usize,
+    pub latest_feature_job_feature_centers: usize,
+    pub latest_feature_job_dependency_chunks: usize,
+    pub latest_feature_job_first_target: Option<ChunkPos>,
     pub completed_light_statuses: usize,
     pub completed_light_batches: usize,
     pub total_light_status_compute_us: u128,
@@ -1006,6 +1014,7 @@ impl ChunkScheduler {
     }
 
     pub fn metrics(&self) -> ChunkSchedulerMetrics {
+        let latest_feature_job = self.jobs.values().max_by_key(|job| job.id);
         ChunkSchedulerMetrics {
             direct_ticket_chunks: self.ticketed_chunk_count(),
             active_ticket_chunks: self.active_ticketed_chunk_count(),
@@ -1048,6 +1057,33 @@ impl ChunkScheduler {
                 .values()
                 .map(|job| job.retained_dependency_chunks)
                 .sum(),
+            max_feature_job_target_chunks: self
+                .jobs
+                .values()
+                .map(|job| job.target_chunks.len())
+                .max()
+                .unwrap_or(0),
+            max_feature_job_feature_centers: self
+                .jobs
+                .values()
+                .map(|job| job.feature_centers.len())
+                .max()
+                .unwrap_or(0),
+            max_feature_job_dependency_chunks: self
+                .jobs
+                .values()
+                .map(|job| job.dependency_chunks.len())
+                .max()
+                .unwrap_or(0),
+            latest_feature_job_id: latest_feature_job.map(|job| job.id),
+            latest_feature_job_target_chunks: latest_feature_job
+                .map_or(0, |job| job.target_chunks.len()),
+            latest_feature_job_feature_centers: latest_feature_job
+                .map_or(0, |job| job.feature_centers.len()),
+            latest_feature_job_dependency_chunks: latest_feature_job
+                .map_or(0, |job| job.dependency_chunks.len()),
+            latest_feature_job_first_target: latest_feature_job
+                .and_then(|job| job.target_chunks.first().copied()),
             completed_light_statuses: self.completed_light_statuses,
             completed_light_batches: self.completed_light_batches,
             total_light_status_compute_us: self.total_light_status_compute_us,
@@ -3272,6 +3308,51 @@ mod tests {
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(dependency_chunks.first(), Some(&ChunkPos::new(5, -3)));
+    }
+
+    #[test]
+    fn high_render_distance_current_startup_job_shape_is_whole_view_sized() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let targets = square(ChunkPos::new(0, 0), 33)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let (job_id, _) = scheduler.create_feature_job(&targets, &[ChunkPos::new(0, 0)]);
+
+        let metrics = scheduler.metrics();
+        assert_eq!(metrics.pending_jobs, 1);
+        assert_eq!(metrics.latest_feature_job_id, Some(job_id));
+        assert_eq!(
+            metrics.latest_feature_job_first_target,
+            Some(ChunkPos::new(0, 0))
+        );
+        assert_eq!(metrics.latest_feature_job_target_chunks, 67 * 67);
+        assert_eq!(metrics.latest_feature_job_feature_centers, 69 * 69);
+        assert_eq!(metrics.latest_feature_job_dependency_chunks, 85 * 85);
+        assert_eq!(
+            metrics.max_feature_job_target_chunks,
+            metrics.latest_feature_job_target_chunks
+        );
+        assert_eq!(
+            metrics.max_feature_job_dependency_chunks,
+            metrics.latest_feature_job_dependency_chunks
+        );
+    }
+
+    #[test]
+    #[ignore = "tactical 139 Slice C: first high-radius feature job should be bounded to the startup gate"]
+    fn high_render_distance_startup_feature_job_should_be_bounded_to_center_gate() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let targets = square(ChunkPos::new(0, 0), 33)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        scheduler.create_feature_job(&targets, &[ChunkPos::new(0, 0)]);
+
+        assert!(
+            scheduler.metrics().latest_feature_job_target_chunks <= 9,
+            "startup-critical feature job should cover at most the center 3x3 FULL gate"
+        );
     }
 
     #[test]

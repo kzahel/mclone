@@ -542,6 +542,38 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         metrics.total_retained_dependency_chunks
     );
     println!(
+        "{indent}  \"max_feature_job_target_chunks\": {},",
+        metrics.max_feature_job_target_chunks
+    );
+    println!(
+        "{indent}  \"max_feature_job_feature_centers\": {},",
+        metrics.max_feature_job_feature_centers
+    );
+    println!(
+        "{indent}  \"max_feature_job_dependency_chunks\": {},",
+        metrics.max_feature_job_dependency_chunks
+    );
+    println!(
+        "{indent}  \"latest_feature_job_id\": {},",
+        metrics.latest_feature_job_id.map_or(0, |id| id.0)
+    );
+    println!(
+        "{indent}  \"latest_feature_job_target_chunks\": {},",
+        metrics.latest_feature_job_target_chunks
+    );
+    println!(
+        "{indent}  \"latest_feature_job_feature_centers\": {},",
+        metrics.latest_feature_job_feature_centers
+    );
+    println!(
+        "{indent}  \"latest_feature_job_dependency_chunks\": {},",
+        metrics.latest_feature_job_dependency_chunks
+    );
+    println!(
+        "{indent}  \"latest_feature_job_first_target\": {},",
+        chunk_pos_json(metrics.latest_feature_job_first_target)
+    );
+    println!(
         "{indent}  \"completed_light_statuses\": {},",
         metrics.completed_light_statuses
     );
@@ -954,6 +986,13 @@ fn git_dirty() -> bool {
         .filter(|output| output.status.success())
         .map(|output| !output.stdout.is_empty())
         .unwrap_or(true)
+}
+
+fn chunk_pos_json(pos: Option<ChunkPos>) -> String {
+    pos.map_or_else(
+        || "null".to_owned(),
+        |pos| format!("{{\"x\":{},\"z\":{}}}", pos.x, pos.z),
+    )
 }
 
 fn json_escape(value: &str) -> String {

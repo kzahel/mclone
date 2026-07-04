@@ -2529,6 +2529,17 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "tactical 139 Slice B: local tracking should use Java's requested + 1 halo"]
+    fn chunk_tracking_radius_should_include_java_view_halo() {
+        assert_eq!(chunk_tracking_radius_for_render_distance(0), 0);
+        assert_eq!(chunk_tracking_radius_for_render_distance(1), 1);
+        assert_eq!(chunk_tracking_radius_for_render_distance(2), 3);
+        assert_eq!(chunk_tracking_radius_for_render_distance(12), 13);
+        assert_eq!(chunk_tracking_radius_for_render_distance(30), 31);
+        assert_eq!(chunk_tracking_radius_for_render_distance(32), 33);
+    }
+
+    #[test]
     fn traversal_ready_section_cache_skips_until_stamp_changes() {
         let runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 2, 3);
         let mut cache = TraversalReadySectionCache::default();
