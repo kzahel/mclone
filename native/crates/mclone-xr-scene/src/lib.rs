@@ -42,7 +42,7 @@ use mclone_render::chunk::{
     ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionStereoDraw,
     TexturedSectionDrawResources, TexturedSectionRecordCacheStats,
     TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
-    TexturedSectionRenderStats, TexturedSectionUploadReport,
+    TexturedSectionRenderStats, TexturedSectionUploadReport, TexturedSectionUploadTiming,
 };
 use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats};
 use mclone_render::far_lod::FarTerrainLodRenderer;
@@ -537,6 +537,15 @@ pub struct XrTerrainFrameTiming {
     pub runtime_upload_enqueue_ms: f64,
     pub runtime_upload_select_ms: f64,
     pub runtime_upload_apply_ms: f64,
+    pub runtime_upload_apply_dirty_mark_ms: f64,
+    pub runtime_upload_apply_remove_ms: f64,
+    pub runtime_upload_apply_section_state_ms: f64,
+    pub runtime_upload_apply_vertex_bytes_ms: f64,
+    pub runtime_upload_apply_vertex_buffer_ms: f64,
+    pub runtime_upload_apply_index_bytes_ms: f64,
+    pub runtime_upload_apply_index_buffer_ms: f64,
+    pub runtime_upload_apply_mesh_insert_ms: f64,
+    pub runtime_upload_apply_mesh_upload_worst_ms: f64,
     pub runtime_ready_sections_ms: f64,
     pub runtime_ready_publish_ms: f64,
     pub shared_records_ms: f64,
@@ -1035,6 +1044,22 @@ struct XrTerrainUploadApplyReport {
     upload: TexturedSectionUploadReport,
     phase: RenderSectionUploadPhaseReport,
     release_compile_jobs: usize,
+}
+
+impl XrTerrainFrameTiming {
+    fn absorb_upload_apply_timing(&mut self, timing: TexturedSectionUploadTiming) {
+        self.runtime_upload_apply_dirty_mark_ms += timing.dirty_mark_ms;
+        self.runtime_upload_apply_remove_ms += timing.remove_ms;
+        self.runtime_upload_apply_section_state_ms += timing.section_state_ms;
+        self.runtime_upload_apply_vertex_bytes_ms += timing.vertex_bytes_ms;
+        self.runtime_upload_apply_vertex_buffer_ms += timing.vertex_buffer_ms;
+        self.runtime_upload_apply_index_bytes_ms += timing.index_bytes_ms;
+        self.runtime_upload_apply_index_buffer_ms += timing.index_buffer_ms;
+        self.runtime_upload_apply_mesh_insert_ms += timing.mesh_insert_ms;
+        self.runtime_upload_apply_mesh_upload_worst_ms = self
+            .runtime_upload_apply_mesh_upload_worst_ms
+            .max(timing.mesh_upload_worst_ms);
+    }
 }
 
 impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
@@ -3739,7 +3764,7 @@ where
             let apply_start = Instant::now();
             let report = self
                 .draw
-                .apply_section_updates_with_context(
+                .apply_section_updates_with_context_timed(
                     device,
                     &section_update.rebuilt_sections,
                     &section_update.removed_section_keys,
@@ -3747,10 +3772,13 @@ where
                 )
                 .context("upload XR terrain render section updates");
             timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
-            return report.map(|upload| XrTerrainUploadApplyReport {
-                upload,
-                phase,
-                release_compile_jobs,
+            return report.map(|(upload, upload_timing)| {
+                timing.absorb_upload_apply_timing(upload_timing);
+                XrTerrainUploadApplyReport {
+                    upload,
+                    phase,
+                    release_compile_jobs,
+                }
             });
         }
 
@@ -3774,7 +3802,7 @@ where
         let apply_start = Instant::now();
         let report = self
             .draw
-            .apply_section_updates_with_context(
+            .apply_section_updates_with_context_timed(
                 device,
                 &drain.rebuilt_sections,
                 &drain.removed_section_keys,
@@ -3782,7 +3810,8 @@ where
             )
             .context("accept budgeted XR terrain render section updates");
         timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
-        report.map(|upload| {
+        report.map(|(upload, upload_timing)| {
+            timing.absorb_upload_apply_timing(upload_timing);
             let released_on_apply = self
                 .section_uploads
                 .complete_applied_lifecycle_items(drain.lifecycle_item_count);

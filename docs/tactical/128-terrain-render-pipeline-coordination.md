@@ -1754,6 +1754,35 @@ budget retuning as the first fallback if that repeats, but the terrain
 coordinator direction remains upload apply, ready/publication ownership, and
 per-eye encode/submit.
 
+Follow-up slice: upload-apply subphase attribution has landed. This does not
+change pacing yet; it splits the broad `runtime_upload_apply_ms` bucket into
+dirty marking, removal bookkeeping, section-state mutation, vertex byte
+conversion, vertex buffer creation, index byte conversion, index buffer
+creation, mesh insertion/drop, and worst single mesh upload. Android XR now logs
+the max subphase line as `MCLONE_ANDROID_XR_PERF_UPLOAD_APPLY_MAX` and mirrors
+the same fields for worst sampled frames with
+`MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD_APPLY`.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session -- --nocapture`
+- Quest churn validation built the Android XR release APK successfully, then
+  stopped at device discovery because no Quest headset was attached. Re-run the
+  same `2 / 16 / 64` controlled churn lane and write the summary to
+  `/tmp/mclone-quest-openxr-churn-upload-apply-attribution-summary.txt` before
+  choosing the next behavior change.
+
+Deferred note for closeout: once headset data exists, use the new subphase
+fields to choose a narrow upload-apply change. If buffer creation dominates,
+look at GPU buffer lifetime/staging and replacement-drop behavior. If removal or
+mesh insertion dominates, look at draw-resource data structure churn. If no
+single subphase dominates, move to per-eye encode/submit attribution before
+adding another upload pacing policy.
+
 Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
 default policy. It was the best held-capacity result, but the controlled churn
 run proves the remaining unload/update-pump issue is not solved by those caps

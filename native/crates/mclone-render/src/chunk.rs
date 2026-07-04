@@ -422,6 +422,30 @@ impl TexturedSectionUploadReport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TexturedSectionUploadTiming {
+    pub total_ms: f64,
+    pub dirty_mark_ms: f64,
+    pub remove_ms: f64,
+    pub section_state_ms: f64,
+    pub vertex_bytes_ms: f64,
+    pub vertex_buffer_ms: f64,
+    pub index_bytes_ms: f64,
+    pub index_buffer_ms: f64,
+    pub mesh_insert_ms: f64,
+    pub mesh_upload_worst_ms: f64,
+}
+
+impl TexturedSectionUploadTiming {
+    fn absorb_mesh_upload(&mut self, timing: GpuTexturedChunkMeshUploadTiming) {
+        self.vertex_bytes_ms += timing.vertex_bytes_ms;
+        self.vertex_buffer_ms += timing.vertex_buffer_ms;
+        self.index_bytes_ms += timing.index_bytes_ms;
+        self.index_buffer_ms += timing.index_buffer_ms;
+        self.mesh_upload_worst_ms = self.mesh_upload_worst_ms.max(timing.total_ms);
+    }
+}
+
 pub fn textured_section_visibility_stats(
     sections: &[TexturedRenderSectionMesh],
     render_view: ChunkRenderView,
@@ -1418,6 +1442,15 @@ pub struct GpuTexturedChunkMesh {
     visibility: VisibilitySet,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct GpuTexturedChunkMeshUploadTiming {
+    total_ms: f64,
+    vertex_bytes_ms: f64,
+    vertex_buffer_ms: f64,
+    index_bytes_ms: f64,
+    index_buffer_ms: f64,
+}
+
 impl GpuTexturedChunkMesh {
     pub fn new(device: &wgpu::Device, mesh: &TexturedVisibleChunkMesh) -> Result<Self> {
         Self::with_visibility(device, mesh, VisibilitySet::all_visible())
@@ -1428,27 +1461,51 @@ impl GpuTexturedChunkMesh {
         mesh: &TexturedVisibleChunkMesh,
         visibility: VisibilitySet,
     ) -> Result<Self> {
+        Self::with_visibility_timed(device, mesh, visibility).map(|(mesh, _timing)| mesh)
+    }
+
+    fn with_visibility_timed(
+        device: &wgpu::Device,
+        mesh: &TexturedVisibleChunkMesh,
+        visibility: VisibilitySet,
+    ) -> Result<(Self, GpuTexturedChunkMeshUploadTiming)> {
         if mesh.is_empty() {
             bail!("cannot upload an empty textured chunk mesh");
         }
+        let total_start = timing_now();
+        let mut timing = GpuTexturedChunkMeshUploadTiming::default();
+        let vertex_bytes_start = timing_now();
+        let vertex_bytes = textured_vertex_bytes(mesh);
+        timing.vertex_bytes_ms = timing_elapsed_ms(vertex_bytes_start);
+        let vertex_buffer_start = timing_now();
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mclone_textured_chunk_vertices"),
-            contents: &textured_vertex_bytes(mesh),
+            contents: &vertex_bytes,
             usage: wgpu::BufferUsages::VERTEX,
         });
+        timing.vertex_buffer_ms = timing_elapsed_ms(vertex_buffer_start);
+        let index_bytes_start = timing_now();
+        let indices = index_bytes(&mesh.indices);
+        timing.index_bytes_ms = timing_elapsed_ms(index_bytes_start);
+        let index_buffer_start = timing_now();
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mclone_textured_chunk_indices"),
-            contents: &index_bytes(&mesh.indices),
+            contents: &indices,
             usage: wgpu::BufferUsages::INDEX,
         });
-        Ok(Self {
-            vertex_buffer,
-            index_buffer,
-            index_count: mesh.indices.len() as u32,
-            solid_index_count: mesh.solid_index_count().min(mesh.indices.len() as u32),
-            opaque_index_count: mesh.opaque_index_count().min(mesh.indices.len() as u32),
-            visibility,
-        })
+        timing.index_buffer_ms = timing_elapsed_ms(index_buffer_start);
+        timing.total_ms = timing_elapsed_ms(total_start);
+        Ok((
+            Self {
+                vertex_buffer,
+                index_buffer,
+                index_count: mesh.indices.len() as u32,
+                solid_index_count: mesh.solid_index_count().min(mesh.indices.len() as u32),
+                opaque_index_count: mesh.opaque_index_count().min(mesh.indices.len() as u32),
+                visibility,
+            },
+            timing,
+        ))
     }
 
     pub fn index_count(&self) -> u32 {
@@ -2419,9 +2476,29 @@ impl TexturedSectionDrawResources {
         removed: &BTreeSet<RenderSectionKey>,
         upload_backpressured: bool,
     ) -> Result<TexturedSectionUploadReport> {
+        self.apply_section_updates_with_context_timed(
+            device,
+            sections,
+            removed,
+            upload_backpressured,
+        )
+        .map(|(report, _timing)| report)
+    }
+
+    pub fn apply_section_updates_with_context_timed(
+        &mut self,
+        device: &wgpu::Device,
+        sections: &[TexturedRenderSectionMesh],
+        removed: &BTreeSet<RenderSectionKey>,
+        upload_backpressured: bool,
+    ) -> Result<(TexturedSectionUploadReport, TexturedSectionUploadTiming)> {
+        let total_start = timing_now();
+        let mut timing = TexturedSectionUploadTiming::default();
         if sections.is_empty() && removed.is_empty() {
-            return Ok(TexturedSectionUploadReport::default());
+            timing.total_ms = timing_elapsed_ms(total_start);
+            return Ok((TexturedSectionUploadReport::default(), timing));
         }
+        let dirty_start = timing_now();
         self.section_set_generation = self.section_set_generation.wrapping_add(1);
         // Slice F: the section set / meshes change here, so the cached culling
         // records must be rebuilt on the next prepare.
@@ -2437,7 +2514,9 @@ impl TexturedSectionDrawResources {
                 dirty_causes.with(TexturedSectionRecordDirtyCauses::UPLOAD_BACKPRESSURED);
         }
         self.mark_records_dirty(dirty_causes);
+        timing.dirty_mark_ms = timing_elapsed_ms(dirty_start);
         let mut report = TexturedSectionUploadReport::default();
+        let remove_start = timing_now();
         for key in removed {
             if self.sections.remove(key).is_some() {
                 report.removed_section_count += 1;
@@ -2445,8 +2524,10 @@ impl TexturedSectionDrawResources {
             self.visibility_sections.remove(key);
             self.traversal_ready_sections.remove(key);
         }
+        timing.remove_ms = timing_elapsed_ms(remove_start);
 
         for section in sections {
+            let section_state_start = timing_now();
             self.visibility_sections
                 .insert(section.key, section.visibility);
             self.traversal_ready_sections.insert(section.key);
@@ -2454,21 +2535,28 @@ impl TexturedSectionDrawResources {
                 if self.sections.remove(&section.key).is_some() {
                     report.removed_section_count += 1;
                 }
+                timing.section_state_ms += timing_elapsed_ms(section_state_start);
                 continue;
             }
+            timing.section_state_ms += timing_elapsed_ms(section_state_start);
             let stats = section.stats();
             report.uploaded_section_count += 1;
             report.uploaded_vertex_count += stats.vertex_count;
             report.uploaded_index_count += stats.index_count;
-            self.sections.insert(
-                section.key,
-                GpuTexturedChunkMesh::with_visibility(device, &section.mesh, section.visibility)
-                    .with_context(|| {
-                        format!("failed to upload render section {:?}", section.key)
-                    })?,
-            );
+            let (gpu_mesh, mesh_timing) = GpuTexturedChunkMesh::with_visibility_timed(
+                device,
+                &section.mesh,
+                section.visibility,
+            )
+            .with_context(|| format!("failed to upload render section {:?}", section.key))?;
+            timing.absorb_mesh_upload(mesh_timing);
+            let mesh_insert_start = timing_now();
+            let old_mesh = self.sections.insert(section.key, gpu_mesh);
+            drop(old_mesh);
+            timing.mesh_insert_ms += timing_elapsed_ms(mesh_insert_start);
         }
-        Ok(report)
+        timing.total_ms = timing_elapsed_ms(total_start);
+        Ok((report, timing))
     }
 
     pub fn set_traversal_ready_sections(&mut self, ready_sections: &BTreeSet<RenderSectionKey>) {
