@@ -13,7 +13,10 @@ handling, active-delete guarding, and focused conformance tests. Slice 2 landed
 on 2026-07-04: desktop `FlatClientDriver` now delegates catalog UI state and
 create/open/delete action policy to the shared controller while retaining the
 native catalog backend, world-root selection, `SceneOptions`, and startup
-payloads as desktop adapter responsibilities.
+payloads as desktop adapter responsibilities. Slice 3 landed on 2026-07-05:
+native web now renders controller-owned catalog state and routes menu
+Create/Open/Delete through controller request/completion effects while keeping
+IndexedDB promises and worker startup in the browser adapter.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -411,6 +414,8 @@ git diff --check
 
 ### Slice 3: Web Adopts The Same Controller
 
+Status: landed 2026-07-05.
+
 Wire native web through the shared controller rather than adding a second copy
 of desktop policy:
 
@@ -423,7 +428,27 @@ of desktop policy:
   helpers web-local;
 - remove inert catalog action arms from `apply_web_ui_action`.
 
-Validation:
+Recorded Slice 3 result:
+
+- Added `FlatClientCatalogController` ownership to
+  `WebChunkRenderSession` and returned its active-world-aware
+  `WorldCatalogUiState` from web `ui_render_state`.
+- Replaced inert web catalog action arms with shared controller calls for
+  world-list/create/select/open/delete/confirm/cancel actions. Rust now emits
+  catalog request effects in the existing UI report object.
+- Added wasm completion entrypoints for browser IndexedDB results:
+  `applyWorldCatalogResponse` and `applyWorldCatalogError`.
+- Added `startIndexedDbLocalWorld` so controller create/open completions start
+  the integrated web worker with `worldStorage=indexeddb` and the resolved
+  `worldId`, while using the shared active session descriptor.
+- Kept browser-only concerns in TypeScript:
+  `openWorldDb`, IndexedDB CRUD promises, active-world delete adapter argument,
+  worker URLs, and app-smoke/runtime restart plumbing.
+- Updated the platform parity tracker to mark web world-select/persistence as
+  partial and to add the shared flat catalog controller as an explicit contract
+  adoption row.
+
+Validation after Slice 3:
 
 ```bash
 pnpm native:web:typecheck
@@ -433,6 +458,19 @@ pnpm native:web:app-smoke
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog
 git diff --check
 ```
+
+Results on 2026-07-05:
+
+- Passed: `pnpm native:web:typecheck`
+- Passed: `pnpm native:web:build`
+- Passed: `pnpm native:web:smoke`
+- Passed: `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog`
+- Passed: `git diff --check`
+- Repeated validation issue: `pnpm native:web:app-smoke` failed twice in the
+  existing block-place probe with `hitType: miss`, `commandSent: false`, and
+  otherwise healthy app/session/compiler state. No catalog UI or IndexedDB
+  request failed in that run; track this as an app-smoke interaction probe
+  issue before using it as a blocker for catalog controller adoption.
 
 ### Slice 4: Session Replacement And Startup Policy
 

@@ -4,8 +4,10 @@ Status: active; Slices 1-5 shared catalog contract, catalog-aware session
 request vocabulary, native filesystem/SQLite catalog backend, shared UI v2
 world catalog screens, desktop flat lifecycle wiring, and desktop
 persistence/delete smoke coverage landed. Slice 6 browser IndexedDB catalog
-store/smoke first pass landed. Owns follow-up persistence lifecycle work from
-closed
+store/smoke first pass landed; tactical
+[`141-flat-client-platform-policy-convergence.md`](141-flat-client-platform-policy-convergence.md)
+Slice 3 wired the native web menu path through the shared catalog controller
+and IndexedDB adapter. Owns follow-up persistence lifecycle work from closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -98,8 +100,10 @@ Gaps:
   UI.
 - Native catalog summaries now live beside the database in `world.json`; the
   SQLite metadata table remains store-internal and is not the UI summary source.
-- Web IndexedDB has chunk/entity stores keyed by `worldId`, but no visible
-  browser world list/create/delete UI.
+- Web IndexedDB has chunk/entity stores keyed by `worldId` and the native web
+  menu can now list/create/open/delete catalog worlds through the shared
+  controller. Browser player/world metadata, full lifecycle save/flush
+  discipline, and Android catalog adoption are still pending.
 - Android app-private world roots are still pending.
 - Player/world/saved-data records are not live yet, so first world summaries
   will be mostly display id/name/seed/schema/timestamps and coarse diagnostics.
@@ -550,6 +554,18 @@ Recorded Slice 6 first-pass result:
 - Left menu-driven web Create/Open/Delete wiring pending; the Rust web UI still
   renders an empty/default catalog state until the next Slice 6 chunk feeds
   these browser summaries into `GameUiRenderState` and routes catalog actions.
+
+Follow-up after tactical 141 Slice 3:
+
+- Menu-driven native web Create/Open/Delete now uses the shared
+  `FlatClientCatalogController`; IndexedDB promises remain web-local and feed
+  controller completions back through wasm.
+- `WebChunkRenderSession` now renders controller-owned catalog state and starts
+  catalog-created/opened local worlds with `worldStorage=indexeddb` plus the
+  selected/generated `worldId`.
+- Remaining browser persistence work is lifecycle depth, not menu policy:
+  player/world metadata records, save/flush shutdown discipline, richer
+  summaries, and app-smoke coverage for the visible catalog UI flow.
 
 Validation after Slice 6 first pass on 2026-07-04:
 

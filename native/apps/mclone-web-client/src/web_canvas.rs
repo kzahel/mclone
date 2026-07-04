@@ -7,12 +7,21 @@ use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
     WebIntegratedServerRunnerConfig, WebRuntime,
 };
+use mclone_app_runtime::flat_client_catalog::{
+    FlatClientCatalogActionContext, FlatClientCatalogController, FlatClientCatalogEffects,
+    FlatClientCatalogRequest, FlatClientCatalogSessionStart,
+};
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
     SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
 };
 use mclone_app_runtime::startup_args::{
     RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState, StartupOptions, StartupSceneOptions,
+};
+use mclone_app_runtime::world_catalog::{
+    LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
+    WorldCatalogError, WorldCatalogErrorKind, WorldCatalogRequest, WorldCatalogRequestId,
+    WorldCatalogResponse,
 };
 use mclone_app_runtime::{
     debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
@@ -2463,6 +2472,7 @@ pub struct WebChunkRenderSession {
     actors: ActorDrawResources,
     gui: GuiRenderer,
     ui: GameUiHost,
+    world_catalog: FlatClientCatalogController,
     debug_overlay_visible: bool,
     status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
@@ -2620,6 +2630,60 @@ impl WebChunkRenderSession {
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
+    #[wasm_bindgen(js_name = startIndexedDbLocalWorld)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_indexed_db_local_world(
+        &mut self,
+        seed: i64,
+        world_id: String,
+        display_name: String,
+        request_kind: String,
+        worker_url: String,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Result<JsValue, JsValue> {
+        let world_id = LocalWorldId::new(world_id).map_err(|error| JsValue::from(error.message))?;
+        let descriptor = ActiveSessionDescriptor::LocalWorld {
+            seed,
+            id: Some(world_id.clone()),
+            display_name: Some(display_name.clone()),
+        };
+        let request = match request_kind.as_str() {
+            "createLocalWorld" => {
+                let options = LocalWorldCreateOptions::new(display_name, seed)
+                    .map_err(|error| JsValue::from(error.message))?
+                    .with_requested_id(world_id.clone());
+                SessionStartRequest::create_local_world(options)
+            }
+            "openLocalWorld" => SessionStartRequest::open_local_world(world_id.clone()),
+            other => {
+                return Err(JsValue::from(format!(
+                    "unsupported IndexedDB local world start kind {other:?}"
+                )));
+            }
+        };
+        self.session.begin_start(request.clone());
+        let config = WebIntegratedServerRunnerConfig::new(
+            seed,
+            worker_url,
+            job_worker_url,
+            bindgen_js_url,
+            bindgen_wasm_url,
+        )
+        .with_indexed_db_world(world_id.as_str().to_owned(), false);
+        match WebRuntime::web_worker_integrated(config).await {
+            Ok(runtime) => {
+                self.install_started_runtime_with_descriptor(request, descriptor, runtime)
+                    .map_err(JsValue::from)?;
+            }
+            Err(error) => {
+                self.fail_session_start(request, error);
+            }
+        }
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = joinRemoteWebSocket)]
     pub async fn join_remote_websocket(
         &mut self,
@@ -2640,6 +2704,38 @@ impl WebChunkRenderSession {
             }
         }
         self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = applyWorldCatalogResponse)]
+    pub fn apply_world_catalog_response(
+        &mut self,
+        request_id: String,
+        operation: String,
+        payload: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let request_id = parse_world_catalog_request_id(&request_id).map_err(JsValue::from)?;
+        let response =
+            decode_world_catalog_response(&operation, &payload).map_err(JsValue::from)?;
+        let effects = self
+            .world_catalog
+            .apply_catalog_response(request_id, response);
+        self.catalog_effects_to_js_value(effects)
+            .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = applyWorldCatalogError)]
+    pub fn apply_world_catalog_error(
+        &mut self,
+        request_id: String,
+        message: String,
+    ) -> Result<JsValue, JsValue> {
+        let request_id = parse_world_catalog_request_id(&request_id).map_err(JsValue::from)?;
+        let effects = self.world_catalog.apply_catalog_error(
+            request_id,
+            WorldCatalogError::new(WorldCatalogErrorKind::StorageFailure, message),
+        );
+        self.catalog_effects_to_js_value(effects)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = openTitleUi)]
@@ -3024,13 +3120,15 @@ impl WebChunkRenderSession {
         handled: bool,
         action: Option<GameUiAction>,
     ) -> Result<JsValue, String> {
-        if let Some(action) = action {
-            self.apply_web_ui_action(action);
-        }
-        self.ui_event_result_to_js_value(handled, action)
+        let effects = action
+            .map(|action| self.apply_web_ui_action(action))
+            .unwrap_or_default();
+        self.ui_event_result_to_js_value(handled, action, effects)
     }
 
-    fn apply_web_ui_action(&mut self, action: GameUiAction) {
+    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+        let mut effects = FlatClientCatalogEffects::default();
+        let mut apply_ui_action = true;
         match action {
             GameUiAction::ToggleSectionOcclusion => {
                 self.section_occlusion_culling = !self.section_occlusion_culling;
@@ -3098,18 +3196,36 @@ impl WebChunkRenderSession {
             GameUiAction::Quit => {
                 self.runtime.request_shutdown();
             }
+            GameUiAction::OpenWorldList
+            | GameUiAction::OpenWorldCreate
+            | GameUiAction::SelectWorld(_)
+            | GameUiAction::ConfirmDeleteWorld(_)
+            | GameUiAction::DeleteWorld(_)
+            | GameUiAction::CancelDeleteWorld => {
+                let active_world = self.active_local_world_id().cloned();
+                self.world_catalog.set_active_world(active_world);
+                effects = self.world_catalog.apply_ui_action(
+                    action,
+                    FlatClientCatalogActionContext {
+                        new_world_seed: self.ui.new_world_seed(),
+                    },
+                );
+            }
+            GameUiAction::OpenWorld(_) | GameUiAction::CreateCatalogWorld => {
+                let active_world = self.active_local_world_id().cloned();
+                self.world_catalog.set_active_world(active_world);
+                effects = self.world_catalog.apply_ui_action(
+                    action,
+                    FlatClientCatalogActionContext {
+                        new_world_seed: self.ui.new_world_seed(),
+                    },
+                );
+                apply_ui_action = false;
+            }
             GameUiAction::StartWorld
             | GameUiAction::OpenBlockPalette
             | GameUiAction::OpenHelp(_)
             | GameUiAction::CloseHelp(_)
-            | GameUiAction::OpenWorldList
-            | GameUiAction::OpenWorldCreate
-            | GameUiAction::SelectWorld(_)
-            | GameUiAction::OpenWorld(_)
-            | GameUiAction::CreateCatalogWorld
-            | GameUiAction::ConfirmDeleteWorld(_)
-            | GameUiAction::DeleteWorld(_)
-            | GameUiAction::CancelDeleteWorld
             | GameUiAction::OpenNewWorld
             | GameUiAction::OpenJoinRemote
             | GameUiAction::OpenServerSettings(_)
@@ -3124,13 +3240,17 @@ impl WebChunkRenderSession {
             | GameUiAction::SetServerSimulationCadence(_)
             | GameUiAction::SetRenderDistance(_) => {}
         }
-        self.ui.apply_action(action);
+        if apply_ui_action {
+            self.ui.apply_action(action);
+        }
+        effects
     }
 
     fn ui_event_result_to_js_value(
-        &self,
+        &mut self,
         handled: bool,
         action: Option<GameUiAction>,
+        effects: FlatClientCatalogEffects,
     ) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
         self.write_ui_status_to_js_object(&object)?;
@@ -3213,12 +3333,118 @@ impl WebChunkRenderSession {
                 | GameUiAction::CycleFpsCap => {}
             }
         }
+        self.write_catalog_effects_to_js_object(&object, effects)?;
         Ok(object.into())
+    }
+
+    fn catalog_effects_to_js_value(
+        &mut self,
+        effects: FlatClientCatalogEffects,
+    ) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        self.write_ui_status_to_js_object(&object)?;
+        self.write_catalog_effects_to_js_object(&object, effects)?;
+        Ok(object.into())
+    }
+
+    fn write_catalog_effects_to_js_object(
+        &mut self,
+        object: &js_sys::Object,
+        effects: FlatClientCatalogEffects,
+    ) -> Result<(), String> {
+        set_number(
+            object,
+            "catalogRequestCount",
+            effects.catalog_requests.len() as f64,
+        )?;
+        set_number(
+            object,
+            "catalogSessionStartCount",
+            effects.session_starts.len() as f64,
+        )?;
+        if let Some(request) = effects.catalog_requests.first() {
+            self.write_catalog_request_to_js_object(object, request)?;
+        }
+        if let Some(start) = effects.session_starts.first() {
+            self.ui.set_screen(None);
+            self.status_overlay = StatusOverlay::hidden();
+            self.write_catalog_session_start_to_js_object(object, start)?;
+        }
+        Ok(())
+    }
+
+    fn write_catalog_request_to_js_object(
+        &self,
+        object: &js_sys::Object,
+        request: &FlatClientCatalogRequest,
+    ) -> Result<(), String> {
+        set_bool(object, "catalogRequest", true)?;
+        set_string(object, "catalogRequestId", &request.id.0.to_string())?;
+        if let Some(active_world) = self.active_local_world_id() {
+            set_string(object, "activeWorldId", active_world.as_str())?;
+        }
+        match &request.request {
+            WorldCatalogRequest::ListWorlds => {
+                set_string(object, "catalogOperation", "listWorlds")?;
+            }
+            WorldCatalogRequest::CreateWorld { options } => {
+                set_string(object, "catalogOperation", "createWorld")?;
+                set_string(object, "catalogDisplayName", &options.display_name)?;
+                set_number(object, "catalogWorldSeed", options.seed as f64)?;
+                set_string(object, "catalogWorldSeedText", &options.seed.to_string())?;
+                if let Some(id) = &options.requested_id {
+                    set_string(object, "catalogRequestedId", id.as_str())?;
+                }
+            }
+            WorldCatalogRequest::OpenWorld { id } => {
+                set_string(object, "catalogOperation", "openWorld")?;
+                set_string(object, "catalogWorldId", id.as_str())?;
+            }
+            WorldCatalogRequest::DeleteWorld { id } => {
+                set_string(object, "catalogOperation", "deleteWorld")?;
+                set_string(object, "catalogWorldId", id.as_str())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_catalog_session_start_to_js_object(
+        &self,
+        object: &js_sys::Object,
+        start: &FlatClientCatalogSessionStart,
+    ) -> Result<(), String> {
+        set_bool(object, "catalogSessionStart", true)?;
+        match &start.request {
+            SessionStartRequest::CreateLocalWorld { .. } => {
+                set_string(object, "catalogSessionRequest", "createLocalWorld")?;
+            }
+            SessionStartRequest::OpenLocalWorld { .. } => {
+                set_string(object, "catalogSessionRequest", "openLocalWorld")?;
+            }
+            SessionStartRequest::JoinRemote { .. } | SessionStartRequest::Unknown => {
+                set_string(object, "catalogSessionRequest", "unknown")?;
+            }
+        }
+        set_string(object, "catalogWorldId", start.summary.id.as_str())?;
+        set_string(
+            object,
+            "catalogWorldDisplayName",
+            &start.summary.display_name,
+        )?;
+        set_number(object, "catalogWorldSeed", start.summary.seed as f64)?;
+        set_string(
+            object,
+            "catalogWorldSeedText",
+            &start.summary.seed.to_string(),
+        )?;
+        Ok(())
     }
 
     fn ui_render_state(&self, radius_chunks: u32) -> GameUiRenderState {
         GameUiRenderState {
-            world_catalog: Default::default(),
+            world_catalog: self
+                .world_catalog
+                .ui_state_with_active_world(self.active_local_world_id()),
             render_distance: i32::try_from(radius_chunks)
                 .unwrap_or(i32::MAX)
                 .clamp(WEB_MIN_RENDER_DISTANCE, WEB_MAX_RENDER_DISTANCE),
@@ -3411,6 +3637,8 @@ impl WebChunkRenderSession {
         }
         ui.set_scale(GuiScale::from_pixels(context.width, context.height));
         let session = started_web_session_coordinator(session_request)?;
+        let mut world_catalog = FlatClientCatalogController::new();
+        world_catalog.set_capabilities(WorldCatalogCapabilities::persistent_local());
         let mut camera = EngineCameraController::spawn_for_chunk(initial_center);
         camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
 
@@ -3428,6 +3656,7 @@ impl WebChunkRenderSession {
             actors,
             gui,
             ui,
+            world_catalog,
             debug_overlay_visible: false,
             status_overlay: StatusOverlay::hidden(),
             section_occlusion_culling: render_options.section_occlusion_culling,
@@ -3484,11 +3713,22 @@ impl WebChunkRenderSession {
         let descriptor = request
             .active_descriptor()
             .ok_or_else(|| "web session request did not describe an active session".to_owned())?;
+        self.install_started_runtime_with_descriptor(request, descriptor, runtime)
+    }
+
+    fn install_started_runtime_with_descriptor(
+        &mut self,
+        request: SessionStartRequest,
+        descriptor: ActiveSessionDescriptor,
+        runtime: WebRuntime,
+    ) -> Result<(), String> {
         self.runtime.request_shutdown();
         self.runtime = runtime;
         self.session
             .apply_start_result(&Ok(StartedGameSession::new(descriptor, ())));
         self.reset_runtime_view_state(&request);
+        let active_world = self.active_local_world_id().cloned();
+        self.world_catalog.set_active_world(active_world);
         self.sync_player_appearance_deferred()?;
         Ok(())
     }
@@ -3526,6 +3766,13 @@ impl WebChunkRenderSession {
         self.mesh_build_count = 0;
         self.mesh_upload_count = 0;
         self.render_count = 0;
+    }
+
+    fn active_local_world_id(&self) -> Option<&LocalWorldId> {
+        let GameSessionState::Active { session } = self.session.state() else {
+            return None;
+        };
+        session.local_world_id()
     }
 
     async fn interact_block_with_kind(
@@ -4946,6 +5193,144 @@ fn touch_controls_mode_js_label(mode: TouchControlsMode) -> &'static str {
         TouchControlsMode::On => "on",
         TouchControlsMode::Off => "off",
     }
+}
+
+fn parse_world_catalog_request_id(value: &str) -> Result<WorldCatalogRequestId, String> {
+    value
+        .trim()
+        .parse::<u64>()
+        .map(WorldCatalogRequestId)
+        .map_err(|_| format!("invalid world catalog request id {value:?}"))
+}
+
+fn decode_world_catalog_response(
+    operation: &str,
+    payload: &JsValue,
+) -> Result<WorldCatalogResponse, String> {
+    match operation {
+        "listWorlds" => Ok(WorldCatalogResponse::WorldList {
+            capabilities: WorldCatalogCapabilities::persistent_local(),
+            worlds: decode_web_local_world_summaries(payload)?,
+        }),
+        "createWorld" => Ok(WorldCatalogResponse::WorldCreated {
+            summary: decode_web_local_world_summary(payload)?,
+        }),
+        "openWorld" => Ok(WorldCatalogResponse::WorldOpened {
+            summary: decode_web_local_world_summary(payload)?,
+        }),
+        "deleteWorld" => Ok(WorldCatalogResponse::WorldDeleted {
+            id: LocalWorldId::new(js_string_property(payload, "id")?)
+                .map_err(|error| error.message)?,
+        }),
+        other => Err(format!(
+            "unsupported world catalog response operation {other:?}"
+        )),
+    }
+}
+
+fn decode_web_local_world_summaries(value: &JsValue) -> Result<Vec<LocalWorldSummary>, String> {
+    if !js_sys::Array::is_array(value) {
+        return Err("world catalog list response must be an array".to_owned());
+    }
+    js_sys::Array::from(value)
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            decode_web_local_world_summary(&value)
+                .map_err(|error| format!("world catalog list entry {index}: {error}"))
+        })
+        .collect()
+}
+
+fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, String> {
+    let id = LocalWorldId::new(js_string_property(value, "id")?).map_err(|error| error.message)?;
+    let mut summary = LocalWorldSummary::new(
+        id,
+        js_string_property(value, "displayName")?,
+        js_i64_property(value, "seed")?,
+        js_u64_property(value, "createdUnixMillis")?,
+    )
+    .map_err(|error| error.message)?;
+    summary.last_played_unix_millis = js_optional_u64_property(value, "lastPlayedUnixMillis")?;
+    summary.storage_schema_version = js_u32_property(value, "storageSchemaVersion")?;
+    summary.target_minecraft_version = js_string_property(value, "targetMinecraftVersion")?;
+    summary.mclone_version = js_optional_string_property(value, "mcloneVersion")?;
+    summary.backend_label = js_optional_string_property(value, "backendLabel")?;
+    summary.locked = js_bool_property(value, "locked")?;
+    summary.compatible = js_bool_property(value, "compatible")?;
+    Ok(summary)
+}
+
+fn js_property(value: &JsValue, key: &str) -> Result<JsValue, String> {
+    js_sys::Reflect::get(value, &JsValue::from_str(key))
+        .map_err(|error| format!("failed to read JS property {key}: {error:?}"))
+}
+
+fn js_string_property(value: &JsValue, key: &str) -> Result<String, String> {
+    let property = js_property(value, key)?;
+    property
+        .as_string()
+        .ok_or_else(|| format!("JS property {key} must be a string"))
+}
+
+fn js_optional_string_property(value: &JsValue, key: &str) -> Result<Option<String>, String> {
+    let property = js_property(value, key)?;
+    if property.is_null() || property.is_undefined() {
+        return Ok(None);
+    }
+    property
+        .as_string()
+        .map(Some)
+        .ok_or_else(|| format!("JS property {key} must be a string or null"))
+}
+
+fn js_i64_property(value: &JsValue, key: &str) -> Result<i64, String> {
+    let number = js_f64_property(value, key)?;
+    if number.fract() != 0.0 || number < i64::MIN as f64 || number > i64::MAX as f64 {
+        return Err(format!("JS property {key} must be an i64 integer"));
+    }
+    Ok(number as i64)
+}
+
+fn js_u64_property(value: &JsValue, key: &str) -> Result<u64, String> {
+    let number = js_f64_property(value, key)?;
+    if number.fract() != 0.0 || number < 0.0 || number > u64::MAX as f64 {
+        return Err(format!("JS property {key} must be a u64 integer"));
+    }
+    Ok(number as u64)
+}
+
+fn js_optional_u64_property(value: &JsValue, key: &str) -> Result<Option<u64>, String> {
+    let property = js_property(value, key)?;
+    if property.is_null() || property.is_undefined() {
+        return Ok(None);
+    }
+    let number = property
+        .as_f64()
+        .filter(|number| number.is_finite())
+        .ok_or_else(|| format!("JS property {key} must be a number or null"))?;
+    if number.fract() != 0.0 || number < 0.0 || number > u64::MAX as f64 {
+        return Err(format!("JS property {key} must be a u64 integer or null"));
+    }
+    Ok(Some(number as u64))
+}
+
+fn js_u32_property(value: &JsValue, key: &str) -> Result<u32, String> {
+    let number = js_u64_property(value, key)?;
+    u32::try_from(number).map_err(|_| format!("JS property {key} must fit u32"))
+}
+
+fn js_bool_property(value: &JsValue, key: &str) -> Result<bool, String> {
+    js_property(value, key)?
+        .as_bool()
+        .ok_or_else(|| format!("JS property {key} must be a boolean"))
+}
+
+fn js_f64_property(value: &JsValue, key: &str) -> Result<f64, String> {
+    js_property(value, key)?
+        .as_f64()
+        .filter(|number| number.is_finite())
+        .ok_or_else(|| format!("JS property {key} must be a finite number"))
 }
 
 fn parse_startup_options_from_query(search: &str) -> Result<StartupOptions, JsValue> {
