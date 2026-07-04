@@ -4,6 +4,7 @@ import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry, Texture
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 export type ThemeMode = "light" | "dark";
 export type PreviewMode = "detail" | "atlas" | "blocks";
+export type QueueFilter = "all" | "noise-placeholder" | "authored-structure" | "frozen-asset" | "has-candidates" | "needs-candidates";
 type ThemeSource = "system" | "manual";
 
 export interface TextureLabState {
@@ -17,6 +18,7 @@ export interface TextureLabState {
   search: string;
   materialFilter: string;
   statusFilter: string;
+  queueFilter: QueueFilter;
   loadStatus: LoadStatus;
   error: string | null;
   curationStatus: string | null;
@@ -36,6 +38,7 @@ export interface TextureLabState {
   setSearch: (search: string) => void;
   setMaterialFilter: (material: string) => void;
   setStatusFilter: (status: string) => void;
+  setQueueFilter: (queueFilter: QueueFilter) => void;
 }
 
 export const useTextureLabStore = create<TextureLabState>((set, get) => ({
@@ -49,6 +52,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   search: "",
   materialFilter: "all",
   statusFilter: "all",
+  queueFilter: "all",
   loadStatus: "idle",
   error: null,
   curationStatus: null,
@@ -222,6 +226,10 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
 
   setStatusFilter(statusFilter) {
     set({ statusFilter });
+  },
+
+  setQueueFilter(queueFilter) {
+    set({ queueFilter });
   },
 }));
 

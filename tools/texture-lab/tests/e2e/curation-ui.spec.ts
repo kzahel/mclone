@@ -247,6 +247,38 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-blocks.png", fullPage: true });
 });
 
+test("filters texture replacement queues", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  const textureList = page.locator(".textureList");
+
+  await page.getByLabel("Queue").selectOption({ label: "Has candidates" });
+  await expect(page.locator(".filterCount")).toHaveText("1 texture");
+  await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toBeVisible();
+  await expect(textureList.getByRole("button", { name: /andesite/ })).toHaveCount(0);
+
+  await page.getByLabel("Queue").selectOption({ label: "Frozen assets" });
+  await expect(page.locator(".filterCount")).toHaveText("2 textures");
+  await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toBeVisible();
+  await expect(textureList.getByRole("button", { name: /stone/ })).toBeVisible();
+  await expect(textureList.getByRole("button", { name: /andesite/ })).toHaveCount(0);
+
+  await page.getByLabel("Queue").selectOption({ label: "Needs candidates" });
+  await expect(page.locator(".filterCount")).toHaveText("79 textures");
+  await expect(textureList.getByRole("button", { name: /andesite/ })).toBeVisible();
+  await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toHaveCount(0);
+  await expect(textureList.getByRole("button", { name: /^stone/ })).toHaveCount(0);
+
+  await page.getByLabel("Search").fill("dripstone");
+  await expect(textureList.getByRole("button", { name: /dripstone_block/ })).toBeVisible();
+  await expect(textureList.getByRole("button", { name: /pointed_dripstone/ })).toBeVisible();
+
+  await page.getByLabel("Queue").selectOption({ label: "Noise placeholders" });
+  await expect(textureList.getByRole("button", { name: /pointed_dripstone/ })).toBeVisible();
+  await page.getByLabel("Search").fill("");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-queue-filter.png", fullPage: true });
+});
+
 test("uses generated candidates as temporary atlas and block previews", async ({ page }) => {
   await page.goto("/");
 

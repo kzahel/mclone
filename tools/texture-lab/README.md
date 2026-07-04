@@ -402,6 +402,10 @@ are only seeded macro-noise/speckle coverage, including the broad
 `far-lod-material` set, are labeled `noise placeholder` in the sidebar, detail
 view, atlas cards, inspector, and search. They are useful for coverage and
 layout review, but should not be mistaken for curated/frozen texture art.
+The sidebar Queue filter turns those labels into replacement queues: `Noise
+placeholders`, `Authored structure`, `Frozen assets`, `Has candidates`, and
+`Needs candidates`. `Needs candidates` means the texture is not frozen and has
+no local generated candidates linked yet.
 
 All procedural helpers that target fully tiled textures should be periodic by
 construction. Rotation-safe materials should avoid one-way lighting or streaks;

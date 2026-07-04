@@ -1,5 +1,5 @@
 import type { TextureCandidateEntry, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
-import type { TextureLabState } from "./textureLabStore";
+import type { QueueFilter, TextureLabState } from "./textureLabStore";
 
 export const selectIndex = (state: TextureLabState): TextureLabIndex | null => state.index;
 export const selectLoadStatus = (state: TextureLabState): TextureLabState["loadStatus"] => state.loadStatus;
@@ -14,6 +14,16 @@ export const selectPreviewMode = (state: TextureLabState): TextureLabState["prev
 export const selectSearch = (state: TextureLabState): string => state.search;
 export const selectMaterialFilter = (state: TextureLabState): string => state.materialFilter;
 export const selectStatusFilter = (state: TextureLabState): string => state.statusFilter;
+export const selectQueueFilter = (state: TextureLabState): TextureLabState["queueFilter"] => state.queueFilter;
+
+export const QUEUE_FILTER_OPTIONS: { value: QueueFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "noise-placeholder", label: "Noise placeholders" },
+  { value: "authored-structure", label: "Authored structure" },
+  { value: "frozen-asset", label: "Frozen assets" },
+  { value: "has-candidates", label: "Has candidates" },
+  { value: "needs-candidates", label: "Needs candidates" },
+];
 
 export function selectedTexture(state: TextureLabState): TextureIndexEntry | null {
   if (!state.index || !state.selectedTextureName) {
@@ -41,11 +51,15 @@ export function filteredTextures(state: TextureLabState): TextureIndexEntry[] {
     return [];
   }
   const search = state.search.trim().toLowerCase();
+  const candidateCounts = candidateCountsByTexture(state.index.candidates);
   return state.index.textures.filter((texture) => {
     if (state.materialFilter !== "all" && texture.materialFamily !== state.materialFilter) {
       return false;
     }
     if (state.statusFilter !== "all" && texture.status !== state.statusFilter) {
+      return false;
+    }
+    if (!matchesQueueFilter(texture, state.queueFilter, candidateCounts.get(texture.name) ?? 0)) {
       return false;
     }
     if (!search) {
@@ -67,6 +81,36 @@ export function filteredTextures(state: TextureLabState): TextureIndexEntry[] {
       .toLowerCase()
       .includes(search);
   });
+}
+
+function matchesQueueFilter(texture: TextureIndexEntry, queueFilter: QueueFilter, candidateCount: number): boolean {
+  if (queueFilter === "all") {
+    return true;
+  }
+  if (queueFilter === "noise-placeholder") {
+    return texture.artSource.kind === "procedural-placeholder";
+  }
+  if (queueFilter === "authored-structure") {
+    return texture.artSource.kind === "authored-structure";
+  }
+  if (queueFilter === "frozen-asset") {
+    return texture.artSource.kind === "frozen";
+  }
+  if (queueFilter === "has-candidates") {
+    return candidateCount > 0;
+  }
+  return texture.artSource.kind !== "frozen" && candidateCount === 0;
+}
+
+function candidateCountsByTexture(candidates: TextureCandidateEntry[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    if (!candidate.textureName) {
+      continue;
+    }
+    counts.set(candidate.textureName, (counts.get(candidate.textureName) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export function materialOptions(state: TextureLabState): string[] {

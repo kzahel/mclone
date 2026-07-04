@@ -296,6 +296,11 @@ h3 {
   color: var(--text);
 }
 
+.filterCount {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .textureList {
   display: grid;
   align-content: start;

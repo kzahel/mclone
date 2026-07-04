@@ -15,6 +15,7 @@ import {
   selectMaterialFilter,
   selectPreviewMode,
   selectPreviewSelectionsByTexture,
+  selectQueueFilter,
   selectSearch,
   selectedCandidate as selectedCandidateSelector,
   selectedTexture,
@@ -22,9 +23,10 @@ import {
   selectSelectedTextureName,
   selectStatusFilter,
   selectThemeMode,
+  QUEUE_FILTER_OPTIONS,
   statusOptions,
 } from "./store/selectors";
-import type { ThemeMode } from "./store/textureLabStore";
+import type { QueueFilter, ThemeMode } from "./store/textureLabStore";
 import { imageRefUrl, imageUrl, useTextureLabStore } from "./store/textureLabStore";
 
 export function App(): JSX.Element {
@@ -46,6 +48,7 @@ export function App(): JSX.Element {
   const search = useTextureLabStore(selectSearch);
   const materialFilter = useTextureLabStore(selectMaterialFilter);
   const statusFilter = useTextureLabStore(selectStatusFilter);
+  const queueFilter = useTextureLabStore(selectQueueFilter);
   const materials = useTextureLabStore(useShallow(materialOptions));
   const statuses = useTextureLabStore(useShallow(statusOptions));
   const loadIndex = useTextureLabStore((state) => state.loadIndex);
@@ -64,6 +67,7 @@ export function App(): JSX.Element {
   const setSearch = useTextureLabStore((state) => state.setSearch);
   const setMaterialFilter = useTextureLabStore((state) => state.setMaterialFilter);
   const setStatusFilter = useTextureLabStore((state) => state.setStatusFilter);
+  const setQueueFilter = useTextureLabStore((state) => state.setQueueFilter);
 
   useEffect(() => {
     void loadIndex();
@@ -150,6 +154,19 @@ export function App(): JSX.Element {
                 ))}
               </select>
             </label>
+            <label>
+              Queue
+              <select value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as QueueFilter)}>
+                {QUEUE_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="filterCount" aria-live="polite">
+              {textures.length} texture{textures.length === 1 ? "" : "s"}
+            </div>
           </div>
           <div className="textureList" aria-label="Textures">
             {textures.map((texture) => (
