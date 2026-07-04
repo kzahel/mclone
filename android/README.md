@@ -162,14 +162,14 @@ The Quest lane is still flat Android, not OpenXR. It validates the same
 NativeActivity APK as a 2D app panel on headset hardware.
 
 ```bash
-pnpm native:android:quest-flat -- --skip-build --screenshot /tmp/mclone-quest-flat.png --log /tmp/mclone-quest-flat-logcat.txt
+pnpm native:android:quest-flat -- --skip-build --screenshot /tmp/mclone-quest-flat.png --log /tmp/mclone-quest-flat-logcat.txt --smoke-seconds 60
 ```
 
 Quest-flat remote dedicated smoke uses the same option when the server is
 reachable from the headset network:
 
 ```bash
-pnpm native:android:quest-flat -- --skip-build --remote-addr HOST:25565
+pnpm native:android:quest-flat -- --skip-build --remote-addr HOST:25565 --smoke-seconds 60
 ```
 
 On a machine without an attached authorized Quest, the expected blocker is:

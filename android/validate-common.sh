@@ -364,11 +364,36 @@ mclone_stage_asset_pack() {
     }
 
     mclone_check_default_asset_pack_lock "$asset_pack_path"
+    if [[ "${MCLONE_ANDROID_STAGE_INTERNAL_ASSETS:-0}" == "1" ]]; then
+        mclone_stage_internal_asset_pack "$serial" "$asset_pack_path"
+        mclone_stage_local_sound_assets "$serial"
+        return 0
+    fi
+
     mclone_note "Staging asset pack $asset_pack_path to $remote_path"
     "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
     "$ADB" -s "$serial" push "$asset_pack_path" "$remote_path" >/dev/null
     mclone_stage_local_sound_assets "$serial"
     mclone_repair_emulator_asset_permissions "$serial"
+}
+
+mclone_run_as_app_shell() {
+    local serial="$1"
+    local command="$2"
+
+    "$ADB" -s "$serial" shell "run-as $MCLONE_ANDROID_APP_ID sh -c '$command'"
+}
+
+mclone_stage_internal_asset_pack() {
+    local serial="$1"
+    local asset_pack_path="$2"
+    local tmp_path="/data/local/tmp/${MCLONE_ANDROID_APP_ID//./_}-extracted.zip"
+
+    mclone_note "Staging asset pack $asset_pack_path to internal app storage files/assets/packs/extracted.zip"
+    "$ADB" -s "$serial" push "$asset_pack_path" "$tmp_path" >/dev/null
+    mclone_run_as_app_shell "$serial" \
+        "rm -rf files/assets/packs && mkdir -p files/assets/packs && cp $tmp_path files/assets/packs/extracted.zip && chmod 600 files/assets/packs/extracted.zip"
+    "$ADB" -s "$serial" shell rm -f "$tmp_path" >/dev/null || true
 }
 
 mclone_local_sound_asset_source() {
@@ -413,10 +438,29 @@ mclone_stage_local_sound_assets() {
         return 0
     fi
 
+    if [[ "${MCLONE_ANDROID_STAGE_INTERNAL_ASSETS:-0}" == "1" ]]; then
+        mclone_stage_internal_sound_assets "$serial" "$source_dir"
+        return 0
+    fi
+
     mclone_note "Staging local sound assets $source_dir to $remote_dir"
     "$ADB" -s "$serial" shell rm -rf "$remote_dir" >/dev/null
     "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
     mclone_push_asset_tree "$serial" "$source_dir" "$remote_dir"
+}
+
+mclone_stage_internal_sound_assets() {
+    local serial="$1"
+    local source_dir="$2"
+    local tmp_dir="/data/local/tmp/${MCLONE_ANDROID_APP_ID//./_}-local-sounds"
+
+    mclone_note "Staging local sound assets $source_dir to internal app storage files/assets/local-sounds"
+    "$ADB" -s "$serial" shell rm -rf "$tmp_dir" >/dev/null
+    "$ADB" -s "$serial" shell mkdir -p "$tmp_dir" >/dev/null
+    mclone_push_asset_tree "$serial" "$source_dir" "$tmp_dir"
+    mclone_run_as_app_shell "$serial" \
+        "rm -rf files/assets/local-sounds && mkdir -p files/assets && cp -R $tmp_dir files/assets/local-sounds && chmod -R u+rwX,go-rwx files/assets/local-sounds"
+    "$ADB" -s "$serial" shell rm -rf "$tmp_dir" >/dev/null || true
 }
 
 mclone_push_asset_tree() {

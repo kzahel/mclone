@@ -459,8 +459,8 @@ OpenXR.
 - [x] Add `android/validate-quest-flat.sh` adapted from Playbox.
 - [x] Detect attached Quest-like devices.
 - [x] Wake headset for test and restore headset settings afterward.
-- [ ] Launch the same flat `NativeActivity`, not a VR activity.
-- [ ] Capture `/tmp/mclone-quest-flat.png` and logcat.
+- [x] Launch the same flat `NativeActivity`, not a VR activity.
+- [x] Capture `/tmp/mclone-quest-flat.png` and logcat.
 
 Recorded Slice 5 setup result:
 
@@ -472,12 +472,20 @@ Recorded Slice 5 setup result:
 - Added `pnpm native:android:quest-flat`.
 - Local attempt stopped at device discovery because `adb devices` reported no
   attached Quest headset.
+- Quest 3 validation on device `2G0YC1ZF93041Z` exposed that physical Quest
+  cannot traverse adb-created external app asset subdirectories even though the
+  same path works on the AVD after root ownership repair. Flat Android now
+  stages assets into internal app storage with `run-as`, and the flat app
+  prefers `internal_data_path()` for `MCLONE_ANDROID_ASSET_ROOT`.
+- Quest flat validation passed with a 60 second smoke window. The captured
+  `/tmp/mclone-quest-flat.png` shows the flat NativeActivity as a Quest panel
+  in the headset compositor with rendered gameplay and touch UI.
 
 Validation:
 
 ```bash
 bash -n android/validate-common.sh android/validate-avd.sh android/validate-quest-flat.sh
-pnpm native:android:quest-flat -- --skip-build --screenshot /tmp/mclone-quest-flat.png --log /tmp/mclone-quest-flat-logcat.txt
+pnpm native:android:quest-flat -- --skip-build --screenshot /tmp/mclone-quest-flat.png --log /tmp/mclone-quest-flat-logcat.txt --smoke-seconds 60
 ```
 
 Expected current blocker without a connected headset:

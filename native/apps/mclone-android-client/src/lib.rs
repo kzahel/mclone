@@ -157,8 +157,8 @@ mod android {
             return;
         }
         let Some(path) = app
-            .external_data_path()
-            .or_else(|| app.internal_data_path())
+            .internal_data_path()
+            .or_else(|| app.external_data_path())
         else {
             log::warn!("could not resolve Android app data path for MCLONE_ANDROID_ASSET_ROOT");
             return;
