@@ -745,8 +745,8 @@ fn forest_features() -> Vec<PlacedFeature> {
         forest_birch_other_feature(),
         default_flower_feature(),
         forest_grass_patch_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         omitted_vegetal_feature(),
         omitted_vegetal_feature(),
         spring_water_feature(),
@@ -761,8 +761,8 @@ fn flower_forest_features() -> Vec<PlacedFeature> {
         forest_flower_trees_feature(),
         flower_forest_feature(),
         grass_patch(GRASS, 1),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         spring_water_feature(),
         spring_lava_feature(),
     ]
@@ -944,6 +944,8 @@ fn swamp_features() -> Vec<PlacedFeature> {
         waterlily_patch_feature(),
         swamp_mushroom_patch_feature(BROWN_MUSHROOM, 4, false),
         swamp_mushroom_patch_feature(RED_MUSHROOM, 8, true),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         sugar_cane_patch(20),
         pumpkin_patch(),
     ]
@@ -958,8 +960,8 @@ fn dark_forest_features(red_mushrooms_first: bool) -> Vec<PlacedFeature> {
         dark_forest_vegetation_feature(red_mushrooms_first),
         default_flower_feature(),
         forest_grass_patch_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         spring_water_feature(),
         spring_lava_feature(),
     ]
@@ -971,7 +973,8 @@ fn savanna_features(shattered: bool) -> Vec<PlacedFeature> {
         savanna_tree_feature(tree_count),
         default_flower_feature(),
         forest_grass_patch_feature(),
-        omitted_vegetal_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         spring_water_feature(),
         spring_lava_feature(),
     ]
@@ -985,8 +988,8 @@ fn jungle_features(light_bamboo: bool, edge: bool) -> Vec<PlacedFeature> {
     features.push(jungle_tree_feature(if edge { 2 } else { 50 }, edge));
     features.push(default_flower_feature());
     features.push(jungle_grass_patch_feature());
-    features.push(omitted_vegetal_feature());
-    features.push(omitted_vegetal_feature());
+    features.push(normal_mushroom_patch_feature(BROWN_MUSHROOM, 4));
+    features.push(normal_mushroom_patch_feature(RED_MUSHROOM, 8));
     features.push(spring_water_feature());
     features.push(spring_lava_feature());
     features.push(omitted_vegetal_feature());
@@ -999,8 +1002,8 @@ fn bamboo_jungle_features() -> Vec<PlacedFeature> {
         bamboo_vegetation_feature(),
         default_flower_feature(),
         jungle_grass_patch_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         spring_water_feature(),
         spring_lava_feature(),
         omitted_vegetal_feature(),
@@ -1045,8 +1048,8 @@ fn river_features(frozen: bool) -> Vec<PlacedFeature> {
         water_tree_feature(),
         default_flower_feature(),
         forest_grass_patch_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         sugar_cane_patch(10),
         pumpkin_patch(),
         spring_water_feature(),
@@ -1062,8 +1065,8 @@ fn beach_features() -> Vec<PlacedFeature> {
     vec![
         default_flower_feature(),
         forest_grass_patch_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         sugar_cane_patch(10),
         pumpkin_patch(),
         spring_water_feature(),
@@ -1536,6 +1539,32 @@ fn swamp_mushroom_patch_feature(
             place_on: &[],
         }),
         decorators,
+    )
+}
+
+fn normal_mushroom_patch_feature(state: RawBlockId, rarity: i32) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        }),
+        vec![
+            ConfiguredDecorator::chance(rarity),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
     )
 }
 

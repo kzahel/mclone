@@ -1269,6 +1269,17 @@ mod tests {
     }
 
     #[test]
+    fn biome_feature_tables_include_java_normal_mushroom_patches_for_current_lanes() {
+        for biome_id in [
+            4, 18, 132, 6, 134, 29, 157, 35, 36, 163, 164, 21, 22, 149, 23, 151, 168, 169,
+        ] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert!(has_normal_mushroom_patch(&features, BROWN_MUSHROOM, 4));
+            assert!(has_normal_mushroom_patch(&features, RED_MUSHROOM, 8));
+        }
+    }
+
+    #[test]
     fn river_and_beach_feature_tables_include_java_default_vegetation_subset() {
         let river = overworld_features_for_biome(get_layered_biome_by_id(7));
         let frozen_river = overworld_features_for_biome(get_layered_biome_by_id(11));
@@ -1285,6 +1296,8 @@ mod tests {
         for features in [&river, &frozen_river, &beach, &stone_shore, &snowy_beach] {
             assert!(has_default_flower_feature(features));
             assert!(has_default_grass_patch_feature(features));
+            assert!(has_normal_mushroom_patch(features, BROWN_MUSHROOM, 4));
+            assert!(has_normal_mushroom_patch(features, RED_MUSHROOM, 8));
             assert!(has_random_patch(features, SUGAR_CANE, 10));
             assert!(has_pumpkin_patch(features));
         }
@@ -1926,6 +1939,40 @@ mod tests {
         })
     }
 
+    fn has_normal_mushroom_patch(
+        features: &[PlacedFeature],
+        state: RawBlockId,
+        rarity: i32,
+    ) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::chance(rarity),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: patch_state,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 64,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: false,
+                        can_replace: false,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[],
+                    }) if patch_state == state
+                )
+        })
+    }
+
     fn has_water_tree_feature(features: &[PlacedFeature]) -> bool {
         features.iter().any(|feature| {
             feature.step == DecorationStep::VegetalDecoration
@@ -2053,11 +2100,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            vegetal_features[5..9]
+            vegetal_features[7..9]
                 .iter()
                 .filter(|feature| feature.feature == ConfiguredFeature::noop())
                 .count(),
-            4
+            2
         );
     }
 

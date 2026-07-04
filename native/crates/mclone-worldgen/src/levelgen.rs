@@ -446,7 +446,7 @@ mod tests {
             feature_family: Some(FeatureFamily::ForestOakBirchTrees),
         },
         PaletteMatrixCase {
-            seed: 12926,
+            seed: 18_246,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:swamp",
@@ -807,8 +807,8 @@ mod tests {
         },
         PaletteMatrixCase {
             seed: 89_335,
-            chunk_x: 0,
-            chunk_z: 0,
+            chunk_x: 5,
+            chunk_z: 4,
             biome_key: "minecraft:swamp_hills",
             surface_family: SurfaceFamily::Swamp,
             feature_family: Some(FeatureFamily::SwampNativeSubsetSugarCaneLilyPad),
