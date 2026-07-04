@@ -83,6 +83,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(`${pointedReference.width}x${pointedReference.height}`).toBe("32x80");
 
   const carvedPumpkin = index.blocks.find((block: { name: string }) => block.name === "carved-pumpkin");
+  expect(carvedPumpkin?.previewSource).toBe("authored");
   expect(carvedPumpkin?.faces.map((face: { face: string; textureName: string }) => `${face.face}:${face.textureName}`)).toEqual([
     "top:pumpkin_top",
     "bottom:pumpkin_top",
@@ -102,6 +103,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     throw new Error("Missing grass cross block fixture");
   }
   expect(grassBlock?.kind).toBe("cross");
+  expect(grassBlock?.previewSource).toBe("authored");
   expect(grassBlock?.faces.map((face: { face: string; textureName: string }) => `${face.face}:${face.textureName}`)).toEqual([
     "all:grass_cross",
   ]);
@@ -116,6 +118,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     throw new Error("Missing redstone dust dot flat block fixture");
   }
   expect(redstoneDustDot?.kind).toBe("flat");
+  expect(redstoneDustDot?.previewSource).toBe("authored");
   expect(redstoneDustDot?.faces.map((face: { face: string; textureName: string }) => `${face.face}:${face.textureName}`)).toEqual([
     "top:redstone_dust_dot",
   ]);
@@ -123,6 +126,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
 
   expect(index.blocks.find((block: { name: string }) => block.name === "glass-pane")).toMatchObject({
     kind: "pane",
+    previewSource: "vanilla-derived",
     faces: [
       { face: "top", textureName: "glass_pane_top" },
       { face: "side", textureName: "glass" },
@@ -130,14 +134,17 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   });
   expect(index.blocks.find((block: { name: string }) => block.name === "rail")).toMatchObject({
     kind: "rail",
+    previewSource: "vanilla-derived",
     faces: [{ face: "top", textureName: "rail" }],
   });
   expect(index.blocks.find((block: { name: string }) => block.name === "torch")).toMatchObject({
     kind: "torch",
+    previewSource: "vanilla-derived",
     faces: [{ face: "side", textureName: "torch" }],
   });
   expect(index.blocks.find((block: { name: string }) => block.name === "oak-door")).toMatchObject({
     kind: "door",
+    previewSource: "vanilla-derived",
     faces: [
       { face: "top", textureName: "oak_door_top" },
       { face: "bottom", textureName: "oak_door_bottom" },
@@ -145,6 +152,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   });
   expect(index.blocks.find((block: { name: string }) => block.name === "oak-trapdoor")).toMatchObject({
     kind: "trapdoor",
+    previewSource: "vanilla-derived",
     faces: [{ face: "top", textureName: "oak_trapdoor" }],
   });
 
@@ -367,6 +375,8 @@ test("shows shape-specific automatic previews for partial block families", async
   await expect(page.locator(".overviewHeader")).toContainText("partial / 1 block / 1 face");
   const glassPaneBundle = page.locator(".blockBundleCard").filter({ hasText: "Glass Pane" });
   await expect(glassPaneBundle).toContainText("pane / 1 faces");
+  await expect(glassPaneBundle).toContainText("vanilla-derived preview");
+  await expect(page.getByRole("heading", { name: "Vanilla-Derived Review Blocks" })).toBeVisible();
   await expect(page.getByRole("button", { name: "glass-pane top uses Glass Pane Top", exact: true })).toBeVisible();
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-shape-pane.png", fullPage: true });
 
@@ -375,6 +385,7 @@ test("shows shape-specific automatic previews for partial block families", async
   await expect(page.getByRole("heading", { name: "Oak Door Top" })).toBeVisible();
   const doorBundle = page.locator(".blockBundleCard").filter({ hasText: "Oak Door" });
   await expect(doorBundle).toContainText("door / 1 faces");
+  await expect(doorBundle).toContainText("vanilla-derived preview");
   await expect(page.getByRole("button", { name: "oak-door top uses Oak Door Top", exact: true })).toBeVisible();
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-shape-door.png", fullPage: true });
 
@@ -423,7 +434,11 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
 
   await page.getByRole("button", { name: "Blocks" }).click();
   await expect(page.getByRole("heading", { name: "Block Bundles" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Authored Pack Blocks" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Vanilla-Derived Review Blocks" })).toBeVisible();
   expect(await page.locator(".blockBundleCard").count()).toBeGreaterThan(0);
+  const stoneBundle = page.locator(".blockBundleCard").filter({ hasText: "Stone" }).filter({ hasText: "cube / 1 faces" });
+  await expect(stoneBundle).toContainText("authored block");
   await expect(page.getByRole("button", { name: "stone all uses Stone", exact: true })).toBeVisible();
   await page.getByLabel("Search").fill("pumpkin");
   await expect(page.getByText("Carved Pumpkin")).toBeVisible();

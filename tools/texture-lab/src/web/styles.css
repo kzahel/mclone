@@ -515,6 +515,13 @@ h3 {
   font-size: 12px;
 }
 
+.blockBundleHeader span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .atlasCardMeta {
   display: flex;
   flex-wrap: wrap;
@@ -619,6 +626,16 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 12px;
+}
+
+.blockBundleGroups,
+.blockBundleSourceGroup {
+  display: grid;
+  gap: 12px;
+}
+
+.blockSourceHeader {
+  padding: 0 2px;
 }
 
 .blockBundleCard {

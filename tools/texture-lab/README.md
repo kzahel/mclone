@@ -389,8 +389,10 @@ families can be judged in shape context instead of as cube or raw-texture-only
 art. When a texture has vanilla usage metadata but no authored pack block, the
 index builder derives a review block from the sampled vanilla block/model usage
 and writes a generated block sheet into `generated-assets`. These derived review
-blocks keep the pack source focused on authored textures; pane/door/rail/torch
-review no longer needs hand-authored `block(...)` fixture entries.
+blocks are labeled separately from authored pack blocks in the browser Blocks
+and Auto previews, so generated vanilla-context cards do not read as source
+definitions. Pane/door/rail/torch review no longer needs hand-authored
+`block(...)` fixture entries.
 
 The `mclone-default` grass block module encodes that relationship directly:
 

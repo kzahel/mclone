@@ -12,6 +12,7 @@ import {
   TEXTURE_LAB_INDEX_SCHEMA_VERSION,
   type BlockFaceIndexEntry,
   type BlockIndexEntry,
+  type BlockPreviewSource,
   type TextureBlockUsage,
   type TextureImageRef,
   type TextureIndexEntry,
@@ -43,11 +44,11 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
   await writeVanillaPreviewBlockSheets(pack, vanillaPreviewBlocks, outputRoot);
   const blocks = await Promise.all(
     [
-      ...Object.entries(pack.blocks).map(([name, block]) => ({ name, block })),
-      ...vanillaPreviewBlocks,
+      ...Object.entries(pack.blocks).map(([name, block]) => ({ name, block, previewSource: "authored" as const })),
+      ...vanillaPreviewBlocks.map((entry) => ({ ...entry, previewSource: "vanilla-derived" as const })),
     ]
       .sort((left, right) => left.name.localeCompare(right.name))
-      .map(({ name, block }) => blockEntryFrom(pack, name, block, outputRoot)),
+      .map(({ name, block, previewSource }) => blockEntryFrom(pack, name, block, previewSource, outputRoot)),
   );
 
   return {
@@ -242,10 +243,17 @@ function frozenRef(pack: TexturePackAsset, textureName: string): TextureIndexEnt
   };
 }
 
-async function blockEntryFrom(pack: TexturePackAsset, name: string, block: BlockSpec, outputRoot: string): Promise<BlockIndexEntry> {
+async function blockEntryFrom(
+  pack: TexturePackAsset,
+  name: string,
+  block: BlockSpec,
+  previewSource: BlockPreviewSource,
+  outputRoot: string,
+): Promise<BlockIndexEntry> {
   return {
     name,
     kind: block.kind,
+    previewSource,
     faces: blockFaces(block),
     sheet: await imageRef("Block sheet", path.join(outputRoot, blockSheetName(pack, name)), "pnpm texture-lab:sheet"),
   };

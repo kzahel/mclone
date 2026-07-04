@@ -4,6 +4,8 @@ import { primaryCandidateImage } from "../candidate-images";
 import type { PreviewMode } from "../store/textureLabStore";
 import { imageRefUrl, tintedImageRefUrl } from "../store/textureLabStore";
 
+type VisibleBlockEntry = { block: BlockIndexEntry; faces: BlockIndexEntry["faces"] };
+
 export function PreviewModeTabs({
   mode,
   onChange,
@@ -118,6 +120,7 @@ export function BlockBundleAtlas({
       faces: block.faces.filter((face) => textureByName.has(face.textureName)),
     }))
     .filter((entry) => entry.faces.length > 0);
+  const visibleGroups = groupBlocksByPreviewSource(visibleBlocks);
 
   return (
     <div className="overviewStack">
@@ -127,43 +130,59 @@ export function BlockBundleAtlas({
           <p>{summary ?? `${visibleBlocks.length} blocks with filtered textures`}</p>
         </div>
       </div>
-      {visibleBlocks.length ? (
-        <div className="blockBundleGrid">
-          {visibleBlocks.map(({ block, faces }) => (
-            <section key={block.name} className="blockBundleCard" aria-label={`${block.name} block bundle`}>
-              <div className="blockBundleHeader">
-                <strong>{humanizeName(block.name)}</strong>
-                <span>
-                  {block.kind} / {faces.length} faces
-                </span>
-              </div>
-              <div className="blockBundleBody">
-                <BlockSheetPreview blockName={block.name} image={block.sheet} />
-                <div className="blockFaceGrid">
-                  {faces.map((face) => {
-                    const texture = textureByName.get(face.textureName);
-                    return texture ? (
-                      <button
-                        key={`${block.name}:${face.face}:${face.textureName}`}
-                        className={texture.name === selectedTextureName ? "blockFaceTile selected" : "blockFaceTile"}
-                        type="button"
-                        aria-pressed={texture.name === selectedTextureName}
-                        aria-label={`${block.name} ${face.face} uses ${texture.displayName}`}
-                        onClick={() => onSelectTexture(texture.name)}
-                      >
-                        <div className="blockFaceTitle">
-                          <strong>{face.face}</strong>
-                          <span>{texture.name}</span>
-                        </div>
-                        <SplitTextureCompare
-                          texture={texture}
-                          previewCandidate={candidateById.get(previewSelectionsByTexture[texture.name] ?? "") ?? null}
-                          compact
-                        />
-                      </button>
-                    ) : null;
-                  })}
+      {visibleGroups.length ? (
+        <div className="blockBundleGroups">
+          {visibleGroups.map((group) => (
+            <section
+              key={group.previewSource}
+              className="blockBundleSourceGroup"
+              aria-label={blockPreviewSourceTitle(group.previewSource)}
+            >
+              <div className="subsectionHeader blockSourceHeader">
+                <div>
+                  <h3>{blockPreviewSourceTitle(group.previewSource)}</h3>
+                  <p>{group.entries.length} blocks</p>
                 </div>
+              </div>
+              <div className="blockBundleGrid">
+                {group.entries.map(({ block, faces }) => (
+                  <section key={block.name} className="blockBundleCard" aria-label={`${block.name} block bundle`}>
+                    <div className="blockBundleHeader">
+                      <strong>{humanizeName(block.name)}</strong>
+                      <span>
+                        {block.kind} / {faces.length} faces / {blockPreviewSourceLabel(block.previewSource)}
+                      </span>
+                    </div>
+                    <div className="blockBundleBody">
+                      <BlockSheetPreview blockName={block.name} image={block.sheet} />
+                      <div className="blockFaceGrid">
+                        {faces.map((face) => {
+                          const texture = textureByName.get(face.textureName);
+                          return texture ? (
+                            <button
+                              key={`${block.name}:${face.face}:${face.textureName}`}
+                              className={texture.name === selectedTextureName ? "blockFaceTile selected" : "blockFaceTile"}
+                              type="button"
+                              aria-pressed={texture.name === selectedTextureName}
+                              aria-label={`${block.name} ${face.face} uses ${texture.displayName}`}
+                              onClick={() => onSelectTexture(texture.name)}
+                            >
+                              <div className="blockFaceTitle">
+                                <strong>{face.face}</strong>
+                                <span>{texture.name}</span>
+                              </div>
+                              <SplitTextureCompare
+                                texture={texture}
+                                previewCandidate={candidateById.get(previewSelectionsByTexture[texture.name] ?? "") ?? null}
+                                compact
+                              />
+                            </button>
+                          ) : null;
+                        })}
+                      </div>
+                    </div>
+                  </section>
+                ))}
               </div>
             </section>
           ))}
@@ -220,6 +239,26 @@ function AtlasTextureCard({
 
 function artSourceMetaClass(texture: TextureIndexEntry): string {
   return texture.artSource.kind === "procedural-placeholder" ? "artSourceMeta placeholderMeta" : "artSourceMeta";
+}
+
+function groupBlocksByPreviewSource(entries: VisibleBlockEntry[]): {
+  previewSource: BlockIndexEntry["previewSource"];
+  entries: VisibleBlockEntry[];
+}[] {
+  return (["authored", "vanilla-derived"] as const)
+    .map((previewSource) => ({
+      previewSource,
+      entries: entries.filter((entry) => entry.block.previewSource === previewSource),
+    }))
+    .filter((group) => group.entries.length > 0);
+}
+
+function blockPreviewSourceLabel(source: BlockIndexEntry["previewSource"]): string {
+  return source === "vanilla-derived" ? "vanilla-derived preview" : "authored block";
+}
+
+function blockPreviewSourceTitle(source: BlockIndexEntry["previewSource"]): string {
+  return source === "vanilla-derived" ? "Vanilla-Derived Review Blocks" : "Authored Pack Blocks";
 }
 
 function BlockSheetPreview({ blockName, image }: { blockName: string; image: TextureImageRef }): JSX.Element {

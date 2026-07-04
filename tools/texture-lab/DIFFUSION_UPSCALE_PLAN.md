@@ -436,8 +436,10 @@ Local validation on macOS/M4/MPS:
     `block(...)` entry in the pack, the lab chooses a representative vanilla
     block, maps its texture slots to local authored textures, writes a generated
     block review sheet under `generated-assets`, and includes that block in
-    Auto/Blocks preview. Thin shape textures therefore no longer need manual
-    fixture block definitions.
+    Auto/Blocks preview. The curation index and UI label these entries as
+    vanilla-derived review blocks, distinct from authored pack block
+    definitions. Thin shape textures therefore no longer need manual fixture
+    block definitions.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

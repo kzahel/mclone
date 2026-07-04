@@ -203,9 +203,12 @@ export interface TextureCurationStaleSelectionEntry {
   reason: string;
 }
 
+export type BlockPreviewSource = "authored" | "vanilla-derived";
+
 export interface BlockIndexEntry {
   name: string;
   kind: BlockKind;
+  previewSource: BlockPreviewSource;
   faces: BlockFaceIndexEntry[];
   sheet: TextureImageRef;
 }
