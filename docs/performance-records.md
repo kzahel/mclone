@@ -38,6 +38,7 @@ pnpm native:timedemo:perf
 Quest/OpenXR guardrail lanes:
 
 ```bash
+pnpm native:android-xr:perf:orbit:rd5:metrics
 pnpm native:android-xr:perf:orbit:rd7:metrics
 pnpm native:android-xr:perf:orbit:rd7:frame-overlap
 pnpm native:android-xr:perf:rd10:baseline
@@ -66,6 +67,7 @@ pnpm native:runtime:perf
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for faster iteration and easier comparison with Quest RD10 guardrails. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
 - `native:android:*`: flat Android validation on AVD and Quest-as-panel. These lanes prove Android packaging, asset staging, NativeActivity startup, wgpu surface creation, touch UI, and first rendered-frame behavior. They are useful for Android startup timing, but they are not OpenXR frame-pacing proof and do not currently emit dropped-frame/headroom metrics.
+- `native:android-xr:perf:*rd5*`: Quest/OpenXR lower-distance control lanes. Use RD5 to distinguish fixed XR/render overhead from view-distance pressure; current records live in `docs/quest-standalone-performance-records.md`.
 - `native:android-xr:perf:*rd7*`: Quest/OpenXR RD7 baseline guardrails. RD7 is the headset product-style frame-pacing lane; current records live in `docs/quest-standalone-performance-records.md`.
 - `native:android-xr:perf:*rd10*`: Quest/OpenXR RD10 stress guardrails. These currently report headset app-work/headroom, dropped/stale frames, runtime/render/upload/compile tails, and Meta performance metrics where enabled. They do not yet emit the same playable/full-view-ready/render-quiescent startup-streaming markers as the desktop startup-streaming lane.
 - `native:loading-settle:*`: synthetic full-drain isolation probe. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters. Use it to split server/light/runtime cost from mesh cost, not as the primary desktop startup policy target.

@@ -54,6 +54,8 @@ pnpm native:android-xr:perf:flight:sweep
 Settled orbit at walking-like speed:
 
 ```bash
+pnpm native:android-xr:perf:orbit:rd5:metrics
+pnpm native:android-xr:perf:orbit:rd5:frame-overlap
 pnpm native:android-xr:perf:orbit:rd7:metrics
 pnpm native:android-xr:perf:orbit:rd7:frame-overlap
 pnpm native:android-xr:perf:orbit:rd7:accept4:metrics
@@ -102,6 +104,98 @@ draw counts during the measured window. Current frozen scripts use
 force-stops the app and sleeps the headset during cleanup.
 
 ## Records
+
+### 2026-07-04 - Standalone Quest 3 RD5 Settled Orbit Control
+
+Benchmarked code: current local worktree after `cce964fd` plus uncommitted
+changes. The uncommitted package/docs changes only add this lane and record this
+result, but unrelated worldgen files were also dirty during capture, so treat
+this as a current-state control rather than a clean regression baseline.
+
+This run uses the same guardrail shape as the 2026-07-04 RD7 settled-orbit
+record: two render compile workers, completed-result accept budget `2`, section
+upload budget `16`, and section accept budget `64`.
+
+Command:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build \
+  --skip-assets \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-settled-orbit \
+  --perf-orbit-speed 4.3 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd5-budgeted-current-summary.txt \
+  --log /tmp/mclone-quest-openxr-perf-orbit-rd5-budgeted-current-logcat.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+`pnpm native:android-xr:perf:orbit:rd5:metrics` now carries the same budgeted
+arguments and can reproduce this lane without the explicit command.
+
+Summary:
+
+| Lane | Path | Hz | Sample | Settle | FPS | Runtime skipped | App avg | App p50 | App p95 | App p99 | App max | Headroom avg | Over period |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| settled orbit RD5 | per-eye | `72.0` | `45.010s` | `32.411s` | `71.58` | `0` | `11.677ms` | `11.723ms` | `13.434ms` | `15.822ms` | `21.408ms` | `2.212ms` | `3.7%` |
+
+Additional pacing counters:
+
+- Frame interval summary: `13.917ms` avg / `15.471ms` p95 /
+  `17.464ms` p99 / `27.446ms` max; `1556 / 3222` frame intervals were over
+  the `13.889ms` 72 Hz period, with `0` frames over `2x` budget.
+- Runtime frame counters during the measured sample: `submitted_delta=3222`,
+  `runtime_delta=3222`, `skipped_delta=0`.
+- Meta PerfMetrics single early query: app GPU `2.832ms`, compositor GPU
+  `1.374ms`, GPU util `27.7%`, CPU util avg/worst `80.2% / 93.0%`,
+  motion-to-photon `23.836ms`, dropped-frame counter `19`. This is not yet a
+  measured per-sample dropped-frame delta.
+
+Key max buckets:
+
+| Bucket | Value |
+|---|---:|
+| Runtime upload | `6.210ms` |
+| Runtime sync | `3.790ms` |
+| Runtime GPU upload | `4.626ms` |
+| Upload apply worst mesh upload | `3.507ms` |
+| Shared records | `1.891ms` |
+| Left/right eye | `7.450ms` / `7.492ms` |
+| Stereo poll wait | `8.397ms` |
+| Server tick / scheduler tick | `16.124ms` / `15.279ms` |
+| Ready sections | `1936` |
+| Drawn sections / indices | `108` / `927,348` |
+
+Exploratory note: before adding the budgeted package lane, an unbounded RD5
+orbit run with one compile worker also passed: `71.92 FPS`, `skipped_delta=0`,
+app work `11.727ms` avg / `13.343ms` p95, and `2.162ms` average headroom.
+
+Interpretation:
+
+- RD5 is clean enough to use as the lower-distance Quest control: it has zero
+  runtime skipped frames and positive average headroom under the same 72 Hz
+  budget.
+- Compared with the RD7 guardrail below, RD5 cuts drawn pressure from `191`
+  sections / `1,512,444` indices to `108` sections / `927,348` indices and moves
+  app work from over-budget on most frames to over-budget on only `3.7%`.
+- The RD7 issue is therefore not fixed XR overhead alone. It scales materially
+  with view-distance terrain pressure and the associated upload/compile/draw
+  work.
+- The exact Quest compositor dropped-frame story is still incomplete for the
+  same reason as RD7: PerfMetrics currently logs an absolute counter, not a
+  per-sample delta.
 
 ### 2026-07-04 - Standalone Quest 3 RD7 Settled Orbit Current Guardrail
 

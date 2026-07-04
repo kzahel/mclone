@@ -67,6 +67,12 @@ Known Quest evidence:
   over-period for `81.9%` of frames. It also exposed a measurement gap: Meta's
   dropped-frame counter was captured only as a single early absolute value, not
   as a per-sample delta.
+- The 2026-07-04 RD5 settled-orbit control, using the same `2 / 16 / 64`
+  budgeted guardrail shape as RD7, was materially cleaner: `skipped_delta=0`,
+  `11.677ms` average app work, `13.434ms` p95 app work, `2.212ms` average
+  headroom, and only `3.7%` over-period frames. This makes RD5 useful as the
+  lower-distance control and points the RD7 problem toward view-distance terrain
+  pressure rather than fixed XR overhead alone.
 - `120-vanilla-render-compile-backpressure.md` measured that more render compile
   workers can improve terrain throughput, but on Quest they can also produce
   larger runtime sync and upload tails.
@@ -94,9 +100,10 @@ is a measured policy boundary, not one global knob.
   Synthetic loading-settle remains useful for attribution, but it must not be
   the only target for throughput policy.
 - Use RD7 as the default Quest XR baseline and first desktop/Quest comparison
-  distance. Use RD10 as a Quest stress lane after RD7 is understood. Keep
-  RD20/RD30 out of the default iteration loop unless the question is
-  specifically high-distance desktop long-run behavior.
+  distance. Use RD5 as a lower-distance control lane to separate fixed
+  XR/render overhead from view-distance pressure, and use RD10 as a Quest stress
+  lane after RD7 is understood. Keep RD20/RD30 out of the default iteration loop
+  unless the question is specifically high-distance desktop long-run behavior.
 - Keep runtime settle and render mesh settle separate. A faster mesh path does
   not prove server generation improved.
 - Keep average throughput and frame tails separate. A higher chunks/sec number
