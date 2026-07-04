@@ -13,7 +13,9 @@ landed 2026-07-04. Slice A2.9 raw/tinted comparison variants landed
 pack apply landed 2026-07-04. Slice D0 freeze request manifests landed
 2026-07-04. Slice D1 canonical frozen PNG overlay landed 2026-07-04. Next
 priority is a reviewed promote-from-freeze-request path that keeps browser-side
-source mutation out of the app while making accepted pixels durable.
+source mutation out of the app while making accepted pixels durable. Slice A2.10
+multi-part vanilla reference counterparts for special block models landed
+2026-07-04.
 
 ## Purpose
 
@@ -61,6 +63,8 @@ Target workflows:
   texture role
 - inspect the active authored texture, neutral/tinted export, tile repeat, mip
   strip, terrain patch, and block preview
+- compare against both one-to-one vanilla textures and encoded multi-part
+  vanilla block-model texture sets such as pointed dripstone
 - compare generated candidates with compact codenames, prompt metadata, seeds,
   strengths, projection metrics, palettes, and archive status
 - mark candidates as favorite, rejected, needs prompt iteration, or freeze
@@ -780,6 +784,9 @@ Slice A is complete when:
   comparison and human selection over numeric auto-ranking.
 - Palette/projection choices are texture-specific. Do not bake grass or stone
   assumptions into generic candidate indexing.
+- Vanilla reference mappings are not always one file per block. Encode
+  blockstate/model-driven texture sets explicitly instead of choosing one
+  arbitrary face or showing a false missing reference.
 
 ## Open Questions
 

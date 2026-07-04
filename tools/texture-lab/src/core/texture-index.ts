@@ -5,7 +5,7 @@ import { buildTextureCurationState } from "./curation";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { textureLabOutputRoot } from "../output-root";
-import { findReferenceTextureFile, runtimeCompatTexturePath } from "../reference";
+import { findOrCreateReferencePreviewFile, runtimeCompatTexturePath } from "../reference";
 import {
   TEXTURE_LAB_INDEX_SCHEMA_VERSION,
   type BlockFaceIndexEntry,
@@ -102,7 +102,7 @@ async function textureEntryFrom(
   const runtimeCompatPath = runtimeCompatTexturePath(texture.exportPath);
   const currentExportPath = path.join(outputRoot, "pack", texture.exportPath);
   const runtimeExportPath = runtimeCompatPath ? path.join(outputRoot, "runtime-pack", runtimeCompatPath) : null;
-  const referencePath = await findReferenceTextureFile(texture.exportPath);
+  const referencePath = await findOrCreateReferencePreviewFile(texture.exportPath, outputRoot);
   const sheetPath = path.join(outputRoot, `${name}-sheet.png`);
   const catalog = texture.catalog;
   const tags = catalog?.tags ?? [];

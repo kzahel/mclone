@@ -57,6 +57,16 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   await expect(tintedImageResponse).toBeOK();
   expect(tintedImageResponse.headers()["content-type"]).toBe("image/png");
 
+  const pointedDripstone = index.textures.find((texture: { name: string }) => texture.name === "pointed_dripstone");
+  expect(pointedDripstone?.images.minecraftReference.exists).toBe(true);
+  expect(pointedDripstone?.images.minecraftReference.path).toContain("reference-composites/pointed_dripstone-up-down-thickness.png");
+  const pointedReferenceResponse = await request.get(
+    `/api/image?path=${encodeURIComponent(pointedDripstone.images.minecraftReference.path)}`,
+  );
+  await expect(pointedReferenceResponse).toBeOK();
+  const pointedReference = decodePng(await pointedReferenceResponse.body());
+  expect(`${pointedReference.width}x${pointedReference.height}`).toBe("32x80");
+
   const selectResponse = await request.post("/api/curation/select", {
     data: { textureName: "grass_block_top", candidateId: archivedCandidate.id },
   });
@@ -182,6 +192,14 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await stoneCard.click();
   await expect(stoneCard).toHaveAttribute("aria-pressed", "true");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-atlas.png", fullPage: true });
+
+  await page.getByLabel("Search").fill("pointed_dripstone");
+  const pointedCard = page.getByRole("button", { name: "Pointed Dripstone atlas comparison", exact: true });
+  await expect(pointedCard).toBeVisible();
+  await expect(pointedCard).not.toContainText("Missing");
+  await expect(pointedCard.locator("img")).toHaveCount(2);
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-pointed-dripstone-reference.png", fullPage: true });
+  await page.getByLabel("Search").fill("");
 
   await page.getByRole("button", { name: "Blocks" }).click();
   await expect(page.getByRole("heading", { name: "Block Bundles" })).toBeVisible();

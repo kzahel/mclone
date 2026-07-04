@@ -283,6 +283,20 @@ Use a constrained TypeScript DSL, following the same broad pattern as
   by `curation.v1.json`; temporary exports and diffusion work products remain
   under gitignored `generated-assets/`.
 
+## Reference Counterparts
+
+Most authored textures compare against one vanilla block texture with the same
+name. Some vanilla blocks are model-part sets instead of one PNG. The reference
+layer encodes those as composite counterparts so the UI and sheets show the real
+vanilla texture set rather than a false `Missing` state.
+
+Current special mappings:
+
+- `pointed_dripstone`: a 2x5 composite, with `down` and `up` columns and
+  `base`, `frustum`, `middle`, `tip`, and `tip_merge` rows, matching the
+  `vertical_direction` and `thickness` blockstate/model fanout in Minecraft
+  1.17.1.
+
 The first source format is hybrid:
 
 - Indexed ASCII textures for small pixel-art masks, icons, overlays, and
