@@ -44,6 +44,7 @@ use crate::{
 };
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const DEFAULT_LOCAL_SINGLE_VIEW_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 static REMOTE_DEDICATED_SEND_ONLY_IGNORED_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -658,7 +659,11 @@ impl LocalSingleViewSceneRuntime {
     }
 
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-        let deadline = Instant::now() + Duration::from_secs(120);
+        self.poll_until_idle_with_timeout(DEFAULT_LOCAL_SINGLE_VIEW_IDLE_TIMEOUT)
+    }
+
+    pub fn poll_until_idle_with_timeout(&mut self, timeout: Duration) -> Result<(usize, f64)> {
+        let deadline = Instant::now() + timeout;
         let mut polls = 0_usize;
         let mut poll_ms = 0.0_f64;
         loop {
@@ -671,7 +676,10 @@ impl LocalSingleViewSceneRuntime {
                 return Ok((polls, poll_ms));
             }
             if Instant::now() >= deadline {
-                bail!("timed out waiting for local single-view worldgen jobs");
+                bail!(
+                    "timed out waiting for local single-view worldgen jobs after {:.3}s",
+                    timeout.as_secs_f64()
+                );
             }
             if diagnostics.update_queue_depth == 0
                 && self.deferred_client_chunk_drop_backlog_items() == 0
@@ -1072,6 +1080,13 @@ where
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
         match self {
             Self::Local(scene) => scene.poll_until_idle(),
+            Self::RemoteDedicated(scene) => scene.poll_until_idle(),
+        }
+    }
+
+    pub fn poll_until_idle_with_timeout(&mut self, timeout: Duration) -> Result<(usize, f64)> {
+        match self {
+            Self::Local(scene) => scene.poll_until_idle_with_timeout(timeout),
             Self::RemoteDedicated(scene) => scene.poll_until_idle(),
         }
     }

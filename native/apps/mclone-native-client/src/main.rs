@@ -29,16 +29,18 @@ use crate::cli::Cli;
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessActorReviewSheetOptions,
     HeadlessActorWalkReviewOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
-    HeadlessScreenshotUi, MovementPerfOptions, RemotePlayerVisualSmokeOptions,
-    RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, TorchLightProbeOptions,
-    WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
-    parse_screenshot_ui_arg,
+    HeadlessScreenshotUi, LoadingSettlePerfOptions, MovementPerfOptions,
+    RemotePlayerVisualSmokeOptions, RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions,
+    TorchLightProbeOptions, WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions,
+    XrUnderwaterMode, XrViewPose, parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, run_renderer_rebuild_smoke, write_actor_review_sheet,
     write_actor_walk_review, write_headless_dual_view,
 };
-use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
+use crate::perf::{
+    run_frame_budget_probe, run_loading_settle_perf, run_movement_perf_smoke, run_timedemo,
+};
 use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
 use crate::torch_light_probe::run_torch_light_probe;
 use anyhow::Result;
@@ -68,6 +70,7 @@ const MAX_MOVEMENT_PERF_STEPS: usize = 512;
 const MAX_TIMEDEMO_FRAMES: usize = 4096;
 const MAX_FRAME_BUDGET_PROBE_FRAMES: usize = 4096;
 const MAX_MOVEMENT_PERF_PATH_RADIUS: i32 = 128;
+const MAX_LOADING_SETTLE_DISTANCE_COUNT: usize = 16;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -265,6 +268,12 @@ fn main() -> Result<()> {
         }
         Cli::FrameBudgetProbe { options } => {
             let report = run_frame_budget_probe(&options)?;
+            report.validate()?;
+            report.print_json();
+            Ok(())
+        }
+        Cli::LoadingSettlePerf { options } => {
+            let report = run_loading_settle_perf(&options)?;
             report.validate()?;
             report.print_json();
             Ok(())
@@ -1619,6 +1628,58 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_loading_settle_perf_options() {
+        let cli = Cli::parse([
+            "--loading-settle-perf".to_owned(),
+            "--loading-settle-distances".to_owned(),
+            "5,10,30".to_owned(),
+            "--seed".to_owned(),
+            "99".to_owned(),
+            "--render-compile-workers".to_owned(),
+            "2".to_owned(),
+            "--debug-passive-showcase".to_owned(),
+            "false".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::LoadingSettlePerf {
+                options: LoadingSettlePerfOptions {
+                    scene: SceneOptions {
+                        seed: 99,
+                        render_compile_worker_count: 2,
+                        debug_passive_showcase: false,
+                        ..SceneOptions::default()
+                    },
+                    distances: vec![5, 10, 30],
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_rejects_invalid_loading_settle_distances() {
+        let err = Cli::parse([
+            "--loading-settle-perf".to_owned(),
+            "--loading-settle-distances".to_owned(),
+            "5,5".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("duplicate distance 5"));
+
+        let err = Cli::parse([
+            "--loading-settle-perf".to_owned(),
+            "--loading-settle-distances".to_owned(),
+            "33".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("distances must be between 2 and 32"));
     }
 
     #[test]

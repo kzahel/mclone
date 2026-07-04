@@ -17,8 +17,9 @@ use crate::{
     DEFAULT_CHUNK_X, DEFAULT_CHUNK_Z, DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
     DEFAULT_FRAME_BUDGET_TARGET_HZ, DEFAULT_MOVEMENT_PERF_PATH_RADIUS, DEFAULT_MOVEMENT_PERF_STEPS,
     DEFAULT_RENDER_DISTANCE, DEFAULT_SEED, DEFAULT_TIMEDEMO_FRAMES, DEFAULT_TIMEDEMO_PATH_RADIUS,
-    MAX_FRAME_BUDGET_PROBE_FRAMES, MAX_MOVEMENT_PERF_PATH_RADIUS, MAX_MOVEMENT_PERF_STEPS,
-    MAX_RENDER_DISTANCE, MAX_TIMEDEMO_FRAMES, MIN_RENDER_DISTANCE,
+    MAX_FRAME_BUDGET_PROBE_FRAMES, MAX_LOADING_SETTLE_DISTANCE_COUNT,
+    MAX_MOVEMENT_PERF_PATH_RADIUS, MAX_MOVEMENT_PERF_STEPS, MAX_RENDER_DISTANCE,
+    MAX_TIMEDEMO_FRAMES, MIN_RENDER_DISTANCE,
 };
 
 const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
@@ -91,6 +92,12 @@ pub(crate) struct FrameBudgetProbeOptions {
     pub(crate) path_radius_chunks: i32,
     pub(crate) target_hz: f64,
     pub(crate) movement_speed: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LoadingSettlePerfOptions {
+    pub(crate) scene: SceneOptions,
+    pub(crate) distances: Vec<i32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -419,6 +426,9 @@ pub(crate) enum Cli {
     FrameBudgetProbe {
         options: FrameBudgetProbeOptions,
     },
+    LoadingSettlePerf {
+        options: LoadingSettlePerfOptions,
+    },
     XrClearSmoke {
         options: XrClearSmokeOptions,
     },
@@ -471,9 +481,11 @@ impl Cli {
         let mut frame_budget_probe = false;
         let mut explicit_frame_budget_probe = false;
         let mut movement_frame_probe = false;
+        let mut loading_settle_perf = false;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
         let mut timedemo_frames = DEFAULT_TIMEDEMO_FRAMES;
         let mut frame_budget_frames = DEFAULT_FRAME_BUDGET_PROBE_FRAMES;
+        let mut loading_settle_distances = default_loading_settle_distances();
         let mut target_hz = DEFAULT_FRAME_BUDGET_TARGET_HZ;
         let mut movement_speed = SPECTATOR_BASE_SPEED;
         let mut path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
@@ -518,6 +530,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || loading_settle_perf
                         || xr_mclone_smoke
                     {
                         bail!("--xr-clear-smoke cannot be combined with other run modes");
@@ -530,6 +543,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || loading_settle_perf
                         || xr_clear_smoke
                     {
                         bail!("--xr-mclone-smoke cannot be combined with other run modes");
@@ -553,6 +567,14 @@ impl Cli {
                         bail!("--timedemo cannot be combined with --movement-perf");
                     }
                     timedemo = true;
+                }
+                "--loading-settle-perf" => {
+                    if mode.is_some() {
+                        bail!(
+                            "--loading-settle-perf cannot be combined with a headless output mode"
+                        );
+                    }
+                    loading_settle_perf = true;
                 }
                 "--frame-budget-probe" => {
                     if mode.is_some() {
@@ -587,7 +609,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-clear requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Clear(path))?;
@@ -597,7 +624,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--actor-review-sheet requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ActorReviewSheet(path))?;
@@ -607,7 +639,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--actor-walk-review requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ActorWalkReview(path))?;
@@ -638,7 +675,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-dual-view requires an output directory")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::DualView(path))?;
@@ -648,7 +690,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--screenshot requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Screenshot(path))?;
@@ -658,7 +705,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--renderer-rebuild-smoke requires an output directory")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::RendererRebuildSmoke(path))?;
@@ -668,7 +720,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--torch-light-probe requires an output directory")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::TorchLightProbe(path))?;
@@ -678,7 +735,12 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--remote-player-visual-smoke requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || loading_settle_perf
+                    {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::RemotePlayerVisualSmoke(path))?;
@@ -765,6 +827,11 @@ impl Cli {
                     }
                     target_hz = parse_target_hz_arg("--target-hz", args.next())?;
                 }
+                "--loading-settle-distances" | "--settle-distances" => {
+                    loading_settle_perf = true;
+                    loading_settle_distances =
+                        parse_loading_settle_distances_arg(&arg, args.next())?;
+                }
                 "--movement-frame-speed" => {
                     if explicit_frame_budget_probe {
                         bail!(
@@ -823,10 +890,11 @@ impl Cli {
         let perf_mode_count = movement_perf as u8
             + timedemo as u8
             + frame_budget_probe as u8
-            + movement_frame_probe as u8;
+            + movement_frame_probe as u8
+            + loading_settle_perf as u8;
         if perf_mode_count > 1 {
             bail!(
-                "--movement-perf, --timedemo, --frame-budget-probe, and --movement-frame-probe are mutually exclusive"
+                "--movement-perf, --timedemo, --frame-budget-probe, --movement-frame-probe, and --loading-settle-perf are mutually exclusive"
             );
         }
         if (xr_clear_smoke || xr_mclone_smoke) && (mode.is_some() || perf_mode_count > 0) {
@@ -1027,6 +1095,12 @@ impl Cli {
                     movement_speed,
                 },
             }),
+            None if loading_settle_perf => Ok(Self::LoadingSettlePerf {
+                options: LoadingSettlePerfOptions {
+                    scene,
+                    distances: loading_settle_distances,
+                },
+            }),
             None if xr_clear_smoke => Ok(Self::XrClearSmoke {
                 options: XrClearSmokeOptions {
                     frame_limit: xr_frame_limit,
@@ -1102,6 +1176,40 @@ pub(crate) fn default_native_world_root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".mclone")
         .join("worlds")
+}
+
+fn default_loading_settle_distances() -> Vec<i32> {
+    vec![5, 10, 15, 20]
+}
+
+fn parse_loading_settle_distances_arg(flag: &str, value: Option<String>) -> Result<Vec<i32>> {
+    let value = value.with_context(|| format!("{flag} requires a comma-separated list"))?;
+    let mut distances = Vec::new();
+    for part in value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let distance = part.parse::<i32>().with_context(|| {
+            format!("{flag} expects render distances such as 5,10,15, got `{part}`")
+        })?;
+        if !(MIN_RENDER_DISTANCE..=MAX_RENDER_DISTANCE).contains(&distance) {
+            bail!(
+                "{flag} distances must be between {MIN_RENDER_DISTANCE} and {MAX_RENDER_DISTANCE}"
+            );
+        }
+        if distances.contains(&distance) {
+            bail!("{flag} contains duplicate distance {distance}");
+        }
+        distances.push(distance);
+    }
+    if distances.is_empty() {
+        bail!("{flag} requires at least one distance");
+    }
+    if distances.len() > MAX_LOADING_SETTLE_DISTANCE_COUNT {
+        bail!("{flag} accepts at most {MAX_LOADING_SETTLE_DISTANCE_COUNT} distances");
+    }
+    Ok(distances)
 }
 
 fn parse_movement_steps_arg(flag: &str, value: Option<String>) -> Result<usize> {
@@ -1404,6 +1512,7 @@ fn print_help() {
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
          Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."

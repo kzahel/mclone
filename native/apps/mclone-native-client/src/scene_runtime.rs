@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-#[cfg(test)]
 use std::time::Duration;
 use std::time::Instant;
 
@@ -510,6 +509,13 @@ pub(crate) fn poll_window_runtime_until_idle(
     runtime: &mut WindowSceneRuntime,
 ) -> Result<(usize, f64)> {
     runtime.scene.poll_until_idle()
+}
+
+pub(crate) fn poll_window_runtime_until_idle_with_timeout(
+    runtime: &mut WindowSceneRuntime,
+    timeout: Duration,
+) -> Result<(usize, f64)> {
+    runtime.scene.poll_until_idle_with_timeout(timeout)
 }
 
 impl SceneOptions {

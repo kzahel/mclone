@@ -18,6 +18,7 @@ Individual lanes:
 pnpm native:worldgen:smoke
 pnpm native:movement:smoke
 pnpm native:movement-frame:smoke
+pnpm native:loading-settle:smoke
 pnpm native:timedemo:smoke
 ```
 
@@ -27,6 +28,7 @@ Release-oriented lanes:
 pnpm native:worldgen:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
+pnpm native:loading-settle:perf
 pnpm native:timedemo:perf
 ```
 
@@ -42,6 +44,7 @@ pnpm native:runtime:perf
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
+- `native:loading-settle:*`: desktop-native integrated client/server loading-settle throughput. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters.
 - `native:timedemo:*`: deterministic headless GPU render path over a fixed camera orbit. Reports scene build time, render setup, per-frame render time, and drawn section/index pressure. It does not read back PNGs per frame.
 - `native:runtime:*`: lower-level server scheduler movement benchmark without client remesh/render work.
 
@@ -60,6 +63,48 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-04 - Desktop Loading-Settle Throughput
+
+Commit reported by native benchmark JSON: `e0106245`.
+
+Note: `git_dirty=true` because this was captured while adding the
+loading-settle benchmark lane and with unrelated tactical-doc edits in the
+worktree. Treat this as the first durable desktop-native loading-settle
+baseline, not a clean historical state of `e0106245`.
+
+Host: Apple M4 Pro Mac, 48 GiB RAM, Darwin `25.5.0` arm64.
+
+Release loading-settle command:
+
+```bash
+pnpm native:loading-settle:perf
+```
+
+Benchmark options: seed `12345`, transient worlds, render compile workers `1`,
+simulation cadence `20/20/60`, lighting enabled, debug passive showcase
+disabled, benchmark idle timeout `600s` per distance.
+
+Summary:
+
+| Render distance | Target chunks | Runtime settle | Mesh settle | Full settle | Runtime chunks/sec | Full chunks/sec | Sim time | Cached sections | Pending render chunks |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `5` | `121` | `10,249.026 ms` | `547.563 ms` | `10,796.589 ms` | `11.806` | `11.207` | `9.850 s` | `1,296` | `40` |
+| `10` | `441` | `31,117.749 ms` | `6,331.645 ms` | `37,449.394 ms` | `14.172` | `11.776` | `28.850 s` | `5,776` | `80` |
+| `15` | `961` | `68,410.366 ms` | `28,736.760 ms` | `97,147.127 ms` | `14.048` | `9.892` | `57.700 s` | `13,456` | `120` |
+| `20` | `1,681` | `127,947.261 ms` | `82,297.339 ms` | `210,244.600 ms` | `13.138` | `7.995` | `97.100 s` | `24,336` | `160` |
+
+Counters at completion: `target_ready_chunks == target_chunk_count`,
+`loaded_chunks == target_chunk_count`, `pending_jobs=0`,
+`pending_publications=0`, and `pending_render_compile_jobs=0` for every
+distance. The remaining `pending_render_chunks` are edge render chunks waiting
+on outside-neighbor readiness after the requested target chunk square has
+settled.
+
+Render distances `25` and `30` are intentionally omitted from the default
+release lane for now because distance `20` already makes the lane multi-minute
+on this desktop. Add them only to an explicit long-run command until startup
+throughput improves.
 
 ### 2026-06-19 - Block Render Facts Parity
 

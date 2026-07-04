@@ -22,23 +22,27 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::actor_instances_from_presentations;
+use mclone_server::initial_spawn_center_for_seed;
 use mclone_ui::{GameMovementMode, GameUiHost, GuiScale};
 
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
 };
 use crate::cli::{
-    FrameBudgetProbeMode, FrameBudgetProbeOptions, MovementPerfOptions, SceneOptions,
-    TimedemoOptions,
+    FrameBudgetProbeMode, FrameBudgetProbeOptions, LoadingSettlePerfOptions, MovementPerfOptions,
+    SceneOptions, TimedemoOptions,
 };
 use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
 use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{
-    WindowSceneRuntime, build_scene_textured_sections, chunk_tracking_radius_for_render_distance,
-    poll_window_runtime_until_idle, square_count,
+    WindowSceneAssets, WindowSceneRuntime, build_scene_textured_sections,
+    chunk_tracking_radius_for_render_distance, poll_window_runtime_until_idle,
+    poll_window_runtime_until_idle_with_timeout, square_count,
 };
 use crate::{MAX_RENDER_DISTANCE, print_benchmark_metadata};
+
+const LOADING_SETTLE_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug)]
 pub(crate) struct MovementPerfReport {
@@ -372,6 +376,50 @@ pub(crate) struct FrameBudgetProbeReport {
     initial_index_count: u32,
     headless: mclone_render::headless::HeadlessFrameLoopReport,
     frames: Vec<FrameBudgetProbeFrameReport>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LoadingSettlePerfReport {
+    options: LoadingSettlePerfOptions,
+    asset_load_ms: f64,
+    total_elapsed_ms: f64,
+    samples: Vec<LoadingSettlePerfSampleReport>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LoadingSettlePerfSampleReport {
+    render_distance: i32,
+    chunk_tracking_radius: u32,
+    spawn_center: ChunkPos,
+    expected_target_chunks: usize,
+    target_chunk_count: usize,
+    target_ready_chunks: usize,
+    loaded_chunks: usize,
+    client_visible_chunks: usize,
+    active_ticket_chunks: usize,
+    runtime_create_ms: f64,
+    runtime_poll_count: usize,
+    runtime_poll_ms: f64,
+    runtime_settle_ms: f64,
+    render_mesh_settle_ms: f64,
+    full_settle_ms: f64,
+    runtime_chunks_per_second: f64,
+    full_chunks_per_second: f64,
+    player_position_updates: usize,
+    cached_sections: usize,
+    rebuilt_sections: usize,
+    removed_sections: usize,
+    rebuilt_vertices: u32,
+    rebuilt_faces: u32,
+    rebuilt_indices: u32,
+    visibility_graph_build_count: usize,
+    visibility_graph_total_ms: f64,
+    pending_jobs: usize,
+    pending_publications: usize,
+    pending_render_chunks: usize,
+    pending_render_compile_jobs: usize,
+    simulation_tick: u64,
+    simulation_seconds: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1080,8 +1128,213 @@ impl FrameBudgetProbeReport {
     }
 }
 
+impl LoadingSettlePerfReport {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.samples.len() != self.options.distances.len() {
+            bail!(
+                "loading-settle report recorded {} samples, expected {}",
+                self.samples.len(),
+                self.options.distances.len()
+            );
+        }
+        for sample in &self.samples {
+            if sample.target_chunk_count != sample.expected_target_chunks {
+                bail!(
+                    "render distance {} target_chunk_count={} expected {}",
+                    sample.render_distance,
+                    sample.target_chunk_count,
+                    sample.expected_target_chunks
+                );
+            }
+            if sample.target_ready_chunks != sample.target_chunk_count {
+                bail!(
+                    "render distance {} target_ready_chunks={} target_chunk_count={}",
+                    sample.render_distance,
+                    sample.target_ready_chunks,
+                    sample.target_chunk_count
+                );
+            }
+            if sample.loaded_chunks != sample.target_chunk_count {
+                bail!(
+                    "render distance {} loaded_chunks={} target_chunk_count={}",
+                    sample.render_distance,
+                    sample.loaded_chunks,
+                    sample.target_chunk_count
+                );
+            }
+            if sample.player_position_updates == 0 {
+                bail!(
+                    "render distance {} did not publish the initial player spawn position",
+                    sample.render_distance
+                );
+            }
+            if sample.cached_sections == 0 {
+                bail!(
+                    "render distance {} produced no cached render sections",
+                    sample.render_distance
+                );
+            }
+            if sample.pending_jobs != 0
+                || sample.pending_publications != 0
+                || sample.pending_render_compile_jobs != 0
+            {
+                bail!(
+                    "render distance {} did not fully settle: pending_jobs={} pending_publications={} pending_render_compile_jobs={}",
+                    sample.render_distance,
+                    sample.pending_jobs,
+                    sample.pending_publications,
+                    sample.pending_render_compile_jobs
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn print_json(&self) {
+        println!("{{");
+        print_benchmark_metadata("native_loading_settle", "  ", true);
+        println!("  \"seed\": {},", self.options.scene.seed);
+        println!("  \"world_storage\": \"transient\",");
+        println!(
+            "  \"render_compile_workers\": {},",
+            self.options.scene.render_compile_worker_count
+        );
+        println!(
+            "  \"simulation_cadence\": {{ \"host_hz\": {}, \"gameplay_hz\": {}, \"physics_hz\": {} }},",
+            self.options.scene.simulation_cadence.host_rate_hz,
+            self.options.scene.simulation_cadence.gameplay_rate_hz,
+            self.options.scene.simulation_cadence.physics_rate_hz
+        );
+        println!(
+            "  \"debug_passive_showcase\": {},",
+            self.options.scene.debug_passive_showcase
+        );
+        println!(
+            "  \"lighting_enabled\": {},",
+            self.options.scene.lighting_enabled
+        );
+        println!("  \"asset_load_ms\": {:.3},", self.asset_load_ms);
+        println!("  \"total_elapsed_ms\": {:.3},", self.total_elapsed_ms);
+        println!("  \"samples\": [");
+        for (index, sample) in self.samples.iter().enumerate() {
+            let suffix = if index + 1 == self.samples.len() {
+                ""
+            } else {
+                ","
+            };
+            println!("    {{");
+            println!(
+                "      \"render_distance_chunks\": {},",
+                sample.render_distance
+            );
+            println!(
+                "      \"chunk_tracking_radius\": {},",
+                sample.chunk_tracking_radius
+            );
+            println!(
+                "      \"spawn_center\": {{ \"x\": {}, \"z\": {} }},",
+                sample.spawn_center.x, sample.spawn_center.z
+            );
+            println!(
+                "      \"expected_target_chunks\": {},",
+                sample.expected_target_chunks
+            );
+            println!(
+                "      \"target_chunk_count\": {},",
+                sample.target_chunk_count
+            );
+            println!(
+                "      \"target_ready_chunks\": {},",
+                sample.target_ready_chunks
+            );
+            println!("      \"loaded_chunks\": {},", sample.loaded_chunks);
+            println!(
+                "      \"client_visible_chunks\": {},",
+                sample.client_visible_chunks
+            );
+            println!(
+                "      \"active_ticket_chunks\": {},",
+                sample.active_ticket_chunks
+            );
+            println!(
+                "      \"runtime_create_ms\": {:.3},",
+                sample.runtime_create_ms
+            );
+            println!(
+                "      \"runtime_poll_count\": {},",
+                sample.runtime_poll_count
+            );
+            println!("      \"runtime_poll_ms\": {:.3},", sample.runtime_poll_ms);
+            println!(
+                "      \"runtime_settle_ms\": {:.3},",
+                sample.runtime_settle_ms
+            );
+            println!(
+                "      \"render_mesh_settle_ms\": {:.3},",
+                sample.render_mesh_settle_ms
+            );
+            println!("      \"full_settle_ms\": {:.3},", sample.full_settle_ms);
+            println!(
+                "      \"runtime_chunks_per_second\": {:.3},",
+                sample.runtime_chunks_per_second
+            );
+            println!(
+                "      \"full_chunks_per_second\": {:.3},",
+                sample.full_chunks_per_second
+            );
+            println!(
+                "      \"player_position_updates\": {},",
+                sample.player_position_updates
+            );
+            println!("      \"cached_sections\": {},", sample.cached_sections);
+            println!("      \"rebuilt_sections\": {},", sample.rebuilt_sections);
+            println!("      \"removed_sections\": {},", sample.removed_sections);
+            println!("      \"rebuilt_vertices\": {},", sample.rebuilt_vertices);
+            println!("      \"rebuilt_faces\": {},", sample.rebuilt_faces);
+            println!("      \"rebuilt_indices\": {},", sample.rebuilt_indices);
+            println!(
+                "      \"visibility_graph_build_count\": {},",
+                sample.visibility_graph_build_count
+            );
+            println!(
+                "      \"visibility_graph_total_ms\": {:.3},",
+                sample.visibility_graph_total_ms
+            );
+            println!("      \"pending_jobs\": {},", sample.pending_jobs);
+            println!(
+                "      \"pending_publications\": {},",
+                sample.pending_publications
+            );
+            println!(
+                "      \"pending_render_chunks\": {},",
+                sample.pending_render_chunks
+            );
+            println!(
+                "      \"pending_render_compile_jobs\": {},",
+                sample.pending_render_compile_jobs
+            );
+            println!("      \"simulation_tick\": {},", sample.simulation_tick);
+            println!(
+                "      \"simulation_seconds\": {:.3}",
+                sample.simulation_seconds
+            );
+            println!("    }}{suffix}");
+        }
+        println!("  ]");
+        println!("}}");
+    }
+}
+
 fn target_frame_ms(target_hz: f64) -> f64 {
     1000.0 / target_hz.max(1.0)
+}
+
+fn per_second(count: usize, elapsed_ms: f64) -> f64 {
+    if elapsed_ms <= 0.0 {
+        0.0
+    } else {
+        count as f64 / (elapsed_ms / 1000.0)
+    }
 }
 
 fn frame_budget_over_count(
@@ -1209,6 +1462,110 @@ pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<M
         options: options.clone(),
         total_elapsed_ms: elapsed_ms(total_start.elapsed()),
         steps,
+    })
+}
+
+pub(crate) fn run_loading_settle_perf(
+    options: &LoadingSettlePerfOptions,
+) -> Result<LoadingSettlePerfReport> {
+    if options.scene.remote_addr.is_some() {
+        bail!("--loading-settle-perf requires the local integrated server path");
+    }
+    if options.scene.world_dir.is_some() {
+        bail!("--loading-settle-perf uses fresh transient worlds; omit --world-dir");
+    }
+
+    let total_start = Instant::now();
+    let asset_start = Instant::now();
+    let assets = WindowSceneAssets::load().context("failed to load window scene assets")?;
+    let asset_load_ms = elapsed_ms(asset_start.elapsed());
+    let mut samples = Vec::with_capacity(options.distances.len());
+
+    for &render_distance in &options.distances {
+        let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(
+            u32::try_from(render_distance).context("render distance must be non-negative")?,
+        );
+        let expected_target_chunks = square_count(
+            i32::try_from(chunk_tracking_radius).context("chunk tracking radius exceeds i32")?,
+        )?;
+        let spawn_center = initial_spawn_center_for_seed(options.scene.seed);
+        let mut scene = options.scene.clone();
+        scene.chunk_x = spawn_center.x;
+        scene.chunk_z = spawn_center.z;
+        scene.render_distance = render_distance;
+        scene.world_dir = None;
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+
+        let runtime_start = Instant::now();
+        let runtime_create_start = Instant::now();
+        let mut runtime = WindowSceneRuntime::with_assets(&scene, &assets)?;
+        let runtime_create_ms = elapsed_ms(runtime_create_start.elapsed());
+        let (runtime_poll_count, runtime_poll_ms) =
+            poll_window_runtime_until_idle_with_timeout(&mut runtime, LOADING_SETTLE_IDLE_TIMEOUT)?;
+        let runtime_settle_ms = elapsed_ms(runtime_start.elapsed());
+        let player_position_updates = runtime.drain_player_position_updates().len();
+
+        let runtime_stats = runtime.stats();
+        let loading_progress = runtime_stats.loading_progress.with_context(|| {
+            format!("render distance {render_distance} did not publish loading progress")
+        })?;
+        let render_mesh_start = Instant::now();
+        let section_update = runtime.sync_all_render_sections(spectator.position)?;
+        let render_mesh_settle_ms = elapsed_ms(render_mesh_start.elapsed());
+        let cached_sections = runtime.cached_sections().len();
+        let final_stats = runtime.stats();
+        let full_settle_ms = runtime_settle_ms + render_mesh_settle_ms;
+        let simulation_seconds = if scene.simulation_cadence.gameplay_rate_hz == 0 {
+            0.0
+        } else {
+            final_stats.last_simulation_tick as f64
+                / f64::from(scene.simulation_cadence.gameplay_rate_hz)
+        };
+
+        samples.push(LoadingSettlePerfSampleReport {
+            render_distance,
+            chunk_tracking_radius,
+            spawn_center,
+            expected_target_chunks,
+            target_chunk_count: loading_progress.target_chunk_count,
+            target_ready_chunks: loading_progress.target_ready_chunks,
+            loaded_chunks: final_stats.loaded_chunks,
+            client_visible_chunks: final_stats.client_visible_chunks,
+            active_ticket_chunks: final_stats.active_ticket_chunks,
+            runtime_create_ms,
+            runtime_poll_count,
+            runtime_poll_ms,
+            runtime_settle_ms,
+            render_mesh_settle_ms,
+            full_settle_ms,
+            runtime_chunks_per_second: per_second(
+                loading_progress.target_chunk_count,
+                runtime_settle_ms,
+            ),
+            full_chunks_per_second: per_second(loading_progress.target_chunk_count, full_settle_ms),
+            player_position_updates,
+            cached_sections,
+            rebuilt_sections: section_update.rebuilt_section_count(),
+            removed_sections: section_update.removed_section_count(),
+            rebuilt_vertices: section_update.rebuilt_vertex_count,
+            rebuilt_faces: section_update.rebuilt_face_count(),
+            rebuilt_indices: section_update.rebuilt_index_count,
+            visibility_graph_build_count: section_update.visibility_graph_stats.build_count,
+            visibility_graph_total_ms: section_update.visibility_graph_stats.total_ms,
+            pending_jobs: final_stats.pending_jobs,
+            pending_publications: final_stats.pending_publications,
+            pending_render_chunks: final_stats.pending_render_chunks,
+            pending_render_compile_jobs: final_stats.pending_render_compile_jobs,
+            simulation_tick: final_stats.last_simulation_tick,
+            simulation_seconds,
+        });
+    }
+
+    Ok(LoadingSettlePerfReport {
+        options: options.clone(),
+        asset_load_ms,
+        total_elapsed_ms: elapsed_ms(total_start.elapsed()),
+        samples,
     })
 }
 
