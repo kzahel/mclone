@@ -130,6 +130,7 @@ mod tests {
     enum FeatureFamily {
         PlainsVegetation,
         DesertDeadBushCactusSugarCane,
+        ForestOakBirchTrees,
         SwampNativeSubsetSugarCaneLilyPad,
         TaigaSpruceFernBerry,
         SnowySpruceFern,
@@ -149,6 +150,7 @@ mod tests {
             match self {
                 Self::PlainsVegetation => "plains grass/flower/oak",
                 Self::DesertDeadBushCactusSugarCane => "desert dead bush plus cactus/sugar cane",
+                Self::ForestOakBirchTrees => "forest oak/birch trees",
                 Self::SwampNativeSubsetSugarCaneLilyPad => {
                     "native swamp vegetation/clay subset plus sugar cane/lily pad"
                 }
@@ -172,6 +174,7 @@ mod tests {
             match self {
                 Self::PlainsVegetation => &[OAK_LOG, OAK_LEAVES, GRASS, DANDELION, POPPY],
                 Self::DesertDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
+                Self::ForestOakBirchTrees => &[OAK_LOG, OAK_LEAVES, BIRCH_LOG, BIRCH_LEAVES],
                 Self::SwampNativeSubsetSugarCaneLilyPad => &[
                     OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE, LILY_PAD,
                 ],
@@ -232,6 +235,10 @@ mod tests {
                         .any(|block| chunk.block_count(*block) > 0)
                         && chunk.block_count(SUGAR_CANE) > 0
                         && chunk.block_count(LILY_PAD) > 0
+                }
+                Self::ForestOakBirchTrees => {
+                    (chunk.block_count(OAK_LOG) > 0 && chunk.block_count(OAK_LEAVES) > 0)
+                        || (chunk.block_count(BIRCH_LOG) > 0 && chunk.block_count(BIRCH_LEAVES) > 0)
                 }
                 Self::TaigaSpruceFernBerry => {
                     [
@@ -334,7 +341,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:forest",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::ForestOakBirchTrees),
         },
         PaletteMatrixCase {
             seed: 376,
@@ -558,7 +565,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:wooded_hills",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::ForestOakBirchTrees),
         },
         PaletteMatrixCase {
             seed: 29,
