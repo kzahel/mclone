@@ -9,6 +9,8 @@ background batches.
 Slice B1 landed on 2026-07-04: local render distance now gets Java's
 `requested + 1` tracking halo for normal values, while startup readiness waits
 for the explicit center `3x3` publication gate.
+Slice D1 landed on 2026-07-04: loading progress now keeps latest announced
+status for grid colors separate from ready status for percent/playable counts.
 Workstream: native Rust, server scheduling, startup readiness, loading UI;
 desktop validation first
 
@@ -301,20 +303,48 @@ Completed validation:
 
 ### Slice D: Make Progress Java-Shaped Enough To Be Honest
 
-- [ ] Store latest announced status per chunk in `ChunkLoadingProgress`, not
+- [x] Store latest announced status per chunk in `ChunkLoadingProgress`, not
       only ready statuses.
-- [ ] Keep target-ready/full-ready counts separate from latest-status colors.
-- [ ] Map native statuses to the existing Java-inspired palette.
-- [ ] Decide and document whether native percent follows Java `FULL` progress or
+- [x] Keep target-ready/full-ready counts separate from latest-status colors.
+- [x] Map native statuses to the existing Java-inspired palette.
+- [x] Decide and document whether native percent follows Java `FULL` progress or
       conservative target-ready progress.
-- [ ] Ensure the loading grid shows scheduled/active phase colors while the
+- [x] Ensure the loading grid shows scheduled/active phase colors while the
       current job is running.
 
-Validation:
+Slice D1 result:
 
-- `cargo test --manifest-path native/Cargo.toml -p mclone-server`
-- `cargo test --manifest-path native/Cargo.toml -p mclone-ui`
-- visual check of Create World progress at RD20/RD30 before first entry
+- `ChunkLoadingProgress` now maintains a latest-status map for phase coloring
+  and a ready-status map for target-ready/playable counts.
+- Scheduled status events now produce colored grid cells without increasing
+  target-ready percent or the playable `3x3` gate.
+- Native percent intentionally remains conservative target-ready percent for
+  now. This can still read `0%` during a long scheduled feature job, but the
+  grid should no longer stay black once scheduled status diagnostics reach the
+  UI.
+- Existing `mclone-app-runtime` overlay mapping already maps native statuses to
+  the Java-inspired palette, so no presentation-side format change was needed.
+
+Completed validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server` passed on
+  2026-07-04 (`360` passed, `0` ignored).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime` passed
+  on 2026-07-04 (`80` passed, `0` ignored).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-ui` passed on
+  2026-07-04 (`61` passed, `0` ignored).
+- Visual check: `/tmp/mclone-loading-progress-frames-rd2.png` from
+  `--startup-wait frames:1 --render-distance 2 --lighting false` was inspected.
+  It shows conservative `0%` with a green scheduled progress cell instead of an
+  all-black grid.
+
+Known validation gap:
+
+- RD30 offscreen progress capture with `--startup-wait frames:1` wrote
+  `/tmp/mclone-loading-progress-frames-rd30.png`, but the image was still black
+  and the process had to be interrupted after `34.12s` while teardown waited on
+  the in-flight worldgen worker. This is tracked under Slice E/F below, not
+  treated as solved by Slice D1.
 
 ### Slice E: Desktop High-Radius Validation
 
@@ -331,6 +361,42 @@ Validation:
 
 Validation commands should use the current defaults from
 `docs/platforms.md#validation-policy`.
+
+2026-07-04 high-radius validation findings:
+
+- RD30 playable screenshot command with lighting enabled was interrupted after
+  `139.34s` without entering the world:
+  `--screenshot /tmp/mclone-rd30-playable.png --render-distance 30
+  --startup-wait playable`.
+- RD30 playable screenshot with `--lighting false` was interrupted after
+  `65.01s` without entering the world. Lighting is therefore not the primary
+  startup blocker.
+- The first bounded startup feature job is no longer whole-view, but the center
+  `3x3` target still expands to `5x5` feature centers and `21x21` dependency
+  chunks. That cold dependency floor is still too expensive for RD30 local
+  startup in the current implementation.
+- Reference check: Java `ChunkMap.prepareTickingChunk(...)` uses a radius-1
+  `ChunkStatus.FULL` range, `prepareEntityTickingChunk(...)` uses radius 2, and
+  `ServerLevel.setDefaultSpawnPos(...)` manages a separate fixed radius-11
+  `START` region ticket. Native's local startup divergence remains valid, but
+  it still needs a cheaper way to satisfy or stage the center gate.
+
+### Slice F: Reduce The Center-Gate Cold Feature Floor
+
+- [ ] Decide whether local startup should keep strict `3x3 Features/Light`
+      before entry or introduce an explicit staged preview state for
+      surface/collision-first entry.
+- [ ] If strict `3x3` remains the gate, reduce the first cold feature job cost
+      without regressing vanilla feature writes. Candidate directions:
+      mixed-status Java-style dependencies instead of full liquid-carved terrain
+      for the full radius-8 shell, retained dependency prewarming, or smaller
+      center-priority work packets with measured cache reuse.
+- [ ] Ensure the loading screen can repaint while the first high-radius feature
+      job is in flight. Offscreen teardown currently waits for in-flight native
+      worldgen jobs, so validation needs either a non-blocking capture mode or
+      an orderly cancellation/drain story.
+- [ ] Re-run RD20/RD30 playable screenshots and inspect at least one resulting
+      world screenshot under `/tmp`.
 
 ## Open Questions
 

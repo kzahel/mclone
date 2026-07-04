@@ -9,6 +9,7 @@ use crate::ChunkStatusStep;
 pub struct ChunkLoadingProgress {
     view: Option<ChunkLoadingProgressView>,
     target_status: ChunkStatus,
+    latest_statuses: BTreeMap<ChunkPos, ChunkStatus>,
     ready_statuses: BTreeMap<ChunkPos, ChunkStatus>,
 }
 
@@ -58,6 +59,7 @@ impl ChunkLoadingProgress {
         Self {
             view: None,
             target_status,
+            latest_statuses: BTreeMap::new(),
             ready_statuses: BTreeMap::new(),
         }
     }
@@ -79,6 +81,13 @@ impl ChunkLoadingProgress {
         status: ChunkStatus,
         step: ChunkStatusStep,
     ) {
+        self.latest_statuses
+            .entry(pos)
+            .and_modify(|latest_status| {
+                *latest_status = (*latest_status).max(status);
+            })
+            .or_insert(status);
+
         if step == ChunkStatusStep::Ready {
             self.ready_statuses
                 .entry(pos)
@@ -90,6 +99,7 @@ impl ChunkLoadingProgress {
     }
 
     pub fn clear_chunk(&mut self, pos: ChunkPos) {
+        self.latest_statuses.remove(&pos);
         self.ready_statuses.remove(&pos);
     }
 
@@ -128,15 +138,18 @@ impl ChunkLoadingProgress {
         };
 
         let mut cells = self
-            .ready_statuses
+            .latest_statuses
             .iter()
             .filter_map(|(pos, status)| {
+                let ready_status = self.ready_statuses.get(pos).copied();
+                let target_ready =
+                    ready_status.is_some_and(|ready_status| ready_status >= self.target_status);
                 chunk_within_radius(*pos, view.center, view.target_radius).then_some(
                     ChunkLoadingProgressCell {
                         relative_x: pos.x - view.center.x,
                         relative_z: pos.z - view.center.z,
                         status: Some(*status),
-                        target_ready: *status >= self.target_status,
+                        target_ready,
                         playable: *pos == stats.playable_chunk,
                     },
                 )
@@ -284,6 +297,47 @@ mod tests {
         let stats = progress.stats().unwrap();
         assert_eq!(stats.target_ready_chunks, 0);
         assert!(!stats.playable_chunk_ready);
+
+        assert_eq!(
+            progress.snapshot().unwrap().cells,
+            vec![ChunkLoadingProgressCell {
+                relative_x: 0,
+                relative_z: 0,
+                status: Some(ChunkStatus::Features),
+                target_ready: false,
+                playable: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn scheduled_status_can_color_cell_after_lower_status_is_ready() {
+        let mut progress = ChunkLoadingProgress::new(ChunkStatus::Light);
+        progress.set_view(&view(ChunkPos::new(0, 0), 0));
+
+        progress.record_status_change(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Features,
+            ChunkStatusStep::Ready,
+        );
+        progress.record_status_change(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkStatusStep::Scheduled,
+        );
+
+        let snapshot = progress.snapshot().unwrap();
+        assert_eq!(snapshot.stats.target_ready_chunks, 0);
+        assert_eq!(
+            snapshot.cells,
+            vec![ChunkLoadingProgressCell {
+                relative_x: 0,
+                relative_z: 0,
+                status: Some(ChunkStatus::Light),
+                target_ready: false,
+                playable: true,
+            }]
+        );
     }
 
     #[test]
@@ -300,6 +354,16 @@ mod tests {
         assert_eq!(stats.target_ready_chunks, 0);
         assert_eq!(stats.playable_gate_ready_chunks, 8);
         assert!(!stats.playable_chunk_ready);
+        assert_eq!(
+            progress.snapshot().unwrap().cells,
+            vec![ChunkLoadingProgressCell {
+                relative_x: 0,
+                relative_z: 0,
+                status: None,
+                target_ready: false,
+                playable: true,
+            }]
+        );
     }
 
     #[test]
