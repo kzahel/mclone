@@ -6,7 +6,10 @@ after tactical
 another desktop-first policy split: desktop flat can create, open, delete, and
 smoke persistent catalog worlds through `FlatClientDriver`, while native web
 has an IndexedDB catalog store smoke but still renders a default catalog state
-and leaves the shared catalog UI actions inert.
+and leaves the shared catalog UI actions inert. Slice 1 landed on 2026-07-04:
+`mclone-app-runtime` now has a platform-neutral flat-client catalog controller
+with shared UI-state conversion, request effects, async-style completion
+handling, active-delete guarding, and focused conformance tests.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -309,7 +312,7 @@ Deliverables:
 
 ### Slice 1: Shared Catalog Action Controller
 
-First implementation chunk.
+Status: landed 2026-07-04.
 
 Add the narrowest shared controller piece in `mclone-app-runtime`:
 
@@ -327,9 +330,33 @@ This slice should not move render resources, runtime factories, or browser
 worker lifecycle. It is deliberately only the world-catalog action/state policy
 that currently sits in desktop `FlatClientDriver`.
 
-Validation:
+Recorded Slice 1 result:
+
+- Added `mclone_app_runtime::flat_client_catalog` with
+  `FlatClientCatalogController`, `FlatClientCatalogActionContext`,
+  `FlatClientCatalogEffects`, catalog request effects, and session-start
+  effects.
+- Centralized `LocalWorldSummary -> WorldCatalogUiState` conversion, stable
+  `WorldCatalogUiWorldId` allocation, active-world row mapping, create-display
+  draft state, persistent/read-only/transient capabilities, loading state, and
+  catalog status messages.
+- Routed shared catalog actions through effect generation and completion
+  methods instead of direct storage execution:
+  `OpenWorldList`, `OpenWorldCreate`, `SelectWorld`, `ConfirmDeleteWorld`,
+  `CancelDeleteWorld`, `CreateCatalogWorld`, `OpenWorld`, and `DeleteWorld`.
+- Kept storage and runtime platform-local: callers execute emitted
+  `WorldCatalogRequest` values and later feed `WorldCatalogResponse` or
+  `WorldCatalogError` back to the controller. Desktop can complete those
+  requests synchronously; web can complete them after IndexedDB promises.
+- Added focused tests for world-list UI conversion and stable row IDs,
+  create/open/delete effect flow, async-style completion, active-world delete
+  rejection, storage errors, unsupported catalog state, and duplicate-id error
+  surfacing.
+
+Validation after Slice 1:
 
 ```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog
 cargo test --manifest-path native/Cargo.toml -p mclone-ui
 git diff --check
