@@ -1,15 +1,15 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, nineteen supported feature-family groups, and 48 F-checked
+overworld tint IDs, nineteen supported feature-family groups, and 53 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads,
 blue orchids, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
 dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, and ordinary
-forest tree plus mountain oak/spruce trees, giant-taiga mega spruce/pine,
-flower-forest dense/common flower, and sunflower-plains sunflower palette
-coverage
+forest tree plus mountain oak/spruce trees, badlands-variant dead
+bush/cactus/sugar-cane, giant-taiga mega spruce/pine, flower-forest
+dense/common flower, and sunflower-plains sunflower palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -154,8 +154,8 @@ notes.
 | 35 | `minecraft:savanna` | savanna | dry grass tint/surface and acacia tree family checked; tall grass/warm flowers gap | seed `62`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau tint/surface and acacia tree family checked; grass/warm flowers gap | seed `126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, dead bush plus cactus/sugar-cane family checked; wooded variants gap | seed `2359`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 38 | `minecraft:wooded_badlands_plateau` | badlands | terracotta/red sand checked; wooded plateau trees gap | seed `86`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand checked | seed `84`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 38 | `minecraft:wooded_badlands_plateau` | badlands | terracotta/red sand plus dead bush and sugar-cane/cactus family checked; wooded plateau tree gap | seed `94280`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand plus dead bush and sugar-cane/cactus family checked | seed `13089`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water/sand, seagrass plus coral blocks/sea pickles checked; coral plants/fans gap | seed `2696`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 45 | `minecraft:lukewarm_ocean` | ocean-lukewarm | bright water/sand, seagrass/kelp water plants checked | seed `6`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 46 | `minecraft:cold_ocean` | ocean-cold | cold water checked; gravel/grass seafloor, seagrass/kelp checked | seed `5`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -181,9 +181,9 @@ notes.
 | 162 | `minecraft:modified_gravelly_mountains` | mountains | modified gravelly mountain surface plus sparse oak/spruce tree family checked; forest-rock/emerald/infested-stone gap | seed `1831`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface and acacia tree family checked | seed `68`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau surface and acacia tree family checked | seed `2659`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface checked; pillar feature gap | seed `8464`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | wooded badlands modified plateau surface checked; trees gap | seed `3823`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau surface checked | seed `18441`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface plus dead bush and sugar-cane/cactus family checked; pillar feature gap | seed `9682`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | wooded badlands modified plateau plus dead bush and sugar-cane/cactus family checked; wooded plateau tree gap | seed `198012`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau plus dead bush and sugar-cane/cactus family checked | seed `65916`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks, and jungle log/leaves vegetation checked; vines/cocoa/top bamboo leaf states gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks, and jungle log/leaves vegetation checked; vines/cocoa/top bamboo leaf states gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 
@@ -225,8 +225,8 @@ Landed:
   families, mushroom-field huge mushrooms, birch log/leaves trees, savanna
   acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus jungle
   log/leaves vegetation, flower-forest dense and common flowers, and
-  sunflower-plains sunflower patches. Desert and badlands now require dead bush plus
-  cactus/sugar-cane family coverage; ordinary forest and wooded hills require
+  sunflower-plains sunflower patches. Desert and all generated badlands rows now
+  require dead bush plus cactus/sugar-cane family coverage; ordinary forest and wooded hills require
   an oak or birch log/leaves tree pair; swamp requires the native
   vegetation/clay subset plus blue orchids, small mushrooms, sugar cane, and
   lily pads; taiga, taiga hills, taiga mountains, base snowy taiga, and snowy
@@ -334,6 +334,12 @@ Documented gaps from this slice:
   mossy-cobblestone boulders are not generated, extra emerald and infested
   stone are not palette-checked here, and exact tree-count mismatch buckets
   remain later `103` work.
+- Java badlands rows now have high-signal dead-bush plus badlands
+  sugar-cane/cactus family coverage across the base, plateau, wooded plateau,
+  eroded, and modified plateau variants. Exact parity is still incomplete:
+  wooded badlands plateau tree visibility, eroded pillar feature shape,
+  mineshaft/structure context, pumpkin, and exact decorated mismatch buckets
+  remain later `103` work.
 - Java giant taiga now has high-signal mega spruce / mega pine tree coverage,
   including the giant 2x2 trunk, mega-pine foliage family, podzol
   alter-ground, and giant tree vs giant spruce selector weights. Exact parity
@@ -358,11 +364,11 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Move to the badlands variant rows without entering structure territory:
+Move to the desert variant rows without entering structure territory:
 
-1. Read Java badlands / wooded badlands feature table sources before editing.
-2. Try to promote rows `38`, `39`, `165`, `166`, and `167` with deterministic
-   dead-bush plus cactus/sugar-cane family checks, reusing the existing shared
-   badlands table where possible.
-3. Keep exact terracotta pillar, wooded plateau tree, mineshaft/structure, and
+1. Read Java desert hills / desert lakes feature table sources before editing.
+2. Try to promote rows `17` and `130` with deterministic dead-bush plus
+   cactus/sugar-cane family checks, reusing the existing shared desert table
+   where possible.
+3. Keep desert wells, fossil/lake behavior, villages/pyramids, and exact
    decorated-count mismatch buckets in `103`.
