@@ -149,6 +149,8 @@ impl ConfiguredFeature {
             Self::RandomPatch(config) => patch::place_random_patch(world, random, origin, *config),
             Self::Flower(config) => patch::place_flower(world, random, origin, *config),
             Self::Disk(config) => disk::place_disk(world, random, origin, *config),
+            Self::Iceberg(state) => ice::place_iceberg(world, random, origin, *state),
+            Self::BlueIce => ice::place_blue_ice(world, random, origin),
             Self::IceSpike => ice::place_ice_spike(world, random, origin),
             Self::IcePatch(config) => ice::place_ice_patch(world, random, origin, *config),
             Self::GlowLichen(config) => {
@@ -288,18 +290,18 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ORCHID,
-        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS,
-        CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH,
-        DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
+        ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE,
+        BLUE_ORCHID, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
+        CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
+        DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
         DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
         DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
         GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
         KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER,
-        LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PEONY_LOWER, POPPY,
-        RED_MUSHROOM, RED_MUSHROOM_BLOCK, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND,
-        SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES,
-        STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER,
+        LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PEONY_LOWER,
+        POPPY, RED_MUSHROOM, RED_MUSHROOM_BLOCK, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER,
+        SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW,
+        SPRUCE_LEAVES, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER,
         TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
@@ -769,6 +771,17 @@ mod tests {
                 .iter()
                 .any(|state| count_blocks(&chunk, *state) > 0)
         );
+    }
+
+    #[test]
+    fn blue_ice_feature_spreads_from_water_next_to_packed_ice() {
+        let mut chunk = flat_ocean_chunk();
+        chunk.set_block_at_y(9, 5, 8, PACKED_ICE);
+        let mut random = WorldgenRandom::new(4);
+        let feature = ConfiguredFeature::blue_ice();
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 5, 8)));
+        assert!(count_blocks(&chunk, BLUE_ICE) > 0);
     }
 
     #[test]

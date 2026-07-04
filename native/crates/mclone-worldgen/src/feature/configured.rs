@@ -1030,6 +1030,8 @@ pub enum ConfiguredFeature {
     RandomPatch(RandomPatchConfiguration),
     Flower(RandomPatchConfiguration),
     Disk(DiskConfiguration),
+    Iceberg(RawBlockId),
+    BlueIce,
     IceSpike,
     IcePatch(DiskConfiguration),
     GlowLichen(GlowLichenConfiguration),
@@ -1078,6 +1080,14 @@ impl ConfiguredFeature {
 
     pub const fn disk(config: DiskConfiguration) -> Self {
         Self::Disk(config)
+    }
+
+    pub const fn iceberg(state: RawBlockId) -> Self {
+        Self::Iceberg(state)
+    }
+
+    pub const fn blue_ice() -> Self {
+        Self::BlueIce
     }
 
     pub const fn ice_spike() -> Self {

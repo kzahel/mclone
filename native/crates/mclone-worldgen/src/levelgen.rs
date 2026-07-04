@@ -41,7 +41,7 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BIRCH_LEAVES, BIRCH_LOG,
+        ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE,
         BLUE_ORCHID, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
         CACTUS, CLAY, COARSE_DIRT, CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH,
         FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES,
@@ -143,6 +143,7 @@ mod tests {
         MountainTrees,
         BadlandsDeadBushCactusSugarCane,
         IceSpikesPackedIce,
+        FrozenOceanIcebergs,
         RiverSeagrass,
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
@@ -173,6 +174,7 @@ mod tests {
                     "badlands dead bush plus cactus/sugar cane"
                 }
                 Self::IceSpikesPackedIce => "ice spikes packed ice",
+                Self::FrozenOceanIcebergs => "frozen ocean packed/blue icebergs",
                 Self::RiverSeagrass => "river seagrass water plants",
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
@@ -236,6 +238,7 @@ mod tests {
                 Self::MountainTrees => &[OAK_LOG, OAK_LEAVES, SPRUCE_LOG, SPRUCE_LEAVES],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::IceSpikesPackedIce => &[PACKED_ICE],
+                Self::FrozenOceanIcebergs => &[PACKED_ICE, BLUE_ICE],
                 Self::RiverSeagrass => &[SEAGRASS, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER],
                 Self::OceanWaterPlants => &[
                     SEAGRASS,
@@ -345,6 +348,9 @@ mod tests {
                         && chunk.block_count(PODZOL) > 0
                         && has_two_by_two_log_square(chunk, SPRUCE_LOG)
                 }
+                Self::FrozenOceanIcebergs => {
+                    chunk.block_count(PACKED_ICE) > 0 && chunk.block_count(BLUE_ICE) > 0
+                }
                 Self::WarmOceanCoralSeaPickles => {
                     [
                         TUBE_CORAL_BLOCK,
@@ -453,12 +459,12 @@ mod tests {
             feature_family: Some(FeatureFamily::RiverSeagrass),
         },
         PaletteMatrixCase {
-            seed: 333,
+            seed: 779,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:frozen_ocean",
             surface_family: SurfaceFamily::FrozenWater,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::FrozenOceanIcebergs),
         },
         PaletteMatrixCase {
             seed: 44,
@@ -581,12 +587,12 @@ mod tests {
             feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
-            seed: 103,
+            seed: 1679,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:deep_frozen_ocean",
             surface_family: SurfaceFamily::FrozenWater,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::FrozenOceanIcebergs),
         },
         PaletteMatrixCase {
             seed: 6232,

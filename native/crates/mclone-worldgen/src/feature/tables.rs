@@ -2,8 +2,8 @@ use std::sync::OnceLock;
 
 use crate::biome::BiomeDefinition;
 use crate::block::{
-    ANDESITE, BLUE_ORCHID, BROWN_MUSHROOM, CACTUS, CLAY, COAL_ORE, COARSE_DIRT, COPPER_ORE,
-    DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE,
+    ANDESITE, BLUE_ICE, BLUE_ORCHID, BROWN_MUSHROOM, CACTUS, CLAY, COAL_ORE, COARSE_DIRT,
+    COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE,
     DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
     DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE, GRANITE, GRASS,
     GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER,
@@ -399,7 +399,9 @@ fn warm_ocean_feature_table(deep: bool) -> &'static [PlacedFeature] {
 fn frozen_ocean_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
-        .get_or_init(|| build_overworld_feature_table("minecraft:frozen_ocean", Vec::new()))
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:frozen_ocean", frozen_ocean_features())
+        })
         .as_slice()
 }
 
@@ -843,6 +845,42 @@ fn ice_patch_feature() -> PlacedFeature {
             ConfiguredDecorator::count(2),
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
+fn frozen_ocean_features() -> Vec<PlacedFeature> {
+    vec![
+        iceberg_feature(PACKED_ICE, 16),
+        iceberg_feature(BLUE_ICE, 200),
+        blue_ice_feature(),
+    ]
+}
+
+fn iceberg_feature(state: RawBlockId, rarity: i32) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::LocalModifications,
+        ConfiguredFeature::iceberg(state),
+        vec![
+            ConfiguredDecorator::chance(rarity),
+            ConfiguredDecorator::iceberg(),
+        ],
+    )
+}
+
+fn blue_ice_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::SurfaceStructures,
+        ConfiguredFeature::blue_ice(),
+        vec![
+            ConfiguredDecorator::Count(CountConfiguration::from_provider(IntProvider::uniform(
+                0, 19,
+            ))),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::uniform(
+                VerticalAnchor::absolute(30),
+                VerticalAnchor::absolute(61),
+            )),
         ],
     )
 }

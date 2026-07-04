@@ -478,6 +478,7 @@ pub enum ConfiguredDecorator {
     Nope,
     Square,
     DarkOakTree,
+    Iceberg,
     Count(CountConfiguration),
     CountNoiseBiased(NoiseCountFactorDecoratorConfiguration),
     CountExtra(FrequencyWithExtraChanceDecoratorConfiguration),
@@ -501,6 +502,10 @@ impl ConfiguredDecorator {
 
     pub const fn dark_oak_tree() -> Self {
         Self::DarkOakTree
+    }
+
+    pub const fn iceberg() -> Self {
+        Self::Iceberg
     }
 
     pub const fn count(count: i32) -> Self {
@@ -565,6 +570,7 @@ impl ConfiguredDecorator {
             Self::Nope => nope_positions(context, random, pos),
             Self::Square => square_positions(context, random, pos),
             Self::DarkOakTree => dark_oak_tree_positions(random, pos),
+            Self::Iceberg => iceberg_positions(random, pos),
             Self::Count(config) => count_positions(context, random, config, pos),
             Self::CountNoiseBiased(config) => count_noise_biased_positions(config, pos),
             Self::CountExtra(config) => count_extra_positions(context, random, config, pos),
@@ -615,6 +621,14 @@ pub fn dark_oak_tree_positions(random: &mut impl RandomSource, pos: BlockPos) ->
             )
         })
         .collect()
+}
+
+pub fn iceberg_positions(random: &mut impl RandomSource, pos: BlockPos) -> Vec<BlockPos> {
+    vec![BlockPos::new(
+        random.next_int_bound(8) + 4 + pos.x,
+        pos.y,
+        random.next_int_bound(8) + 4 + pos.z,
+    )]
 }
 
 pub fn count_positions(
@@ -934,6 +948,17 @@ mod tests {
         );
         assert_eq!(accepted_random.get_count(), 1);
         assert_eq!(rejected_random.get_count(), 1);
+    }
+
+    #[test]
+    fn iceberg_offsets_inside_vanilla_inner_chunk_window() {
+        let mut random = WorldgenRandom::new(12345);
+
+        assert_eq!(
+            ConfiguredDecorator::iceberg().get_positions(&CONTEXT, &mut random, POS),
+            vec![BlockPos::new(38, 72, -40)]
+        );
+        assert_eq!(random.get_count(), 2);
     }
 
     #[test]

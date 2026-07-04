@@ -563,6 +563,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (150, "minecraft:blue_orchid", EMPTY_PROPS),
     (151, "minecraft:brown_mushroom", EMPTY_PROPS),
     (152, "minecraft:red_mushroom", EMPTY_PROPS),
+    (153, "minecraft:blue_ice", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -581,7 +582,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 153);
+        assert_eq!(registry.len(), 154);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -913,6 +914,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:red_mushroom"),
             Some(BlockStateId(152))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:blue_ice"),
+            Some(BlockStateId(153))
         );
     }
 

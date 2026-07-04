@@ -155,6 +155,7 @@ pub const SUNFLOWER_UPPER: RawBlockId = 149;
 pub const BLUE_ORCHID: RawBlockId = 150;
 pub const BROWN_MUSHROOM: RawBlockId = 151;
 pub const RED_MUSHROOM: RawBlockId = 152;
+pub const BLUE_ICE: RawBlockId = 153;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -237,6 +238,7 @@ impl GeneratedBlockId {
     pub const BLUE_ORCHID: Self = Self(BLUE_ORCHID);
     pub const BROWN_MUSHROOM: Self = Self(BROWN_MUSHROOM);
     pub const RED_MUSHROOM: Self = Self(RED_MUSHROOM);
+    pub const BLUE_ICE: Self = Self(BLUE_ICE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -492,6 +494,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         SANDSTONE => "minecraft:sandstone",
         RED_SANDSTONE => "minecraft:red_sandstone",
         PACKED_ICE => "minecraft:packed_ice",
+        BLUE_ICE => "minecraft:blue_ice",
         OBSIDIAN => "minecraft:obsidian",
         MAGMA_BLOCK => "minecraft:magma_block",
         RED_SAND => "minecraft:red_sand",
@@ -647,6 +650,7 @@ mod tests {
         assert_eq!(block_light_opacity(RED_MUSHROOM), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
+        assert_eq!(block_light_opacity(BLUE_ICE), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
         assert_eq!(block_light_opacity(ACACIA_LOG), 15);
         assert_eq!(block_light_opacity(BROWN_MUSHROOM_BLOCK), 15);
@@ -667,6 +671,7 @@ mod tests {
         assert_eq!(block_name(TALL_SEAGRASS_UPPER), "minecraft:tall_seagrass");
         assert_eq!(block_name(KELP), "minecraft:kelp");
         assert_eq!(block_name(KELP_PLANT), "minecraft:kelp_plant");
+        assert_eq!(block_name(BLUE_ICE), "minecraft:blue_ice");
         assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
         assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
         assert_eq!(block_name(SEA_PICKLE_4), "minecraft:sea_pickle");
