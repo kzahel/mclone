@@ -1266,6 +1266,30 @@ mod tests {
     }
 
     #[test]
+    fn river_and_beach_feature_tables_include_java_default_vegetation_subset() {
+        let river = overworld_features_for_biome(get_layered_biome_by_id(7));
+        let frozen_river = overworld_features_for_biome(get_layered_biome_by_id(11));
+        let beach = overworld_features_for_biome(get_layered_biome_by_id(16));
+        let stone_shore = overworld_features_for_biome(get_layered_biome_by_id(25));
+        let snowy_beach = overworld_features_for_biome(get_layered_biome_by_id(26));
+
+        assert!(has_water_tree_feature(&river));
+        assert!(has_water_tree_feature(&frozen_river));
+        assert!(!has_water_tree_feature(&beach));
+        assert!(!has_water_tree_feature(&stone_shore));
+        assert!(!has_water_tree_feature(&snowy_beach));
+
+        for features in [&river, &frozen_river, &beach, &stone_shore, &snowy_beach] {
+            assert!(has_default_flower_feature(features));
+            assert!(has_default_grass_patch_feature(features));
+            assert!(has_random_patch(features, SUGAR_CANE, 10));
+        }
+
+        assert!(has_seagrass_feature(&river, 48, 0.4));
+        assert!(!has_seagrass_feature(&frozen_river, 48, 0.4));
+    }
+
+    #[test]
     fn swamp_feature_table_includes_java_blue_orchid_patch() {
         let swamp = overworld_features_for_biome(get_layered_biome_by_id(6));
         let blue_orchid = swamp
@@ -1864,6 +1888,71 @@ mod tests {
                         state: patch_state,
                         ..
                     }) if patch_state == state
+                )
+        })
+    }
+
+    fn has_water_tree_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators == tables::tree_threshold_decorators(0, 0.1, 1)
+                && matches!(
+                    &feature.feature,
+                    ConfiguredFeature::RandomSelector(RandomFeatureConfiguration {
+                        features: weighted,
+                        default_feature,
+                    }) if weighted.len() == 1
+                        && weighted[0].chance == 0.1
+                        && *weighted[0].feature == ConfiguredFeature::tree(TreeConfiguration::fancy_oak())
+                        && **default_feature == ConfiguredFeature::tree(TreeConfiguration::oak())
+                )
+        })
+    }
+
+    fn has_default_flower_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && matches!(
+                    &feature.feature,
+                    ConfiguredFeature::Flower(RandomPatchConfiguration {
+                        state: POPPY,
+                        weighted_states,
+                        state_provider: RandomPatchStateProvider::Weighted,
+                        tries: 64,
+                        ..
+                    }) if weighted_states == &tables::DEFAULT_FLOWER_STATES
+                )
+        })
+    }
+
+    fn has_default_grass_patch_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: GRASS,
+                        tries: 32,
+                        ..
+                    })
+                )
+        })
+    }
+
+    fn has_seagrass_feature(features: &[PlacedFeature], count: i32, tall_probability: f32) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators.first() == Some(&ConfiguredDecorator::count(count))
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::Seagrass(SeagrassConfiguration {
+                        tall_probability: actual,
+                    }) if actual == tall_probability
                 )
         })
     }

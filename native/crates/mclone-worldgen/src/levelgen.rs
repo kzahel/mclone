@@ -144,6 +144,7 @@ mod tests {
         BadlandsDeadBushCactusSugarCane,
         IceSpikesPackedIce,
         FrozenOceanIcebergs,
+        DefaultExtraSugarCane,
         RiverSeagrass,
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
@@ -175,6 +176,7 @@ mod tests {
                 }
                 Self::IceSpikesPackedIce => "ice spikes packed ice",
                 Self::FrozenOceanIcebergs => "frozen ocean packed/blue icebergs",
+                Self::DefaultExtraSugarCane => "default extra sugar cane",
                 Self::RiverSeagrass => "river seagrass water plants",
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
@@ -239,6 +241,7 @@ mod tests {
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::IceSpikesPackedIce => &[PACKED_ICE],
                 Self::FrozenOceanIcebergs => &[PACKED_ICE, BLUE_ICE],
+                Self::DefaultExtraSugarCane => &[SUGAR_CANE],
                 Self::RiverSeagrass => &[SEAGRASS, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER],
                 Self::OceanWaterPlants => &[
                     SEAGRASS,
@@ -499,20 +502,20 @@ mod tests {
             feature_family: Some(FeatureFamily::MushroomFieldHugeMushrooms),
         },
         PaletteMatrixCase {
-            seed: 45,
+            seed: 1941,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:beach",
             surface_family: SurfaceFamily::Sand,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DefaultExtraSugarCane),
         },
         PaletteMatrixCase {
-            seed: 330,
+            seed: 5006,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:snowy_beach",
             surface_family: SurfaceFamily::SnowySand,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DefaultExtraSugarCane),
         },
         PaletteMatrixCase {
             seed: 71,
@@ -632,7 +635,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:frozen_river",
             surface_family: SurfaceFamily::FrozenWater,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DefaultExtraSugarCane),
         },
         PaletteMatrixCase {
             seed: 326,
@@ -691,12 +694,12 @@ mod tests {
             feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
-            seed: 167,
+            seed: 74739,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:stone_shore",
             surface_family: SurfaceFamily::Mountain,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DefaultExtraSugarCane),
         },
         PaletteMatrixCase {
             seed: 30,
@@ -2436,7 +2439,7 @@ mod tests {
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
-        assert_eq!(report.mismatched_blocks, 69, "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 67, "{report:#?}");
         assert_eq!(
             report.top_mismatch_pairs,
             vec![
@@ -2448,7 +2451,7 @@ mod tests {
                 MismatchBucket {
                     actual: "minecraft:grass".to_owned(),
                     expected: "minecraft:air".to_owned(),
-                    count: 16,
+                    count: 14,
                 },
                 MismatchBucket {
                     actual: "minecraft:poppy".to_owned(),

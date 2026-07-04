@@ -95,7 +95,11 @@ pub(super) fn overworld_features_for_biome_cached(
         | "minecraft:modified_badlands_plateau"
         | "minecraft:modified_wooded_badlands_plateau"
         | "minecraft:eroded_badlands" => badlands_feature_table(),
-        "minecraft:river" => river_feature_table(),
+        "minecraft:river" => river_feature_table(false),
+        "minecraft:frozen_river" => river_feature_table(true),
+        "minecraft:beach" | "minecraft:snowy_beach" | "minecraft:stone_shore" => {
+            beach_feature_table()
+        }
         "minecraft:swamp" | "minecraft:swamp_hills" => swamp_feature_table(),
         "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => {
             mushroom_field_feature_table()
@@ -275,10 +279,28 @@ fn swamp_feature_table() -> &'static [PlacedFeature] {
         .as_slice()
 }
 
-fn river_feature_table() -> &'static [PlacedFeature] {
+fn river_feature_table(frozen: bool) -> &'static [PlacedFeature] {
+    static RIVER: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static FROZEN_RIVER: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if frozen { &FROZEN_RIVER } else { &RIVER };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table(
+                if frozen {
+                    "minecraft:frozen_river"
+                } else {
+                    "minecraft:river"
+                },
+                river_features(frozen),
+            )
+        })
+        .as_slice()
+}
+
+fn beach_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
-        .get_or_init(|| build_overworld_feature_table("minecraft:river", river_features()))
+        .get_or_init(|| build_overworld_feature_table("minecraft:beach", beach_features()))
         .as_slice()
 }
 
@@ -1011,8 +1033,35 @@ fn warm_ocean_features(deep: bool) -> Vec<PlacedFeature> {
     }
 }
 
-fn river_features() -> Vec<PlacedFeature> {
-    vec![seagrass_feature(48, 0.4)]
+fn river_features(frozen: bool) -> Vec<PlacedFeature> {
+    let mut features = vec![
+        water_tree_feature(),
+        default_flower_feature(),
+        forest_grass_patch_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        sugar_cane_patch(10),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
+    ];
+    if !frozen {
+        features.push(seagrass_feature(48, 0.4));
+    }
+    features
+}
+
+fn beach_features() -> Vec<PlacedFeature> {
+    vec![
+        default_flower_feature(),
+        forest_grass_patch_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        sugar_cane_patch(10),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
+    ]
 }
 
 fn default_land_features() -> Vec<PlacedFeature> {
@@ -1249,6 +1298,20 @@ fn tall_birch_tree_feature() -> PlacedFeature {
             ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002()),
         )),
         tree_threshold_decorators(10, 0.1, 1),
+    )
+}
+
+fn water_tree_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            [WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::fancy_oak()),
+                0.1,
+            )],
+            ConfiguredFeature::tree(TreeConfiguration::oak()),
+        )),
+        tree_threshold_decorators(0, 0.1, 1),
     )
 }
 

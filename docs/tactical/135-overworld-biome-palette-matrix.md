@@ -1,10 +1,11 @@
 # 135: Overworld Biome Palette Matrix
 
-Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, twenty-two supported feature-family groups, and 62 F-checked
-matrix rows landed, including cactus/sugar-cane extras, swamp/swamp-hills
-lily pads, blue orchids, sugar cane, and small mushrooms, ocean water plants,
-warm-ocean coral/sea-pickle, river seagrass, frozen-ocean blue ice,
+Status: active parent; 68 overworld matrix rows, 66 emitted-row
+biome/tint/visible-surface probes, all overworld tint IDs, twenty-three
+supported feature-family groups, and all 66 emitted rows F-checked, including
+cactus/sugar-cane extras, swamp/swamp-hills lily pads, blue orchids, sugar
+cane, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
+river seagrass, frozen-river/beach/shore sugar cane, frozen-ocean blue ice,
 ice-spikes packed ice,
 dark-forest canopy/mushroom,
 mushroom-field/shore huge mushrooms, birch and tall-birch trees, savanna acacia,
@@ -129,14 +130,14 @@ notes.
 | 4 | `minecraft:forest` | forest | forest grass tint/surface and oak/birch tree family checked; flowers/extras gap | seed `0`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 5 | `minecraft:taiga` | taiga | spruce trees, ferns, and sweet berry bushes checked | seed `233`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, small mushrooms, sugar cane, and lily pads; seagrass/pumpkin gap | seed `12926`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 7 | `minecraft:river` | river | river water plus `SEAGRASS_RIVER` seagrass/tall-seagrass water plants checked; banks/water-tree gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 7 | `minecraft:river` | river | river water plus `SEAGRASS_RIVER` seagrass/tall-seagrass water plants checked; native water-tree/default-vegetation subset present; banks/pumpkin gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice plus packed/blue iceberg and blue-ice spread coverage checked; structures/exact iceberg gap | seed `779`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice checked | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice plus default sugar-cane extras checked; normal mushrooms/pumpkin gap | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 12 | `minecraft:snowy_tundra` | frozen-land | snow over grass, native snowy spruce/fern subset | seed `42`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 13 | `minecraft:snowy_mountains` | frozen-land | snowy mountain surface plus native snowy spruce/fern subset checked; Java default grass/extras gap | seed `326`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 14 | `minecraft:mushroom_fields` | mushroom | mycelium and huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `978`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition plus huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `7056`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 16 | `minecraft:beach` | plains | sand beach checked, buried-treasure/shipwreck surface context | seed `45`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 16 | `minecraft:beach` | plains | sand beach plus default sugar-cane extras checked; buried-treasure/shipwreck/pumpkin gap | seed `1941`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 17 | `minecraft:desert_hills` | desert | sand/sandstone hills plus dead bush and cactus/sugar-cane family checked; structures/fossils gap | seed `446`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 18 | `minecraft:wooded_hills` | forest | forest hill grass and oak/birch tree family checked; flowers/extras gap | seed `2`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 19 | `minecraft:taiga_hills` | taiga | taiga hill grass plus spruce/fern and sweet berry bushes checked | seed `29`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -145,8 +146,8 @@ notes.
 | 22 | `minecraft:jungle_hills` | jungle | jungle hill surface/tint and jungle log/leaves tree family checked; vines/cocoa gap | seed `146`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface and lower-density jungle log/leaves tree family checked; vines/cocoa gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 24 | `minecraft:deep_ocean` | ocean-default | deep water checked; seagrass/kelp water plants checked | seed `4`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 25 | `minecraft:stone_shore` | mountains | stone shore checked, steep coast | seed `167`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water checked | seed `330`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 25 | `minecraft:stone_shore` | mountains | stone shore plus default sugar-cane extras checked; steep coast/structure-context gap | seed `74739`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water plus default sugar-cane extras checked; pumpkin gap | seed `5006`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 27 | `minecraft:birch_forest` | birch | birch tint/grass surface and birch log/leaves tree family checked | seed `10`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 28 | `minecraft:birch_forest_hills` | birch | birch hill surface/tint and birch log/leaves tree family checked | seed `30`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier, dark oak canopy, and huge mushroom family checked | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -217,7 +218,7 @@ notes.
 Landed:
 
 - `mclone-worldgen::levelgen::tests::palette_matrix_rows_have_expected_biome_surface_and_supported_feature_family`
-  records representative `(0,0)` seeds for all 67 rows that the native/default
+  records representative `(0,0)` seeds for all 66 rows that the native/default
   Java 1.17.1 layered source currently emits.
 - The worldgen probe asserts primary biome identity, block-position biome
   identity somewhere in the chunk, and at least one visible `FEATURES`
@@ -240,8 +241,9 @@ Landed:
   mountains and snowy taiga mountains currently require the snowy spruce/fern family; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   river requires the `SEAGRASS_RIVER` seagrass/tall-seagrass block family;
-  frozen-ocean rows require packed ice plus blue ice from the iceberg/blue-ice
-  feature table;
+  frozen river, beach, stone shore, and snowy beach require default sugar-cane
+  extra coverage; frozen-ocean rows require packed ice plus blue ice from the
+  iceberg/blue-ice feature table;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
   cap/stem blocks; mushroom field rows require a huge mushroom cap plus stem;
@@ -280,12 +282,14 @@ Landed:
   flower forests; Java-style `PATCH_SUNFLOWER` placement for sunflower plains;
   Java-shaped `ICE_SPIKE` and `ICE_PATCH` packed-ice surface-structure placement;
   Java-shaped `SEAGRASS_RIVER` count/probability table placement;
+  Java-shaped `TREES_WATER`, `PATCH_GRASS_BADLANDS`, `FLOWER_DEFAULT`, and
+  `PATCH_SUGAR_CANE` table slots for river/frozen-river/beach/shore rows;
   Java-shaped `ICEBERG_PACKED` / `ICEBERG_BLUE` local-modification placement
   and direct `BLUE_ICE` spread placement;
   Java-shaped giant taiga `MEGA_SPRUCE` / `MEGA_PINE` 2x2 trunk, mega-pine
   foliage, podzol alter-ground, and giant taiga feature-table selectors; the
   `NoiseBasedDecorator` count path used by kelp/coral/bamboo; and
-  forest/desert/badlands/swamp/river/frozen-ocean/ocean/dark-forest/birch/savanna/jungle/
+  forest/desert/badlands/swamp/river/frozen-river/beach/shore/frozen-ocean/ocean/dark-forest/birch/savanna/jungle/
   bamboo-jungle/flower-forest/sunflower-plains/giant-taiga/mountain/ice-spikes
   feature table entries, plus the mushroom-field huge mushroom table entry.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
@@ -296,9 +300,10 @@ Landed:
 
 Documented gaps from this slice:
 
-- Java default extra vegetation adds sugar cane to many other non-ocean
-  overworld biomes; this slice only landed the high-signal
-  desert/badlands/swamp extra-vegetation paths, and still omits pumpkin.
+- Java default extra vegetation adds sugar cane and pumpkin to many non-ocean
+  overworld biomes. Native now has high-signal sugar-cane coverage for
+  desert/badlands/swamp plus river/frozen-river/beach/shore rows, but still
+  omits pumpkin.
 - Java dark forest now has the high-signal dark oak plus huge mushroom selector
   path represented, but exact parity is still incomplete: dark oak still uses a
   reduced `ThreeLayersFeatureSize` free-space approximation, huge mushrooms do
@@ -327,11 +332,20 @@ Documented gaps from this slice:
   shipwreck/buried-treasure structure context, exact iceberg mismatch buckets,
   and full fluid-state/waterlogged behavior remain later `103` or structure
   work.
-- Java non-frozen river now has high-signal `SEAGRASS_RIVER` seagrass coverage.
-  Exact parity is still incomplete: water-tree placement, default
-  flower/grass/mushroom/extra vegetation, river-bank boundary shape, exact
-  seagrass counts, frozen-river behavior, and full waterlogged/fluid-state
-  modeling for water plants remain later `103` or boundary work.
+- Java river rows now have high-signal `SEAGRASS_RIVER` seagrass coverage for
+  non-frozen river and deterministic default sugar-cane extras for frozen
+  river. Native also wires the Java `TREES_WATER`, `FLOWER_DEFAULT`,
+  `PATCH_GRASS_BADLANDS`, and spring slots. Exact parity is still incomplete:
+  normal mushroom patches, pumpkin, exact water-tree visibility/counts,
+  river-bank boundary shape, exact seagrass counts, and full
+  waterlogged/fluid-state modeling for water plants remain later `103` or
+  boundary work.
+- Java beach, snowy beach, and stone shore now have deterministic default
+  sugar-cane extra coverage, plus the shared default flower/grass and spring
+  table slots. Exact parity is still incomplete: normal mushroom patches,
+  pumpkin, buried treasure, shipwrecks, mineshafts, steep shore/coast
+  boundaries, and exact decorated mismatch buckets remain later `103`,
+  structure, or boundary work.
 - Java swamp and swamp hills now have high-signal water-lily, blue-orchid,
   small-mushroom, and sugar-cane coverage. Exact parity is still incomplete:
   swamp-hills fossil ordering, swamp seagrass/extras, pumpkin, and exact
@@ -406,14 +420,14 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Move to one of the remaining non-structure shore/river rows:
+The emitted-row palette matrix is now full. Move the next chunk from row
+promotion to a still-visible parity gap:
 
-1. Read Java `riverBiome(...)`, `beachBiome(...)`, `addWaterTrees`, and
-   `addDefaultExtraVegetation` before editing.
-2. Try to promote `minecraft:frozen_river`, `minecraft:beach`, or
-   `minecraft:snowy_beach` with deterministic non-structure vegetation
-   coverage such as water-tree or sugar-cane/extras if the current fixtures
-   surface those blocks.
-3. Keep buried treasure, shipwrecks, mineshafts, exact beach/shore boundaries,
-   and exact decorated mismatch buckets in `103` or later structure/boundary
-   work.
+1. Add native `minecraft:pumpkin` block/asset registry coverage if the asset
+   lock already contains it, then port Java `PATCH_PUMPKIN` for default extra
+   vegetation.
+2. Use focused deterministic fixtures for plains, sunflower plains,
+   river/frozen-river, and beach/shore rows that already have sugar-cane
+   extras.
+3. Keep structures, exact beach/shore boundaries, and exact decorated mismatch
+   buckets in `103` or later structure/boundary work.
