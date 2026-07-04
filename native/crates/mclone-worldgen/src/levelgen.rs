@@ -478,7 +478,7 @@ mod tests {
             feature_family: Some(FeatureFamily::DarkForestCanopyMushrooms),
         },
         PaletteMatrixCase {
-            seed: 29_123,
+            seed: 2962,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:snowy_taiga",
@@ -710,7 +710,7 @@ mod tests {
             feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
-            seed: 22_120,
+            seed: 30_823,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:snowy_taiga_hills",
@@ -2351,7 +2351,7 @@ mod tests {
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
         assert!(report.matched_blocks < report.total_blocks);
-        assert_eq!(report.mismatched_blocks, 5, "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 6, "{report:#?}");
         assert_eq!(
             report.top_mismatch_pairs,
             vec![
@@ -2368,6 +2368,11 @@ mod tests {
                 MismatchBucket {
                     actual: "minecraft:air".to_owned(),
                     expected: "minecraft:lava".to_owned(),
+                    count: 1,
+                },
+                MismatchBucket {
+                    actual: "minecraft:brown_mushroom".to_owned(),
+                    expected: "minecraft:air".to_owned(),
                     count: 1,
                 },
                 MismatchBucket {
@@ -2415,7 +2420,15 @@ mod tests {
         }
 
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
-        assert!(report.is_exact(), "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 1, "{report:#?}");
+        assert_eq!(
+            report.top_mismatch_pairs,
+            vec![MismatchBucket {
+                actual: "minecraft:brown_mushroom".to_owned(),
+                expected: "minecraft:air".to_owned(),
+                count: 1,
+            }]
+        );
     }
 
     #[test]

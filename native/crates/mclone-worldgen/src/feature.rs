@@ -288,7 +288,7 @@ fn heightmap_is_opaque(heightmap: HeightmapType, block_id: RawBlockId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::biome::get_layered_biome_by_id;
+    use crate::biome::{BiomeDefinition, get_layered_biome_by_id};
     use crate::block::{
         ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE,
         BLUE_ORCHID, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
@@ -1323,11 +1323,61 @@ mod tests {
     #[test]
     fn biome_feature_tables_include_java_normal_mushroom_patches_for_current_lanes() {
         for biome_id in [
-            4, 18, 132, 6, 134, 29, 157, 35, 36, 163, 164, 21, 22, 149, 23, 151, 168, 169,
+            1, 3, 4, 5, 6, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 27, 28, 29, 30, 31, 32, 33, 34,
+            35, 36, 129, 131, 132, 133, 134, 140, 149, 151, 155, 156, 157, 158, 160, 161, 162, 163,
+            164, 168, 169,
         ] {
             let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
             assert!(has_normal_mushroom_patch(&features, BROWN_MUSHROOM, 4));
             assert!(has_normal_mushroom_patch(&features, RED_MUSHROOM, 8));
+        }
+
+        let fallback = overworld_features_for_biome(BiomeDefinition::new(
+            999,
+            "minecraft:test_fallback",
+            0.0,
+            0.0,
+        ));
+        assert!(has_normal_mushroom_patch(&fallback, BROWN_MUSHROOM, 4));
+        assert!(has_normal_mushroom_patch(&fallback, RED_MUSHROOM, 8));
+    }
+
+    #[test]
+    fn biome_feature_tables_include_java_taiga_mushroom_patches_for_current_lanes() {
+        for biome_id in [5, 14, 15, 19, 30, 31, 133, 158] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert!(has_taiga_mushroom_patch(
+                &features,
+                BROWN_MUSHROOM,
+                4,
+                None,
+                false
+            ));
+            assert!(has_taiga_mushroom_patch(
+                &features,
+                RED_MUSHROOM,
+                8,
+                None,
+                true
+            ));
+        }
+
+        for biome_id in [32, 33, 160, 161] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert!(has_taiga_mushroom_patch(
+                &features,
+                BROWN_MUSHROOM,
+                4,
+                Some(3),
+                false
+            ));
+            assert!(has_taiga_mushroom_patch(
+                &features,
+                RED_MUSHROOM,
+                8,
+                Some(3),
+                true
+            ));
         }
     }
 
@@ -2025,6 +2075,49 @@ mod tests {
         })
     }
 
+    fn has_taiga_mushroom_patch(
+        features: &[PlacedFeature],
+        state: RawBlockId,
+        rarity: i32,
+        count: Option<i32>,
+        heightmap_double_square: bool,
+    ) -> bool {
+        let mut decorators = Vec::new();
+        if let Some(count) = count {
+            decorators.push(ConfiguredDecorator::count(count));
+        }
+        decorators.push(ConfiguredDecorator::square());
+        decorators.push(if heightmap_double_square {
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking)
+        } else {
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking)
+        });
+        decorators.push(ConfiguredDecorator::chance(rarity));
+
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators == decorators
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: patch_state,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 64,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: false,
+                        can_replace: false,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[],
+                    }) if patch_state == state
+                )
+        })
+    }
+
     fn has_water_tree_feature(features: &[PlacedFeature]) -> bool {
         features.iter().any(|feature| {
             feature.step == DecorationStep::VegetalDecoration
@@ -2397,14 +2490,14 @@ mod tests {
             other => panic!("expected taiga grass random patch, got {other:?}"),
         }
         assert_eq!(
-            vegetal_features[5..11]
+            vegetal_features[9..11]
                 .iter()
                 .filter(|feature| feature.feature == ConfiguredFeature::noop())
                 .count(),
-            6
+            2
         );
         assert!(
-            vegetal_features[5..11]
+            vegetal_features[9..11]
                 .iter()
                 .all(|feature| feature.decorators.is_empty())
         );

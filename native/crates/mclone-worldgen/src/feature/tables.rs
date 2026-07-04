@@ -440,6 +440,8 @@ fn plains_features() -> Vec<PlacedFeature> {
         grass_patch(GRASS, 4),
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
     ]
 }
 
@@ -774,6 +776,8 @@ fn birch_forest_features() -> Vec<PlacedFeature> {
         grass_patch(GRASS, 3),
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
     ]
 }
 
@@ -783,6 +787,8 @@ fn tall_birch_forest_features() -> Vec<PlacedFeature> {
         grass_patch(GRASS, 3),
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
     ]
 }
 
@@ -793,10 +799,10 @@ fn taiga_features() -> Vec<PlacedFeature> {
         taiga_vegetation_feature(),
         default_flower_feature(),
         taiga_grass_patch_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        taiga_mushroom_patch_feature(BROWN_MUSHROOM, 4, false),
+        taiga_mushroom_patch_feature(RED_MUSHROOM, 8, true),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         omitted_vegetal_feature(),
         omitted_vegetal_feature(),
         spring_water_feature(),
@@ -813,10 +819,10 @@ fn giant_taiga_features(giant_spruce: bool) -> Vec<PlacedFeature> {
         default_flower_feature(),
         taiga_grass_patch_feature(),
         dead_bush_patch(1),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        counted_taiga_mushroom_patch_feature(BROWN_MUSHROOM, 4, 3, false),
+        counted_taiga_mushroom_patch_feature(RED_MUSHROOM, 8, 3, true),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         spring_water_feature(),
         spring_lava_feature(),
         berry_patch_feature(false),
@@ -827,6 +833,8 @@ fn snowy_features() -> Vec<PlacedFeature> {
     vec![
         tree_feature(BasicTreeConfiguration::spruce(), 3, 0.2, 1),
         grass_patch(FERN, 1),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
     ]
 }
 
@@ -838,6 +846,8 @@ fn ice_spikes_features() -> Vec<PlacedFeature> {
 
 fn snowy_taiga_features() -> Vec<PlacedFeature> {
     let mut features = snowy_features();
+    features.insert(2, taiga_mushroom_patch_feature(BROWN_MUSHROOM, 4, false));
+    features.insert(3, taiga_mushroom_patch_feature(RED_MUSHROOM, 8, true));
     features.push(berry_patch_feature(true));
     features
 }
@@ -912,6 +922,8 @@ fn mountain_features() -> Vec<PlacedFeature> {
         tree_feature(BasicTreeConfiguration::spruce(), 1, 0.25, 1),
         tree_feature(BasicTreeConfiguration::oak(), 0, 0.2, 1),
         grass_patch(GRASS, 1),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
     ]
 }
 
@@ -952,7 +964,14 @@ fn swamp_features() -> Vec<PlacedFeature> {
 }
 
 fn mushroom_field_features() -> Vec<PlacedFeature> {
-    vec![mushroom_field_vegetation_feature(), grass_patch(GRASS, 1)]
+    vec![
+        mushroom_field_vegetation_feature(),
+        taiga_mushroom_patch_feature(BROWN_MUSHROOM, 4, false),
+        taiga_mushroom_patch_feature(RED_MUSHROOM, 8, true),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
+        grass_patch(GRASS, 1),
+    ]
 }
 
 fn dark_forest_features(red_mushrooms_first: bool) -> Vec<PlacedFeature> {
@@ -1079,6 +1098,8 @@ fn default_land_features() -> Vec<PlacedFeature> {
         tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
         grass_patch(GRASS, 2),
         flower_patch(DANDELION, 1),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
     ]
 }
 
@@ -1512,7 +1533,36 @@ fn swamp_mushroom_patch_feature(
     rarity: i32,
     heightmap_double_square: bool,
 ) -> PlacedFeature {
-    let mut decorators = vec![ConfiguredDecorator::count(8)];
+    counted_taiga_mushroom_patch_feature(state, rarity, 8, heightmap_double_square)
+}
+
+fn taiga_mushroom_patch_feature(
+    state: RawBlockId,
+    rarity: i32,
+    heightmap_double_square: bool,
+) -> PlacedFeature {
+    mushroom_patch_feature(state, rarity, None, heightmap_double_square)
+}
+
+fn counted_taiga_mushroom_patch_feature(
+    state: RawBlockId,
+    rarity: i32,
+    count: i32,
+    heightmap_double_square: bool,
+) -> PlacedFeature {
+    mushroom_patch_feature(state, rarity, Some(count), heightmap_double_square)
+}
+
+fn mushroom_patch_feature(
+    state: RawBlockId,
+    rarity: i32,
+    count: Option<i32>,
+    heightmap_double_square: bool,
+) -> PlacedFeature {
+    let mut decorators = Vec::new();
+    if let Some(count) = count {
+        decorators.push(ConfiguredDecorator::count(count));
+    }
     decorators.push(ConfiguredDecorator::square());
     decorators.push(if heightmap_double_square {
         ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking)
@@ -1520,7 +1570,6 @@ fn swamp_mushroom_patch_feature(
         ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking)
     });
     decorators.push(ConfiguredDecorator::chance(rarity));
-
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
