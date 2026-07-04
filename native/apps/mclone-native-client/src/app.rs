@@ -1465,6 +1465,13 @@ mod tests {
         GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
     };
     use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
+    use mclone_core::{
+        AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkSnapshot, Direction,
+        block_to_section_coord, chunk_section_index, local_block_coord, local_section_block_coord,
+    };
+    use mclone_protocol::{
+        ClientCommand, MovePlayerCommand, PlayerActionCommand, PlayerActionKind,
+    };
     use mclone_render_session::{EngineCameraMovementMode, actor_instances_from_presentations};
     use mclone_ui::GameScreen;
 
@@ -1500,6 +1507,97 @@ mod tests {
 
     fn hash_signature_value(hash: u64, value: u64) -> u64 {
         (hash ^ value).wrapping_mul(0x0000_0100_0000_01b3)
+    }
+
+    fn ui_action_context() -> FlatClientUiActionContext<'static> {
+        FlatClientUiActionContext {
+            session_starting: false,
+            from_pointer_click: true,
+            fallback_remote_addr: None,
+        }
+    }
+
+    fn unique_temp_world_root(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("mclone-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    fn start_queued_session_immediately(app: &mut ChunkApp) {
+        let pending = app
+            .driver
+            .session
+            .take_pending_start()
+            .expect("session start should be queued");
+        let descriptor = pending
+            .payload
+            .descriptor
+            .clone()
+            .or_else(|| pending.request.active_descriptor())
+            .expect("queued local session should have an active descriptor");
+        app.start_world_from_scene(pending.payload.scene).unwrap();
+        app.driver.session.complete_start(descriptor.clone());
+        app.driver.apply_started_session_ui(&descriptor);
+    }
+
+    fn wait_for_client_block_state(app: &mut ChunkApp, pos: BlockPos, expected: BlockStateId) {
+        let deadline = Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let observed = app
+                .driver
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.client().block_state_at_block_pos(pos));
+            if observed == Some(expected) {
+                return;
+            }
+            app.driver.poll_runtime().unwrap();
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for block {pos:?} to become {expected:?}; observed {observed:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    fn first_non_air_block(snapshot: &ChunkSnapshot) -> Option<BlockPos> {
+        for section in snapshot.sections.iter().rev() {
+            let section_blocks = section.unpack_block_state_ids();
+            for local_y in (0..16).rev() {
+                for local_z in 0..16 {
+                    for local_x in 0..16 {
+                        if section_blocks[chunk_section_index(local_x, local_y, local_z)]
+                            != AIR_BLOCK_STATE_ID
+                        {
+                            return Some(BlockPos::new(
+                                snapshot.pos.min_block_x() + local_x,
+                                section.section_y * 16 + local_y,
+                                snapshot.pos.min_block_z() + local_z,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn snapshot_block_state(snapshot: &ChunkSnapshot, pos: BlockPos) -> BlockStateId {
+        let Some(section) = snapshot
+            .sections
+            .iter()
+            .find(|section| section.section_y == block_to_section_coord(pos.y))
+        else {
+            return AIR_BLOCK_STATE_ID;
+        };
+        let blocks = section.unpack_block_state_ids();
+        blocks[chunk_section_index(
+            local_block_coord(pos.x),
+            local_section_block_coord(pos.y),
+            local_block_coord(pos.z),
+        )]
     }
 
     #[test]
@@ -1826,6 +1924,118 @@ mod tests {
         assert_ne!(first_signature, second_signature);
         assert_eq!(app.driver.render_stats.section_count, 0);
         assert_eq!(app.driver.render_stats.index_count, 0);
+    }
+
+    #[test]
+    fn catalog_world_create_edit_quit_reopen_preserves_block_edit() {
+        let root = unique_temp_world_root("catalog-create-edit-reopen");
+        let scene = SceneOptions {
+            seed: 24_680,
+            render_distance: 0,
+            lighting_enabled: false,
+            debug_passive_showcase: false,
+            world_root: Some(root.clone()),
+            ..SceneOptions::default()
+        };
+        let assets = WindowSceneAssets::load().unwrap();
+        let mut app = ChunkApp::new(
+            scene,
+            assets,
+            TexturedSectionRenderOptions::default(),
+            WindowStartIntent::Menu,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
+        );
+
+        app.driver.set_new_world_seed(24_680);
+        let create = app
+            .driver
+            .apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
+        assert!(create.session_start_queued);
+        start_queued_session_immediately(&mut app);
+
+        let created_id = match app.driver.session.state() {
+            GameSessionState::Active { session } => session
+                .local_world_id()
+                .expect("catalog-created session must carry a local world id")
+                .clone(),
+            state => panic!("expected active catalog session, got {state:?}"),
+        };
+        let center = mclone_core::ChunkPos::new(app.driver.scene.chunk_x, app.driver.scene.chunk_z);
+        let snapshot = app
+            .driver
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.client().chunk_snapshot(center))
+            .expect("catalog-created world should load center chunk")
+            .clone();
+        let target = first_non_air_block(&snapshot).expect("generated center chunk has blocks");
+        assert_ne!(snapshot_block_state(&snapshot, target), AIR_BLOCK_STATE_ID);
+
+        let runtime = app.driver.runtime.as_mut().expect("runtime is active");
+        runtime
+            .send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(
+                    target.x as f64 + 0.5,
+                    target.y as f64,
+                    target.z as f64 + 0.5,
+                ),
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                on_ground: true,
+            }))
+            .unwrap();
+        app.driver.poll_runtime().unwrap();
+        let runtime = app.driver.runtime.as_mut().expect("runtime is active");
+        runtime
+            .send_gameplay_command(ClientCommand::PlayerAction(PlayerActionCommand {
+                pos: target,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }))
+            .unwrap();
+        wait_for_client_block_state(&mut app, target, AIR_BLOCK_STATE_ID);
+
+        app.teardown_world().unwrap();
+        app.driver.clear_session();
+        app.driver.apply_quit_to_title_ui();
+        assert_eq!(app.driver.ui_screen(), Some(GameScreen::Title));
+        assert!(app.driver.runtime.is_none());
+
+        app.driver
+            .apply_ui_action(GameUiAction::OpenWorldList, ui_action_context());
+        let state = app.driver.current_ui_render_state(
+            crate::frame_pacing::FramePacingUiState::default(),
+            mclone_ui::BlockPaletteOverlay::hidden(),
+        );
+        let row = state
+            .world_catalog
+            .entries
+            .iter()
+            .flatten()
+            .find(|entry| entry.display_name.as_str() == "New World")
+            .expect("created world should be listed after quit");
+        let open = app
+            .driver
+            .apply_ui_action(GameUiAction::OpenWorld(row.id), ui_action_context());
+        assert!(open.session_start_queued);
+        start_queued_session_immediately(&mut app);
+
+        match app.driver.session.state() {
+            GameSessionState::Active { session } => {
+                assert_eq!(session.local_world_id(), Some(&created_id));
+            }
+            state => panic!("expected reopened catalog session, got {state:?}"),
+        }
+        assert_eq!(
+            app.driver
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.client().block_state_at_block_pos(target)),
+            Some(AIR_BLOCK_STATE_ID)
+        );
+
+        app.teardown_world().unwrap();
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
