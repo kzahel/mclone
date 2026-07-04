@@ -1,6 +1,8 @@
 # 003: Native Path To TypeScript Parity
 
-Status: active parent checklist.
+Status: completed historical parent checklist.
+
+This parent checklist is no longer active prioritization. It records the old parity horizon used while the Rust engine was catching up to the retired browser implementation. Current architecture direction lives in [`../native-engine-architecture.md`](../native-engine-architecture.md), current platform posture lives in [`../platforms.md`](../platforms.md), and active tactical status lives in [`README.md`](README.md).
 
 This is the parent ordering plan for the native Rust workstream from the current native state to roughly the capability level of the TypeScript engine. It is not a single implementation slice. Use it to choose the next high-impact tactical and to avoid app-local cleanup that does not move ownership, parity, validation, or platform reach forward.
 
