@@ -652,7 +652,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:taiga_hills",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::TaigaSpruceFernBerry),
         },
         PaletteMatrixCase {
             seed: 146,
@@ -687,12 +687,12 @@ mod tests {
             feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
-            seed: 886,
+            seed: 22_120,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:snowy_taiga_hills",
             surface_family: SurfaceFamily::Snow,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::TaigaSpruceFernBerry),
         },
         PaletteMatrixCase {
             seed: 305,
@@ -775,12 +775,12 @@ mod tests {
             feature_family: Some(FeatureFamily::FlowerForestFlowers),
         },
         PaletteMatrixCase {
-            seed: 1326,
+            seed: 6126,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:taiga_mountains",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::TaigaSpruceFernBerry),
         },
         PaletteMatrixCase {
             seed: 1094,
@@ -844,7 +844,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:snowy_taiga_mountains",
             surface_family: SurfaceFamily::Snow,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SnowySpruceFern),
         },
         PaletteMatrixCase {
             seed: 282,

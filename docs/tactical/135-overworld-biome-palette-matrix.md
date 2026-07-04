@@ -1,14 +1,14 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, eighteen supported feature-family groups, and 40 F-checked
+overworld tint IDs, eighteen supported feature-family groups, and 44 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads,
 blue orchids, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
 dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
-jungle tree, bamboo-jungle, base taiga/snowy-taiga berry, and ordinary forest
-tree plus giant-taiga mega spruce/pine, flower-forest dense/common flower, and
-sunflower-plains sunflower palette coverage
+jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, and ordinary
+forest tree plus giant-taiga mega spruce/pine, flower-forest dense/common
+flower, and sunflower-plains sunflower palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -134,7 +134,7 @@ notes.
 | 16 | `minecraft:beach` | plains | sand beach checked, buried-treasure/shipwreck surface context | seed `45`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 17 | `minecraft:desert_hills` | desert | sand/sandstone hills checked; extra vegetation unprobed | seed `120`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 18 | `minecraft:wooded_hills` | forest | forest hill grass and oak/birch tree family checked; flowers/extras gap | seed `2`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 19 | `minecraft:taiga_hills` | taiga | taiga hill grass checked; spruce/fern gap | seed `29`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 19 | `minecraft:taiga_hills` | taiga | taiga hill grass plus spruce/fern and sweet berry bushes checked | seed `29`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 20 | `minecraft:mountain_edge` | mountains | tint checked; Java 1.17 final layered source appears not to emit this registered ID | no B/S fixture | `[ ] B [x] T [ ] S [ ] F` |
 | 21 | `minecraft:jungle` | jungle | grass tint/surface and jungle log/leaves tree family checked; vines/cocoa gap | seed `71`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 22 | `minecraft:jungle_hills` | jungle | jungle hill surface/tint and jungle log/leaves tree family checked; vines/cocoa gap | seed `146`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -146,7 +146,7 @@ notes.
 | 28 | `minecraft:birch_forest_hills` | birch | birch hill surface/tint and birch log/leaves tree family checked | seed `30`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier, dark oak canopy, and huge mushroom family checked | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 30 | `minecraft:snowy_taiga` | snowy-taiga | snowy surface/tint, spruce/ferns, and sweet berry bushes checked | seed `29123`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 31 | `minecraft:snowy_taiga_hills` | snowy-taiga | snowy taiga hill surface/tint checked; spruce gap | seed `886`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 31 | `minecraft:snowy_taiga_hills` | snowy-taiga | snowy taiga hill surface/tint plus spruce/fern and sweet berry bushes checked | seed `22120`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt surface plus giant spruce/mega pine log/leaves family checked; exact mushrooms/vegetation gap | seed `132`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 33 | `minecraft:giant_tree_taiga_hills` | giant-tree-taiga | giant taiga hill podzol/coarse dirt plus giant spruce/mega pine log/leaves family checked; exact mushrooms/vegetation gap | seed `305`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 34 | `minecraft:wooded_mountains` | mountains | mountain surface checked; trees gap | seed `3`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -166,7 +166,7 @@ notes.
 | 130 | `minecraft:desert_lakes` | desert | desert surface checked; lake/fossil/extra-vegetation gap | seed `98`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 131 | `minecraft:gravelly_mountains` | mountains | gravelly mountain surface checked | seed `212`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 132 | `minecraft:flower_forest` | forest | forest grass/tint, dense small flowers, and common tall flowers checked; mushrooms/extras gap | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass checked; spruce/fern mountain gap | seed `1326`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass plus spruce/fern and sweet berry bushes checked | seed `6126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 134 | `minecraft:swamp_hills` | swamp | swamp tint/surface checked; hill fossil/vegetation gap | seed `1094`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 140 | `minecraft:ice_spikes` | frozen-land | snow/ice-spikes surface checked; spike feature gap | seed `59`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 149 | `minecraft:modified_jungle` | jungle | jungle tint/surface and jungle log/leaves tree family checked; dense vines/cocoa gap | seed `1374`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -174,7 +174,7 @@ notes.
 | 155 | `minecraft:tall_birch_forest` | birch | birch tint/surface and tall-birch selector log/leaves family checked | seed `48`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 156 | `minecraft:tall_birch_hills` | birch | birch hill tint/surface and tall-birch selector log/leaves family checked | seed `1557`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 157 | `minecraft:dark_forest_hills` | dark-forest | dark-forest tint/surface, dark oak canopy, and huge mushroom family checked | seed `410`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 158 | `minecraft:snowy_taiga_mountains` | snowy-taiga | snowy taiga mountain tint/surface checked; spruce gap | seed `12006`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 158 | `minecraft:snowy_taiga_mountains` | snowy-taiga | snowy taiga mountain tint/surface plus spruce/fern checked; visible berry gap | seed `12006`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | podzol/coarse dirt surface plus giant spruce log/leaves family checked; exact mushrooms/vegetation gap | seed `6232`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 161 | `minecraft:giant_spruce_taiga_hills` | giant-spruce-taiga | giant spruce hill podzol/coarse dirt plus giant spruce log/leaves family checked; exact mushrooms/vegetation gap | seed `282`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 162 | `minecraft:modified_gravelly_mountains` | mountains | modified gravelly mountain surface checked | seed `83`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -228,7 +228,9 @@ Landed:
   cactus/sugar-cane family coverage; ordinary forest and wooded hills require
   an oak or birch log/leaves tree pair; swamp requires the native
   vegetation/clay subset plus blue orchids, small mushrooms, sugar cane, and
-  lily pads; base taiga and base snowy taiga require spruce/fern vegetation plus sweet berry bushes; generated
+  lily pads; taiga, taiga hills, taiga mountains, base snowy taiga, and snowy
+  taiga hills require spruce/fern vegetation plus sweet berry bushes; snowy
+  taiga mountains currently requires the snowy spruce/fern family; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
@@ -315,12 +317,15 @@ Documented gaps from this slice:
   incomplete: tree counts, bee-nest side effects, flower/grass/default extra
   vegetation counts, and exact decorated mismatch buckets remain later `103`
   work.
-- Java taiga now has high-signal sweet berry bush coverage for base taiga and
-  base snowy taiga, including the Java `PATCH_BERRY_SPARSE` and
-  `PATCH_BERRY_DECORATED.rarity(12)` table split. Exact parity is still
-  incomplete: taiga hills/mountains and snowy taiga hills/mountains still need
-  deterministic F-check seeds, and exact decorated mismatch buckets remain
-  later `103` work.
+- Java taiga now has high-signal sweet berry bush coverage for base taiga,
+  taiga hills, taiga mountains, base snowy taiga, and snowy taiga hills,
+  including the Java `PATCH_BERRY_SPARSE` and
+  `PATCH_BERRY_DECORATED.rarity(12)` table split. Snowy taiga mountains now
+  has deterministic spruce/fern coverage, but the checked `(0,0)` candidates
+  inspected in this slice did not surface a berry bush. Exact parity is still
+  incomplete: snowy taiga mountains berry visibility, default mushrooms,
+  default extra vegetation, and exact decorated mismatch buckets remain later
+  `103` work.
 - Java giant taiga now has high-signal mega spruce / mega pine tree coverage,
   including the giant 2x2 trunk, mega-pine foliage family, podzol
   alter-ground, and giant tree vs giant spruce selector weights. Exact parity
@@ -345,12 +350,11 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Close the remaining taiga-family checklist rows without entering structure
-territory:
+Move to the mountain-family surface rows without entering structure territory:
 
-1. Read the Java taiga and snowy-taiga vegetation table sources before editing.
-2. Find or refresh `(0,0)` seeds for rows `19`, `31`, `133`, and `158` that
-   contain the existing spruce/fern/berry family where appropriate.
-3. Promote those rows to deterministic `F` checks if the current shared tables
-   already support them; otherwise add only the narrow missing shared
-   random-patch/table routing needed for broad palette coverage.
+1. Read Java mountain / wooded mountain feature table sources before editing.
+2. Add or verify broad deterministic palette checks for rows `3`, `34`, `131`,
+   and `162`, focusing on sparse mountain trees or rock/gravel feature signals
+   that are already shared worldgen concepts.
+3. Keep exact ore, structure, and decorated-count mismatch buckets in `103`;
+   this matrix should only promote high-signal visible block-family coverage.
