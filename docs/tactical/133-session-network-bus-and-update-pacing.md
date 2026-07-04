@@ -15,7 +15,8 @@ eliminate it; Slice 3H client entity-by-chunk unload index landed and cut the
 Quest update-pump tail below 4 ms; Slice 3I batched packed-section patching
 landed and improved the section-block client tail; Slice 3J deferred client
 chunk snapshot payload drops landed and removed the Quest unload client-apply
-tail while making cleanup cost explicit in poll diagnostics;
+tail while making cleanup cost explicit in poll diagnostics; Slice 3K native
+deferred payload drop worker landed and moved that cleanup off the app frame;
 remote/web bus convergence and broader terrain coordinator lifecycle remain
 active
 Workstream: shared native Rust app runtime, local integrated server runner,
@@ -815,7 +816,8 @@ Recorded Slice 3J result:
   `section_client_ms=1.996`. Overall update apply is
   `apply_updates_ms=2.066`, `dirty_mark_ms=1.883`,
   `client_apply_ms=1.997`.
-- Deferred cleanup is now visible and bounded separately from apply:
+- Deferred cleanup is now visible and bounded separately from apply, but this
+  still left cleanup inside the app-frame poll:
   `deferred_chunk_drop_ms=3.011`,
   `deferred_chunk_drop_items=16`,
   `deferred_chunk_drop_backlog_items=3078`, and
@@ -830,20 +832,84 @@ Recorded Slice 3J result:
   `upload_limited=true`, `accept_limited=true`, `backpressured=true`,
   `queued_upload_removed_sections=1408`, `max_runtime_upload_apply_ms=5.217`.
 
+### Slice 3K - Native Deferred Payload Drop Worker
+
+Goal: keep deferred old-snapshot payload destruction out of the app/render
+frame while retaining the immediate client-replica unload semantics from Slice
+3J.
+
+- [x] Keep `ClientRuntime` deterministic by continuing to own the removed
+  snapshot queue and vector-level drop-item accounting.
+- [x] Add a whole-snapshot handoff API so native runtimes can move old
+  `ChunkSnapshot` payload ownership without freeing it on the app frame.
+- [x] Add a native `LocalSingleViewSceneRuntime` drop worker that receives
+  handed-off snapshots and frees them on a named background thread.
+- [x] Report combined client-queue plus worker-pending backlog through the
+  existing `deferred_chunk_drop_backlog_items` diagnostic.
+- [x] Make `poll_until_idle` wait for the combined backlog so tests and startup
+  helpers do not leave background cleanup pending.
+
+Validation (Slice 3K):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-client -- --nocapture`
+  passed (`90` tests).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+  passed (`78` tests). The local churn probe reported `9` unloads,
+  `deferred_chunk_drop_items=137`, `max_deferred_chunk_drop_ms=0.016`,
+  `max_deferred_chunk_drop_backlog_items=137`, and zero combined backlog at
+  settle.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene` passed.
+- Quest chunk-view churn validation passed with the same `2 / 16 / 64` lane,
+  writing
+  `/tmp/mclone-quest-openxr-churn-deferred-drop-worker-handoff-summary.txt`
+  and
+  `/tmp/mclone-quest-openxr-churn-deferred-drop-worker-handoff-logcat.txt`.
+
+Recorded Slice 3K result:
+
+- The deferred cleanup tail left the app-frame poll:
+  `deferred_chunk_drop_ms=0.131`,
+  `deferred_chunk_drop_items=39`,
+  `deferred_chunk_drop_backlog_items=5994`, and
+  `max_runtime_poll_ms=2.279`.
+- Update apply stayed in the intended thin-apply band for this run:
+  `apply_updates_ms=2.183`, `dirty_mark_ms=2.114`,
+  `client_apply_ms=1.986`; unload apply was
+  `unload_ms=1.581`, `unload_dirty_ms=1.321`,
+  `unload_client_ms=0.256`.
+- Queue age remained in the same rough band under the churn lane:
+  `server_update_queue_depth=406`,
+  `server_update_oldest_applied_age_ms=235.040`.
+- Worst sampled frames again had zero or tiny update-apply work and were
+  dominated by terrain upload/poll-wait shape, not deferred cleanup or update
+  application.
+- Terrain upload pressure remains the next dominant local integrated follow-up:
+  `max_runtime_upload_apply_ms=14.021`,
+  `max_runtime_gpu_upload_ms=15.643`, `upload_limited=true`,
+  `accept_limited=true`, `backpressured=true`,
+  `queued_upload_removed_sections=1408`.
+- Ready/prepared churn was no longer the top bucket in this run:
+  `max_runtime_ready_sections_ms=1.148`,
+  `ready_set_backpressured=72`,
+  `ready_set_backpressured_skipped=253`,
+  `prepared_rebuild_max_ms=1.246`, and
+  `prepared_rebuild_backpressured_dirty=2`.
+
 Slice 3 conclusion: the local integrated update pump now follows the intended
 thin-apply shape for resident dirty marking: producer-side decode, strict
-receive-order application, resident flag flips, deferred old-payload cleanup,
+receive-order application, resident flag flips, off-frame old-payload cleanup,
 and bounded compile/upload pull-work. Remaining frame misses are no longer
 explained by hidden command drain, render-thread decode, full-cache dirty
-scans, resident dirty-set insertion, entity cleanup scans, or old chunk
-snapshot destruction in the unload apply bucket. Keep receive order; any
-additional divergence should stop between ordered update records or make
-oversized lifecycle batches splittable instead of reordering them. This
-tactical's remaining bus work is still remote TCP and web convergence. Local
-integrated performance follow-up should move primarily back to the terrain
-dirty-to-drawable coordinator (`128`): upload apply, ready-section admission,
-per-eye encode/submit, and possible retuning of the explicit deferred-drop
-budget if sustained movement shows memory/backlog pressure.
+scans, resident dirty-set insertion, entity cleanup scans, old chunk snapshot
+destruction in the unload apply bucket, or deferred cleanup inside the app-frame
+poll. Keep receive order; any additional divergence should stop between
+ordered update records or make oversized lifecycle batches splittable instead
+of reordering them. This tactical's remaining bus work is still remote TCP and
+web convergence. Local integrated performance follow-up should move primarily
+back to the terrain dirty-to-drawable coordinator (`128`): upload apply,
+ready-section admission/publication, per-eye encode/submit, and sustained
+worker-backlog monitoring if movement patterns get more aggressive than the
+current churn lane.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
@@ -905,6 +971,10 @@ another doc, explicitly decide where these remaining valuable items live:
   ready-plan materialization, compiler handoff, and upload/publication
   ownership remain valuable `128` work before the dirty-to-drawable pipeline is
   truly Java-shaped.
+- Deferred payload cleanup outside native local integrated play: Slice 3K adds
+  a native local-runtime worker handoff. When remote TCP and web bus convergence
+  resume, decide whether those paths need the same old-snapshot drop handoff or
+  whether their unload/update cadence keeps inline/fallback cleanup acceptable.
 - Exact oldest pending update age: current diagnostics expose applied update
   age and queued bytes/depth, but the mpsc-backed runner still cannot peek the
   oldest pending update without a transport-side metadata queue.

@@ -1149,6 +1149,14 @@ impl SingleViewRuntime {
         self.client_mut().drain_deferred_chunk_drop_items(budget)
     }
 
+    pub fn drain_deferred_client_chunk_drop_item(&mut self) -> bool {
+        self.client_mut().drain_deferred_chunk_drop_item()
+    }
+
+    pub fn take_deferred_client_chunk_drop_snapshot(&mut self) -> Option<(ChunkSnapshot, usize)> {
+        self.client_mut().take_deferred_chunk_drop_snapshot()
+    }
+
     pub fn set_interest_center_command(&mut self, center: ChunkPos) -> Option<ClientCommand> {
         self.set_chunk_view_command(center, self.render_distance, self.chunk_tracking_radius)
     }

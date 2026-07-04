@@ -1,13 +1,15 @@
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::ClientRuntime;
-use mclone_core::{BlockStateId, ChunkPos};
+use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_render::far_lod::FarTerrainLodMesh;
@@ -134,9 +136,77 @@ pub struct LocalSingleViewSceneRuntime {
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
+    deferred_chunk_drop_worker: DeferredChunkDropWorker,
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
     last_runner_diagnostics_poll_at: Option<Instant>,
+}
+
+struct DeferredChunkDropWorker {
+    sender: Option<mpsc::Sender<(ChunkSnapshot, usize)>>,
+    pending_items: Arc<AtomicUsize>,
+    join_handle: Option<JoinHandle<()>>,
+}
+
+impl DeferredChunkDropWorker {
+    fn new() -> Result<Self> {
+        let (sender, receiver) = mpsc::channel::<(ChunkSnapshot, usize)>();
+        let pending_items = Arc::new(AtomicUsize::new(0));
+        let worker_pending_items = Arc::clone(&pending_items);
+        let join_handle = thread::Builder::new()
+            .name("mclone-chunk-drop".to_owned())
+            .spawn(move || {
+                while let Ok((snapshot, item_count)) = receiver.recv() {
+                    drop(snapshot);
+                    worker_pending_items.fetch_sub(item_count, Ordering::AcqRel);
+                }
+            })
+            .context("failed to spawn deferred chunk drop worker")?;
+        Ok(Self {
+            sender: Some(sender),
+            pending_items,
+            join_handle: Some(join_handle),
+        })
+    }
+
+    fn enqueue(&self, snapshot: ChunkSnapshot, item_count: usize) {
+        if item_count == 0 {
+            return;
+        }
+        self.pending_items.fetch_add(item_count, Ordering::AcqRel);
+        let Some(sender) = &self.sender else {
+            drop(snapshot);
+            self.pending_items.fetch_sub(item_count, Ordering::AcqRel);
+            return;
+        };
+        if let Err(error) = sender.send((snapshot, item_count)) {
+            let (snapshot, item_count) = error.0;
+            drop(snapshot);
+            self.pending_items.fetch_sub(item_count, Ordering::AcqRel);
+        }
+    }
+
+    fn pending_item_count(&self) -> usize {
+        self.pending_items.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for DeferredChunkDropWorker {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(join_handle) = self.join_handle.take() {
+            let _ = join_handle.join();
+        }
+    }
+}
+
+impl std::fmt::Debug for DeferredChunkDropWorker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DeferredChunkDropWorker")
+            .field("pending_items", &self.pending_item_count())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -277,6 +347,7 @@ impl LocalSingleViewSceneRuntime {
             mesh_assets,
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
+            deferred_chunk_drop_worker: DeferredChunkDropWorker::new()?,
             simulation_cadence: options.cadence,
             last_runner_diagnostics: None,
             last_runner_diagnostics_poll_at: None,
@@ -298,6 +369,28 @@ impl LocalSingleViewSceneRuntime {
 
     pub const fn core_mut(&mut self) -> &mut SingleViewRuntime {
         &mut self.core
+    }
+
+    fn handoff_deferred_client_chunk_drops(&mut self) -> usize {
+        let mut handed_off_items = 0;
+        loop {
+            if handed_off_items >= DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET {
+                break;
+            }
+            let Some((snapshot, item_count)) = self.core.take_deferred_client_chunk_drop_snapshot()
+            else {
+                break;
+            };
+            handed_off_items += item_count;
+            self.deferred_chunk_drop_worker
+                .enqueue(snapshot, item_count);
+        }
+        handed_off_items
+    }
+
+    fn deferred_client_chunk_drop_backlog_items(&self) -> usize {
+        self.core.deferred_client_chunk_drop_item_count()
+            + self.deferred_chunk_drop_worker.pending_item_count()
     }
 
     pub const fn client(&self) -> &ClientRuntime {
@@ -461,12 +554,10 @@ impl LocalSingleViewSceneRuntime {
         let pump_report = self.pump_runner_updates_report(budget)?;
         let changed = pump_report.apply_report.changed;
         let deferred_drop_start = Instant::now();
-        let client_deferred_chunk_drop_items = self
-            .core
-            .drain_deferred_client_chunk_drop_items(DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET);
+        let client_deferred_chunk_drop_items = self.handoff_deferred_client_chunk_drops();
         let client_deferred_chunk_drop_ms = elapsed_ms(deferred_drop_start.elapsed());
         let client_deferred_chunk_drop_backlog_items =
-            self.core.deferred_client_chunk_drop_item_count();
+            self.deferred_client_chunk_drop_backlog_items();
         let (
             runner_diagnostics,
             poll_diagnostics_ms,
@@ -576,14 +667,14 @@ impl LocalSingleViewSceneRuntime {
             poll_ms += elapsed_ms(poll_start.elapsed());
             polls += 1;
             let diagnostics = self.server_runner_diagnostics()?;
-            if runner_idle(&diagnostics) && self.core.deferred_client_chunk_drop_item_count() == 0 {
+            if runner_idle(&diagnostics) && self.deferred_client_chunk_drop_backlog_items() == 0 {
                 return Ok((polls, poll_ms));
             }
             if Instant::now() >= deadline {
                 bail!("timed out waiting for local single-view worldgen jobs");
             }
             if diagnostics.update_queue_depth == 0
-                && self.core.deferred_client_chunk_drop_item_count() == 0
+                && self.deferred_client_chunk_drop_backlog_items() == 0
             {
                 std::thread::sleep(Duration::from_millis(1));
             }
@@ -1955,7 +2046,7 @@ mod tests {
                 max_queue_depth_before_poll.max(runner_diagnostics_before.update_queue_depth);
             if polls > 0
                 && runner_idle(&runner_diagnostics_before)
-                && runtime.core().deferred_client_chunk_drop_item_count() == 0
+                && runtime.deferred_client_chunk_drop_backlog_items() == 0
             {
                 break;
             }
@@ -1992,7 +2083,7 @@ mod tests {
                 "timed out waiting for churned chunk view to settle; runner={runner_diagnostics:?}"
             );
             if runner_diagnostics.update_queue_depth == 0
-                && runtime.core().deferred_client_chunk_drop_item_count() == 0
+                && runtime.deferred_client_chunk_drop_backlog_items() == 0
             {
                 std::thread::sleep(Duration::from_millis(1));
             }
@@ -2028,7 +2119,7 @@ mod tests {
             deferred_chunk_drop_items >= old_positions.len(),
             "old chunk snapshot payload items should be deferred and drained after unload apply"
         );
-        assert_eq!(runtime.core().deferred_client_chunk_drop_item_count(), 0);
+        assert_eq!(runtime.deferred_client_chunk_drop_backlog_items(), 0);
         eprintln!(
             "local_chunk_view_churn_attributes_unload_apply polls={polls} changed_polls={changed_polls} snapshots={snapshot_updates} section_updates={section_block_updates} unloads={unload_updates} other={other_updates} unload_apply_ms={unload_apply_ms:.3} unload_dirty_ms={unload_dirty_mark_ms:.3} unload_client_ms={unload_client_apply_ms:.3} max_unload_apply_ms={max_unload_apply_ms:.3} max_unload_client_ms={max_unload_client_apply_ms:.3} deferred_chunk_drop_items={deferred_chunk_drop_items} deferred_chunk_drop_ms={deferred_chunk_drop_ms:.3} max_deferred_chunk_drop_ms={max_deferred_chunk_drop_ms:.3} max_deferred_chunk_drop_backlog_items={max_deferred_chunk_drop_backlog_items} max_queue_depth_before_poll={max_queue_depth_before_poll}"
         );

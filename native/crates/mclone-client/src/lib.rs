@@ -20,8 +20,8 @@ mod block_shapes {
 }
 
 use mclone_core::{
-    BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, local_block_coord,
-    obfuscate_biome_zoom_seed,
+    BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, PackedChunkSection, PackedLightSection,
+    SECTION_HEIGHT, local_block_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_protocol::{
     ChunkView, ClientCommand, EntityId, EntitySnapshot, EntityUpdate, PlayerPositionUpdate,
@@ -228,10 +228,23 @@ impl ClientRuntime {
 
     pub fn drain_deferred_chunk_drop_items(&mut self, budget: usize) -> usize {
         let mut drained = 0;
-        while drained < budget && self.drain_one_deferred_chunk_drop_item() {
+        while drained < budget && self.drain_deferred_chunk_drop_item() {
             drained += 1;
         }
         drained
+    }
+
+    pub fn drain_deferred_chunk_drop_item(&mut self) -> bool {
+        self.drain_one_deferred_chunk_drop_item()
+    }
+
+    pub fn take_deferred_chunk_drop_snapshot(&mut self) -> Option<(ChunkSnapshot, usize)> {
+        let snapshot = self.deferred_chunk_drops.pop_front()?;
+        let item_count = chunk_snapshot_drop_item_count(&snapshot);
+        debug_assert!(item_count > 0);
+        debug_assert!(self.deferred_chunk_drop_items >= item_count);
+        self.deferred_chunk_drop_items -= item_count;
+        Some((snapshot, item_count))
     }
 
     pub fn clear_server_replica(&mut self) {
@@ -303,32 +316,67 @@ impl ClientRuntime {
                 return false;
             };
 
-            if let Some(light_section) = snapshot.light_sections.pop() {
-                if chunk_snapshot_has_drop_items(&snapshot) {
-                    self.deferred_chunk_drops.push_front(snapshot);
-                }
-                drop(light_section);
-                self.deferred_chunk_drop_items -= 1;
-                return true;
-            }
+            loop {
+                if let Some(light_section) = snapshot.light_sections.last_mut() {
+                    if let Some(sky_light) = light_section.sky.take() {
+                        if chunk_snapshot_has_drop_items(&snapshot) {
+                            self.deferred_chunk_drops.push_front(snapshot);
+                        }
+                        drop(sky_light);
+                        self.deferred_chunk_drop_items -= 1;
+                        return true;
+                    }
 
-            if let Some(section) = snapshot.sections.pop() {
-                if chunk_snapshot_has_drop_items(&snapshot) {
-                    self.deferred_chunk_drops.push_front(snapshot);
-                }
-                drop(section);
-                self.deferred_chunk_drop_items -= 1;
-                return true;
-            }
+                    if let Some(block_light) = light_section.block.take() {
+                        if chunk_snapshot_has_drop_items(&snapshot) {
+                            self.deferred_chunk_drops.push_front(snapshot);
+                        }
+                        drop(block_light);
+                        self.deferred_chunk_drop_items -= 1;
+                        return true;
+                    }
 
-            if !snapshot.biomes.is_empty() {
-                let biomes = std::mem::take(&mut snapshot.biomes);
-                if chunk_snapshot_has_drop_items(&snapshot) {
-                    self.deferred_chunk_drops.push_front(snapshot);
+                    snapshot.light_sections.pop();
+                    continue;
                 }
-                drop(biomes);
-                self.deferred_chunk_drop_items -= 1;
-                return true;
+
+                if let Some(section) = snapshot.sections.last_mut() {
+                    if !section.packed_block_indices.is_empty() {
+                        let packed_block_indices =
+                            std::mem::take(&mut section.packed_block_indices);
+                        if chunk_snapshot_has_drop_items(&snapshot) {
+                            self.deferred_chunk_drops.push_front(snapshot);
+                        }
+                        drop(packed_block_indices);
+                        self.deferred_chunk_drop_items -= 1;
+                        return true;
+                    }
+
+                    if !section.palette_state_ids.is_empty() {
+                        let palette_state_ids = std::mem::take(&mut section.palette_state_ids);
+                        if chunk_snapshot_has_drop_items(&snapshot) {
+                            self.deferred_chunk_drops.push_front(snapshot);
+                        }
+                        drop(palette_state_ids);
+                        self.deferred_chunk_drop_items -= 1;
+                        return true;
+                    }
+
+                    snapshot.sections.pop();
+                    continue;
+                }
+
+                if !snapshot.biomes.is_empty() {
+                    let biomes = std::mem::take(&mut snapshot.biomes);
+                    if chunk_snapshot_has_drop_items(&snapshot) {
+                        self.deferred_chunk_drops.push_front(snapshot);
+                    }
+                    drop(biomes);
+                    self.deferred_chunk_drop_items -= 1;
+                    return true;
+                }
+
+                break;
             }
         }
     }
@@ -460,8 +508,25 @@ fn chunk_snapshot_has_drop_items(snapshot: &ChunkSnapshot) -> bool {
 
 fn chunk_snapshot_drop_item_count(snapshot: &ChunkSnapshot) -> usize {
     usize::from(!snapshot.biomes.is_empty())
-        + snapshot.sections.len()
-        + snapshot.light_sections.len()
+        + snapshot
+            .sections
+            .iter()
+            .map(packed_chunk_section_drop_item_count)
+            .sum::<usize>()
+        + snapshot
+            .light_sections
+            .iter()
+            .map(packed_light_section_drop_item_count)
+            .sum::<usize>()
+}
+
+fn packed_chunk_section_drop_item_count(section: &PackedChunkSection) -> usize {
+    usize::from(!section.palette_state_ids.is_empty())
+        + usize::from(!section.packed_block_indices.is_empty())
+}
+
+fn packed_light_section_drop_item_count(section: &PackedLightSection) -> usize {
+    usize::from(section.sky.is_some()) + usize::from(section.block.is_some())
 }
 
 fn remote_player_horizontal_distance(
@@ -564,8 +629,10 @@ mod tests {
 
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), None);
-        assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 2);
         assert_eq!(runtime.drain_deferred_chunk_drop_items(0), 0);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 2);
+        assert_eq!(runtime.drain_deferred_chunk_drop_items(1), 1);
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
         assert_eq!(runtime.drain_deferred_chunk_drop_items(1), 1);
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
@@ -600,9 +667,38 @@ mod tests {
 
         assert_eq!(runtime.loaded_chunk_count(), 1);
         assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), Some(&second));
-        assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
-        assert_eq!(runtime.drain_deferred_chunk_drop_items(usize::MAX), 1);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 2);
+        assert_eq!(runtime.drain_deferred_chunk_drop_items(usize::MAX), 2);
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
+    }
+
+    #[test]
+    fn client_runtime_takes_deferred_chunk_snapshot_for_external_drop() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let mut blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        blocks[0] = BlockStateId(1);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &blocks,
+        );
+
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(snapshot));
+        runtime.apply_update(ServerUpdate::ChunkUnload {
+            pos: ChunkPos::new(0, 0),
+        });
+
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 2);
+        let (snapshot, item_count) = runtime
+            .take_deferred_chunk_drop_snapshot()
+            .expect("deferred snapshot should be available for external drop");
+        assert_eq!(snapshot.pos, ChunkPos::new(0, 0));
+        assert_eq!(item_count, 2);
+        assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
+        assert!(runtime.take_deferred_chunk_drop_snapshot().is_none());
     }
 
     #[test]
