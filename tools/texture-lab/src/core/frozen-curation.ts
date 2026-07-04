@@ -14,6 +14,11 @@ import { repoRoot } from "../output-root";
 import { decodePng, type RgbaImage } from "../png";
 import { textureSourcePolicyErrors } from "../source-policy";
 import type { RenderedTexture } from "../compositor";
+import {
+  TEXTURE_FREEZE_REQUEST_SCHEMA_VERSION,
+  type FreezeRequestFileRef,
+  type TextureFreezeRequestManifest,
+} from "./freeze-request";
 
 export const TEXTURE_FROZEN_CURATION_SCHEMA_VERSION = 1;
 export const TEXTURE_FROZEN_CURATION_FILENAME = "curation.v1.json";
@@ -143,6 +148,32 @@ export async function promoteFrozenTexture(options: {
   };
 }
 
+export async function promoteFrozenTextureFromFreezeRequest(options: {
+  pack: TexturePackAsset;
+  packInputPath: string;
+  requestPath: string;
+  asset?: string;
+}): Promise<PromoteFrozenTextureResult> {
+  const requestPath = path.resolve(options.requestPath);
+  const requestBytes = await fs.readFile(requestPath);
+  const request = JSON.parse(Buffer.from(requestBytes).toString("utf8")) as TextureFreezeRequestManifest;
+  validateFreezeRequestManifest(request, requestPath, options.pack);
+  await verifyFreezeRequestFiles(request, requestPath);
+
+  const metadata = metadataFromFreezeRequest(request, requestPath, sha256Hex(requestBytes));
+  const promoteOptions: Parameters<typeof promoteFrozenTexture>[0] = {
+    pack: options.pack,
+    packInputPath: options.packInputPath,
+    textureName: request.texture.name,
+    imagePath: request.images.projected.path,
+    metadata,
+  };
+  if (options.asset) {
+    promoteOptions.asset = options.asset;
+  }
+  return promoteFrozenTexture(promoteOptions);
+}
+
 export async function readFrozenTextureCurationManifest(packDir: string): Promise<TextureFrozenCurationManifest> {
   const manifestPath = path.join(path.resolve(packDir), TEXTURE_FROZEN_CURATION_FILENAME);
   try {
@@ -250,6 +281,120 @@ function validateFrozenImageSourcePolicy(
   }
 }
 
+function validateFreezeRequestManifest(
+  request: TextureFreezeRequestManifest,
+  requestPath: string,
+  pack: TexturePackAsset,
+): void {
+  if (request.schemaVersion !== TEXTURE_FREEZE_REQUEST_SCHEMA_VERSION) {
+    throw new TextureFrozenCurationError(`Unsupported freeze request '${requestPath}'`);
+  }
+  const texture = pack.textures[request.texture.name];
+  if (!texture) {
+    throw new TextureFrozenCurationError(`Freeze request '${requestPath}' references unknown texture '${request.texture.name}'`);
+  }
+  const expectedSize = texture.size ?? pack.defaultSize;
+  const expectedSource = texture.source ?? "final-color";
+  if (request.texture.exportPath !== texture.exportPath) {
+    throw new TextureFrozenCurationError(
+      `Freeze request '${requestPath}' exportPath changed: expected ${texture.exportPath}, got ${request.texture.exportPath}`,
+    );
+  }
+  if (request.texture.size !== expectedSize) {
+    throw new TextureFrozenCurationError(
+      `Freeze request '${requestPath}' texture size changed: expected ${expectedSize}, got ${request.texture.size}`,
+    );
+  }
+  if (request.texture.source !== expectedSource || request.texture.tintRole !== (texture.tintRole ?? null)) {
+    throw new TextureFrozenCurationError(`Freeze request '${requestPath}' texture source policy changed`);
+  }
+  if (request.sourcePolicy.errors.length > 0) {
+    throw new TextureFrozenCurationError(
+      `Freeze request '${requestPath}' was created with source-policy errors: ${request.sourcePolicy.errors.join("; ")}`,
+    );
+  }
+}
+
+async function verifyFreezeRequestFiles(request: TextureFreezeRequestManifest, requestPath: string): Promise<void> {
+  await verifyFreezeFileRef("projected image", request.images.projected);
+  await verifyOptionalFreezeFileRef("raw image", request.images.raw);
+  await verifyOptionalFreezeFileRef("raw tile image", request.images.rawTile);
+  await verifyOptionalFreezeFileRef("review sheet", request.images.reviewSheet);
+  await verifyOptionalFreezeFileRef("contact sheet", request.images.contactSheet);
+
+  if (request.candidate.freezeReadiness === "archived" && !request.candidate.archivePath) {
+    throw new TextureFrozenCurationError(`Freeze request '${requestPath}' is archived but has no archive manifest path`);
+  }
+  if (request.candidate.freezeReadiness === "archivable" && (!request.candidate.manifestPath || !request.candidate.projectionReportPath)) {
+    throw new TextureFrozenCurationError(`Freeze request '${requestPath}' is archivable but is missing projection artifact paths`);
+  }
+  await verifyReferencedArtifact("archive manifest", request.candidate.archivePath);
+  await verifyReferencedArtifact("diffusion manifest", request.candidate.manifestPath);
+  await verifyReferencedArtifact("projection report", request.candidate.projectionReportPath);
+}
+
+async function verifyFreezeFileRef(label: string, ref: FreezeRequestFileRef): Promise<void> {
+  const bytes = await fs.readFile(ref.path);
+  const actual = sha256Hex(bytes);
+  if (actual !== ref.sha256) {
+    throw new TextureFrozenCurationError(`${label} '${ref.path}' hash mismatch: expected ${ref.sha256}, got ${actual}`);
+  }
+}
+
+async function verifyOptionalFreezeFileRef(label: string, ref: FreezeRequestFileRef | null): Promise<void> {
+  if (ref) {
+    await verifyFreezeFileRef(label, ref);
+  }
+}
+
+async function verifyReferencedArtifact(label: string, artifactPath: string | null): Promise<void> {
+  if (!artifactPath) {
+    return;
+  }
+  try {
+    const stat = await fs.stat(artifactPath);
+    if (!stat.isFile()) {
+      throw new TextureFrozenCurationError(`${label} '${artifactPath}' is not a file`);
+    }
+  } catch (error) {
+    if (error instanceof TextureFrozenCurationError) {
+      throw error;
+    }
+    throw new TextureFrozenCurationError(`${label} '${artifactPath}' is missing`);
+  }
+}
+
+function metadataFromFreezeRequest(
+  request: TextureFreezeRequestManifest,
+  requestPath: string,
+  requestSha256: string,
+): TextureFrozenMetadata {
+  const metadata: TextureFrozenMetadata = {
+    codename: request.candidate.codename,
+    candidateId: request.candidate.candidateId,
+    sourceContext: {
+      projectionAssetSha256: request.images.projected.sha256,
+      freezeRequest: requestPath,
+      freezeRequestSha256: requestSha256,
+      note: `Promoted from freeze request created at ${request.createdAt}.`,
+    },
+  };
+  if (request.candidate.promptPreset) metadata.promptPreset = request.candidate.promptPreset;
+  if (request.candidate.prompt) metadata.prompt = request.candidate.prompt;
+  if (request.candidate.negativePrompt) metadata.negativePrompt = request.candidate.negativePrompt;
+  if (request.candidate.modelId) metadata.modelId = request.candidate.modelId;
+  if (request.candidate.scheduler) metadata.scheduler = request.candidate.scheduler;
+  if (request.candidate.steps !== null) metadata.steps = request.candidate.steps;
+  if (request.candidate.seed !== null) metadata.seed = request.candidate.seed;
+  if (request.candidate.strength !== null) metadata.strength = request.candidate.strength;
+  if (request.candidate.resolution !== null) metadata.resolution = request.candidate.resolution;
+  if (request.candidate.archivePath) metadata.sourceContext!.archiveManifest = request.candidate.archivePath;
+  if (request.candidate.manifestPath) metadata.sourceContext!.diffusionManifest = request.candidate.manifestPath;
+  if (request.candidate.projectionReportPath) metadata.sourceContext!.projectionReport = request.candidate.projectionReportPath;
+  if (request.images.raw) metadata.sourceContext!.rawAssetSha256 = request.images.raw.sha256;
+  return metadata;
+}
+
 async function mergeSourceContext(
   packInputPath: string,
   sourceAsset: string,
@@ -261,6 +406,9 @@ async function mergeSourceContext(
     ? {
         ...existing,
         archiveManifest: normalizeContextPath(existing.archiveManifest),
+        diffusionManifest: normalizeContextPath(existing.diffusionManifest),
+        projectionReport: normalizeContextPath(existing.projectionReport),
+        freezeRequest: normalizeContextPath(existing.freezeRequest),
         sourceAsset: normalizeContextPath(existing.sourceAsset),
       }
     : undefined;

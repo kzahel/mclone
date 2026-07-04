@@ -1,4 +1,8 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { promoteFrozenTextureFromFreezeRequest } from "../../src/core/frozen-curation";
+import { loadTexturePack } from "../../src/load";
 import { decodePng, type RgbaImage } from "../../src/png";
 
 test("indexes authored textures, generated candidates, and allowlisted images", async ({ request }) => {
@@ -114,6 +118,28 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   await expect(freezeListResponse).toBeOK();
   const freezeList = await freezeListResponse.json();
   expect(freezeList.requests.map((entry: { path: string }) => entry.path)).toContain(freezePayload.request.path);
+
+  const pack = await loadTexturePack(index.pack.inputPath);
+  const tempPackInputPath = path.join(index.outputRoot, "promote-freeze-request-pack", "texture.ts");
+  await fs.mkdir(path.dirname(tempPackInputPath), { recursive: true });
+  const promoted = await promoteFrozenTextureFromFreezeRequest({
+    pack,
+    packInputPath: tempPackInputPath,
+    requestPath: freezePayload.request.path,
+  });
+  expect(promoted.textureName).toBe("grass_block_top");
+  expect(promoted.entry).toMatchObject({
+    asset: "frozen/block/grass_block_top.png",
+    codename: "G5101S74",
+    candidateId: "candidate-seed5101-strength0p740",
+    seed: 5101,
+    strength: 0.74,
+  });
+  expect(promoted.entry.sourceContext?.freezeRequest).toContain("generated-assets/texture-lab-playwright/freeze-requests/");
+  const promotedImage = decodePng(await fs.readFile(promoted.assetPath));
+  expect(`${promotedImage.width}x${promotedImage.height}`).toBe("64x64");
+  const promotedManifest = JSON.parse(await fs.readFile(promoted.manifestPath, "utf8"));
+  expect(promotedManifest.textures.grass_block_top.sha256).toBe(promoted.entry.sha256);
 
   const applyResponse = await request.post("/api/curation/apply");
   await expect(applyResponse).toBeOK();

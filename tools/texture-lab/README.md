@@ -223,6 +223,12 @@ To promote the current selected pack candidate:
 pnpm texture-lab:promote-frozen -- --texture grass_block_top
 ```
 
+To promote a reviewed freeze request:
+
+```sh
+pnpm texture-lab:promote-freeze-request -- generated-assets/texture-lab/freeze-requests/grass_block_top-G5101S74-....freeze-request.v1.json
+```
+
 To promote an explicit image:
 
 ```sh

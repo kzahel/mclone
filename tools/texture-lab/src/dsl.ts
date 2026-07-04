@@ -71,7 +71,12 @@ export interface TextureFrozenSourceContext {
   sourceAsset?: string;
   sourceAssetSha256?: string;
   archiveManifest?: string;
+  diffusionManifest?: string;
+  projectionReport?: string;
   projectionAssetSha256?: string;
+  rawAssetSha256?: string;
+  freezeRequest?: string;
+  freezeRequestSha256?: string;
   note?: string;
 }
 

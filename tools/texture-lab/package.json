@@ -12,6 +12,7 @@
     "apply-curation": "tsx src/apply-curation.ts packs/mclone-default/texture.ts",
     "freeze-request": "tsx src/freeze-request.ts packs/mclone-default/texture.ts",
     "promote-frozen": "tsx src/promote-frozen.ts packs/mclone-default/texture.ts",
+    "promote-freeze-request": "tsx src/promote-freeze-request.ts packs/mclone-default/texture.ts",
     "runtime-compat": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat",
     "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only",
     "web:dev": "tsx src/web-server/server.ts",

@@ -11,11 +11,11 @@ views landed 2026-07-04. Slice A2.8 temporary candidate preview selection
 landed 2026-07-04. Slice A2.9 raw/tinted comparison variants landed
 2026-07-04. Slice C0 persisted active-pack candidate selections and generated
 pack apply landed 2026-07-04. Slice D0 freeze request manifests landed
-2026-07-04. Slice D1 canonical frozen PNG overlay landed 2026-07-04. Next
-priority is a reviewed promote-from-freeze-request path that keeps browser-side
-source mutation out of the app while making accepted pixels durable. Slice A2.10
-multi-part vanilla reference counterparts for special block models landed
-2026-07-04.
+2026-07-04. Slice D1 canonical frozen PNG overlay landed 2026-07-04. Slice
+A2.10 multi-part vanilla reference counterparts for special block models landed
+2026-07-04. Slice D2 reviewed promote-from-freeze-request CLI landed
+2026-07-04. Next priority is persistent review-state marking so candidate
+tournaments can scale beyond selected-pack and frozen states.
 
 ## Purpose
 
@@ -705,10 +705,19 @@ Slice D1 landed 2026-07-04:
 - surfaced frozen texture count and per-texture codename/asset metadata in the
   web index and inspector
 
+Slice D2 landed 2026-07-04:
+
+- added `pnpm texture-lab:promote-freeze-request`
+- read one reviewed `*.freeze-request.v1.json`
+- verified all hashed image refs and required projection/archive artifact files
+  still match before promotion
+- copied the selected projected PNG into `frozen/` and updated
+  `curation.v1.json` through the same frozen-asset validation path
+- preserved codename, prompt/seed/model metadata, source-context commit fields,
+  the freeze request path/hash, and projected/raw asset hashes
+
 Remaining deliverables:
 
-- promote directly from a reviewed freeze request, verifying referenced hashes
-  before copying the PNG into `frozen/` and updating `curation.v1.json`
 - keep TypeScript source patching as an exceptional/manual operation for
   structural pack changes, not the default texture promotion path
 - do not auto-commit from the UI
@@ -796,18 +805,16 @@ Slice A is complete when:
   immediately add a small Three.js scene for rotatable inspection?
 - How much of the reference texture organization should be hand-authored tags
   versus inferred from pack/block/role naming?
-- Should `Request Freeze` grow a reviewed promotion handoff that calls
-  `promote-frozen`, or should the browser continue to only write manifests?
+- Should the browser eventually show eligible freeze requests and the exact
+  `promote-freeze-request` command, or should that remain CLI-only?
 
 ## Immediate Next Step
 
-Implement promote-from-freeze-request:
+Implement persistent review-state marking:
 
-1. read one reviewed `*.freeze-request.v1.json`
-2. verify all referenced image hashes and projection/archive files still match
-3. copy the selected PNG into `tools/texture-lab/packs/mclone-default/frozen/`
-   with the default stable asset path
-4. update `curation.v1.json` with codename, prompt/seed/model metadata, PNG
-   hash, and source-context commit fields
-5. keep the browser out of source mutation and commits
-6. add focused validation for promoting the grass freeze request
+1. add a local `generated-assets/texture-lab/review-state.v1.json`
+2. support favorite, reject, needs-iteration, notes, and tags per candidate id
+3. surface compact state badges and filters in the candidate list and atlas
+4. keep selected-pack and frozen state separate from review annotations
+5. add Playwright coverage for marking, filtering, reindex persistence, and
+   clearing candidate detail safely
