@@ -1,12 +1,13 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, sixteen supported feature-family groups, and 35 F-checked
+overworld tint IDs, seventeen supported feature-family groups, and 36 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads, ocean
 water plants, warm-ocean coral/sea-pickle, dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, base taiga/snowy-taiga berry, and ordinary forest
-tree plus flower-forest dense/common flower palette coverage
+tree plus flower-forest dense/common flower and sunflower-plains sunflower
+palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -160,7 +161,7 @@ notes.
 | 48 | `minecraft:deep_lukewarm_ocean` | ocean-lukewarm | deep bright water, seagrass/kelp water plants checked | seed `56`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 49 | `minecraft:deep_cold_ocean` | ocean-cold | deep cold water, seagrass/kelp water plants checked | seed `13`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 50 | `minecraft:deep_frozen_ocean` | ocean-frozen-deep | deep frozen water/ice checked, icebergs gap | seed `103`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 129 | `minecraft:sunflower_plains` | plains | plains tint/surface checked; sunflower patches gap | seed `25`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 129 | `minecraft:sunflower_plains` | plains | plains tint/surface and sunflower patches checked; pumpkin/sugar-cane extras gap | seed `43`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 130 | `minecraft:desert_lakes` | desert | desert surface checked; lake/fossil/extra-vegetation gap | seed `98`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 131 | `minecraft:gravelly_mountains` | mountains | gravelly mountain surface checked | seed `212`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 132 | `minecraft:flower_forest` | forest | forest grass/tint, dense small flowers, and common tall flowers checked; mushrooms/extras gap | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -221,8 +222,8 @@ Landed:
   blocks and sea pickles, dark-forest dark oak and huge mushroom block
   families, mushroom-field huge mushrooms, birch log/leaves trees, savanna
   acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus jungle
-  log/leaves vegetation, plus flower-forest dense and common flowers. Desert and
-  badlands now require dead bush plus
+  log/leaves vegetation, flower-forest dense and common flowers, and
+  sunflower-plains sunflower patches. Desert and badlands now require dead bush plus
   cactus/sugar-cane family coverage; ordinary forest and wooded hills require
   an oak or birch log/leaves tree pair; swamp requires the native
   vegetation/clay subset plus sugar cane and lily pads; base taiga and base
@@ -235,17 +236,17 @@ Landed:
   leaves; jungle rows require jungle logs and leaves; bamboo jungle rows require
   bamboo plus jungle logs and leaves; flower forest requires at least four
   distinct Java `ForestFlowerProvider` small-flower states and one
-  `FOREST_FLOWER_VEGETATION_COMMON` tall-flower lower/upper pair. The
-  assertions are intentionally broad block-family checks, not exact decorated
-  counts.
+  `FOREST_FLOWER_VEGETATION_COMMON` tall-flower lower/upper pair; sunflower
+  plains requires a sunflower lower/upper pair. The assertions are intentionally
+  broad block-family checks, not exact decorated counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
   state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; dark oak
   log/leaves IDs; huge mushroom cap/stem IDs; acacia log/leaves IDs; jungle
   log/leaves IDs; bamboo trunk ID; sweet berry bush age-3 ID; allium,
   azure bluet, red/orange/white/pink tulips, oxeye daisy, cornflower, lily of
-  the valley, and lilac/rose-bush/peony lower/upper IDs; synthetic asset
-  registry mappings; basic shared
+  the valley, lilac/rose-bush/peony lower/upper IDs, and sunflower lower/upper
+  IDs; synthetic asset registry mappings; basic shared
   shape/material/render/light facts; Java-style reduced random-patch column
   placement; Java-style waterlily and sweet-berry random-patch placement;
   Java-style `nextBoolean` random-boolean selector placement for mushroom fields;
@@ -256,11 +257,11 @@ Landed:
   column/podzol-disk placement; Java-style `ForestFlowerProvider`
   `BIOME_INFO_NOISE` small-flower selection and the Java
   `FOREST_FLOWER_VEGETATION_COMMON` simple-random mixed flower selector for
-  flower forests; the
+  flower forests; Java-style `PATCH_SUNFLOWER` placement for sunflower plains; the
   `NoiseBasedDecorator` count path used by kelp/coral/bamboo; and
   forest/desert/badlands/swamp/ocean/dark-forest/birch/savanna/jungle/
-  bamboo-jungle/flower-forest feature table entries, plus the mushroom-field
-  huge mushroom table entry.
+  bamboo-jungle/flower-forest/sunflower-plains feature table entries, plus the
+  mushroom-field huge mushroom table entry.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
   asserts every matrix row's grass, foliage, and water tint output through the
   shared tint resolver by tint group, including the two registered rows without
@@ -325,14 +326,19 @@ Documented gaps from this slice:
   through `FOREST_FLOWER_VEGETATION_COMMON`. Exact parity is still incomplete:
   default mushrooms, default extra vegetation, bee-nest side effects, and exact
   decorated mismatch buckets remain later `103` work.
+- Java sunflower plains now has high-signal sunflower coverage through
+  `PATCH_SUNFLOWER`. Exact parity is still incomplete: the Java sunflower-plains
+  sugar-cane and pumpkin extras, villages/outposts, normal plains mismatch
+  buckets, and exact decorated counts remain later `103` work.
 
 ## Suggested Next Slice
 
-Use the generalized double-plant path to make another distinctive row visible:
+Move to another distinctive single-biome flower family:
 
-1. Add sunflower lower/upper block IDs/assets/shapes and real-asset smoke
-   coverage for the Java `sunflower` blockstate.
-2. Port the narrow `PATCH_SUNFLOWER` / sunflower-plains table slice from Java
-   for row `129`, keeping the deterministic matrix check broad.
-3. Mark `minecraft:sunflower_plains` F-checked once the fixture requires a
-   sunflower lower/upper pair in the generated chunk.
+1. Add a blue orchid generated block ID/assets/shapes and real-asset smoke
+   coverage for the Java `blue_orchid` blockstate.
+2. Port the narrow `FLOWER_SWAMP` random patch from
+   `BiomeDefaultFeatures.addSwampVegetation`, keeping the existing swamp row's
+   broad vegetation/clay/sugar-cane/lily-pad check intact.
+3. Extend row `6` to require a blue orchid in the generated swamp fixture once
+   the patch exists.

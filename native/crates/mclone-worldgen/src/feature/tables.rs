@@ -7,8 +7,8 @@ use crate::block::{
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
     FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
     LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, PEONY_LOWER, PODZOL, POPPY,
-    RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SUGAR_CANE, SWEET_BERRY_BUSH,
-    TERRACOTTA, TUFF, WATER,
+    RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SUGAR_CANE, SUNFLOWER_LOWER,
+    SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -49,7 +49,8 @@ pub(super) fn overworld_features_for_biome_cached(
     biome: BiomeDefinition,
 ) -> &'static [PlacedFeature] {
     match biome.key() {
-        "minecraft:plains" | "minecraft:sunflower_plains" => plains_feature_table(),
+        "minecraft:plains" => plains_feature_table(),
+        "minecraft:sunflower_plains" => sunflower_plains_feature_table(),
         "minecraft:forest" | "minecraft:wooded_hills" => forest_feature_table(),
         "minecraft:flower_forest" => flower_forest_feature_table(),
         "minecraft:birch_forest" | "minecraft:birch_forest_hills" => birch_forest_feature_table(),
@@ -129,6 +130,15 @@ fn plains_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
         .get_or_init(|| build_overworld_feature_table("minecraft:plains", plains_features()))
+        .as_slice()
+}
+
+fn sunflower_plains_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:sunflower_plains", sunflower_plains_features())
+        })
         .as_slice()
 }
 
@@ -355,6 +365,12 @@ fn plains_features() -> Vec<PlacedFeature> {
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
     ]
+}
+
+fn sunflower_plains_features() -> Vec<PlacedFeature> {
+    let mut features = vec![sunflower_patch_feature()];
+    features.extend(plains_features());
+    features
 }
 
 fn default_lake_features(biome_key: &str) -> Vec<PlacedFeature> {
@@ -1189,6 +1205,19 @@ fn double_plant_patch_feature(state: RawBlockId) -> ConfiguredFeature {
         need_water: false,
         place_on: &[],
     })
+}
+
+fn sunflower_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        double_plant_patch_feature(SUNFLOWER_LOWER),
+        vec![
+            ConfiguredDecorator::count(10),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::spread_32_above(),
+        ],
+    )
 }
 
 fn forest_grass_patch_feature() -> PlacedFeature {

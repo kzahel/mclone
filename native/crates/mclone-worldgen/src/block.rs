@@ -150,6 +150,8 @@ pub const ROSE_BUSH_LOWER: RawBlockId = 144;
 pub const ROSE_BUSH_UPPER: RawBlockId = 145;
 pub const PEONY_LOWER: RawBlockId = 146;
 pub const PEONY_UPPER: RawBlockId = 147;
+pub const SUNFLOWER_LOWER: RawBlockId = 148;
+pub const SUNFLOWER_UPPER: RawBlockId = 149;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -227,6 +229,8 @@ impl GeneratedBlockId {
     pub const ROSE_BUSH_UPPER: Self = Self(ROSE_BUSH_UPPER);
     pub const PEONY_LOWER: Self = Self(PEONY_LOWER);
     pub const PEONY_UPPER: Self = Self(PEONY_UPPER);
+    pub const SUNFLOWER_LOWER: Self = Self(SUNFLOWER_LOWER);
+    pub const SUNFLOWER_UPPER: Self = Self(SUNFLOWER_UPPER);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -284,6 +288,8 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | ROSE_BUSH_UPPER
             | PEONY_LOWER
             | PEONY_UPPER
+            | SUNFLOWER_LOWER
+            | SUNFLOWER_UPPER
             | GLOW_LICHEN
             | POINTED_DRIPSTONE
             | TORCH
@@ -514,6 +520,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         LILAC_LOWER | LILAC_UPPER => "minecraft:lilac",
         ROSE_BUSH_LOWER | ROSE_BUSH_UPPER => "minecraft:rose_bush",
         PEONY_LOWER | PEONY_UPPER => "minecraft:peony",
+        SUNFLOWER_LOWER | SUNFLOWER_UPPER => "minecraft:sunflower",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -618,6 +625,8 @@ mod tests {
         assert_eq!(block_light_opacity(ROSE_BUSH_UPPER), 0);
         assert_eq!(block_light_opacity(PEONY_LOWER), 0);
         assert_eq!(block_light_opacity(PEONY_UPPER), 0);
+        assert_eq!(block_light_opacity(SUNFLOWER_LOWER), 0);
+        assert_eq!(block_light_opacity(SUNFLOWER_UPPER), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
@@ -679,5 +688,7 @@ mod tests {
         assert_eq!(block_name(ROSE_BUSH_UPPER), "minecraft:rose_bush");
         assert_eq!(block_name(PEONY_LOWER), "minecraft:peony");
         assert_eq!(block_name(PEONY_UPPER), "minecraft:peony");
+        assert_eq!(block_name(SUNFLOWER_LOWER), "minecraft:sunflower");
+        assert_eq!(block_name(SUNFLOWER_UPPER), "minecraft:sunflower");
     }
 }

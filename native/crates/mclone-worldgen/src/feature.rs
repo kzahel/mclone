@@ -290,8 +290,8 @@ mod tests {
         LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD,
         MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PEONY_LOWER, POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE,
         ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
-        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, SWEET_BERRY_BUSH,
-        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
+        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, SUNFLOWER_LOWER,
+        SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -1796,6 +1796,43 @@ mod tests {
                 .count(),
             4
         );
+    }
+
+    #[test]
+    fn sunflower_plains_feature_table_includes_java_sunflower_patch() {
+        let sunflower_plains = overworld_features_for_biome(get_layered_biome_by_id(129));
+        let vegetal_features = sunflower_plains
+            .iter()
+            .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            vegetal_features[0].decorators,
+            vec![
+                ConfiguredDecorator::count(10),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::spread_32_above(),
+            ]
+        );
+        match &vegetal_features[0].feature {
+            ConfiguredFeature::RandomPatch(config) => {
+                assert_eq!(config.state, SUNFLOWER_LOWER);
+                assert_eq!(config.weighted_states, &[]);
+                assert_eq!(config.state_provider, RandomPatchStateProvider::Simple);
+                assert_eq!(config.tries, 64);
+                assert_eq!(config.xspread, 7);
+                assert_eq!(config.yspread, 3);
+                assert_eq!(config.zspread, 7);
+                assert!(!config.project);
+                assert!(!config.can_replace);
+                assert!(config.double_plant);
+                assert_eq!(config.column_height, None);
+                assert!(!config.need_water);
+                assert!(config.place_on.is_empty());
+            }
+            other => panic!("expected sunflower random patch, got {other:?}"),
+        }
     }
 
     #[test]

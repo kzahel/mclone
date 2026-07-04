@@ -50,9 +50,9 @@ mod tests {
         OXEYE_DAISY, PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY,
         RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
         SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
-        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER,
-        TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, WHITE_TULIP, is_air_like,
-        is_water,
+        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
+        SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK,
+        WATER, WHITE_TULIP, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -132,6 +132,7 @@ mod tests {
     #[derive(Clone, Copy, Debug)]
     enum FeatureFamily {
         PlainsVegetation,
+        SunflowerPlainsSunflowers,
         DesertDeadBushCactusSugarCane,
         ForestOakBirchTrees,
         FlowerForestFlowers,
@@ -153,6 +154,7 @@ mod tests {
         fn name(self) -> &'static str {
             match self {
                 Self::PlainsVegetation => "plains grass/flower/oak",
+                Self::SunflowerPlainsSunflowers => "sunflower plains sunflower patches",
                 Self::DesertDeadBushCactusSugarCane => "desert dead bush plus cactus/sugar cane",
                 Self::ForestOakBirchTrees => "forest oak/birch trees",
                 Self::FlowerForestFlowers => "flower forest dense small flowers",
@@ -178,6 +180,7 @@ mod tests {
         fn blocks(self) -> &'static [RawBlockId] {
             match self {
                 Self::PlainsVegetation => &[OAK_LOG, OAK_LEAVES, GRASS, DANDELION, POPPY],
+                Self::SunflowerPlainsSunflowers => &[SUNFLOWER_LOWER, SUNFLOWER_UPPER],
                 Self::DesertDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::ForestOakBirchTrees => &[OAK_LOG, OAK_LEAVES, BIRCH_LOG, BIRCH_LEAVES],
                 Self::FlowerForestFlowers => &[
@@ -263,6 +266,9 @@ mod tests {
                 Self::ForestOakBirchTrees => {
                     (chunk.block_count(OAK_LOG) > 0 && chunk.block_count(OAK_LEAVES) > 0)
                         || (chunk.block_count(BIRCH_LOG) > 0 && chunk.block_count(BIRCH_LEAVES) > 0)
+                }
+                Self::SunflowerPlainsSunflowers => {
+                    chunk.block_count(SUNFLOWER_LOWER) > 0 && chunk.block_count(SUNFLOWER_UPPER) > 0
                 }
                 Self::FlowerForestFlowers => {
                     let small_flower_count = [
@@ -716,12 +722,12 @@ mod tests {
             feature_family: Some(FeatureFamily::OceanWaterPlants),
         },
         PaletteMatrixCase {
-            seed: 25,
+            seed: 43,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:sunflower_plains",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SunflowerPlainsSunflowers),
         },
         PaletteMatrixCase {
             seed: 98,

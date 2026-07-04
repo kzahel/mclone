@@ -125,6 +125,8 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::ROSE_BUSH_UPPER
         | terrain_id::PEONY_LOWER
         | terrain_id::PEONY_UPPER
+        | terrain_id::SUNFLOWER_LOWER
+        | terrain_id::SUNFLOWER_UPPER
         | terrain_id::GLOW_LICHEN
         | terrain_id::SUGAR_CANE
         | terrain_id::SEAGRASS
@@ -190,6 +192,8 @@ fn is_double_plant(id: u32) -> bool {
             | terrain_id::ROSE_BUSH_UPPER
             | terrain_id::PEONY_LOWER
             | terrain_id::PEONY_UPPER
+            | terrain_id::SUNFLOWER_LOWER
+            | terrain_id::SUNFLOWER_UPPER
     )
 }
 
@@ -439,6 +443,8 @@ mod tests {
             terrain_id::ROSE_BUSH_UPPER,
             terrain_id::PEONY_LOWER,
             terrain_id::PEONY_UPPER,
+            terrain_id::SUNFLOWER_LOWER,
+            terrain_id::SUNFLOWER_UPPER,
             terrain_id::GLOW_LICHEN,
             terrain_id::SUGAR_CANE,
             terrain_id::SWEET_BERRY_BUSH,
@@ -527,6 +533,11 @@ mod tests {
         );
         assert_eq!(
             shape_for(state(terrain_id::LILAC_LOWER), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::SUNFLOWER_LOWER), ShapeUse::Outline)
                 .map(|shape| shape.world_aabb(pos)),
             Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
         );

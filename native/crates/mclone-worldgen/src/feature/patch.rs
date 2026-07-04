@@ -5,8 +5,8 @@ use crate::block::{
     GRASS_BLOCK, ICE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
     LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER,
     PINK_TULIP, PODZOL, POPPY, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
-    SAND, SUGAR_CANE, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP, is_air_like, is_lava, is_water,
-    material_blocks_motion,
+    SAND, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP,
+    is_air_like, is_lava, is_water, material_blocks_motion,
 };
 use crate::noise::PerlinSimplexNoise;
 use crate::placement::BlockPos;
@@ -325,6 +325,7 @@ fn double_plant_halves(block_id: RawBlockId) -> Option<(RawBlockId, RawBlockId)>
         LILAC_LOWER | LILAC_UPPER => Some((LILAC_LOWER, LILAC_UPPER)),
         ROSE_BUSH_LOWER | ROSE_BUSH_UPPER => Some((ROSE_BUSH_LOWER, ROSE_BUSH_UPPER)),
         PEONY_LOWER | PEONY_UPPER => Some((PEONY_LOWER, PEONY_UPPER)),
+        SUNFLOWER_LOWER | SUNFLOWER_UPPER => Some((SUNFLOWER_LOWER, SUNFLOWER_UPPER)),
         _ => None,
     }
 }
