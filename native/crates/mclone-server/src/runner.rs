@@ -1361,6 +1361,8 @@ mod native {
             assert_eq!(runner.kind(), ServerRunnerKind::NativeThread);
             let mut updates = Vec::new();
             drain_runner_until_idle(&mut runner, &mut updates);
+            updates.extend(runner.drain_updates().unwrap());
+            drain_runner_until_idle(&mut runner, &mut updates);
             let diagnostics = runner.poll_diagnostics().unwrap();
             assert_eq!(diagnostics.kind, ServerRunnerKind::NativeThread);
             assert!(diagnostics.running);

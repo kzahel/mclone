@@ -17,7 +17,10 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::target::RenderFrameContext;
 use mclone_server::initial_spawn_center_for_seed;
-use mclone_ui::{FlatHotbarOverlay, FlatHud, GameScreen, GuiScale, Point};
+use mclone_ui::{
+    FlatHotbarOverlay, FlatHud, GameScreen, GuiScale, LoadingProgressCellStatus,
+    LoadingProgressOverlay, Point,
+};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{
@@ -168,6 +171,7 @@ impl OffscreenFlatClientHost {
             StartupWaitPolicy::None | StartupWaitPolicy::Frames(_) => {
                 self.start_scene_nonblocking(device, scene)
             }
+            StartupWaitPolicy::Progress => self.start_scene_progress(device, scene),
             StartupWaitPolicy::Idle => self.start_scene_idle(device, scene),
             StartupWaitPolicy::Playable => self.start_scene_playable(device, scene),
         }
@@ -212,6 +216,36 @@ impl OffscreenFlatClientHost {
             );
         }
         Ok(())
+    }
+
+    fn start_scene_progress(&mut self, device: &wgpu::Device, scene: SceneOptions) -> Result<()> {
+        if scene.remote_addr.is_some() {
+            bail!("offscreen loading-progress startup wait requires a local world");
+        }
+        self.start_scene_nonblocking(device, scene)?;
+        if loading_progress_overlay_has_visible_status(self.driver.startup_progress_overlay()) {
+            return Ok(());
+        }
+
+        for _ in 0..MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS {
+            if self.driver.startup.is_none() {
+                bail!(
+                    "offscreen loading-progress startup completed before a progress grid was available"
+                );
+            }
+            let startup_update = self.driver.advance_local_world_startup(Some(device));
+            if startup_update.mouse_lock_requested.is_some() {
+                self.driver.clear_camera_input();
+            }
+            if loading_progress_overlay_has_visible_status(self.driver.startup_progress_overlay()) {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        bail!(
+            "offscreen flat client did not observe loading progress after {MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS} steps"
+        )
     }
 
     fn start_scene_playable(&mut self, device: &wgpu::Device, scene: SceneOptions) -> Result<()> {
@@ -647,6 +681,19 @@ fn clear_scripted_interaction_target(
         }
     }
     None
+}
+
+fn loading_progress_overlay_has_visible_status(progress: Option<LoadingProgressOverlay>) -> bool {
+    progress.is_some_and(|progress| {
+        progress.cells.iter().any(|cell| {
+            matches!(
+                cell.status,
+                LoadingProgressCellStatus::Features
+                    | LoadingProgressCellStatus::Light
+                    | LoadingProgressCellStatus::TargetReady
+            )
+        })
+    })
 }
 
 fn is_clear_torch_surface(runtime: &WindowSceneRuntime, x: i32, y: i32, z: i32) -> bool {

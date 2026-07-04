@@ -443,6 +443,16 @@ mod tests {
             }
         );
 
+        assert_eq!(
+            Cli::parse(["--startup-wait".to_owned(), "progress".to_owned()]).unwrap(),
+            Cli::Window {
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::Progress,
+            }
+        );
+
         let cli = Cli::parse([
             "--screenshot".to_owned(),
             "/tmp/mclone-frame.png".to_owned(),

@@ -16,6 +16,10 @@ old center-gate cold floor; native feature block dependencies are bounded to
 the Java write radius, startup persistence loads are center-bounded, and the
 startup pump no longer drains unbounded update batches before rechecking the
 playable gate.
+Slice G1 landed on 2026-07-04: RD30 in-flight loading progress can now be
+captured deterministically, startup percent uses the center `3x3` gate, and
+scheduled phase colors now reflect admitted feature/light work instead of the
+entire requested view.
 Workstream: native Rust, server scheduling, startup readiness, loading UI;
 desktop validation first
 
@@ -366,7 +370,7 @@ Known validation gap:
       `20`, and `30`.
 - [x] Confirm RD30 enters after the center `3x3 FULL` gate instead of waiting
       for the whole view.
-- [ ] Confirm the loading grid changes colors before the world is entered.
+- [x] Confirm the loading grid changes colors before the world is entered.
 - [ ] Confirm chunks stream outward after entry.
 - [x] Capture and inspect a drawable screenshot under `/tmp` for at least one
       high-radius lane.
@@ -406,6 +410,10 @@ Validation commands should use the current defaults from
 - The direct scheduler probe that previously trickled the center gate one chunk
   at a time after the first persistence completions reached the `3x3` playable
   gate in roughly `2.5s`.
+- RD30 loading-progress screenshots using `--startup-wait progress` completed
+  with lighting disabled and with default lighting. Both images were inspected:
+  `/tmp/mclone-loading-progress-rd30-progress.png` and
+  `/tmp/mclone-loading-progress-rd30-progress-lit.png`.
 
 ### Slice F: Reduce The Center-Gate Cold Feature Floor
 
@@ -466,13 +474,65 @@ Completed validation:
   `/tmp/mclone-rd30-playable-f4-unlit.png` and
   `/tmp/mclone-rd30-playable-f4-lit.png`.
 
+### Slice G: Honest In-Flight Loading Progress
+
+- [x] Add an offscreen validation mode that waits for real loading-progress
+      phase movement without waiting for playable entry.
+- [x] Keep Java's latest-status grid model: scheduled/active phase colors are
+      separate from completion percent.
+- [x] Make startup loading percent use the local startup target, the center
+      `3x3` gate, rather than the whole RD30 tracking square.
+- [x] Emit `FEATURES` scheduled progress only when a feature job is admitted,
+      and emit `LIGHT` scheduled progress only when a light batch is admitted.
+- [x] Re-run RD30 in-flight loading screenshots and inspect the resulting
+      images under `/tmp`.
+- [x] Re-run the focused worldgen perf smoke that motivated the cold-floor
+      investigation.
+
+Slice G1 result:
+
+- `--startup-wait progress` is now available for screenshots. It starts the
+  local non-blocking startup pump, advances until the loading overlay contains a
+  feature/light/ready phase cell, then captures a frame. It is intentionally a
+  validation/capture policy, not the desktop gameplay default.
+- Startup loading percent now uses
+  `playable_gate_ready_chunks / playable_gate_chunk_count`. The post-join debug
+  view-readiness panel still uses the full target-ready count for the current
+  view.
+- Scheduler `StatusChanged { step: Scheduled }` events for `FEATURES` and
+  `LIGHT` now correspond to admitted feature/light work. Reserving a holder's
+  future target status no longer colors the whole requested view as if that work
+  were already running.
+- The RD30 progress grid now shows the full tracked square in the lower
+  surface phase with only the center-bounded admitted feature work green. It no
+  longer captures as an all-black frame or paints the whole RD30 square green at
+  the first repaint.
+
+Completed validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server` passed on
+  2026-07-04 (`361` passed, `0` ignored).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime` passed
+  on 2026-07-04 (`80` passed, `0` ignored).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client` passed
+  on 2026-07-04 (`144` passed, `0` ignored).
+- RD30 progress screenshots were captured and inspected at
+  `/tmp/mclone-loading-progress-rd30-progress.png` and
+  `/tmp/mclone-loading-progress-rd30-progress-lit.png`.
+- Optimized-dev `worldgen_perf --radius 1 --iterations 1` now reports `49`
+  requested cold dependency chunks and `82.749 ms` cold features for `9` target
+  chunks. The older performance record from 2026-06-15 reported `441`
+  dependency chunks and `357.560 ms` cold features for the same radius.
+- Optimized-dev `worldgen_perf --radius 3 --iterations 1` reports `121`
+  requested cold dependency chunks and `180.115 ms` cold features for `49`
+  target chunks.
+
 Remaining follow-ups:
 
 - Port or explicitly model Java's full mixed-status radius-8 feature dependency
   graph if later parity work needs the outer metadata dependencies visible in
   the native scheduler.
-- Validate progress-screen repaint behavior during RD30 in-flight startup work,
-  not only the final playable screenshot.
 - Run movement/background-streaming smokes at RD20/RD30 after entry so render
   compile backpressure and far-view streaming can be measured independently of
   startup admission.
@@ -482,9 +542,9 @@ Remaining follow-ups:
 - Should native expose Java's fixed radius-11 spawn bootstrap as an optional
   parity mode for oracle/debug runs, while keeping small-view local startup as
   the default?
-- Should the loading percent match Java's `FULL` status announcement count
-  exactly, or remain target-ready based while the grid shows in-progress
-  statuses?
+- Should the post-join debug readiness percent continue using full current-view
+  target readiness, or should it expose separate gate/view counters like startup
+  now does?
 - How much of Java's `ChunkTaskPriorityQueueSorter` should be ported directly
   versus represented by a smaller native priority/budget scheduler?
 - Should dedicated-server view distance get its own CLI/config in the same

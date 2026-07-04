@@ -2214,11 +2214,13 @@ impl ChunkScheduler {
                         .expect("holder must exist before scheduling");
                     holder.mark_scheduled(status);
                 }
-                events.push(ChunkSchedulerEvent::StatusChanged {
-                    pos,
-                    status,
-                    step: ChunkStatusStep::Scheduled,
-                });
+                if status < ChunkStatus::Features {
+                    events.push(status_changed_event(
+                        pos,
+                        status,
+                        ChunkStatusStep::Scheduled,
+                    ));
+                }
 
                 if status == ChunkStatus::Features {
                     if self.stored_chunk_misses.contains(&pos) {
@@ -2234,16 +2236,12 @@ impl ChunkScheduler {
                         .get_mut(&pos)
                         .expect("holder must exist before marking ready");
                     holder.mark_ready(status, None);
-                    events.push(ChunkSchedulerEvent::StatusChanged {
-                        pos,
-                        status,
-                        step: ChunkStatusStep::Ready,
-                    });
+                    events.push(status_changed_event(pos, status, ChunkStatusStep::Ready));
                 }
             }
         }
 
-        self.enqueue_feature_job_for_missing_targets(to_generate, priority_centers);
+        events.extend(self.enqueue_feature_job_for_missing_targets(to_generate, priority_centers));
 
         Ok(events)
     }
@@ -2256,7 +2254,7 @@ impl ChunkScheduler {
         }
     }
 
-    fn enqueue_next_pending_feature_job(&mut self) {
+    fn enqueue_next_pending_feature_job(&mut self) -> Vec<ChunkSchedulerEvent> {
         let priority_centers = self
             .distance_manager
             .player_interest_priority_centers()
@@ -2275,16 +2273,16 @@ impl ChunkScheduler {
             })
             .collect::<BTreeSet<_>>();
         let candidates = sorted_chunk_positions_by_priority(candidates, &priority_centers);
-        self.enqueue_feature_job_for_missing_targets(candidates, &priority_centers);
+        self.enqueue_feature_job_for_missing_targets(candidates, &priority_centers)
     }
 
     fn enqueue_feature_job_for_missing_targets(
         &mut self,
         candidates_in_priority_order: Vec<ChunkPos>,
         priority_centers: &[ChunkPos],
-    ) {
+    ) -> Vec<ChunkSchedulerEvent> {
         if candidates_in_priority_order.is_empty() || self.has_incomplete_feature_status_job() {
-            return;
+            return Vec::new();
         }
 
         let candidates = dedupe_chunk_positions_preserving_order(candidates_in_priority_order);
@@ -2294,16 +2292,22 @@ impl ChunkScheduler {
             .take(target_limit)
             .collect::<Vec<_>>();
         if job_targets.is_empty() {
-            return;
+            return Vec::new();
         }
 
         let (job_id, seeded_dependencies) = self.create_feature_job(&job_targets, priority_centers);
+        let mut events = Vec::with_capacity(job_targets.len());
         for pos in &job_targets {
             self.stored_chunk_misses.remove(pos);
             self.holders
                 .get_mut(pos)
                 .expect("holder must exist before assigning job")
                 .assign_status_job(ChunkStatus::Features, job_id);
+            events.push(status_changed_event(
+                *pos,
+                ChunkStatus::Features,
+                ChunkStatusStep::Scheduled,
+            ));
         }
 
         self.mark_job_state(job_id, ChunkJobState::Running);
@@ -2313,6 +2317,7 @@ impl ChunkScheduler {
             &job_targets,
             seeded_dependencies,
         );
+        events
     }
 
     fn has_incomplete_feature_status_job(&self) -> bool {
@@ -2418,6 +2423,11 @@ impl ChunkScheduler {
                     .and_then(|holder| holder.status_slot(ChunkStatus::Light))
                     .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
             if should_light {
+                events.push(status_changed_event(
+                    pos,
+                    ChunkStatus::Light,
+                    ChunkStatusStep::Scheduled,
+                ));
                 let ready_light_batch = {
                     let statuses = self
                         .pending_light_status_batches
@@ -2470,7 +2480,7 @@ impl ChunkScheduler {
             self.light_mailbox
                 .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
         }
-        self.enqueue_next_pending_feature_job();
+        events.extend(self.enqueue_next_pending_feature_job());
         Ok((events, None))
     }
 
@@ -3242,6 +3252,14 @@ fn fluid_tick_event_from_record(
         fluid,
         delay: tick.delay,
     })
+}
+
+fn status_changed_event(
+    pos: ChunkPos,
+    status: ChunkStatus,
+    step: ChunkStatusStep,
+) -> ChunkSchedulerEvent {
+    ChunkSchedulerEvent::StatusChanged { pos, status, step }
 }
 
 pub(crate) const fn scheduled_fluid_tick_target(fluid: FluidKind) -> &'static str {

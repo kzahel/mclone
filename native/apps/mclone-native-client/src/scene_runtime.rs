@@ -637,8 +637,8 @@ mod tests {
         assert_eq!(chunk_tracking_radius_for_render_distance(0), 0);
         assert_eq!(chunk_tracking_radius_for_render_distance(1), 1);
         assert_eq!(chunk_tracking_radius_for_render_distance(2), 3);
-        assert_eq!(chunk_tracking_radius_for_render_distance(3), 3);
-        assert_eq!(chunk_tracking_radius_for_render_distance(4), 4);
+        assert_eq!(chunk_tracking_radius_for_render_distance(3), 4);
+        assert_eq!(chunk_tracking_radius_for_render_distance(4), 5);
     }
 
     #[test]

@@ -3247,14 +3247,14 @@ mod tests {
                 .iter()
                 .all(|event| !matches!(event, ChunkSchedulerEvent::SnapshotReady(_)))
         );
-        assert_eq!(events.len(), 9 * 6);
+        assert_eq!(events.len(), 9 * 4);
         assert_eq!(
             status_event_count(&events, ChunkStatus::Features, ChunkStatusStep::Scheduled),
-            9
+            0
         );
         assert_eq!(
             status_event_count(&events, ChunkStatus::Light, ChunkStatusStep::Scheduled),
-            9
+            0
         );
 
         let mut ready_events = scheduler.poll().unwrap();
@@ -3353,7 +3353,15 @@ mod tests {
                 chunk_tracking_radius: 0,
             })
             .unwrap();
-        assert!(scheduler.poll().unwrap().is_empty());
+        let scheduled_events = scheduler.poll().unwrap();
+        assert_eq!(
+            status_event_count(
+                &scheduled_events,
+                ChunkStatus::Features,
+                ChunkStatusStep::Scheduled
+            ),
+            9
+        );
         assert!(scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30)));
 
         let first_events = scheduler.poll().unwrap();
@@ -3400,7 +3408,7 @@ mod tests {
         assert_eq!(holder.ticket_level(), PLAYER_TICKET_LEVEL);
         assert_eq!(holder.full_status(), FullChunkStatus::EntityTicking);
         assert!(holder.full_status().is_or_after(FullChunkStatus::Ticking));
-        assert_eq!(events.len(), 9 * 6);
+        assert_eq!(events.len(), 9 * 4);
 
         let moved_events = scheduler
             .apply_interest(ChunkView {
@@ -3445,9 +3453,17 @@ mod tests {
         };
 
         let first_events = scheduler.apply_interest(interest.clone()).unwrap();
-        assert_eq!(first_events.len(), 9 * 6);
+        assert_eq!(first_events.len(), 9 * 4);
         assert_eq!(scheduler.pending_persistence_load_count(), 9);
-        assert!(scheduler.poll().unwrap().is_empty());
+        let scheduled_events = scheduler.poll().unwrap();
+        assert_eq!(
+            status_event_count(
+                &scheduled_events,
+                ChunkStatus::Features,
+                ChunkStatusStep::Scheduled
+            ),
+            9
+        );
         assert_eq!(scheduler.pending_job_count(), 1);
         assert_eq!(scheduler.job_count(), 1);
 
@@ -3458,7 +3474,7 @@ mod tests {
 
         assert_eq!(
             without_fluid_tick_events(&poll_scheduler_until_idle(&mut scheduler)).len(),
-            19
+            28
         );
         assert_eq!(scheduler.loaded_chunk_count(), 9);
         assert_eq!(scheduler.job_count(), 1);
@@ -3524,12 +3540,12 @@ mod tests {
         let events = scheduler
             .add_region_ticket(ChunkTicketType::Unknown, ChunkPos::new(0, 0), 0)
             .unwrap();
-        assert_eq!(events.len(), 6);
+        assert_eq!(events.len(), 4);
         assert_eq!(scheduler.ticketed_chunk_count(), 1);
         assert_eq!(scheduler.ticket_level_at(ChunkPos::new(0, 0)), 33);
         assert_eq!(
             without_fluid_tick_events(&poll_scheduler_until_idle(&mut scheduler)).len(),
-            2
+            4
         );
         assert_eq!(scheduler.loaded_chunk_count(), 1);
         assert_eq!(scheduler.client_visible_chunk_count(), 0);
@@ -3620,7 +3636,7 @@ mod tests {
             Some(UNLOADED_CHUNK_LEVEL)
         );
 
-        assert!(!scheduler.set_chunk_forced(pos, true).unwrap().is_empty());
+        scheduler.set_chunk_forced(pos, true).unwrap();
         poll_scheduler_until_idle(&mut scheduler);
 
         assert!(!scheduler.is_pending_unload(pos));

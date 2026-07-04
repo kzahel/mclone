@@ -260,6 +260,7 @@ pub(crate) enum WindowStartIntent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StartupWaitPolicy {
     None,
+    Progress,
     Playable,
     Idle,
     Frames(u32),
@@ -272,7 +273,7 @@ impl StartupWaitPolicy {
     pub(crate) fn offscreen_capture_frame_count(self) -> usize {
         match self {
             Self::Frames(frames) => (frames as usize).saturating_add(1),
-            Self::None | Self::Playable | Self::Idle => 1,
+            Self::None | Self::Progress | Self::Playable | Self::Idle => 1,
         }
     }
 }
@@ -1433,6 +1434,7 @@ fn parse_startup_wait_arg(flag: &str, value: Option<String>) -> Result<StartupWa
     let value = value.with_context(|| format!("{flag} requires a value"))?;
     match value.as_str() {
         "none" => Ok(StartupWaitPolicy::None),
+        "progress" => Ok(StartupWaitPolicy::Progress),
         "playable" => Ok(StartupWaitPolicy::Playable),
         "idle" => Ok(StartupWaitPolicy::Idle),
         _ => {
@@ -1440,7 +1442,9 @@ fn parse_startup_wait_arg(flag: &str, value: Option<String>) -> Result<StartupWa
                 .strip_prefix("frames:")
                 .or_else(|| value.strip_prefix("frames="))
                 .with_context(|| {
-                    format!("{flag} must be none, playable, idle, or frames:N, got `{value}`")
+                    format!(
+                        "{flag} must be none, progress, playable, idle, or frames:N, got `{value}`"
+                    )
                 })?;
             let frames = frames
                 .parse::<u32>()
@@ -1499,11 +1503,11 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-hud true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-hud true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\

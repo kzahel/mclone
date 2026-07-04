@@ -554,7 +554,7 @@ pub fn loading_progress_overlay_from_diagnostics(
     diagnostics
         .loading_progress_snapshot
         .as_ref()
-        .map(loading_progress_overlay_from_snapshot)
+        .map(startup_loading_progress_overlay_from_snapshot)
 }
 
 pub fn view_readiness_overlay_from_diagnostics(
@@ -569,10 +569,32 @@ pub fn view_readiness_overlay_from_diagnostics(
 pub fn loading_progress_overlay_from_snapshot(
     snapshot: &ChunkLoadingProgressSnapshot,
 ) -> LoadingProgressOverlay {
-    LoadingProgressOverlay::new(
-        snapshot.stats.target_radius,
+    loading_progress_overlay_from_snapshot_counts(
+        snapshot,
         snapshot.stats.target_ready_chunks,
         snapshot.stats.target_chunk_count,
+    )
+}
+
+fn startup_loading_progress_overlay_from_snapshot(
+    snapshot: &ChunkLoadingProgressSnapshot,
+) -> LoadingProgressOverlay {
+    loading_progress_overlay_from_snapshot_counts(
+        snapshot,
+        snapshot.stats.playable_gate_ready_chunks,
+        snapshot.stats.playable_gate_chunk_count,
+    )
+}
+
+fn loading_progress_overlay_from_snapshot_counts(
+    snapshot: &ChunkLoadingProgressSnapshot,
+    ready_chunks: usize,
+    chunk_count: usize,
+) -> LoadingProgressOverlay {
+    LoadingProgressOverlay::new(
+        snapshot.stats.target_radius,
+        ready_chunks,
+        chunk_count,
         snapshot.stats.playable_chunk_ready,
         snapshot.cells.iter().map(|cell| {
             LoadingProgressCell::new(
@@ -2747,6 +2769,15 @@ mod tests {
 
         let mut diagnostics =
             ServerRunnerDiagnostics::initial(ServerRunnerKind::InlineFallback, 0, 0);
+        diagnostics.loading_progress_snapshot = Some(snapshot.clone());
+        let startup_overlay = loading_progress_overlay_from_diagnostics(&diagnostics)
+            .expect("startup loading diagnostics should map to an overlay");
+        assert_eq!(startup_overlay.percent(), 100);
+        assert_eq!(
+            startup_overlay.status_at(1, 0),
+            LoadingProgressCellStatus::Features
+        );
+
         diagnostics.view_readiness_snapshot = Some(snapshot);
         let diagnostics_overlay = view_readiness_overlay_from_diagnostics(&diagnostics)
             .expect("view readiness diagnostics should map to an overlay");

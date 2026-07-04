@@ -975,6 +975,7 @@ impl ApplicationHandler for ChunkApp {
                     }
                 }
                 StartupWaitPolicy::None
+                | StartupWaitPolicy::Progress
                 | StartupWaitPolicy::Playable
                 | StartupWaitPolicy::Frames(_) => {
                     self.driver.request_current_scene_start(false, true);
