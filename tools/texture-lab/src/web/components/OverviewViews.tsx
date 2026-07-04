@@ -12,6 +12,7 @@ export function PreviewModeTabs({
   onChange: (mode: PreviewMode) => void;
 }): JSX.Element {
   const modes: { mode: PreviewMode; label: string }[] = [
+    { mode: "auto", label: "Auto" },
     { mode: "detail", label: "Detail" },
     { mode: "atlas", label: "Atlas" },
     { mode: "blocks", label: "Blocks" },
@@ -95,6 +96,9 @@ export function BlockBundleAtlas({
   previewSelectionsByTexture,
   selectedTextureName,
   onSelectTexture,
+  title = "Block Bundles",
+  summary,
+  emptyMessage = "No block bundles match the current filters.",
 }: {
   blocks: BlockIndexEntry[];
   textures: TextureIndexEntry[];
@@ -102,6 +106,9 @@ export function BlockBundleAtlas({
   previewSelectionsByTexture: Record<string, string>;
   selectedTextureName: string | null;
   onSelectTexture: (name: string) => void;
+  title?: string;
+  summary?: string;
+  emptyMessage?: string;
 }): JSX.Element {
   const textureByName = new Map(textures.map((texture) => [texture.name, texture]));
   const candidateById = candidateMapById(candidates);
@@ -116,8 +123,8 @@ export function BlockBundleAtlas({
     <div className="overviewStack">
       <div className="sectionHeader overviewHeader">
         <div>
-          <h2>Block Bundles</h2>
-          <p>{visibleBlocks.length} blocks with filtered textures</p>
+          <h2>{title}</h2>
+          <p>{summary ?? `${visibleBlocks.length} blocks with filtered textures`}</p>
         </div>
       </div>
       {visibleBlocks.length ? (
@@ -162,7 +169,7 @@ export function BlockBundleAtlas({
           ))}
         </div>
       ) : (
-        <div className="candidateEmpty">No block bundles match the current filters.</div>
+        <div className="candidateEmpty">{emptyMessage}</div>
       )}
     </div>
   );

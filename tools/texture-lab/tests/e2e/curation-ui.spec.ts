@@ -284,6 +284,33 @@ test("keeps the texture list in its own scroll pane", async ({ page }) => {
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-scroll-pane.png", fullPage: true });
 });
 
+test("defaults to automatic rendered previews from vanilla metadata", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByLabel("Search").fill("grass_cross");
+  await page.getByRole("button", { name: /grass_cross/ }).click();
+  await expect(page.getByRole("heading", { name: "Grass Cross" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rendered Uses" })).toBeVisible();
+  await expect(page.locator(".overviewHeader")).toContainText("cross / 1 block / 1 face");
+  await expect(page.getByRole("button", { name: "grass all uses Grass Cross", exact: true })).toBeVisible();
+  await expect(page.locator(".chipGroup")).toContainText("cross");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-auto-cross.png", fullPage: true });
+
+  await page.getByLabel("Search").fill("redstone-dust-dot");
+  await page.getByRole("button", { name: /redstone_dust_dot/ }).click();
+  await expect(page.getByRole("heading", { name: "Redstone Dust Dot" })).toBeVisible();
+  await expect(page.locator(".overviewHeader")).toContainText("flat / 1 block / 1 face");
+  await expect(page.getByRole("button", { name: "redstone-dust-dot top uses Redstone Dust Dot", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Detail" }).click();
+  await expect(page.getByRole("button", { name: "Detail" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel("Search").fill("fern_cross");
+  await page.getByRole("button", { name: /fern_cross/ }).click();
+  await expect(page.getByRole("button", { name: "Detail" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "Fern Cross" })).toBeVisible();
+});
+
 test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();

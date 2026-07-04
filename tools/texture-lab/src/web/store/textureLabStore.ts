@@ -3,7 +3,7 @@ import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry, Texture
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 export type ThemeMode = "light" | "dark";
-export type PreviewMode = "detail" | "atlas" | "blocks";
+export type PreviewMode = "auto" | "detail" | "atlas" | "blocks";
 export type QueueFilter = "all" | "noise-placeholder" | "authored-structure" | "frozen-asset" | "has-candidates" | "needs-candidates";
 type ThemeSource = "system" | "manual";
 
@@ -48,7 +48,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   previewSelectionsByTexture: {},
   themeMode: systemThemeMode(),
   themeSource: "system",
-  previewMode: "detail",
+  previewMode: "auto",
   search: "",
   materialFilter: "all",
   statusFilter: "all",

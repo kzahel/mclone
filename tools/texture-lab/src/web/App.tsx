@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../core/index-model";
+import type { BlockIndexEntry, TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../core/index-model";
 import { primaryCandidateImage } from "./candidate-images";
 import { BlockBundleAtlas, PreviewModeTabs, TextureAtlas } from "./components/OverviewViews";
 import {
@@ -206,6 +206,25 @@ export function App(): JSX.Element {
                   selectedTextureName={selectedTextureName}
                   onSelectTexture={selectTexture}
                 />
+              ) : previewMode === "auto" && activeTexture ? (
+                <AutoTexturePreview
+                  texture={activeTexture}
+                  blocks={index.blocks}
+                  candidates={activeCandidates}
+                  selectedCandidateId={selectedCandidateId}
+                  previewCandidateId={previewSelectionsByTexture[activeTexture.name] ?? null}
+                  previewSelectionsByTexture={visibleSelectionsByTexture}
+                  curationCandidateId={curatedSelectionsByTexture[activeTexture.name] ?? null}
+                  curationSelectedCount={index.curation.selectedCount}
+                  onSelectTexture={selectTexture}
+                  onSelectCandidate={selectCandidate}
+                  onUsePreview={setPreviewCandidate}
+                  onClearPreview={clearPreviewCandidate}
+                  onSelectCuration={selectCurationCandidate}
+                  onClearCuration={clearCurationSelection}
+                  onApplyCuration={applyCuration}
+                  onRequestFreeze={requestFreeze}
+                />
               ) : activeTexture ? (
                 <TexturePreview
                   texture={activeTexture}
@@ -298,31 +317,8 @@ function TexturePreview({
 }): JSX.Element {
   return (
     <>
-      <div className="sectionHeader">
-        <div>
-          <h2>{texture.displayName}</h2>
-          <p>
-            {texture.exportPath} / {texture.status}
-          </p>
-        </div>
-        <div className="chipGroup">
-          <span className={artSourceChipClass(texture)} title={texture.artSource.description}>
-            {texture.artSource.label}
-          </span>
-          <span className="chip">{texture.materialFamily}</span>
-          {texture.vanillaUsage && texture.vanillaUsage.previewHint !== "unknown" ? (
-            <span className="chip">{texture.vanillaUsage.previewHint}</span>
-          ) : null}
-          <span className="chip">{texture.tiling}</span>
-          <span className="chip">{texture.rotation}</span>
-          {texture.tintRole ? <span className="chip tintChip">{texture.tintRole}</span> : null}
-        </div>
-      </div>
-      <div className="imageGrid">
-        <ImageCard texture={texture} imageKind="currentExport" refInfo={texture.images.currentExport} />
-        <ImageCard texture={texture} imageKind="runtimeExport" refInfo={texture.images.runtimeExport} />
-        <ImageCard texture={texture} imageKind="sheet" refInfo={texture.images.sheet} wide />
-      </div>
+      <TexturePreviewHeader texture={texture} />
+      <TextureAssetGrid texture={texture} />
       <CandidateSection
         texture={texture}
         candidates={candidates}
@@ -340,6 +336,136 @@ function TexturePreview({
       />
     </>
   );
+}
+
+function AutoTexturePreview({
+  texture,
+  blocks,
+  candidates,
+  selectedCandidateId,
+  previewCandidateId,
+  previewSelectionsByTexture,
+  curationCandidateId,
+  curationSelectedCount,
+  onSelectTexture,
+  onSelectCandidate,
+  onUsePreview,
+  onClearPreview,
+  onSelectCuration,
+  onClearCuration,
+  onApplyCuration,
+  onRequestFreeze,
+}: {
+  texture: TextureIndexEntry;
+  blocks: BlockIndexEntry[];
+  candidates: TextureCandidateEntry[];
+  selectedCandidateId: string | null;
+  previewCandidateId: string | null;
+  previewSelectionsByTexture: Record<string, string>;
+  curationCandidateId: string | null;
+  curationSelectedCount: number;
+  onSelectTexture: (name: string) => void;
+  onSelectCandidate: (id: string) => void;
+  onUsePreview: (textureName: string, candidateId: string) => void;
+  onClearPreview: (textureName: string) => void;
+  onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
+  onClearCuration: (textureName: string) => Promise<void>;
+  onApplyCuration: () => Promise<void>;
+  onRequestFreeze: (textureName: string) => Promise<void>;
+}): JSX.Element {
+  const focusedBlocks = blocks.filter((block) => block.faces.some((face) => face.textureName === texture.name));
+  return (
+    <>
+      <TexturePreviewHeader texture={texture} subtitle={autoPreviewSubtitle(texture)} />
+      {focusedBlocks.length ? (
+        <div className="autoPreviewBlock">
+          <BlockBundleAtlas
+            blocks={focusedBlocks}
+            textures={[texture]}
+            candidates={candidates}
+            previewSelectionsByTexture={previewSelectionsByTexture}
+            selectedTextureName={texture.name}
+            onSelectTexture={onSelectTexture}
+            title="Rendered Uses"
+            summary={autoRenderedUsesSummary(texture, focusedBlocks)}
+            emptyMessage="No rendered uses found for this texture."
+          />
+        </div>
+      ) : (
+        <TextureAssetGrid texture={texture} />
+      )}
+      <CandidateSection
+        texture={texture}
+        candidates={candidates}
+        selectedCandidateId={selectedCandidateId}
+        previewCandidateId={previewCandidateId}
+        curationCandidateId={curationCandidateId}
+        curationSelectedCount={curationSelectedCount}
+        onSelectCandidate={onSelectCandidate}
+        onUsePreview={onUsePreview}
+        onClearPreview={onClearPreview}
+        onSelectCuration={onSelectCuration}
+        onClearCuration={onClearCuration}
+        onApplyCuration={onApplyCuration}
+        onRequestFreeze={onRequestFreeze}
+      />
+    </>
+  );
+}
+
+function TexturePreviewHeader({
+  texture,
+  subtitle = `${texture.exportPath} / ${texture.status}`,
+}: {
+  texture: TextureIndexEntry;
+  subtitle?: string;
+}): JSX.Element {
+  return (
+    <div className="sectionHeader">
+      <div>
+        <h2>{texture.displayName}</h2>
+        <p>{subtitle}</p>
+      </div>
+      <div className="chipGroup">
+        <span className={artSourceChipClass(texture)} title={texture.artSource.description}>
+          {texture.artSource.label}
+        </span>
+        <span className="chip">{texture.materialFamily}</span>
+        {texture.vanillaUsage && texture.vanillaUsage.previewHint !== "unknown" ? (
+          <span className="chip">{texture.vanillaUsage.previewHint}</span>
+        ) : null}
+        <span className="chip">{texture.tiling}</span>
+        <span className="chip">{texture.rotation}</span>
+        {texture.tintRole ? <span className="chip tintChip">{texture.tintRole}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function TextureAssetGrid({ texture }: { texture: TextureIndexEntry }): JSX.Element {
+  return (
+    <div className="imageGrid">
+      <ImageCard texture={texture} imageKind="currentExport" refInfo={texture.images.currentExport} />
+      <ImageCard texture={texture} imageKind="runtimeExport" refInfo={texture.images.runtimeExport} />
+      <ImageCard texture={texture} imageKind="sheet" refInfo={texture.images.sheet} wide />
+    </div>
+  );
+}
+
+function autoPreviewSubtitle(texture: TextureIndexEntry): string {
+  const hint = texture.vanillaUsage?.previewHint;
+  if (!hint || hint === "unknown") {
+    return `${texture.exportPath} / ${texture.status}`;
+  }
+  return `${hint} preview / ${texture.exportPath} / ${texture.status}`;
+}
+
+function autoRenderedUsesSummary(texture: TextureIndexEntry, blocks: BlockIndexEntry[]): string {
+  const hint = texture.vanillaUsage?.previewHint;
+  const faces = blocks.reduce((sum, block) => sum + block.faces.filter((face) => face.textureName === texture.name).length, 0);
+  const blockWord = blocks.length === 1 ? "block" : "blocks";
+  const faceWord = faces === 1 ? "face" : "faces";
+  return `${hint && hint !== "unknown" ? `${hint} / ` : ""}${blocks.length} ${blockWord} / ${faces} ${faceWord}`;
 }
 
 function ImageCard({

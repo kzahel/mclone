@@ -378,9 +378,11 @@ blockstate/model usage, model families, normalized geometry kinds such as
 `cross-sprite`, `crop-cross`, `flat-ground`, `cube`, `pane`, `rail`, `door`,
 and `torch`, render layers, texture slots, tint indexes/roles, preview hints,
 and concrete vanilla block examples. This metadata is the preferred source for
-choosing review previews and authoring constraints; alpha-shape diagnostics are
-secondary validation for the model families where centering or cutout coverage
-matters.
+choosing review previews and authoring constraints. The browser UI defaults to
+an `Auto` preview mode that uses the vanilla preview hint to show focused
+rendered uses for cube, cross-sprite, flat-ground, and partial-model textures
+when authored block usage is available; alpha-shape diagnostics are secondary
+validation for the model families where centering or cutout coverage matters.
 
 The `mclone-default` grass block module encodes that relationship directly:
 
