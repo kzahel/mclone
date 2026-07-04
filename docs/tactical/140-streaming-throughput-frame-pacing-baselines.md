@@ -1,10 +1,11 @@
 # 140: Streaming Throughput And Frame Pacing Baselines
 
-Status: active benchmark and attribution checkpoint. Slice A clean desktop
-startup-streaming baseline captured on 2026-07-04 at `3adafc1e`; Slice A2 clean
-synthetic loading-settle isolation baseline captured on 2026-07-04 at
-`482f0d51`. No optimization slices should start from this doc until the baseline
-matrix is captured and interpreted.
+Status: active benchmark and attribution checkpoint. Slice A long-run desktop
+startup-streaming RD20 baseline captured on 2026-07-04 at `3adafc1e`; Slice A2
+clean synthetic loading-settle isolation baseline captured on 2026-07-04 at
+`482f0d51`. The primary paired RD10 desktop/Quest baseline is still pending. No
+optimization slices should start from this doc until the RD10 baseline matrix is
+captured and interpreted.
 Workstream: native Rust performance, desktop throughput, Android XR / Quest
 frame pacing, shared runtime/render scheduling policy.
 
@@ -18,6 +19,10 @@ Capture the current conflict between two valid performance goals:
 - Quest and other constrained XR/mobile lanes must keep chunk generation,
   update application, render-section compilation, GPU upload, and ready-state
   publication from creating frame-time tails.
+- Desktop and Quest policy comparisons should use the same practical render
+  distance before drawing conclusions. RD10 is the current paired comparison
+  target because it is meaningful on Quest and fast enough to iterate on
+  desktop; RD20/RD30 remain explicit long-run checkpoints.
 
 The recent startup work fixed the entry gate: local play can enter as soon as
 the center `3x3` publication gate is ready, even when a large render distance
@@ -72,6 +77,9 @@ is a measured policy boundary, not one global knob.
 - Treat desktop-shaped startup streaming as the primary local-play benchmark.
   Synthetic loading-settle remains useful for attribution, but it must not be
   the only target for throughput policy.
+- Use RD10 as the default apples-to-apples desktop/Quest comparison distance.
+  Keep RD20/RD30 out of the default iteration loop unless the question is
+  specifically high-distance long-run behavior.
 - Keep runtime settle and render mesh settle separate. A faster mesh path does
   not prove server generation improved.
 - Keep average throughput and frame tails separate. A higher chunks/sec number
@@ -102,13 +110,13 @@ Primary clean baseline:
 ```bash
 cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
   --startup-streaming-perf \
-  --render-distance 20 \
-  --startup-streaming-frames 30000 \
-  --target-hz 120 \
+  --render-distance 10 \
+  --startup-streaming-frames 6000 \
+  --target-hz 60 \
   --debug-passive-showcase false \
   --render-compile-workers 1 \
   --simulation-cadence 20/20/60 \
-  | tee /tmp/mclone-startup-streaming-rd20-workers1-cadence20.json
+  | tee /tmp/mclone-startup-streaming-rd10-workers1-cadence20-target60.json
 ```
 
 Smoke:
@@ -139,6 +147,12 @@ Interpretation:
   frame safety.
 - If frame tails are bad while backlog drains quickly, the desktop policy needs
   the same budget-awareness discipline as Quest, not simply more workers.
+
+Explicit long-run RD20 reproduction:
+
+```bash
+pnpm native:startup-streaming:perf:rd20-long
+```
 
 ### A2. Desktop Loading-Settle Isolation
 
@@ -221,10 +235,10 @@ cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --
   --render-distance 10 \
   --render-compile-workers 1 \
   --frame-budget-frames 240 \
-  --target-hz 120 \
+  --target-hz 60 \
   --path-radius 4 \
   --movement-frame-speed 32 \
-  | tee /tmp/mclone-movement-frame-rd10-workers1.json
+  | tee /tmp/mclone-movement-frame-rd10-workers1-target60.json
 ```
 
 Repeat with `--render-compile-workers 2` and `4` if the loading-settle worker
@@ -254,46 +268,57 @@ If these do not explain loading-settle runtime cost, add a focused follow-up
 slice to expose per-status chunks/sec and pending mailbox depth during
 `--loading-settle-perf`.
 
-### D. Quest Guardrail
+### D. Quest RD10 Guardrail
 
 Goal: ensure any throughput policy candidate still respects headset frame
-pacing and does not regress the backpressure story.
+pacing and does not regress the backpressure story at the same render distance
+used by the desktop iteration lane.
 
-Use the current RD7 settled-orbit lane as the primary guardrail. The exact
-command may evolve, but each comparable run should record workers, result
-accept budget, section upload budget, section accept budget, render distance,
-seed, duration, and whether actors are enabled.
+Use RD10 as the paired Quest baseline. The current Quest probes already measure
+real headset frame pacing, app-work/headroom, terrain runtime/upload/compile
+tails, and Meta performance metrics where enabled. They do not yet report the
+same playable/full-view-ready/render-quiescent startup-streaming milestones as
+the desktop lane, so adding those XR markers is a required follow-up before we
+can call it the exact same benchmark.
 
-Known useful guardrail command shape:
+Current paired guardrail command:
+
+```bash
+pnpm native:android-xr:perf:rd10:baseline
+```
+
+Expanded command:
 
 ```bash
 node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
-  --render-compile-workers 2 \
-  --xr-render-completed-result-accept-budget 2 \
-  --xr-render-section-upload-budget 16 \
-  --xr-render-section-accept-budget 64 \
-  --perf-seconds 45 \
-  --perf-settled-orbit \
-  --perf-orbit-speed 4.3 \
+  --perf-seconds 20 \
+  --perf-settled-stationary \
   --perf-metrics \
-  --wait-seconds 270 \
-  --perf-summary /tmp/mclone-quest-rd7-guardrail-2-16-64.txt \
-  --log /tmp/mclone-quest-rd7-guardrail-2-16-64-logcat.txt \
+  --wait-seconds 240 \
+  --perf-summary /tmp/mclone-quest-openxr-perf-stationary-rd10-metrics.txt \
+  --log /tmp/mclone-quest-openxr-perf-stationary-rd10-metrics-logcat.txt \
   --view-pose 0,120,-96,180 \
   --seed 12345 \
   --chunk-x 0 \
   --chunk-z 0 \
-  --render-distance 7 \
+  --render-distance 10 \
   --day-time 6000 \
   --freeze-time
 ```
 
+Also run the frame-overlap RD10 variant when evaluating any policy candidate:
+
+```bash
+pnpm native:android-xr:perf:stationary:rd10:frame-overlap
+```
+
 For policy comparisons, run at least:
 
-- current default lane
-- current known guardrail lane
-- the desktop candidate policy if it changes worker count or admission/upload
-  defaults
+- desktop RD10 startup-streaming baseline
+- Quest RD10 baseline above
+- Quest RD10 frame-overlap baseline
+- the desktop candidate policy on both desktop RD10 and Quest RD10 if it changes
+  worker count or admission/upload defaults
 
 Record:
 
@@ -303,14 +328,20 @@ Record:
 - thread CPU vs blocked summary when available
 - terrain runtime sync/upload/ready/publish buckets
 - compile worker pending/queued state and upload/result backlog
+- settle seconds reported by the current Quest settled gate
+- once implemented, Quest playable/full-view-ready/render-quiescent milestones
+  matching the desktop startup-streaming report
 
 ## Captured Results
 
-### Slice A: Clean Desktop Startup-Streaming RD20 Baseline
+### Slice A Long-Run: Clean Desktop Startup-Streaming RD20 Baseline
 
 Captured on 2026-07-04 at commit `3adafc1e`.
 
 `git_dirty=false`; release build; `debug_assertions=false`.
+
+This is retained as high-distance evidence, not the primary iteration lane.
+Use RD10 for desktop/Quest apples-to-apples comparisons.
 
 Raw output for this local run:
 `/tmp/mclone-startup-streaming-rd20-workers1-cadence20.json`.
@@ -349,8 +380,9 @@ Immediate interpretation:
   under-foot `3x3` playable gate in `1.747s`, then stream the full requested
   view in the background.
 - Full target readiness is roughly `97s`, and target render quiescence is
-  roughly `106s`. That is the primary local-play streaming baseline; the older
-  loading-settle full-drain number remains useful only for attribution.
+  roughly `106s`. That proves the entry gate and streaming path work at high
+  distance, but it is too slow for the default comparison loop. The primary
+  desktop/Quest baseline should be RD10.
 - Frame-work timing is not yet well enough attributed. The explicit
   poll/remesh/upload/render callback totals are much smaller than the measured
   headless frame work, and the headless loop serializes with GPU completion via
@@ -432,7 +464,7 @@ Immediate interpretation:
   from roughly `2052` sections/sec at RD5 to `284` sections/sec at RD20.
 - The next pass should not tune one global backpressure knob. Run the cadence
   sweep and render-compile-worker sweep separately, then use a desktop
-  movement-frame run and Quest RD7 guardrail before changing defaults.
+  movement-frame run and Quest RD10 guardrail before changing defaults.
 
 ## Interpretation Rules
 
@@ -457,8 +489,12 @@ Do not optimize from a single number. Use these reads:
 
 ## Acceptance Criteria For This Tactical
 
-- [x] A clean commit baseline exists for desktop startup-streaming RD20 with
-  current defaults.
+- [ ] A clean commit baseline exists for desktop startup-streaming RD10 at a
+  60 Hz budget with current defaults.
+- [ ] A Quest OpenXR RD10 frame-pacing baseline exists for the same seed and
+  current default policy.
+- [x] A clean long-run baseline exists for desktop startup-streaming RD20 with
+  previous defaults.
 - [x] A clean synthetic isolation baseline exists for desktop loading-settle
   RD5/RD10/RD15/RD20 with current defaults.
 - [ ] At least one worker-count sweep and one cadence sweep are recorded for
@@ -466,7 +502,7 @@ Do not optimize from a single number. Use these reads:
   loading-settle.
 - [ ] At least one desktop live streaming frame-budget or startup-streaming run
   is recorded for the baseline and for any promising throughput candidate.
-- [ ] At least one Quest RD7 guardrail run is recorded after the same candidate
+- [ ] At least one Quest RD10 guardrail run is recorded after the same candidate
   policy.
 - [ ] The results are summarized in `docs/performance-records.md` with enough raw
   `/tmp` paths or copied summary tables to reproduce the interpretation.

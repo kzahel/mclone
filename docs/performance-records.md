@@ -30,8 +30,17 @@ pnpm native:worldgen:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
 pnpm native:startup-streaming:perf
+pnpm native:startup-streaming:perf:rd20-long
 pnpm native:loading-settle:perf
 pnpm native:timedemo:perf
+```
+
+Quest/OpenXR guardrail lanes:
+
+```bash
+pnpm native:android-xr:perf:rd10:baseline
+pnpm native:android-xr:perf:stationary:rd10:frame-overlap
+pnpm native:android-xr:perf:flight:rd10:metrics
 ```
 
 Lower-level scheduler isolation:
@@ -46,7 +55,8 @@ pnpm native:runtime:perf
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
-- `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness.
+- `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for faster iteration and easier comparison with Quest RD10 guardrails. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
+- `native:android-xr:perf:*rd10*`: Quest/OpenXR RD10 frame-pacing guardrails. These currently report headset app-work/headroom, dropped/stale frames, runtime/render/upload/compile tails, and Meta performance metrics where enabled. They do not yet emit the same playable/full-view-ready/render-quiescent startup-streaming markers as the desktop startup-streaming lane.
 - `native:loading-settle:*`: synthetic full-drain isolation probe. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters. Use it to split server/light/runtime cost from mesh cost, not as the primary desktop startup policy target.
 - `native:timedemo:*`: deterministic headless GPU render path over a fixed camera orbit. Reports scene build time, render setup, per-frame render time, and drawn section/index pressure. It does not read back PNGs per frame.
 - `native:runtime:*`: lower-level server scheduler movement benchmark without client remesh/render work.
@@ -67,7 +77,7 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
-### 2026-07-04 - Desktop Startup-Streaming RD20 Baseline
+### 2026-07-04 - Desktop Startup-Streaming RD20 Long-Run Baseline
 
 Commit reported by native benchmark JSON: `3adafc1e`.
 
@@ -94,7 +104,8 @@ Raw output for this local run:
 Benchmark options: seed `12345`, transient local integrated world, render
 distance `20`, render compile workers `1`, simulation cadence `20/20/60`,
 lighting enabled, debug passive showcase disabled, `30,000` paced frames at
-`120 Hz`.
+`120 Hz`. This is retained as an explicit long-run checkpoint. The default
+desktop/Quest comparison lane should use RD10 for iteration.
 
 Summary:
 
