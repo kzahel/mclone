@@ -27,8 +27,10 @@ landed block-change path recompute triggers and path-trim hooks. Slice 5H
 landed the first Java-shaped server mob ground travel subset so passive
 movement speed flows through carried horizontal delta, input damping,
 normal-block friction/drag, and stepped collision instead of direct
-position-stepping. The starter passive path is now an explicit debug passive
-showcase, enabled by default.
+position-stepping. Slice 5I landed shared block movement facts for Java
+friction, speed factor, and jump factor defaults, plus generated ice and
+packed-ice friction, and wired those facts into server mob travel. The starter
+passive path is now an explicit debug passive showcase, enabled by default.
 Slice 8 landed a bounded farm-animal biome/placement dry run so biome tables,
 on-ground animal predicates, and cow/chicken AABB collision are no longer
 missing subsystems. Slice 9 landed strict raw-brightness sampling for the
@@ -761,12 +763,58 @@ Landed notes:
 
 Remaining travel follow-ups:
 
-- Move block friction, block speed factor, and jump factor into shared block
-  facts instead of using the normal-block friction constant everywhere.
+- Add terrain ids and movement facts for special blocks not yet present in the
+  terrain-MVP lane, including soul sand, honey, slime, and blue ice.
 - Add fluids, ladders/climbables, powder snow, effects, sprinting, and the
   broader `AttributeMap` / modifier stack.
 - Revisit path timeout speed estimates once movement speed and effective travel
   speed are represented as distinct runtime facts.
+
+## Slice 5I - Shared Block Movement Facts For Mob Travel (Landed)
+
+Purpose: move Java block movement facts under the shared block owner before
+adding more entity behavior that depends on them.
+
+Implementation sketch:
+
+- Add shared `mclone-blocks` accessors for Java block friction, speed factor,
+  and jump factor.
+- Mirror the generated terrain-MVP ice ids and Java `0.98` ice friction.
+- Keep default block movement facts at Java's `0.6` friction, `1.0` speed
+  factor, and `1.0` jump factor.
+- Update server mob travel to sample the current block and the block below the
+  movement AABB using Java's `Entity` helper shape.
+- Feed sampled friction into ground acceleration/drag, sampled speed factor
+  into post-collision horizontal delta, and sampled jump factor into jump
+  impulse.
+
+Landed notes:
+
+- Added `mclone-blocks` movement fact APIs:
+  `block_friction(...)`, `block_speed_factor(...)`, and
+  `block_jump_factor(...)`.
+- Added terrain-MVP ids for `ICE` and `PACKED_ICE`, both using Java `0.98`
+  friction.
+- Server mob travel now derives friction, speed factor, and jump factor from
+  shared block facts instead of a server-local normal-block friction constant.
+- Added focused regressions for block movement defaults, ice friction, mob
+  sampling of the below-movement block, and speed-factor application before
+  horizontal drag.
+- Verified with:
+  ```bash
+  cargo test --manifest-path native/Cargo.toml -p mclone-blocks
+  cargo test --manifest-path native/Cargo.toml -p mclone-server entity::mob
+  cargo test --manifest-path native/Cargo.toml -p mclone-server
+  cargo test --manifest-path native/Cargo.toml
+  ```
+
+Remaining block-fact follow-ups:
+
+- Add ids/facts when terrain generation or the registry exposes soul sand,
+  honey block, slime block, blue ice, bubble columns, ladders, vines, powder
+  snow, and other movement-affecting blocks.
+- Move fluid travel and climbable handling through the same shared block-fact
+  boundary instead of adding server-local checks.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 

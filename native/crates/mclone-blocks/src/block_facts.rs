@@ -8,6 +8,8 @@ pub mod terrain_id {
     pub const WATER: u32 = 2;
     pub const SNOW: u32 = 8;
     pub const LAVA: u32 = 9;
+    pub const PACKED_ICE: u32 = 35;
+    pub const ICE: u32 = 39;
     pub const GRASS: u32 = 43;
     pub const DANDELION: u32 = 44;
     pub const POPPY: u32 = 45;
@@ -89,6 +91,9 @@ pub enum BlockFluidKind {
 
 pub const WATER_BLOCK_STATE_ID: BlockStateId = BlockStateId(terrain_id::WATER);
 pub const LAVA_BLOCK_STATE_ID: BlockStateId = BlockStateId(terrain_id::LAVA);
+pub const DEFAULT_BLOCK_FRICTION: f32 = 0.6;
+pub const DEFAULT_BLOCK_SPEED_FACTOR: f32 = 1.0;
+pub const DEFAULT_BLOCK_JUMP_FACTOR: f32 = 1.0;
 
 pub fn block_fluid_kind(state: BlockStateId) -> BlockFluidKind {
     match state.0 {
@@ -113,6 +118,21 @@ pub fn block_fluid_height(state: BlockStateId) -> Option<f32> {
         BlockFluidKind::Water | BlockFluidKind::Lava => Some(1.0),
         BlockFluidKind::None => None,
     }
+}
+
+pub fn block_friction(state: BlockStateId) -> f32 {
+    match state.0 {
+        terrain_id::ICE | terrain_id::PACKED_ICE => 0.98,
+        _ => DEFAULT_BLOCK_FRICTION,
+    }
+}
+
+pub fn block_speed_factor(_state: BlockStateId) -> f32 {
+    DEFAULT_BLOCK_SPEED_FACTOR
+}
+
+pub fn block_jump_factor(_state: BlockStateId) -> f32 {
+    DEFAULT_BLOCK_JUMP_FACTOR
 }
 
 #[cfg(test)]
@@ -163,5 +183,31 @@ mod tests {
             Some(1.0)
         );
         assert_eq!(block_fluid_height(state(terrain_id::AIR)), None);
+    }
+
+    #[test]
+    fn java_movement_defaults_apply_to_most_terrain_mvp_blocks() {
+        assert_eq!(
+            block_friction(state(terrain_id::AIR)),
+            DEFAULT_BLOCK_FRICTION
+        );
+        assert_eq!(
+            block_friction(state(terrain_id::GRASS)),
+            DEFAULT_BLOCK_FRICTION
+        );
+        assert_eq!(
+            block_speed_factor(state(terrain_id::GRASS)),
+            DEFAULT_BLOCK_SPEED_FACTOR
+        );
+        assert_eq!(
+            block_jump_factor(state(terrain_id::GRASS)),
+            DEFAULT_BLOCK_JUMP_FACTOR
+        );
+    }
+
+    #[test]
+    fn ice_blocks_use_java_high_friction() {
+        assert_eq!(block_friction(state(terrain_id::ICE)), 0.98);
+        assert_eq!(block_friction(state(terrain_id::PACKED_ICE)), 0.98);
     }
 }

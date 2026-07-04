@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use mclone_blocks::{collide_movement, collide_movement_result, collision_aabb_for_feet_position};
+use mclone_blocks::{
+    BlockFluidKind, block_fluid_kind, block_friction, block_jump_factor, block_speed_factor,
+    collide_movement, collide_movement_result, collision_aabb_for_feet_position,
+};
 use mclone_core::{Aabb, BlockPos, BlockStateId, Vec3d};
 use mclone_protocol::{EntityId, EntityKind};
 use mclone_worldgen::prng::SimpleRandomSource;
@@ -28,7 +31,6 @@ const MOB_GRAVITY: f64 = 0.08;
 const MOB_VERTICAL_DRAG: f64 = 0.98;
 const MOB_COLLISION_EPSILON: f64 = 1.0e-7;
 const MOB_INPUT_DAMPING: f64 = 0.98;
-const MOB_DEFAULT_BLOCK_FRICTION: f64 = 0.6;
 const MOB_FRICTION_INFLUENCE_NUMERATOR: f64 = 0.21600002;
 const MOB_GROUND_DRAG_MULTIPLIER: f64 = 0.91;
 const MOB_AIR_DRAG: f64 = 0.91;
@@ -539,18 +541,22 @@ impl<'a> MobGoalContext<'a> {
             self.y_body_rot_degrees,
         );
 
+        let block_jump_factor = mob_block_jump_factor(self.block_state_at, self.position);
         let requested_y = if jumping && self.on_ground {
-            self.attributes.jump_power
+            self.attributes.jump_power * block_jump_factor
         } else {
             self.delta_movement.y
         };
         let was_on_ground = self.on_ground;
+        let movement_block_friction = mob_block_friction(self.block_state_at, self.position);
+        let movement_block_speed_factor =
+            mob_block_speed_factor(self.block_state_at, self.position);
         let requested = mob_travel_request(
             Vec3d::new(self.delta_movement.x, requested_y, self.delta_movement.z),
             move_tick.speed,
             self.y_body_rot_degrees,
             was_on_ground,
-            MOB_DEFAULT_BLOCK_FRICTION,
+            movement_block_friction,
         );
         let bounding_box = collision_aabb_for_feet_position(
             self.position,
@@ -573,7 +579,8 @@ impl<'a> MobGoalContext<'a> {
             requested,
             traveled,
             was_on_ground,
-            MOB_DEFAULT_BLOCK_FRICTION,
+            movement_block_friction,
+            movement_block_speed_factor,
         );
 
         if !move_tick.moved && looked {
@@ -677,28 +684,86 @@ fn mob_delta_after_travel(
     traveled: Vec3d,
     was_on_ground: bool,
     block_friction: f64,
+    block_speed_factor: f64,
 ) -> Vec3d {
     let horizontal_drag = if was_on_ground {
         block_friction * MOB_GROUND_DRAG_MULTIPLIER
     } else {
         MOB_AIR_DRAG
     };
-    let next_x = if nearly_equal(requested.x, traveled.x) {
-        traveled.x * horizontal_drag
+    let moved_x = if nearly_equal(requested.x, traveled.x) {
+        traveled.x * block_speed_factor
     } else {
         0.0
     };
-    let next_z = if nearly_equal(requested.z, traveled.z) {
-        traveled.z * horizontal_drag
+    let moved_z = if nearly_equal(requested.z, traveled.z) {
+        traveled.z * block_speed_factor
     } else {
         0.0
     };
 
     Vec3d::new(
-        next_x,
+        moved_x * horizontal_drag,
         (traveled.y - MOB_GRAVITY) * MOB_VERTICAL_DRAG,
-        next_z,
+        moved_z * horizontal_drag,
     )
+}
+
+fn mob_block_friction(
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+    position: Vec3d,
+) -> f64 {
+    f64::from(block_friction(block_state_or_air(
+        block_state_at,
+        block_pos_below_that_affects_movement(position),
+    )))
+}
+
+fn mob_block_speed_factor(
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+    position: Vec3d,
+) -> f64 {
+    let current = block_state_or_air(block_state_at, BlockPos::containing(position));
+    let current_factor = block_speed_factor(current);
+    if block_fluid_kind(current) == BlockFluidKind::Water {
+        return f64::from(current_factor);
+    }
+
+    if current_factor == mclone_blocks::DEFAULT_BLOCK_SPEED_FACTOR {
+        f64::from(block_speed_factor(block_state_or_air(
+            block_state_at,
+            block_pos_below_that_affects_movement(position),
+        )))
+    } else {
+        f64::from(current_factor)
+    }
+}
+
+fn mob_block_jump_factor(
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+    position: Vec3d,
+) -> f64 {
+    let current = block_state_or_air(block_state_at, BlockPos::containing(position));
+    let current_factor = block_jump_factor(current);
+    if current_factor == mclone_blocks::DEFAULT_BLOCK_JUMP_FACTOR {
+        f64::from(block_jump_factor(block_state_or_air(
+            block_state_at,
+            block_pos_below_that_affects_movement(position),
+        )))
+    } else {
+        f64::from(current_factor)
+    }
+}
+
+fn block_pos_below_that_affects_movement(position: Vec3d) -> BlockPos {
+    BlockPos::containing(Vec3d::new(position.x, position.y - 0.5000001, position.z))
+}
+
+fn block_state_or_air(
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+    position: BlockPos,
+) -> BlockStateId {
+    block_state_at(position).unwrap_or(BlockStateId(mclone_blocks::terrain_id::AIR))
 }
 
 fn collide_mob_movement(
@@ -796,6 +861,14 @@ mod tests {
         })
     }
 
+    fn ice_ground(pos: BlockPos) -> Option<BlockStateId> {
+        Some(if pos.y == 63 {
+            BlockStateId(mclone_blocks::terrain_id::ICE)
+        } else {
+            BlockStateId(mclone_blocks::terrain_id::AIR)
+        })
+    }
+
     fn no_blocks(_pos: BlockPos) -> Option<BlockStateId> {
         None
     }
@@ -809,42 +882,77 @@ mod tests {
         })
     }
 
+    fn default_block_friction() -> f64 {
+        f64::from(mclone_blocks::DEFAULT_BLOCK_FRICTION)
+    }
+
     #[test]
     fn mob_travel_uses_ground_friction_instead_of_raw_speed_step() {
+        let block_friction = default_block_friction();
         let requested = mob_travel_request(
             Vec3d::ZERO,
             EntityMetadata::CHICKEN.movement_speed,
             0.0,
             true,
-            MOB_DEFAULT_BLOCK_FRICTION,
+            block_friction,
         );
         let expected_z = EntityMetadata::CHICKEN.movement_speed
             * MOB_INPUT_DAMPING
             * EntityMetadata::CHICKEN.movement_speed
-            * (MOB_FRICTION_INFLUENCE_NUMERATOR / MOB_DEFAULT_BLOCK_FRICTION.powi(3));
+            * (MOB_FRICTION_INFLUENCE_NUMERATOR / block_friction.powi(3));
 
         assert_eq!(requested.x, 0.0);
         assert!(requested.z > 0.0);
         assert!(requested.z < EntityMetadata::CHICKEN.movement_speed);
         assert!((requested.z - expected_z).abs() < 1.0e-12);
 
-        let next_delta =
-            mob_delta_after_travel(requested, requested, true, MOB_DEFAULT_BLOCK_FRICTION);
-        assert_eq!(
-            next_delta.z,
-            requested.z * MOB_DEFAULT_BLOCK_FRICTION * MOB_GROUND_DRAG_MULTIPLIER
-        );
+        let next_delta = mob_delta_after_travel(requested, requested, true, block_friction, 1.0);
+        let expected_delta_z = requested.z * block_friction * MOB_GROUND_DRAG_MULTIPLIER;
+        assert!((next_delta.z - expected_delta_z).abs() < 1.0e-12);
     }
 
     #[test]
     fn mob_travel_carries_horizontal_delta_between_control_ticks() {
-        let first = mob_travel_request(Vec3d::ZERO, 0.2, 0.0, true, MOB_DEFAULT_BLOCK_FRICTION);
-        let first_delta = mob_delta_after_travel(first, first, true, MOB_DEFAULT_BLOCK_FRICTION);
-        let second = mob_travel_request(first_delta, 0.2, 0.0, true, MOB_DEFAULT_BLOCK_FRICTION);
+        let block_friction = default_block_friction();
+        let first = mob_travel_request(Vec3d::ZERO, 0.2, 0.0, true, block_friction);
+        let first_delta = mob_delta_after_travel(first, first, true, block_friction, 1.0);
+        let second = mob_travel_request(first_delta, 0.2, 0.0, true, block_friction);
 
         assert!(first.z > 0.0);
         assert!(second.z > first.z);
         assert!(second.z < 0.2);
+    }
+
+    #[test]
+    fn mob_block_movement_facts_sample_below_movement_position() {
+        let position = Vec3d::new(0.5, 64.0, 0.5);
+
+        assert_eq!(
+            mob_block_friction(&ice_ground, position),
+            f64::from(block_friction(BlockStateId(mclone_blocks::terrain_id::ICE)))
+        );
+        assert_eq!(
+            mob_block_speed_factor(&ice_ground, position),
+            f64::from(mclone_blocks::DEFAULT_BLOCK_SPEED_FACTOR)
+        );
+        assert_eq!(
+            mob_block_jump_factor(&ice_ground, position),
+            f64::from(mclone_blocks::DEFAULT_BLOCK_JUMP_FACTOR)
+        );
+    }
+
+    #[test]
+    fn mob_delta_after_travel_applies_block_speed_factor_before_drag() {
+        let requested = Vec3d::new(0.1, 0.0, 0.2);
+        let speed_factor = 0.4;
+        let block_friction = default_block_friction();
+        let delta =
+            mob_delta_after_travel(requested, requested, true, block_friction, speed_factor);
+
+        let expected_x = requested.x * speed_factor * block_friction * MOB_GROUND_DRAG_MULTIPLIER;
+        let expected_z = requested.z * speed_factor * block_friction * MOB_GROUND_DRAG_MULTIPLIER;
+        assert!((delta.x - expected_x).abs() < 1.0e-12);
+        assert!((delta.z - expected_z).abs() < 1.0e-12);
     }
 
     #[test]

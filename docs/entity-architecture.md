@@ -96,9 +96,10 @@ The first shared ground/collision scaffold is also in place:
 - Server mob ground travel now uses the first Java-shaped
   `LivingEntity.travel(...)` subset: `MoveControl` sets yaw and speed intent,
   forward input is damped before travel, horizontal delta movement carries
-  across ticks, normal-block friction/drag are applied after collision, and
-  Java's stepped-collision candidate is tried before accepting a clipped
-  horizontal move.
+  across ticks, shared block friction/speed/jump facts feed travel and jump
+  impulses, and Java's stepped-collision candidate is tried before accepting a
+  clipped horizontal move. The terrain-MVP block facts currently cover Java
+  defaults plus generated ice/packed-ice friction.
 - `GroundPathNavigation` now owns Java-shaped target/reach bookkeeping,
   delayed path recomputation gating, cached-node timeout detection, and the
   falling-past-waypoint advance path. Timeout elapsed time is counted from
@@ -119,10 +120,10 @@ The first shared ground/collision scaffold is also in place:
 
 This does not complete full Java `WalkNodeEvaluator` parity, cauldron/sun path
 trim behavior, the full Java `AttributeMap` / modifier/effect stack, or full
-`LivingEntity.travel(...)` for block-specific friction, fluids, ladders,
-climbables, powder snow, effects, or block speed/jump factors. Those remain
-required foundations before natural passive movement can be considered
-complete.
+`LivingEntity.travel(...)` for fluids, ladders, climbables, powder snow,
+effects, or special block ids that are not yet present in the terrain-MVP lane.
+Those remain required foundations before natural passive movement can be
+considered complete.
 
 Pathfinding should keep the Minecraft module shape even where native runtime
 execution diverges for performance. Goals should ask navigation to move;
