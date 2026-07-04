@@ -535,7 +535,7 @@ impl<'a> MobGoalContext<'a> {
             self.jump_control.jump();
         }
         let jumping = self.jump_control.tick();
-        let looked = self.look_control.tick(
+        let _ = self.look_control.tick(
             self.position,
             &mut self.y_head_rot_degrees,
             self.y_body_rot_degrees,
@@ -582,13 +582,6 @@ impl<'a> MobGoalContext<'a> {
             movement_block_friction,
             movement_block_speed_factor,
         );
-
-        if !move_tick.moved && looked {
-            // The current entity protocol has one yaw field. Until head/body yaw
-            // are split, publish head turns as body yaw so passive looks are
-            // visible to clients.
-            self.y_body_rot_degrees = self.y_head_rot_degrees;
-        }
 
         entity.position = self.position;
         entity.y_rot_degrees = self.y_body_rot_degrees;

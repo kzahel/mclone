@@ -253,8 +253,9 @@ mod tests {
         goal.start(&mut context);
         goal.tick(&mut context);
         let mut entity = entity;
-        assert!(context.apply_controls(&mut entity));
+        assert!(!context.apply_controls(&mut entity));
 
-        assert_eq!(entity.y_rot_degrees, 10.0);
+        assert_eq!(entity.y_rot_degrees, 0.0);
+        assert_eq!(context.y_head_rot_degrees, 10.0);
     }
 }

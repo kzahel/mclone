@@ -117,13 +117,17 @@ The first shared ground/collision scaffold is also in place:
   in entity-ticking chunks, and airborne downward velocity is damped like Java
   `Chicken.aiStep()`. Egg item entities, sounds, persistence, and jockey
   passenger behavior remain separate system follow-ups.
+- Passive mob head yaw and body yaw are tracked separately inside the server
+  mob runtime. Until a head-yaw presentation lane exists, look goals must not
+  fake visibility by mutating authoritative body yaw; body yaw remains the
+  locomotion-facing yaw sent through the current entity update field.
 
 This does not complete full Java `WalkNodeEvaluator` parity, cauldron/sun path
 trim behavior, the full Java `AttributeMap` / modifier/effect stack, or full
 `LivingEntity.travel(...)` for fluids, ladders, climbables, powder snow,
-effects, or special block ids that are not yet present in the terrain-MVP lane.
-Those remain required foundations before natural passive movement can be
-considered complete.
+effects, special block ids that are not yet present in the terrain-MVP lane, or
+tracked head/body yaw presentation parity. Those remain required foundations
+before natural passive movement can be considered complete.
 
 Pathfinding should keep the Minecraft module shape even where native runtime
 execution diverges for performance. Goals should ask navigation to move;

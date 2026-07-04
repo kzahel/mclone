@@ -29,8 +29,11 @@ movement speed flows through carried horizontal delta, input damping,
 normal-block friction/drag, and stepped collision instead of direct
 position-stepping. Slice 5I landed shared block movement facts for Java
 friction, speed factor, and jump factor defaults, plus generated ice and
-packed-ice friction, and wired those facts into server mob travel. The starter
-passive path is now an explicit debug passive showcase, enabled by default.
+packed-ice friction, and wired those facts into server mob travel. Slice 5J
+stopped passive look goals from publishing head turns as authoritative body yaw,
+so standing mobs no longer appear to change walking direction just because a
+look-around goal ran. The starter passive path is now an explicit debug passive
+showcase, enabled by default.
 Slice 8 landed a bounded farm-animal biome/placement dry run so biome tables,
 on-ground animal predicates, and cow/chicken AABB collision are no longer
 missing subsystems. Slice 9 landed strict raw-brightness sampling for the
@@ -815,6 +818,43 @@ Remaining block-fact follow-ups:
   snow, and other movement-affecting blocks.
 - Move fluid travel and climbable handling through the same shared block-fact
   boundary instead of adding server-local checks.
+
+## Slice 5J - Separate Passive Head Look From Body Direction (Landed)
+
+Purpose: remove a visible direction-change artifact without weakening Java
+movement or goal cadence.
+
+Reference finding:
+
+- Java mobs have separate head and body yaw. `RandomLookAroundGoal` and
+  `LookAtPlayerGoal` drive `LookControl`; they do not need to overwrite the
+  authoritative locomotion-facing body yaw every time a mob looks around.
+- The current protocol has one entity yaw field, so the native server had been
+  temporarily copying internal head yaw into body yaw when a passive look goal
+  ran without movement. That made idle chickens/cows appear to change walking
+  direction rapidly.
+
+Landed notes:
+
+- Kept internal `y_head_rot_degrees` updates for passive look goals.
+- Stopped publishing passive look-only head turns through
+  `entity.y_rot_degrees`; server body yaw now changes through movement intent,
+  not idle look goals.
+- Updated the focused look-at-player regression to assert internal head yaw
+  advances while authoritative body yaw remains stable.
+- Verified with:
+  ```bash
+  cargo test --manifest-path native/Cargo.toml -p mclone-server entity::mob::goals::passive
+  cargo test --manifest-path native/Cargo.toml -p mclone-server entity::mob
+  cargo test --manifest-path native/Cargo.toml -p mclone-server
+  ```
+
+Remaining presentation follow-ups:
+
+- Add a general tracked head/body yaw presentation lane for mobs instead of
+  overloading the existing body yaw field.
+- Once head yaw is tracked, apply head-specific transforms in the cow model and
+  asset-lab figures that expose a head part.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 
