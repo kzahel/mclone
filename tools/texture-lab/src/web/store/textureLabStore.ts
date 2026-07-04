@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
+import type { TextureImageRef, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -95,6 +95,9 @@ function selectTextureAfterLoad(index: TextureLabIndex, current: string | null):
 }
 
 export function imageUrl(texture: TextureIndexEntry, imageKind: keyof TextureIndexEntry["images"]): string | null {
-  const ref = texture.images[imageKind];
+  return imageRefUrl(texture.images[imageKind]);
+}
+
+export function imageRefUrl(ref: TextureImageRef): string | null {
   return ref.path && ref.exists ? `/api/image?path=${encodeURIComponent(ref.path)}` : null;
 }

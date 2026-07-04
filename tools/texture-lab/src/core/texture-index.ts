@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { discoverTextureCandidates } from "./candidate-index";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { textureLabOutputRoot } from "../output-root";
@@ -24,6 +25,7 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
   const inputPath = path.resolve(options.inputPath);
   const outputRoot = path.resolve(options.outputRoot ?? textureLabOutputRoot());
   const pack = await loadTexturePack(inputPath);
+  const candidateDiscovery = await discoverTextureCandidates(outputRoot, { textureNames: Object.keys(pack.textures) });
   const blockUsagesByTexture = collectBlockUsages(pack);
   const textures = await Promise.all(
     Object.entries(pack.textures)
@@ -53,10 +55,14 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
       currentExportsPresent: textures.filter((texture) => texture.images.currentExport.exists).length,
       sheetsPresent: textures.filter((texture) => texture.images.sheet.exists).length,
       runtimeExportsPresent: textures.filter((texture) => texture.images.runtimeExport.exists).length,
+      candidateCount: candidateDiscovery.candidates.length,
+      associatedCandidateCount: candidateDiscovery.candidates.filter((candidate) => candidate.textureName !== null).length,
+      archivedCandidateCount: candidateDiscovery.candidates.filter((candidate) => candidate.archived).length,
     },
     textures,
+    candidates: candidateDiscovery.candidates,
     blocks,
-    warnings: buildWarnings(textures),
+    warnings: [...buildWarnings(textures), ...buildCandidateWarnings(candidateDiscovery.candidates), ...candidateDiscovery.warnings],
   };
 }
 
@@ -241,4 +247,11 @@ function buildWarnings(textures: TextureIndexEntry[]): string[] {
     warnings.push(`${missingSheets.length} review sheets are missing. Run pnpm texture-lab:sheet.`);
   }
   return warnings;
+}
+
+function buildCandidateWarnings(candidates: { textureName: string | null }[]): string[] {
+  const unassociatedCount = candidates.filter((candidate) => candidate.textureName === null).length;
+  return unassociatedCount > 0
+    ? [`${unassociatedCount} generated candidate artifact(s) are not associated with an authored texture.`]
+    : [];
 }

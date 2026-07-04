@@ -46,6 +46,18 @@ export function createTextureLabApi(options: TextureLabApiOptions): TextureLabAp
         return true;
       }
 
+      if (request.method === "GET" && url.pathname === "/api/candidates") {
+        const textureName = url.searchParams.get("texture");
+        const index = await loadIndex();
+        sendJson(
+          response,
+          textureName
+            ? index.candidates.filter((candidate) => candidate.textureName === textureName)
+            : index.candidates,
+        );
+        return true;
+      }
+
       if (request.method === "POST" && url.pathname === "/api/reindex") {
         sendJson(response, await loadIndex(true));
         return true;
@@ -59,7 +71,11 @@ export function createTextureLabApi(options: TextureLabApiOptions): TextureLabAp
           sendJson(response, { error: `Texture '${textureName}' not found` }, 404);
           return true;
         }
-        sendJson(response, { texture, blocks: index.blocks.filter((block) => blockUsesTexture(block, texture.name)) });
+        sendJson(response, {
+          texture,
+          blocks: index.blocks.filter((block) => blockUsesTexture(block, texture.name)),
+          candidates: index.candidates.filter((candidate) => candidate.textureName === texture.name),
+        });
         return true;
       }
 

@@ -16,6 +16,7 @@ export interface TextureLabIndex {
   pack: TexturePackSummary;
   summary: TextureLabIndexSummary;
   textures: TextureIndexEntry[];
+  candidates: TextureCandidateEntry[];
   blocks: BlockIndexEntry[];
   warnings: string[];
 }
@@ -34,6 +35,9 @@ export interface TextureLabIndexSummary {
   currentExportsPresent: number;
   sheetsPresent: number;
   runtimeExportsPresent: number;
+  candidateCount: number;
+  associatedCandidateCount: number;
+  archivedCandidateCount: number;
 }
 
 export interface TextureIndexEntry {
@@ -72,6 +76,42 @@ export interface TextureImageRef {
   path: string | null;
   exists: boolean;
   missingCommand: string | null;
+}
+
+export type TextureCandidateSource = "diffusion" | "projection" | "archive";
+
+export interface TextureCandidateEntry {
+  id: string;
+  candidateId: string;
+  codename: string;
+  source: TextureCandidateSource;
+  textureName: string | null;
+  artifactRoot: string;
+  manifestPath: string | null;
+  projectionReportPath: string | null;
+  archivePath: string | null;
+  archived: boolean;
+  promptPreset: string | null;
+  prompt: string | null;
+  negativePrompt: string | null;
+  modelId: string | null;
+  scheduler: string | null;
+  steps: number | null;
+  seed: number | null;
+  strength: number | null;
+  resolution: number | null;
+  resolutions: number[];
+  paletteColors: string[];
+  status: string | null;
+  score: number | null;
+  reasons: string[];
+  images: {
+    raw: TextureImageRef;
+    rawTile: TextureImageRef;
+    projected: TextureImageRef;
+    contactSheet: TextureImageRef;
+    reviewSheet: TextureImageRef;
+  };
 }
 
 export interface BlockIndexEntry {

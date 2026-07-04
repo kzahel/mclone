@@ -80,7 +80,7 @@ h3 {
 
 .summaryStrip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(68px, 1fr));
+  grid-template-columns: repeat(5, minmax(68px, 1fr));
   gap: 8px;
 }
 
@@ -354,6 +354,154 @@ h3 {
   display: block;
   padding: 8px 10px;
   border-top: 1px solid #d8d4ca;
+}
+
+.candidateSection {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.subsectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subsectionHeader h3 {
+  font-size: 15px;
+}
+
+.subsectionHeader p {
+  margin-top: 3px;
+  color: #697165;
+  font-size: 12px;
+}
+
+.candidateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.candidateCard {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #c9c4b7;
+  border-radius: 6px;
+  background: #fbfaf7;
+}
+
+.candidateImageFrame {
+  display: grid;
+  aspect-ratio: 1 / 1;
+  place-items: center;
+  padding: 12px;
+  background:
+    linear-gradient(45deg, #ddd8cc 25%, transparent 25%),
+    linear-gradient(-45deg, #ddd8cc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ddd8cc 75%),
+    linear-gradient(-45deg, transparent 75%, #ddd8cc 75%);
+  background-color: #f4f1e8;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.candidateImageFrame img {
+  width: min(100%, 180px);
+  height: min(100%, 180px);
+  object-fit: contain;
+  image-rendering: pixelated;
+  border: 1px solid rgb(0 0 0 / 10%);
+  background: #ffffff;
+}
+
+.candidateImageFrame span {
+  color: #665d4d;
+  font-size: 12px;
+}
+
+.candidateBody {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border-top: 1px solid #d8d4ca;
+}
+
+.candidateTitleRow,
+.candidateMeta,
+.candidateFacts,
+.candidatePrompt {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.candidateTitleRow {
+  justify-content: space-between;
+}
+
+.candidateTitleRow code {
+  overflow: hidden;
+  color: #222620;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourcePill {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid #bfc7b9;
+  border-radius: 5px;
+  background: #f7faf4;
+  color: #384336;
+  font-size: 11px;
+}
+
+.candidateMeta,
+.candidateFacts {
+  flex-wrap: wrap;
+  color: #596154;
+  font-size: 12px;
+}
+
+.candidateMeta span,
+.candidateFacts span {
+  min-width: 0;
+}
+
+.candidatePrompt {
+  display: grid;
+  gap: 2px;
+  color: #5d6658;
+  font-size: 11px;
+}
+
+.candidatePrompt strong,
+.candidatePrompt span,
+.candidateReasons {
+  overflow-wrap: anywhere;
+}
+
+.candidateReasons {
+  color: #5e5547;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.candidateEmpty {
+  padding: 14px;
+  border: 1px dashed #c9c4b7;
+  border-radius: 6px;
+  color: #5d6658;
+  font-size: 13px;
+  background: #fbfaf7;
 }
 
 .inspectorStack {

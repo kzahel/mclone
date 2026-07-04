@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import type { TextureImageRef, TextureIndexEntry } from "../core/index-model";
+import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../core/index-model";
 import {
   filteredTextures,
   materialOptions,
@@ -15,7 +15,7 @@ import {
   selectStatusFilter,
   statusOptions,
 } from "./store/selectors";
-import { imageUrl, useTextureLabStore } from "./store/textureLabStore";
+import { imageRefUrl, imageUrl, useTextureLabStore } from "./store/textureLabStore";
 
 export function App(): JSX.Element {
   const index = useTextureLabStore(selectIndex);
@@ -35,6 +35,10 @@ export function App(): JSX.Element {
   const setSearch = useTextureLabStore((state) => state.setSearch);
   const setMaterialFilter = useTextureLabStore((state) => state.setMaterialFilter);
   const setStatusFilter = useTextureLabStore((state) => state.setStatusFilter);
+  const activeCandidates =
+    index && activeTexture
+      ? index.candidates.filter((candidate) => candidate.textureName === activeTexture.name)
+      : [];
 
   useEffect(() => {
     void loadIndex();
@@ -52,6 +56,7 @@ export function App(): JSX.Element {
           <SummaryItem label="exports" value={index?.summary.currentExportsPresent ?? 0} />
           <SummaryItem label="sheets" value={index?.summary.sheetsPresent ?? 0} />
           <SummaryItem label="runtime" value={index?.summary.runtimeExportsPresent ?? 0} />
+          <SummaryItem label="candidates" value={index?.summary.associatedCandidateCount ?? 0} />
         </div>
         <button className="toolbarButton" type="button" onClick={() => void reindex()} disabled={loadStatus === "loading"}>
           {loadStatus === "loading" ? "Indexing" : "Reindex"}
@@ -115,7 +120,7 @@ export function App(): JSX.Element {
         </aside>
 
         <section className="previewPane">
-          {activeTexture ? <TexturePreview texture={activeTexture} /> : <EmptyState loadStatus={loadStatus} />}
+          {activeTexture ? <TexturePreview texture={activeTexture} candidates={activeCandidates} /> : <EmptyState loadStatus={loadStatus} />}
         </section>
 
         <aside className="inspector">
@@ -135,7 +140,7 @@ function SummaryItem({ label, value }: { label: string; value: number }): JSX.El
   );
 }
 
-function TexturePreview({ texture }: { texture: TextureIndexEntry }): JSX.Element {
+function TexturePreview({ texture, candidates }: { texture: TextureIndexEntry; candidates: TextureCandidateEntry[] }): JSX.Element {
   return (
     <>
       <div className="sectionHeader">
@@ -157,6 +162,7 @@ function TexturePreview({ texture }: { texture: TextureIndexEntry }): JSX.Elemen
         <ImageCard texture={texture} imageKind="runtimeExport" refInfo={texture.images.runtimeExport} />
         <ImageCard texture={texture} imageKind="sheet" refInfo={texture.images.sheet} wide />
       </div>
+      <CandidateSection texture={texture} candidates={candidates} />
     </>
   );
 }
@@ -192,6 +198,102 @@ function ImageCard({
       {refInfo.path ? <code className="pathLine">{refInfo.path}</code> : null}
     </div>
   );
+}
+
+function CandidateSection({
+  texture,
+  candidates,
+}: {
+  texture: TextureIndexEntry;
+  candidates: TextureCandidateEntry[];
+}): JSX.Element {
+  const sortedCandidates = [...candidates].sort(compareCandidateDisplay);
+  return (
+    <section className="candidateSection">
+      <div className="subsectionHeader">
+        <div>
+          <h3>Generated Candidates</h3>
+          <p>{sortedCandidates.length ? `${sortedCandidates.length} linked to ${texture.name}` : "No local candidates linked yet."}</p>
+        </div>
+      </div>
+      {sortedCandidates.length ? (
+        <div className="candidateGrid">
+          {sortedCandidates.map((candidate) => (
+            <CandidateCard key={candidate.id} candidate={candidate} />
+          ))}
+        </div>
+      ) : (
+        <div className="candidateEmpty">No local generated candidates are present for this texture.</div>
+      )}
+    </section>
+  );
+}
+
+function CandidateCard({ candidate }: { candidate: TextureCandidateEntry }): JSX.Element {
+  const image = primaryCandidateImage(candidate);
+  const url = image ? imageRefUrl(image) : null;
+  const sourceLabel = candidate.archived ? "archive" : candidate.source;
+  return (
+    <article className="candidateCard">
+      <div className="candidateImageFrame">
+        {url && image ? <img src={url} alt={`${candidate.codename} ${image.label}`} /> : <span>No image</span>}
+      </div>
+      <div className="candidateBody">
+        <div className="candidateTitleRow">
+          <code>{candidate.codename}</code>
+          <span className="sourcePill">{sourceLabel}</span>
+        </div>
+        <div className="candidateMeta">
+          <span>{candidate.status ?? "untriaged"}</span>
+          {candidate.score !== null ? <span>score {formatScore(candidate.score)}</span> : null}
+          {candidate.resolution !== null ? <span>{candidate.resolution}px</span> : null}
+        </div>
+        <div className="candidateFacts">
+          <span>{candidate.seed !== null ? `seed ${candidate.seed}` : "seed unknown"}</span>
+          <span>{candidate.strength !== null ? `strength ${candidate.strength.toFixed(2)}` : "strength unknown"}</span>
+        </div>
+        <div className="candidatePrompt">
+          <strong>{candidate.promptPreset ?? "custom prompt"}</strong>
+          {candidate.modelId ? <span>{candidate.modelId}</span> : null}
+        </div>
+        {candidate.reasons.length ? <p className="candidateReasons">{candidate.reasons.slice(0, 2).join("; ")}</p> : null}
+      </div>
+    </article>
+  );
+}
+
+function primaryCandidateImage(candidate: TextureCandidateEntry): TextureImageRef | null {
+  return (
+    [
+      candidate.images.projected,
+      candidate.images.raw,
+      candidate.images.rawTile,
+      candidate.images.reviewSheet,
+      candidate.images.contactSheet,
+    ].find((image) => image.exists) ?? null
+  );
+}
+
+function compareCandidateDisplay(left: TextureCandidateEntry, right: TextureCandidateEntry): number {
+  return (
+    sourceOrder(left.source) - sourceOrder(right.source) ||
+    left.codename.localeCompare(right.codename) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function sourceOrder(source: TextureCandidateEntry["source"]): number {
+  if (source === "archive") {
+    return 0;
+  }
+  if (source === "projection") {
+    return 1;
+  }
+  return 2;
+}
+
+function formatScore(score: number): string {
+  return Number.isInteger(score) ? `${score}` : score.toFixed(2);
 }
 
 function TextureInspector({ texture }: { texture: TextureIndexEntry }): JSX.Element {

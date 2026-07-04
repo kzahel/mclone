@@ -2,8 +2,9 @@
 
 Status: active; Slice A0 web shell, Zustand store, authored texture index API,
 safe image serving, and read-only browser UI landed 2026-07-04. Slice A0.5
-repo-local generated output root landed 2026-07-04. Next priority is generated
-candidate discovery.
+repo-local generated output root landed 2026-07-04. Slice A1 generated
+candidate discovery landed 2026-07-04. Next priority is read-only candidate
+selection and detail inspection.
 
 ## Purpose
 
@@ -276,7 +277,8 @@ Keep the first API explicit and file-system constrained:
 Future action endpoints:
 
 - `POST /api/preview-pack`
-  - writes a temporary selected-candidate runtime-compatible pack under `/tmp`
+  - writes a temporary selected-candidate runtime-compatible pack under
+    `generated-assets/texture-lab/ui-preview-pack/`
 - `POST /api/freeze-request`
   - writes a provenance-rich freeze request manifest; first implementation can
     still require an agent to apply the source patch
@@ -392,7 +394,7 @@ Additional validation:
 
 ### Slice A1 - Generated Candidate Discovery
 
-Status: next.
+Status: landed 2026-07-04.
 
 Extend the read-only UI from authored textures to generated candidate artifacts.
 
@@ -406,10 +408,12 @@ Deliverables:
   `generated-assets/texture-lab/diffusion-archive/**`
 - normalize generated outputs into `TextureCandidate` records with codename,
   source type, prompt, negative prompt, seed, strength, projection palette,
-  resolution, metrics, archive status, and image paths
-- associate candidate records with target texture names where metadata is clear
+  resolution, triage status/score/reasons, archive status, and image paths
+- associate candidate records with target texture names from projection/archive
+  metadata, authored texture names in source paths, or historical prompt aliases
 - show generated candidate cards beside the authored/current texture panels
-- keep unknown or unassociated artifacts visible in a separate diagnostics group
+- keep unknown or unassociated artifacts visible through index warnings and
+  `/api/candidates` diagnostics
 
 Validation:
 
@@ -419,8 +423,25 @@ pnpm --dir tools/texture-lab web:build
 pnpm --dir tools/texture-lab web:dev
 ```
 
-After `web:dev`, inspect stone and grass candidates in the browser and capture
-one screenshot under `/tmp`.
+Additional validation:
+
+- copied a representative ignored grass/stone candidate subset from the old
+  `/tmp/mclone-texture-lab/` output into
+  `generated-assets/texture-lab/{diffusion,diffusion-projection,diffusion-archive}/`
+  for local validation
+- `/api/index` reported output root
+  `/Users/kgraehl/code/mclone/generated-assets/texture-lab`, 79 generated
+  candidates, 79 associated candidates, and 2 archived candidates
+- `/api/candidates?texture=grass_block_top` returned 14 candidates with compact
+  codenames such as `G5101S74`
+- `/api/candidates?texture=stone` returned 65 candidates with compact codenames
+  such as `H4101S58`
+- `/api/image` served a generated candidate PNG from
+  `generated-assets/texture-lab/` with HTTP 200
+- headless Chrome loaded `http://127.0.0.1:5177/`, selected
+  `grass_block_top`, found 14 candidate cards, and wrote
+  `/tmp/mclone-texture-lab-ui-a1.png`; the only browser log event was the
+  unrelated missing `favicon.ico`
 
 ### Slice B - Preview Generation Parity
 
@@ -572,12 +593,11 @@ Slice A is complete when:
 
 ## Immediate Next Step
 
-Implement Slice A:
+Implement a small Slice A2 before broader preview generation:
 
-1. add the Vite/React shell and local server under `tools/texture-lab/src/`
-2. migrate the default generated output root to
-   `generated-assets/texture-lab/`
-3. build a read-only index over authored textures and generated diffusion
-   outputs
-4. serve thumbnails safely through an allowlisted endpoint
-5. verify with `typecheck`, `web:build`, and a browser screenshot
+1. add selected-candidate state to the Zustand store
+2. show the selected candidate's prompt, negative prompt, seed, strength,
+   projection report path, archive path, and image paths in the right inspector
+3. make candidate cards clickable and keyboard-focusable
+4. keep the state read-only; do not write review state until Slice C
+5. verify with `typecheck`, `web:build`, API checks, and a browser screenshot
