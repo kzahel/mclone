@@ -1,11 +1,11 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, nineteen supported feature-family groups, and 55 F-checked
+overworld tint IDs, nineteen supported feature-family groups, and 56 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads,
 blue orchids, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
 dark-forest canopy/mushroom,
-mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
+mushroom-field/shore huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, and ordinary
 forest tree plus mountain oak/spruce trees, badlands-variant dead
 bush/cactus/sugar-cane, desert-variant dead bush/cactus/sugar-cane,
@@ -132,7 +132,7 @@ notes.
 | 12 | `minecraft:snowy_tundra` | frozen-land | snow over grass, native snowy spruce/fern subset | seed `42`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 13 | `minecraft:snowy_mountains` | frozen-land | snowy mountain surface checked | seed `326`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 14 | `minecraft:mushroom_fields` | mushroom | mycelium and huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `978`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition checked | seed `1554`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition plus huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `7056`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 16 | `minecraft:beach` | plains | sand beach checked, buried-treasure/shipwreck surface context | seed `45`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 17 | `minecraft:desert_hills` | desert | sand/sandstone hills plus dead bush and cactus/sugar-cane family checked; structures/fossils gap | seed `446`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 18 | `minecraft:wooded_hills` | forest | forest hill grass and oak/birch tree family checked; flowers/extras gap | seed `2`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -223,9 +223,9 @@ Landed:
   families for plains, desert, ordinary forest, swamp, base taiga, snowy
   tundra, base snowy taiga, badlands, and ocean water plants, warm-ocean coral
   blocks and sea pickles, dark-forest dark oak and huge mushroom block
-  families, mushroom-field huge mushrooms, birch log/leaves trees, savanna
-  acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus jungle
-  log/leaves vegetation, flower-forest dense and common flowers, and
+  families, mushroom-field/shore huge mushrooms, birch log/leaves trees,
+  savanna acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus
+  jungle log/leaves vegetation, flower-forest dense and common flowers, and
   sunflower-plains sunflower patches. Desert, desert hills, desert lakes, and
   all generated badlands rows now require dead bush plus cactus/sugar-cane
   family coverage; ordinary forest and wooded hills require an oak or birch
@@ -237,8 +237,8 @@ Landed:
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
-  cap/stem blocks; mushroom fields require a huge mushroom cap plus stem; birch
-  rows require birch logs and leaves; savanna rows require acacia logs and
+  cap/stem blocks; mushroom field rows require a huge mushroom cap plus stem;
+  birch rows require birch logs and leaves; savanna rows require acacia logs and
   leaves; jungle rows require jungle logs and leaves; bamboo jungle rows require
   bamboo plus jungle logs and leaves; giant taiga rows require a high-signal
   spruce log/leaves family with podzol from the Java mega spruce/mega pine
@@ -311,11 +311,11 @@ Documented gaps from this slice:
 - Java swamp now has high-signal water-lily, blue-orchid, and small-mushroom
   coverage. Exact parity is still incomplete: swamp seagrass/extras, pumpkin,
   and exact decorated counts remain later `103` work.
-- Java mushroom fields now have high-signal huge mushroom coverage. Exact
-  parity is still incomplete: small brown/red mushroom patches, default mushroom
-  patches, default extra vegetation, exact huge mushroom side-state booleans,
-  mushroom-field shore feature coverage, and spawn-table/no-normal-hostile
-  behavior remain later `103` or entity-runtime work.
+- Java mushroom fields and mushroom-field shore now have high-signal huge
+  mushroom coverage. Exact parity is still incomplete: small brown/red mushroom
+  patches, default mushroom patches, default extra vegetation, exact huge
+  mushroom side-state booleans, and spawn-table/no-normal-hostile behavior
+  remain later `103` or entity-runtime work.
 - Java birch forests now have high-signal birch log/leaves coverage, including
   separate normal birch and tall-birch table shapes. Exact parity is still
   incomplete: tree counts, bee-nest side effects, flower/grass/default extra
@@ -371,13 +371,11 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Move to the mushroom-field shore row without entering spawn-table work:
+Move to the swamp hills row without entering fossil or exact-count work:
 
-1. Read Java mushroom fields / mushroom-field shore feature table sources
-   before editing.
-2. Try to promote row `15` with deterministic mycelium plus huge-mushroom
-   family checks, reusing the existing shared mushroom-field table where
-   possible.
-3. Keep small mushroom/default-extra vegetation, no-normal-hostile spawn-table
-   behavior, and exact huge-mushroom side-state/count mismatch buckets in
-   `103` or entity-runtime work.
+1. Read Java swamp / swamp hills feature table sources before editing.
+2. Try to promote row `134` with deterministic swamp surface plus the existing
+   swamp native subset, blue-orchid, small-mushroom, sugar-cane, and lily-pad
+   family checks.
+3. Keep hill fossils, swamp seagrass/extras, pumpkin, and exact decorated-count
+   mismatch buckets in `103`.

@@ -631,12 +631,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 1554,
+            seed: 7056,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:mushroom_field_shore",
             surface_family: SurfaceFamily::Mycelium,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::MushroomFieldHugeMushrooms),
         },
         PaletteMatrixCase {
             seed: 446,
