@@ -76,6 +76,26 @@ mod tests {
     }
 
     #[derive(Clone, Copy, Debug)]
+    struct LowVisibilityFeatureCase {
+        seed: i64,
+        chunk_x: i32,
+        chunk_z: i32,
+        biome_key: &'static str,
+        expectation: LowVisibilityFeatureExpectation,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum LowVisibilityFeatureExpectation {
+        VisibleSmallMushrooms {
+            min_count: usize,
+        },
+        DefaultSpringLiquidTicks {
+            min_water_ticks: usize,
+            min_lava_ticks: usize,
+        },
+    }
+
+    #[derive(Clone, Copy, Debug)]
     enum SurfaceFamily {
         Grass,
         Sand,
@@ -932,6 +952,50 @@ mod tests {
             biome_key: "minecraft:bamboo_jungle_hills",
             surface_family: SurfaceFamily::Grass,
             feature_family: Some(FeatureFamily::BambooJungle),
+        },
+    ];
+
+    const LOW_VISIBILITY_FEATURE_CASES: &[LowVisibilityFeatureCase] = &[
+        LowVisibilityFeatureCase {
+            seed: 16,
+            chunk_x: 1,
+            chunk_z: -1,
+            biome_key: "minecraft:plains",
+            expectation: LowVisibilityFeatureExpectation::VisibleSmallMushrooms { min_count: 1 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 233,
+            chunk_x: -1,
+            chunk_z: 0,
+            biome_key: "minecraft:taiga",
+            expectation: LowVisibilityFeatureExpectation::VisibleSmallMushrooms { min_count: 2 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 978,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:mushroom_fields",
+            expectation: LowVisibilityFeatureExpectation::VisibleSmallMushrooms { min_count: 2 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 62,
+            chunk_x: -1,
+            chunk_z: 2,
+            biome_key: "minecraft:savanna",
+            expectation: LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
+                min_water_ticks: 2,
+                min_lava_ticks: 1,
+            },
+        },
+        LowVisibilityFeatureCase {
+            seed: 43,
+            chunk_x: -1,
+            chunk_z: 1,
+            biome_key: "minecraft:sunflower_plains",
+            expectation: LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
+                min_water_ticks: 1,
+                min_lava_ticks: 1,
+            },
         },
     ];
 
@@ -2002,6 +2066,77 @@ mod tests {
     }
 
     #[test]
+    fn palette_matrix_low_visibility_feature_slots_have_deterministic_fixtures() {
+        for case in LOW_VISIBILITY_FEATURE_CASES {
+            let biome_source = OverworldBiomeSource::new(case.seed, false, false);
+            assert_eq!(
+                biome_source
+                    .get_primary_biome_definition(case.chunk_x, case.chunk_z)
+                    .key(),
+                case.biome_key,
+                "primary biome for seed {} chunk ({}, {})",
+                case.seed,
+                case.chunk_x,
+                case.chunk_z
+            );
+
+            let matrix_case = PaletteMatrixCase {
+                seed: case.seed,
+                chunk_x: case.chunk_x,
+                chunk_z: case.chunk_z,
+                biome_key: case.biome_key,
+                surface_family: SurfaceFamily::Grass,
+                feature_family: None,
+            };
+            let block_position_biomes =
+                count_block_position_biomes_in_chunk(&biome_source, case.seed, &matrix_case);
+            assert!(
+                block_position_biomes > 0,
+                "seed {} chunk ({}, {}) had no block-position {} samples",
+                case.seed,
+                case.chunk_x,
+                case.chunk_z,
+                case.biome_key
+            );
+
+            let chunk = generate_overworld_features_chunk(case.seed, case.chunk_x, case.chunk_z);
+            match case.expectation {
+                LowVisibilityFeatureExpectation::VisibleSmallMushrooms { min_count } => {
+                    let actual =
+                        chunk.block_count(BROWN_MUSHROOM) + chunk.block_count(RED_MUSHROOM);
+                    assert!(
+                        actual >= min_count,
+                        "seed {} chunk ({}, {}) expected at least {} visible small mushrooms, found {}",
+                        case.seed,
+                        case.chunk_x,
+                        case.chunk_z,
+                        min_count,
+                        actual
+                    );
+                }
+                LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
+                    min_water_ticks,
+                    min_lava_ticks,
+                } => {
+                    let water_ticks = liquid_tick_count(&chunk, "minecraft:water");
+                    let lava_ticks = liquid_tick_count(&chunk, "minecraft:lava");
+                    assert!(
+                        water_ticks >= min_water_ticks && lava_ticks >= min_lava_ticks,
+                        "seed {} chunk ({}, {}) expected spring liquid ticks water>={} lava>={}, found water={} lava={}",
+                        case.seed,
+                        case.chunk_x,
+                        case.chunk_z,
+                        min_water_ticks,
+                        min_lava_ticks,
+                        water_ticks,
+                        lava_ticks
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn generated_features_chunk_adds_visible_decoration_blocks() {
         let features = generate_overworld_features_chunk(12345, 0, 0);
         let feature_block_count = features.block_count(crate::block::OAK_LOG)
@@ -2913,6 +3048,14 @@ mod tests {
             }
         }
         count
+    }
+
+    fn liquid_tick_count(chunk: &GeneratedChunk, target: &str) -> usize {
+        chunk
+            .liquid_ticks()
+            .iter()
+            .filter(|tick| tick.target == target)
+            .count()
     }
 
     fn top_non_air_block(chunk: &GeneratedChunk, local_x: i32, local_z: i32) -> Option<RawBlockId> {
