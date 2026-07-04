@@ -1138,6 +1138,19 @@ mod tests {
             HeadlessScreenshotUi::Title
         );
         assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("world-list".to_owned())).unwrap(),
+            HeadlessScreenshotUi::WorldList
+        );
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("world-create".to_owned())).unwrap(),
+            HeadlessScreenshotUi::WorldCreate
+        );
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("world-delete-confirm".to_owned()))
+                .unwrap(),
+            HeadlessScreenshotUi::WorldDeleteConfirm
+        );
+        assert_eq!(
             parse_screenshot_ui_arg("--screenshot-ui", Some("new-world".to_owned())).unwrap(),
             HeadlessScreenshotUi::NewWorld
         );

@@ -1,8 +1,9 @@
 # 136: World Catalog And CRUD UI
 
-Status: active; Slices 1-3 shared catalog contract, catalog-aware session
-request vocabulary, and the native filesystem/SQLite catalog backend landed
-2026-07-03. Owns follow-up persistence lifecycle work from closed
+Status: active; Slices 1-4 shared catalog contract, catalog-aware session
+request vocabulary, native filesystem/SQLite catalog backend, and shared UI v2
+world catalog screens landed. Owns follow-up persistence lifecycle work from
+closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -368,6 +369,8 @@ round-tripping a chunk record across reopen.
 
 ### Slice 4: Shared UI Screens
 
+Status: first pass landed 2026-07-04.
+
 Add UI v2 screens in `mclone-ui`:
 
 - Title button becomes "Singleplayer" or opens a world list instead of direct
@@ -384,6 +387,50 @@ Validation:
 - `mclone-ui` hit-test/action tests for list selection, create, delete confirm
 - desktop headless UI screenshots for title, world list, create, delete confirm
 - inspect screenshots in `/tmp`
+
+Recorded Slice 4 result:
+
+- Added dependency-free shared catalog UI types in `mclone-ui`: fixed-capacity
+  `WorldCatalogUiState`, `WorldCatalogUiEntry`, fixed-size UI text, opaque
+  `WorldCatalogUiWorldId`, status/capability flags, selected/active ids, and
+  create draft display text.
+- Added catalog UI actions while keeping the old seed-only `NewWorld` path for
+  developer/headless compatibility: `OpenWorldList`, `OpenWorldCreate`,
+  `SelectWorld`, `OpenWorld`, `CreateCatalogWorld`, `ConfirmDeleteWorld`,
+  `DeleteWorld`, and `CancelDeleteWorld`.
+- Routed the title "Singleplayer" button to the shared world-list screen.
+  Added retained UI v2 screens for world list, create world, and delete
+  confirmation, including stable row/button widget ids and hit-test actions.
+- Added placeholder handling in desktop flat, web, Android, and XR action
+  handlers so submit actions compile and remain inert until Slice 5 wires the
+  catalog backend/lifecycle. Navigation and selection are shared UI behavior.
+- Extended native headless `--screenshot-ui` with `world-list`, `world-create`,
+  and `world-delete-confirm` so the new screens can be rendered directly.
+
+Validation after Slice 4 first pass on 2026-07-04:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+pnpm native:web:build
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client parse_screenshot_ui_accepts_named_screens
+```
+
+Native screenshots inspected:
+
+```bash
+/tmp/mclone-world-list-ui-clean.png
+/tmp/mclone-title-singleplayer-ui.png
+```
+
+The world-list capture rendered a clean, centered `SELECT WORLD` panel with
+disabled catalog controls until Slice 5 supplies a live native catalog state.
+The title capture rendered the title screen with `SINGLEPLAYER` as the first
+button.
 
 ### Slice 5: Desktop Lifecycle Wiring
 

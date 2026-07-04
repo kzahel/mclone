@@ -192,6 +192,11 @@ impl HeadlessScreenshotUi {
         match self {
             Self::None => None,
             Self::Title => Some(GameScreen::Title),
+            Self::WorldList => Some(GameScreen::WorldList),
+            Self::WorldCreate => Some(GameScreen::WorldCreate),
+            Self::WorldDeleteConfirm => Some(GameScreen::WorldDeleteConfirm {
+                id: mclone_ui::WorldCatalogUiWorldId(0),
+            }),
             Self::NewWorld => Some(GameScreen::NewWorld),
             Self::JoinRemote => Some(GameScreen::JoinRemote),
             Self::Pause => Some(GameScreen::Pause),

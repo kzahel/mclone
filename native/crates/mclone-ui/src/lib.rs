@@ -831,9 +831,230 @@ pub enum GuiKey {
     F1,
 }
 
+pub const WORLD_CATALOG_UI_ROW_CAPACITY: usize = 8;
+pub const WORLD_CATALOG_UI_TEXT_CAPACITY: usize = 64;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub struct WorldCatalogUiWorldId(pub u64);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorldCatalogUiText {
+    bytes: [u8; WORLD_CATALOG_UI_TEXT_CAPACITY],
+    len: u8,
+}
+
+impl WorldCatalogUiText {
+    pub const fn empty() -> Self {
+        Self {
+            bytes: [0; WORLD_CATALOG_UI_TEXT_CAPACITY],
+            len: 0,
+        }
+    }
+
+    pub fn new(value: &str) -> Self {
+        let mut text = Self::empty();
+        for ch in value.chars() {
+            let mut encoded = [0; 4];
+            let encoded = ch.encode_utf8(&mut encoded);
+            let len = text.len as usize;
+            if len + encoded.len() > WORLD_CATALOG_UI_TEXT_CAPACITY {
+                break;
+            }
+            text.bytes[len..len + encoded.len()].copy_from_slice(encoded.as_bytes());
+            text.len += encoded.len() as u8;
+        }
+        text
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len as usize]).unwrap_or("")
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl Default for WorldCatalogUiText {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorldCatalogUiEntry {
+    pub id: WorldCatalogUiWorldId,
+    pub display_name: WorldCatalogUiText,
+    pub seed: i64,
+    pub created_unix_millis: u64,
+    pub last_played_unix_millis: Option<u64>,
+    pub locked: bool,
+    pub compatible: bool,
+}
+
+impl WorldCatalogUiEntry {
+    pub fn new(id: WorldCatalogUiWorldId, display_name: &str, seed: i64) -> Self {
+        Self {
+            id,
+            display_name: WorldCatalogUiText::new(display_name),
+            seed,
+            created_unix_millis: 0,
+            last_played_unix_millis: None,
+            locked: false,
+            compatible: true,
+        }
+    }
+
+    pub const fn with_created_unix_millis(mut self, created_unix_millis: u64) -> Self {
+        self.created_unix_millis = created_unix_millis;
+        self
+    }
+
+    pub const fn with_last_played_unix_millis(
+        mut self,
+        last_played_unix_millis: Option<u64>,
+    ) -> Self {
+        self.last_played_unix_millis = last_played_unix_millis;
+        self
+    }
+
+    pub const fn locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
+        self
+    }
+
+    pub const fn compatible(mut self, compatible: bool) -> Self {
+        self.compatible = compatible;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorldCatalogUiStatus {
+    pub visible: bool,
+    pub ok: bool,
+    pub message: WorldCatalogUiText,
+}
+
+impl WorldCatalogUiStatus {
+    pub const fn hidden() -> Self {
+        Self {
+            visible: false,
+            ok: true,
+            message: WorldCatalogUiText::empty(),
+        }
+    }
+
+    pub fn new(message: &str, ok: bool) -> Self {
+        let message = WorldCatalogUiText::new(message);
+        Self {
+            visible: !message.is_empty(),
+            ok,
+            message,
+        }
+    }
+}
+
+impl Default for WorldCatalogUiStatus {
+    fn default() -> Self {
+        Self::hidden()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorldCatalogUiState {
+    pub persistent: bool,
+    pub list_supported: bool,
+    pub create_supported: bool,
+    pub open_supported: bool,
+    pub delete_supported: bool,
+    pub loading: bool,
+    pub entries: [Option<WorldCatalogUiEntry>; WORLD_CATALOG_UI_ROW_CAPACITY],
+    pub selected: Option<WorldCatalogUiWorldId>,
+    pub active: Option<WorldCatalogUiWorldId>,
+    pub status: WorldCatalogUiStatus,
+    pub create_display_name: WorldCatalogUiText,
+}
+
+impl WorldCatalogUiState {
+    pub const fn empty() -> Self {
+        Self {
+            persistent: false,
+            list_supported: false,
+            create_supported: false,
+            open_supported: false,
+            delete_supported: false,
+            loading: false,
+            entries: [None; WORLD_CATALOG_UI_ROW_CAPACITY],
+            selected: None,
+            active: None,
+            status: WorldCatalogUiStatus::hidden(),
+            create_display_name: WorldCatalogUiText::empty(),
+        }
+    }
+
+    pub fn persistent_local(entries: &[WorldCatalogUiEntry]) -> Self {
+        let mut state = Self {
+            persistent: true,
+            list_supported: true,
+            create_supported: true,
+            open_supported: true,
+            delete_supported: true,
+            create_display_name: WorldCatalogUiText::new("New World"),
+            ..Self::empty()
+        };
+        state.set_entries(entries);
+        state
+    }
+
+    pub fn set_entries(&mut self, entries: &[WorldCatalogUiEntry]) {
+        self.entries = [None; WORLD_CATALOG_UI_ROW_CAPACITY];
+        for (slot, entry) in self.entries.iter_mut().zip(entries.iter().copied()) {
+            *slot = Some(entry);
+        }
+        if self.selected.is_none_or(|id| self.entry(id).is_none()) {
+            self.selected = self.entries.iter().flatten().next().map(|entry| entry.id);
+        }
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.iter().flatten().count()
+    }
+
+    pub fn entry(&self, id: WorldCatalogUiWorldId) -> Option<&WorldCatalogUiEntry> {
+        self.entries.iter().flatten().find(|entry| entry.id == id)
+    }
+
+    pub fn selected_entry(&self) -> Option<&WorldCatalogUiEntry> {
+        self.selected.and_then(|id| self.entry(id))
+    }
+
+    pub fn can_open_world(&self, id: WorldCatalogUiWorldId) -> bool {
+        self.open_supported
+            && self
+                .entry(id)
+                .is_some_and(|entry| !entry.locked && entry.compatible)
+    }
+
+    pub fn can_delete_world(&self, id: WorldCatalogUiWorldId) -> bool {
+        self.delete_supported
+            && self.active != Some(id)
+            && self.entry(id).is_some_and(|entry| !entry.locked)
+    }
+}
+
+impl Default for WorldCatalogUiState {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameScreen {
     Title,
+    WorldList,
+    WorldCreate,
+    WorldDeleteConfirm { id: WorldCatalogUiWorldId },
     NewWorld,
     JoinRemote,
     Pause,
@@ -853,6 +1074,9 @@ pub enum GameOptionsParent {
 pub enum GameHelpParent {
     Game,
     Title,
+    WorldList,
+    WorldCreate,
+    WorldDeleteConfirm,
     NewWorld,
     JoinRemote,
     Pause,
@@ -865,6 +1089,9 @@ impl GameHelpParent {
         match self {
             Self::Game => None,
             Self::Title => Some(GameScreen::Title),
+            Self::WorldList => Some(GameScreen::WorldList),
+            Self::WorldCreate => Some(GameScreen::WorldCreate),
+            Self::WorldDeleteConfirm => Some(GameScreen::WorldList),
             Self::NewWorld => Some(GameScreen::NewWorld),
             Self::JoinRemote => Some(GameScreen::JoinRemote),
             Self::Pause => Some(GameScreen::Pause),
@@ -1082,6 +1309,14 @@ const fn lane_rate_is_clean(host_rate_hz: u32, lane_rate_hz: u32) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameUiAction {
     StartWorld,
+    OpenWorldList,
+    OpenWorldCreate,
+    SelectWorld(WorldCatalogUiWorldId),
+    OpenWorld(WorldCatalogUiWorldId),
+    CreateCatalogWorld,
+    ConfirmDeleteWorld(WorldCatalogUiWorldId),
+    DeleteWorld(WorldCatalogUiWorldId),
+    CancelDeleteWorld,
     OpenNewWorld,
     OpenJoinRemote,
     RerollSeed,
@@ -1186,6 +1421,7 @@ impl GameTouchSettings {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameUiRenderState {
+    pub world_catalog: WorldCatalogUiState,
     pub render_distance: i32,
     pub min_render_distance: i32,
     pub max_render_distance: i32,
@@ -1218,6 +1454,7 @@ pub struct GameUiRenderState {
 impl Default for GameUiRenderState {
     fn default() -> Self {
         Self {
+            world_catalog: WorldCatalogUiState::default(),
             render_distance: 2,
             min_render_distance: 2,
             max_render_distance: 16,

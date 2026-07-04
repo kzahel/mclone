@@ -229,6 +229,9 @@ pub(crate) enum HeadlessScreenshotUi {
     #[default]
     None,
     Title,
+    WorldList,
+    WorldCreate,
+    WorldDeleteConfirm,
     NewWorld,
     JoinRemote,
     Pause,
@@ -1289,12 +1292,17 @@ pub(crate) fn parse_screenshot_ui_arg(
 ) -> Result<HeadlessScreenshotUi> {
     let value = value.with_context(|| {
         format!(
-            "{flag} requires none, title, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, or server-settings-pause"
+            "{flag} requires none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, or server-settings-pause"
         )
     })?;
     match value.as_str() {
         "none" | "off" | "false" | "0" => Ok(HeadlessScreenshotUi::None),
         "title" => Ok(HeadlessScreenshotUi::Title),
+        "world-list" | "world_list" | "singleplayer" => Ok(HeadlessScreenshotUi::WorldList),
+        "world-create" | "world_create" => Ok(HeadlessScreenshotUi::WorldCreate),
+        "world-delete-confirm" | "world_delete_confirm" | "world-delete" | "world_delete" => {
+            Ok(HeadlessScreenshotUi::WorldDeleteConfirm)
+        }
         "new-world" | "new_world" => Ok(HeadlessScreenshotUi::NewWorld),
         "join-remote" | "join_remote" => Ok(HeadlessScreenshotUi::JoinRemote),
         "pause" => Ok(HeadlessScreenshotUi::Pause),
@@ -1306,7 +1314,7 @@ pub(crate) fn parse_screenshot_ui_arg(
             Ok(HeadlessScreenshotUi::ServerSettingsPause)
         }
         _ => bail!(
-            "{flag} must be none, title, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, or server-settings-pause, got `{value}`"
+            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, or server-settings-pause, got `{value}`"
         ),
     }
 }
@@ -1328,7 +1336,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-hud true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-hud true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\

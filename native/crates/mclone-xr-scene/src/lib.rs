@@ -4150,6 +4150,7 @@ where
             },
         );
         GameUiRenderState {
+            world_catalog: Default::default(),
             render_distance: (render_distance as i32).clamp(1, MAX_XR_RENDER_DISTANCE as i32),
             min_render_distance: 1,
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
@@ -5016,6 +5017,22 @@ where
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
                 self.session_status = StatusOverlay::hidden();
+            }
+            GameUiAction::OpenWorldCreate => {
+                let seed = self.next_new_world_seed();
+                self.ui.set_new_world_seed(seed);
+                self.session_status = StatusOverlay::hidden();
+            }
+            GameUiAction::OpenWorldList
+            | GameUiAction::SelectWorld(_)
+            | GameUiAction::ConfirmDeleteWorld(_)
+            | GameUiAction::CancelDeleteWorld => {
+                self.session_status = StatusOverlay::hidden();
+            }
+            GameUiAction::OpenWorld(_)
+            | GameUiAction::CreateCatalogWorld
+            | GameUiAction::DeleteWorld(_) => {
+                log::warn!("persistent world catalog action is not wired to XR scene yet");
             }
             GameUiAction::OpenJoinRemote => {
                 let remote_addr = self

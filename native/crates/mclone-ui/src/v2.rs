@@ -3,14 +3,14 @@ use crate::{
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
     GameScreen, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv,
     HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect, Slider, WidgetId,
-    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
-    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
-    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
-    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
-    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
-    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
-    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
-    render_flat_hud_status_layer, render_flat_hud_transient_layers,
+    WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect,
+    block_palette_slot_rect, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
+    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
+    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
+    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
+    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
+    render_flat_hud_debug_layer, render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer,
+    render_flat_hud_retained_layer, render_flat_hud_status_layer, render_flat_hud_transient_layers,
     render_loading_progress_overlay, render_loading_progress_panel_at,
     render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
     touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
@@ -23,6 +23,9 @@ use mclone_input::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiScreenId {
     Title,
+    WorldList,
+    WorldCreate,
+    WorldDeleteConfirm { id: WorldCatalogUiWorldId },
     NewWorld,
     JoinRemote,
     Pause,
@@ -36,6 +39,9 @@ impl UiScreenId {
     pub fn from_game_screen(screen: Option<GameScreen>) -> Option<Self> {
         match screen {
             Some(GameScreen::Title) => Some(Self::Title),
+            Some(GameScreen::WorldList) => Some(Self::WorldList),
+            Some(GameScreen::WorldCreate) => Some(Self::WorldCreate),
+            Some(GameScreen::WorldDeleteConfirm { id }) => Some(Self::WorldDeleteConfirm { id }),
             Some(GameScreen::NewWorld) => Some(Self::NewWorld),
             Some(GameScreen::JoinRemote) => Some(Self::JoinRemote),
             Some(GameScreen::Pause) => Some(Self::Pause),
@@ -99,10 +105,21 @@ impl UiWidgetId {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UiWidgetKind {
     Button,
-    Checkbox { checked: bool },
+    Checkbox {
+        checked: bool,
+    },
     Cycle,
-    PaletteSlot { icon: Option<GuiTextureUv> },
-    Slider { value: f32 },
+    WorldRow {
+        selected: bool,
+        locked: bool,
+        compatible: bool,
+    },
+    PaletteSlot {
+        icon: Option<GuiTextureUv>,
+    },
+    Slider {
+        value: f32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -186,6 +203,30 @@ impl UiWidget {
             enabled: true,
             action: None,
             value: None,
+        }
+    }
+
+    fn world_row(
+        id: UiWidgetId,
+        rect: Rect,
+        label: impl Into<String>,
+        value: impl Into<String>,
+        selected: bool,
+        locked: bool,
+        compatible: bool,
+    ) -> Self {
+        Self {
+            id,
+            kind: UiWidgetKind::WorldRow {
+                selected,
+                locked,
+                compatible,
+            },
+            rect,
+            label: label.into(),
+            enabled: true,
+            action: None,
+            value: Some(value.into()),
         }
     }
 
@@ -554,6 +595,27 @@ impl UiSurface {
             (Some(UiScreenId::Title), GuiKey::F1) => {
                 (true, Some(GameUiAction::OpenHelp(GameHelpParent::Title)))
             }
+            (Some(UiScreenId::WorldList), GuiKey::Escape) => {
+                (true, Some(GameUiAction::BackToTitle))
+            }
+            (Some(UiScreenId::WorldList), GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(GameHelpParent::WorldList)),
+            ),
+            (Some(UiScreenId::WorldCreate), GuiKey::Escape) => {
+                (true, Some(GameUiAction::OpenWorldList))
+            }
+            (Some(UiScreenId::WorldCreate), GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(GameHelpParent::WorldCreate)),
+            ),
+            (Some(UiScreenId::WorldDeleteConfirm { .. }), GuiKey::Escape) => {
+                (true, Some(GameUiAction::CancelDeleteWorld))
+            }
+            (Some(UiScreenId::WorldDeleteConfirm { .. }), GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(GameHelpParent::WorldDeleteConfirm)),
+            ),
             (Some(UiScreenId::NewWorld), GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
             (Some(UiScreenId::NewWorld), GuiKey::F1) => {
                 (true, Some(GameUiAction::OpenHelp(GameHelpParent::NewWorld)))
@@ -601,6 +663,11 @@ impl UiSurface {
         let mut draw = GuiDrawList::new();
         match self.screen {
             Some(UiScreenId::Title) => self.render_title(&mut draw),
+            Some(UiScreenId::WorldList) => self.render_world_list(&mut draw),
+            Some(UiScreenId::WorldCreate) => self.render_world_create(&mut draw),
+            Some(UiScreenId::WorldDeleteConfirm { id }) => {
+                self.render_world_delete_confirm(&mut draw, id)
+            }
             Some(UiScreenId::NewWorld) => self.render_new_world(&mut draw),
             Some(UiScreenId::JoinRemote) => self.render_join_remote(&mut draw),
             Some(UiScreenId::Pause) => self.render_pause(&mut draw),
@@ -625,6 +692,22 @@ impl UiSurface {
         self.layout_revision = self.layout_revision.wrapping_add(1);
         self.layout = match self.screen {
             Some(UiScreenId::Title) => title_layout(self.scale, self.layout_revision),
+            Some(UiScreenId::WorldList) => world_list_layout(
+                self.scale,
+                self.layout_revision,
+                self.render_state.world_catalog,
+            ),
+            Some(UiScreenId::WorldCreate) => world_create_layout(
+                self.scale,
+                self.layout_revision,
+                self.render_state.world_catalog,
+            ),
+            Some(UiScreenId::WorldDeleteConfirm { id }) => world_delete_confirm_layout(
+                self.scale,
+                self.layout_revision,
+                id,
+                self.render_state.world_catalog,
+            ),
             Some(UiScreenId::NewWorld) => new_world_layout(self.scale, self.layout_revision),
             Some(UiScreenId::JoinRemote) => join_remote_layout(self.scale, self.layout_revision),
             Some(UiScreenId::Pause) => pause_layout(self.scale, self.layout_revision),
@@ -714,6 +797,164 @@ impl UiSurface {
             self.scale.height - 12.0,
             Color::rgba(160, 176, 170, 255),
         );
+    }
+
+    fn render_world_list(&self, draw: &mut GuiDrawList) {
+        render_title_background(draw, self.scale);
+        let catalog = self.render_state.world_catalog;
+        let panel = world_list_panel_rect(self.scale);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(31, 43, 45, 245),
+            Color::rgba(13, 18, 20, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered_atlas(
+            draw,
+            "SELECT WORLD",
+            panel.center_x(),
+            panel.y + 10.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+
+        let subtitle = if catalog.loading {
+            "LOADING WORLDS"
+        } else if !catalog.persistent {
+            "PERSISTENT WORLDS UNAVAILABLE"
+        } else if catalog.entry_count() == 0 {
+            "NO WORLDS FOUND"
+        } else {
+            "LOCAL WORLDS"
+        };
+        self.font.draw_centered_atlas(
+            draw,
+            subtitle,
+            panel.center_x(),
+            panel.y + 24.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+
+        if catalog.status.visible {
+            let color = if catalog.status.ok {
+                Color::rgba(190, 224, 196, 255)
+            } else {
+                Color::rgba(255, 178, 178, 255)
+            };
+            self.font.draw_centered_atlas(
+                draw,
+                catalog.status.message.as_str(),
+                panel.center_x(),
+                panel.bottom() - 39.0,
+                color,
+            );
+        }
+
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+    }
+
+    fn render_world_create(&self, draw: &mut GuiDrawList) {
+        render_title_background(draw, self.scale);
+        let catalog = self.render_state.world_catalog;
+        let panel = world_create_panel_rect(self.scale);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(31, 43, 45, 245),
+            Color::rgba(13, 18, 20, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered_atlas(
+            draw,
+            "CREATE WORLD",
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        let display_name = if catalog.create_display_name.is_empty() {
+            "New World"
+        } else {
+            catalog.create_display_name.as_str()
+        };
+        self.font.draw_centered_atlas(
+            draw,
+            display_name,
+            panel.center_x(),
+            panel.y + 38.0,
+            Color::rgba(222, 238, 222, 255),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            &format!("Seed: {}", self.new_world_seed),
+            panel.center_x(),
+            panel.y + 54.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        if !catalog.create_supported {
+            self.font.draw_centered_atlas(
+                draw,
+                "CREATE IS UNAVAILABLE",
+                panel.center_x(),
+                panel.y + 72.0,
+                Color::rgba(255, 178, 178, 255),
+            );
+        }
+
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+    }
+
+    fn render_world_delete_confirm(&self, draw: &mut GuiDrawList, id: WorldCatalogUiWorldId) {
+        render_title_background(draw, self.scale);
+        let catalog = self.render_state.world_catalog;
+        let panel = world_delete_confirm_panel_rect(self.scale);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(45, 33, 35, 245),
+            Color::rgba(18, 13, 14, 245),
+        );
+        draw.outline(panel, Color::rgba(190, 124, 124, 255));
+        self.font.draw_centered_atlas(
+            draw,
+            "DELETE WORLD",
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(255, 224, 224, 255),
+        );
+
+        let name = catalog
+            .entry(id)
+            .map(|entry| entry.display_name.as_str())
+            .unwrap_or("Unknown World");
+        self.font.draw_centered_atlas(
+            draw,
+            name,
+            panel.center_x(),
+            panel.y + 40.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        let warning = if catalog.active == Some(id) {
+            "QUIT TO TITLE BEFORE DELETING THE ACTIVE WORLD"
+        } else if !catalog.can_delete_world(id) {
+            "THIS WORLD CANNOT BE DELETED"
+        } else {
+            "THIS CANNOT BE UNDONE"
+        };
+        self.font.draw_centered_atlas(
+            draw,
+            warning,
+            panel.center_x(),
+            panel.y + 58.0,
+            Color::rgba(255, 190, 190, 255),
+        );
+
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
     }
 
     fn render_new_world(&self, draw: &mut GuiDrawList) {
@@ -1029,6 +1270,58 @@ impl UiSurface {
                 );
                 cycle.enabled = widget.enabled;
                 cycle.render_atlas_text(draw, &self.font, interaction);
+            }
+            UiWidgetKind::WorldRow {
+                selected,
+                locked,
+                compatible,
+            } => {
+                let hovered = interaction.is_hovered(widget.rect);
+                let fill = if *selected {
+                    Color::rgba(64, 90, 84, 230)
+                } else if hovered {
+                    Color::rgba(42, 58, 58, 225)
+                } else {
+                    Color::rgba(19, 27, 28, 210)
+                };
+                let border = if *selected {
+                    Color::rgba(196, 224, 180, 255)
+                } else {
+                    Color::rgba(72, 92, 88, 210)
+                };
+                let text = if *locked || !*compatible {
+                    Color::rgba(155, 164, 158, 255)
+                } else {
+                    Color::rgba(235, 242, 232, 255)
+                };
+                draw.fill(widget.rect, fill);
+                draw.outline(widget.rect, border);
+                draw.push_clip(widget.rect.inset(3.0));
+                let prefix = if *selected { "> " } else { "  " };
+                self.font.draw_shadow_atlas(
+                    draw,
+                    &format!("{prefix}{}", widget.label),
+                    widget.rect.x + 5.0,
+                    widget.rect.y + 6.0,
+                    text,
+                );
+                if let Some(value) = widget.value.as_deref() {
+                    let value_color = if *locked || !*compatible {
+                        Color::rgba(130, 136, 132, 255)
+                    } else {
+                        Color::rgba(178, 204, 190, 255)
+                    };
+                    let value_x = (widget.rect.right() - self.font.width(value) - 8.0)
+                        .max(widget.rect.x + 80.0);
+                    self.font.draw_shadow_atlas(
+                        draw,
+                        value,
+                        value_x,
+                        widget.rect.y + 6.0,
+                        value_color,
+                    );
+                }
+                draw.pop_clip();
             }
             UiWidgetKind::PaletteSlot { icon } => {
                 render_touch_panel(
@@ -1607,7 +1900,14 @@ impl GameUiHost {
     pub fn covers_world(&self) -> bool {
         matches!(
             self.screen,
-            Some(GameScreen::Title | GameScreen::NewWorld | GameScreen::JoinRemote)
+            Some(
+                GameScreen::Title
+                    | GameScreen::WorldList
+                    | GameScreen::WorldCreate
+                    | GameScreen::WorldDeleteConfirm { .. }
+                    | GameScreen::NewWorld
+                    | GameScreen::JoinRemote
+            )
         ) || matches!(
             self.screen,
             Some(GameScreen::Help { parent }) if help_parent_covers_world(parent)
@@ -1668,7 +1968,18 @@ impl GameUiHost {
         match action {
             GameUiAction::StartWorld
             | GameUiAction::Resume
+            | GameUiAction::OpenWorld(_)
+            | GameUiAction::CreateCatalogWorld
             | GameUiAction::AssignHotbarBlock { .. } => self.screen = None,
+            GameUiAction::OpenWorldList | GameUiAction::CancelDeleteWorld => {
+                self.screen = Some(GameScreen::WorldList)
+            }
+            GameUiAction::OpenWorldCreate => self.screen = Some(GameScreen::WorldCreate),
+            GameUiAction::ConfirmDeleteWorld(id) => {
+                self.screen = Some(GameScreen::WorldDeleteConfirm { id })
+            }
+            GameUiAction::DeleteWorld(_) => self.screen = Some(GameScreen::WorldList),
+            GameUiAction::SelectWorld(_) => {}
             GameUiAction::OpenNewWorld => self.screen = Some(GameScreen::NewWorld),
             GameUiAction::OpenBlockPalette => self.screen = Some(GameScreen::BlockPalette),
             GameUiAction::OpenHelp(parent) => self.screen = Some(GameScreen::Help { parent }),
@@ -1846,6 +2157,16 @@ const UI_V2_TITLE_START: UiWidgetId = UiWidgetId(401);
 const UI_V2_TITLE_JOIN_REMOTE: UiWidgetId = UiWidgetId(402);
 const UI_V2_TITLE_OPTIONS: UiWidgetId = UiWidgetId(403);
 const UI_V2_TITLE_QUIT: UiWidgetId = UiWidgetId(404);
+const UI_V2_WORLD_LIST_OPEN: UiWidgetId = UiWidgetId(801);
+const UI_V2_WORLD_LIST_CREATE: UiWidgetId = UiWidgetId(802);
+const UI_V2_WORLD_LIST_DELETE: UiWidgetId = UiWidgetId(803);
+const UI_V2_WORLD_LIST_BACK: UiWidgetId = UiWidgetId(804);
+const UI_V2_WORLD_LIST_ROW_BASE: u64 = 820;
+const UI_V2_WORLD_CREATE_REROLL: UiWidgetId = UiWidgetId(901);
+const UI_V2_WORLD_CREATE_CREATE: UiWidgetId = UiWidgetId(902);
+const UI_V2_WORLD_CREATE_BACK: UiWidgetId = UiWidgetId(903);
+const UI_V2_WORLD_DELETE_CONFIRM: UiWidgetId = UiWidgetId(951);
+const UI_V2_WORLD_DELETE_CANCEL: UiWidgetId = UiWidgetId(952);
 const UI_V2_NEW_WORLD_REROLL: UiWidgetId = UiWidgetId(501);
 const UI_V2_NEW_WORLD_CREATE: UiWidgetId = UiWidgetId(502);
 const UI_V2_NEW_WORLD_BACK: UiWidgetId = UiWidgetId(503);
@@ -1885,8 +2206,12 @@ fn title_layout(scale: GuiScale, revision: u64) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::Title), revision);
     let y = scale.height * 0.5 - 34.0;
     layout.push(
-        UiWidget::button(UI_V2_TITLE_START, menu_button_rect(scale, y), "New World")
-            .action(GameUiAction::OpenNewWorld),
+        UiWidget::button(
+            UI_V2_TITLE_START,
+            menu_button_rect(scale, y),
+            "Singleplayer",
+        )
+        .action(GameUiAction::OpenWorldList),
     );
     layout.push(
         UiWidget::button(
@@ -1907,6 +2232,141 @@ fn title_layout(scale: GuiScale, revision: u64) -> UiLayout {
     layout.push(
         UiWidget::button(UI_V2_TITLE_QUIT, menu_button_rect(scale, y + 72.0), "Quit")
             .action(GameUiAction::Quit),
+    );
+    layout
+}
+
+fn world_list_row_id(index: usize) -> UiWidgetId {
+    UiWidgetId(UI_V2_WORLD_LIST_ROW_BASE + index as u64)
+}
+
+fn world_list_layout(scale: GuiScale, revision: u64, catalog: WorldCatalogUiState) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::WorldList), revision);
+    let panel = world_list_panel_rect(scale);
+    let row_rects = world_list_row_rects(panel);
+    for (index, entry) in catalog.entries.iter().flatten().copied().enumerate() {
+        let Some(rect) = row_rects.get(index).copied() else {
+            break;
+        };
+        layout.push(
+            UiWidget::world_row(
+                world_list_row_id(index),
+                rect,
+                world_list_row_label(entry),
+                world_list_row_value(entry, catalog.active),
+                catalog.selected == Some(entry.id),
+                entry.locked,
+                entry.compatible,
+            )
+            .action(GameUiAction::SelectWorld(entry.id)),
+        );
+    }
+
+    let selected = catalog.selected_entry().map(|entry| entry.id);
+    let open_enabled = selected.is_some_and(|id| catalog.can_open_world(id));
+    let delete_enabled = selected.is_some_and(|id| catalog.can_delete_world(id));
+    let open_action = selected.map_or(GameUiAction::OpenWorld(WorldCatalogUiWorldId(0)), |id| {
+        GameUiAction::OpenWorld(id)
+    });
+    let delete_action = selected.map_or(
+        GameUiAction::ConfirmDeleteWorld(WorldCatalogUiWorldId(0)),
+        |id| GameUiAction::ConfirmDeleteWorld(id),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_LIST_OPEN,
+            world_list_footer_button_rect(panel, 0),
+            "Open",
+        )
+        .enabled(open_enabled)
+        .action(open_action),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_LIST_CREATE,
+            world_list_footer_button_rect(panel, 1),
+            "Create",
+        )
+        .enabled(catalog.create_supported)
+        .action(GameUiAction::OpenWorldCreate),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_LIST_DELETE,
+            world_list_footer_button_rect(panel, 2),
+            "Delete",
+        )
+        .enabled(delete_enabled)
+        .action(delete_action),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_LIST_BACK,
+            world_list_footer_button_rect(panel, 3),
+            "Back",
+        )
+        .action(GameUiAction::BackToTitle),
+    );
+    layout
+}
+
+fn world_create_layout(scale: GuiScale, revision: u64, catalog: WorldCatalogUiState) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::WorldCreate), revision);
+    let panel = world_create_panel_rect(scale);
+    let y = panel.y + 91.0;
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_CREATE_REROLL,
+            menu_button_rect_at(panel.center_x(), y),
+            "Reroll Seed",
+        )
+        .action(GameUiAction::RerollSeed),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_CREATE_CREATE,
+            menu_button_rect_at(panel.center_x(), y + 24.0),
+            "Create World",
+        )
+        .enabled(catalog.create_supported)
+        .action(GameUiAction::CreateCatalogWorld),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_CREATE_BACK,
+            menu_button_rect_at(panel.center_x(), y + 48.0),
+            "Back",
+        )
+        .action(GameUiAction::OpenWorldList),
+    );
+    layout
+}
+
+fn world_delete_confirm_layout(
+    scale: GuiScale,
+    revision: u64,
+    id: WorldCatalogUiWorldId,
+    catalog: WorldCatalogUiState,
+) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::WorldDeleteConfirm { id }), revision);
+    let panel = world_delete_confirm_panel_rect(scale);
+    let y = panel.y + 89.0;
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_DELETE_CONFIRM,
+            menu_button_rect_at(panel.center_x(), y),
+            "Delete",
+        )
+        .enabled(catalog.can_delete_world(id))
+        .action(GameUiAction::DeleteWorld(id)),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_DELETE_CANCEL,
+            menu_button_rect_at(panel.center_x(), y + 24.0),
+            "Cancel",
+        )
+        .action(GameUiAction::CancelDeleteWorld),
     );
     layout
 }
@@ -1990,7 +2450,60 @@ fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
 }
 
 fn menu_button_rect(scale: GuiScale, y: f32) -> Rect {
-    Rect::new(scale.width * 0.5 - 90.0, y, 180.0, 20.0)
+    menu_button_rect_at(scale.width * 0.5, y)
+}
+
+fn menu_button_rect_at(center_x: f32, y: f32) -> Rect {
+    Rect::new(center_x - 90.0, y, 180.0, 20.0)
+}
+
+fn world_list_panel_rect(scale: GuiScale) -> Rect {
+    centered_panel(scale, 420.0, 286.0)
+}
+
+fn world_create_panel_rect(scale: GuiScale) -> Rect {
+    centered_panel(scale, 320.0, 178.0)
+}
+
+fn world_delete_confirm_panel_rect(scale: GuiScale) -> Rect {
+    centered_panel(scale, 340.0, 158.0)
+}
+
+fn world_list_row_rects(panel: Rect) -> [Rect; 8] {
+    let row_x = panel.x + 14.0;
+    let row_width = panel.width - 28.0;
+    let first_y = panel.y + 44.0;
+    std::array::from_fn(|index| Rect::new(row_x, first_y + index as f32 * 23.0, row_width, 20.0))
+}
+
+fn world_list_footer_button_rect(panel: Rect, index: usize) -> Rect {
+    let button_width = 84.0;
+    let gap = 8.0;
+    let total = button_width * 4.0 + gap * 3.0;
+    let x = panel.center_x() - total * 0.5 + index as f32 * (button_width + gap);
+    Rect::new(x, panel.bottom() - 28.0, button_width, 20.0)
+}
+
+fn world_list_row_label(entry: WorldCatalogUiEntry) -> String {
+    let name = entry.display_name.as_str();
+    if entry.locked {
+        format!("{name} [Locked]")
+    } else if !entry.compatible {
+        format!("{name} [Incompatible]")
+    } else {
+        name.to_owned()
+    }
+}
+
+fn world_list_row_value(
+    entry: WorldCatalogUiEntry,
+    active: Option<WorldCatalogUiWorldId>,
+) -> String {
+    if active == Some(entry.id) {
+        "Active".to_owned()
+    } else {
+        format!("Seed {}", entry.seed)
+    }
 }
 
 fn render_title_background(draw: &mut GuiDrawList, scale: GuiScale) {
@@ -2126,7 +2639,12 @@ fn controls_help_rows() -> Vec<UiHelpRowKind> {
 const fn help_parent_covers_world(parent: GameHelpParent) -> bool {
     matches!(
         parent,
-        GameHelpParent::Title | GameHelpParent::NewWorld | GameHelpParent::JoinRemote
+        GameHelpParent::Title
+            | GameHelpParent::WorldList
+            | GameHelpParent::WorldCreate
+            | GameHelpParent::WorldDeleteConfirm
+            | GameHelpParent::NewWorld
+            | GameHelpParent::JoinRemote
     )
 }
 
@@ -2555,6 +3073,19 @@ mod tests {
         }
     }
 
+    fn world_catalog_state() -> WorldCatalogUiState {
+        let first = WorldCatalogUiEntry::new(WorldCatalogUiWorldId(11), "Alpha Base", 123);
+        let second = WorldCatalogUiEntry::new(WorldCatalogUiWorldId(12), "Beta Mine", -456);
+        WorldCatalogUiState::persistent_local(&[first, second])
+    }
+
+    fn world_catalog_render_state() -> GameUiRenderState {
+        GameUiRenderState {
+            world_catalog: world_catalog_state(),
+            ..GameUiRenderState::default()
+        }
+    }
+
     #[test]
     fn layout_hit_test_uses_topmost_enabled_widget() {
         let mut layout = UiLayout::new(Some(UiScreenId::Pause), 1);
@@ -2714,9 +3245,10 @@ mod tests {
     fn title_flow_screens_route_through_v2_surface() {
         let mut host = GameUiHost::new();
         host.set_scale(GuiScale::from_pixels(960, 540));
+        let state = world_catalog_render_state();
 
         let title = host
-            .render_v2_panel_draw_list(GameUiRenderState::default())
+            .render_v2_panel_draw_list(state)
             .expect("Title is a v2 panel");
         assert_eq!(title.cache, UiDrawCacheStats::rebuild());
         let snapshot = host.v2_debug_snapshot().expect("Title has debug data");
@@ -2725,7 +3257,7 @@ mod tests {
             snapshot
                 .widgets
                 .iter()
-                .any(|widget| widget.label == "New World")
+                .any(|widget| widget.label == "Singleplayer")
         );
         assert!(
             snapshot
@@ -2742,21 +3274,143 @@ mod tests {
             .rect;
         assert!(host.pointer_down(point_in(new_world)));
         let (_handled, action) = host.pointer_up(point_in(new_world));
-        assert_eq!(action, Some(GameUiAction::OpenNewWorld));
+        assert_eq!(action, Some(GameUiAction::OpenWorldList));
+        host.apply_action(action.unwrap());
+
+        host.render_v2_panel_draw_list(state)
+            .expect("WorldList is a v2 panel");
+        let snapshot = host.v2_debug_snapshot().expect("WorldList has debug data");
+        assert_eq!(snapshot.screen, Some(UiScreenId::WorldList));
+        assert!(
+            snapshot
+                .widgets
+                .iter()
+                .any(|widget| widget.label == "Alpha Base")
+        );
+
+        let create_new = snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == UI_V2_WORLD_LIST_CREATE)
+            .expect("Create button")
+            .rect;
+        assert!(host.pointer_down(point_in(create_new)));
+        let (_handled, action) = host.pointer_up(point_in(create_new));
+        assert_eq!(action, Some(GameUiAction::OpenWorldCreate));
         host.apply_action(action.unwrap());
 
         host.set_new_world_seed(12345);
-        let snapshot = host.v2_debug_snapshot().expect("NewWorld has debug data");
-        assert_eq!(snapshot.screen, Some(UiScreenId::NewWorld));
+        host.render_v2_panel_draw_list(state)
+            .expect("WorldCreate is a v2 panel");
+        let snapshot = host
+            .v2_debug_snapshot()
+            .expect("WorldCreate has debug data");
+        assert_eq!(snapshot.screen, Some(UiScreenId::WorldCreate));
         let create = snapshot
             .widgets
             .iter()
-            .find(|widget| widget.id == UI_V2_NEW_WORLD_CREATE)
+            .find(|widget| widget.id == UI_V2_WORLD_CREATE_CREATE)
             .expect("Create World button")
             .rect;
         assert!(host.pointer_down(point_in(create)));
         let (_handled, action) = host.pointer_up(point_in(create));
-        assert_eq!(action, Some(GameUiAction::CreateWorld(12345)));
+        assert_eq!(action, Some(GameUiAction::CreateCatalogWorld));
+    }
+
+    #[test]
+    fn world_list_rows_emit_selection_open_and_delete_actions() {
+        let mut surface = UiSurface::new();
+        let mut state = world_catalog_render_state();
+        let second = WorldCatalogUiWorldId(12);
+        surface.set_screen(Some(UiScreenId::WorldList));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+        surface.set_render_state(state);
+
+        let rows = surface
+            .layout()
+            .widgets()
+            .iter()
+            .filter(|widget| matches!(widget.kind, UiWidgetKind::WorldRow { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, world_list_row_id(0));
+        assert_eq!(rows[0].label, "Alpha Base");
+        assert_eq!(rows[1].id, world_list_row_id(1));
+
+        assert!(surface.pointer_down(point_in(rows[1].rect), state));
+        let (_handled, action) = surface.pointer_up(point_in(rows[1].rect), state);
+        assert_eq!(action, Some(GameUiAction::SelectWorld(second)));
+
+        state.world_catalog.selected = Some(second);
+        surface.set_render_state(state);
+        let snapshot = surface.debug_snapshot().expect("WorldList debug snapshot");
+        let open = snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == UI_V2_WORLD_LIST_OPEN)
+            .expect("Open button");
+        assert!(open.enabled);
+        assert!(surface.pointer_down(point_in(open.rect), state));
+        let (_handled, action) = surface.pointer_up(point_in(open.rect), state);
+        assert_eq!(action, Some(GameUiAction::OpenWorld(second)));
+
+        let delete = surface
+            .debug_snapshot()
+            .expect("WorldList debug snapshot")
+            .widgets
+            .into_iter()
+            .find(|widget| widget.id == UI_V2_WORLD_LIST_DELETE)
+            .expect("Delete button");
+        assert!(delete.enabled);
+        assert!(surface.pointer_down(point_in(delete.rect), state));
+        let (_handled, action) = surface.pointer_up(point_in(delete.rect), state);
+        assert_eq!(action, Some(GameUiAction::ConfirmDeleteWorld(second)));
+    }
+
+    #[test]
+    fn active_world_delete_is_disabled_until_delete_confirm_can_delete() {
+        let mut state = world_catalog_render_state();
+        let active = WorldCatalogUiWorldId(11);
+        state.world_catalog.selected = Some(active);
+        state.world_catalog.active = Some(active);
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::WorldList));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+        surface.set_render_state(state);
+
+        let delete = surface
+            .debug_snapshot()
+            .expect("WorldList debug snapshot")
+            .widgets
+            .into_iter()
+            .find(|widget| widget.id == UI_V2_WORLD_LIST_DELETE)
+            .expect("Delete button");
+        assert!(!delete.enabled);
+
+        surface.set_screen(Some(UiScreenId::WorldDeleteConfirm { id: active }));
+        let confirm = surface
+            .debug_snapshot()
+            .expect("DeleteConfirm debug snapshot")
+            .widgets
+            .into_iter()
+            .find(|widget| widget.id == UI_V2_WORLD_DELETE_CONFIRM)
+            .expect("Delete confirm button");
+        assert!(!confirm.enabled);
+
+        state.world_catalog.active = None;
+        surface.set_render_state(state);
+        let confirm = surface
+            .debug_snapshot()
+            .expect("DeleteConfirm debug snapshot")
+            .widgets
+            .into_iter()
+            .find(|widget| widget.id == UI_V2_WORLD_DELETE_CONFIRM)
+            .expect("Delete confirm button");
+        assert!(confirm.enabled);
+        assert!(surface.pointer_down(point_in(confirm.rect), state));
+        let (_handled, action) = surface.pointer_up(point_in(confirm.rect), state);
+        assert_eq!(action, Some(GameUiAction::DeleteWorld(active)));
     }
 
     #[test]

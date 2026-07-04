@@ -3102,6 +3102,14 @@ impl WebChunkRenderSession {
             | GameUiAction::OpenBlockPalette
             | GameUiAction::OpenHelp(_)
             | GameUiAction::CloseHelp(_)
+            | GameUiAction::OpenWorldList
+            | GameUiAction::OpenWorldCreate
+            | GameUiAction::SelectWorld(_)
+            | GameUiAction::OpenWorld(_)
+            | GameUiAction::CreateCatalogWorld
+            | GameUiAction::ConfirmDeleteWorld(_)
+            | GameUiAction::DeleteWorld(_)
+            | GameUiAction::CancelDeleteWorld
             | GameUiAction::OpenNewWorld
             | GameUiAction::OpenJoinRemote
             | GameUiAction::OpenServerSettings(_)
@@ -3174,6 +3182,14 @@ impl WebChunkRenderSession {
                 | GameUiAction::OpenBlockPalette
                 | GameUiAction::OpenHelp(_)
                 | GameUiAction::CloseHelp(_)
+                | GameUiAction::OpenWorldList
+                | GameUiAction::OpenWorldCreate
+                | GameUiAction::SelectWorld(_)
+                | GameUiAction::OpenWorld(_)
+                | GameUiAction::CreateCatalogWorld
+                | GameUiAction::ConfirmDeleteWorld(_)
+                | GameUiAction::DeleteWorld(_)
+                | GameUiAction::CancelDeleteWorld
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
                 | GameUiAction::OpenServerSettings(_)
@@ -3202,6 +3218,7 @@ impl WebChunkRenderSession {
 
     fn ui_render_state(&self, radius_chunks: u32) -> GameUiRenderState {
         GameUiRenderState {
+            world_catalog: Default::default(),
             render_distance: i32::try_from(radius_chunks)
                 .unwrap_or(i32::MAX)
                 .clamp(WEB_MIN_RENDER_DISTANCE, WEB_MAX_RENDER_DISTANCE),
@@ -4852,6 +4869,9 @@ fn gui_key_from_label(label: &str) -> Option<GuiKey> {
 fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
     match screen {
         Some(GameScreen::Title) => "title",
+        Some(GameScreen::WorldList) => "worldList",
+        Some(GameScreen::WorldCreate) => "worldCreate",
+        Some(GameScreen::WorldDeleteConfirm { .. }) => "worldDeleteConfirm",
         Some(GameScreen::NewWorld) => "newWorld",
         Some(GameScreen::JoinRemote) => "joinRemote",
         Some(GameScreen::Pause) => "pause",
@@ -4873,6 +4893,14 @@ fn options_parent_label(parent: GameOptionsParent) -> &'static str {
 fn ui_action_label(action: GameUiAction) -> &'static str {
     match action {
         GameUiAction::StartWorld => "startWorld",
+        GameUiAction::OpenWorldList => "openWorldList",
+        GameUiAction::OpenWorldCreate => "openWorldCreate",
+        GameUiAction::SelectWorld(_) => "selectWorld",
+        GameUiAction::OpenWorld(_) => "openWorld",
+        GameUiAction::CreateCatalogWorld => "createCatalogWorld",
+        GameUiAction::ConfirmDeleteWorld(_) => "confirmDeleteWorld",
+        GameUiAction::DeleteWorld(_) => "deleteWorld",
+        GameUiAction::CancelDeleteWorld => "cancelDeleteWorld",
         GameUiAction::OpenBlockPalette => "openBlockPalette",
         GameUiAction::OpenHelp(_) => "openHelp",
         GameUiAction::CloseHelp(_) => "closeHelp",

@@ -1307,6 +1307,22 @@ mod android {
                     self.ui.set_new_world_seed(seed);
                     self.session_status = StatusOverlay::hidden();
                 }
+                GameUiAction::OpenWorldCreate => {
+                    let seed = self.next_new_world_seed();
+                    self.ui.set_new_world_seed(seed);
+                    self.session_status = StatusOverlay::hidden();
+                }
+                GameUiAction::OpenWorldList
+                | GameUiAction::SelectWorld(_)
+                | GameUiAction::ConfirmDeleteWorld(_)
+                | GameUiAction::CancelDeleteWorld => {
+                    self.session_status = StatusOverlay::hidden();
+                }
+                GameUiAction::OpenWorld(_)
+                | GameUiAction::CreateCatalogWorld
+                | GameUiAction::DeleteWorld(_) => {
+                    log::warn!("persistent world catalog action is not wired to Android yet");
+                }
                 GameUiAction::OpenJoinRemote => {
                     let remote_addr = self.scene_options.remote_addr.clone().unwrap_or_else(|| {
                         normalized_android_remote_addr(self.ui.join_remote_addr())
@@ -1384,6 +1400,7 @@ mod android {
 
         fn current_ui_render_state(&self) -> GameUiRenderState {
             let mut state = GameUiRenderState {
+                world_catalog: Default::default(),
                 render_distance: (self.scene.render_distance() as i32)
                     .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE),
                 min_render_distance: ANDROID_MIN_RENDER_DISTANCE,

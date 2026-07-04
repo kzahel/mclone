@@ -1133,6 +1133,23 @@ impl FlatClientDriver {
                 self.ui.set_new_world_seed(seed);
                 self.clear_inactive_session_status();
             }
+            GameUiAction::OpenWorldCreate => {
+                let seed = self.next_new_world_seed();
+                self.ui.set_new_world_seed(seed);
+                self.clear_inactive_session_status();
+            }
+            GameUiAction::OpenWorldList
+            | GameUiAction::SelectWorld(_)
+            | GameUiAction::ConfirmDeleteWorld(_)
+            | GameUiAction::CancelDeleteWorld => {
+                self.clear_inactive_session_status();
+            }
+            GameUiAction::OpenWorld(_)
+            | GameUiAction::CreateCatalogWorld
+            | GameUiAction::DeleteWorld(_) => {
+                log::warn!("persistent world catalog action is not wired to desktop runtime yet");
+                apply_ui_action = false;
+            }
             GameUiAction::OpenJoinRemote => {
                 let remote_addr = context
                     .fallback_remote_addr
@@ -2173,6 +2190,7 @@ impl FlatClientDriver {
 
 pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUiRenderState {
     GameUiRenderState {
+        world_catalog: Default::default(),
         render_distance: options.render_distance,
         min_render_distance: MIN_RENDER_DISTANCE,
         max_render_distance: MAX_RENDER_DISTANCE,

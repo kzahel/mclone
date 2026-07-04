@@ -767,7 +767,10 @@ fn configure_screenshot_scene(
     host: &mut OffscreenFlatClientHost,
     options: &HeadlessScreenshotOptions,
 ) -> Result<()> {
-    if options.ui == HeadlessScreenshotUi::NewWorld {
+    if matches!(
+        options.ui,
+        HeadlessScreenshotUi::NewWorld | HeadlessScreenshotUi::WorldCreate
+    ) {
         host.driver.set_new_world_seed(options.scene.seed);
     }
     host.driver.set_ui_screen(options.ui.game_screen());
