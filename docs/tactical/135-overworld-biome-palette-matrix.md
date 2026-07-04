@@ -1,14 +1,15 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, nineteen supported feature-family groups, and 53 F-checked
+overworld tint IDs, nineteen supported feature-family groups, and 55 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads,
 blue orchids, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
 dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, and ordinary
 forest tree plus mountain oak/spruce trees, badlands-variant dead
-bush/cactus/sugar-cane, giant-taiga mega spruce/pine, flower-forest
+bush/cactus/sugar-cane, desert-variant dead bush/cactus/sugar-cane,
+giant-taiga mega spruce/pine, flower-forest
 dense/common flower, and sunflower-plains sunflower palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
@@ -133,7 +134,7 @@ notes.
 | 14 | `minecraft:mushroom_fields` | mushroom | mycelium and huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `978`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition checked | seed `1554`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 16 | `minecraft:beach` | plains | sand beach checked, buried-treasure/shipwreck surface context | seed `45`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 17 | `minecraft:desert_hills` | desert | sand/sandstone hills checked; extra vegetation unprobed | seed `120`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 17 | `minecraft:desert_hills` | desert | sand/sandstone hills plus dead bush and cactus/sugar-cane family checked; structures/fossils gap | seed `446`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 18 | `minecraft:wooded_hills` | forest | forest hill grass and oak/birch tree family checked; flowers/extras gap | seed `2`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 19 | `minecraft:taiga_hills` | taiga | taiga hill grass plus spruce/fern and sweet berry bushes checked | seed `29`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 20 | `minecraft:mountain_edge` | mountains | tint checked; Java 1.17 final layered source appears not to emit this registered ID | no B/S fixture | `[ ] B [x] T [ ] S [ ] F` |
@@ -164,7 +165,7 @@ notes.
 | 49 | `minecraft:deep_cold_ocean` | ocean-cold | deep cold water, seagrass/kelp water plants checked | seed `13`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 50 | `minecraft:deep_frozen_ocean` | ocean-frozen-deep | deep frozen water/ice checked, icebergs gap | seed `103`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 129 | `minecraft:sunflower_plains` | plains | plains tint/surface and sunflower patches checked; pumpkin/sugar-cane extras gap | seed `43`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 130 | `minecraft:desert_lakes` | desert | desert surface checked; lake/fossil/extra-vegetation gap | seed `98`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 130 | `minecraft:desert_lakes` | desert | desert surface plus dead bush and cactus/sugar-cane family checked; lake/fossil gap | seed `1616`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 131 | `minecraft:gravelly_mountains` | mountains | gravelly mountain surface plus sparse oak/spruce tree family checked; forest-rock/emerald/infested-stone gap | seed `250`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 132 | `minecraft:flower_forest` | forest | forest grass/tint, dense small flowers, and common tall flowers checked; mushrooms/extras gap | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass plus spruce/fern and sweet berry bushes checked | seed `6126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -225,9 +226,10 @@ Landed:
   families, mushroom-field huge mushrooms, birch log/leaves trees, savanna
   acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus jungle
   log/leaves vegetation, flower-forest dense and common flowers, and
-  sunflower-plains sunflower patches. Desert and all generated badlands rows now
-  require dead bush plus cactus/sugar-cane family coverage; ordinary forest and wooded hills require
-  an oak or birch log/leaves tree pair; swamp requires the native
+  sunflower-plains sunflower patches. Desert, desert hills, desert lakes, and
+  all generated badlands rows now require dead bush plus cactus/sugar-cane
+  family coverage; ordinary forest and wooded hills require an oak or birch
+  log/leaves tree pair; swamp requires the native
   vegetation/clay subset plus blue orchids, small mushrooms, sugar cane, and
   lily pads; taiga, taiga hills, taiga mountains, base snowy taiga, and snowy
   taiga hills require spruce/fern vegetation plus sweet berry bushes; snowy
@@ -340,6 +342,11 @@ Documented gaps from this slice:
   wooded badlands plateau tree visibility, eroded pillar feature shape,
   mineshaft/structure context, pumpkin, and exact decorated mismatch buckets
   remain later `103` work.
+- Java desert rows now have high-signal dead-bush plus cactus/sugar-cane family
+  coverage across desert, desert hills, and desert lakes. Exact parity is still
+  incomplete: pumpkin, desert wells, fossils/lake behavior,
+  villages/outposts/pyramids, and exact decorated mismatch buckets remain later
+  `103` work.
 - Java giant taiga now has high-signal mega spruce / mega pine tree coverage,
   including the giant 2x2 trunk, mega-pine foliage family, podzol
   alter-ground, and giant tree vs giant spruce selector weights. Exact parity
@@ -364,11 +371,13 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Move to the desert variant rows without entering structure territory:
+Move to the mushroom-field shore row without entering spawn-table work:
 
-1. Read Java desert hills / desert lakes feature table sources before editing.
-2. Try to promote rows `17` and `130` with deterministic dead-bush plus
-   cactus/sugar-cane family checks, reusing the existing shared desert table
-   where possible.
-3. Keep desert wells, fossil/lake behavior, villages/pyramids, and exact
-   decorated-count mismatch buckets in `103`.
+1. Read Java mushroom fields / mushroom-field shore feature table sources
+   before editing.
+2. Try to promote row `15` with deterministic mycelium plus huge-mushroom
+   family checks, reusing the existing shared mushroom-field table where
+   possible.
+3. Keep small mushroom/default-extra vegetation, no-normal-hostile spawn-table
+   behavior, and exact huge-mushroom side-state/count mismatch buckets in
+   `103` or entity-runtime work.

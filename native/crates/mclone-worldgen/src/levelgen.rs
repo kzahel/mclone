@@ -639,12 +639,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 120,
+            seed: 446,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:desert_hills",
             surface_family: SurfaceFamily::Sand,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DesertDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
             seed: 2,
@@ -759,12 +759,12 @@ mod tests {
             feature_family: Some(FeatureFamily::SunflowerPlainsSunflowers),
         },
         PaletteMatrixCase {
-            seed: 98,
+            seed: 1616,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:desert_lakes",
             surface_family: SurfaceFamily::Sand,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DesertDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
             seed: 250,
