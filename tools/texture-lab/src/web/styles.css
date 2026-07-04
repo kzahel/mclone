@@ -390,6 +390,21 @@ h3 {
   border: 1px solid #c9c4b7;
   border-radius: 6px;
   background: #fbfaf7;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.candidateCard:hover,
+.candidateCard:focus-visible {
+  border-color: #8fa57c;
+  outline: 0;
+  box-shadow: 0 0 0 2px rgb(77 125 76 / 16%);
+}
+
+.candidateCard.selected {
+  border-color: #4d7d4c;
+  box-shadow: inset 0 0 0 2px #4d7d4c;
 }
 
 .candidateImageFrame {
@@ -539,6 +554,25 @@ h3 {
 .usageList {
   display: grid;
   gap: 5px;
+}
+
+.paletteSwatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.paletteSwatches span {
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgb(0 0 0 / 20%);
+}
+
+.reasonList {
+  display: grid;
+  gap: 5px;
+  color: #5e5547;
+  font-size: 12px;
 }
 
 .usageList span,

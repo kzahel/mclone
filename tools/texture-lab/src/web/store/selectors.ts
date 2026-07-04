@@ -1,10 +1,11 @@
-import type { TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
+import type { TextureCandidateEntry, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
 import type { TextureLabState } from "./textureLabStore";
 
 export const selectIndex = (state: TextureLabState): TextureLabIndex | null => state.index;
 export const selectLoadStatus = (state: TextureLabState): TextureLabState["loadStatus"] => state.loadStatus;
 export const selectError = (state: TextureLabState): string | null => state.error;
 export const selectSelectedTextureName = (state: TextureLabState): string | null => state.selectedTextureName;
+export const selectSelectedCandidateId = (state: TextureLabState): string | null => state.selectedCandidateId;
 export const selectSearch = (state: TextureLabState): string => state.search;
 export const selectMaterialFilter = (state: TextureLabState): string => state.materialFilter;
 export const selectStatusFilter = (state: TextureLabState): string => state.statusFilter;
@@ -14,6 +15,20 @@ export function selectedTexture(state: TextureLabState): TextureIndexEntry | nul
     return null;
   }
   return state.index.textures.find((texture) => texture.name === state.selectedTextureName) ?? null;
+}
+
+export function activeTextureCandidates(state: TextureLabState): TextureCandidateEntry[] {
+  if (!state.index || !state.selectedTextureName) {
+    return [];
+  }
+  return state.index.candidates.filter((candidate) => candidate.textureName === state.selectedTextureName);
+}
+
+export function selectedCandidate(state: TextureLabState): TextureCandidateEntry | null {
+  if (!state.index || !state.selectedCandidateId) {
+    return null;
+  }
+  return state.index.candidates.find((candidate) => candidate.id === state.selectedCandidateId) ?? null;
 }
 
 export function filteredTextures(state: TextureLabState): TextureIndexEntry[] {

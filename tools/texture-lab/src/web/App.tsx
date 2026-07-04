@@ -3,14 +3,17 @@ import type { JSX, ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../core/index-model";
 import {
+  activeTextureCandidates,
   filteredTextures,
   materialOptions,
   selectError,
-  selectedTexture,
   selectIndex,
   selectLoadStatus,
   selectMaterialFilter,
   selectSearch,
+  selectedCandidate as selectedCandidateSelector,
+  selectedTexture,
+  selectSelectedCandidateId,
   selectSelectedTextureName,
   selectStatusFilter,
   statusOptions,
@@ -23,7 +26,10 @@ export function App(): JSX.Element {
   const error = useTextureLabStore(selectError);
   const textures = useTextureLabStore(useShallow(filteredTextures));
   const activeTexture = useTextureLabStore(selectedTexture);
+  const activeCandidates = useTextureLabStore(useShallow(activeTextureCandidates));
+  const selectedCandidate = useTextureLabStore(selectedCandidateSelector);
   const selectedTextureName = useTextureLabStore(selectSelectedTextureName);
+  const selectedCandidateId = useTextureLabStore(selectSelectedCandidateId);
   const search = useTextureLabStore(selectSearch);
   const materialFilter = useTextureLabStore(selectMaterialFilter);
   const statusFilter = useTextureLabStore(selectStatusFilter);
@@ -32,13 +38,10 @@ export function App(): JSX.Element {
   const loadIndex = useTextureLabStore((state) => state.loadIndex);
   const reindex = useTextureLabStore((state) => state.reindex);
   const selectTexture = useTextureLabStore((state) => state.selectTexture);
+  const selectCandidate = useTextureLabStore((state) => state.selectCandidate);
   const setSearch = useTextureLabStore((state) => state.setSearch);
   const setMaterialFilter = useTextureLabStore((state) => state.setMaterialFilter);
   const setStatusFilter = useTextureLabStore((state) => state.setStatusFilter);
-  const activeCandidates =
-    index && activeTexture
-      ? index.candidates.filter((candidate) => candidate.textureName === activeTexture.name)
-      : [];
 
   useEffect(() => {
     void loadIndex();
@@ -120,11 +123,24 @@ export function App(): JSX.Element {
         </aside>
 
         <section className="previewPane">
-          {activeTexture ? <TexturePreview texture={activeTexture} candidates={activeCandidates} /> : <EmptyState loadStatus={loadStatus} />}
+          {activeTexture ? (
+            <TexturePreview
+              texture={activeTexture}
+              candidates={activeCandidates}
+              selectedCandidateId={selectedCandidateId}
+              onSelectCandidate={selectCandidate}
+            />
+          ) : (
+            <EmptyState loadStatus={loadStatus} />
+          )}
         </section>
 
         <aside className="inspector">
-          {activeTexture ? <TextureInspector texture={activeTexture} /> : <div className="panelNote">No texture selected.</div>}
+          {activeTexture ? (
+            <TextureInspector texture={activeTexture} candidate={selectedCandidate} />
+          ) : (
+            <div className="panelNote">No texture selected.</div>
+          )}
         </aside>
       </main>
     </div>
@@ -140,7 +156,17 @@ function SummaryItem({ label, value }: { label: string; value: number }): JSX.El
   );
 }
 
-function TexturePreview({ texture, candidates }: { texture: TextureIndexEntry; candidates: TextureCandidateEntry[] }): JSX.Element {
+function TexturePreview({
+  texture,
+  candidates,
+  selectedCandidateId,
+  onSelectCandidate,
+}: {
+  texture: TextureIndexEntry;
+  candidates: TextureCandidateEntry[];
+  selectedCandidateId: string | null;
+  onSelectCandidate: (id: string) => void;
+}): JSX.Element {
   return (
     <>
       <div className="sectionHeader">
@@ -162,7 +188,12 @@ function TexturePreview({ texture, candidates }: { texture: TextureIndexEntry; c
         <ImageCard texture={texture} imageKind="runtimeExport" refInfo={texture.images.runtimeExport} />
         <ImageCard texture={texture} imageKind="sheet" refInfo={texture.images.sheet} wide />
       </div>
-      <CandidateSection texture={texture} candidates={candidates} />
+      <CandidateSection
+        texture={texture}
+        candidates={candidates}
+        selectedCandidateId={selectedCandidateId}
+        onSelectCandidate={onSelectCandidate}
+      />
     </>
   );
 }
@@ -203,9 +234,13 @@ function ImageCard({
 function CandidateSection({
   texture,
   candidates,
+  selectedCandidateId,
+  onSelectCandidate,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
+  selectedCandidateId: string | null;
+  onSelectCandidate: (id: string) => void;
 }): JSX.Element {
   const sortedCandidates = [...candidates].sort(compareCandidateDisplay);
   return (
@@ -219,7 +254,12 @@ function CandidateSection({
       {sortedCandidates.length ? (
         <div className="candidateGrid">
           {sortedCandidates.map((candidate) => (
-            <CandidateCard key={candidate.id} candidate={candidate} />
+            <CandidateCard
+              key={candidate.id}
+              candidate={candidate}
+              selected={candidate.id === selectedCandidateId}
+              onSelect={onSelectCandidate}
+            />
           ))}
         </div>
       ) : (
@@ -229,12 +269,26 @@ function CandidateSection({
   );
 }
 
-function CandidateCard({ candidate }: { candidate: TextureCandidateEntry }): JSX.Element {
+function CandidateCard({
+  candidate,
+  selected,
+  onSelect,
+}: {
+  candidate: TextureCandidateEntry;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}): JSX.Element {
   const image = primaryCandidateImage(candidate);
   const url = image ? imageRefUrl(image) : null;
   const sourceLabel = candidate.archived ? "archive" : candidate.source;
   return (
-    <article className="candidateCard">
+    <button
+      className={selected ? "candidateCard selected" : "candidateCard"}
+      type="button"
+      aria-pressed={selected}
+      aria-label={`${candidate.codename} ${sourceLabel} candidate`}
+      onClick={() => onSelect(candidate.id)}
+    >
       <div className="candidateImageFrame">
         {url && image ? <img src={url} alt={`${candidate.codename} ${image.label}`} /> : <span>No image</span>}
       </div>
@@ -258,7 +312,7 @@ function CandidateCard({ candidate }: { candidate: TextureCandidateEntry }): JSX
         </div>
         {candidate.reasons.length ? <p className="candidateReasons">{candidate.reasons.slice(0, 2).join("; ")}</p> : null}
       </div>
-    </article>
+    </button>
   );
 }
 
@@ -296,7 +350,13 @@ function formatScore(score: number): string {
   return Number.isInteger(score) ? `${score}` : score.toFixed(2);
 }
 
-function TextureInspector({ texture }: { texture: TextureIndexEntry }): JSX.Element {
+function TextureInspector({
+  texture,
+  candidate,
+}: {
+  texture: TextureIndexEntry;
+  candidate: TextureCandidateEntry | null;
+}): JSX.Element {
   return (
     <div className="inspectorStack">
       <InspectorSection title="Texture">
@@ -334,8 +394,91 @@ function TextureInspector({ texture }: { texture: TextureIndexEntry }): JSX.Elem
         <Field label="export" value={texture.exportPath} />
         <Field label="runtime" value={texture.runtimeCompatPath ?? "none"} />
       </InspectorSection>
+
+      <CandidateInspector candidate={candidate} />
     </div>
   );
+}
+
+function CandidateInspector({ candidate }: { candidate: TextureCandidateEntry | null }): JSX.Element {
+  if (!candidate) {
+    return (
+      <InspectorSection title="Candidate">
+        <div className="panelNote">No generated candidate selected.</div>
+      </InspectorSection>
+    );
+  }
+
+  return (
+    <>
+      <InspectorSection title="Candidate">
+        <Field label="codename" value={candidate.codename} />
+        <Field label="source" value={candidate.archived ? "archive" : candidate.source} />
+        <Field label="status" value={candidate.status ?? "untriaged"} />
+        <Field label="score" value={candidate.score !== null ? formatScore(candidate.score) : "none"} />
+        <Field label="seed" value={candidate.seed !== null ? `${candidate.seed}` : "unknown"} />
+        <Field label="strength" value={candidate.strength !== null ? candidate.strength.toFixed(2) : "unknown"} />
+        <Field label="size" value={candidateResolutionText(candidate)} />
+        <Field label="archived" value={candidate.archived ? "yes" : "no"} />
+      </InspectorSection>
+
+      <InspectorSection title="Prompt">
+        <Field label="preset" value={candidate.promptPreset ?? "none"} />
+        <Field label="model" value={candidate.modelId ?? "unknown"} />
+        <Field label="scheduler" value={candidate.scheduler ?? "unknown"} />
+        <Field label="steps" value={candidate.steps !== null ? `${candidate.steps}` : "unknown"} />
+        <Field label="prompt" value={candidate.prompt ?? "none"} />
+        <Field label="negative" value={candidate.negativePrompt ?? "none"} />
+      </InspectorSection>
+
+      <InspectorSection title="Projection">
+        {candidate.paletteColors.length ? <PaletteSwatches colors={candidate.paletteColors} /> : <div className="panelNote">No palette colors recorded.</div>}
+        {candidate.reasons.length ? (
+          <div className="reasonList">
+            {candidate.reasons.map((reason) => (
+              <span key={reason}>{reason}</span>
+            ))}
+          </div>
+        ) : null}
+      </InspectorSection>
+
+      <InspectorSection title="Artifacts">
+        <Field label="manifest" value={candidate.manifestPath ?? "none"} />
+        <Field label="report" value={candidate.projectionReportPath ?? "none"} />
+        <Field label="archive" value={candidate.archivePath ?? "none"} />
+        {candidateImageFields(candidate).map(({ label, path }) => (
+          <Field key={label} label={label} value={path ?? "none"} />
+        ))}
+      </InspectorSection>
+    </>
+  );
+}
+
+function PaletteSwatches({ colors }: { colors: string[] }): JSX.Element {
+  return (
+    <div className="paletteSwatches" aria-label="Projection palette">
+      {colors.map((color, index) => (
+        <span key={`${color}:${index}`} title={color} style={{ backgroundColor: color }} />
+      ))}
+    </div>
+  );
+}
+
+function candidateResolutionText(candidate: TextureCandidateEntry): string {
+  if (candidate.resolutions.length) {
+    return candidate.resolutions.map((resolution) => `${resolution}px`).join(", ");
+  }
+  return candidate.resolution !== null ? `${candidate.resolution}px` : "unknown";
+}
+
+function candidateImageFields(candidate: TextureCandidateEntry): { label: string; path: string | null }[] {
+  return [
+    { label: "raw", path: candidate.images.raw.path },
+    { label: "tile", path: candidate.images.rawTile.path },
+    { label: "project", path: candidate.images.projected.path },
+    { label: "review", path: candidate.images.reviewSheet.path },
+    { label: "contact", path: candidate.images.contactSheet.path },
+  ];
 }
 
 function InspectorSection({ title, children }: { title: string; children: ReactNode }): JSX.Element {

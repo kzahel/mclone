@@ -1,11 +1,12 @@
 import { create } from "zustand";
-import type { TextureImageRef, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
+import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 
 export interface TextureLabState {
   index: TextureLabIndex | null;
   selectedTextureName: string | null;
+  selectedCandidateId: string | null;
   search: string;
   materialFilter: string;
   statusFilter: string;
@@ -14,6 +15,7 @@ export interface TextureLabState {
   loadIndex: () => Promise<void>;
   reindex: () => Promise<void>;
   selectTexture: (name: string) => void;
+  selectCandidate: (id: string) => void;
   setSearch: (search: string) => void;
   setMaterialFilter: (material: string) => void;
   setStatusFilter: (status: string) => void;
@@ -22,6 +24,7 @@ export interface TextureLabState {
 export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   index: null,
   selectedTextureName: null,
+  selectedCandidateId: null,
   search: "",
   materialFilter: "all",
   statusFilter: "all",
@@ -35,9 +38,11 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
     set({ loadStatus: "loading", error: null });
     try {
       const index = await fetchIndex("/api/index");
+      const selectedTextureName = selectTextureAfterLoad(index, get().selectedTextureName);
       set({
         index,
-        selectedTextureName: selectTextureAfterLoad(index, get().selectedTextureName),
+        selectedTextureName,
+        selectedCandidateId: selectCandidateAfterLoad(index, selectedTextureName, get().selectedCandidateId),
         loadStatus: "ready",
         error: null,
       });
@@ -50,9 +55,11 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
     set({ loadStatus: "loading", error: null });
     try {
       const index = await fetchIndex("/api/reindex", { method: "POST" });
+      const selectedTextureName = selectTextureAfterLoad(index, get().selectedTextureName);
       set({
         index,
-        selectedTextureName: selectTextureAfterLoad(index, get().selectedTextureName),
+        selectedTextureName,
+        selectedCandidateId: selectCandidateAfterLoad(index, selectedTextureName, get().selectedCandidateId),
         loadStatus: "ready",
         error: null,
       });
@@ -62,7 +69,15 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   },
 
   selectTexture(name) {
-    set({ selectedTextureName: name });
+    const index = get().index;
+    set({
+      selectedTextureName: name,
+      selectedCandidateId: index ? firstCandidateForTexture(index, name)?.id ?? null : null,
+    });
+  },
+
+  selectCandidate(id) {
+    set({ selectedCandidateId: id });
   },
 
   setSearch(search) {
@@ -92,6 +107,27 @@ function selectTextureAfterLoad(index: TextureLabIndex, current: string | null):
     return current;
   }
   return index.textures[0]?.name ?? null;
+}
+
+function selectCandidateAfterLoad(
+  index: TextureLabIndex,
+  selectedTextureName: string | null,
+  currentCandidateId: string | null,
+): string | null {
+  if (!selectedTextureName) {
+    return null;
+  }
+  if (currentCandidateId) {
+    const current = index.candidates.find((candidate) => candidate.id === currentCandidateId);
+    if (current?.textureName === selectedTextureName) {
+      return current.id;
+    }
+  }
+  return firstCandidateForTexture(index, selectedTextureName)?.id ?? null;
+}
+
+function firstCandidateForTexture(index: TextureLabIndex, textureName: string): TextureCandidateEntry | null {
+  return index.candidates.find((candidate) => candidate.textureName === textureName) ?? null;
 }
 
 export function imageUrl(texture: TextureIndexEntry, imageKind: keyof TextureIndexEntry["images"]): string | null {

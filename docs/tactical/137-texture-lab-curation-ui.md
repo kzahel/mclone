@@ -3,8 +3,9 @@
 Status: active; Slice A0 web shell, Zustand store, authored texture index API,
 safe image serving, and read-only browser UI landed 2026-07-04. Slice A0.5
 repo-local generated output root landed 2026-07-04. Slice A1 generated
-candidate discovery landed 2026-07-04. Next priority is read-only candidate
-selection and detail inspection.
+candidate discovery landed 2026-07-04. Slice A2 read-only candidate selection
+and detail inspection landed 2026-07-04. Next priority is preview generation
+parity.
 
 ## Purpose
 
@@ -443,6 +444,47 @@ Additional validation:
   `/tmp/mclone-texture-lab-ui-a1.png`; the only browser log event was the
   unrelated missing `favicon.ico`
 
+### Slice A2 - Read-Only Candidate Selection And Detail
+
+Status: landed 2026-07-04.
+
+Add session-local selected-candidate state and expose candidate provenance in
+the inspector without writing review state or mutating pack source.
+
+Deliverables:
+
+- add `selectedCandidateId` and `selectCandidate` to the Zustand store
+- preserve selected candidate across reload/reindex when it still belongs to
+  the selected texture
+- default texture selection to the first associated candidate when present
+- make candidate cards clickable, keyboard-focusable buttons with selected and
+  `aria-pressed` state
+- show the selected candidate's codename, source, status, score, seed,
+  strength, resolution, archive state, prompt, negative prompt, model,
+  scheduler, steps, projection palette swatches, triage reasons, and artifact
+  paths in the right inspector
+- keep the flow read-only; do not write `review-state.json` yet
+
+Validation:
+
+```sh
+pnpm --dir tools/texture-lab typecheck
+pnpm --dir tools/texture-lab web:build
+pnpm --dir tools/texture-lab web:dev
+```
+
+Additional validation:
+
+- `/api/index` still reported 79 generated candidates and 79 associated
+  candidates
+- `/api/candidates?texture=grass_block_top` still returned 14 candidates
+- headless Chrome loaded `http://127.0.0.1:5177/`, selected
+  `grass_block_top`, clicked the `G5101S74` archive card, found exactly one
+  selected/pressed candidate card, verified the inspector contained
+  `G5101S74`, `grass-top-tufts`, archive artifact paths, and palette swatches,
+  and wrote `/tmp/mclone-texture-lab-ui-a2.png`
+- the browser smoke reported no non-favicon browser log events
+
 ### Slice B - Preview Generation Parity
 
 Move the reusable preview generation pieces behind typed helpers so the UI can
@@ -593,11 +635,11 @@ Slice A is complete when:
 
 ## Immediate Next Step
 
-Implement a small Slice A2 before broader preview generation:
+Implement Slice B preview generation parity:
 
-1. add selected-candidate state to the Zustand store
-2. show the selected candidate's prompt, negative prompt, seed, strength,
-   projection report path, archive path, and image paths in the right inspector
-3. make candidate cards clickable and keyboard-focusable
-4. keep the state read-only; do not write review state until Slice C
-5. verify with `typecheck`, `web:build`, API checks, and a browser screenshot
+1. factor reusable preview generation helpers behind typed `src/core/` APIs
+2. cache UI preview artifacts under `generated-assets/texture-lab/ui-cache/`
+3. show candidate/source/tinted/tile/mip/block/terrain evidence on demand
+4. detect stale preview cache entries from source and candidate hashes
+5. visually compare at least one UI-generated preview set against an existing
+   static review sheet
