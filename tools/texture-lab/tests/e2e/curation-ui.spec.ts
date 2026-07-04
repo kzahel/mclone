@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { decodePng, type RgbaImage } from "../../src/png";
 
 test("indexes authored textures, generated candidates, and allowlisted images", async ({ request }) => {
   const indexResponse = await request.get("/api/index");
@@ -29,6 +30,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   const imageResponse = await request.get(`/api/image?path=${encodeURIComponent(grass.images.currentExport.path)}`);
   await expect(imageResponse).toBeOK();
   expect(imageResponse.headers()["content-type"]).toBe("image/png");
+  expect(saturation(meanRgb(decodePng(await imageResponse.body())))).toBeLessThan(0.005);
   const tintedImageResponse = await request.get(
     `/api/tinted-image?path=${encodeURIComponent(grass.images.currentExport.path)}&tint=${encodeURIComponent(grass.tint.normal)}`,
   );
@@ -219,4 +221,23 @@ async function layoutMetrics(page: import("@playwright/test").Page): Promise<{
       viewportHeight: window.innerHeight,
     };
   });
+}
+
+function meanRgb(image: RgbaImage): [number, number, number] {
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  const count = image.width * image.height;
+  for (let index = 0; index < image.data.length; index += 4) {
+    red += image.data[index]!;
+    green += image.data[index + 1]!;
+    blue += image.data[index + 2]!;
+  }
+  return [red / count, green / count, blue / count];
+}
+
+function saturation([red, green, blue]: [number, number, number]): number {
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  return max === 0 ? 0 : (max - min) / max;
 }

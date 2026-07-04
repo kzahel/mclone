@@ -396,10 +396,15 @@ Local validation on macOS/M4/MPS:
   - Active grass top trial: `G5101S74` at 64px, projected into a 20-tone
     neutral ramp and frozen into
     `packs/mclone-default/block/grass-block.ts`.
+  - Follow-up correction: the first committed 20-tone ramp was still olive,
+    not neutral. `grass_top` is now a neutral grayscale ramp so raw tintable
+    source matches the local vanilla raw hue/luminance before biome tint is
+    applied.
   - Grass freeze archive:
     `/tmp/mclone-texture-lab/diffusion-archive/grass-top-g5101s74-active-20-2026-07-04/`.
-    The exported neutral `grass_block_top.png` SHA-256 matches the archived
-    projected PNG exactly: `89ff4aaeb2a3e052794358f81028de20c2925c66626e9aebec691601dc3938b5`.
+    The committed mask structure still comes from the archived projected PNG;
+    the exported PNG no longer byte-matches that archive because the
+    tintable source palette was corrected from olive to neutral grayscale.
   - Current workflow bottleneck is no longer only prompt tuning. The next
     texture-lab scaling slice should be an interactive candidate browser:
     reference texture navigation by structure/brick/overlay/material role,

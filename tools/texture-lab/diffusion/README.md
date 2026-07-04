@@ -210,6 +210,12 @@ and frozen into `grass_block_top` as a 64px source mask. The remaining failure
 mode is repetition/directional texture at tile scale, which should be judged in
 block/game context before another prompt sweep.
 
+Correction: the first committed 20-tone `grass_top` ramp was not actually
+neutral; it was an olive ramp, so the raw tintable source was already green.
+The active source palette is now a neutral grayscale ramp calibrated so the
+raw exported average and default-tinted average align with the local vanilla
+reference while preserving the generated mask structure.
+
 ## Project Candidates
 
 Projection is handled by the TypeScript lab, not the Python runner. It consumes
