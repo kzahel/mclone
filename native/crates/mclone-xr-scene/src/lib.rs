@@ -31,7 +31,8 @@ use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_client::{
     BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
-    sphere_intersects_solid_blocks,
+    NativeTeleportPreviewWorker, TeleportConfig, TeleportIntent, TeleportPreview,
+    TeleportPreviewRequestId, TeleportPreviewResult, sphere_intersects_solid_blocks,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_mesh::quad_face_count_from_indices;
@@ -89,6 +90,7 @@ pub const XR_DEFAULT_SNAP_TURN_DEGREES: f32 = 15.0;
 pub const XR_SNAP_TURN_ENGAGE_THRESHOLD: f32 = 0.65;
 pub const XR_SNAP_TURN_RECENTER_THRESHOLD: f32 = 0.25;
 pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
+pub const XR_BLINK_TELEPORT_STICK_THRESHOLD: f32 = 0.5;
 pub const XR_AUTOMATED_ORBIT_RADIUS_BLOCKS: f64 = 16.0;
 pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
 pub const XR_UI_FPS_CAP: u32 = 90;
@@ -114,6 +116,15 @@ const XR_HEAD_COMFORT_HEAD_PENETRATION_ALPHA: f32 = 0.65;
 const XR_HEAD_COMFORT_MAX_ALPHA: f32 = 0.9;
 const XR_HEAD_COMFORT_FADE_IN_SECONDS: f32 = 0.12;
 const XR_HEAD_COMFORT_FADE_OUT_SECONDS: f32 = 0.22;
+const XR_BLINK_TELEPORT_MAX_DISTANCE: f64 = 8.0;
+const XR_BLINK_TELEPORT_ARC_HEIGHT: f64 = 1.25;
+const XR_BLINK_TELEPORT_GROUND_PROBE_DISTANCE: f64 = 0.01;
+const XR_BLINK_TELEPORT_VALID_ARC_COLOR: [f32; 4] = [0.1, 0.85, 1.0, 1.0];
+const XR_BLINK_TELEPORT_INVALID_ARC_COLOR: [f32; 4] = [1.0, 0.25, 0.15, 1.0];
+const XR_BLINK_TELEPORT_FEET_COLOR: [f32; 4] = [0.1, 1.0, 0.35, 1.0];
+const XR_BLINK_TELEPORT_DOT_COLOR: [f32; 4] = [1.0, 0.95, 0.2, 1.0];
+const XR_BLINK_TELEPORT_MARKER_RADIUS: f64 = 0.28;
+const XR_BLINK_TELEPORT_DOT_RADIUS: f64 = 0.1;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum XrLocomotionMode {
@@ -411,6 +422,20 @@ struct XrHeadComfortTarget {
     alpha: f32,
     blocked_residual: bool,
     head_penetrating: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct XrBlinkTeleportState {
+    active: bool,
+    preview: Option<TeleportPreview>,
+    first_request_id: Option<TeleportPreviewRequestId>,
+    preview_request_id: Option<TeleportPreviewRequestId>,
+    last_submitted_intent: Option<TeleportIntent>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct XrBlinkTeleportFrame {
+    suppress_left_stick_movement: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -971,6 +996,8 @@ where
     locomotion_mode: XrLocomotionMode,
     turn_policy: XrTurnPolicy,
     snap_turn_state: XrSnapTurnState,
+    blink_teleport: XrBlinkTeleportState,
+    blink_teleport_worker: Option<NativeTeleportPreviewWorker>,
     display_refresh_hz: Option<f32>,
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
@@ -1136,6 +1163,8 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             turn_policy: XrTurnPolicy::default(),
             snap_turn_state: XrSnapTurnState::default(),
+            blink_teleport: XrBlinkTeleportState::default(),
+            blink_teleport_worker: None,
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
@@ -1242,6 +1271,8 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             turn_policy: XrTurnPolicy::default(),
             snap_turn_state: XrSnapTurnState::default(),
+            blink_teleport: XrBlinkTeleportState::default(),
+            blink_teleport_worker: None,
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
@@ -2454,6 +2485,7 @@ where
         {
             world_lines.push(gameplay_ray);
         }
+        world_lines.extend(self.xr_blink_teleport_lines());
         if !world_lines.is_empty() {
             self.world_gui_renderer
                 .render_lines_multiview(
@@ -2654,6 +2686,7 @@ where
         if self.runtime.is_none() {
             self.head_comfort.reset();
             self.snap_turn_state.reset();
+            self.clear_xr_blink_teleport();
             timing.input_ms = elapsed_ms(input_start.elapsed());
             return Ok(timing);
         }
@@ -2664,6 +2697,7 @@ where
             .context("update XR head comfort fade state")?;
         if self.ui.is_active() {
             self.snap_turn_state.reset();
+            self.clear_xr_blink_teleport();
             timing.input_ms = elapsed_ms(input_start.elapsed());
             let commit_start = Instant::now();
             let (_, commit_timing) = self
@@ -2678,6 +2712,9 @@ where
                 .apply_snap_turn_preserving_headset(&views, transform, yaw_delta_radians)
                 .context("apply XR snap turn")?;
         }
+        let blink_frame = self
+            .update_xr_blink_teleport(controllers, transform)
+            .context("update XR Blink teleport")?;
         let movement_yaw_radians = self
             .locomotion_movement_yaw_radians_with_transform(&views, transform)
             .context("resolve XR locomotion frame")?;
@@ -2687,6 +2724,9 @@ where
             movement_yaw_radians,
             self.turn_policy,
         );
+        if blink_frame.suppress_left_stick_movement {
+            input.movement_impulse = None;
+        }
         input.hand_push = xr_hand_push_input_from_controllers(controllers, &views, transform)
             .context("resolve XR hand-push input")?;
         timing.input_ms = elapsed_ms(input_start.elapsed());
@@ -2707,6 +2747,176 @@ where
             timing.gameplay_interaction_ms = elapsed_ms(interaction_start.elapsed());
         }
         Ok(timing)
+    }
+
+    fn update_xr_blink_teleport(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+        transform: XrStageToWorld,
+    ) -> Result<XrBlinkTeleportFrame> {
+        let left_axis = xr_left_stick_raw_axis(controllers);
+        let left_axis_active = left_axis.length() > XR_JOYPAD_DEAD_ZONE;
+        let blink_engaged = xr_left_stick_blink_engaged(controllers);
+        if blink_engaged {
+            if !self.blink_teleport.active {
+                self.begin_xr_blink_teleport();
+            }
+            self.submit_xr_blink_teleport_request(controllers, transform)?;
+            self.poll_xr_blink_teleport_worker();
+            return Ok(XrBlinkTeleportFrame {
+                suppress_left_stick_movement: true,
+            });
+        }
+
+        if self.blink_teleport.active {
+            self.commit_xr_blink_teleport()?;
+            return Ok(XrBlinkTeleportFrame {
+                suppress_left_stick_movement: true,
+            });
+        }
+
+        Ok(XrBlinkTeleportFrame {
+            suppress_left_stick_movement: left_axis_active,
+        })
+    }
+
+    fn begin_xr_blink_teleport(&mut self) {
+        if self.runtime.is_none() {
+            self.clear_xr_blink_teleport();
+            return;
+        }
+        self.ensure_xr_blink_teleport_worker();
+        self.blink_teleport.active = true;
+        self.blink_teleport.preview = None;
+        self.blink_teleport.first_request_id = None;
+        self.blink_teleport.preview_request_id = None;
+        self.blink_teleport.last_submitted_intent = None;
+        log::info!("XR Blink teleport preview armed");
+    }
+
+    fn clear_xr_blink_teleport(&mut self) {
+        self.blink_teleport = XrBlinkTeleportState::default();
+    }
+
+    fn ensure_xr_blink_teleport_worker(&mut self) {
+        if self.blink_teleport_worker.is_some() {
+            return;
+        }
+        match NativeTeleportPreviewWorker::new() {
+            Ok(worker) => {
+                self.blink_teleport_worker = Some(worker);
+            }
+            Err(error) => {
+                log::warn!("failed to start XR Blink teleport worker: {error}");
+            }
+        }
+    }
+
+    fn submit_xr_blink_teleport_request(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+        transform: XrStageToWorld,
+    ) -> Result<bool> {
+        let Some(intent) = xr_blink_teleport_intent(&self.camera, controllers, transform) else {
+            return Ok(false);
+        };
+        if self.blink_teleport.last_submitted_intent == Some(intent) {
+            return Ok(false);
+        }
+        self.ensure_xr_blink_teleport_worker();
+        let Some(runtime) = self.runtime.as_ref() else {
+            return Ok(false);
+        };
+        let Some(worker) = self.blink_teleport_worker.as_mut() else {
+            return Ok(false);
+        };
+        match worker.submit_from_world(runtime.client(), intent, xr_blink_teleport_config()) {
+            Ok(request_id) => {
+                self.blink_teleport
+                    .first_request_id
+                    .get_or_insert(request_id);
+                self.blink_teleport.last_submitted_intent = Some(intent);
+                Ok(true)
+            }
+            Err(error) => {
+                log::warn!("XR Blink teleport preview submit failed: {error}");
+                self.blink_teleport_worker = None;
+                Ok(false)
+            }
+        }
+    }
+
+    fn poll_xr_blink_teleport_worker(&mut self) -> bool {
+        let Some(worker) = self.blink_teleport_worker.as_mut() else {
+            return false;
+        };
+        match worker.try_recv_latest() {
+            Ok(Some(result)) => self.accept_xr_blink_teleport_result(result),
+            Ok(None) => false,
+            Err(error) => {
+                log::warn!("XR Blink teleport worker failed: {error}");
+                self.blink_teleport_worker = None;
+                false
+            }
+        }
+    }
+
+    fn accept_xr_blink_teleport_result(&mut self, result: TeleportPreviewResult) -> bool {
+        if !self.blink_teleport.active {
+            return false;
+        }
+        if self
+            .blink_teleport
+            .first_request_id
+            .is_some_and(|first_request_id| result.id < first_request_id)
+        {
+            return false;
+        }
+        if self
+            .blink_teleport
+            .preview_request_id
+            .is_some_and(|preview_request_id| result.id <= preview_request_id)
+        {
+            return false;
+        }
+        self.blink_teleport.preview = Some(result.preview);
+        self.blink_teleport.preview_request_id = Some(result.id);
+        true
+    }
+
+    fn commit_xr_blink_teleport(&mut self) -> Result<()> {
+        self.poll_xr_blink_teleport_worker();
+        let preview = self.blink_teleport.preview.take();
+        self.clear_xr_blink_teleport();
+        let Some(preview) = preview else {
+            log::info!("XR Blink teleport release had no completed preview");
+            return Ok(());
+        };
+        let Some(target_feet) = preview.target_feet.filter(|_| preview.is_valid()) else {
+            log::info!(
+                "XR Blink teleport release had no valid preview: {:?}",
+                preview.validity
+            );
+            return Ok(());
+        };
+
+        let pitch_radians = self.camera.snapshot().pitch_radians;
+        self.camera.set_player_feet_pose(
+            target_feet,
+            -preview.target_yaw_degrees.to_radians(),
+            pitch_radians,
+        );
+        if let Some(runtime) = self.runtime.as_ref() {
+            self.camera
+                .probe_ground(runtime.client(), XR_BLINK_TELEPORT_GROUND_PROBE_DISTANCE);
+        }
+        log::info!(
+            "XR Blink teleport committed feet=({:.2}, {:.2}, {:.2})",
+            target_feet.x,
+            target_feet.y,
+            target_feet.z
+        );
+        Ok(())
     }
 
     pub fn apply_automated_flight_input(
@@ -3861,6 +4071,7 @@ where
         {
             world_lines.push(gameplay_ray);
         }
+        world_lines.extend(self.xr_blink_teleport_lines());
         let mut xr_world_lines_ms = 0.0;
         if !world_lines.is_empty() {
             let world_lines_start = collect_split_timing.then(Instant::now);
@@ -4481,6 +4692,13 @@ where
         ))
     }
 
+    fn xr_blink_teleport_lines(&self) -> Vec<WorldGuiLine> {
+        let Some(preview) = self.blink_teleport.preview.as_ref() else {
+            return Vec::new();
+        };
+        xr_blink_teleport_lines(preview)
+    }
+
     fn current_xr_block_interaction_target(&self) -> Option<BlockInteractionTarget> {
         if self.ui.is_active() {
             return None;
@@ -4792,6 +5010,7 @@ where
         self.underwater_effects = XrUnderwaterEffectStates::default();
         self.last_underwater_update = None;
         self.head_comfort.reset();
+        self.clear_xr_blink_teleport();
         self.latest_controllers.clear();
         self.first_eye_summary = None;
         self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
@@ -5815,6 +6034,24 @@ fn xr_left_stick_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
         .unwrap_or(Vec2::ZERO)
 }
 
+fn xr_left_stick_raw_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
+    controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Left)
+        .map(|controller| {
+            if controller.thumbstick.is_finite() {
+                controller.thumbstick
+            } else {
+                Vec2::ZERO
+            }
+        })
+        .unwrap_or(Vec2::ZERO)
+}
+
+fn xr_left_stick_blink_engaged(controllers: &[XrControllerSnapshot]) -> bool {
+    xr_left_stick_raw_axis(controllers).length() > XR_BLINK_TELEPORT_STICK_THRESHOLD
+}
+
 fn xr_right_stick_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
     controllers
         .iter()
@@ -5859,6 +6096,95 @@ fn xr_controller_hand_position(controllers: &[XrControllerSnapshot], hand: XrHan
         .iter()
         .find(|controller| controller.hand == hand)
         .and_then(|controller| controller.grip_position.or(controller.aim_position))
+}
+
+fn xr_blink_teleport_config() -> TeleportConfig {
+    TeleportConfig {
+        max_distance: XR_BLINK_TELEPORT_MAX_DISTANCE,
+        arc_height: XR_BLINK_TELEPORT_ARC_HEIGHT,
+        ..TeleportConfig::default()
+    }
+}
+
+fn xr_blink_teleport_intent(
+    camera: &EngineCameraController,
+    controllers: &[XrControllerSnapshot],
+    transform: XrStageToWorld,
+) -> Option<TeleportIntent> {
+    let controller = controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Left)?;
+    let aim_origin = transform.transform_position(controller.aim_position?);
+    let aim_direction = transform.transform_direction(controller.aim_direction?);
+    if !aim_origin.is_finite()
+        || !aim_direction.is_finite()
+        || aim_direction.length_squared() <= f32::EPSILON
+    {
+        return None;
+    }
+    let pose = camera.player().pose();
+    Some(TeleportIntent::new(
+        pose.position,
+        vec3d_from_glam(aim_origin),
+        vec3d_from_glam(aim_direction.normalize_or_zero()),
+        pose.y_rot_degrees,
+    ))
+}
+
+fn xr_blink_teleport_lines(preview: &TeleportPreview) -> Vec<WorldGuiLine> {
+    let mut lines = Vec::new();
+    let arc_color = if preview.is_valid() {
+        XR_BLINK_TELEPORT_VALID_ARC_COLOR
+    } else {
+        XR_BLINK_TELEPORT_INVALID_ARC_COLOR
+    };
+    for points in preview.arc_points.windows(2) {
+        lines.push(WorldGuiLine::new(
+            glam_vec3_from_vec3d(points[0]),
+            glam_vec3_from_vec3d(points[1]),
+            arc_color,
+        ));
+    }
+    if let Some(feet) = preview.target_feet {
+        push_xr_blink_teleport_cross(
+            &mut lines,
+            feet,
+            XR_BLINK_TELEPORT_MARKER_RADIUS,
+            XR_BLINK_TELEPORT_FEET_COLOR,
+        );
+    }
+    if let (Some(feet), Some(dot)) = (preview.target_feet, preview.marker_dot) {
+        lines.push(WorldGuiLine::new(
+            glam_vec3_from_vec3d(feet),
+            glam_vec3_from_vec3d(dot),
+            XR_BLINK_TELEPORT_DOT_COLOR,
+        ));
+        push_xr_blink_teleport_cross(
+            &mut lines,
+            dot,
+            XR_BLINK_TELEPORT_DOT_RADIUS,
+            XR_BLINK_TELEPORT_DOT_COLOR,
+        );
+    }
+    lines
+}
+
+fn push_xr_blink_teleport_cross(
+    lines: &mut Vec<WorldGuiLine>,
+    center: Vec3d,
+    radius: f64,
+    color: [f32; 4],
+) {
+    lines.push(WorldGuiLine::new(
+        glam_vec3_from_vec3d(center.add(Vec3d::new(-radius, 0.0, 0.0))),
+        glam_vec3_from_vec3d(center.add(Vec3d::new(radius, 0.0, 0.0))),
+        color,
+    ));
+    lines.push(WorldGuiLine::new(
+        glam_vec3_from_vec3d(center.add(Vec3d::new(0.0, 0.0, -radius))),
+        glam_vec3_from_vec3d(center.add(Vec3d::new(0.0, 0.0, radius))),
+        color,
+    ));
 }
 
 pub fn xr_automated_flight_input(
@@ -6861,6 +7187,49 @@ mod tests {
 
         assert_eq!(input.movement_impulse, None);
         assert_eq!(input.mouse_delta_x, 0.0);
+    }
+
+    #[test]
+    fn xr_blink_teleport_engages_only_past_left_stick_threshold() {
+        assert!(!xr_left_stick_blink_engaged(&[test_controller(
+            XrHand::Left,
+            Vec2::new(XR_BLINK_TELEPORT_STICK_THRESHOLD, 0.0),
+            false,
+        )]));
+        assert!(xr_left_stick_blink_engaged(&[test_controller(
+            XrHand::Left,
+            Vec2::new(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01, 0.0),
+            false,
+        )]));
+        assert!(xr_left_stick_blink_engaged(&[test_controller(
+            XrHand::Left,
+            Vec2::new(0.0, -(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01)),
+            false,
+        )]));
+    }
+
+    #[test]
+    fn xr_blink_teleport_intent_uses_left_controller_world_aim() {
+        let mut left = test_controller(XrHand::Left, Vec2::new(0.8, 0.0), false);
+        left.aim_position = Some(Vec3::new(0.25, 1.2, -0.5));
+        left.aim_direction = Some(Vec3::NEG_Z);
+        let transform = XrStageToWorld {
+            origin_stage: Vec3::ZERO,
+            origin_world: Vec3::new(10.0, 64.0, -4.0),
+            stage_to_world_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        };
+        let camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(10.0, 65.62, -4.0),
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+
+        let intent = xr_blink_teleport_intent(&camera, &[left], transform).expect("intent");
+
+        assert_eq!(intent.start_feet, camera.player().pose().position);
+        assert_vec3d_close(intent.aim_origin, Vec3d::new(9.5, 65.2, -4.25));
+        assert_vec3d_close(intent.aim_direction, Vec3d::new(-1.0, 0.0, 0.0));
     }
 
     #[test]

@@ -77,12 +77,13 @@ remain mob-specific.
 
 The first XR Blink control target is concrete:
 
-- A movement-mode option selects Continuous, Blink, Shift, or Hand Push.
-- In Blink, the left analog joystick is the arm/commit control.
+- The initial playable test path reserves the left analog joystick for Blink
+  while the gameplay UI is inactive. A later movement-mode option can expose
+  Continuous, Blink, Shift, or Hand Push selection.
 - Pushing the left analog joystick more than `0.5` magnitude in any direction
   starts the Blink intent preview.
 - While the stick remains past the threshold, the preview refreshes from the
-  latest controller/camera aim.
+  latest left-controller world aim.
 - The preview shows where the player's feet/body would land.
 - Returning the stick below the threshold commits the latest still-valid
   preview result.
@@ -318,27 +319,37 @@ Landed:
 - Switched the desktop flat debug adapter to the native worker path. It submits
   changed mouse-look intents, renders the latest completed preview, and commits
   only that completed preview on release.
+- Added a playable XR Blink adapter: left stick magnitude above `0.5`
+  arms/updates the worker-backed preview from the left controller aim, releasing
+  below the threshold commits the latest completed valid target, and there is no
+  separate cancel gesture.
+- Routed the provisional XR Blink preview through the existing per-eye and
+  multiview world-line renderer, showing the same arc, target feet marker, and
+  vertically aligned dot used by desktop debug.
+- XR Blink commit now moves the shared engine player/body feet pose and syncs
+  through the existing XR camera/server commit path. Formal comfort fade and
+  movement-mode UI remain future slices.
 - Web/WASM still shares the evaluator and collision snapshot types, but the
   native OS-thread worker export is intentionally unavailable on `wasm32`; the
   future web path should provide the same mailbox shape over Web Workers.
 
 ## Slice 3 - Preview Overlay
 
-- [ ] Render a world-space target feet marker.
-- [ ] Render the dot directly above the resolved feet marker.
+- [x] Render a world-space target feet marker.
+- [x] Render the dot directly above the resolved feet marker.
 - [ ] Render a facing arrow or short body-forward line.
-- [ ] Render the candidate path/arc/line, with invalid previews visibly
+- [x] Render the candidate path/arc/line, with invalid previews visibly
   different from valid previews.
-- [ ] Keep the desktop flat debug arc visible from the normal camera by using
+- [x] Keep the desktop flat debug arc visible from the normal camera by using
   the synthetic off-center origin and upward-biased aim.
-- [ ] Route through existing multiview-aware world GUI/overlay paths where
+- [x] Route through existing multiview-aware world GUI/overlay paths where
   practical.
 - [ ] Add headless or synthetic render coverage for the overlay renderer path.
 
 ## Slice 4 - Blink Execution
 
 - [ ] Add Blink locomotion mode.
-- [ ] Commit the path-validated target by moving the authoritative body/player
+- [x] Commit the path-validated target by moving the authoritative body/player
   pose, not only the XR stage transform.
 - [ ] Use `ScreenEffectsRenderer` or the existing comfort fade primitive for a
   brief same-alpha stereo fade.
