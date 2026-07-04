@@ -908,12 +908,16 @@ async function waitForWebAppReady(page) {
     undefined,
     { timeout: 60_000 },
   );
-  const state = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+  const state = await page.evaluate(() => /** @type {any} */ (globalThis).__mcloneWebApp.state);
   if (!state?.ready || !state?.ok) {
     throw new Error(`native web app failed to boot after reload:\n${JSON.stringify(state, null, 2)}`);
   }
 }
 
+/**
+ * @param {any} interaction
+ * @returns {{ x: number, y: number, z: number, source: string }[]}
+ */
 function placedBlockCandidates(interaction) {
   if (!interaction) {
     return [];
@@ -938,6 +942,10 @@ function placedBlockCandidates(interaction) {
   ];
 }
 
+/**
+ * @param {string} direction
+ * @returns {{ x: number, y: number, z: number }}
+ */
 function directionOffset(direction) {
   switch (direction) {
     case "down":
@@ -957,10 +965,14 @@ function directionOffset(direction) {
   }
 }
 
-/** @param {Page} page */
+/**
+ * @param {Page} page
+ * @param {{ x: number, y: number, z: number }} pos
+ */
 function blockStateAt(page, pos) {
   return page.evaluate((pos) => {
-    const report = globalThis.__mcloneWebApp?.blockStateAt?.(pos.x, pos.y, pos.z) ?? null;
+    const app = /** @type {any} */ (globalThis).__mcloneWebApp;
+    const report = app?.blockStateAt?.(pos.x, pos.y, pos.z) ?? null;
     return {
       ...pos,
       ok: report?.ok === true,
@@ -971,13 +983,20 @@ function blockStateAt(page, pos) {
   }, pos);
 }
 
+/**
+ * @param {Page} page
+ * @param {{ x: number, y: number, z: number }} pos
+ * @param {number} expectedBlockStateId
+ */
 async function waitForBlockStateAt(page, pos, expectedBlockStateId) {
   await page.waitForFunction(
-    ({ pos, expectedBlockStateId }) => {
-      const report = globalThis.__mcloneWebApp?.blockStateAt?.(pos.x, pos.y, pos.z);
+    (payload) => {
+      const typed = /** @type {{ pos: { x: number, y: number, z: number }, expectedBlockStateId: number }} */ (payload);
+      const app = /** @type {any} */ (globalThis).__mcloneWebApp;
+      const report = app?.blockStateAt?.(typed.pos.x, typed.pos.y, typed.pos.z);
       return report?.ok === true
         && report.loaded === true
-        && Number(report.blockStateId) === expectedBlockStateId;
+        && Number(report.blockStateId) === typed.expectedBlockStateId;
     },
     { pos, expectedBlockStateId },
     { timeout: 60_000 },
@@ -985,11 +1004,17 @@ async function waitForBlockStateAt(page, pos, expectedBlockStateId) {
   return blockStateAt(page, pos);
 }
 
+/**
+ * @param {Page} page
+ * @param {string} worldId
+ * @param {number} minChunks
+ */
 async function waitForBrowserIndexedDbChunkRecords(page, worldId, minChunks) {
   await page.waitForFunction(
-    async ({ worldId, minChunks }) => {
-      const counts = await globalThis.__mcloneBrowserSmokeIndexedDbCounts(worldId);
-      return counts.chunks >= minChunks;
+    async (payload) => {
+      const typed = /** @type {{ worldId: string, minChunks: number }} */ (payload);
+      const counts = await /** @type {any} */ (globalThis).__mcloneBrowserSmokeIndexedDbCounts(typed.worldId);
+      return counts.chunks >= typed.minChunks;
     },
     { worldId, minChunks },
     { timeout: 30_000 },
@@ -997,19 +1022,30 @@ async function waitForBrowserIndexedDbChunkRecords(page, worldId, minChunks) {
   return browserIndexedDbWorldRecordCounts(page, worldId);
 }
 
+/**
+ * @param {Page} page
+ * @param {string} worldId
+ */
 function browserIndexedDbWorldRecordCounts(page, worldId) {
-  return page.evaluate((worldId) => globalThis.__mcloneBrowserSmokeIndexedDbCounts(worldId), worldId);
+  return page.evaluate(
+    (worldId) => /** @type {any} */ (globalThis).__mcloneBrowserSmokeIndexedDbCounts(worldId),
+    worldId,
+  );
 }
 
+/** @param {Page} page */
 async function installIndexedDbCountHelper(page) {
   await page.evaluate(() => {
-    globalThis.__mcloneBrowserSmokeIndexedDbCounts = async (worldId) => {
-      const db = await new Promise((resolve, reject) => {
+    const global = /** @type {any} */ (globalThis);
+    /** @type {(worldId: string) => Promise<{ chunks: number, entityChunks: number, total: number }>} */
+    const countIndexedDbRecords = async (worldId) => {
+      const db = await /** @type {Promise<IDBDatabase>} */ (new Promise((resolve, reject) => {
         const request = indexedDB.open("mclone-web-worlds");
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB"));
-      });
+      }));
       try {
+        /** @param {string} storeName */
         const countStore = (storeName) => new Promise((resolve, reject) => {
           if (!db.objectStoreNames.contains(storeName)) {
             resolve(0);
@@ -1027,11 +1063,16 @@ async function installIndexedDbCountHelper(page) {
           countStore("chunks"),
           countStore("entityChunks"),
         ]);
-        return { chunks, entityChunks, total: chunks + entityChunks };
+        return {
+          chunks: Number(chunks) || 0,
+          entityChunks: Number(entityChunks) || 0,
+          total: (Number(chunks) || 0) + (Number(entityChunks) || 0),
+        };
       } finally {
         db.close();
       }
     };
+    global.__mcloneBrowserSmokeIndexedDbCounts = countIndexedDbRecords;
   });
 }
 

@@ -9,6 +9,13 @@ import {
   RUNNER_SHARED_STATUS_COMPLETE,
   RUNNER_SHARED_STATUS_FAILED,
 } from "./mclone-runner-shared-abi.js";
+import {
+  WORLD_CHUNK_STORE,
+  WORLD_ENTITY_CHUNK_STORE,
+  WORLD_ID_INDEX,
+  clearIndexedDbWorldRecords,
+  openWorldDb,
+} from "./mclone-web-world-catalog.js";
 import type { McloneWebIntegratedServerWorker } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
@@ -111,12 +118,6 @@ const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 // runner's pool, so these need not agree with any Rust constant.
 const MAX_RUNNER_SHARED_POOL_SLOTS = 2;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES = 2 * 1024 * 1024;
-const WORLD_DB_NAME = "mclone-web-worlds";
-const WORLD_DB_VERSION = 1;
-const WORLD_CHUNK_STORE = "chunks";
-const WORLD_ENTITY_CHUNK_STORE = "entityChunks";
-const WORLD_ID_INDEX = "worldId";
-
 workerSelf.onmessage = async (event: MessageEvent) => {
   const message = (event.data ?? {}) as IntegratedServerWorkerMessage;
   try {
@@ -336,7 +337,7 @@ async function prepareIndexedDbWorldForStart(
   const db = await openWorldDb();
   try {
     if (message.clearWorldStorage) {
-      await clearIndexedDbWorld(db, worldId);
+      await clearIndexedDbWorldRecords(db, worldId);
     }
   } finally {
     db.close();
@@ -351,7 +352,7 @@ async function loadIndexedDbWorldForStart(
   const db = await openWorldDb();
   try {
     if (message.clearWorldStorage) {
-      await clearIndexedDbWorld(db, worldId);
+      await clearIndexedDbWorldRecords(db, worldId);
     }
     const [chunks, entityChunks] = await Promise.all([
       loadIndexedDbRecords(db, WORLD_CHUNK_STORE, worldId),
@@ -371,36 +372,6 @@ function indexedDbWorldIdFromMessage(message: IntegratedServerWorkerMessage): st
   return `seed-${String(message.seed ?? "0")}`;
 }
 
-function openWorldDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(WORLD_DB_NAME, WORLD_DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      ensureWorldStore(db, request.transaction, WORLD_CHUNK_STORE);
-      ensureWorldStore(db, request.transaction, WORLD_ENTITY_CHUNK_STORE);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB world store"));
-    request.onblocked = () => reject(new Error("IndexedDB world store upgrade was blocked"));
-  });
-}
-
-function ensureWorldStore(
-  db: IDBDatabase,
-  transaction: IDBTransaction | null,
-  storeName: string,
-): void {
-  if (db.objectStoreNames.contains(storeName)) {
-    const store = transaction?.objectStore(storeName);
-    if (store && !store.indexNames.contains(WORLD_ID_INDEX)) {
-      store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
-    }
-    return;
-  }
-  const store = db.createObjectStore(storeName, { keyPath: ["worldId", "x", "z"] });
-  store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
-}
-
 async function loadIndexedDbRecords(
   db: IDBDatabase,
   storeName: string,
@@ -414,30 +385,6 @@ async function loadIndexedDbRecords(
   const records = await idbRequest<unknown[]>(request);
   await transactionDone(transaction);
   return records.map((record) => normalizeIndexedDbRecord(worldId, record));
-}
-
-async function clearIndexedDbWorld(db: IDBDatabase, worldId: string): Promise<void> {
-  await Promise.all([
-    clearIndexedDbStoreForWorld(db, WORLD_CHUNK_STORE, worldId),
-    clearIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
-  ]);
-}
-
-async function clearIndexedDbStoreForWorld(
-  db: IDBDatabase,
-  storeName: string,
-  worldId: string,
-): Promise<void> {
-  const transaction = db.transaction(storeName, "readwrite");
-  const store = transaction.objectStore(storeName);
-  const request = store.index(WORLD_ID_INDEX).openKeyCursor(IDBKeyRange.only(worldId));
-  request.onsuccess = () => {
-    const cursor = request.result;
-    if (!cursor) return;
-    store.delete(cursor.primaryKey);
-    cursor.continue();
-  };
-  await transactionDone(transaction);
 }
 
 async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string, any>): Promise<void> {

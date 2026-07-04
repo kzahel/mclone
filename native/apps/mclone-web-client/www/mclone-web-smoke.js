@@ -1,4 +1,14 @@
 import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
+import {
+  WORLD_CHUNK_STORE,
+  WORLD_ENTITY_CHUNK_STORE,
+  WORLD_ID_INDEX,
+  createIndexedDbCatalogWorld,
+  deleteIndexedDbCatalogWorld,
+  listIndexedDbCatalogWorlds,
+  openIndexedDbCatalogWorld,
+  openWorldDb,
+} from "./mclone-web-world-catalog.js";
 
 /**
  * The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
@@ -24,11 +34,6 @@ const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.me
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
-const WORLD_DB_NAME = "mclone-web-worlds";
-const WORLD_CHUNK_STORE = "chunks";
-const WORLD_ENTITY_CHUNK_STORE = "entityChunks";
-const WORLD_ID_INDEX = "worldId";
-
 const ready = boot();
 globalThis.__mcloneNativeReady = ready;
 
@@ -398,6 +403,7 @@ async function renderCanvas() {
         canvas,
         compiler,
       );
+      const indexedDbCatalog = await runIndexedDbCatalogSmoke();
       const sharedTopologyStress = await runSharedTopologyStress(module);
       const remoteWebSocket = await runRemoteWebSocketSmoke(module);
       return {
@@ -425,6 +431,7 @@ async function renderCanvas() {
           && report.textured
           && shutdownReport.ok
           && indexedDbPersistence.ok
+          && indexedDbCatalog.ok
           && sharedTopologyStressActive(sharedTopologyStress)
           && remoteWebSocketActive(remoteWebSocket)
         ),
@@ -438,6 +445,7 @@ async function renderCanvas() {
         report,
         shutdownReport,
         indexedDbPersistence,
+        indexedDbCatalog,
         sharedTopologyStress,
         remoteWebSocket,
       };
@@ -547,6 +555,110 @@ async function createIndexedDbSmokeSession(module, assetPack, canvas, worldId, c
   );
 }
 
+async function runIndexedDbCatalogSmoke() {
+  const worldId = `catalog-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const db = await openWorldDb();
+  try {
+    const before = await listIndexedDbCatalogWorlds(db);
+    const created = await createIndexedDbCatalogWorld(db, {
+      displayName: "Smoke Catalog World",
+      seed: 424242,
+      requestedId: worldId,
+    });
+    const duplicateRejected = await rejectsWithMessage(
+      () => createIndexedDbCatalogWorld(db, {
+        displayName: "Duplicate Smoke Catalog World",
+        seed: 424242,
+        requestedId: worldId,
+      }),
+      "already exists",
+    );
+    const activeDeleteRejected = await rejectsWithMessage(
+      () => deleteIndexedDbCatalogWorld(db, worldId, worldId),
+      "cannot delete active local world",
+    );
+
+    await putIndexedDbSmokeRecord(db, WORLD_CHUNK_STORE, worldId, 0, 0);
+    await putIndexedDbSmokeRecord(db, WORLD_ENTITY_CHUNK_STORE, worldId, 0, 0);
+    const recordsBeforeDelete = await countIndexedDbWorldRecords(worldId);
+
+    const afterCreate = await listIndexedDbCatalogWorlds(db);
+    const opened = await openIndexedDbCatalogWorld(db, worldId);
+    const deleted = await deleteIndexedDbCatalogWorld(db, worldId);
+    const afterDelete = await listIndexedDbCatalogWorlds(db);
+    const openDeletedRejected = await rejectsWithMessage(
+      () => openIndexedDbCatalogWorld(db, worldId),
+      "was not found",
+    );
+    const recordsAfterDelete = await countIndexedDbWorldRecords(worldId);
+
+    return {
+      ok: Boolean(
+        created.id === worldId
+        && created.displayName === "Smoke Catalog World"
+        && opened.id === worldId
+        && Number(opened.lastPlayedUnixMillis) >= Number(created.lastPlayedUnixMillis)
+        && deleted.id === worldId
+        && duplicateRejected
+        && activeDeleteRejected
+        && openDeletedRejected
+        && recordsBeforeDelete.chunks === 1
+        && recordsBeforeDelete.entityChunks === 1
+        && recordsAfterDelete.total === 0
+        && afterCreate.some((world) => world.id === worldId)
+        && afterDelete.every((world) => world.id !== worldId)
+      ),
+      worldId,
+      beforeCount: before.length,
+      afterCreateCount: afterCreate.length,
+      afterDeleteCount: afterDelete.length,
+      created,
+      opened,
+      deleted,
+      recordsBeforeDelete,
+      recordsAfterDelete,
+      duplicateRejected,
+      activeDeleteRejected,
+      openDeletedRejected,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * @param {() => Promise<unknown>} operation
+ * @param {string} message
+ * @returns {Promise<boolean>}
+ */
+async function rejectsWithMessage(operation, message) {
+  try {
+    await operation();
+    return false;
+  } catch (error) {
+    return stringifyError(error).includes(message);
+  }
+}
+
+/**
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @param {string} worldId
+ * @param {number} x
+ * @param {number} z
+ */
+async function putIndexedDbSmokeRecord(db, storeName, worldId, x, z) {
+  const transaction = db.transaction(storeName, "readwrite");
+  transaction.objectStore(storeName).put({
+    worldId,
+    x,
+    z,
+    record: new Uint8Array([1, 2, 3, 4]),
+  });
+  await transactionDone(transaction);
+}
+
+/** @param {string} worldId */
 async function countIndexedDbWorldRecords(worldId) {
   const db = await openSmokeWorldDb();
   try {
@@ -564,6 +676,10 @@ async function countIndexedDbWorldRecords(worldId) {
   }
 }
 
+/**
+ * @param {string} worldId
+ * @param {number} minChunks
+ */
 async function waitForIndexedDbWorldRecords(worldId, minChunks) {
   const deadline = performance.now() + 10_000;
   let last = { chunks: 0, entityChunks: 0, total: 0 };
@@ -580,14 +696,17 @@ async function waitForIndexedDbWorldRecords(worldId, minChunks) {
   );
 }
 
+/** @returns {Promise<IDBDatabase>} */
 function openSmokeWorldDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(WORLD_DB_NAME);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("failed to open smoke IndexedDB"));
-  });
+  return openWorldDb();
 }
 
+/**
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @param {string} worldId
+ * @returns {Promise<number>}
+ */
 function countIndexedDbStoreForWorld(db, storeName, worldId) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, "readonly");
@@ -600,6 +719,18 @@ function countIndexedDbStoreForWorld(db, storeName, worldId) {
     transaction.onerror = () => reject(
       transaction.error ?? new Error(`failed to count ${storeName}`),
     );
+  });
+}
+
+/**
+ * @param {IDBTransaction} transaction
+ * @returns {Promise<void>}
+ */
+function transactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve(undefined);
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
   });
 }
 

@@ -3,8 +3,9 @@
 Status: active; Slices 1-5 shared catalog contract, catalog-aware session
 request vocabulary, native filesystem/SQLite catalog backend, shared UI v2
 world catalog screens, desktop flat lifecycle wiring, and desktop
-persistence/delete smoke coverage landed. Owns follow-up persistence lifecycle
-work from closed
+persistence/delete smoke coverage landed. Slice 6 browser IndexedDB catalog
+store/smoke first pass landed. Owns follow-up persistence lifecycle work from
+closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -515,6 +516,8 @@ FOUND`) with `Create` enabled and `Open`/`Delete` disabled.
 
 ### Slice 6: Web IndexedDB Catalog
 
+Status: first catalog-store/smoke pass landed 2026-07-04.
+
 Add browser catalog support behind the same shared model:
 
 - `worlds` object store
@@ -529,6 +532,33 @@ Validation:
 - deleted world no longer appears and has no chunk/entity records
 - `pnpm native:web:build`
 - `pnpm native:web:smoke`
+
+Recorded Slice 6 first-pass result:
+
+- Added a browser `worlds` IndexedDB object store alongside the existing
+  chunk/entity stores and bumped the web world database schema to version 2.
+- Centralized browser world-store schema setup and per-world chunk/entity
+  cleanup in `mclone-web-world-catalog.ts` so the integrated-server worker and
+  smoke page share the same store names, version, and record cleanup behavior.
+- Added dependency-free browser catalog CRUD helpers that mirror the shared
+  `LocalWorldSummary` shape, display-name slug/id rules, persistent
+  IndexedDB backend label, duplicate id rejection, active-world delete
+  rejection, last-played update on open, summary sorting, and delete cleanup.
+- Extended the browser smoke page with an IndexedDB catalog probe covering
+  create/list/open/delete, duplicate-id rejection, active-world delete
+  rejection, and deletion clearing both chunk and entity stores for the world.
+- Left menu-driven web Create/Open/Delete wiring pending; the Rust web UI still
+  renders an empty/default catalog state until the next Slice 6 chunk feeds
+  these browser summaries into `GameUiRenderState` and routes catalog actions.
+
+Validation after Slice 6 first pass on 2026-07-04:
+
+```bash
+pnpm exec tsc --noEmit -p native/apps/mclone-web-client/tsconfig.json
+pnpm native:web:typecheck
+pnpm native:web:build
+pnpm native:web:smoke
+```
 
 ### Slice 7: Android And XR Adoption
 
