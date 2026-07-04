@@ -1,6 +1,6 @@
 # 138: Flat Render Camera Pose
 
-Status: complete; flat pose route, sky route, and cleanup landed 2026-07-04
+Status: closed; flat pose route, sky route, cleanup, and pitch policy landed 2026-07-04
 Workstream: native Rust, shared render/session boundary, desktop validation first
 
 ## Purpose
@@ -263,6 +263,15 @@ Validation:
 - `cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-render-session -p mclone-native-client`
 - `pnpm native:web:build`
 - `pnpm native:desktop-offscreen:smoke`
+
+## Closeout Decision
+
+Normal player mouse-look remains clamped to Java's `[-90, 90]` pitch behavior.
+The render-pose work fixed the vertical camera singularity at the renderer
+boundary, so there is no need to permit normal gameplay pitch past vertical for
+robustness. Any `91` or `92` degree behavior should be introduced later as an
+explicit debug/free-camera mode with its own input semantics, yaw/roll behavior,
+movement rules, and protocol isolation.
 
 ## Acceptance Criteria
 
