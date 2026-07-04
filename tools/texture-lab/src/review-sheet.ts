@@ -271,7 +271,7 @@ function makeCrossBlockReviewSheet(
   const tiling = effectiveTiling(textureForBlockFace(block, texturesByName, "cross"), texture);
 
   drawRect(sheet, 16, 16, 300, 300, panel);
-  drawCrossPlant(sheet, texture, 94, 62, 68, 34, 116);
+  drawCrossPlant(sheet, texture, 94, 62, 68, 34, 116, { debug: true });
 
   drawRect(sheet, 340, 16, 328, 328, panel);
   drawCheckerboard(sheet, 384, 60, texture.width * 6, texture.height * 6, 12);
@@ -288,7 +288,7 @@ function makeCrossBlockReviewSheet(
     drawTintSwatch(sheet, 900, 412 + index * 34, tint);
   }
 
-  drawPanelLabel(sheet, "CROSS PLANT", 16, 16, 300);
+  drawPanelLabel(sheet, "CROSS DEBUG", 16, 16, 300);
   drawPanelLabel(sheet, texturePanelLabel("CUTOUT", tiling), 340, 16, 328);
   drawPanelLabel(sheet, "PATCH PREVIEW", 692, 16, 328);
   drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
@@ -845,11 +845,15 @@ function drawCrossPlant(
   halfWidth: number,
   halfDepth: number,
   height: number,
+  options: { debug?: boolean } = {},
 ): void {
   const originX = targetX + halfWidth;
   const originY = targetY + height;
   drawCubeFace(target, texture, 0.88, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 0.5));
   drawCubeFace(target, texture, 0.98, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 1 - v, u));
+  if (options.debug) {
+    drawCrossPlaneDebug(target, originX, originY, halfWidth, halfDepth, height);
+  }
   drawLine(
     target,
     projectIso(originX, originY, halfWidth, halfDepth, height, 0, 0, 0.5),
@@ -861,6 +865,41 @@ function drawCrossPlant(
     projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 0),
     projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 1),
     [24, 22, 20, 180],
+  );
+}
+
+function drawCrossPlaneDebug(
+  target: RgbaImage,
+  originX: number,
+  originY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const xPlane = [
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0, 0, 0.5),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 0, 0.5),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 1, 0.5),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0, 1, 0.5),
+  ];
+  const zPlane = [
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 1, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 1, 0),
+  ];
+  const xColor: Rgba = [88, 168, 255, 94];
+  const zColor: Rgba = [255, 112, 88, 94];
+  const axisColor: Rgba = [255, 229, 94, 255];
+  fillPolygon(target, xPlane, xColor);
+  fillPolygon(target, zPlane, zColor);
+  drawPolygonOutline(target, xPlane, [88, 168, 255, 255]);
+  drawPolygonOutline(target, zPlane, [255, 112, 88, 255]);
+  drawLine(
+    target,
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 0.5),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 1, 0.5),
+    axisColor,
   );
 }
 
@@ -1201,6 +1240,12 @@ function drawCubeOutline(target: RgbaImage, points: Point[]): void {
   drawLine(target, topRight!, bottomRight!, outline);
   drawLine(target, bottomLeft!, bottomBack!, outline);
   drawLine(target, bottomBack!, bottomRight!, outline);
+}
+
+function drawPolygonOutline(target: RgbaImage, points: Point[], color: Rgba): void {
+  for (let index = 0; index < points.length; index += 1) {
+    drawLine(target, points[index]!, points[(index + 1) % points.length]!, color);
+  }
 }
 
 interface Point {
