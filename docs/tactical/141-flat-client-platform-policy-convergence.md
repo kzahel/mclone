@@ -9,7 +9,11 @@ has an IndexedDB catalog store smoke but still renders a default catalog state
 and leaves the shared catalog UI actions inert. Slice 1 landed on 2026-07-04:
 `mclone-app-runtime` now has a platform-neutral flat-client catalog controller
 with shared UI-state conversion, request effects, async-style completion
-handling, active-delete guarding, and focused conformance tests.
+handling, active-delete guarding, and focused conformance tests. Slice 2 landed
+on 2026-07-04: desktop `FlatClientDriver` now delegates catalog UI state and
+create/open/delete action policy to the shared controller while retaining the
+native catalog backend, world-root selection, `SceneOptions`, and startup
+payloads as desktop adapter responsibilities.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -364,6 +368,8 @@ git diff --check
 
 ### Slice 2: Desktop Delegates Catalog Policy
 
+Status: landed 2026-07-04.
+
 Refactor desktop `FlatClientDriver` so it becomes a native adapter around the
 shared catalog controller:
 
@@ -374,12 +380,32 @@ shared catalog controller:
   existing session starts;
 - keep the three desktop catalog smokes from tactical 136 green.
 
-Validation:
+Recorded Slice 2 result:
+
+- Replaced desktop-local catalog row cache and `WorldCatalogUiState` ownership
+  with `FlatClientCatalogController`.
+- Removed duplicate desktop summary-to-UI conversion, stable row-id allocation,
+  active-row mapping, unsupported/persistent status messages, create/open/delete
+  validation, and delete-active status policy.
+- Added a desktop adapter layer that executes emitted `WorldCatalogRequest`
+  values through `NativeWorldCatalog`, feeds `WorldCatalogResponse` /
+  `WorldCatalogError` back into the controller, and queues existing
+  catalog-backed local session starts from controller session-start effects.
+- Kept native-only responsibilities in `mclone-native-client`: `world_root`,
+  `NativeWorldCatalog`, `SceneOptions`, world-dir paths, mouse lock, and local
+  startup payload construction.
+- Updated desktop driver tests to observe catalog state through
+  `GameUiRenderState` and backend summaries instead of private desktop cache
+  fields.
+
+Validation after Slice 2:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo fmt --manifest-path native/Cargo.toml --all --check
 git diff --check
 ```
 

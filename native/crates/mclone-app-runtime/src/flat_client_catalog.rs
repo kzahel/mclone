@@ -39,8 +39,15 @@ impl FlatClientCatalogController {
     }
 
     pub fn ui_state(&self) -> WorldCatalogUiState {
+        self.ui_state_with_active_world(self.active_world.as_ref())
+    }
+
+    pub fn ui_state_with_active_world(
+        &self,
+        active_world: Option<&LocalWorldId>,
+    ) -> WorldCatalogUiState {
         let mut state = self.ui;
-        state.active = self.active_local_world_ui_id();
+        state.active = self.active_local_world_ui_id_for_world(active_world);
         state.loading = !self.pending.is_empty();
         state
     }
@@ -315,7 +322,13 @@ impl FlatClientCatalogController {
             state.create_display_name = create_display_name;
         }
         state.selected = previous_selected;
-        state.active = self.active_local_world_ui_id_for_entries(&cached_entries);
+        state.active = self.active_world.as_ref().and_then(|active| {
+            cached_entries
+                .iter()
+                .find(|entry| &entry.summary.id == active)
+                .map(|entry| entry.ui_id)
+                .or_else(|| Some(world_catalog_ui_id_for_local_world(active)))
+        });
         state.status = if status.visible {
             status
         } else if total_world_count > WORLD_CATALOG_UI_ROW_CAPACITY {
@@ -380,15 +393,15 @@ impl FlatClientCatalogController {
     }
 
     fn active_local_world_ui_id(&self) -> Option<WorldCatalogUiWorldId> {
-        self.active_local_world_ui_id_for_entries(&self.entries)
+        self.active_local_world_ui_id_for_world(self.active_world.as_ref())
     }
 
-    fn active_local_world_ui_id_for_entries(
+    fn active_local_world_ui_id_for_world(
         &self,
-        entries: &[FlatClientCatalogEntry],
+        active_world: Option<&LocalWorldId>,
     ) -> Option<WorldCatalogUiWorldId> {
-        let active = self.active_world.as_ref()?;
-        entries
+        let active = active_world?;
+        self.entries
             .iter()
             .find(|entry| &entry.summary.id == active)
             .map(|entry| entry.ui_id)
