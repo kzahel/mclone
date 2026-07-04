@@ -1770,18 +1770,34 @@ Validation:
 - `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-render -- --nocapture`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-render-session -- --nocapture`
-- Quest churn validation built the Android XR release APK successfully, then
-  stopped at device discovery because no Quest headset was attached. Re-run the
-  same `2 / 16 / 64` controlled churn lane and write the summary to
-  `/tmp/mclone-quest-openxr-churn-upload-apply-attribution-summary.txt` before
-  choosing the next behavior change.
+- Quest `2 / 16 / 64` controlled chunk-view churn passed after the headset was
+  reattached. Artifacts:
+  `/tmp/mclone-quest-openxr-churn-upload-apply-attribution-summary.txt` and
+  `/tmp/mclone-quest-openxr-churn-upload-apply-attribution-logcat.txt`.
 
-Deferred note for closeout: once headset data exists, use the new subphase
-fields to choose a narrow upload-apply change. If buffer creation dominates,
-look at GPU buffer lifetime/staging and replacement-drop behavior. If removal or
-mesh insertion dominates, look at draw-resource data structure churn. If no
-single subphase dominates, move to per-eye encode/submit attribution before
-adding another upload pacing policy.
+Measured result from that Quest run:
+
+- frame p50/p95/p99/max was `13.942` / `17.885` / `21.314` / `30.350 ms`, with
+  app-work p95/max `15.703` / `27.225 ms`;
+- terrain runtime maxes were `runtime_upload_ms=15.484`,
+  `runtime_sync_ms=14.383`, `runtime_gpu_upload_ms=11.226`,
+  `runtime_upload_apply_ms=6.148`, and `runtime_ready_sections_ms=1.287`;
+- upload-apply subphase maxes were `dirty_mark_ms=0.049`,
+  `remove_ms=2.840`, `section_state_ms=0.451`, `vertex_bytes_ms=1.536`,
+  `vertex_buffer_ms=4.521`, `index_bytes_ms=0.493`,
+  `index_buffer_ms=4.505`, `mesh_insert_ms=0.186`, and
+  `mesh_upload_worst_ms=5.656`;
+- the worst sampled frame cross-check did not line up as a pure upload-apply
+  problem: rank 1 had `runtime_upload_ms=12.843`, `gpu_upload_ms=10.998`, and
+  only `upload_apply_ms=0.799`.
+
+Deferred note for closeout: the next implementation chunk should split the
+broader `runtime_gpu_upload_ms` / `runtime_sync_ms` path before changing upload
+pacing. If that split confirms buffer creation or resource submission as the
+source, pursue GPU buffer lifetime/staging and replacement-drop behavior. If GPU
+wait/sync dominates, move the next slice toward CPU/GPU overlap and scheduling.
+Keep draw-resource removal/map churn as a narrower follow-up for frames where
+`remove_ms` repeats as a standalone upload-apply tail.
 
 Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
 default policy. It was the best held-capacity result, but the controlled churn
