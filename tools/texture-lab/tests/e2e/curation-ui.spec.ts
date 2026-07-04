@@ -24,6 +24,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
 
   const grass = index.textures.find((texture: { name: string }) => texture.name === "grass_block_top");
   expect(grass?.images.currentExport.exists).toBe(true);
+  expect(grass?.images.minecraftReference.exists).toBe(true);
   const imageResponse = await request.get(`/api/image?path=${encodeURIComponent(grass.images.currentExport.path)}`);
   await expect(imageResponse).toBeOK();
   expect(imageResponse.headers()["content-type"]).toBe("image/png");
@@ -67,6 +68,30 @@ test("keeps the texture list in its own scroll pane", async ({ page }) => {
   expect(after.previewBottom).toBe(before.previewBottom);
 
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-scroll-pane.png", fullPage: true });
+});
+
+test("shows atlas and block bundle overview comparisons", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Atlas" }).click();
+  await expect(page.getByRole("heading", { name: "Texture Atlas" })).toBeVisible();
+  expect(await page.locator(".atlasCard").count()).toBeGreaterThan(20);
+
+  const stoneCard = page.getByRole("button", { name: "Stone atlas comparison", exact: true });
+  await expect(stoneCard).toBeVisible();
+  await expect(stoneCard).toContainText("Ours");
+  await expect(stoneCard).toContainText("Minecraft");
+  await expect(stoneCard.locator("img")).toHaveCount(2);
+  await stoneCard.click();
+  await expect(stoneCard).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-atlas.png", fullPage: true });
+
+  await page.getByRole("button", { name: "Blocks" }).click();
+  await expect(page.getByRole("heading", { name: "Block Bundles" })).toBeVisible();
+  expect(await page.locator(".blockBundleCard").count()).toBeGreaterThan(0);
+  await expect(page.getByRole("button", { name: "stone all uses Stone", exact: true })).toBeVisible();
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-blocks.png", fullPage: true });
 });
 
 test("supports texture filtering, candidate selection, inspector details, keyboard activation, and reindex preservation", async ({

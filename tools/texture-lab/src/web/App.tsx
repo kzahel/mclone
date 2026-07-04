@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../core/index-model";
+import { BlockBundleAtlas, PreviewModeTabs, TextureAtlas } from "./components/OverviewViews";
 import {
   activeTextureCandidates,
   filteredTextures,
@@ -10,6 +11,7 @@ import {
   selectIndex,
   selectLoadStatus,
   selectMaterialFilter,
+  selectPreviewMode,
   selectSearch,
   selectedCandidate as selectedCandidateSelector,
   selectedTexture,
@@ -33,6 +35,7 @@ export function App(): JSX.Element {
   const selectedTextureName = useTextureLabStore(selectSelectedTextureName);
   const selectedCandidateId = useTextureLabStore(selectSelectedCandidateId);
   const themeMode = useTextureLabStore(selectThemeMode);
+  const previewMode = useTextureLabStore(selectPreviewMode);
   const search = useTextureLabStore(selectSearch);
   const materialFilter = useTextureLabStore(selectMaterialFilter);
   const statusFilter = useTextureLabStore(selectStatusFilter);
@@ -42,6 +45,7 @@ export function App(): JSX.Element {
   const reindex = useTextureLabStore((state) => state.reindex);
   const selectTexture = useTextureLabStore((state) => state.selectTexture);
   const selectCandidate = useTextureLabStore((state) => state.selectCandidate);
+  const setPreviewMode = useTextureLabStore((state) => state.setPreviewMode);
   const syncSystemTheme = useTextureLabStore((state) => state.syncSystemTheme);
   const toggleTheme = useTextureLabStore((state) => state.toggleTheme);
   const setSearch = useTextureLabStore((state) => state.setSearch);
@@ -148,13 +152,34 @@ export function App(): JSX.Element {
         </aside>
 
         <section className="previewPane">
-          {activeTexture ? (
-            <TexturePreview
-              texture={activeTexture}
-              candidates={activeCandidates}
-              selectedCandidateId={selectedCandidateId}
-              onSelectCandidate={selectCandidate}
-            />
+          {index ? (
+            <>
+              <PreviewModeTabs mode={previewMode} onChange={setPreviewMode} />
+              {previewMode === "atlas" ? (
+                <TextureAtlas
+                  textures={textures}
+                  candidates={index.candidates}
+                  selectedTextureName={selectedTextureName}
+                  onSelectTexture={selectTexture}
+                />
+              ) : previewMode === "blocks" ? (
+                <BlockBundleAtlas
+                  blocks={index.blocks}
+                  textures={textures}
+                  selectedTextureName={selectedTextureName}
+                  onSelectTexture={selectTexture}
+                />
+              ) : activeTexture ? (
+                <TexturePreview
+                  texture={activeTexture}
+                  candidates={activeCandidates}
+                  selectedCandidateId={selectedCandidateId}
+                  onSelectCandidate={selectCandidate}
+                />
+              ) : (
+                <EmptyState loadStatus={loadStatus} />
+              )}
+            </>
           ) : (
             <EmptyState loadStatus={loadStatus} />
           )}

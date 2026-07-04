@@ -4,7 +4,7 @@ import { discoverTextureCandidates } from "./candidate-index";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { textureLabOutputRoot } from "../output-root";
-import { runtimeCompatTexturePath } from "../reference";
+import { findReferenceTextureFile, runtimeCompatTexturePath } from "../reference";
 import {
   TEXTURE_LAB_INDEX_SCHEMA_VERSION,
   type BlockFaceIndexEntry,
@@ -92,6 +92,7 @@ async function textureEntryFrom(
   const runtimeCompatPath = runtimeCompatTexturePath(texture.exportPath);
   const currentExportPath = path.join(outputRoot, "pack", texture.exportPath);
   const runtimeExportPath = runtimeCompatPath ? path.join(outputRoot, "runtime-pack", runtimeCompatPath) : null;
+  const referencePath = await findReferenceTextureFile(texture.exportPath);
   const sheetPath = path.join(outputRoot, `${name}-sheet.png`);
   const catalog = texture.catalog;
   const tags = catalog?.tags ?? [];
@@ -123,6 +124,7 @@ async function textureEntryFrom(
         runtimeExportPath,
         runtimeCompatPath ? "pnpm texture-lab:runtime-compat" : null,
       ),
+      minecraftReference: await imageRef("Minecraft reference", referencePath, "./scripts/extract-assets.sh"),
       sheet: await imageRef("Review sheet", sheetPath, "pnpm texture-lab:sheet"),
     },
   };

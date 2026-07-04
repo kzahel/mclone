@@ -64,6 +64,31 @@ export function referenceRoots(referenceRoot?: string): string[] {
   ];
 }
 
+export async function findReferenceTextureFile(
+  exportPath: string,
+  options: Pick<ReferenceOptions, "referenceRoot"> = {},
+): Promise<string | null> {
+  const counterpartPath = referenceTexturePath(exportPath);
+  if (!counterpartPath) {
+    return null;
+  }
+  for (const root of referenceRoots(options.referenceRoot)) {
+    const referencePath = path.join(root, counterpartPath);
+    try {
+      const stat = await fs.stat(referencePath);
+      if (stat.isFile()) {
+        return referencePath;
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        throw new Error(`Failed to inspect reference texture '${referencePath}': ${(error as Error).message}`);
+      }
+    }
+  }
+  return null;
+}
+
 export async function loadReferenceTexture(
   exportPath: string,
   options: ReferenceOptions = {},

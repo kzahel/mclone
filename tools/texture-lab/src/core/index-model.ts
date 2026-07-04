@@ -61,6 +61,7 @@ export interface TextureIndexEntry {
   images: {
     currentExport: TextureImageRef;
     runtimeExport: TextureImageRef;
+    minecraftReference: TextureImageRef;
     sheet: TextureImageRef;
   };
 }

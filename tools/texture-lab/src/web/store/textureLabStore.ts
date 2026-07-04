@@ -3,6 +3,7 @@ import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry, Texture
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 export type ThemeMode = "light" | "dark";
+export type PreviewMode = "detail" | "atlas" | "blocks";
 type ThemeSource = "system" | "manual";
 
 export interface TextureLabState {
@@ -11,6 +12,7 @@ export interface TextureLabState {
   selectedCandidateId: string | null;
   themeMode: ThemeMode;
   themeSource: ThemeSource;
+  previewMode: PreviewMode;
   search: string;
   materialFilter: string;
   statusFilter: string;
@@ -20,6 +22,7 @@ export interface TextureLabState {
   reindex: () => Promise<void>;
   selectTexture: (name: string) => void;
   selectCandidate: (id: string) => void;
+  setPreviewMode: (mode: PreviewMode) => void;
   syncSystemTheme: (themeMode: ThemeMode) => void;
   toggleTheme: () => void;
   setSearch: (search: string) => void;
@@ -33,6 +36,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   selectedCandidateId: null,
   themeMode: systemThemeMode(),
   themeSource: "system",
+  previewMode: "detail",
   search: "",
   materialFilter: "all",
   statusFilter: "all",
@@ -86,6 +90,10 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
 
   selectCandidate(id) {
     set({ selectedCandidateId: id });
+  },
+
+  setPreviewMode(previewMode) {
+    set({ previewMode });
   },
 
   syncSystemTheme(themeMode) {

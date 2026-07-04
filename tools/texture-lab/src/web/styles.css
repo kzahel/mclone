@@ -367,6 +367,268 @@ h3 {
   background: var(--accent-soft);
 }
 
+.viewTabs {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.viewTab {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-strong);
+}
+
+.viewTab:hover,
+.viewTab.selected {
+  background: var(--row-hover);
+  color: var(--text);
+}
+
+.viewTab.selected {
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.overviewStack {
+  display: grid;
+  gap: 18px;
+}
+
+.overviewHeader {
+  margin-bottom: 0;
+}
+
+.atlasGroup {
+  display: grid;
+  gap: 10px;
+}
+
+.atlasGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
+  gap: 12px;
+}
+
+.atlasCard {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: inherit;
+  text-align: left;
+}
+
+.atlasCard:hover,
+.atlasCard:focus-visible,
+.blockFaceTile:hover,
+.blockFaceTile:focus-visible {
+  border-color: var(--accent-border);
+  outline: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.blockFaceTile:hover,
+.blockFaceTile:focus-visible {
+  background: var(--row-hover);
+}
+
+.atlasCard.selected,
+.blockFaceTile.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.atlasCardHeader,
+.blockBundleHeader {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.atlasCardHeader strong,
+.blockBundleHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atlasCardHeader span,
+.blockBundleHeader span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.atlasCardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.splitCompare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.splitCompare.compact {
+  gap: 6px;
+  padding: 0;
+}
+
+.comparePanel {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.compareLabel {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compareFrame,
+.blockSheetPreview {
+  display: grid;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  place-items: center;
+  padding: 8px;
+  background:
+    linear-gradient(45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-color) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-color) 75%);
+  background-color: var(--checker-bg);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.splitCompare.compact .compareFrame {
+  padding: 5px;
+}
+
+.compareFrame img,
+.blockSheetPreview img {
+  width: 100%;
+  max-width: 112px;
+  height: 100%;
+  max-height: 112px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  border: 1px solid rgb(0 0 0 / 10%);
+  background: var(--image-bg);
+}
+
+.splitCompare.compact .compareFrame img {
+  max-width: 58px;
+  max-height: 58px;
+}
+
+.compareMissing,
+.blockSheetPreview span {
+  color: var(--missing-text);
+  font-size: 11px;
+  text-align: center;
+}
+
+.blockBundleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+}
+
+.blockBundleCard {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.blockBundleBody {
+  display: grid;
+  grid-template-columns: minmax(112px, 148px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+.blockSheetPreview {
+  align-self: start;
+}
+
+.blockFaceGrid {
+  display: grid;
+}
+
+.blockFaceTile {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.blockFaceTile:first-child {
+  border-top: 0;
+}
+
+.blockFaceTitle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.blockFaceTitle strong {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.blockFaceTitle span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .imageGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
@@ -705,6 +967,11 @@ h3 {
   }
 
   .imageGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .blockBundleGrid,
+  .blockBundleBody {
     grid-template-columns: 1fr;
   }
 }
