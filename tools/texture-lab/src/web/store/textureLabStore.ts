@@ -2,11 +2,15 @@ import { create } from "zustand";
 import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
+export type ThemeMode = "light" | "dark";
+type ThemeSource = "system" | "manual";
 
 export interface TextureLabState {
   index: TextureLabIndex | null;
   selectedTextureName: string | null;
   selectedCandidateId: string | null;
+  themeMode: ThemeMode;
+  themeSource: ThemeSource;
   search: string;
   materialFilter: string;
   statusFilter: string;
@@ -16,6 +20,8 @@ export interface TextureLabState {
   reindex: () => Promise<void>;
   selectTexture: (name: string) => void;
   selectCandidate: (id: string) => void;
+  syncSystemTheme: (themeMode: ThemeMode) => void;
+  toggleTheme: () => void;
   setSearch: (search: string) => void;
   setMaterialFilter: (material: string) => void;
   setStatusFilter: (status: string) => void;
@@ -25,6 +31,8 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   index: null,
   selectedTextureName: null,
   selectedCandidateId: null,
+  themeMode: systemThemeMode(),
+  themeSource: "system",
   search: "",
   materialFilter: "all",
   statusFilter: "all",
@@ -80,6 +88,19 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
     set({ selectedCandidateId: id });
   },
 
+  syncSystemTheme(themeMode) {
+    if (get().themeSource === "system") {
+      set({ themeMode });
+    }
+  },
+
+  toggleTheme() {
+    set((state) => ({
+      themeMode: state.themeMode === "dark" ? "light" : "dark",
+      themeSource: "manual",
+    }));
+  },
+
   setSearch(search) {
     set({ search });
   },
@@ -128,6 +149,13 @@ function selectCandidateAfterLoad(
 
 function firstCandidateForTexture(index: TextureLabIndex, textureName: string): TextureCandidateEntry | null {
   return index.candidates.find((candidate) => candidate.textureName === textureName) ?? null;
+}
+
+function systemThemeMode(): ThemeMode {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return "light";
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function imageUrl(texture: TextureIndexEntry, imageKind: keyof TextureIndexEntry["images"]): string | null {

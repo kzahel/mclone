@@ -5,7 +5,8 @@ safe image serving, and read-only browser UI landed 2026-07-04. Slice A0.5
 repo-local generated output root landed 2026-07-04. Slice A1 generated
 candidate discovery landed 2026-07-04. Slice A2 read-only candidate selection
 and detail inspection landed 2026-07-04. Slice A2.5 Playwright integration
-coverage landed 2026-07-04. Next priority is preview generation parity.
+coverage landed 2026-07-04. Slice A2.6 system-default light/dark theme toggle
+landed 2026-07-04. Next priority is preview generation parity.
 
 ## Purpose
 
@@ -313,8 +314,9 @@ images; avoid large marketing-style panels and decorative layouts.
 ## Browser Validation Policy
 
 Texture-lab browser UI changes must include Playwright coverage once they
-affect routing, indexing, image serving, selection state, candidate detail,
-review state, preview generation, pack profiles, or generation launch flows.
+affect routing, indexing, image serving, theme or UI chrome, selection state,
+candidate detail, review state, preview generation, pack profiles, or
+generation launch flows.
 
 The committed harness should stay deterministic:
 
@@ -551,6 +553,34 @@ Additional validation:
 - Playwright ran 3 Chrome tests with 3 passing
 - the curation-flow Playwright screenshot was written to
   `/tmp/mclone-texture-lab-playwright-a2.png`
+
+### Slice A2.6 - System-Default Theme Toggle
+
+Status: landed 2026-07-04.
+
+Add a light/dark mode toggle that defaults from the user's system color scheme.
+
+Deliverables:
+
+- initialize the theme from `prefers-color-scheme`
+- keep following system theme changes until the user manually toggles
+- add a top-bar light/dark toggle button with accessible labels
+- apply light and dark palettes through `data-theme` and CSS variables
+- cover system-default dark mode and manual toggle behavior in Playwright
+
+Validation:
+
+```sh
+pnpm --dir tools/texture-lab typecheck
+pnpm --dir tools/texture-lab web:build
+pnpm --dir tools/texture-lab web:test
+```
+
+Additional validation:
+
+- Playwright ran 4 Chrome tests with 4 passing
+- the dark-mode Playwright screenshot was written to
+  `/tmp/mclone-texture-lab-playwright-dark-mode.png`
 
 ### Slice B - Preview Generation Parity
 

@@ -1,6 +1,36 @@
 :root {
-  color: #222620;
-  background: #ecebe6;
+  --text: #222620;
+  --page: #ecebe6;
+  --header: #faf9f4;
+  --panel: #f6f4ed;
+  --card: #fbfaf7;
+  --image-bg: #ffffff;
+  --border: #c9c4b7;
+  --border-strong: #cbc8bf;
+  --border-soft: #d8d4ca;
+  --muted: #697165;
+  --muted-strong: #586050;
+  --path: #5f665b;
+  --row-hover: #e2ead9;
+  --accent: #4d7d4c;
+  --accent-soft: #e5f0da;
+  --accent-border: #98b27d;
+  --chip-bg: #f7faf4;
+  --chip-border: #bfc7b9;
+  --chip-text: #384336;
+  --toolbar-bg: #f7e7a9;
+  --toolbar-border: #9d8e65;
+  --toolbar-text: #2f2a18;
+  --warning-bg: #f9edc8;
+  --warning-text: #574318;
+  --error-bg: #f1d7d0;
+  --error-text: #611f1f;
+  --checker-color: #ddd8cc;
+  --checker-bg: #f4f1e8;
+  --missing-text: #655b4a;
+  --reason-text: #5e5547;
+  color: var(--text);
+  background: var(--page);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -15,7 +45,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #ecebe6;
+  background: var(--page);
 }
 
 button,
@@ -36,6 +66,43 @@ code {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto auto 1fr;
+  background: var(--page);
+  color: var(--text);
+  color-scheme: light;
+}
+
+.appShell[data-theme="dark"] {
+  --text: #ebe8de;
+  --page: #171915;
+  --header: #24261f;
+  --panel: #20231e;
+  --card: #252820;
+  --image-bg: #151713;
+  --border: #565b4e;
+  --border-strong: #454b40;
+  --border-soft: #42483d;
+  --muted: #aeb7a6;
+  --muted-strong: #ccd5c2;
+  --path: #b9c2b1;
+  --row-hover: #2b3928;
+  --accent: #8abf7c;
+  --accent-soft: #2e442c;
+  --accent-border: #719667;
+  --chip-bg: #242d24;
+  --chip-border: #526a4c;
+  --chip-text: #dce8d1;
+  --toolbar-bg: #4d4426;
+  --toolbar-border: #a9965e;
+  --toolbar-text: #fff1b8;
+  --warning-bg: #3d331b;
+  --warning-text: #f2d98b;
+  --error-bg: #4b2724;
+  --error-text: #ffd7ce;
+  --checker-color: #34382f;
+  --checker-bg: #22251f;
+  --missing-text: #d0c3ab;
+  --reason-text: #d7cbb8;
+  color-scheme: dark;
 }
 
 .topBar {
@@ -45,12 +112,12 @@ code {
   grid-template-columns: minmax(180px, 1fr) auto auto;
   gap: 16px;
   align-items: center;
-  border-bottom: 1px solid #cdc9bd;
-  background: #faf9f4;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--header);
 }
 
 .eyebrow {
-  color: #66705d;
+  color: var(--muted);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0;
@@ -87,8 +154,8 @@ h3 {
 .summaryItem {
   min-width: 68px;
   padding: 7px 9px;
-  border: 1px solid #d4d1c8;
-  background: #ffffff;
+  border: 1px solid var(--border-soft);
+  background: var(--card);
 }
 
 .summaryItem strong,
@@ -101,17 +168,22 @@ h3 {
 }
 
 .summaryItem span {
-  color: #687064;
+  color: var(--muted);
   font-size: 11px;
+}
+
+.toolbarActions {
+  display: flex;
+  gap: 8px;
 }
 
 .toolbarButton {
   min-height: 36px;
   padding: 0 14px;
-  border: 1px solid #9d8e65;
+  border: 1px solid var(--toolbar-border);
   border-radius: 6px;
-  background: #f7e7a9;
-  color: #2f2a18;
+  background: var(--toolbar-bg);
+  color: var(--toolbar-text);
 }
 
 .toolbarButton:disabled {
@@ -124,18 +196,18 @@ h3 {
   display: flex;
   gap: 12px;
   padding: 8px 18px;
-  border-bottom: 1px solid #d1c6b8;
+  border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
 
 .errorBanner {
-  color: #611f1f;
-  background: #f1d7d0;
+  color: var(--error-text);
+  background: var(--error-bg);
 }
 
 .warningBanner {
-  color: #574318;
-  background: #f9edc8;
+  color: var(--warning-text);
+  background: var(--warning-bg);
 }
 
 .workbench {
@@ -148,35 +220,35 @@ h3 {
 .inspector {
   min-width: 0;
   overflow: auto;
-  background: #f6f4ed;
+  background: var(--panel);
 }
 
 .sidebar {
-  border-right: 1px solid #cbc8bf;
+  border-right: 1px solid var(--border-strong);
 }
 
 .inspector {
-  border-left: 1px solid #cbc8bf;
+  border-left: 1px solid var(--border-strong);
 }
 
 .previewPane {
   min-width: 0;
   overflow: auto;
   padding: 18px;
-  background: #ecebe6;
+  background: var(--page);
 }
 
 .sidebarControls {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border-bottom: 1px solid #d4d1c8;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .sidebarControls label {
   display: grid;
   gap: 4px;
-  color: #586050;
+  color: var(--muted-strong);
   font-size: 12px;
   font-weight: 700;
 }
@@ -185,11 +257,11 @@ h3 {
 .sidebarControls select {
   width: 100%;
   min-height: 32px;
-  border: 1px solid #c9c4b7;
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 5px 8px;
-  background: #ffffff;
-  color: #222620;
+  background: var(--card);
+  color: var(--text);
 }
 
 .textureList {
@@ -202,19 +274,19 @@ h3 {
   width: 100%;
   padding: 10px 14px;
   border: 0;
-  border-bottom: 1px solid #dedbd2;
+  border-bottom: 1px solid var(--border-soft);
   background: transparent;
-  color: #222620;
+  color: var(--text);
   text-align: left;
 }
 
 .textureRow:hover,
 .textureRow.selected {
-  background: #e2ead9;
+  background: var(--row-hover);
 }
 
 .textureRow.selected {
-  box-shadow: inset 3px 0 0 #4d7d4c;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .textureName {
@@ -226,7 +298,7 @@ h3 {
 
 .textureMeta {
   overflow: hidden;
-  color: #697165;
+  color: var(--muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -241,7 +313,7 @@ h3 {
 
 .sectionHeader p {
   margin-top: 3px;
-  color: #697165;
+  color: var(--muted);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -257,16 +329,16 @@ h3 {
 .chip {
   min-height: 24px;
   padding: 4px 8px;
-  border: 1px solid #bfc7b9;
+  border: 1px solid var(--chip-border);
   border-radius: 5px;
-  background: #f7faf4;
-  color: #384336;
+  background: var(--chip-bg);
+  color: var(--chip-text);
   font-size: 12px;
 }
 
 .tintChip {
-  border-color: #98b27d;
-  background: #e5f0da;
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
 }
 
 .imageGrid {
@@ -277,9 +349,9 @@ h3 {
 
 .imageCard {
   min-width: 0;
-  border: 1px solid #c9c4b7;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfaf7;
+  background: var(--card);
 }
 
 .imageCard.wide {
@@ -291,7 +363,7 @@ h3 {
   justify-content: space-between;
   gap: 8px;
   padding: 9px 10px;
-  border-bottom: 1px solid #d8d4ca;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .imageCardHeader strong {
@@ -299,7 +371,7 @@ h3 {
 }
 
 .imageCardHeader span {
-  color: #687064;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -310,11 +382,11 @@ h3 {
   place-items: center;
   padding: 14px;
   background:
-    linear-gradient(45deg, #ddd8cc 25%, transparent 25%),
-    linear-gradient(-45deg, #ddd8cc 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #ddd8cc 75%),
-    linear-gradient(-45deg, transparent 75%, #ddd8cc 75%);
-  background-color: #f4f1e8;
+    linear-gradient(45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-color) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-color) 75%);
+  background-color: var(--checker-bg);
   background-position:
     0 0,
     0 8px,
@@ -329,12 +401,12 @@ h3 {
   image-rendering: pixelated;
   object-fit: contain;
   border: 1px solid rgb(0 0 0 / 10%);
-  background: #ffffff;
+  background: var(--image-bg);
 }
 
 .missingImage {
   gap: 8px;
-  color: #655b4a;
+  color: var(--missing-text);
   text-align: center;
 }
 
@@ -346,14 +418,14 @@ h3 {
 .pathLine {
   max-width: 100%;
   overflow-wrap: anywhere;
-  color: #5f665b;
+  color: var(--path);
   font-size: 11px;
 }
 
 .pathLine {
   display: block;
   padding: 8px 10px;
-  border-top: 1px solid #d8d4ca;
+  border-top: 1px solid var(--border-soft);
 }
 
 .candidateSection {
@@ -374,7 +446,7 @@ h3 {
 
 .subsectionHeader p {
   margin-top: 3px;
-  color: #697165;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -387,9 +459,9 @@ h3 {
 .candidateCard {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid #c9c4b7;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfaf7;
+  background: var(--card);
   color: inherit;
   padding: 0;
   text-align: left;
@@ -397,14 +469,14 @@ h3 {
 
 .candidateCard:hover,
 .candidateCard:focus-visible {
-  border-color: #8fa57c;
+  border-color: var(--accent-border);
   outline: 0;
-  box-shadow: 0 0 0 2px rgb(77 125 76 / 16%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .candidateCard.selected {
-  border-color: #4d7d4c;
-  box-shadow: inset 0 0 0 2px #4d7d4c;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .candidateImageFrame {
@@ -413,11 +485,11 @@ h3 {
   place-items: center;
   padding: 12px;
   background:
-    linear-gradient(45deg, #ddd8cc 25%, transparent 25%),
-    linear-gradient(-45deg, #ddd8cc 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #ddd8cc 75%),
-    linear-gradient(-45deg, transparent 75%, #ddd8cc 75%);
-  background-color: #f4f1e8;
+    linear-gradient(45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-color) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-color) 75%);
+  background-color: var(--checker-bg);
   background-position:
     0 0,
     0 8px,
@@ -432,11 +504,11 @@ h3 {
   object-fit: contain;
   image-rendering: pixelated;
   border: 1px solid rgb(0 0 0 / 10%);
-  background: #ffffff;
+  background: var(--image-bg);
 }
 
 .candidateImageFrame span {
-  color: #665d4d;
+  color: var(--missing-text);
   font-size: 12px;
 }
 
@@ -444,7 +516,7 @@ h3 {
   display: grid;
   gap: 7px;
   padding: 10px;
-  border-top: 1px solid #d8d4ca;
+  border-top: 1px solid var(--border-soft);
 }
 
 .candidateTitleRow,
@@ -463,7 +535,7 @@ h3 {
 
 .candidateTitleRow code {
   overflow: hidden;
-  color: #222620;
+  color: var(--text);
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -472,17 +544,17 @@ h3 {
 .sourcePill {
   flex: 0 0 auto;
   padding: 2px 6px;
-  border: 1px solid #bfc7b9;
+  border: 1px solid var(--chip-border);
   border-radius: 5px;
-  background: #f7faf4;
-  color: #384336;
+  background: var(--chip-bg);
+  color: var(--chip-text);
   font-size: 11px;
 }
 
 .candidateMeta,
 .candidateFacts {
   flex-wrap: wrap;
-  color: #596154;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -494,7 +566,7 @@ h3 {
 .candidatePrompt {
   display: grid;
   gap: 2px;
-  color: #5d6658;
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -505,18 +577,18 @@ h3 {
 }
 
 .candidateReasons {
-  color: #5e5547;
+  color: var(--reason-text);
   font-size: 11px;
   line-height: 1.35;
 }
 
 .candidateEmpty {
   padding: 14px;
-  border: 1px dashed #c9c4b7;
+  border: 1px dashed var(--border);
   border-radius: 6px;
-  color: #5d6658;
+  color: var(--muted);
   font-size: 13px;
-  background: #fbfaf7;
+  background: var(--card);
 }
 
 .inspectorStack {
@@ -531,7 +603,7 @@ h3 {
 }
 
 .inspectorSection h3 {
-  color: #4f5d47;
+  color: var(--muted-strong);
 }
 
 .fieldRow {
@@ -543,12 +615,12 @@ h3 {
 }
 
 .fieldRow span {
-  color: #687064;
+  color: var(--muted);
 }
 
 .fieldRow code {
   overflow-wrap: anywhere;
-  color: #222620;
+  color: var(--text);
 }
 
 .usageList {
@@ -571,13 +643,13 @@ h3 {
 .reasonList {
   display: grid;
   gap: 5px;
-  color: #5e5547;
+  color: var(--reason-text);
   font-size: 12px;
 }
 
 .usageList span,
 .panelNote {
-  color: #5d6658;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -586,7 +658,7 @@ h3 {
   display: grid;
   place-content: center;
   gap: 8px;
-  color: #596154;
+  color: var(--muted);
   text-align: center;
 }
 

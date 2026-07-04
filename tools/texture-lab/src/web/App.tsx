@@ -16,8 +16,10 @@ import {
   selectSelectedCandidateId,
   selectSelectedTextureName,
   selectStatusFilter,
+  selectThemeMode,
   statusOptions,
 } from "./store/selectors";
+import type { ThemeMode } from "./store/textureLabStore";
 import { imageRefUrl, imageUrl, useTextureLabStore } from "./store/textureLabStore";
 
 export function App(): JSX.Element {
@@ -30,6 +32,7 @@ export function App(): JSX.Element {
   const selectedCandidate = useTextureLabStore(selectedCandidateSelector);
   const selectedTextureName = useTextureLabStore(selectSelectedTextureName);
   const selectedCandidateId = useTextureLabStore(selectSelectedCandidateId);
+  const themeMode = useTextureLabStore(selectThemeMode);
   const search = useTextureLabStore(selectSearch);
   const materialFilter = useTextureLabStore(selectMaterialFilter);
   const statusFilter = useTextureLabStore(selectStatusFilter);
@@ -39,6 +42,8 @@ export function App(): JSX.Element {
   const reindex = useTextureLabStore((state) => state.reindex);
   const selectTexture = useTextureLabStore((state) => state.selectTexture);
   const selectCandidate = useTextureLabStore((state) => state.selectCandidate);
+  const syncSystemTheme = useTextureLabStore((state) => state.syncSystemTheme);
+  const toggleTheme = useTextureLabStore((state) => state.toggleTheme);
   const setSearch = useTextureLabStore((state) => state.setSearch);
   const setMaterialFilter = useTextureLabStore((state) => state.setMaterialFilter);
   const setStatusFilter = useTextureLabStore((state) => state.setStatusFilter);
@@ -47,8 +52,18 @@ export function App(): JSX.Element {
     void loadIndex();
   }, [loadIndex]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystemThemeChange = (event: MediaQueryListEvent): void => {
+      syncSystemTheme(themeModeFromSystem(event.matches));
+    };
+    syncSystemTheme(themeModeFromSystem(mediaQuery.matches));
+    mediaQuery.addEventListener("change", onSystemThemeChange);
+    return () => mediaQuery.removeEventListener("change", onSystemThemeChange);
+  }, [syncSystemTheme]);
+
   return (
-    <div className="appShell">
+    <div className="appShell" data-theme={themeMode}>
       <header className="topBar">
         <div>
           <div className="eyebrow">Texture Lab</div>
@@ -61,9 +76,19 @@ export function App(): JSX.Element {
           <SummaryItem label="runtime" value={index?.summary.runtimeExportsPresent ?? 0} />
           <SummaryItem label="candidates" value={index?.summary.associatedCandidateCount ?? 0} />
         </div>
-        <button className="toolbarButton" type="button" onClick={() => void reindex()} disabled={loadStatus === "loading"}>
-          {loadStatus === "loading" ? "Indexing" : "Reindex"}
-        </button>
+        <div className="toolbarActions">
+          <button
+            className="toolbarButton"
+            type="button"
+            aria-label={`Switch to ${oppositeThemeMode(themeMode)} mode`}
+            onClick={toggleTheme}
+          >
+            {themeMode === "dark" ? "Light" : "Dark"}
+          </button>
+          <button className="toolbarButton" type="button" onClick={() => void reindex()} disabled={loadStatus === "loading"}>
+            {loadStatus === "loading" ? "Indexing" : "Reindex"}
+          </button>
+        </div>
       </header>
 
       {error ? <div className="errorBanner">{error}</div> : null}
@@ -145,6 +170,14 @@ export function App(): JSX.Element {
       </main>
     </div>
   );
+}
+
+function themeModeFromSystem(prefersDark: boolean): ThemeMode {
+  return prefersDark ? "dark" : "light";
+}
+
+function oppositeThemeMode(themeMode: ThemeMode): ThemeMode {
+  return themeMode === "dark" ? "light" : "dark";
 }
 
 function SummaryItem({ label, value }: { label: string; value: number }): JSX.Element {

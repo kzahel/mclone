@@ -198,9 +198,10 @@ The test harness builds a deterministic fixture under the gitignored
 `generated-assets/texture-lab-playwright/` root, starts the local texture-lab
 server, verifies authored texture indexing, generated candidate discovery,
 allowlisted image serving, candidate selection, inspector details, keyboard
-activation, reindex preservation, and empty-candidate behavior. The validation
-screenshot from the curation flow is written to
-`/tmp/mclone-texture-lab-playwright-a2.png`.
+activation, reindex preservation, empty-candidate behavior, system-default dark
+mode, and manual light/dark toggling. Validation screenshots are written to
+`/tmp/mclone-texture-lab-playwright-a2.png` and
+`/tmp/mclone-texture-lab-playwright-dark-mode.png`.
 
 ## Source Format
 

@@ -29,6 +29,24 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(imageResponse.headers()["content-type"]).toBe("image/png");
 });
 
+test("defaults to the system theme and toggles light or dark mode", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+
+  const shell = page.locator(".appShell");
+  await expect(shell).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByRole("button", { name: "Switch to light mode" })).toHaveText("Light");
+  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-dark-mode.png", fullPage: true });
+
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  await expect(shell).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "Switch to dark mode" })).toHaveText("Dark");
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(shell).toHaveAttribute("data-theme", "light");
+});
+
 test("supports texture filtering, candidate selection, inspector details, keyboard activation, and reindex preservation", async ({
   page,
 }) => {
