@@ -198,10 +198,14 @@ pnpm --dir tools/texture-lab project-diffusion -- \
   --out /tmp/mclone-texture-lab/diffusion-projection/grass-top-fine-m1-64
 ```
 
-Current read: `G5101S50`, `G5101S62`, and `G5203S40` are the most useful
-directions, but no grass candidate has been frozen into source yet. The main
-failure mode is raw diffusion inventing cracks, cell boundaries, or oversized
-leaf/blade shapes that survive projection too visibly.
+Current read: `G5101S74` is the active grass top trial. The first 5-tone
+projection made grass candidates read too gray and constrained; a 20-tone
+tint-neutral ramp preserved fine tuft coverage better after the default grass
+tint was applied. `G5101S74` was archived at
+`/tmp/mclone-texture-lab/diffusion-archive/grass-top-g5101s74-active-20-2026-07-04/`
+and frozen into `grass_block_top` as a 64px source mask. The remaining failure
+mode is repetition/directional texture at tile scale, which should be judged in
+block/game context before another prompt sweep.
 
 ## Project Candidates
 

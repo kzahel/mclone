@@ -385,12 +385,26 @@ Local validation on macOS/M4/MPS:
     `/tmp/mclone-texture-lab/diffusion-projection/grass-top-m1-64/projection-review-all-64.png`
     and
     `/tmp/mclone-texture-lab/diffusion-projection/grass-top-fine-m1-64/projection-review-all-64.png`.
-  - Visual read: `G5101S50`, `G5101S62`, and `G5203S40` are useful directions,
-    but no grass top candidate should be frozen yet. The first-pass failure
-    mode is SD inventing cracks, cell boundaries, or oversized blades/leaves
-    that remain legible after projection. Next grass pass should either soften
-    and de-contrast the 16x16 structure input or use a more constrained fine
-    turf prompt/model before another freeze review.
+  - Visual read: `G5101S50`, `G5101S62`, and `G5203S40` were useful directions,
+    but first-pass 5-tone projection flattened too much tuft detail and made
+    the candidates read gray until tint was applied.
+  - Follow-up palette experiments projected selected candidates into 11-tone
+    and 20-tone neutral grass ramps, then reviewed them with the default grass
+    tint `#79b34e`. The broader ramp worked better for 64px tintable grass:
+    extra tones preserve coverage/antialias values for fine blades and tufts
+    without introducing new final biome colors.
+  - Active grass top trial: `G5101S74` at 64px, projected into a 20-tone
+    neutral ramp and frozen into
+    `packs/mclone-default/block/grass-block.ts`.
+  - Grass freeze archive:
+    `/tmp/mclone-texture-lab/diffusion-archive/grass-top-g5101s74-active-20-2026-07-04/`.
+    The exported neutral `grass_block_top.png` SHA-256 matches the archived
+    projected PNG exactly: `89ff4aaeb2a3e052794358f81028de20c2925c66626e9aebec691601dc3938b5`.
+  - Current workflow bottleneck is no longer only prompt tuning. The next
+    texture-lab scaling slice should be an interactive candidate browser:
+    reference texture navigation by structure/brick/overlay/material role,
+    generated candidate galleries with quick pack swapping, block/rendered
+    previews, prompt metadata, and candidate accept/reject/freeze actions.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;
@@ -444,9 +458,10 @@ macro-correction tuning is speculative work that will be redone.
 - **M5 — generalize.** Dirt and grass top (tint-neutral handling), prompt
   library growth, x-only tiling if a directional material lands, and an
   SDXL / ControlNet-Tile quality evaluation only if projected 32x32 output
-  is visibly limited by the base model. Status: started for grass top with an
-  authoring-only structure mask, first-pass prompt presets, and two projected
-  review sheets; not frozen into source yet.
+  is visibly limited by the base model. Status: grass top is in active trial
+  with `G5101S74`, a 64px source mask, and a 20-tone neutral tintable source
+  ramp. Next scaling work should move candidate review into an interactive web
+  UI instead of one-off static sheets.
 
 ## Open questions and knobs
 
