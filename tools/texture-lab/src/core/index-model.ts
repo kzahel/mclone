@@ -33,6 +33,7 @@ export interface TexturePackSummary {
 
 export interface TextureLabIndexSummary {
   authoredTextures: number;
+  proceduralPlaceholderCount: number;
   tintableTextures: number;
   currentExportsPresent: number;
   sheetsPresent: number;
@@ -57,6 +58,7 @@ export interface TextureIndexEntry {
   exportPath: string;
   runtimeCompatPath: string | null;
   status: TextureCatalogStatus;
+  artSource: TextureArtSource;
   tiling: TextureCatalogTiling;
   rotation: TextureCatalogRotation;
   tags: string[];
@@ -70,6 +72,14 @@ export interface TextureIndexEntry {
     minecraftReference: TextureImageRef;
     sheet: TextureImageRef;
   };
+}
+
+export type TextureArtSourceKind = "frozen" | "authored-structure" | "authored-baseline" | "procedural-placeholder";
+
+export interface TextureArtSource {
+  kind: TextureArtSourceKind;
+  label: string;
+  description: string;
 }
 
 export interface TextureBlockUsage {

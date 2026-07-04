@@ -88,6 +88,7 @@ export function App(): JSX.Element {
         </div>
         <div className="summaryStrip" aria-label="Pack summary">
           <SummaryItem label="textures" value={index?.summary.authoredTextures ?? 0} />
+          <SummaryItem label="placeholders" value={index?.summary.proceduralPlaceholderCount ?? 0} />
           <SummaryItem label="exports" value={index?.summary.currentExportsPresent ?? 0} />
           <SummaryItem label="sheets" value={index?.summary.sheetsPresent ?? 0} />
           <SummaryItem label="runtime" value={index?.summary.runtimeExportsPresent ?? 0} />
@@ -160,7 +161,7 @@ export function App(): JSX.Element {
               >
                 <span className="textureName">{texture.name}</span>
                 <span className="textureMeta">
-                  {texture.materialFamily} / {texture.size}px / {texture.source}
+                  {texture.materialFamily} / {texture.size}px / {texture.source} / {texture.artSource.label}
                 </span>
               </button>
             ))}
@@ -288,6 +289,9 @@ function TexturePreview({
           </p>
         </div>
         <div className="chipGroup">
+          <span className={artSourceChipClass(texture)} title={texture.artSource.description}>
+            {texture.artSource.label}
+          </span>
           <span className="chip">{texture.materialFamily}</span>
           <span className="chip">{texture.tiling}</span>
           <span className="chip">{texture.rotation}</span>
@@ -551,6 +555,8 @@ function TextureInspector({
         <Field label="palette" value={texture.palette} />
         <Field label="base" value={texture.base} />
         <Field label="tint" value={texture.tintRole ?? "none"} />
+        <Field label="art source" value={texture.artSource.label} />
+        <Field label="art note" value={texture.artSource.description} />
         <Field label="source policy" value={sourcePolicyLabel(texture)} />
         <Field label="frozen" value={frozenLabel(texture)} />
       </InspectorSection>
@@ -597,6 +603,10 @@ function sourcePolicyLabel(texture: TextureIndexEntry): string {
     parts.push(`pixel <= ${neutrality.maxPixelSaturation}`);
   }
   return parts.join(", ");
+}
+
+function artSourceChipClass(texture: TextureIndexEntry): string {
+  return texture.artSource.kind === "procedural-placeholder" ? "chip artSourceChip placeholderChip" : "chip artSourceChip";
 }
 
 function frozenLabel(texture: TextureIndexEntry): string {

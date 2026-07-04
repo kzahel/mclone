@@ -158,7 +158,7 @@ h3 {
 
 .summaryStrip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(68px, 1fr));
+  grid-template-columns: repeat(4, minmax(68px, 1fr));
   gap: 8px;
 }
 
@@ -377,6 +377,31 @@ h3 {
   background: var(--accent-soft);
 }
 
+.artSourceChip {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeholderChip,
+.placeholderMeta,
+.placeholderHeaderBadge {
+  border-color: var(--toolbar-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.placeholderHeaderBadge {
+  padding: 2px 6px;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 4px;
+}
+
+.atlasCardHeader .placeholderHeaderBadge {
+  color: var(--warning-text);
+}
+
 .viewTabs {
   display: inline-flex;
   width: max-content;
@@ -493,6 +518,20 @@ h3 {
   border-top: 1px solid var(--border-soft);
   color: var(--muted);
   font-size: 11px;
+}
+
+.atlasCardMeta .artSourceMeta {
+  padding: 2px 6px;
+  border: 1px solid var(--chip-border);
+  border-radius: 4px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+}
+
+.atlasCardMeta .placeholderMeta {
+  border-color: var(--toolbar-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 .splitCompare {

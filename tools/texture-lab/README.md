@@ -397,6 +397,12 @@ The starter DSL now includes broader authored structure beyond speckles:
   placement drivers are future extensions
 - compositional textures, such as base stone plus ore/mineral masks
 
+The web index classifies the current art source for each texture. Textures that
+are only seeded macro-noise/speckle coverage, including the broad
+`far-lod-material` set, are labeled `noise placeholder` in the sidebar, detail
+view, atlas cards, inspector, and search. They are useful for coverage and
+layout review, but should not be mistaken for curated/frozen texture art.
+
 All procedural helpers that target fully tiled textures should be periodic by
 construction. Rotation-safe materials should avoid one-way lighting or streaks;
 orientation-aware materials should declare that directionality explicitly.

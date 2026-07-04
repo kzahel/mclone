@@ -53,6 +53,7 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
     },
     summary: {
       authoredTextures: textures.length,
+      proceduralPlaceholderCount: textures.filter((texture) => texture.artSource.kind === "procedural-placeholder").length,
       tintableTextures: textures.filter((texture) => texture.source === "tintable").length,
       currentExportsPresent: textures.filter((texture) => texture.images.currentExport.exists).length,
       sheetsPresent: textures.filter((texture) => texture.images.sheet.exists).length,
@@ -109,6 +110,8 @@ async function textureEntryFrom(
   const notes = catalog?.notes ?? [];
   const source = texture.source ?? "final-color";
   const tint = texture.tintRole ? pack.tints[texture.tintRole] : undefined;
+  const frozen = frozenRef(pack, name);
+  const authoringRoles = authoringRolesFrom(texture);
 
   return {
     name,
@@ -130,12 +133,13 @@ async function textureEntryFrom(
     exportPath: texture.exportPath,
     runtimeCompatPath,
     status: catalog?.status ?? "draft",
+    artSource: artSourceFrom(texture, frozen, tags, authoringRoles),
     tiling: catalog?.tiling ?? texture.preview?.tiling ?? "unknown",
     rotation: catalog?.rotation ?? "unknown",
     tags,
     notes,
-    frozen: frozenRef(pack, name),
-    authoringRoles: authoringRolesFrom(texture),
+    frozen,
+    authoringRoles,
     blockUsages: blockUsages.sort(compareBlockUsages),
     images: {
       currentExport: await imageRef("Current export", currentExportPath, "pnpm texture-lab:export"),
@@ -148,6 +152,48 @@ async function textureEntryFrom(
       sheet: await imageRef("Review sheet", sheetPath, "pnpm texture-lab:sheet"),
     },
   };
+}
+
+function artSourceFrom(
+  texture: TextureSpec,
+  frozen: TextureIndexEntry["frozen"],
+  tags: string[],
+  authoringRoles: string[],
+): TextureIndexEntry["artSource"] {
+  if (frozen) {
+    return {
+      kind: "frozen",
+      label: "frozen asset",
+      description: "Committed frozen PNG selected from a reviewed generated candidate.",
+    };
+  }
+  if (isProceduralPlaceholder(texture, tags)) {
+    return {
+      kind: "procedural-placeholder",
+      label: "noise placeholder",
+      description: "Seeded macro-noise and speckle coverage art; useful for layout review, not a curated texture.",
+    };
+  }
+  if (authoringRoles.length > 0) {
+    return {
+      kind: "authored-structure",
+      label: "authored structure",
+      description: "Author-controlled mask or ASCII structure drives the current texture.",
+    };
+  }
+  return {
+    kind: "authored-baseline",
+    label: "authored baseline",
+    description: "Authored palette and layer source without a frozen generated override.",
+  };
+}
+
+function isProceduralPlaceholder(texture: TextureSpec, tags: string[]): boolean {
+  if (tags.includes("placeholder") || tags.includes("far-lod-material")) {
+    return true;
+  }
+  const layers = texture.layers ?? [];
+  return layers.length > 0 && layers.every((layer) => layer.kind === "macroNoise" || layer.kind === "speckles");
 }
 
 function frozenRef(pack: TexturePackAsset, textureName: string): TextureIndexEntry["frozen"] {

@@ -189,10 +189,15 @@ function AtlasTextureCard({
     >
       <div className="atlasCardHeader">
         <strong>{texture.displayName}</strong>
-        <span>{texture.status}</span>
+        <span className={texture.artSource.kind === "procedural-placeholder" ? "placeholderHeaderBadge" : undefined}>
+          {texture.artSource.kind === "procedural-placeholder" ? "placeholder" : texture.status}
+        </span>
       </div>
       <SplitTextureCompare texture={texture} previewCandidate={previewCandidate} />
       <div className="atlasCardMeta">
+        <span className={artSourceMetaClass(texture)} title={texture.artSource.description}>
+          {texture.artSource.label}
+        </span>
         <span>{texture.size}px</span>
         <span>{texture.tiling}</span>
         {texture.tintRole ? <span>{texture.tintRole}</span> : null}
@@ -202,6 +207,10 @@ function AtlasTextureCard({
       </div>
     </button>
   );
+}
+
+function artSourceMetaClass(texture: TextureIndexEntry): string {
+  return texture.artSource.kind === "procedural-placeholder" ? "artSourceMeta placeholderMeta" : "artSourceMeta";
 }
 
 function BlockSheetPreview({ blockName, image }: { blockName: string; image: TextureImageRef }): JSX.Element {

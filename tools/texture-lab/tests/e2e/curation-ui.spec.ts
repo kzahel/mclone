@@ -17,6 +17,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(index.summary.archivedCandidateCount).toBe(1);
   expect(index.summary.curatedSelectionCount).toBe(0);
   expect(index.summary.frozenTextureCount).toBe(2);
+  expect(index.summary.proceduralPlaceholderCount).toBeGreaterThan(40);
   expect(index.curation.selectedCount).toBe(0);
   expect(index.curation.manifestPath).toContain("generated-assets/texture-lab-playwright/curation/selections.v1.json");
 
@@ -45,6 +46,10 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     candidateId: "candidate-seed5101-strength0p740",
     sha256: "2e361a434f83d7dbe5c8b810880897bb5308f4243394e03777e86d47b2d7c190",
   });
+  expect(grass?.artSource).toMatchObject({
+    kind: "frozen",
+    label: "frozen asset",
+  });
   expect(grass?.images.minecraftReference.exists).toBe(true);
   expect(grass?.tint.normal).toBe("#79b34e");
   expect(grass?.tint.sourceNeutrality).toEqual({
@@ -62,6 +67,10 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(tintedImageResponse.headers()["content-type"]).toBe("image/png");
 
   const pointedDripstone = index.textures.find((texture: { name: string }) => texture.name === "pointed_dripstone");
+  expect(pointedDripstone?.artSource).toMatchObject({
+    kind: "procedural-placeholder",
+    label: "noise placeholder",
+  });
   expect(pointedDripstone?.images.minecraftReference.exists).toBe(true);
   expect(pointedDripstone?.images.minecraftReference.path).toContain("reference-composites/pointed_dripstone-up-down-thickness.png");
   const pointedReferenceResponse = await request.get(
@@ -210,6 +219,10 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Texture Atlas" })).toBeVisible();
   expect(await page.locator(".atlasCard").count()).toBeGreaterThan(20);
 
+  const andesiteCard = page.getByRole("button", { name: "Andesite atlas comparison", exact: true });
+  await expect(andesiteCard).toContainText("noise placeholder");
+  await expect(andesiteCard).toContainText("placeholder");
+
   const stoneCard = page.getByRole("button", { name: "Stone atlas comparison", exact: true });
   await expect(stoneCard).toBeVisible();
   await expect(stoneCard).toContainText("Ours");
@@ -273,7 +286,12 @@ test("supports texture filtering, candidate selection, inspector details, keyboa
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  await expect(page.locator(".chipGroup")).toContainText("noise placeholder");
+  await expect(page.locator(".inspector")).toContainText("Seeded macro-noise and speckle coverage art");
   await expect(page.getByText("No local generated candidates are present for this texture.")).toBeVisible();
+
+  await page.getByLabel("Search").fill("noise placeholder");
+  await expect(page.getByRole("button", { name: /andesite/ })).toBeVisible();
 
   await page.getByLabel("Search").fill("grass_block_top");
   await page.getByRole("button", { name: /grass_block_top/ }).click();
