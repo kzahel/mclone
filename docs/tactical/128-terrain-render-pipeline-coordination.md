@@ -1799,6 +1799,34 @@ wait/sync dominates, move the next slice toward CPU/GPU overlap and scheduling.
 Keep draw-resource removal/map churn as a narrower follow-up for frames where
 `remove_ms` repeats as a standalone upload-apply tail.
 
+Follow-up slice: broader GPU upload/sync attribution has landed. The existing
+`runtime_gpu_upload_ms` aggregate is preserved, and Android XR now also logs
+`MCLONE_ANDROID_XR_PERF_GPU_SYNC_MAX` plus
+`MCLONE_ANDROID_XR_PERF_WORST_FRAME_GPU_SYNC` with:
+
+- `sync_unattributed_ms`, the outer runtime sync wall time not explained by
+  completed-result accept, dirty seed, prepare, or submit timing;
+- `gpu_upload_pre_sync_ms`, the upload-drain work applied before runtime sync;
+- `gpu_upload_post_sync_ms`, the upload-drain work applied after runtime sync.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `bash -n android-xr/validate-quest-openxr.sh`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`
+- Quest `2 / 16 / 64` controlled chunk-view churn rebuilt the release APK
+  successfully, then stopped before install because ADB reported no attached
+  Quest headset. Re-run with the same lane and write artifacts to
+  `/tmp/mclone-quest-openxr-churn-gpu-sync-attribution-summary.txt` and
+  `/tmp/mclone-quest-openxr-churn-gpu-sync-attribution-logcat.txt`.
+
+Deferred note for closeout: if the next headset run shows
+`sync_unattributed_ms` carrying the tail, switch to CPU/GPU overlap or runtime
+sync wait attribution before changing upload buffers. If pre-sync or post-sync
+upload drain carries the tail, use the existing upload-apply subphase line to
+decide between buffer lifetime/staging and draw-resource churn.
+
 Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
 default policy. It was the best held-capacity result, but the controlled churn
 run proves the remaining unload/update-pump issue is not solved by those caps

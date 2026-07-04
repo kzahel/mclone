@@ -488,6 +488,7 @@ pub struct XrTerrainFrameTiming {
     pub runtime_upload_ms: f64,
     pub runtime_poll_ms: f64,
     pub runtime_sync_ms: f64,
+    pub runtime_sync_unattributed_ms: f64,
     pub runtime_result_accept_ms: f64,
     pub runtime_dirty_seed_ms: f64,
     pub runtime_prepare_ms: f64,
@@ -543,6 +544,8 @@ pub struct XrTerrainFrameTiming {
     pub runtime_dispatcher_available_job_slots: usize,
     pub runtime_dispatcher_queued_compile_tasks: usize,
     pub runtime_gpu_upload_ms: f64,
+    pub runtime_gpu_upload_pre_sync_ms: f64,
+    pub runtime_gpu_upload_post_sync_ms: f64,
     pub runtime_upload_enqueue_ms: f64,
     pub runtime_upload_select_ms: f64,
     pub runtime_upload_apply_ms: f64,
@@ -3494,7 +3497,9 @@ where
                 false,
                 timing,
             )?;
-            timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
+            let upload_elapsed_ms = elapsed_ms(upload_start.elapsed());
+            timing.runtime_gpu_upload_ms += upload_elapsed_ms;
+            timing.runtime_gpu_upload_pre_sync_ms += upload_elapsed_ms;
             accumulate_upload_report(&mut upload_report, drained_report.upload);
             upload_phase.absorb(drained_report.phase);
             self.release_render_compile_jobs(drained_report.release_compile_jobs);
@@ -3523,6 +3528,12 @@ where
         timing.runtime_dirty_seed_ms = timed_section_update.timing.dirty_seed_ms;
         timing.runtime_prepare_ms = timed_section_update.timing.prepare_ms;
         timing.runtime_submit_ms = timed_section_update.timing.submit_ms;
+        timing.runtime_sync_unattributed_ms = (timing.runtime_sync_ms
+            - timing.runtime_result_accept_ms
+            - timing.runtime_dirty_seed_ms
+            - timing.runtime_prepare_ms
+            - timing.runtime_submit_ms)
+            .max(0.0);
         timing.runtime_submit_snapshot_ms = timed_section_update.timing.submit_snapshot_ms;
         timing.runtime_submit_handoff_ms = timed_section_update.timing.submit_handoff_ms;
         timing.runtime_submit_handoff_worst_ms =
@@ -3684,7 +3695,9 @@ where
                 upload_frame_decision.upload_backpressured,
                 timing,
             )?;
-            timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
+            let upload_elapsed_ms = elapsed_ms(upload_start.elapsed());
+            timing.runtime_gpu_upload_ms += upload_elapsed_ms;
+            timing.runtime_gpu_upload_post_sync_ms += upload_elapsed_ms;
             accumulate_upload_report(&mut upload_report, section_update_report.upload);
             upload_phase.absorb(section_update_report.phase);
             self.release_render_compile_jobs(section_update_report.release_compile_jobs);

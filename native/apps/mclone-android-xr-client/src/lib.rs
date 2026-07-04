@@ -3387,6 +3387,7 @@ mod android {
         terrain_runtime_upload_ms: f64,
         terrain_runtime_poll_ms: f64,
         terrain_runtime_sync_ms: f64,
+        terrain_runtime_sync_unattributed_ms: f64,
         terrain_runtime_result_accept_ms: f64,
         terrain_runtime_dirty_seed_ms: f64,
         terrain_runtime_prepare_ms: f64,
@@ -3442,6 +3443,8 @@ mod android {
         terrain_runtime_dispatcher_available_job_slots: usize,
         terrain_runtime_dispatcher_queued_compile_tasks: usize,
         terrain_runtime_gpu_upload_ms: f64,
+        terrain_runtime_gpu_upload_pre_sync_ms: f64,
+        terrain_runtime_gpu_upload_post_sync_ms: f64,
         terrain_runtime_upload_enqueue_ms: f64,
         terrain_runtime_upload_select_ms: f64,
         terrain_runtime_upload_apply_ms: f64,
@@ -4282,6 +4285,12 @@ mod android {
                 self.max_render.terrain_runtime_ready_publish_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_GPU_SYNC_MAX sync_unattributed_ms={:.3} gpu_upload_pre_sync_ms={:.3} gpu_upload_post_sync_ms={:.3}",
+                self.max_render.terrain_runtime_sync_unattributed_ms,
+                self.max_render.terrain_runtime_gpu_upload_pre_sync_ms,
+                self.max_render.terrain_runtime_gpu_upload_post_sync_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_UPLOAD_APPLY_MAX dirty_mark_ms={:.3} remove_ms={:.3} section_state_ms={:.3} vertex_bytes_ms={:.3} vertex_buffer_ms={:.3} index_bytes_ms={:.3} index_buffer_ms={:.3} mesh_insert_ms={:.3} mesh_upload_worst_ms={:.3}",
                 self.max_render.terrain_runtime_upload_apply_dirty_mark_ms,
                 self.max_render.terrain_runtime_upload_apply_remove_ms,
@@ -4818,6 +4827,14 @@ mod android {
                     render.terrain_runtime_submit_ready_update_ms
                 );
                 log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_GPU_SYNC rank={} sample_frame={} sync_unattributed_ms={:.3} gpu_upload_pre_sync_ms={:.3} gpu_upload_post_sync_ms={:.3}",
+                    rank,
+                    snapshot.sample_frame,
+                    render.terrain_runtime_sync_unattributed_ms,
+                    render.terrain_runtime_gpu_upload_pre_sync_ms,
+                    render.terrain_runtime_gpu_upload_post_sync_ms
+                );
+                log::info!(
                     "MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD_APPLY rank={} sample_frame={} dirty_mark_ms={:.3} remove_ms={:.3} section_state_ms={:.3} vertex_bytes_ms={:.3} vertex_buffer_ms={:.3} index_bytes_ms={:.3} index_buffer_ms={:.3} mesh_insert_ms={:.3} mesh_upload_worst_ms={:.3}",
                     rank,
                     snapshot.sample_frame,
@@ -5064,6 +5081,9 @@ mod android {
             terrain_runtime_upload_ms: a.terrain_runtime_upload_ms.max(b.terrain_runtime_upload_ms),
             terrain_runtime_poll_ms: a.terrain_runtime_poll_ms.max(b.terrain_runtime_poll_ms),
             terrain_runtime_sync_ms: a.terrain_runtime_sync_ms.max(b.terrain_runtime_sync_ms),
+            terrain_runtime_sync_unattributed_ms: a
+                .terrain_runtime_sync_unattributed_ms
+                .max(b.terrain_runtime_sync_unattributed_ms),
             terrain_runtime_result_accept_ms: a
                 .terrain_runtime_result_accept_ms
                 .max(b.terrain_runtime_result_accept_ms),
@@ -5227,6 +5247,12 @@ mod android {
             terrain_runtime_gpu_upload_ms: a
                 .terrain_runtime_gpu_upload_ms
                 .max(b.terrain_runtime_gpu_upload_ms),
+            terrain_runtime_gpu_upload_pre_sync_ms: a
+                .terrain_runtime_gpu_upload_pre_sync_ms
+                .max(b.terrain_runtime_gpu_upload_pre_sync_ms),
+            terrain_runtime_gpu_upload_post_sync_ms: a
+                .terrain_runtime_gpu_upload_post_sync_ms
+                .max(b.terrain_runtime_gpu_upload_post_sync_ms),
             terrain_runtime_upload_enqueue_ms: a
                 .terrain_runtime_upload_enqueue_ms
                 .max(b.terrain_runtime_upload_enqueue_ms),
@@ -6042,6 +6068,7 @@ mod android {
         timing.terrain_runtime_upload_ms = scene_timing.runtime_upload_ms;
         timing.terrain_runtime_poll_ms = scene_timing.runtime_poll_ms;
         timing.terrain_runtime_sync_ms = scene_timing.runtime_sync_ms;
+        timing.terrain_runtime_sync_unattributed_ms = scene_timing.runtime_sync_unattributed_ms;
         timing.terrain_runtime_result_accept_ms = scene_timing.runtime_result_accept_ms;
         timing.terrain_runtime_dirty_seed_ms = scene_timing.runtime_dirty_seed_ms;
         timing.terrain_runtime_prepare_ms = scene_timing.runtime_prepare_ms;
@@ -6142,6 +6169,9 @@ mod android {
         timing.terrain_runtime_dispatcher_queued_compile_tasks =
             scene_timing.runtime_dispatcher_queued_compile_tasks;
         timing.terrain_runtime_gpu_upload_ms = scene_timing.runtime_gpu_upload_ms;
+        timing.terrain_runtime_gpu_upload_pre_sync_ms = scene_timing.runtime_gpu_upload_pre_sync_ms;
+        timing.terrain_runtime_gpu_upload_post_sync_ms =
+            scene_timing.runtime_gpu_upload_post_sync_ms;
         timing.terrain_runtime_upload_enqueue_ms = scene_timing.runtime_upload_enqueue_ms;
         timing.terrain_runtime_upload_select_ms = scene_timing.runtime_upload_select_ms;
         timing.terrain_runtime_upload_apply_ms = scene_timing.runtime_upload_apply_ms;
