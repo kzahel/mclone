@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use mclone_core::{
     block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord, chunk_min_block_coord,
 };
@@ -42,6 +42,7 @@ const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
 // Matches the default Java 1.17.1 video option: Options.mipmapLevels = 4.
 // TextureUtil.prepareImage allocates levels 0..=4 for the block atlas.
 const CHUNK_ATLAS_MAX_MIP_LEVEL: u32 = 4;
+const CAMERA_BASIS_MIN_LENGTH_SQUARED: f32 = 1.0e-8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkCamera {
@@ -171,6 +172,87 @@ impl ChunkCamera {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PerspectiveRenderPose {
+    pub eye: Vec3,
+    pub orientation: Quat,
+    pub fov_y_radians: f32,
+    pub z_near: f32,
+    pub z_far: f32,
+}
+
+impl PerspectiveRenderPose {
+    pub const fn new(
+        eye: Vec3,
+        orientation: Quat,
+        fov_y_radians: f32,
+        z_near: f32,
+        z_far: f32,
+    ) -> Self {
+        Self {
+            eye,
+            orientation,
+            fov_y_radians,
+            z_near,
+            z_far,
+        }
+    }
+
+    pub fn render_view(self, width: u32, height: u32) -> Result<ChunkRenderView> {
+        if !self.eye.is_finite() {
+            bail!("perspective render pose has a non-finite eye");
+        }
+        if !finite_quat(self.orientation)
+            || self.orientation.length_squared() <= CAMERA_BASIS_MIN_LENGTH_SQUARED
+        {
+            bail!("perspective render pose has an invalid orientation");
+        }
+        if !self.fov_y_radians.is_finite()
+            || self.fov_y_radians <= 0.0
+            || !self.z_near.is_finite()
+            || !self.z_far.is_finite()
+            || self.z_near <= 0.0
+            || self.z_far <= self.z_near
+        {
+            bail!("perspective render pose has invalid projection parameters");
+        }
+
+        let aspect = width.max(1) as f32 / height.max(1) as f32;
+        let aspect = aspect.max(0.01);
+        let orientation = self.orientation.normalize();
+        let view = Mat4::from_rotation_translation(orientation, self.eye).inverse();
+        let projection = Mat4::perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
+        let camera_forward = (orientation * Vec3::NEG_Z).normalize_or_zero();
+        let camera_right = (orientation * Vec3::X).normalize_or_zero();
+        let camera_up = (orientation * Vec3::Y).normalize_or_zero();
+        if camera_forward.length_squared() <= CAMERA_BASIS_MIN_LENGTH_SQUARED
+            || camera_right.length_squared() <= CAMERA_BASIS_MIN_LENGTH_SQUARED
+            || camera_up.length_squared() <= CAMERA_BASIS_MIN_LENGTH_SQUARED
+        {
+            bail!("perspective render pose produced a degenerate camera basis");
+        }
+
+        let render_view = ChunkRenderView {
+            view,
+            projection,
+            view_projection: projection * view,
+            camera_position: self.eye,
+            camera_forward,
+            camera_right,
+            camera_up,
+            aspect,
+            fov_y_radians: self.fov_y_radians,
+            z_near: self.z_near,
+            z_far: self.z_far,
+            projection_kind: ChunkProjectionKind::CameraPerspective,
+        };
+        if !render_view.is_finite() {
+            bail!("perspective render pose produced a non-finite render view");
+        }
+        Ok(render_view)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChunkProjectionKind {
     CameraPerspective,
@@ -194,6 +276,20 @@ pub struct ChunkRenderView {
 }
 
 impl ChunkRenderView {
+    pub fn is_finite(self) -> bool {
+        self.view.is_finite()
+            && self.projection.is_finite()
+            && self.view_projection.is_finite()
+            && self.camera_position.is_finite()
+            && self.camera_forward.is_finite()
+            && self.camera_right.is_finite()
+            && self.camera_up.is_finite()
+            && self.aspect.is_finite()
+            && self.fov_y_radians.is_finite()
+            && self.z_near.is_finite()
+            && self.z_far.is_finite()
+    }
+
     pub fn uniform_matrix(self) -> [[f32; 4]; 4] {
         self.view_projection.to_cols_array_2d()
     }
@@ -223,6 +319,11 @@ impl ChunkRenderView {
         let rotation_only_view = Mat4::look_at_rh(Vec3::ZERO, self.camera_forward, self.camera_up);
         self.projection * rotation_only_view
     }
+}
+
+fn finite_quat(value: Quat) -> bool {
+    let [x, y, z, w] = value.to_array();
+    x.is_finite() && y.is_finite() && z.is_finite() && w.is_finite()
 }
 
 #[derive(Clone, Copy)]
@@ -3702,6 +3803,73 @@ mod tests {
     }
 
     #[test]
+    fn perspective_render_pose_builds_finite_normal_view() {
+        let orientation = Quat::IDENTITY;
+        let render_view = test_perspective_pose(Vec3::new(0.0, 64.0, 0.0), orientation)
+            .render_view(1280, 720)
+            .expect("normal render pose should build");
+
+        assert_finite_render_view(render_view);
+        assert_vec3_near(render_view.camera_forward, Vec3::NEG_Z, 1.0e-6);
+        assert_vec3_near(render_view.camera_right, Vec3::X, 1.0e-6);
+        assert_vec3_near(render_view.camera_up, Vec3::Y, 1.0e-6);
+    }
+
+    #[test]
+    fn perspective_render_pose_builds_finite_upward_vertical_view() {
+        let orientation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        let render_view = test_perspective_pose(Vec3::new(0.0, 64.0, 0.0), orientation)
+            .render_view(1280, 720)
+            .expect("upward vertical render pose should build");
+
+        assert_finite_render_view(render_view);
+        assert_vec3_near(render_view.camera_forward, Vec3::Y, 1.0e-6);
+        assert_basis_is_orthonormal(render_view);
+    }
+
+    #[test]
+    fn perspective_render_pose_builds_finite_downward_vertical_view() {
+        let orientation = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let render_view = test_perspective_pose(Vec3::new(0.0, 64.0, 0.0), orientation)
+            .render_view(1280, 720)
+            .expect("downward vertical render pose should build");
+
+        assert_finite_render_view(render_view);
+        assert_vec3_near(render_view.camera_forward, Vec3::NEG_Y, 1.0e-6);
+        assert_basis_is_orthonormal(render_view);
+    }
+
+    #[test]
+    fn perspective_render_pose_keeps_third_person_vertical_view_finite() {
+        let player_eye = Vec3::new(8.0, 70.0, 8.0);
+        let orientation = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let forward = orientation * Vec3::NEG_Z;
+        let render_eye = player_eye - forward * 4.0;
+        let render_view = test_perspective_pose(render_eye, orientation)
+            .render_view(1280, 720)
+            .expect("third-person vertical render pose should build");
+
+        assert_finite_render_view(render_view);
+        assert_vec3_near(
+            render_view.camera_position,
+            Vec3::new(8.0, 74.0, 8.0),
+            1.0e-5,
+        );
+        assert_vec3_near(render_view.camera_forward, Vec3::NEG_Y, 1.0e-6);
+        assert_basis_is_orthonormal(render_view);
+    }
+
+    #[test]
+    fn perspective_render_pose_rejects_invalid_orientation() {
+        let pose = test_perspective_pose(
+            Vec3::new(0.0, 64.0, 0.0),
+            Quat::from_xyzw(0.0, 0.0, 0.0, 0.0),
+        );
+
+        assert!(pose.render_view(1280, 720).is_err());
+    }
+
+    #[test]
     fn multiview_uniform_serializes_distinct_left_right_views() {
         let left = ChunkCamera {
             eye: [0.0, 70.0, -4.0],
@@ -4467,6 +4635,39 @@ mod tests {
             z_far,
             projection_kind: ChunkProjectionKind::CameraPerspective,
         }
+    }
+
+    fn test_perspective_pose(eye: Vec3, orientation: Quat) -> PerspectiveRenderPose {
+        PerspectiveRenderPose::new(eye, orientation, 70.0_f32.to_radians(), 0.05, 200.0)
+    }
+
+    fn assert_finite_render_view(render_view: ChunkRenderView) {
+        assert!(
+            render_view.is_finite(),
+            "render view should be finite: {render_view:?}"
+        );
+    }
+
+    fn assert_basis_is_orthonormal(render_view: ChunkRenderView) {
+        assert!((render_view.camera_forward.length() - 1.0).abs() < 1.0e-6);
+        assert!((render_view.camera_right.length() - 1.0).abs() < 1.0e-6);
+        assert!((render_view.camera_up.length() - 1.0).abs() < 1.0e-6);
+        assert!(
+            render_view
+                .camera_forward
+                .dot(render_view.camera_right)
+                .abs()
+                < 1.0e-6
+        );
+        assert!(render_view.camera_forward.dot(render_view.camera_up).abs() < 1.0e-6);
+        assert!(render_view.camera_right.dot(render_view.camera_up).abs() < 1.0e-6);
+    }
+
+    fn assert_vec3_near(left: Vec3, right: Vec3, epsilon: f32) {
+        assert!(
+            (left - right).length() <= epsilon,
+            "vectors differed beyond {epsilon}: left={left:?} right={right:?}"
+        );
     }
 
     fn assert_mat4_near(left: Mat4, right: Mat4, epsilon: f32) {
