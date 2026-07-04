@@ -281,17 +281,18 @@ mod tests {
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
         ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ORCHID,
-        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CAVE_AIR, CLAY,
-        COAL_ORE, COPPER_ORE, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE,
-        DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
-        DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE,
-        DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
-        HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LAPIS_ORE,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD,
-        MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PEONY_LOWER, POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE,
-        ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
-        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, SUNFLOWER_LOWER,
-        SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
+        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS,
+        CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH,
+        DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
+        DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
+        DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
+        GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
+        KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER,
+        LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PEONY_LOWER, POPPY,
+        RED_MUSHROOM, RED_MUSHROOM_BLOCK, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND,
+        SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES,
+        STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER,
+        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -1289,6 +1290,75 @@ mod tests {
                 );
             }
             other => panic!("expected blue orchid flower feature, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn swamp_feature_table_includes_java_small_mushroom_patches() {
+        let swamp = overworld_features_for_biome(get_layered_biome_by_id(6));
+        assert_swamp_mushroom_patch(
+            &swamp,
+            BROWN_MUSHROOM,
+            vec![
+                ConfiguredDecorator::count(8),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::chance(4),
+            ],
+        );
+        assert_swamp_mushroom_patch(
+            &swamp,
+            RED_MUSHROOM,
+            vec![
+                ConfiguredDecorator::count(8),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::chance(8),
+            ],
+        );
+    }
+
+    fn assert_swamp_mushroom_patch(
+        swamp: &[PlacedFeature],
+        state: RawBlockId,
+        expected_decorators: Vec<ConfiguredDecorator>,
+    ) {
+        let feature = swamp
+            .iter()
+            .find(|feature| {
+                matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: patch_state,
+                        ..
+                    }) if patch_state == state
+                )
+            })
+            .expect("swamp mushroom feature");
+
+        assert_eq!(feature.decorators, expected_decorators);
+        match &feature.feature {
+            ConfiguredFeature::RandomPatch(config) => {
+                assert_eq!(
+                    *config,
+                    RandomPatchConfiguration {
+                        state,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 64,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: false,
+                        can_replace: false,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[],
+                    }
+                );
+            }
+            other => panic!("expected swamp mushroom random patch, got {other:?}"),
         }
     }
 

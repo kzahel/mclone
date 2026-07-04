@@ -2,13 +2,13 @@ use std::sync::OnceLock;
 
 use crate::biome::BiomeDefinition;
 use crate::block::{
-    ANDESITE, BLUE_ORCHID, CACTUS, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
-    DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
-    DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
-    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
-    LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, PEONY_LOWER, PODZOL, POPPY,
-    RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SUGAR_CANE, SUNFLOWER_LOWER,
-    SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
+    ANDESITE, BLUE_ORCHID, BROWN_MUSHROOM, CACTUS, CLAY, COAL_ORE, COPPER_ORE, DANDELION,
+    DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
+    DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
+    DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE,
+    LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM,
+    PEONY_LOWER, PODZOL, POPPY, RED_MUSHROOM, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId,
+    SAND, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -771,6 +771,8 @@ fn swamp_features() -> Vec<PlacedFeature> {
         flower_patch(POPPY, 1),
         dead_bush_patch(1),
         waterlily_patch_feature(),
+        swamp_mushroom_patch_feature(BROWN_MUSHROOM, 4, false),
+        swamp_mushroom_patch_feature(RED_MUSHROOM, 8, true),
         sugar_cane_patch(20),
     ]
 }
@@ -1244,6 +1246,41 @@ fn swamp_flower_feature() -> PlacedFeature {
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
             ConfiguredDecorator::spread_32_above(),
         ],
+    )
+}
+
+fn swamp_mushroom_patch_feature(
+    state: RawBlockId,
+    rarity: i32,
+    heightmap_double_square: bool,
+) -> PlacedFeature {
+    let mut decorators = vec![ConfiguredDecorator::count(8)];
+    decorators.push(ConfiguredDecorator::square());
+    decorators.push(if heightmap_double_square {
+        ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking)
+    } else {
+        ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking)
+    });
+    decorators.push(ConfiguredDecorator::chance(rarity));
+
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        }),
+        decorators,
     )
 }
 

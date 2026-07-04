@@ -146,6 +146,9 @@ fn java_light_emission(record: &BlockStateRecord) -> u8 {
     if matches!(path, "glow_lichen") {
         return 7;
     }
+    if matches!(path, "brown_mushroom") {
+        return 1;
+    }
     if matches!(path, "torch" | "wall_torch") {
         return 14;
     }
@@ -195,6 +198,8 @@ fn java_material_blocks_motion(block: &ResourceLocation) -> bool {
             | "dandelion"
             | "poppy"
             | "dead_bush"
+            | "brown_mushroom"
+            | "red_mushroom"
             | "glow_lichen"
             | "sugar_cane"
             | "seagrass"
@@ -368,6 +373,8 @@ mod tests {
             "minecraft:dandelion",
             "minecraft:poppy",
             "minecraft:dead_bush",
+            "minecraft:brown_mushroom",
+            "minecraft:red_mushroom",
             "minecraft:sugar_cane",
             "minecraft:seagrass",
             "minecraft:tall_seagrass",
@@ -438,6 +445,15 @@ mod tests {
         assert_eq!(one.light_emission, 6);
         assert_eq!(four.light_emission, 15);
         assert_eq!(dry.light_emission, 0);
+    }
+
+    #[test]
+    fn small_mushroom_emission_matches_java_block_properties() {
+        let brown = block_render_facts(&record("minecraft:brown_mushroom"), false);
+        let red = block_render_facts(&record("minecraft:red_mushroom"), false);
+
+        assert_eq!(brown.light_emission, 1);
+        assert_eq!(red.light_emission, 0);
     }
 
     #[test]

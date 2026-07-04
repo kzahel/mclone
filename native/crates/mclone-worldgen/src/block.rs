@@ -153,6 +153,8 @@ pub const PEONY_UPPER: RawBlockId = 147;
 pub const SUNFLOWER_LOWER: RawBlockId = 148;
 pub const SUNFLOWER_UPPER: RawBlockId = 149;
 pub const BLUE_ORCHID: RawBlockId = 150;
+pub const BROWN_MUSHROOM: RawBlockId = 151;
+pub const RED_MUSHROOM: RawBlockId = 152;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -233,6 +235,8 @@ impl GeneratedBlockId {
     pub const SUNFLOWER_LOWER: Self = Self(SUNFLOWER_LOWER);
     pub const SUNFLOWER_UPPER: Self = Self(SUNFLOWER_UPPER);
     pub const BLUE_ORCHID: Self = Self(BLUE_ORCHID);
+    pub const BROWN_MUSHROOM: Self = Self(BROWN_MUSHROOM);
+    pub const RED_MUSHROOM: Self = Self(RED_MUSHROOM);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -293,6 +297,8 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | SUNFLOWER_LOWER
             | SUNFLOWER_UPPER
             | BLUE_ORCHID
+            | BROWN_MUSHROOM
+            | RED_MUSHROOM
             | GLOW_LICHEN
             | POINTED_DRIPSTONE
             | TORCH
@@ -335,6 +341,7 @@ pub const fn block_light_emission(block_id: RawBlockId) -> u8 {
         match block_id {
             MAGMA_BLOCK => 3,
             GLOW_LICHEN => 7,
+            BROWN_MUSHROOM => 1,
             TORCH | WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => 14,
             SEA_PICKLE_1 => 6,
             SEA_PICKLE_2 => 9,
@@ -525,6 +532,8 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         PEONY_LOWER | PEONY_UPPER => "minecraft:peony",
         SUNFLOWER_LOWER | SUNFLOWER_UPPER => "minecraft:sunflower",
         BLUE_ORCHID => "minecraft:blue_orchid",
+        BROWN_MUSHROOM => "minecraft:brown_mushroom",
+        RED_MUSHROOM => "minecraft:red_mushroom",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -580,6 +589,8 @@ mod tests {
         assert_eq!(block_light_emission(LAVA_LEVEL_8), 15);
         assert_eq!(block_light_emission(MAGMA_BLOCK), 3);
         assert_eq!(block_light_emission(GLOW_LICHEN), 7);
+        assert_eq!(block_light_emission(BROWN_MUSHROOM), 1);
+        assert_eq!(block_light_emission(RED_MUSHROOM), 0);
         assert_eq!(block_light_emission(TORCH), 14);
         assert_eq!(block_light_emission(WALL_TORCH_NORTH), 14);
         assert_eq!(block_light_emission(SEA_PICKLE_1), 6);
@@ -632,6 +643,8 @@ mod tests {
         assert_eq!(block_light_opacity(SUNFLOWER_LOWER), 0);
         assert_eq!(block_light_opacity(SUNFLOWER_UPPER), 0);
         assert_eq!(block_light_opacity(BLUE_ORCHID), 0);
+        assert_eq!(block_light_opacity(BROWN_MUSHROOM), 0);
+        assert_eq!(block_light_opacity(RED_MUSHROOM), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
@@ -696,5 +709,7 @@ mod tests {
         assert_eq!(block_name(SUNFLOWER_LOWER), "minecraft:sunflower");
         assert_eq!(block_name(SUNFLOWER_UPPER), "minecraft:sunflower");
         assert_eq!(block_name(BLUE_ORCHID), "minecraft:blue_orchid");
+        assert_eq!(block_name(BROWN_MUSHROOM), "minecraft:brown_mushroom");
+        assert_eq!(block_name(RED_MUSHROOM), "minecraft:red_mushroom");
     }
 }

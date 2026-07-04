@@ -2,8 +2,8 @@
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
 overworld tint IDs, seventeen supported feature-family groups, and 36 F-checked
-matrix rows landed, including cactus/sugar-cane extras, swamp lily pads and
-blue orchids, ocean water plants, warm-ocean coral/sea-pickle,
+matrix rows landed, including cactus/sugar-cane extras, swamp lily pads,
+blue orchids, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
 dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, base taiga/snowy-taiga berry, and ordinary forest
@@ -123,7 +123,7 @@ notes.
 | 3 | `minecraft:mountains` | mountains | grass/stone/gravel mountain surface checked, sparse trees | seed `31`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 4 | `minecraft:forest` | forest | forest grass tint/surface and oak/birch tree family checked; flowers/extras gap | seed `0`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 5 | `minecraft:taiga` | taiga | spruce trees, ferns, and sweet berry bushes checked | seed `233`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, sugar cane, and lily pads; mushrooms/seagrass/pumpkin gap | seed `36`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, small mushrooms, sugar cane, and lily pads; seagrass/pumpkin gap | seed `12926`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 7 | `minecraft:river` | river | river water checked, banks/seagrass gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice checked, icebergs/blue ice gap | seed `333`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice checked | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -227,8 +227,8 @@ Landed:
   sunflower-plains sunflower patches. Desert and badlands now require dead bush plus
   cactus/sugar-cane family coverage; ordinary forest and wooded hills require
   an oak or birch log/leaves tree pair; swamp requires the native
-  vegetation/clay subset plus blue orchids, sugar cane, and lily pads; base taiga and base
-  snowy taiga require spruce/fern vegetation plus sweet berry bushes; generated
+  vegetation/clay subset plus blue orchids, small mushrooms, sugar cane, and
+  lily pads; base taiga and base snowy taiga require spruce/fern vegetation plus sweet berry bushes; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
@@ -243,14 +243,15 @@ Landed:
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
   state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; blue orchid
-  ID; dark oak log/leaves IDs; huge mushroom cap/stem IDs; acacia log/leaves IDs; jungle
+  ID; brown/red small mushroom IDs; dark oak log/leaves IDs; huge mushroom
+  cap/stem IDs; acacia log/leaves IDs; jungle
   log/leaves IDs; bamboo trunk ID; sweet berry bush age-3 ID; allium,
   azure bluet, red/orange/white/pink tulips, oxeye daisy, cornflower, lily of
   the valley, lilac/rose-bush/peony lower/upper IDs, and sunflower lower/upper
   IDs; synthetic asset registry mappings; basic shared
   shape/material/render/light facts; Java-style reduced random-patch column
-  placement; Java-style waterlily, `FLOWER_SWAMP` blue-orchid flower, and
-  sweet-berry random-patch placement;
+  placement; Java-style waterlily, `FLOWER_SWAMP` blue-orchid flower,
+  `BROWN_MUSHROOM_SWAMP` / `RED_MUSHROOM_SWAMP`, and sweet-berry random-patch placement;
   Java-style `nextBoolean` random-boolean selector placement for mushroom fields;
   Java-style seagrass, kelp, sea-pickle, and broad coral tree/claw/mushroom
   placement; broad Java-shaped dark oak tree, huge mushroom, birch and
@@ -297,9 +298,9 @@ Documented gaps from this slice:
   path, coral plants, coral fans/wall fans, exact coral mismatch parity, and
   full waterlogged/fluid-state modeling for water plants in the raw generated
   block lane.
-- Java swamp now has high-signal water-lily and blue-orchid coverage. Exact
-  parity is still incomplete: brown/red mushroom patches, swamp
-  seagrass/extras, pumpkin, and exact decorated counts remain later `103` work.
+- Java swamp now has high-signal water-lily, blue-orchid, and small-mushroom
+  coverage. Exact parity is still incomplete: swamp seagrass/extras, pumpkin,
+  and exact decorated counts remain later `103` work.
 - Java mushroom fields now have high-signal huge mushroom coverage. Exact
   parity is still incomplete: small brown/red mushroom patches, default mushroom
   patches, default extra vegetation, exact huge mushroom side-state booleans,
@@ -335,12 +336,13 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Continue the same swamp row with the next missing visible vanilla vegetation:
+Move to the high-signal giant taiga rows without entering structure territory:
 
-1. Add brown and red small mushroom generated block IDs/assets/shapes and
-   real-asset smoke coverage for the Java `brown_mushroom` and `red_mushroom`
-   blockstates.
-2. Port the narrow `BROWN_MUSHROOM_SWAMP` and `RED_MUSHROOM_SWAMP` random
-   patches from `BiomeDefaultFeatures.addSwampVegetation`.
-3. Extend row `6` to require at least one small mushroom family member while
-   leaving exact decorated counts and swamp extras under later `103` work.
+1. Read Java `MEGA_PINE_TREE`, `MEGA_SPRUCE_TREE`, and giant taiga vegetation
+   table sources before editing.
+2. Add broad native giant-taiga / giant-spruce tree family coverage using the
+   existing spruce log/leaves and podzol/coarse-dirt surface facts, keeping the
+   implementation in shared worldgen.
+3. Promote rows `32`, `33`, `160`, and `161` toward deterministic `F` checks
+   where a representative `(0,0)` seed contains the distinctive giant tree
+   family; leave exact 2x2 trunk/foliage/count mismatch buckets to `103`.

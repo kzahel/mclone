@@ -72,6 +72,7 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
             )
             .with_offset(OffsetKind::Xz),
         ),
+        terrain_id::BROWN_MUSHROOM | terrain_id::RED_MUSHROOM => Some(mushroom_shape()),
         terrain_id::CACTUS => Some(cactus_outline_shape()),
         terrain_id::SUGAR_CANE => Some(sugar_cane_shape()),
         terrain_id::BAMBOO => Some(bamboo_outline_shape()),
@@ -117,6 +118,8 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::CORNFLOWER
         | terrain_id::LILY_OF_THE_VALLEY
         | terrain_id::BLUE_ORCHID
+        | terrain_id::BROWN_MUSHROOM
+        | terrain_id::RED_MUSHROOM
         | terrain_id::DEAD_BUSH
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
@@ -229,6 +232,17 @@ fn bamboo_outline_shape() -> LocalShape {
 
 fn bamboo_collision_shape() -> LocalShape {
     local_box(6.5 / 16.0, 0.0, 6.5 / 16.0, 9.5 / 16.0, 1.0, 9.5 / 16.0).with_offset(OffsetKind::Xz)
+}
+
+fn mushroom_shape() -> LocalShape {
+    local_box(
+        5.0 / 16.0,
+        0.0,
+        5.0 / 16.0,
+        11.0 / 16.0,
+        6.0 / 16.0,
+        11.0 / 16.0,
+    )
 }
 
 fn lily_pad_shape() -> LocalShape {
@@ -437,6 +451,8 @@ mod tests {
             terrain_id::CORNFLOWER,
             terrain_id::LILY_OF_THE_VALLEY,
             terrain_id::BLUE_ORCHID,
+            terrain_id::BROWN_MUSHROOM,
+            terrain_id::RED_MUSHROOM,
             terrain_id::DEAD_BUSH,
             terrain_id::LARGE_FERN_LOWER,
             terrain_id::LARGE_FERN_UPPER,
@@ -527,6 +543,30 @@ mod tests {
                 flower_offset.x + 11.0 / 16.0,
                 10.0 / 16.0,
                 flower_offset.z + 11.0 / 16.0,
+            ))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::BROWN_MUSHROOM), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(
+                5.0 / 16.0,
+                0.0,
+                5.0 / 16.0,
+                11.0 / 16.0,
+                6.0 / 16.0,
+                11.0 / 16.0,
+            ))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::RED_MUSHROOM), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(
+                5.0 / 16.0,
+                0.0,
+                5.0 / 16.0,
+                11.0 / 16.0,
+                6.0 / 16.0,
+                11.0 / 16.0,
             ))
         );
         assert_eq!(
