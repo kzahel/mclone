@@ -1815,17 +1815,35 @@ Validation:
 - `bash -n android-xr/validate-quest-openxr.sh`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`
-- Quest `2 / 16 / 64` controlled chunk-view churn rebuilt the release APK
-  successfully, then stopped before install because ADB reported no attached
-  Quest headset. Re-run with the same lane and write artifacts to
+- Quest `2 / 16 / 64` controlled chunk-view churn passed after the headset was
+  reattached. Artifacts:
   `/tmp/mclone-quest-openxr-churn-gpu-sync-attribution-summary.txt` and
   `/tmp/mclone-quest-openxr-churn-gpu-sync-attribution-logcat.txt`.
 
-Deferred note for closeout: if the next headset run shows
-`sync_unattributed_ms` carrying the tail, switch to CPU/GPU overlap or runtime
-sync wait attribution before changing upload buffers. If pre-sync or post-sync
-upload drain carries the tail, use the existing upload-apply subphase line to
-decide between buffer lifetime/staging and draw-resource churn.
+Measured result from that Quest run:
+
+- frame p50/p95/p99/max was `14.200` / `19.113` / `21.625` / `34.767 ms`, with
+  app-work p95/max `18.558` / `24.701 ms`;
+- terrain runtime maxes were `runtime_upload_ms=7.538`,
+  `runtime_sync_ms=5.868`, `runtime_gpu_upload_ms=4.386`,
+  `runtime_upload_apply_ms=3.623`, and `runtime_ready_sections_ms=1.757`;
+- GPU/sync split maxes were `sync_unattributed_ms=2.069`,
+  `gpu_upload_pre_sync_ms=3.644`, and `gpu_upload_post_sync_ms=4.386`;
+- upload-apply subphase maxes were `remove_ms=3.622`,
+  `vertex_bytes_ms=1.639`, `vertex_buffer_ms=1.218`,
+  `index_bytes_ms=0.645`, `index_buffer_ms=1.048`, and
+  `mesh_upload_worst_ms=1.746`;
+- worst-frame rank 1 did not line up as a GPU-upload or sync-wait problem:
+  `terrain_frame_ms=24.269`, `runtime_upload_ms=7.538`,
+  `sync_ms=4.362`, `prepare_ms=3.247`, `gpu_upload_ms=0.364`,
+  `sync_unattributed_ms=0.752`, and `stereo_poll_wait_ms=8.817`.
+
+Deferred note for closeout: the next implementation chunk should avoid changing
+upload buffer lifetime based only on aggregate maxima. The worst-frame
+cross-check points instead at render-thread overlap/eye poll wait plus runtime
+sync prepare attribution. Keep post-sync upload drain and removal-only apply
+cost on the watch list, but split eye submit/poll wait and sync prepare before
+adding a new upload pacing policy.
 
 Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
 default policy. It was the best held-capacity result, but the controlled churn
