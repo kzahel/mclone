@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { discoverTextureCandidates } from "./candidate-index";
+import { buildTextureCurationState } from "./curation";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { textureLabOutputRoot } from "../output-root";
@@ -26,6 +27,7 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
   const outputRoot = path.resolve(options.outputRoot ?? textureLabOutputRoot());
   const pack = await loadTexturePack(inputPath);
   const candidateDiscovery = await discoverTextureCandidates(outputRoot, { textureNames: Object.keys(pack.textures) });
+  const curation = await buildTextureCurationState(outputRoot, candidateDiscovery.candidates);
   const blockUsagesByTexture = collectBlockUsages(pack);
   const textures = await Promise.all(
     Object.entries(pack.textures)
@@ -58,11 +60,18 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
       candidateCount: candidateDiscovery.candidates.length,
       associatedCandidateCount: candidateDiscovery.candidates.filter((candidate) => candidate.textureName !== null).length,
       archivedCandidateCount: candidateDiscovery.candidates.filter((candidate) => candidate.archived).length,
+      curatedSelectionCount: curation.selectedCount,
     },
+    curation,
     textures,
     candidates: candidateDiscovery.candidates,
     blocks,
-    warnings: [...buildWarnings(textures), ...buildCandidateWarnings(candidateDiscovery.candidates), ...candidateDiscovery.warnings],
+    warnings: [
+      ...buildWarnings(textures),
+      ...buildCandidateWarnings(candidateDiscovery.candidates),
+      ...buildCurationWarnings(curation),
+      ...candidateDiscovery.warnings,
+    ],
   };
 }
 
@@ -265,4 +274,8 @@ function buildCandidateWarnings(candidates: { textureName: string | null }[]): s
   return unassociatedCount > 0
     ? [`${unassociatedCount} generated candidate artifact(s) are not associated with an authored texture.`]
     : [];
+}
+
+function buildCurationWarnings(curation: { staleSelections: { textureName: string; reason: string }[] }): string[] {
+  return curation.staleSelections.map((selection) => `Curated selection for ${selection.textureName} is stale: ${selection.reason}.`);
 }

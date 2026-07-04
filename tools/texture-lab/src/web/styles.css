@@ -211,6 +211,16 @@ h3 {
   font-size: 13px;
 }
 
+.statusBanner {
+  display: flex;
+  gap: 18px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--muted-strong);
+  font-size: 13px;
+}
+
 .errorBanner {
   color: var(--error-text);
   background: var(--error-bg);
@@ -757,6 +767,18 @@ h3 {
   color: var(--text);
 }
 
+.inlineButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.candidateActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 8px;
+}
+
 .candidateGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -788,6 +810,10 @@ h3 {
 
 .candidateCard.previewed {
   border-color: var(--accent-border);
+}
+
+.candidateCard.active {
+  border-color: var(--accent);
 }
 
 .candidateImageFrame {
@@ -874,6 +900,16 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: 5px;
   background: var(--accent-soft);
+  color: var(--chip-text);
+  font-size: 11px;
+}
+
+.activePill {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--card));
   color: var(--chip-text);
   font-size: 11px;
 }

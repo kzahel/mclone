@@ -9,6 +9,7 @@
     "analyze": "tsx src/analyze.ts packs/mclone-default/texture.ts",
     "catalog": "tsx src/catalog.ts packs/mclone-default/texture.ts",
     "project-diffusion": "tsx src/project-diffusion.ts packs/mclone-default/texture.ts",
+    "apply-curation": "tsx src/apply-curation.ts packs/mclone-default/texture.ts",
     "runtime-compat": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat",
     "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only",
     "web:dev": "tsx src/web-server/server.ts",

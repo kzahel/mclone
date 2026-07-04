@@ -9,7 +9,9 @@ coverage landed 2026-07-04. Slice A2.6 system-default light/dark theme toggle
 landed 2026-07-04. Slice A2.7 overview atlas and block-bundle comparison
 views landed 2026-07-04. Slice A2.8 temporary candidate preview selection
 landed 2026-07-04. Slice A2.9 raw/tinted comparison variants landed
-2026-07-04. Next priority is preview generation parity.
+2026-07-04. Slice C0 persisted active-pack candidate selections and generated
+pack apply landed 2026-07-04. Next priority is freeze request manifests for
+durable source promotion.
 
 ## Purpose
 
@@ -264,7 +266,7 @@ Keep the first API explicit and file-system constrained:
 
 - `GET /api/index`
   - returns texture groups, current authored entries, available candidates,
-    review-state summary, and stale-artifact warnings
+    curation-state summary, and stale-artifact warnings
 - `GET /api/textures/:textureName`
   - returns full detail for one texture and its related candidates
 - `GET /api/candidates?texture=<name>`
@@ -275,16 +277,23 @@ Keep the first API explicit and file-system constrained:
     - `generated-assets/texture-lab/`
     - the optional `MCLONE_TEXTURE_LAB_OUTPUT_ROOT`
     - local reference assets already permitted by texture-lab reference lookup
-- `POST /api/review-state`
-  - writes local favorite/reject/active/notes changes
+- `POST /api/curation/select`
+  - persists one active projected candidate selection for a texture under
+    `generated-assets/texture-lab/curation/selections.v1.json`
+- `POST /api/curation/clear`
+  - clears one active candidate selection from the local curation manifest
+- `POST /api/curation/apply`
+  - regenerates `pack/` and `runtime-pack/` from authored source plus persisted
+    candidate selections, then validates tintable source-neutrality before
+    writing generated pack assets
 - `POST /api/reindex`
   - rebuilds the in-memory index after new CLI outputs are generated
 
 Future action endpoints:
 
-- `POST /api/preview-pack`
-  - writes a temporary selected-candidate runtime-compatible pack under
-    `generated-assets/texture-lab/ui-preview-pack/`
+- `POST /api/review-state`
+  - writes local favorite/reject/notes/tags changes after active selections are
+    stable
 - `POST /api/freeze-request`
   - writes a provenance-rich freeze request manifest; first implementation can
     still require an agent to apply the source patch
@@ -616,7 +625,21 @@ static review sheet.
 
 Let the human curate without mutating source.
 
-Deliverables:
+Slice C0 landed 2026-07-04:
+
+- persisted active projected candidate choices in
+  `generated-assets/texture-lab/curation/selections.v1.json`
+- surfaced selected candidate count, `Pack` candidate pills, and
+  `Select for Pack` / `Clear Pack` / `Apply Pack` controls in the React UI
+- added `/api/curation/select`, `/api/curation/clear`, and
+  `/api/curation/apply`
+- added `pnpm texture-lab:apply-curation` for command-line regeneration
+- regenerated `generated-assets/texture-lab/pack/` and `runtime-pack/` from
+  authored source plus selected projected candidates
+- rejected diffusion-only raw candidates for pack promotion and validated
+  tintable source neutrality before writing generated assets
+
+Remaining deliverables:
 
 - persist favorite/rejected/active/notes/tags in
   `generated-assets/texture-lab/review-state.json`
@@ -737,12 +760,13 @@ Slice A is complete when:
 
 ## Immediate Next Step
 
-Implement Slice B preview generation parity:
+Implement Slice D freeze request manifests:
 
-1. factor reusable preview generation helpers behind typed `src/core/` APIs
-2. cache UI preview artifacts under `generated-assets/texture-lab/ui-cache/`
-3. show candidate/source/tinted/tile/mip/block/terrain evidence on demand
-4. detect stale preview cache entries from source and candidate hashes
-5. update Playwright coverage for the new preview behavior
-6. visually compare at least one UI-generated preview set against an existing
-   static review sheet
+1. write a local freeze request from the currently selected pack candidate
+2. include texture name, codename, candidate id, projected image path, raw image
+   path, prompt metadata, seed, strength, model id, palette, resolution, and
+   source-policy validation summary
+3. require archived or archivable candidates before a request can be written
+4. keep source mutation agent/CLI-mediated; the UI should not patch or commit
+   source directly
+5. add Playwright coverage for writing and inspecting a freeze request

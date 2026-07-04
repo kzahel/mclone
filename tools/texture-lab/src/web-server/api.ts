@@ -2,7 +2,14 @@ import fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { buildTextureLabIndex } from "../core/texture-index";
+import {
+  applyTextureCuration,
+  clearTextureCandidateCuration,
+  selectTextureCandidateForCuration,
+  TextureCurationError,
+} from "../core/curation";
 import { isHexColor } from "../dsl";
+import { loadTexturePack } from "../load";
 import type { TextureLabIndex } from "../core/index-model";
 import { parseHexColor, tintTexture } from "../image";
 import { textureLabOutputRoot } from "../output-root";
@@ -63,6 +70,38 @@ export function createTextureLabApi(options: TextureLabApiOptions): TextureLabAp
 
       if (request.method === "POST" && url.pathname === "/api/reindex") {
         sendJson(response, await loadIndex(true));
+        return true;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/curation/select") {
+        const body = await readJsonBody<{ textureName?: unknown; candidateId?: unknown }>(request);
+        if (typeof body.textureName !== "string" || typeof body.candidateId !== "string") {
+          sendJson(response, { error: "Expected textureName and candidateId" }, 400);
+          return true;
+        }
+        const index = await loadIndex();
+        await selectTextureCandidateForCuration(outputRoot, index.candidates, body.textureName, body.candidateId);
+        sendJson(response, await loadIndex(true));
+        return true;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/curation/clear") {
+        const body = await readJsonBody<{ textureName?: unknown }>(request);
+        if (typeof body.textureName !== "string") {
+          sendJson(response, { error: "Expected textureName" }, 400);
+          return true;
+        }
+        const index = await loadIndex();
+        await clearTextureCandidateCuration(outputRoot, index.candidates, body.textureName);
+        sendJson(response, await loadIndex(true));
+        return true;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/curation/apply") {
+        const index = await loadIndex();
+        const pack = await loadTexturePack(inputPath);
+        const result = await applyTextureCuration({ outputRoot, pack, candidates: index.candidates });
+        sendJson(response, { result, index: await loadIndex(true) });
         return true;
       }
 
@@ -148,8 +187,23 @@ function sendJson(response: ServerResponse, payload: unknown, statusCode = 200):
   response.end(JSON.stringify(payload, null, 2));
 }
 
+async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  if (chunks.length === 0) {
+    return {} as T;
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+}
+
 function sendError(response: ServerResponse, error: unknown): void {
   if (error instanceof ImageFileError) {
+    sendJson(response, { error: error.message }, error.statusCode);
+    return;
+  }
+  if (error instanceof TextureCurationError) {
     sendJson(response, { error: error.message }, error.statusCode);
     return;
   }

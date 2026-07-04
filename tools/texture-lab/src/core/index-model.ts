@@ -16,6 +16,7 @@ export interface TextureLabIndex {
   outputRoot: string;
   pack: TexturePackSummary;
   summary: TextureLabIndexSummary;
+  curation: TextureCurationState;
   textures: TextureIndexEntry[];
   candidates: TextureCandidateEntry[];
   blocks: BlockIndexEntry[];
@@ -39,6 +40,7 @@ export interface TextureLabIndexSummary {
   candidateCount: number;
   associatedCandidateCount: number;
   archivedCandidateCount: number;
+  curatedSelectionCount: number;
 }
 
 export interface TextureIndexEntry {
@@ -115,6 +117,7 @@ export interface TextureCandidateEntry {
   status: string | null;
   score: number | null;
   reasons: string[];
+  promotable: boolean;
   images: {
     raw: TextureImageRef;
     rawTile: TextureImageRef;
@@ -122,6 +125,30 @@ export interface TextureCandidateEntry {
     contactSheet: TextureImageRef;
     reviewSheet: TextureImageRef;
   };
+}
+
+export interface TextureCurationState {
+  schemaVersion: 1;
+  manifestPath: string;
+  selectedCount: number;
+  selections: TextureCurationSelectionEntry[];
+  staleSelections: TextureCurationStaleSelectionEntry[];
+}
+
+export interface TextureCurationSelectionEntry {
+  textureName: string;
+  candidateId: string;
+  codename: string;
+  source: TextureCandidateSource;
+  selectedAt: string;
+  image: TextureImageRef;
+}
+
+export interface TextureCurationStaleSelectionEntry {
+  textureName: string;
+  candidateId: string;
+  selectedAt: string;
+  reason: string;
 }
 
 export interface BlockIndexEntry {

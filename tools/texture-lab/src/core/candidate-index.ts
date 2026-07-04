@@ -176,6 +176,7 @@ async function candidatesFromDiffusionManifest(
       status: null,
       score: null,
       reasons: [],
+      promotable: false,
       images: {
         raw: await imageRef("Raw", resolveArtifactPath(candidate.png, manifestDir, outputRoot)),
         rawTile: await imageRef("Raw 3x3", resolveArtifactPath(candidate.tile3x3_png, manifestDir, outputRoot)),
@@ -238,6 +239,7 @@ async function candidatesFromProjectionSummary(
       status: primary?.status ?? null,
       score: primary?.score ?? null,
       reasons: primary?.reasons ?? [],
+      promotable: Boolean(primary?.png),
       images: {
         raw: await imageRef("Raw", resolveArtifactPath(sourceCandidate?.png, sourceManifestPath ? path.dirname(sourceManifestPath) : summaryDir, outputRoot)),
         rawTile: await imageRef("Raw 3x3", resolveArtifactPath(sourceCandidate?.tile3x3_png, sourceManifestPath ? path.dirname(sourceManifestPath) : summaryDir, outputRoot)),
@@ -292,6 +294,7 @@ async function candidatesFromArchiveManifest(archivePath: string, outputRoot: st
       status: primary?.triage?.status ?? null,
       score: primary?.triage?.score ?? null,
       reasons: primary?.triage?.reasons ?? [],
+      promotable: Boolean(primary?.png?.path),
       images: {
         raw: await imageRef("Raw", resolveArchiveFile(candidate.raw, archiveDir, outputRoot)),
         rawTile: await imageRef("Raw 3x3", resolveArchiveFile(candidate.rawTile, archiveDir, outputRoot)),

@@ -4,6 +4,7 @@ import type { TextureLabState } from "./textureLabStore";
 export const selectIndex = (state: TextureLabState): TextureLabIndex | null => state.index;
 export const selectLoadStatus = (state: TextureLabState): TextureLabState["loadStatus"] => state.loadStatus;
 export const selectError = (state: TextureLabState): string | null => state.error;
+export const selectCurationStatus = (state: TextureLabState): string | null => state.curationStatus;
 export const selectSelectedTextureName = (state: TextureLabState): string | null => state.selectedTextureName;
 export const selectSelectedCandidateId = (state: TextureLabState): string | null => state.selectedCandidateId;
 export const selectPreviewSelectionsByTexture = (state: TextureLabState): Record<string, string> =>

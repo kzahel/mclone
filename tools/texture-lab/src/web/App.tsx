@@ -9,6 +9,7 @@ import {
   filteredTextures,
   materialOptions,
   selectError,
+  selectCurationStatus,
   selectIndex,
   selectLoadStatus,
   selectMaterialFilter,
@@ -30,6 +31,7 @@ export function App(): JSX.Element {
   const index = useTextureLabStore(selectIndex);
   const loadStatus = useTextureLabStore(selectLoadStatus);
   const error = useTextureLabStore(selectError);
+  const curationStatus = useTextureLabStore(selectCurationStatus);
   const textures = useTextureLabStore(useShallow(filteredTextures));
   const activeTexture = useTextureLabStore(selectedTexture);
   const activeCandidates = useTextureLabStore(useShallow(activeTextureCandidates));
@@ -37,6 +39,8 @@ export function App(): JSX.Element {
   const selectedTextureName = useTextureLabStore(selectSelectedTextureName);
   const selectedCandidateId = useTextureLabStore(selectSelectedCandidateId);
   const previewSelectionsByTexture = useTextureLabStore(selectPreviewSelectionsByTexture);
+  const curatedSelectionsByTexture = curationSelectionsByTexture(index);
+  const visibleSelectionsByTexture = { ...curatedSelectionsByTexture, ...previewSelectionsByTexture };
   const themeMode = useTextureLabStore(selectThemeMode);
   const previewMode = useTextureLabStore(selectPreviewMode);
   const search = useTextureLabStore(selectSearch);
@@ -50,6 +54,9 @@ export function App(): JSX.Element {
   const selectCandidate = useTextureLabStore((state) => state.selectCandidate);
   const setPreviewCandidate = useTextureLabStore((state) => state.setPreviewCandidate);
   const clearPreviewCandidate = useTextureLabStore((state) => state.clearPreviewCandidate);
+  const selectCurationCandidate = useTextureLabStore((state) => state.selectCurationCandidate);
+  const clearCurationSelection = useTextureLabStore((state) => state.clearCurationSelection);
+  const applyCuration = useTextureLabStore((state) => state.applyCuration);
   const setPreviewMode = useTextureLabStore((state) => state.setPreviewMode);
   const syncSystemTheme = useTextureLabStore((state) => state.syncSystemTheme);
   const toggleTheme = useTextureLabStore((state) => state.toggleTheme);
@@ -84,6 +91,7 @@ export function App(): JSX.Element {
           <SummaryItem label="sheets" value={index?.summary.sheetsPresent ?? 0} />
           <SummaryItem label="runtime" value={index?.summary.runtimeExportsPresent ?? 0} />
           <SummaryItem label="candidates" value={index?.summary.associatedCandidateCount ?? 0} />
+          <SummaryItem label="selected" value={index?.summary.curatedSelectionCount ?? 0} />
         </div>
         <div className="toolbarActions">
           <button
@@ -101,6 +109,7 @@ export function App(): JSX.Element {
       </header>
 
       {error ? <div className="errorBanner">{error}</div> : null}
+      {curationStatus ? <div className="statusBanner">{curationStatus}</div> : null}
       {index?.warnings.length ? (
         <div className="warningBanner">
           {index.warnings.map((warning) => (
@@ -164,7 +173,7 @@ export function App(): JSX.Element {
                 <TextureAtlas
                   textures={textures}
                   candidates={index.candidates}
-                  previewSelectionsByTexture={previewSelectionsByTexture}
+                  previewSelectionsByTexture={visibleSelectionsByTexture}
                   selectedTextureName={selectedTextureName}
                   onSelectTexture={selectTexture}
                 />
@@ -173,7 +182,7 @@ export function App(): JSX.Element {
                   blocks={index.blocks}
                   textures={textures}
                   candidates={index.candidates}
-                  previewSelectionsByTexture={previewSelectionsByTexture}
+                  previewSelectionsByTexture={visibleSelectionsByTexture}
                   selectedTextureName={selectedTextureName}
                   onSelectTexture={selectTexture}
                 />
@@ -183,9 +192,14 @@ export function App(): JSX.Element {
                   candidates={activeCandidates}
                   selectedCandidateId={selectedCandidateId}
                   previewCandidateId={previewSelectionsByTexture[activeTexture.name] ?? null}
+                  curationCandidateId={curatedSelectionsByTexture[activeTexture.name] ?? null}
+                  curationSelectedCount={index.curation.selectedCount}
                   onSelectCandidate={selectCandidate}
                   onUsePreview={setPreviewCandidate}
                   onClearPreview={clearPreviewCandidate}
+                  onSelectCuration={selectCurationCandidate}
+                  onClearCuration={clearCurationSelection}
+                  onApplyCuration={applyCuration}
                 />
               ) : (
                 <EmptyState loadStatus={loadStatus} />
@@ -225,22 +239,39 @@ function SummaryItem({ label, value }: { label: string; value: number }): JSX.El
   );
 }
 
+function curationSelectionsByTexture(index: ReturnType<typeof selectIndex>): Record<string, string> {
+  if (!index) {
+    return {};
+  }
+  return Object.fromEntries(index.curation.selections.map((selection) => [selection.textureName, selection.candidateId]));
+}
+
 function TexturePreview({
   texture,
   candidates,
   selectedCandidateId,
   previewCandidateId,
+  curationCandidateId,
+  curationSelectedCount,
   onSelectCandidate,
   onUsePreview,
   onClearPreview,
+  onSelectCuration,
+  onClearCuration,
+  onApplyCuration,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
   selectedCandidateId: string | null;
   previewCandidateId: string | null;
+  curationCandidateId: string | null;
+  curationSelectedCount: number;
   onSelectCandidate: (id: string) => void;
   onUsePreview: (textureName: string, candidateId: string) => void;
   onClearPreview: (textureName: string) => void;
+  onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
+  onClearCuration: (textureName: string) => Promise<void>;
+  onApplyCuration: () => Promise<void>;
 }): JSX.Element {
   return (
     <>
@@ -268,9 +299,14 @@ function TexturePreview({
         candidates={candidates}
         selectedCandidateId={selectedCandidateId}
         previewCandidateId={previewCandidateId}
+        curationCandidateId={curationCandidateId}
+        curationSelectedCount={curationSelectedCount}
         onSelectCandidate={onSelectCandidate}
         onUsePreview={onUsePreview}
         onClearPreview={onClearPreview}
+        onSelectCuration={onSelectCuration}
+        onClearCuration={onClearCuration}
+        onApplyCuration={onApplyCuration}
       />
     </>
   );
@@ -314,31 +350,66 @@ function CandidateSection({
   candidates,
   selectedCandidateId,
   previewCandidateId,
+  curationCandidateId,
+  curationSelectedCount,
   onSelectCandidate,
   onUsePreview,
   onClearPreview,
+  onSelectCuration,
+  onClearCuration,
+  onApplyCuration,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
   selectedCandidateId: string | null;
   previewCandidateId: string | null;
+  curationCandidateId: string | null;
+  curationSelectedCount: number;
   onSelectCandidate: (id: string) => void;
   onUsePreview: (textureName: string, candidateId: string) => void;
   onClearPreview: (textureName: string) => void;
+  onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
+  onClearCuration: (textureName: string) => Promise<void>;
+  onApplyCuration: () => Promise<void>;
 }): JSX.Element {
   const sortedCandidates = [...candidates].sort(compareCandidateDisplay);
+  const selectedCandidate = sortedCandidates.find((candidate) => candidate.id === selectedCandidateId) ?? null;
+  const canSelectForPack = Boolean(selectedCandidate?.promotable && selectedCandidate.images.projected.exists);
   return (
     <section className="candidateSection">
       <div className="subsectionHeader">
         <div>
           <h3>Generated Candidates</h3>
-          <p>{sortedCandidates.length ? `${sortedCandidates.length} linked to ${texture.name}` : "No local candidates linked yet."}</p>
+          <p>
+            {sortedCandidates.length ? `${sortedCandidates.length} linked to ${texture.name}` : "No local candidates linked yet."}
+            {curationCandidateId ? ` / pack ${candidateCodename(sortedCandidates, curationCandidateId)}` : ""}
+          </p>
         </div>
-        {previewCandidateId ? (
-          <button className="inlineButton" type="button" onClick={() => onClearPreview(texture.name)}>
-            Clear Preview
+        <div className="candidateActions">
+          {selectedCandidate ? (
+            <button
+              className="inlineButton"
+              type="button"
+              disabled={!canSelectForPack}
+              onClick={() => void onSelectCuration(texture.name, selectedCandidate.id)}
+            >
+              Select for Pack
+            </button>
+          ) : null}
+          {curationCandidateId ? (
+            <button className="inlineButton" type="button" onClick={() => void onClearCuration(texture.name)}>
+              Clear Pack
+            </button>
+          ) : null}
+          {previewCandidateId ? (
+            <button className="inlineButton" type="button" onClick={() => onClearPreview(texture.name)}>
+              Clear Preview
+            </button>
+          ) : null}
+          <button className="inlineButton" type="button" disabled={curationSelectedCount === 0} onClick={() => void onApplyCuration()}>
+            Apply Pack
           </button>
-        ) : null}
+        </div>
       </div>
       {sortedCandidates.length ? (
         <div className="candidateGrid">
@@ -348,6 +419,7 @@ function CandidateSection({
               candidate={candidate}
               selected={candidate.id === selectedCandidateId}
               previewed={candidate.id === previewCandidateId}
+              active={candidate.id === curationCandidateId}
               onSelect={onSelectCandidate}
               onUsePreview={onUsePreview}
             />
@@ -364,12 +436,14 @@ function CandidateCard({
   candidate,
   selected,
   previewed,
+  active,
   onSelect,
   onUsePreview,
 }: {
   candidate: TextureCandidateEntry;
   selected: boolean;
   previewed: boolean;
+  active: boolean;
   onSelect: (id: string) => void;
   onUsePreview: (textureName: string, candidateId: string) => void;
 }): JSX.Element {
@@ -378,7 +452,7 @@ function CandidateCard({
   const sourceLabel = candidate.archived ? "archive" : candidate.source;
   return (
     <button
-      className={candidateCardClassName(selected, previewed)}
+      className={candidateCardClassName(selected, previewed, active)}
       type="button"
       aria-pressed={selected}
       aria-label={`${candidate.codename} ${sourceLabel} candidate`}
@@ -397,6 +471,7 @@ function CandidateCard({
           <code>{candidate.codename}</code>
           <span className="candidatePills">
             {previewed ? <span className="previewPill">Previewing</span> : null}
+            {active ? <span className="activePill">Pack</span> : null}
             <span className="sourcePill">{sourceLabel}</span>
           </span>
         </div>
@@ -419,8 +494,12 @@ function CandidateCard({
   );
 }
 
-function candidateCardClassName(selected: boolean, previewed: boolean): string {
-  return ["candidateCard", selected ? "selected" : "", previewed ? "previewed" : ""].filter(Boolean).join(" ");
+function candidateCardClassName(selected: boolean, previewed: boolean, active: boolean): string {
+  return ["candidateCard", selected ? "selected" : "", previewed ? "previewed" : "", active ? "active" : ""].filter(Boolean).join(" ");
+}
+
+function candidateCodename(candidates: TextureCandidateEntry[], candidateId: string): string {
+  return candidates.find((candidate) => candidate.id === candidateId)?.codename ?? "selected";
 }
 
 function compareCandidateDisplay(left: TextureCandidateEntry, right: TextureCandidateEntry): number {

@@ -11,6 +11,9 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(index.summary.candidateCount).toBe(4);
   expect(index.summary.associatedCandidateCount).toBe(4);
   expect(index.summary.archivedCandidateCount).toBe(1);
+  expect(index.summary.curatedSelectionCount).toBe(0);
+  expect(index.curation.selectedCount).toBe(0);
+  expect(index.curation.manifestPath).toContain("generated-assets/texture-lab-playwright/curation/selections.v1.json");
 
   const grassCandidatesResponse = await request.get("/api/candidates?texture=grass_block_top");
   await expect(grassCandidatesResponse).toBeOK();
@@ -22,6 +25,12 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     "G5101S74:projection",
     "G5102S62:diffusion",
   ]);
+  expect(grassCandidates.find((candidate: { source: string; promotable: boolean }) => candidate.source === "diffusion")?.promotable).toBe(false);
+  const archivedCandidate = grassCandidates.find((candidate: { source: string; id: string; promotable: boolean }) => candidate.source === "archive");
+  expect(archivedCandidate?.promotable).toBe(true);
+  if (!archivedCandidate) {
+    throw new Error("Missing archived grass candidate fixture");
+  }
 
   const grass = index.textures.find((texture: { name: string }) => texture.name === "grass_block_top");
   expect(grass?.images.currentExport.exists).toBe(true);
@@ -40,6 +49,39 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   );
   await expect(tintedImageResponse).toBeOK();
   expect(tintedImageResponse.headers()["content-type"]).toBe("image/png");
+
+  const selectResponse = await request.post("/api/curation/select", {
+    data: { textureName: "grass_block_top", candidateId: archivedCandidate.id },
+  });
+  await expect(selectResponse).toBeOK();
+  const selectedIndex = await selectResponse.json();
+  expect(selectedIndex.summary.curatedSelectionCount).toBe(1);
+  expect(selectedIndex.curation.selections[0]).toMatchObject({
+    textureName: "grass_block_top",
+    candidateId: archivedCandidate.id,
+    codename: "G5101S74",
+    source: "archive",
+  });
+
+  const applyResponse = await request.post("/api/curation/apply");
+  await expect(applyResponse).toBeOK();
+  const applyPayload = await applyResponse.json();
+  expect(applyPayload.result.applied).toHaveLength(1);
+  expect(applyPayload.result.applied[0]).toMatchObject({
+    textureName: "grass_block_top",
+    codename: "G5101S74",
+    runtimeCompatPath: "assets/minecraft/textures/block/grass_block_top.png",
+  });
+  const appliedGrass = applyPayload.index.textures.find((texture: { name: string }) => texture.name === "grass_block_top");
+  const appliedImageResponse = await request.get(`/api/image?path=${encodeURIComponent(appliedGrass.images.currentExport.path)}`);
+  await expect(appliedImageResponse).toBeOK();
+  expect(saturation(meanRgb(decodePng(await appliedImageResponse.body())))).toBeLessThan(0.005);
+
+  const clearResponse = await request.post("/api/curation/clear", {
+    data: { textureName: "grass_block_top" },
+  });
+  await expect(clearResponse).toBeOK();
+  expect((await clearResponse.json()).summary.curatedSelectionCount).toBe(0);
 });
 
 test("defaults to the system theme and toggles light or dark mode", async ({ page }) => {
@@ -167,6 +209,18 @@ test("supports texture filtering, candidate selection, inspector details, keyboa
   await expect(inspector).toContainText("playwright archive accepted");
   await expect(inspector).toContainText("diffusion-archive");
   await expect(page.locator(".paletteSwatches span")).toHaveCount(4);
+
+  await page.getByRole("button", { name: "Select for Pack" }).click();
+  await expect(page.getByText("Selected candidate for grass_block_top")).toBeVisible();
+  await expect(archiveCard).toContainText("Pack");
+  await expect(page.getByText("pack G5101S74")).toBeVisible();
+
+  await page.getByRole("button", { name: "Apply Pack" }).click();
+  await expect(page.getByText("Applied 1 selection to generated pack")).toBeVisible();
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-curation-pack.png", fullPage: true });
+
+  await page.getByRole("button", { name: "Clear Pack" }).click();
+  await expect(page.getByText("Cleared pack selection for grass_block_top")).toBeVisible();
 
   const diffusionCard = page.getByRole("button", { name: "G5102S62 diffusion candidate" });
   await diffusionCard.focus();

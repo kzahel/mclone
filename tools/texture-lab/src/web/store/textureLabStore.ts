@@ -19,12 +19,16 @@ export interface TextureLabState {
   statusFilter: string;
   loadStatus: LoadStatus;
   error: string | null;
+  curationStatus: string | null;
   loadIndex: () => Promise<void>;
   reindex: () => Promise<void>;
   selectTexture: (name: string) => void;
   selectCandidate: (id: string) => void;
   setPreviewCandidate: (textureName: string, candidateId: string) => void;
   clearPreviewCandidate: (textureName: string) => void;
+  selectCurationCandidate: (textureName: string, candidateId: string) => Promise<void>;
+  clearCurationSelection: (textureName: string) => Promise<void>;
+  applyCuration: () => Promise<void>;
   setPreviewMode: (mode: PreviewMode) => void;
   syncSystemTheme: (themeMode: ThemeMode) => void;
   toggleTheme: () => void;
@@ -46,6 +50,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   statusFilter: "all",
   loadStatus: "idle",
   error: null,
+  curationStatus: null,
 
   async loadIndex() {
     if (get().loadStatus === "loading") {
@@ -62,6 +67,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
         previewSelectionsByTexture: prunePreviewSelections(index, get().previewSelectionsByTexture),
         loadStatus: "ready",
         error: null,
+        curationStatus: null,
       });
     } catch (error) {
       set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
@@ -80,6 +86,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
         previewSelectionsByTexture: prunePreviewSelections(index, get().previewSelectionsByTexture),
         loadStatus: "ready",
         error: null,
+        curationStatus: null,
       });
     } catch (error) {
       set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
@@ -119,6 +126,60 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
     });
   },
 
+  async selectCurationCandidate(textureName, candidateId) {
+    set({ loadStatus: "loading", error: null, curationStatus: null });
+    try {
+      const index = await postIndex("/api/curation/select", { textureName, candidateId });
+      set({
+        index,
+        selectedTextureName: selectTextureAfterLoad(index, get().selectedTextureName),
+        selectedCandidateId: selectCandidateAfterLoad(index, textureName, candidateId),
+        previewSelectionsByTexture: prunePreviewSelections(index, get().previewSelectionsByTexture),
+        loadStatus: "ready",
+        error: null,
+        curationStatus: `Selected candidate for ${textureName}`,
+      });
+    } catch (error) {
+      set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  async clearCurationSelection(textureName) {
+    set({ loadStatus: "loading", error: null, curationStatus: null });
+    try {
+      const index = await postIndex("/api/curation/clear", { textureName });
+      set({
+        index,
+        selectedTextureName: selectTextureAfterLoad(index, get().selectedTextureName),
+        selectedCandidateId: selectCandidateAfterLoad(index, textureName, get().selectedCandidateId),
+        previewSelectionsByTexture: prunePreviewSelections(index, get().previewSelectionsByTexture),
+        loadStatus: "ready",
+        error: null,
+        curationStatus: `Cleared pack selection for ${textureName}`,
+      });
+    } catch (error) {
+      set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  async applyCuration() {
+    set({ loadStatus: "loading", error: null, curationStatus: null });
+    try {
+      const response = await postApplyCuration();
+      set({
+        index: response.index,
+        selectedTextureName: selectTextureAfterLoad(response.index, get().selectedTextureName),
+        selectedCandidateId: selectCandidateAfterLoad(response.index, get().selectedTextureName, get().selectedCandidateId),
+        previewSelectionsByTexture: prunePreviewSelections(response.index, get().previewSelectionsByTexture),
+        loadStatus: "ready",
+        error: null,
+        curationStatus: `Applied ${response.result.applied.length} selection${response.result.applied.length === 1 ? "" : "s"} to generated pack`,
+      });
+    } catch (error) {
+      set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
   setPreviewMode(previewMode) {
     set({ previewMode });
   },
@@ -150,12 +211,31 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
 }));
 
 async function fetchIndex(url: string, init?: RequestInit): Promise<TextureLabIndex> {
+  return fetchJson<TextureLabIndex>(url, init);
+}
+
+async function postIndex(url: string, body: unknown): Promise<TextureLabIndex> {
+  return fetchIndex(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function postApplyCuration(): Promise<{
+  result: { applied: { textureName: string }[] };
+  index: TextureLabIndex;
+}> {
+  return fetchJson("/api/curation/apply", { method: "POST" });
+}
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `Texture-lab API returned ${response.status}`);
   }
-  return (await response.json()) as TextureLabIndex;
+  return (await response.json()) as T;
 }
 
 function selectTextureAfterLoad(index: TextureLabIndex, current: string | null): string | null {

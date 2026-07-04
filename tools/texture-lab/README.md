@@ -167,6 +167,25 @@ with the native runtime:
 MCLONE_FIRST_PARTY_ASSET_ROOT=generated-assets/texture-lab/runtime-pack pnpm native:timedemo:smoke
 ```
 
+The browser UI can persist active candidate choices without mutating pack
+source. `Select for Pack` writes a local manifest:
+
+```text
+generated-assets/texture-lab/curation/selections.v1.json
+```
+
+`Apply Pack` or the matching CLI command regenerates `pack/` and
+`runtime-pack/` from the authored pack plus those selected projected candidate
+PNGs. Diffusion-only raw candidates are preview-only; candidates must have a
+projected image before they can be selected for pack output.
+
+```sh
+pnpm texture-lab:apply-curation
+```
+
+Tintable selections are validated with the same `sourceNeutrality` policy as
+authored tintable textures before the generated pack is written.
+
 The packed overlay command builds the same overrides into a first-party-only
 `.pbp` file without reading the local Mojang extraction:
 
@@ -198,9 +217,11 @@ The test harness builds a deterministic fixture under the gitignored
 `generated-assets/texture-lab-playwright/` root, starts the local texture-lab
 server, verifies authored texture indexing, generated candidate discovery,
 allowlisted image serving, candidate selection, inspector details, keyboard
-activation, reindex preservation, empty-candidate behavior, system-default dark
-mode, and manual light/dark toggling. Validation screenshots are written to
-`/tmp/mclone-texture-lab-playwright-a2.png` and
+activation, persisted active-pack selection, generated-pack apply, reindex
+preservation, empty-candidate behavior, system-default dark mode, and manual
+light/dark toggling. Validation screenshots are written to
+`/tmp/mclone-texture-lab-playwright-a2.png`,
+`/tmp/mclone-texture-lab-playwright-curation-pack.png`, and
 `/tmp/mclone-texture-lab-playwright-dark-mode.png`.
 
 ## Source Format
