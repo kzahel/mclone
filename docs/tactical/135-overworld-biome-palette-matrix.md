@@ -1,10 +1,10 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, nineteen supported feature-family groups, and 57 F-checked
+overworld tint IDs, twenty supported feature-family groups, and 58 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp/swamp-hills
 lily pads, blue orchids, sugar cane, and small mushrooms, ocean water plants,
-warm-ocean coral/sea-pickle,
+warm-ocean coral/sea-pickle, ice-spikes packed ice,
 dark-forest canopy/mushroom,
 mushroom-field/shore huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, and ordinary
@@ -171,7 +171,7 @@ notes.
 | 132 | `minecraft:flower_forest` | forest | forest grass/tint, dense small flowers, and common tall flowers checked; mushrooms/extras gap | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass plus spruce/fern and sweet berry bushes checked | seed `6126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 134 | `minecraft:swamp_hills` | swamp | swamp-hills tint/surface plus native swamp subset, blue orchids, small mushrooms, sugar cane, and lily pads checked; hill fossil/seagrass/pumpkin gap | seed `89335`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 140 | `minecraft:ice_spikes` | frozen-land | snow/ice-spikes surface checked; spike feature gap | seed `59`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 140 | `minecraft:ice_spikes` | frozen-land | snow/ice-spikes surface plus packed-ice spike/patch coverage checked; exact spike/patch shape gap | seed `59`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 149 | `minecraft:modified_jungle` | jungle | jungle tint/surface and jungle log/leaves tree family checked; dense vines/cocoa gap | seed `1374`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 151 | `minecraft:modified_jungle_edge` | jungle-edge | jungle-edge tint/surface and jungle log/leaves tree family checked; vegetation gap | seed `314096`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 155 | `minecraft:tall_birch_forest` | birch | birch tint/surface and tall-birch selector log/leaves family checked | seed `48`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -222,12 +222,13 @@ Landed:
   top-surface column in the row's expected surface family.
 - The same worldgen probe now asserts currently supported visible feature
   families for plains, desert, ordinary forest, swamp, base taiga, snowy
-  tundra, base snowy taiga, badlands, and ocean water plants, warm-ocean coral
-  blocks and sea pickles, dark-forest dark oak and huge mushroom block
-  families, mushroom-field/shore huge mushrooms, birch log/leaves trees,
-  savanna acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus
-  jungle log/leaves vegetation, flower-forest dense and common flowers, and
-  sunflower-plains sunflower patches. Desert, desert hills, desert lakes, and
+  tundra, base snowy taiga, badlands, ice-spikes packed ice, and ocean water
+  plants, warm-ocean coral blocks and sea pickles, dark-forest dark oak and
+  huge mushroom block families, mushroom-field/shore huge mushrooms, birch
+  log/leaves trees, savanna acacia trees, jungle log/leaves trees, and
+  bamboo-jungle bamboo plus jungle log/leaves vegetation, flower-forest dense
+  and common flowers, and sunflower-plains sunflower patches. Desert, desert
+  hills, desert lakes, and
   all generated badlands rows now require dead bush plus cactus/sugar-cane
   family coverage; ordinary forest and wooded hills require an oak or birch
   log/leaves tree pair; swamp and swamp hills require the native
@@ -247,8 +248,9 @@ Landed:
   pair; flower forest requires at least four distinct Java
   `ForestFlowerProvider` small-flower states and one
   `FOREST_FLOWER_VEGETATION_COMMON` tall-flower lower/upper pair; sunflower
-  plains requires a sunflower lower/upper pair. The assertions are intentionally
-  broad block-family checks, not exact decorated counts.
+  plains requires a sunflower lower/upper pair; ice spikes requires packed-ice
+  spike/patch coverage. The assertions are intentionally broad block-family
+  checks, not exact decorated counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
   state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; blue orchid
@@ -270,12 +272,13 @@ Landed:
   `BIOME_INFO_NOISE` small-flower selection and the Java
   `FOREST_FLOWER_VEGETATION_COMMON` simple-random mixed flower selector for
   flower forests; Java-style `PATCH_SUNFLOWER` placement for sunflower plains;
+  Java-shaped `ICE_SPIKE` and `ICE_PATCH` packed-ice surface-structure placement;
   Java-shaped giant taiga `MEGA_SPRUCE` / `MEGA_PINE` 2x2 trunk, mega-pine
   foliage, podzol alter-ground, and giant taiga feature-table selectors; the
   `NoiseBasedDecorator` count path used by kelp/coral/bamboo; and
   forest/desert/badlands/swamp/ocean/dark-forest/birch/savanna/jungle/
-  bamboo-jungle/flower-forest/sunflower-plains/giant-taiga/mountain feature table
-  entries, plus the mushroom-field huge mushroom table entry.
+  bamboo-jungle/flower-forest/sunflower-plains/giant-taiga/mountain/ice-spikes
+  feature table entries, plus the mushroom-field huge mushroom table entry.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
   asserts every matrix row's grass, foliage, and water tint output through the
   shared tint resolver by tint group, including the two registered rows without
@@ -370,15 +373,17 @@ Documented gaps from this slice:
   `PATCH_SUNFLOWER`. Exact parity is still incomplete: the Java sunflower-plains
   sugar-cane and pumpkin extras, villages/outposts, normal plains mismatch
   buckets, and exact decorated counts remain later `103` work.
+- Java ice spikes now has high-signal packed-ice coverage through a native
+  `ICE_SPIKE` / `ICE_PATCH` surface-structure path. Exact parity is still
+  incomplete: spike geometry, patch disk counts, and exact decorated mismatch
+  buckets remain later `103` work.
 
 ## Suggested Next Slice
 
-Move to the ice-spikes row as the next visible palette feature:
+Move to the river row as the next narrow visible palette feature:
 
-1. Read Java `tundraBiome(..., iceSpikes=true, ...)`, `Features.ICE_SPIKE`,
-   and `Features.ICE_PATCH` before editing.
-2. Add a narrow native shared feature-family path for row `140` that checks
-   visible packed-ice/spike coverage without trying to solve exact spike shape
-   parity in the first slice.
-3. Keep exact spike/patch mismatch buckets and any broader frozen-ocean iceberg
-   work in `103`.
+1. Read Java `riverBiome(...)` and `Features.SEAGRASS_RIVER` before editing.
+2. Add a narrow native shared river feature table or river-specific family check
+   for row `7`, reusing the existing seagrass placement path where practical.
+3. Keep bank shape, exact seagrass counts, frozen-river behavior, and broader
+   river/land boundary probes in `103` or later boundary work.

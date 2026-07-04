@@ -2,13 +2,14 @@ use std::sync::OnceLock;
 
 use crate::biome::BiomeDefinition;
 use crate::block::{
-    ANDESITE, BLUE_ORCHID, BROWN_MUSHROOM, CACTUS, CLAY, COAL_ORE, COPPER_ORE, DANDELION,
-    DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
-    DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
-    DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE,
-    LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM,
-    PEONY_LOWER, PODZOL, POPPY, RED_MUSHROOM, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId,
-    SAND, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
+    ANDESITE, BLUE_ORCHID, BROWN_MUSHROOM, CACTUS, CLAY, COAL_ORE, COARSE_DIRT, COPPER_ORE,
+    DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE,
+    DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
+    DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE, GRANITE, GRASS,
+    GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER,
+    LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, RED_MUSHROOM,
+    RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SNOW_BLOCK, SUGAR_CANE,
+    SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -40,6 +41,15 @@ pub(super) const DEFAULT_FLOWER_STATES: [WeightedBlockState; 2] = [
 const DISK_SAND_TARGETS: [RawBlockId; 2] = [DIRT, GRASS_BLOCK];
 const DISK_CLAY_TARGETS: [RawBlockId; 2] = [DIRT, CLAY];
 const DISK_GRAVEL_TARGETS: [RawBlockId; 2] = [DIRT, GRASS_BLOCK];
+const ICE_PATCH_TARGETS: [RawBlockId; 7] = [
+    DIRT,
+    GRASS_BLOCK,
+    PODZOL,
+    COARSE_DIRT,
+    MYCELIUM,
+    SNOW_BLOCK,
+    ICE,
+];
 
 pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature> {
     overworld_features_for_biome_cached(biome).to_vec()
@@ -70,6 +80,7 @@ pub(super) fn overworld_features_for_biome_cached(
         | "minecraft:snowy_taiga_hills"
         | "minecraft:snowy_taiga_mountains" => snowy_taiga_feature_table(),
         "minecraft:snowy_tundra" | "minecraft:snowy_mountains" => snowy_feature_table(),
+        "minecraft:ice_spikes" => ice_spikes_feature_table(),
         "minecraft:mountains"
         | "minecraft:wooded_mountains"
         | "minecraft:mountain_edge"
@@ -214,6 +225,15 @@ fn snowy_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
         .get_or_init(|| build_overworld_feature_table("minecraft:snowy_tundra", snowy_features()))
+        .as_slice()
+}
+
+fn ice_spikes_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:ice_spikes", ice_spikes_features())
+        })
         .as_slice()
 }
 
@@ -778,10 +798,45 @@ fn snowy_features() -> Vec<PlacedFeature> {
     ]
 }
 
+fn ice_spikes_features() -> Vec<PlacedFeature> {
+    let mut features = vec![ice_spike_feature(), ice_patch_feature()];
+    features.extend(snowy_features());
+    features
+}
+
 fn snowy_taiga_features() -> Vec<PlacedFeature> {
     let mut features = snowy_features();
     features.push(berry_patch_feature(true));
     features
+}
+
+fn ice_spike_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::SurfaceStructures,
+        ConfiguredFeature::ice_spike(),
+        vec![
+            ConfiguredDecorator::count(3),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
+fn ice_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::SurfaceStructures,
+        ConfiguredFeature::ice_patch(DiskConfiguration::new(
+            PACKED_ICE,
+            IntProvider::uniform(2, 3),
+            1,
+            &ICE_PATCH_TARGETS,
+        )),
+        vec![
+            ConfiguredDecorator::count(2),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+        ],
+    )
 }
 
 fn mountain_features() -> Vec<PlacedFeature> {

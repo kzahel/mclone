@@ -9,6 +9,7 @@ mod context;
 mod disk;
 mod dripstone;
 mod glow_lichen;
+mod ice;
 mod lake;
 mod mushroom;
 mod ocean;
@@ -148,6 +149,8 @@ impl ConfiguredFeature {
             Self::RandomPatch(config) => patch::place_random_patch(world, random, origin, *config),
             Self::Flower(config) => patch::place_flower(world, random, origin, *config),
             Self::Disk(config) => disk::place_disk(world, random, origin, *config),
+            Self::IceSpike => ice::place_ice_spike(world, random, origin),
+            Self::IcePatch(config) => ice::place_ice_patch(world, random, origin, *config),
             Self::GlowLichen(config) => {
                 glow_lichen::place_glow_lichen(world, random, origin, *config)
             }

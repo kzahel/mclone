@@ -1030,6 +1030,8 @@ pub enum ConfiguredFeature {
     RandomPatch(RandomPatchConfiguration),
     Flower(RandomPatchConfiguration),
     Disk(DiskConfiguration),
+    IceSpike,
+    IcePatch(DiskConfiguration),
     GlowLichen(GlowLichenConfiguration),
     DripstoneCluster(DripstoneClusterConfiguration),
     SmallDripstone(SmallDripstoneConfiguration),
@@ -1076,6 +1078,14 @@ impl ConfiguredFeature {
 
     pub const fn disk(config: DiskConfiguration) -> Self {
         Self::Disk(config)
+    }
+
+    pub const fn ice_spike() -> Self {
+        Self::IceSpike
+    }
+
+    pub const fn ice_patch(config: DiskConfiguration) -> Self {
+        Self::IcePatch(config)
     }
 
     pub const fn glow_lichen(config: GlowLichenConfiguration) -> Self {

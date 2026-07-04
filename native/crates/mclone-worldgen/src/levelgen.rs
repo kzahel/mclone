@@ -142,6 +142,7 @@ mod tests {
         SnowySpruceFern,
         MountainTrees,
         BadlandsDeadBushCactusSugarCane,
+        IceSpikesPackedIce,
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
         DarkForestCanopyMushrooms,
@@ -170,6 +171,7 @@ mod tests {
                 Self::BadlandsDeadBushCactusSugarCane => {
                     "badlands dead bush plus cactus/sugar cane"
                 }
+                Self::IceSpikesPackedIce => "ice spikes packed ice",
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
                 Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
@@ -231,6 +233,7 @@ mod tests {
                 Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
                 Self::MountainTrees => &[OAK_LOG, OAK_LEAVES, SPRUCE_LOG, SPRUCE_LEAVES],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
+                Self::IceSpikesPackedIce => &[PACKED_ICE],
                 Self::OceanWaterPlants => &[
                     SEAGRASS,
                     TALL_SEAGRASS_LOWER,
@@ -804,7 +807,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:ice_spikes",
             surface_family: SurfaceFamily::Snow,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::IceSpikesPackedIce),
         },
         PaletteMatrixCase {
             seed: 1374,
