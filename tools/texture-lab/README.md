@@ -36,6 +36,7 @@ pnpm texture-lab:catalog
 pnpm texture-lab:runtime-compat
 pnpm texture-lab:pack-overlay
 pnpm texture-lab:coverage
+pnpm --dir tools/texture-lab web:test
 ```
 
 `texture-lab:analyze` is the feedback step of the authoring loop: it reports
@@ -186,6 +187,20 @@ the native terrain atlas currently requests:
 ```text
 generated-assets/texture-lab/mclone-default-overlay-coverage.md
 ```
+
+The browser UI integration tests are Playwright-backed:
+
+```sh
+pnpm --dir tools/texture-lab web:test
+```
+
+The test harness builds a deterministic fixture under the gitignored
+`generated-assets/texture-lab-playwright/` root, starts the local texture-lab
+server, verifies authored texture indexing, generated candidate discovery,
+allowlisted image serving, candidate selection, inspector details, keyboard
+activation, reindex preservation, and empty-candidate behavior. The validation
+screenshot from the curation flow is written to
+`/tmp/mclone-texture-lab-playwright-a2.png`.
 
 ## Source Format
 

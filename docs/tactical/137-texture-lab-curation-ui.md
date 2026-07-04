@@ -4,8 +4,8 @@ Status: active; Slice A0 web shell, Zustand store, authored texture index API,
 safe image serving, and read-only browser UI landed 2026-07-04. Slice A0.5
 repo-local generated output root landed 2026-07-04. Slice A1 generated
 candidate discovery landed 2026-07-04. Slice A2 read-only candidate selection
-and detail inspection landed 2026-07-04. Next priority is preview generation
-parity.
+and detail inspection landed 2026-07-04. Slice A2.5 Playwright integration
+coverage landed 2026-07-04. Next priority is preview generation parity.
 
 ## Purpose
 
@@ -139,7 +139,8 @@ Likely package scripts:
 {
   "web:dev": "tsx src/web-server/server.ts",
   "web:build": "vite build --config src/web/vite.config.ts",
-  "web:preview": "vite preview --host 127.0.0.1 --config src/web/vite.config.ts"
+  "web:preview": "vite preview --host 127.0.0.1 --config src/web/vite.config.ts",
+  "web:test": "playwright test -c playwright.config.ts"
 }
 ```
 
@@ -308,6 +309,34 @@ First viewport should be the actual tool, not a landing page:
 
 Use dense, utilitarian UI. This is a production tool for scanning many small
 images; avoid large marketing-style panels and decorative layouts.
+
+## Browser Validation Policy
+
+Texture-lab browser UI changes must include Playwright coverage once they
+affect routing, indexing, image serving, selection state, candidate detail,
+review state, preview generation, pack profiles, or generation launch flows.
+
+The committed harness should stay deterministic:
+
+- build a gitignored fixture output root under
+  `generated-assets/texture-lab-playwright/`
+- generate only the minimal authored exports and synthetic candidate manifests
+  needed by the test
+- run through the local server and allowlisted image endpoint rather than
+  importing React components directly
+- assert user-visible behavior, not implementation details, except where
+  accessibility state such as `aria-pressed` is the contract
+- write visual validation screenshots outside the repo, under `/tmp`
+- when reporting screenshots in chat or docs, use Markdown links such as
+  `[/tmp/mclone-texture-lab-playwright-a2.png](/tmp/mclone-texture-lab-playwright-a2.png)`
+
+The standard browser UI gate is:
+
+```sh
+pnpm --dir tools/texture-lab typecheck
+pnpm --dir tools/texture-lab web:build
+pnpm --dir tools/texture-lab web:test
+```
 
 ## Implementation Slices
 
@@ -485,6 +514,44 @@ Additional validation:
   and wrote `/tmp/mclone-texture-lab-ui-a2.png`
 - the browser smoke reported no non-favicon browser log events
 
+### Slice A2.5 - Playwright Integration Coverage
+
+Status: landed 2026-07-04.
+
+Replace the ad hoc browser smoke scripts with a committed Playwright test
+harness for the read-only texture-lab UI.
+
+Deliverables:
+
+- add local `@playwright/test` dependency and `web:test` script to
+  `tools/texture-lab`
+- add `playwright.config.ts` using the existing local server and system Chrome
+  channel by default
+- add a deterministic fixture generator that writes only test assets under
+  `generated-assets/texture-lab-playwright/`
+- cover authored index load, generated candidate discovery,
+  `/api/candidates`, allowlisted `/api/image`, texture filtering, candidate
+  card rendering, candidate selection, right-inspector provenance, keyboard
+  activation, reindex selection preservation, and clearing candidate detail
+  when a texture has no candidates
+- include Playwright config and tests in `pnpm --dir tools/texture-lab
+  typecheck`
+- document the screenshot policy and `web:test` command
+
+Validation:
+
+```sh
+pnpm --dir tools/texture-lab typecheck
+pnpm --dir tools/texture-lab web:build
+pnpm --dir tools/texture-lab web:test
+```
+
+Additional validation:
+
+- Playwright ran 3 Chrome tests with 3 passing
+- the curation-flow Playwright screenshot was written to
+  `/tmp/mclone-texture-lab-playwright-a2.png`
+
 ### Slice B - Preview Generation Parity
 
 Move the reusable preview generation pieces behind typed helpers so the UI can
@@ -506,6 +573,7 @@ Validation:
 ```sh
 pnpm --dir tools/texture-lab typecheck
 pnpm --dir tools/texture-lab web:build
+pnpm --dir tools/texture-lab web:test
 ```
 
 Visually compare at least one UI-generated preview set against an existing
@@ -601,7 +669,8 @@ Slice A is complete when:
   through the Zustand store with selector-based component reads
 - images are served only through the allowlisted image endpoint
 - the app handles an empty `generated-assets/texture-lab/` gracefully
-- `typecheck`, `web:build`, and a browser screenshot validation pass
+- `typecheck`, `web:build`, `web:test`, and a linked browser screenshot
+  validation pass
 
 ## Risks
 
@@ -641,5 +710,6 @@ Implement Slice B preview generation parity:
 2. cache UI preview artifacts under `generated-assets/texture-lab/ui-cache/`
 3. show candidate/source/tinted/tile/mip/block/terrain evidence on demand
 4. detect stale preview cache entries from source and candidate hashes
-5. visually compare at least one UI-generated preview set against an existing
+5. update Playwright coverage for the new preview behavior
+6. visually compare at least one UI-generated preview set against an existing
    static review sheet

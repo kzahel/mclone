@@ -12,5 +12,5 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "examples/**/*.ts", "packs/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "examples/**/*.ts", "packs/**/*.ts", "tests/**/*.ts", "playwright.config.ts"]
 }
