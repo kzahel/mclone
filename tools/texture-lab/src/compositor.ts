@@ -4,6 +4,7 @@ import {
   type MacroNoiseLayerSpec,
   type MaskLayerSpec,
   type PaletteSpec,
+  type TextureFrozenAsset,
   type TextureLayerSpec,
   type TexturePackAsset,
   type TextureSourceCategory,
@@ -40,6 +41,7 @@ export interface RenderedTexture extends RgbaImage {
   preview: TextureSpec["preview"];
   catalog: TextureSpec["catalog"];
   authoring: RenderedAuthoringPreview[];
+  frozen?: TextureFrozenAsset;
 }
 
 export interface RenderedAuthoringPreview extends RgbaImage {
@@ -82,17 +84,21 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
     }
   }
 
+  const frozen = pack.frozenTextures?.[name];
   const rendered: RenderedTexture = {
     name,
     exportPath: texture.exportPath,
     source: texture.source ?? "final-color",
-    width: size,
-    height: size,
-    data,
+    width: frozen?.width ?? size,
+    height: frozen?.height ?? size,
+    data: frozen ? new Uint8Array(frozen.data) : data,
     preview: texture.preview,
     catalog: texture.catalog,
     authoring: renderAuthoringPreviews(palette, texture.layers ?? []),
   };
+  if (frozen) {
+    rendered.frozen = frozen;
+  }
   if (texture.tintRole) {
     rendered.tintRole = texture.tintRole;
     rendered.tint = pack.tints[texture.tintRole]!;

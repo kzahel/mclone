@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-04T14:52:42.749Z",
+  "textures": {
+    "grass_block_top": {
+      "asset": "frozen/block/grass_block_top.png",
+      "sha256": "2e361a434f83d7dbe5c8b810880897bb5308f4243394e03777e86d47b2d7c190",
+      "codename": "G5101S74",
+      "candidateId": "candidate-seed5101-strength0p740",
+      "promptPreset": "grass-top-tufts",
+      "prompt": "orthographic top-down macro photograph of dense short turf grass, clipped meadow grass blades, small uneven tufts, fine leafy fibers, natural lawn surface, matte organic texture, flat overcast lighting, seamless square material texture",
+      "negativePrompt": "dirt, soil, flowers, clover, broad leaves, long grass, stems, side view, perspective, strong shadows, dew, insects, paths, moss, text, watermark",
+      "modelId": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+      "scheduler": "PNDMScheduler",
+      "steps": 24,
+      "seed": 5101,
+      "strength": 0.74,
+      "resolution": 64,
+      "sourceContext": {
+        "gitCommit": "71be7cb9570c72382fe99c37ae63a738dbe9283b",
+        "packTreeGitCommit": "36dbc605abdcd9d8de9b096be0aa2683bebff1f8",
+        "packInputPath": "tools/texture-lab/packs/mclone-default/texture.ts",
+        "sourceAsset": "generated-assets/texture-lab/pack/assets/mclone/textures/block/grass_block_top.png",
+        "sourceAssetSha256": "2e361a434f83d7dbe5c8b810880897bb5308f4243394e03777e86d47b2d7c190",
+        "archiveManifest": "generated-assets/texture-lab/diffusion-archive/grass-top-g5101s74-active-20-2026-07-04/archive-manifest.json",
+        "projectionAssetSha256": "89ff4aaeb2a3e052794358f81028de20c2925c66626e9aebec691601dc3938b5",
+        "note": "Frozen asset is the neutralized exported tintable source generated after enforcing grass source neutrality."
+      }
+    },
+    "stone": {
+      "asset": "frozen/block/stone.png",
+      "sha256": "859c3e931f339b0ca47e1ffc7fcd8de45430b2d70ad963977d4b974144cdcf63",
+      "codename": "H4106S58",
+      "candidateId": "candidate-seed4106-strength0p580",
+      "promptPreset": "stone-hewn-horizontal",
+      "prompt": "orthographic top-down macro photograph of rough hewn gray stone surface, horizontal chisel marks, primitive hand tooled rock, shallow layered strata, worn chipped granite, uneven matte stone, subtle pitting and mineral grain, flat overcast lighting, seamless square material texture",
+      "negativePrompt": "perspective, mortar, glossy, colorful, moss, text, watermark",
+      "modelId": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+      "scheduler": "PNDMScheduler",
+      "steps": 24,
+      "seed": 4106,
+      "strength": 0.58,
+      "resolution": 64,
+      "sourceContext": {
+        "gitCommit": "71be7cb9570c72382fe99c37ae63a738dbe9283b",
+        "packTreeGitCommit": "36dbc605abdcd9d8de9b096be0aa2683bebff1f8",
+        "packInputPath": "tools/texture-lab/packs/mclone-default/texture.ts",
+        "sourceAsset": "generated-assets/texture-lab/pack/assets/mclone/textures/block/stone.png",
+        "sourceAssetSha256": "859c3e931f339b0ca47e1ffc7fcd8de45430b2d70ad963977d4b974144cdcf63",
+        "archiveManifest": "generated-assets/texture-lab/diffusion-archive/stone-hewn-h4106s58-active-2026-07-03/archive-manifest.json"
+      }
+    }
+  }
+}

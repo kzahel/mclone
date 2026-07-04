@@ -199,7 +199,7 @@ export async function createTextureFreezeRequest(options: {
       packInputPath: path.resolve(options.packInputPath),
       sourceFileHint: sourceFileHintForTexture(options.textureName),
       textureName: options.textureName,
-      intendedSourceShape: "Update the TypeScript texture source with a deterministic mask/palette patch and preserve candidate provenance comments.",
+      intendedSourceShape: "Promote into the canonical curation.v1.json plus a committed frozen PNG asset; do not patch TypeScript texture definitions by default.",
     },
   };
 

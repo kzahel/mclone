@@ -1,5 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { applyFrozenTextureCurationToPack } from "./core/frozen-curation";
 import { assertValidTexturePack, type TexturePackAsset } from "./dsl";
 
 export async function loadTexturePack(inputPath: string): Promise<TexturePackAsset> {
@@ -13,7 +14,7 @@ export async function loadTexturePack(inputPath: string): Promise<TexturePackAss
   }
 
   assertValidTexturePack(asset);
-  return asset;
+  return applyFrozenTextureCurationToPack(absolutePath, asset);
 }
 
 function isTexturePack(value: unknown): value is TexturePackAsset {

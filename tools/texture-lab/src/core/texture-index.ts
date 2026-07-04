@@ -61,6 +61,7 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
       associatedCandidateCount: candidateDiscovery.candidates.filter((candidate) => candidate.textureName !== null).length,
       archivedCandidateCount: candidateDiscovery.candidates.filter((candidate) => candidate.archived).length,
       curatedSelectionCount: curation.selectedCount,
+      frozenTextureCount: Object.keys(pack.frozenTextures ?? {}).length,
     },
     curation,
     textures,
@@ -133,6 +134,7 @@ async function textureEntryFrom(
     rotation: catalog?.rotation ?? "unknown",
     tags,
     notes,
+    frozen: frozenRef(pack, name),
     authoringRoles: authoringRolesFrom(texture),
     blockUsages: blockUsages.sort(compareBlockUsages),
     images: {
@@ -145,6 +147,21 @@ async function textureEntryFrom(
       minecraftReference: await imageRef("Minecraft reference", referencePath, "./scripts/extract-assets.sh"),
       sheet: await imageRef("Review sheet", sheetPath, "pnpm texture-lab:sheet"),
     },
+  };
+}
+
+function frozenRef(pack: TexturePackAsset, textureName: string): TextureIndexEntry["frozen"] {
+  const frozen = pack.frozenTextures?.[textureName];
+  if (!frozen) {
+    return null;
+  }
+  return {
+    asset: frozen.asset,
+    path: frozen.path,
+    sha256: frozen.sha256,
+    codename: frozen.metadata.codename ?? null,
+    candidateId: frozen.metadata.candidateId ?? null,
+    sourceContextGitCommit: frozen.metadata.sourceContext?.gitCommit ?? null,
   };
 }
 

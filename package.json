@@ -132,6 +132,7 @@
     "texture-lab:runtime-compat": "pnpm --dir ./tools/texture-lab runtime-compat",
     "texture-lab:apply-curation": "pnpm --dir ./tools/texture-lab apply-curation",
     "texture-lab:freeze-request": "pnpm --dir ./tools/texture-lab freeze-request",
+    "texture-lab:promote-frozen": "pnpm --dir ./tools/texture-lab promote-frozen",
     "texture-lab:pack-overlay": "pnpm texture-lab:runtime-compat && node ./scripts/run-python.mjs ./tools/minecraft_assets/overlay_pack.py",
     "texture-lab:coverage": "pnpm texture-lab:pack-overlay && cargo run --manifest-path native/Cargo.toml -p mclone-app-runtime --bin terrain_texture_coverage -- --overlay-pack generated-assets/texture-lab/mclone-default-overlay.pbp --output generated-assets/texture-lab/mclone-default-overlay-coverage.md",
     "texture-lab:sheet": "pnpm --dir ./tools/texture-lab sheet",

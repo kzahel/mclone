@@ -12,6 +12,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(index.summary.associatedCandidateCount).toBe(4);
   expect(index.summary.archivedCandidateCount).toBe(1);
   expect(index.summary.curatedSelectionCount).toBe(0);
+  expect(index.summary.frozenTextureCount).toBe(2);
   expect(index.curation.selectedCount).toBe(0);
   expect(index.curation.manifestPath).toContain("generated-assets/texture-lab-playwright/curation/selections.v1.json");
 
@@ -34,6 +35,12 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
 
   const grass = index.textures.find((texture: { name: string }) => texture.name === "grass_block_top");
   expect(grass?.images.currentExport.exists).toBe(true);
+  expect(grass?.frozen).toMatchObject({
+    asset: "frozen/block/grass_block_top.png",
+    codename: "G5101S74",
+    candidateId: "candidate-seed5101-strength0p740",
+    sha256: "2e361a434f83d7dbe5c8b810880897bb5308f4243394e03777e86d47b2d7c190",
+  });
   expect(grass?.images.minecraftReference.exists).toBe(true);
   expect(grass?.tint.normal).toBe("#79b34e");
   expect(grass?.tint.sourceNeutrality).toEqual({
@@ -92,6 +99,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     sourceFileHint: "tools/texture-lab/packs/mclone-default/block/grass-block.ts",
     textureName: "grass_block_top",
   });
+  expect(freezePayload.request.sourcePatch.intendedSourceShape).toContain("canonical curation.v1.json");
   const freezeListResponse = await request.get("/api/freeze-requests?texture=grass_block_top");
   await expect(freezeListResponse).toBeOK();
   const freezeList = await freezeListResponse.json();
@@ -211,7 +219,8 @@ test("uses generated candidates as temporary atlas and block previews", async ({
   await page.getByRole("button", { name: "Detail" }).click();
   await page.getByRole("button", { name: "Clear Preview" }).click();
   await page.getByRole("button", { name: "Atlas" }).click();
-  await expect(grassCard).not.toContainText("G5101S74");
+  await expect(grassCard).toContainText("frozen G5101S74");
+  await expect(grassCard).not.toContainText("preview G5101S74");
 });
 
 test("supports texture filtering, candidate selection, inspector details, keyboard activation, and reindex preservation", async ({

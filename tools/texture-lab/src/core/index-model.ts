@@ -41,6 +41,7 @@ export interface TextureLabIndexSummary {
   associatedCandidateCount: number;
   archivedCandidateCount: number;
   curatedSelectionCount: number;
+  frozenTextureCount: number;
 }
 
 export interface TextureIndexEntry {
@@ -60,6 +61,7 @@ export interface TextureIndexEntry {
   rotation: TextureCatalogRotation;
   tags: string[];
   notes: string[];
+  frozen: TextureFrozenRef | null;
   authoringRoles: string[];
   blockUsages: TextureBlockUsage[];
   images: {
@@ -88,6 +90,15 @@ export interface TextureImageRef {
   path: string | null;
   exists: boolean;
   missingCommand: string | null;
+}
+
+export interface TextureFrozenRef {
+  asset: string;
+  path: string;
+  sha256: string;
+  codename: string | null;
+  candidateId: string | null;
+  sourceContextGitCommit: string | null;
 }
 
 export type TextureCandidateSource = "diffusion" | "projection" | "archive";

@@ -196,6 +196,7 @@ function AtlasTextureCard({
         <span>{texture.size}px</span>
         <span>{texture.tiling}</span>
         {texture.tintRole ? <span>{texture.tintRole}</span> : null}
+        {texture.frozen ? <span>{texture.frozen.codename ? `frozen ${texture.frozen.codename}` : "frozen"}</span> : null}
         {candidateCount > 0 ? <span>{candidateCount} candidates</span> : null}
         {previewCandidate ? <span>preview {previewCandidate.codename}</span> : null}
       </div>

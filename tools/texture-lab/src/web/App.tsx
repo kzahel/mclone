@@ -93,6 +93,7 @@ export function App(): JSX.Element {
           <SummaryItem label="runtime" value={index?.summary.runtimeExportsPresent ?? 0} />
           <SummaryItem label="candidates" value={index?.summary.associatedCandidateCount ?? 0} />
           <SummaryItem label="selected" value={index?.summary.curatedSelectionCount ?? 0} />
+          <SummaryItem label="frozen" value={index?.summary.frozenTextureCount ?? 0} />
         </div>
         <div className="toolbarActions">
           <button
@@ -551,6 +552,7 @@ function TextureInspector({
         <Field label="base" value={texture.base} />
         <Field label="tint" value={texture.tintRole ?? "none"} />
         <Field label="source policy" value={sourcePolicyLabel(texture)} />
+        <Field label="frozen" value={frozenLabel(texture)} />
       </InspectorSection>
 
       <InspectorSection title="Catalog">
@@ -595,6 +597,13 @@ function sourcePolicyLabel(texture: TextureIndexEntry): string {
     parts.push(`pixel <= ${neutrality.maxPixelSaturation}`);
   }
   return parts.join(", ");
+}
+
+function frozenLabel(texture: TextureIndexEntry): string {
+  if (!texture.frozen) {
+    return "none";
+  }
+  return texture.frozen.codename ? `${texture.frozen.codename} / ${texture.frozen.asset}` : texture.frozen.asset;
 }
 
 function CandidateInspector({ candidate }: { candidate: TextureCandidateEntry | null }): JSX.Element {

@@ -6,6 +6,8 @@ export interface TexturePackAsset {
   palettes: Record<string, PaletteSpec>;
   textures: Record<string, TextureSpec>;
   blocks: Record<string, BlockSpec>;
+  frozenCurationPath?: string;
+  frozenTextures?: Record<string, TextureFrozenAsset>;
 }
 
 export type PaletteSpec = Record<string, string>;
@@ -35,6 +37,42 @@ export interface TextureSpec {
   layers?: TextureLayerSpec[];
   preview?: TexturePreviewSpec;
   catalog?: TextureCatalogMetadataSpec;
+}
+
+export interface TextureFrozenAsset {
+  asset: string;
+  path: string;
+  sha256: string;
+  width: number;
+  height: number;
+  data: Uint8Array;
+  metadata: TextureFrozenMetadata;
+}
+
+export interface TextureFrozenMetadata {
+  codename?: string;
+  candidateId?: string;
+  promptPreset?: string;
+  prompt?: string;
+  negativePrompt?: string;
+  modelId?: string;
+  scheduler?: string;
+  steps?: number;
+  seed?: number;
+  strength?: number;
+  resolution?: number;
+  sourceContext?: TextureFrozenSourceContext;
+}
+
+export interface TextureFrozenSourceContext {
+  gitCommit?: string;
+  packTreeGitCommit?: string;
+  packInputPath?: string;
+  sourceAsset?: string;
+  sourceAssetSha256?: string;
+  archiveManifest?: string;
+  projectionAssetSha256?: string;
+  note?: string;
 }
 
 export interface TextureCatalogMetadataSpec {

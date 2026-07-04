@@ -11,8 +11,9 @@ views landed 2026-07-04. Slice A2.8 temporary candidate preview selection
 landed 2026-07-04. Slice A2.9 raw/tinted comparison variants landed
 2026-07-04. Slice C0 persisted active-pack candidate selections and generated
 pack apply landed 2026-07-04. Slice D0 freeze request manifests landed
-2026-07-04. Next priority is a source-patch CLI that applies reviewed freeze
-requests without browser-side source mutation.
+2026-07-04. Slice D1 canonical frozen PNG overlay landed 2026-07-04. Next
+priority is a reviewed promote-from-freeze-request path that keeps browser-side
+source mutation out of the app while making accepted pixels durable.
 
 ## Purpose
 
@@ -41,8 +42,9 @@ The current texture-lab workflow is productive but sheet-bound:
   archives default to the repo-local `generated-assets/texture-lab/` root
 - diffusion proposals carry useful prompt, seed, strength, hash, projection,
   and codename metadata
-- accepted outputs are frozen back into source as deterministic ASCII masks,
-  not committed PNGs
+- accepted outputs now use committed frozen PNGs plus a small canonical
+  `curation.v1.json` overlay; TypeScript remains the structural fallback and
+  policy source
 
 The stone and grass experiments exposed the next bottleneck. Prompt wording,
 projection palette, tint preview, and candidate selection matter enough that a
@@ -81,8 +83,10 @@ against D4201S58" without copying long paths.
   slices. Zustand async actions and explicit reload/reindex paths are enough
   until background jobs or cache invalidation prove otherwise.
 - Do not mutate pack source in the read-only MVP.
-- Do not commit generated PNGs, diffusion raw outputs, or temporary preview
-  packs.
+- Do not commit temporary generated PNGs, diffusion raw outputs, or preview
+  packs. Committed frozen PNGs under
+  `tools/texture-lab/packs/mclone-default/frozen/` are the intentional
+  exception for accepted textures.
 - Do not feed Mojang textures into diffusion input or train/fine-tune on
   proprietary reference textures.
 - Do not build a public hosted service. This is a local authoring tool.
@@ -664,7 +668,7 @@ pnpm texture-lab:pack-overlay
 If a preview overlay is generated, run the existing native visual smoke path
 from the first-party texture-pack tactical before accepting the slice.
 
-### Slice D - Freeze Requests
+### Slice D - Freeze Requests And Frozen Assets
 
 Make accepted candidates durable, but keep source mutation explicit.
 
@@ -679,27 +683,44 @@ Slice D0 landed 2026-07-04:
   candidates
 - added `/api/freeze-request`, `/api/freeze-requests`, and
   `pnpm texture-lab:freeze-request`
-- kept source patches agent/CLI-mediated; the browser still does not mutate
-  source or commit
+- kept durable promotion agent/CLI-mediated; the browser still does not mutate
+  source artifacts or commit
+
+Slice D1 landed 2026-07-04:
+
+- added canonical frozen curation at
+  `tools/texture-lab/packs/mclone-default/curation.v1.json`
+- committed initial frozen PNGs for `grass_block_top` and `stone` under
+  `tools/texture-lab/packs/mclone-default/frozen/block/`
+- taught `loadTexturePack` and normal export to apply frozen PNGs after loading
+  TypeScript structure, preserving authored export paths, tint policy, catalog
+  metadata, block usage, and fallback rendering
+- added hash, dimension, and tint/source-policy validation for frozen assets
+- added `pnpm texture-lab:promote-frozen` for explicit promotion into the
+  canonical JSON plus committed PNG store
+- surfaced frozen texture count and per-texture codename/asset metadata in the
+  web index and inspector
 
 Remaining deliverables:
 
-- apply a reviewed freeze request to the TypeScript source through an explicit
-  CLI or agent operation
-- require the same deterministic projection and archive checks already used by
-  `project-diffusion` during source application
+- promote directly from a reviewed freeze request, verifying referenced hashes
+  before copying the PNG into `frozen/` and updating `curation.v1.json`
+- keep TypeScript source patching as an exceptional/manual operation for
+  structural pack changes, not the default texture promotion path
 - do not auto-commit from the UI
 
 Validation:
 
 ```sh
 pnpm --dir tools/texture-lab typecheck
-pnpm --dir tools/texture-lab project-diffusion -- --help
+pnpm --dir tools/texture-lab web:build
+pnpm --dir tools/texture-lab web:test
 git diff --check
 ```
 
-The accepted source patch must include provenance comments when freezing a
-diffusion candidate.
+The accepted frozen record must include PNG hashes and enough prompt/seed/model
+provenance to audit how the image was produced. Exact future regeneration is
+best effort; the committed PNG is the canonical pixel source.
 
 ### Slice E - Generation Launcher
 
@@ -750,8 +771,8 @@ Slice A is complete when:
   history.
 - File serving can become a security footgun. Use resolved absolute paths and a
   narrow allowlist.
-- Source mutation from a browser button is risky. Keep freeze as an explicit
-  later slice and do not auto-commit from the app.
+- Source mutation from a browser button is risky. Keep durable promotion as an
+  explicit CLI/agent operation and do not auto-commit from the app.
 - Zustand can become a dumping ground if boundaries are loose. Keep domain
   parsing, provenance, projection, and export rules in `src/core/`; keep the
   store focused on UI/session state and API coordination.
@@ -762,22 +783,24 @@ Slice A is complete when:
 
 ## Open Questions
 
-- Should review state live only in `/tmp`, or should selected curation state be
-  optionally exportable to a checked-in metadata file once the workflow settles?
+- Should transient review state remain generated-only now that accepted frozen
+  state has a checked-in JSON/PNG store?
 - Should the first block preview be the existing software cube, or should the UI
   immediately add a small Three.js scene for rotatable inspection?
 - How much of the reference texture organization should be hand-authored tags
   versus inferred from pack/block/role naming?
-- Should freeze source patches be generated by a CLI command first, with the UI
-  only writing freeze request manifests?
+- Should `Request Freeze` grow a reviewed promotion handoff that calls
+  `promote-frozen`, or should the browser continue to only write manifests?
 
 ## Immediate Next Step
 
-Implement a freeze-request apply CLI:
+Implement promote-from-freeze-request:
 
 1. read one reviewed `*.freeze-request.v1.json`
 2. verify all referenced image hashes and projection/archive files still match
-3. generate or update the deterministic TypeScript mask/palette/provenance
-   source patch for that texture
-4. keep the browser out of source mutation and commits
-5. add focused validation for applying the grass freeze request
+3. copy the selected PNG into `tools/texture-lab/packs/mclone-default/frozen/`
+   with the default stable asset path
+4. update `curation.v1.json` with codename, prompt/seed/model metadata, PNG
+   hash, and source-context commit fields
+5. keep the browser out of source mutation and commits
+6. add focused validation for promoting the grass freeze request

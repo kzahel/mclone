@@ -187,7 +187,7 @@ Tintable selections are validated with the same `sourceNeutrality` policy as
 authored tintable textures before the generated pack is written.
 
 `Request Freeze` writes a local provenance manifest for the selected pack
-candidate without editing source:
+candidate without editing TypeScript source:
 
 ```text
 generated-assets/texture-lab/freeze-requests/*.freeze-request.v1.json
@@ -200,6 +200,33 @@ manifest:
 
 ```sh
 pnpm texture-lab:freeze-request -- --texture grass_block_top
+```
+
+Accepted generated textures are promoted into committed frozen assets, not into
+rewritten TypeScript masks. The default pack stores the canonical overlay here:
+
+```text
+tools/texture-lab/packs/mclone-default/curation.v1.json
+tools/texture-lab/packs/mclone-default/frozen/**/*.png
+```
+
+`texture.ts` and the block modules still own structure, export paths, tint
+policy, palettes, and fallback authored rendering. `curation.v1.json` maps a
+texture name to a committed frozen PNG plus prompt/seed/hash/source-context
+metadata. Normal export reads the TypeScript pack and then applies that frozen
+overlay, so future edits to the TypeScript authoring layers do not silently
+change accepted frozen pixels.
+
+To promote the current selected pack candidate:
+
+```sh
+pnpm texture-lab:promote-frozen -- --texture grass_block_top
+```
+
+To promote an explicit image:
+
+```sh
+pnpm texture-lab:promote-frozen -- --texture grass_block_top --image generated-assets/texture-lab/pack/assets/mclone/textures/block/grass_block_top.png
 ```
 
 The packed overlay command builds the same overrides into a first-party-only
@@ -231,12 +258,13 @@ pnpm --dir tools/texture-lab web:test
 
 The test harness builds a deterministic fixture under the gitignored
 `generated-assets/texture-lab-playwright/` root, starts the local texture-lab
-server, verifies authored texture indexing, generated candidate discovery,
-allowlisted image serving, candidate selection, inspector details, keyboard
-activation, persisted active-pack selection, generated-pack apply, reindex
-preservation, freeze-request writing, empty-candidate behavior,
-system-default dark mode, and manual light/dark toggling. Validation screenshots
-are written to `/tmp/mclone-texture-lab-playwright-a2.png`,
+server, verifies authored texture indexing, committed frozen overlay metadata,
+generated candidate discovery, allowlisted image serving, candidate selection,
+inspector details, keyboard activation, persisted active-pack selection,
+generated-pack apply, reindex preservation, freeze-request writing,
+empty-candidate behavior, system-default dark mode, and manual light/dark
+toggling. Validation screenshots are written to
+`/tmp/mclone-texture-lab-playwright-a2.png`,
 `/tmp/mclone-texture-lab-playwright-curation-pack.png`,
 `/tmp/mclone-texture-lab-playwright-freeze-request.png`, and
 `/tmp/mclone-texture-lab-playwright-dark-mode.png`.
@@ -251,6 +279,9 @@ Use a constrained TypeScript DSL, following the same broad pattern as
 - Preview/render code is only tooling implementation.
 - Exported files are derived artifacts; the editable source remains compact and
   reviewable.
+- Accepted generated textures can be committed as small frozen PNGs referenced
+  by `curation.v1.json`; temporary exports and diffusion work products remain
+  under gitignored `generated-assets/`.
 
 The first source format is hybrid:
 
