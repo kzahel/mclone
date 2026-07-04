@@ -44,7 +44,7 @@ mod android {
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::{
-        ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
+        ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
         TexturedSectionUploadReport,
     };
     use mclone_render::gui::GuiRenderer;
@@ -55,7 +55,7 @@ mod android {
         ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
         ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
         EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
-        EngineCameraMovementMode, EngineRenderCamera,
+        EngineCameraMovementMode,
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
@@ -1718,9 +1718,11 @@ mod android {
             );
             let time_of_day = self.scene.time_of_day();
             let sun_angle = self.scene.sun_angle();
-            let render_view =
-                chunk_camera_from_engine(self.camera.render_camera(self.scene.render_distance()))
-                    .render_view(frame.target.size[0], frame.target.size[1]);
+            let render_view = self
+                .camera
+                .render_pose(self.scene.render_distance())
+                .render_view(frame.target.size[0], frame.target.size[1])
+                .context("build Android flat render camera pose")?;
             let gui_scale = GuiScale::from_pixels(frame.target.size[0], frame.target.size[1]);
             self.ui.set_scale(gui_scale);
             let ui_state = self.current_ui_render_state();
@@ -2805,17 +2807,6 @@ mod android {
 
     fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
         Vec3::new(value.x as f32, value.y as f32, value.z as f32)
-    }
-
-    fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
-        ChunkCamera {
-            eye: camera.eye,
-            target: camera.target,
-            up: camera.up,
-            fov_y_radians: camera.fov_y_radians,
-            z_near: camera.z_near,
-            z_far: camera.z_far,
-        }
     }
 }
 

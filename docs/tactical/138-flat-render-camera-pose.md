@@ -1,6 +1,6 @@
 # 138: Flat Render Camera Pose
 
-Status: proposed; Slices A-B renderer and desktop flat pose path landed 2026-07-04
+Status: proposed; Slices A-C flat pose routing landed 2026-07-04
 Workstream: native Rust, shared render/session boundary, desktop validation first
 
 ## Purpose
@@ -190,21 +190,31 @@ Validation:
 
 ### Slice C: Route Web And Flat Android Through The Same Shared Path
 
-- [ ] Update `native/apps/mclone-web-client/src/web_canvas.rs` to use the shared
+- [x] Update `native/apps/mclone-web-client/src/web_canvas.rs` to use the shared
       render-pose/view conversion.
-- [ ] Update `native/apps/mclone-android-client/src/lib.rs` to use the shared
+- [x] Update `native/apps/mclone-android-client/src/lib.rs` to use the shared
       render-pose/view conversion.
-- [ ] Remove or shrink duplicated `chunk_camera_from_engine(...)` helpers where
+- [x] Remove or shrink duplicated `chunk_camera_from_engine(...)` helpers where
       they only bridge the old target/up shape.
-- [ ] Preserve existing web and flat Android input semantics.
+- [x] Preserve existing web and flat Android input semantics.
+
+Result: native web and flat Android now build live player-camera
+`ChunkRenderView` values from `EngineCameraController::render_pose(...)`. Web
+keeps `ChunkCamera::overview_for_chunk_area(...)` only for deterministic
+overview smokes, and native/headless compatibility cameras remain unchanged.
 
 Validation:
 
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session -p mclone-web-client -p mclone-android-client`
 - `pnpm native:web:build`
-- web smoke/canvas validation from `docs/native-web.md` or
-  `docs/platforms.md`
-- flat Android build/smoke only if this slice touches Android presentation
-  enough to warrant device or emulator time
+- `pnpm native:android:apk:avd`
+- `pnpm native:web:chunk-smoke`
+- direct live web app-camera screenshot inspected:
+  `/tmp/mclone-native-web-live-camera-pose.png`
+
+Note: `pnpm native:web:app-smoke` rendered many app frames but failed in its
+later block-placement interaction probe with `place: miss`; the render-camera
+path was separately validated with the direct live app-camera screenshot.
 
 ### Slice D: Sky And Secondary Render Paths
 

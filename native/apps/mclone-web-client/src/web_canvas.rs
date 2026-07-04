@@ -40,7 +40,7 @@ use mclone_mesh::{
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_render::actor_assets::{ActorTextureImage, load_actor_texture_assets};
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
     TexturedSectionRenderStats, TexturedSectionUploadReport,
 };
@@ -53,7 +53,7 @@ use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, EngineCameraController, EngineCameraFrameState,
-    EngineCameraInput, EngineCameraMovementImpulse, EngineCameraMovementMode, EngineRenderCamera,
+    EngineCameraInput, EngineCameraMovementImpulse, EngineCameraMovementMode,
     RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest,
     RenderSectionCompileResult, RenderSectionCompiler, RenderSectionNeighborReadiness,
     RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
@@ -4309,8 +4309,13 @@ impl WebChunkRenderSession {
         } else {
             TexturedSectionUploadReport::default()
         };
-        let frame_camera = chunk_camera_for_frame(frame_camera, &self.camera, radius_chunks);
-        let render_view = frame_camera.render_view(self.context.width, self.context.height);
+        let render_view = render_view_for_frame(
+            frame_camera,
+            &self.camera,
+            radius_chunks,
+            self.context.width,
+            self.context.height,
+        )?;
         let day_time = self.runtime.client().day_time();
         let time_of_day = self.runtime.client().time_of_day();
         let sun_angle = self.runtime.client().sun_angle();
@@ -4666,28 +4671,25 @@ enum WebFrameCamera {
     Camera,
 }
 
-fn chunk_camera_for_frame(
+fn render_view_for_frame(
     frame_camera: WebFrameCamera,
     camera: &EngineCameraController,
     radius_chunks: u32,
-) -> ChunkCamera {
+    width: u32,
+    height: u32,
+) -> Result<ChunkRenderView, String> {
     match frame_camera {
         WebFrameCamera::Overview {
             center,
             radius_chunks,
-        } => ChunkCamera::overview_for_chunk_area(center.x, center.z, radius_chunks as i32),
-        WebFrameCamera::Camera => chunk_camera_from_engine(camera.render_camera(radius_chunks)),
-    }
-}
-
-fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
-    ChunkCamera {
-        eye: camera.eye,
-        target: camera.target,
-        up: camera.up,
-        fov_y_radians: camera.fov_y_radians,
-        z_near: camera.z_near,
-        z_far: camera.z_far,
+        } => Ok(
+            ChunkCamera::overview_for_chunk_area(center.x, center.z, radius_chunks as i32)
+                .render_view(width, height),
+        ),
+        WebFrameCamera::Camera => camera
+            .render_pose(radius_chunks)
+            .render_view(width, height)
+            .map_err(|error| format!("invalid web render camera pose: {error}")),
     }
 }
 
