@@ -19,8 +19,9 @@ use super::{
     DiskConfiguration, DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration,
     HugeMushroomConfiguration, LakeConfiguration, OreConfiguration, PlacedFeature,
     RandomBooleanFeatureConfiguration, RandomFeatureConfiguration, RandomPatchConfiguration,
-    SeagrassConfiguration, SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration,
-    SpringConfiguration, TreeConfiguration, WeightedBlockState, WeightedConfiguredFeature,
+    RandomPatchStateProvider, SeagrassConfiguration, SimpleRandomFeatureConfiguration,
+    SmallDripstoneConfiguration, SpringConfiguration, TreeConfiguration, WeightedBlockState,
+    WeightedConfiguredFeature,
 };
 
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
@@ -48,9 +49,8 @@ pub(super) fn overworld_features_for_biome_cached(
 ) -> &'static [PlacedFeature] {
     match biome.key() {
         "minecraft:plains" | "minecraft:sunflower_plains" => plains_feature_table(),
-        "minecraft:forest" | "minecraft:wooded_hills" | "minecraft:flower_forest" => {
-            forest_feature_table()
-        }
+        "minecraft:forest" | "minecraft:wooded_hills" => forest_feature_table(),
+        "minecraft:flower_forest" => flower_forest_feature_table(),
         "minecraft:birch_forest" | "minecraft:birch_forest_hills" => birch_forest_feature_table(),
         "minecraft:tall_birch_forest" | "minecraft:tall_birch_hills" => {
             tall_birch_forest_feature_table()
@@ -135,6 +135,15 @@ fn forest_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
         .get_or_init(|| build_overworld_feature_table("minecraft:forest", forest_features()))
+        .as_slice()
+}
+
+fn flower_forest_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:flower_forest", flower_forest_features())
+        })
         .as_slice()
 }
 
@@ -652,6 +661,20 @@ fn forest_features() -> Vec<PlacedFeature> {
     ]
 }
 
+fn flower_forest_features() -> Vec<PlacedFeature> {
+    vec![
+        omitted_vegetal_feature(),
+        glow_lichen_feature(),
+        forest_flower_trees_feature(),
+        flower_forest_feature(),
+        grass_patch(GRASS, 1),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
+    ]
+}
+
 fn birch_forest_features() -> Vec<PlacedFeature> {
     vec![
         birch_tree_feature(),
@@ -896,6 +919,26 @@ fn forest_birch_other_feature() -> PlacedFeature {
     )
 }
 
+fn forest_flower_trees_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            [
+                WeightedConfiguredFeature::new(
+                    ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002()),
+                    0.2,
+                ),
+                WeightedConfiguredFeature::new(
+                    ConfiguredFeature::tree(TreeConfiguration::fancy_oak_bees_0002()),
+                    0.1,
+                ),
+            ],
+            ConfiguredFeature::tree(TreeConfiguration::oak_bees_0002()),
+        )),
+        tree_threshold_decorators(6, 0.1, 1),
+    )
+}
+
 fn dark_forest_vegetation_feature(red_mushrooms_first: bool) -> PlacedFeature {
     let first = if red_mushrooms_first {
         ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::red())
@@ -1060,6 +1103,7 @@ fn default_flower_feature() -> PlacedFeature {
         ConfiguredFeature::flower(RandomPatchConfiguration {
             state: POPPY,
             weighted_states: &DEFAULT_FLOWER_STATES,
+            state_provider: RandomPatchStateProvider::Weighted,
             tries: 64,
             xspread: 7,
             yspread: 3,
@@ -1080,12 +1124,40 @@ fn default_flower_feature() -> PlacedFeature {
     )
 }
 
+fn flower_forest_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::flower(RandomPatchConfiguration {
+            state: DANDELION,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::ForestFlower,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        }),
+        vec![
+            ConfiguredDecorator::count(100),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::spread_32_above(),
+        ],
+    )
+}
+
 fn forest_grass_patch_feature() -> PlacedFeature {
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: GRASS,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 32,
             xspread: 7,
             yspread: 3,
@@ -1110,6 +1182,7 @@ fn taiga_grass_patch_feature() -> PlacedFeature {
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: GRASS,
             weighted_states: &TAIGA_GRASS_STATES,
+            state_provider: RandomPatchStateProvider::Weighted,
             tries: 32,
             xspread: 7,
             yspread: 3,
@@ -1146,6 +1219,7 @@ fn waterlily_patch_feature() -> PlacedFeature {
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: LILY_PAD,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 10,
             xspread: 7,
             yspread: 3,
@@ -1169,6 +1243,7 @@ pub(super) fn jungle_grass_patch_config() -> RandomPatchConfiguration {
     RandomPatchConfiguration {
         state: GRASS,
         weighted_states: &JUNGLE_GRASS_STATES,
+        state_provider: RandomPatchStateProvider::Weighted,
         tries: 32,
         xspread: 7,
         yspread: 3,
@@ -1188,6 +1263,7 @@ fn large_fern_patch_feature() -> PlacedFeature {
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: LARGE_FERN_LOWER,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 64,
             xspread: 7,
             yspread: 3,
@@ -1223,6 +1299,7 @@ fn berry_patch_feature(rarity_12: bool) -> PlacedFeature {
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: SWEET_BERRY_BUSH,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 64,
             xspread: 7,
             yspread: 3,
@@ -1292,6 +1369,7 @@ fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
         RandomPatchConfiguration {
             state: block_id,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 48,
             xspread: 7,
             yspread: 3,
@@ -1316,6 +1394,7 @@ fn dead_bush_patch(count: i32) -> PlacedFeature {
         RandomPatchConfiguration {
             state: DEAD_BUSH,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 16,
             xspread: 7,
             yspread: 3,
@@ -1336,6 +1415,7 @@ fn cactus_patch(count: i32) -> PlacedFeature {
         RandomPatchConfiguration {
             state: CACTUS,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 10,
             xspread: 7,
             yspread: 3,
@@ -1356,6 +1436,7 @@ fn sugar_cane_patch(count: i32) -> PlacedFeature {
         RandomPatchConfiguration {
             state: SUGAR_CANE,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 20,
             xspread: 4,
             yspread: 0,

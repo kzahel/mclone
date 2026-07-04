@@ -61,7 +61,7 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
             13.0 / 16.0,
             14.0 / 16.0,
         )),
-        terrain_id::DANDELION | terrain_id::POPPY => Some(
+        id if is_small_flower(id) => Some(
             local_box(
                 5.0 / 16.0,
                 0.0,
@@ -106,6 +106,15 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::FERN
         | terrain_id::DANDELION
         | terrain_id::POPPY
+        | terrain_id::ALLIUM
+        | terrain_id::AZURE_BLUET
+        | terrain_id::RED_TULIP
+        | terrain_id::ORANGE_TULIP
+        | terrain_id::WHITE_TULIP
+        | terrain_id::PINK_TULIP
+        | terrain_id::OXEYE_DAISY
+        | terrain_id::CORNFLOWER
+        | terrain_id::LILY_OF_THE_VALLEY
         | terrain_id::DEAD_BUSH
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
@@ -144,6 +153,23 @@ fn local_box(min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: 
 
 fn full_block() -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+}
+
+fn is_small_flower(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::DANDELION
+            | terrain_id::POPPY
+            | terrain_id::ALLIUM
+            | terrain_id::AZURE_BLUET
+            | terrain_id::RED_TULIP
+            | terrain_id::ORANGE_TULIP
+            | terrain_id::WHITE_TULIP
+            | terrain_id::PINK_TULIP
+            | terrain_id::OXEYE_DAISY
+            | terrain_id::CORNFLOWER
+            | terrain_id::LILY_OF_THE_VALLEY
+    )
 }
 
 fn pointed_dripstone_shape() -> LocalShape {
@@ -374,6 +400,15 @@ mod tests {
             terrain_id::FERN,
             terrain_id::DANDELION,
             terrain_id::POPPY,
+            terrain_id::ALLIUM,
+            terrain_id::AZURE_BLUET,
+            terrain_id::RED_TULIP,
+            terrain_id::ORANGE_TULIP,
+            terrain_id::WHITE_TULIP,
+            terrain_id::PINK_TULIP,
+            terrain_id::OXEYE_DAISY,
+            terrain_id::CORNFLOWER,
+            terrain_id::LILY_OF_THE_VALLEY,
             terrain_id::DEAD_BUSH,
             terrain_id::LARGE_FERN_LOWER,
             terrain_id::LARGE_FERN_UPPER,
@@ -444,6 +479,19 @@ mod tests {
             shape_for(state(terrain_id::DEAD_BUSH), ShapeUse::Outline)
                 .map(|shape| shape.world_aabb(pos)),
             Some(Aabb::new(0.125, 0.0, 0.125, 0.875, 0.8125, 0.875))
+        );
+        let flower_offset = java_block_offset_xz(pos);
+        assert_eq!(
+            shape_for(state(terrain_id::ALLIUM), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(
+                flower_offset.x + 5.0 / 16.0,
+                0.0,
+                flower_offset.z + 5.0 / 16.0,
+                flower_offset.x + 11.0 / 16.0,
+                10.0 / 16.0,
+                flower_offset.z + 11.0 / 16.0,
+            ))
         );
         assert_eq!(
             shape_for(state(terrain_id::LARGE_FERN_LOWER), ShapeUse::Outline)

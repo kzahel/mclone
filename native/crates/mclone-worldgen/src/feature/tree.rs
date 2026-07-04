@@ -1,8 +1,9 @@
 use crate::block::{
-    ACACIA_LEAVES, ACACIA_LOG, AIR, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, DANDELION, DARK_OAK_LEAVES,
-    DARK_OAK_LOG, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, JUNGLE_LEAVES,
-    JUNGLE_LOG, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY,
-    SPRUCE_LEAVES, SPRUCE_LOG, WATER,
+    ACACIA_LEAVES, ACACIA_LOG, AIR, ALLIUM, AZURE_BLUET, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR,
+    CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN,
+    GRASS, GRASS_BLOCK, JUNGLE_LEAVES, JUNGLE_LOG, LARGE_FERN_LOWER, LARGE_FERN_UPPER,
+    LILY_OF_THE_VALLEY, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PINK_TULIP,
+    PODZOL, POPPY, RED_TULIP, SPRUCE_LEAVES, SPRUCE_LOG, WATER, WHITE_TULIP,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -1042,6 +1043,15 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
             | FERN
             | DANDELION
             | POPPY
+            | ALLIUM
+            | AZURE_BLUET
+            | RED_TULIP
+            | ORANGE_TULIP
+            | WHITE_TULIP
+            | PINK_TULIP
+            | OXEYE_DAISY
+            | CORNFLOWER
+            | LILY_OF_THE_VALLEY
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
@@ -1087,6 +1097,15 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
             | FERN
             | DANDELION
             | POPPY
+            | ALLIUM
+            | AZURE_BLUET
+            | RED_TULIP
+            | ORANGE_TULIP
+            | WHITE_TULIP
+            | PINK_TULIP
+            | OXEYE_DAISY
+            | CORNFLOWER
+            | LILY_OF_THE_VALLEY
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER

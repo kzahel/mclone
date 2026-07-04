@@ -41,15 +41,17 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK,
-        BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT, DANDELION,
-        DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK,
-        GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
-        PACKED_ICE, PODZOL, POPPY, RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1,
-        SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
-        SPRUCE_LOG, STONE, SUGAR_CANE, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER,
-        TERRACOTTA, TUBE_CORAL_BLOCK, WATER, is_air_like, is_water,
+        ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BIRCH_LEAVES, BIRCH_LOG,
+        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT,
+        CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK,
+        GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
+        KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_OF_THE_VALLEY, LILY_PAD,
+        MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PACKED_ICE,
+        PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, RawBlockId, SAND,
+        SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
+        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER,
+        TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, WHITE_TULIP, is_air_like,
+        is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -131,6 +133,7 @@ mod tests {
         PlainsVegetation,
         DesertDeadBushCactusSugarCane,
         ForestOakBirchTrees,
+        FlowerForestFlowers,
         SwampNativeSubsetSugarCaneLilyPad,
         TaigaSpruceFernBerry,
         SnowySpruceFern,
@@ -151,6 +154,7 @@ mod tests {
                 Self::PlainsVegetation => "plains grass/flower/oak",
                 Self::DesertDeadBushCactusSugarCane => "desert dead bush plus cactus/sugar cane",
                 Self::ForestOakBirchTrees => "forest oak/birch trees",
+                Self::FlowerForestFlowers => "flower forest dense small flowers",
                 Self::SwampNativeSubsetSugarCaneLilyPad => {
                     "native swamp vegetation/clay subset plus sugar cane/lily pad"
                 }
@@ -175,6 +179,19 @@ mod tests {
                 Self::PlainsVegetation => &[OAK_LOG, OAK_LEAVES, GRASS, DANDELION, POPPY],
                 Self::DesertDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::ForestOakBirchTrees => &[OAK_LOG, OAK_LEAVES, BIRCH_LOG, BIRCH_LEAVES],
+                Self::FlowerForestFlowers => &[
+                    DANDELION,
+                    POPPY,
+                    ALLIUM,
+                    AZURE_BLUET,
+                    RED_TULIP,
+                    ORANGE_TULIP,
+                    WHITE_TULIP,
+                    PINK_TULIP,
+                    OXEYE_DAISY,
+                    CORNFLOWER,
+                    LILY_OF_THE_VALLEY,
+                ],
                 Self::SwampNativeSubsetSugarCaneLilyPad => &[
                     OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE, LILY_PAD,
                 ],
@@ -239,6 +256,13 @@ mod tests {
                 Self::ForestOakBirchTrees => {
                     (chunk.block_count(OAK_LOG) > 0 && chunk.block_count(OAK_LEAVES) > 0)
                         || (chunk.block_count(BIRCH_LOG) > 0 && chunk.block_count(BIRCH_LEAVES) > 0)
+                }
+                Self::FlowerForestFlowers => {
+                    self.blocks()
+                        .iter()
+                        .filter(|block| chunk.block_count(**block) > 0)
+                        .count()
+                        >= 4
                 }
                 Self::TaigaSpruceFernBerry => {
                     [
@@ -693,7 +717,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:flower_forest",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::FlowerForestFlowers),
         },
         PaletteMatrixCase {
             seed: 1326,

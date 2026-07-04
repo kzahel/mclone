@@ -123,9 +123,17 @@ impl WeightedBlockState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RandomPatchStateProvider {
+    Simple,
+    Weighted,
+    ForestFlower,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RandomPatchConfiguration {
     pub state: RawBlockId,
     pub weighted_states: &'static [WeightedBlockState],
+    pub state_provider: RandomPatchStateProvider,
     pub tries: i32,
     pub xspread: i32,
     pub yspread: i32,
@@ -143,6 +151,7 @@ impl RandomPatchConfiguration {
         Self {
             state,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 64,
             xspread: 7,
             yspread: 3,

@@ -543,6 +543,15 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (130, "minecraft:bamboo", BAMBOO_TRUNK),
     (131, "minecraft:lily_pad", EMPTY_PROPS),
     (132, "minecraft:sweet_berry_bush", AGE_3),
+    (133, "minecraft:allium", EMPTY_PROPS),
+    (134, "minecraft:azure_bluet", EMPTY_PROPS),
+    (135, "minecraft:red_tulip", EMPTY_PROPS),
+    (136, "minecraft:orange_tulip", EMPTY_PROPS),
+    (137, "minecraft:white_tulip", EMPTY_PROPS),
+    (138, "minecraft:pink_tulip", EMPTY_PROPS),
+    (139, "minecraft:oxeye_daisy", EMPTY_PROPS),
+    (140, "minecraft:cornflower", EMPTY_PROPS),
+    (141, "minecraft:lily_of_the_valley", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -561,7 +570,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 133);
+        assert_eq!(registry.len(), 142);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -813,6 +822,42 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:sweet_berry_bush[age=3]"),
             Some(BlockStateId(132))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:allium"),
+            Some(BlockStateId(133))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:azure_bluet"),
+            Some(BlockStateId(134))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:red_tulip"),
+            Some(BlockStateId(135))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:orange_tulip"),
+            Some(BlockStateId(136))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:white_tulip"),
+            Some(BlockStateId(137))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:pink_tulip"),
+            Some(BlockStateId(138))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:oxeye_daisy"),
+            Some(BlockStateId(139))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:cornflower"),
+            Some(BlockStateId(140))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:lily_of_the_valley"),
+            Some(BlockStateId(141))
         );
     }
 

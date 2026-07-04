@@ -135,6 +135,15 @@ pub const JUNGLE_LEAVES: RawBlockId = 129;
 pub const BAMBOO: RawBlockId = 130;
 pub const LILY_PAD: RawBlockId = 131;
 pub const SWEET_BERRY_BUSH: RawBlockId = 132;
+pub const ALLIUM: RawBlockId = 133;
+pub const AZURE_BLUET: RawBlockId = 134;
+pub const RED_TULIP: RawBlockId = 135;
+pub const ORANGE_TULIP: RawBlockId = 136;
+pub const WHITE_TULIP: RawBlockId = 137;
+pub const PINK_TULIP: RawBlockId = 138;
+pub const OXEYE_DAISY: RawBlockId = 139;
+pub const CORNFLOWER: RawBlockId = 140;
+pub const LILY_OF_THE_VALLEY: RawBlockId = 141;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -197,6 +206,15 @@ impl GeneratedBlockId {
     pub const BAMBOO: Self = Self(BAMBOO);
     pub const LILY_PAD: Self = Self(LILY_PAD);
     pub const SWEET_BERRY_BUSH: Self = Self(SWEET_BERRY_BUSH);
+    pub const ALLIUM: Self = Self(ALLIUM);
+    pub const AZURE_BLUET: Self = Self(AZURE_BLUET);
+    pub const RED_TULIP: Self = Self(RED_TULIP);
+    pub const ORANGE_TULIP: Self = Self(ORANGE_TULIP);
+    pub const WHITE_TULIP: Self = Self(WHITE_TULIP);
+    pub const PINK_TULIP: Self = Self(PINK_TULIP);
+    pub const OXEYE_DAISY: Self = Self(OXEYE_DAISY);
+    pub const CORNFLOWER: Self = Self(CORNFLOWER);
+    pub const LILY_OF_THE_VALLEY: Self = Self(LILY_OF_THE_VALLEY);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -236,6 +254,15 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | FERN
             | DANDELION
             | POPPY
+            | ALLIUM
+            | AZURE_BLUET
+            | RED_TULIP
+            | ORANGE_TULIP
+            | WHITE_TULIP
+            | PINK_TULIP
+            | OXEYE_DAISY
+            | CORNFLOWER
+            | LILY_OF_THE_VALLEY
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
@@ -457,6 +484,15 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         BAMBOO => "minecraft:bamboo",
         LILY_PAD => "minecraft:lily_pad",
         SWEET_BERRY_BUSH => "minecraft:sweet_berry_bush",
+        ALLIUM => "minecraft:allium",
+        AZURE_BLUET => "minecraft:azure_bluet",
+        RED_TULIP => "minecraft:red_tulip",
+        ORANGE_TULIP => "minecraft:orange_tulip",
+        WHITE_TULIP => "minecraft:white_tulip",
+        PINK_TULIP => "minecraft:pink_tulip",
+        OXEYE_DAISY => "minecraft:oxeye_daisy",
+        CORNFLOWER => "minecraft:cornflower",
+        LILY_OF_THE_VALLEY => "minecraft:lily_of_the_valley",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -546,6 +582,15 @@ mod tests {
         assert_eq!(block_light_opacity(BAMBOO), 0);
         assert_eq!(block_light_opacity(LILY_PAD), 0);
         assert_eq!(block_light_opacity(SWEET_BERRY_BUSH), 0);
+        assert_eq!(block_light_opacity(ALLIUM), 0);
+        assert_eq!(block_light_opacity(AZURE_BLUET), 0);
+        assert_eq!(block_light_opacity(RED_TULIP), 0);
+        assert_eq!(block_light_opacity(ORANGE_TULIP), 0);
+        assert_eq!(block_light_opacity(WHITE_TULIP), 0);
+        assert_eq!(block_light_opacity(PINK_TULIP), 0);
+        assert_eq!(block_light_opacity(OXEYE_DAISY), 0);
+        assert_eq!(block_light_opacity(CORNFLOWER), 0);
+        assert_eq!(block_light_opacity(LILY_OF_THE_VALLEY), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
@@ -589,5 +634,17 @@ mod tests {
         assert_eq!(block_name(BAMBOO), "minecraft:bamboo");
         assert_eq!(block_name(LILY_PAD), "minecraft:lily_pad");
         assert_eq!(block_name(SWEET_BERRY_BUSH), "minecraft:sweet_berry_bush");
+        assert_eq!(block_name(ALLIUM), "minecraft:allium");
+        assert_eq!(block_name(AZURE_BLUET), "minecraft:azure_bluet");
+        assert_eq!(block_name(RED_TULIP), "minecraft:red_tulip");
+        assert_eq!(block_name(ORANGE_TULIP), "minecraft:orange_tulip");
+        assert_eq!(block_name(WHITE_TULIP), "minecraft:white_tulip");
+        assert_eq!(block_name(PINK_TULIP), "minecraft:pink_tulip");
+        assert_eq!(block_name(OXEYE_DAISY), "minecraft:oxeye_daisy");
+        assert_eq!(block_name(CORNFLOWER), "minecraft:cornflower");
+        assert_eq!(
+            block_name(LILY_OF_THE_VALLEY),
+            "minecraft:lily_of_the_valley"
+        );
     }
 }

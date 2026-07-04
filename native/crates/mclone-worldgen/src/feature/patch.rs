@@ -1,13 +1,34 @@
+use std::sync::OnceLock;
+
 use crate::block::{
-    CACTUS, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, ICE,
-    LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD, MYCELIUM, PODZOL, POPPY, RED_SAND, RawBlockId,
-    SAND, SUGAR_CANE, SWEET_BERRY_BUSH, TERRACOTTA, is_air_like, is_lava, is_water,
+    ALLIUM, AZURE_BLUET, CACTUS, CORNFLOWER, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS,
+    GRASS_BLOCK, ICE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM,
+    ORANGE_TULIP, OXEYE_DAISY, PINK_TULIP, PODZOL, POPPY, RED_SAND, RED_TULIP, RawBlockId, SAND,
+    SUGAR_CANE, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP, is_air_like, is_lava, is_water,
     material_blocks_motion,
 };
+use crate::noise::PerlinSimplexNoise;
 use crate::placement::BlockPos;
-use crate::prng::RandomSource;
+use crate::prng::{RandomSource, WorldgenRandom};
 
-use super::{FeatureWorld, RandomPatchConfiguration, SimpleBlockConfiguration, project_to_surface};
+use super::{
+    FeatureWorld, RandomPatchConfiguration, RandomPatchStateProvider, SimpleBlockConfiguration,
+    project_to_surface,
+};
+
+const FOREST_FLOWERS: [RawBlockId; 11] = [
+    DANDELION,
+    POPPY,
+    ALLIUM,
+    AZURE_BLUET,
+    RED_TULIP,
+    ORANGE_TULIP,
+    WHITE_TULIP,
+    PINK_TULIP,
+    OXEYE_DAISY,
+    CORNFLOWER,
+    LILY_OF_THE_VALLEY,
+];
 
 pub(super) fn place_simple_block<W: FeatureWorld>(
     world: &mut W,
@@ -44,7 +65,7 @@ pub(super) fn place_random_patch<W: FeatureWorld>(
     origin: BlockPos,
     config: RandomPatchConfiguration,
 ) -> bool {
-    let state = select_patch_state(random, config);
+    let state = select_patch_state(random, config, origin);
     let projected = if config.project {
         project_to_surface(world, origin).unwrap_or(origin)
     } else {
@@ -116,7 +137,7 @@ pub(super) fn place_flower<W: FeatureWorld>(
     origin: BlockPos,
     config: RandomPatchConfiguration,
 ) -> bool {
-    let state = select_patch_state(random, config);
+    let state = select_patch_state(random, config, origin);
     let mut placed = 0;
 
     for _ in 0..config.tries {
@@ -149,11 +170,19 @@ pub(super) fn place_flower<W: FeatureWorld>(
 fn select_patch_state(
     random: &mut impl RandomSource,
     config: RandomPatchConfiguration,
+    origin: BlockPos,
 ) -> RawBlockId {
-    if config.weighted_states.is_empty() {
-        return config.state;
+    match config.state_provider {
+        RandomPatchStateProvider::Simple => config.state,
+        RandomPatchStateProvider::Weighted => select_weighted_patch_state(random, config),
+        RandomPatchStateProvider::ForestFlower => forest_flower_state(origin),
     }
+}
 
+fn select_weighted_patch_state(
+    random: &mut impl RandomSource,
+    config: RandomPatchConfiguration,
+) -> RawBlockId {
     let total_weight = config
         .weighted_states
         .iter()
@@ -170,6 +199,20 @@ fn select_patch_state(
     config.state
 }
 
+fn forest_flower_state(origin: BlockPos) -> RawBlockId {
+    let noise = biome_info_noise().get_value(origin.x as f64 / 48.0, origin.z as f64 / 48.0, false);
+    let value = ((1.0 + noise) / 2.0).clamp(0.0, 0.9999);
+    FOREST_FLOWERS[(value * FOREST_FLOWERS.len() as f64) as usize]
+}
+
+fn biome_info_noise() -> &'static PerlinSimplexNoise {
+    static NOISE: OnceLock<PerlinSimplexNoise> = OnceLock::new();
+    NOISE.get_or_init(|| {
+        let mut random = WorldgenRandom::new(2345);
+        PerlinSimplexNoise::from_octaves(&mut random, &[0])
+    })
+}
+
 fn matches_allowed(allowed: &[RawBlockId], block_id: RawBlockId) -> bool {
     allowed.is_empty() || allowed.contains(&block_id)
 }
@@ -181,7 +224,8 @@ fn can_survive_simple_plant(
 ) -> bool {
     is_air_like(current)
         && match block_id {
-            GRASS | FERN | DANDELION | POPPY => {
+            GRASS | FERN => matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM),
+            flower if is_small_flower(flower) => {
                 matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
             }
             LARGE_FERN_LOWER | LARGE_FERN_UPPER => {
@@ -261,13 +305,10 @@ fn horizontal_neighbor_blocks<W: FeatureWorld>(
 fn is_replaceable_plant(block_id: RawBlockId) -> bool {
     matches!(
         block_id,
-        GRASS
-            | FERN
-            | DANDELION
-            | POPPY
-            | DEAD_BUSH
-            | LARGE_FERN_LOWER
-            | LARGE_FERN_UPPER
-            | GLOW_LICHEN
-    )
+        GRASS | FERN | DEAD_BUSH | LARGE_FERN_LOWER | LARGE_FERN_UPPER | GLOW_LICHEN
+    ) || is_small_flower(block_id)
+}
+
+fn is_small_flower(block_id: RawBlockId) -> bool {
+    FOREST_FLOWERS.contains(&block_id)
 }

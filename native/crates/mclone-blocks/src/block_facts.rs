@@ -57,6 +57,15 @@ pub mod terrain_id {
     pub const BAMBOO: u32 = 130;
     pub const LILY_PAD: u32 = 131;
     pub const SWEET_BERRY_BUSH: u32 = 132;
+    pub const ALLIUM: u32 = 133;
+    pub const AZURE_BLUET: u32 = 134;
+    pub const RED_TULIP: u32 = 135;
+    pub const ORANGE_TULIP: u32 = 136;
+    pub const WHITE_TULIP: u32 = 137;
+    pub const PINK_TULIP: u32 = 138;
+    pub const OXEYE_DAISY: u32 = 139;
+    pub const CORNFLOWER: u32 = 140;
+    pub const LILY_OF_THE_VALLEY: u32 = 141;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

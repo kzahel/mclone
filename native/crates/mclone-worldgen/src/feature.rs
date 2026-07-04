@@ -27,10 +27,10 @@ pub use configured::{
     FoliagePlacerConfiguration, GlowLichenConfiguration, HugeMushroomConfiguration,
     HugeMushroomKind, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
     RandomBooleanFeatureConfiguration, RandomFeatureConfiguration, RandomPatchConfiguration,
-    SeagrassConfiguration, SimpleBlockConfiguration, SimpleRandomFeatureConfiguration,
-    SmallDripstoneConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
-    TreeConfiguration, TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState,
-    WeightedConfiguredFeature,
+    RandomPatchStateProvider, SeagrassConfiguration, SimpleBlockConfiguration,
+    SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
+    StraightTrunkPlacerConfiguration, TreeConfiguration, TrunkPlacerConfiguration,
+    TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use placed::{
@@ -528,6 +528,7 @@ mod tests {
         let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: GRASS,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 16,
             xspread: 3,
             yspread: 1,
@@ -552,6 +553,7 @@ mod tests {
         let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: LARGE_FERN_LOWER,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 1,
             xspread: 0,
             yspread: 0,
@@ -574,6 +576,7 @@ mod tests {
         let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: SWEET_BERRY_BUSH,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 1,
             xspread: 0,
             yspread: 0,
@@ -607,6 +610,7 @@ mod tests {
         let cactus = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: CACTUS,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 1,
             xspread: 0,
             yspread: 0,
@@ -634,6 +638,7 @@ mod tests {
         let sugar_cane = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: SUGAR_CANE,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 1,
             xspread: 0,
             yspread: 0,
@@ -664,6 +669,7 @@ mod tests {
         let lily_pad = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: LILY_PAD,
             weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
             tries: 1,
             xspread: 0,
             yspread: 0,
@@ -826,6 +832,7 @@ mod tests {
             ConfiguredFeature::random_patch(RandomPatchConfiguration {
                 state: POPPY,
                 weighted_states: &[],
+                state_provider: RandomPatchStateProvider::Simple,
                 tries: 8,
                 xspread: 1,
                 yspread: 1,
@@ -1241,6 +1248,7 @@ mod tests {
                     RandomPatchConfiguration {
                         state: LILY_PAD,
                         weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
                         tries: 10,
                         xspread: 7,
                         yspread: 3,
@@ -1762,6 +1770,74 @@ mod tests {
                 .count(),
             4
         );
+    }
+
+    #[test]
+    fn flower_forest_feature_table_includes_java_flower_provider() {
+        let flower_forest = overworld_features_for_biome(get_layered_biome_by_id(132));
+        let vegetal_features = flower_forest
+            .iter()
+            .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
+            .collect::<Vec<_>>();
+
+        match &vegetal_features[2].feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002()),
+                            0.2,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::fancy_oak_bees_0002()),
+                            0.1,
+                        ),
+                    ]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::oak_bees_0002())
+                );
+            }
+            other => panic!("expected flower forest tree random selector, got {other:?}"),
+        }
+        assert_eq!(
+            vegetal_features[2].decorators,
+            vec![
+                ConfiguredDecorator::count_extra(6, 0.1, 1),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::water_depth_threshold(0),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
+            ]
+        );
+
+        let dense_flowers = vegetal_features[3];
+        assert_eq!(
+            dense_flowers.decorators,
+            vec![
+                ConfiguredDecorator::count(100),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::spread_32_above(),
+            ]
+        );
+        match &dense_flowers.feature {
+            ConfiguredFeature::Flower(config) => {
+                assert_eq!(
+                    config.state_provider,
+                    RandomPatchStateProvider::ForestFlower
+                );
+                assert_eq!(config.tries, 64);
+                assert_eq!(config.xspread, 7);
+                assert_eq!(config.yspread, 3);
+                assert_eq!(config.zspread, 7);
+                assert!(config.project);
+                assert!(!config.can_replace);
+                assert!(config.place_on.is_empty());
+            }
+            other => panic!("expected flower forest provider feature, got {other:?}"),
+        }
     }
 
     #[test]

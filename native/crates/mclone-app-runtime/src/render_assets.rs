@@ -961,6 +961,15 @@ mod tests {
         assert!(assets.catalog.get(mclone_core::BlockStateId(130)).is_some());
         assert!(assets.catalog.get(mclone_core::BlockStateId(131)).is_some());
         assert!(assets.catalog.get(mclone_core::BlockStateId(132)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(133)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(134)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(135)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(136)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(137)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(138)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(139)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(140)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(141)).is_some());
     }
 
     #[test]
