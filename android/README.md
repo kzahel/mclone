@@ -17,8 +17,10 @@ Current status:
   Android app feeds those tokens into the shared startup parser.
 - AVD validation builds an APK for the selected device or AVD ABI, stages
   assets, verifies the app-rendered frame marker, and captures a screenshot.
-- Quest-flat validation is scripted, but still needs a machine with an attached
-  authorized Quest headset.
+- Quest-flat validation has passed on an attached Quest 3 as a 2D panel in the
+  headset compositor.
+- Durable flat Android startup timings are recorded in
+  [`docs/performance-records.md`](../docs/performance-records.md#2026-07-04---flat-android-rd5-startup-timing-check).
 
 ## Prerequisites
 
@@ -160,6 +162,9 @@ from an older renderer-only section fixture.
 
 The Quest lane is still flat Android, not OpenXR. It validates the same
 NativeActivity APK as a 2D app panel on headset hardware.
+
+The latest AVD and Quest-flat startup timing record is in
+[`docs/performance-records.md`](../docs/performance-records.md#2026-07-04---flat-android-rd5-startup-timing-check).
 
 ```bash
 pnpm native:android:quest-flat -- --skip-build --screenshot /tmp/mclone-quest-flat.png --log /tmp/mclone-quest-flat-logcat.txt --smoke-seconds 60

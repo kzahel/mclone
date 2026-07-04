@@ -43,6 +43,13 @@ pnpm native:android-xr:perf:stationary:rd10:frame-overlap
 pnpm native:android-xr:perf:flight:rd10:metrics
 ```
 
+Flat Android validation lanes:
+
+```bash
+pnpm native:android:avd-smoke
+pnpm native:android:quest-flat
+```
+
 Lower-level scheduler isolation:
 
 ```bash
@@ -56,6 +63,7 @@ pnpm native:runtime:perf
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for faster iteration and easier comparison with Quest RD10 guardrails. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
+- `native:android:*`: flat Android validation on AVD and Quest-as-panel. These lanes prove Android packaging, asset staging, NativeActivity startup, wgpu surface creation, touch UI, and first rendered-frame behavior. They are useful for Android startup timing, but they are not OpenXR frame-pacing proof and do not currently emit dropped-frame/headroom metrics.
 - `native:android-xr:perf:*rd10*`: Quest/OpenXR RD10 frame-pacing guardrails. These currently report headset app-work/headroom, dropped/stale frames, runtime/render/upload/compile tails, and Meta performance metrics where enabled. They do not yet emit the same playable/full-view-ready/render-quiescent startup-streaming markers as the desktop startup-streaming lane.
 - `native:loading-settle:*`: synthetic full-drain isolation probe. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters. Use it to split server/light/runtime cost from mesh cost, not as the primary desktop startup policy target.
 - `native:timedemo:*`: deterministic headless GPU render path over a fixed camera orbit. Reports scene build time, render setup, per-frame render time, and drawn section/index pressure. It does not read back PNGs per frame.
@@ -76,6 +84,86 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-04 - Flat Android RD5 Startup Timing Check
+
+Flat Android validation code committed as `daef4977`.
+
+The Android log timings below were captured from the worktree that became
+`daef4977`; unrelated worldgen/texture-lab files were dirty and are not part of
+this record.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Scenario: seed `12345`, local integrated mode, render distance `5`, render
+compile workers `1`, day time `6000`, freeze time enabled, lighting enabled,
+section occlusion enabled, vanilla color profile. The flat Android validators
+stage `reference/minecraft-1.17.1/extracted.zip` into internal app storage and
+wait for the `Mclone Android rendered local integrated frame` marker.
+
+Commands:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android/validate-avd.sh \
+  --avd jstorrent-tablet \
+  --skip-build \
+  --screenshot /tmp/mclone-android-avd-flat-internal-assets.png \
+  --log /tmp/mclone-android-avd-flat-internal-assets-logcat.txt \
+  --smoke-seconds 15
+
+pnpm native:android:quest-flat -- \
+  --skip-build \
+  --serial 2G0YC1ZF93041Z \
+  --screenshot /tmp/mclone-quest-flat.png \
+  --log /tmp/mclone-quest-flat-logcat.txt
+```
+
+Raw local artifacts:
+
+- `/tmp/mclone-android-avd-flat-internal-assets-logcat.txt`
+- `/tmp/mclone-android-avd-flat-internal-assets.png`
+- `/tmp/mclone-quest-flat-logcat.txt`
+- `/tmp/mclone-quest-flat.png`
+
+Comparable RD5 timing:
+
+| Lane | Device/backend | Target chunks | Runtime ready | Render/upload ready | First rendered frame |
+|---|---|---:|---:|---:|---:|
+| Desktop loading-settle | Apple M4 Pro, synthetic full-drain | `169` | `12.473s` | `13.417s` full settle | N/A |
+| Android AVD flat | `jstorrent-tablet`, arm64 AVD, SwiftShader Vulkan | `169` | `13.178s` | `14.518s` | `14.587s` |
+| Quest 3 flat panel | Quest 3 `2G0YC1ZF93041Z`, Adreno 740 Vulkan | `169` | `18.074s` | `21.825s` | `21.973s` |
+
+Android phase details, measured from `Mclone Android starting`:
+
+| Lane | Asset pack loaded | Runtime idle | Player pose synced | Render sections uploaded | Adapter selected | First rendered frame |
+|---|---:|---:|---:|---:|---:|---:|
+| Android AVD flat | `0.325s` | `13.178s` | `13.228s` | `14.518s` | `14.583s` | `14.587s` |
+| Quest 3 flat panel | `0.193s` | `18.074s` | `18.113s` | `21.825s` | `21.964s` | `21.973s` |
+
+Interpretation:
+
+- Flat Android now has a real validation lane on both AVD and Quest. The Quest
+  screenshot shows the flat NativeActivity as a panel in the headset compositor
+  with rendered gameplay and touch UI.
+- Quest flat startup is slower than the AVD for the same RD5 target: roughly
+  `22.0s` to first rendered frame versus `14.6s`.
+- The flat Android path currently appears to render after the full RD5 target
+  is ready and uploaded. That is good for first-frame validation, but it is not
+  the same local-play shape as desktop startup streaming, where the app can
+  enter at the under-foot `3x3` playable gate and stream the remaining view
+  afterward.
+- This is not Quest frame-pacing evidence. It proves first rendered frame and
+  panel presentation, not dropped-frame/headroom behavior. Use the OpenXR
+  guardrail lanes for VR frame pacing.
+
+Follow-up gaps:
+
+- Add flat Android startup markers equivalent to desktop
+  playable/full-view-ready/render-quiescent if we want this lane to become a
+  true Android startup-streaming benchmark.
+- Run Quest/OpenXR RD10 frame-pacing guardrails after any throughput policy
+  changes. The expected result should be no submitted-frame drops and no stale
+  frames; otherwise desktop throughput changes are not acceptable for Quest.
 
 ### 2026-07-04 - Desktop Startup-Streaming RD20 Long-Run Baseline
 

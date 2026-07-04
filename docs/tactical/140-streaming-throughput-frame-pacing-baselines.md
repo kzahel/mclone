@@ -44,6 +44,13 @@ Known desktop evidence:
   useful for splitting server/light/runtime cost from mesh cost, but it is
   synthetic: it waits for full target readiness and then drains render mesh
   work, instead of entering playable and streaming under the desktop frame loop.
+- `docs/performance-records.md` also has a flat Android RD5 startup timing
+  check from 2026-07-04. AVD flat reached first rendered frame in roughly
+  `14.6s`; Quest 3 flat panel reached first rendered frame in roughly `22.0s`.
+  This proves Android/Quest flat startup and asset staging, but it is not
+  Quest/OpenXR frame-pacing evidence and it does not yet expose the same
+  playable/full-view-ready/render-quiescent markers as desktop startup
+  streaming.
 - Follow-up local observations around the startup fix still show RD20 full
   settle on the order of minutes. Runtime settle and render mesh settle are both
   large enough that we need to split server/worldgen/light throughput from
