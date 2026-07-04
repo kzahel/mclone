@@ -2039,6 +2039,110 @@ mod tests {
     }
 
     #[test]
+    fn catalog_world_delete_after_quit_removes_entry_and_blocks_reopen() {
+        let root = unique_temp_world_root("catalog-delete-after-quit");
+        let scene = SceneOptions {
+            seed: 13_579,
+            render_distance: 0,
+            lighting_enabled: false,
+            debug_passive_showcase: false,
+            world_root: Some(root.clone()),
+            ..SceneOptions::default()
+        };
+        let assets = WindowSceneAssets::load().unwrap();
+        let mut app = ChunkApp::new(
+            scene,
+            assets,
+            TexturedSectionRenderOptions::default(),
+            WindowStartIntent::Menu,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
+        );
+
+        app.driver.set_new_world_seed(13_579);
+        let create = app
+            .driver
+            .apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
+        assert!(create.session_start_queued);
+        start_queued_session_immediately(&mut app);
+
+        let created_id = match app.driver.session.state() {
+            GameSessionState::Active { session } => session
+                .local_world_id()
+                .expect("catalog-created session must carry a local world id")
+                .clone(),
+            state => panic!("expected active catalog session, got {state:?}"),
+        };
+        let world_dir = root.join(created_id.as_str());
+        assert!(world_dir.join("world.json").is_file());
+        assert!(world_dir.join("world.sqlite3").is_file());
+
+        app.teardown_world().unwrap();
+        app.driver.clear_session();
+        app.driver.apply_quit_to_title_ui();
+        assert_eq!(app.driver.ui_screen(), Some(GameScreen::Title));
+        assert!(app.driver.runtime.is_none());
+
+        app.driver
+            .apply_ui_action(GameUiAction::OpenWorldList, ui_action_context());
+        let state = app.driver.current_ui_render_state(
+            crate::frame_pacing::FramePacingUiState::default(),
+            mclone_ui::BlockPaletteOverlay::hidden(),
+        );
+        let row_id = state
+            .world_catalog
+            .entries
+            .iter()
+            .flatten()
+            .find(|entry| entry.display_name.as_str() == "New World")
+            .expect("created world should be listed after quit")
+            .id;
+
+        let delete = app
+            .driver
+            .apply_ui_action(GameUiAction::DeleteWorld(row_id), ui_action_context());
+        assert!(!delete.session_start_queued);
+        assert!(!world_dir.exists());
+
+        let state = app.driver.current_ui_render_state(
+            crate::frame_pacing::FramePacingUiState::default(),
+            mclone_ui::BlockPaletteOverlay::hidden(),
+        );
+        assert!(
+            state
+                .world_catalog
+                .entries
+                .iter()
+                .flatten()
+                .all(|entry| entry.id != row_id)
+        );
+        assert!(state.world_catalog.status.visible);
+        assert!(state.world_catalog.status.ok);
+
+        let reopen = app
+            .driver
+            .apply_ui_action(GameUiAction::OpenWorld(row_id), ui_action_context());
+        assert!(!reopen.session_start_queued);
+        assert!(app.driver.session.take_pending_start().is_none());
+        assert!(app.driver.runtime.is_none());
+        let state = app.driver.current_ui_render_state(
+            crate::frame_pacing::FramePacingUiState::default(),
+            mclone_ui::BlockPaletteOverlay::hidden(),
+        );
+        assert!(state.world_catalog.status.visible);
+        assert!(!state.world_catalog.status.ok);
+        assert!(
+            state
+                .world_catalog
+                .status
+                .message
+                .as_str()
+                .contains("Selected world is unavailable")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn native_key_codes_map_to_shared_flat_input_controls() {
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::KeyW),

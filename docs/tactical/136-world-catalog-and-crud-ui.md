@@ -3,7 +3,8 @@
 Status: active; Slices 1-5 shared catalog contract, catalog-aware session
 request vocabulary, native filesystem/SQLite catalog backend, shared UI v2
 world catalog screens, desktop flat lifecycle wiring, and desktop persistence
-smoke coverage landed. Owns follow-up persistence lifecycle work from closed
+and delete smoke coverage landed. Owns follow-up persistence lifecycle work from
+closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -434,7 +435,7 @@ button.
 
 ### Slice 5: Desktop Lifecycle Wiring
 
-Status: first pass plus desktop persistence smoke landed 2026-07-04.
+Status: first pass plus desktop persistence/delete smokes landed 2026-07-04.
 
 Wire desktop flat end to end:
 
@@ -479,11 +480,16 @@ Recorded Slice 5 result:
   runtime start, debug block break, quit to title, catalog reopen, and
   verification that the block edit survives through the catalog world
   directory.
+- Added a desktop app delete-after-quit smoke covering catalog create,
+  catalog-backed runtime start, clean quit to title, title-side delete, catalog
+  entry removal, world directory removal, and blocked reopen of the deleted UI
+  row.
 
-Validation after Slice 5 desktop persistence smoke on 2026-07-04:
+Validation after Slice 5 desktop persistence/delete smokes on 2026-07-04:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_world_create_edit_quit_reopen_preserves_block_edit
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_world_delete_after_quit_removes_entry_and_blocks_reopen
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_rejects_conflicting_world_storage_args
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client
