@@ -214,3 +214,9 @@ export function imageUrl(texture: TextureIndexEntry, imageKind: keyof TextureInd
 export function imageRefUrl(ref: TextureImageRef): string | null {
   return ref.path && ref.exists ? `/api/image?path=${encodeURIComponent(ref.path)}` : null;
 }
+
+export function tintedImageRefUrl(ref: TextureImageRef, tint: string): string | null {
+  return ref.path && ref.exists
+    ? `/api/tinted-image?path=${encodeURIComponent(ref.path)}&tint=${encodeURIComponent(tint)}`
+    : null;
+}

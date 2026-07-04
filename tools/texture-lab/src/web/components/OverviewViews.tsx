@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import type { BlockIndexEntry, TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../../core/index-model";
 import { primaryCandidateImage } from "../candidate-images";
 import type { PreviewMode } from "../store/textureLabStore";
-import { imageRefUrl } from "../store/textureLabStore";
+import { imageRefUrl, tintedImageRefUrl } from "../store/textureLabStore";
 
 export function PreviewModeTabs({
   mode,
@@ -222,11 +222,32 @@ function SplitTextureCompare({
   compact?: boolean;
 }): JSX.Element {
   const previewImage = previewCandidate ? primaryCandidateImage(previewCandidate) : null;
+  const oursImage = previewImage ?? texture.images.currentExport;
+  if (texture.tint) {
+    return (
+      <div className={compact ? "splitCompare tinted compact" : "splitCompare tinted"}>
+        <CompareImage label="Ours raw" image={oursImage} alt={oursAlt(texture, previewCandidate, "raw")} />
+        <CompareImage
+          label="Ours tinted"
+          image={oursImage}
+          tint={texture.tint.normal}
+          alt={oursAlt(texture, previewCandidate, "tinted")}
+        />
+        <CompareImage label="Minecraft raw" image={texture.images.minecraftReference} alt={`${texture.name} raw Minecraft reference`} />
+        <CompareImage
+          label="Minecraft tinted"
+          image={texture.images.minecraftReference}
+          tint={texture.tint.normal}
+          alt={`${texture.name} tinted Minecraft reference`}
+        />
+      </div>
+    );
+  }
   return (
     <div className={compact ? "splitCompare compact" : "splitCompare"}>
       <CompareImage
         label={previewCandidate ? `Ours · ${previewCandidate.codename}` : "Ours"}
-        image={previewImage ?? texture.images.currentExport}
+        image={oursImage}
         alt={previewCandidate ? `${previewCandidate.codename} preview candidate` : `${texture.name} current export`}
       />
       <CompareImage label="Minecraft" image={texture.images.minecraftReference} alt={`${texture.name} Minecraft reference`} />
@@ -234,8 +255,18 @@ function SplitTextureCompare({
   );
 }
 
-function CompareImage({ label, image, alt }: { label: string; image: TextureImageRef; alt: string }): JSX.Element {
-  const url = imageRefUrl(image);
+function CompareImage({
+  label,
+  image,
+  alt,
+  tint,
+}: {
+  label: string;
+  image: TextureImageRef;
+  alt: string;
+  tint?: string;
+}): JSX.Element {
+  const url = tint ? tintedImageRefUrl(image, tint) : imageRefUrl(image);
   return (
     <div className="comparePanel">
       <span className="compareLabel">{label}</span>
@@ -244,6 +275,12 @@ function CompareImage({ label, image, alt }: { label: string; image: TextureImag
       </div>
     </div>
   );
+}
+
+function oursAlt(texture: TextureIndexEntry, previewCandidate: TextureCandidateEntry | null, variant: "raw" | "tinted"): string {
+  return previewCandidate
+    ? `${previewCandidate.codename} ${variant} preview candidate`
+    : `${texture.name} ${variant} current export`;
 }
 
 function groupTexturesByMaterial(textures: TextureIndexEntry[]): { material: string; textures: TextureIndexEntry[] }[] {

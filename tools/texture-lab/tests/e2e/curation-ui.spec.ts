@@ -25,9 +25,15 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   const grass = index.textures.find((texture: { name: string }) => texture.name === "grass_block_top");
   expect(grass?.images.currentExport.exists).toBe(true);
   expect(grass?.images.minecraftReference.exists).toBe(true);
+  expect(grass?.tint.normal).toBe("#79b34e");
   const imageResponse = await request.get(`/api/image?path=${encodeURIComponent(grass.images.currentExport.path)}`);
   await expect(imageResponse).toBeOK();
   expect(imageResponse.headers()["content-type"]).toBe("image/png");
+  const tintedImageResponse = await request.get(
+    `/api/tinted-image?path=${encodeURIComponent(grass.images.currentExport.path)}&tint=${encodeURIComponent(grass.tint.normal)}`,
+  );
+  await expect(tintedImageResponse).toBeOK();
+  expect(tintedImageResponse.headers()["content-type"]).toBe("image/png");
 });
 
 test("defaults to the system theme and toggles light or dark mode", async ({ page }) => {
@@ -105,14 +111,19 @@ test("uses generated candidates as temporary atlas and block previews", async ({
 
   await page.getByRole("button", { name: "Atlas" }).click();
   const grassCard = page.getByRole("button", { name: "Grass Block Top atlas comparison", exact: true });
-  await expect(grassCard).toContainText("Ours · G5101S74");
+  await expect(grassCard).toContainText("Ours raw");
+  await expect(grassCard).toContainText("Ours tinted");
+  await expect(grassCard).toContainText("Minecraft raw");
+  await expect(grassCard).toContainText("Minecraft tinted");
   await expect(grassCard).toContainText("preview G5101S74");
-  await expect(grassCard.locator("img").first()).toHaveAttribute("alt", "G5101S74 preview candidate");
+  await expect(grassCard.locator("img")).toHaveCount(4);
+  await expect(grassCard.locator("img").first()).toHaveAttribute("alt", "G5101S74 raw preview candidate");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-preview-selection.png", fullPage: true });
 
   await page.getByRole("button", { name: "Blocks" }).click();
   const grassTopFace = page.getByRole("button", { name: "grass-block top uses Grass Block Top", exact: true });
-  await expect(grassTopFace).toContainText("Ours · G5101S74");
+  await expect(grassTopFace).toContainText("Ours raw");
+  await expect(grassTopFace).toContainText("Ours tinted");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-preview-blocks.png", fullPage: true });
 
   await page.getByRole("button", { name: "Detail" }).click();

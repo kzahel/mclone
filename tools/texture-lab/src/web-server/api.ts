@@ -2,8 +2,11 @@ import fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { buildTextureLabIndex } from "../core/texture-index";
+import { isHexColor } from "../dsl";
 import type { TextureLabIndex } from "../core/index-model";
+import { parseHexColor, tintTexture } from "../image";
 import { textureLabOutputRoot } from "../output-root";
+import { decodePng, encodePng } from "../png";
 import { contentTypeForImage, ImageFileError, resolveAllowedImageFile } from "./image-files";
 
 export interface TextureLabApiOptions {
@@ -84,6 +87,11 @@ export function createTextureLabApi(options: TextureLabApiOptions): TextureLabAp
         return true;
       }
 
+      if (request.method === "GET" && url.pathname === "/api/tinted-image") {
+        await sendTintedImage(response, url.searchParams.get("path"), url.searchParams.get("tint"), allowedImageRoots);
+        return true;
+      }
+
       sendJson(response, { error: `No API route for ${request.method ?? "GET"} ${url.pathname}` }, 404);
       return true;
     } catch (error) {
@@ -104,6 +112,29 @@ async function sendImage(response: ServerResponse, rawPath: string | null, allow
   response.setHeader("Content-Type", contentTypeForImage(imagePath));
   response.setHeader("Cache-Control", "no-store");
   response.end(image);
+}
+
+async function sendTintedImage(
+  response: ServerResponse,
+  rawPath: string | null,
+  rawTint: string | null,
+  allowedRoots: string[],
+): Promise<void> {
+  if (!rawTint || !isHexColor(rawTint)) {
+    sendJson(response, { error: "Missing or invalid tint color" }, 400);
+    return;
+  }
+  if (!rawPath) {
+    sendJson(response, { error: "Missing image path" }, 400);
+    return;
+  }
+  const imagePath = await resolveAllowedImageFile(rawPath, allowedRoots);
+  const image = decodePng(await fs.readFile(imagePath));
+  const tinted = encodePng(tintTexture(image, parseHexColor(rawTint)));
+  response.statusCode = 200;
+  response.setHeader("Content-Type", "image/png");
+  response.setHeader("Cache-Control", "no-store");
+  response.end(tinted);
 }
 
 function blockUsesTexture(block: { faces: { textureName: string }[] }, textureName: string): boolean {

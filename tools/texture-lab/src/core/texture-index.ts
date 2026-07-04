@@ -98,6 +98,7 @@ async function textureEntryFrom(
   const tags = catalog?.tags ?? [];
   const notes = catalog?.notes ?? [];
   const source = texture.source ?? "final-color";
+  const tint = texture.tintRole ? pack.tints[texture.tintRole] : undefined;
 
   return {
     name,
@@ -107,6 +108,13 @@ async function textureEntryFrom(
     palette: texture.palette,
     base: texture.base,
     tintRole: texture.tintRole ?? null,
+    tint: tint
+      ? {
+          role: texture.tintRole!,
+          normal: tint.normal,
+          alternates: tint.alternates ?? [],
+        }
+      : null,
     materialFamily: inferMaterialFamily(name, texture, blockUsages),
     exportPath: texture.exportPath,
     runtimeCompatPath,

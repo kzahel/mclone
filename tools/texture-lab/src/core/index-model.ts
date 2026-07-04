@@ -48,6 +48,7 @@ export interface TextureIndexEntry {
   palette: string;
   base: string;
   tintRole: string | null;
+  tint: TextureTintRef | null;
   materialFamily: string;
   exportPath: string;
   runtimeCompatPath: string | null;
@@ -70,6 +71,12 @@ export interface TextureBlockUsage {
   blockName: string;
   role: TextureRole;
   face: string;
+}
+
+export interface TextureTintRef {
+  role: string;
+  normal: string;
+  alternates: string[];
 }
 
 export interface TextureImageRef {
