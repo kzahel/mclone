@@ -1,7 +1,8 @@
 use crate::block::{
     CACTUS, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, ICE,
     LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD, MYCELIUM, PODZOL, POPPY, RED_SAND, RawBlockId,
-    SAND, SUGAR_CANE, TERRACOTTA, is_air_like, is_lava, is_water, material_blocks_motion,
+    SAND, SUGAR_CANE, SWEET_BERRY_BUSH, TERRACOTTA, is_air_like, is_lava, is_water,
+    material_blocks_motion,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -186,6 +187,7 @@ fn can_survive_simple_plant(
             LARGE_FERN_LOWER | LARGE_FERN_UPPER => {
                 matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
             }
+            SWEET_BERRY_BUSH => matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM),
             DEAD_BUSH => matches!(
                 block_below,
                 SAND | RED_SAND | TERRACOTTA | DIRT | GRASS_BLOCK | PODZOL

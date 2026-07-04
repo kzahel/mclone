@@ -7,7 +7,7 @@ use crate::block::{
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
     FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
     LAVA, LILY_PAD, MYCELIUM, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SUGAR_CANE,
-    TERRACOTTA, TUFF, WATER,
+    SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -64,9 +64,8 @@ pub(super) fn overworld_features_for_biome_cached(
         | "minecraft:giant_spruce_taiga_hills" => taiga_feature_table(),
         "minecraft:snowy_taiga"
         | "minecraft:snowy_taiga_hills"
-        | "minecraft:snowy_taiga_mountains"
-        | "minecraft:snowy_tundra"
-        | "minecraft:snowy_mountains" => snowy_feature_table(),
+        | "minecraft:snowy_taiga_mountains" => snowy_taiga_feature_table(),
+        "minecraft:snowy_tundra" | "minecraft:snowy_mountains" => snowy_feature_table(),
         "minecraft:mountains"
         | "minecraft:wooded_mountains"
         | "minecraft:mountain_edge"
@@ -170,7 +169,16 @@ fn taiga_feature_table() -> &'static [PlacedFeature] {
 fn snowy_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
-        .get_or_init(|| build_overworld_feature_table("minecraft:snowy_taiga", snowy_features()))
+        .get_or_init(|| build_overworld_feature_table("minecraft:snowy_tundra", snowy_features()))
+        .as_slice()
+}
+
+fn snowy_taiga_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:snowy_taiga", snowy_taiga_features())
+        })
         .as_slice()
 }
 
@@ -677,7 +685,7 @@ fn taiga_features() -> Vec<PlacedFeature> {
         omitted_vegetal_feature(),
         spring_water_feature(),
         spring_lava_feature(),
-        omitted_vegetal_feature(),
+        berry_patch_feature(false),
     ]
 }
 
@@ -686,6 +694,12 @@ fn snowy_features() -> Vec<PlacedFeature> {
         tree_feature(BasicTreeConfiguration::spruce(), 3, 0.2, 1),
         grass_patch(FERN, 1),
     ]
+}
+
+fn snowy_taiga_features() -> Vec<PlacedFeature> {
+    let mut features = snowy_features();
+    features.push(berry_patch_feature(true));
+    features
 }
 
 fn mountain_features() -> Vec<PlacedFeature> {
@@ -1191,6 +1205,36 @@ fn large_fern_patch_feature() -> PlacedFeature {
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
             ConfiguredDecorator::spread_32_above(),
         ],
+    )
+}
+
+fn berry_patch_feature(rarity_12: bool) -> PlacedFeature {
+    let mut decorators = Vec::new();
+    if rarity_12 {
+        decorators.push(ConfiguredDecorator::chance(12));
+    }
+    decorators.push(ConfiguredDecorator::square());
+    decorators.push(ConfiguredDecorator::heightmap_spread_double(
+        HeightmapType::MotionBlocking,
+    ));
+
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: SWEET_BERRY_BUSH,
+            weighted_states: &[],
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[GRASS_BLOCK],
+        }),
+        decorators,
     )
 }
 

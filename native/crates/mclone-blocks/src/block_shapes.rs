@@ -116,6 +116,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::TALL_SEAGRASS_UPPER
         | terrain_id::KELP
         | terrain_id::KELP_PLANT
+        | terrain_id::SWEET_BERRY_BUSH
         | terrain_id::SEA_PICKLE_1
         | terrain_id::SEA_PICKLE_2
         | terrain_id::SEA_PICKLE_3
@@ -378,6 +379,7 @@ mod tests {
             terrain_id::LARGE_FERN_UPPER,
             terrain_id::GLOW_LICHEN,
             terrain_id::SUGAR_CANE,
+            terrain_id::SWEET_BERRY_BUSH,
             terrain_id::SEAGRASS,
             terrain_id::TALL_SEAGRASS_LOWER,
             terrain_id::TALL_SEAGRASS_UPPER,
@@ -447,6 +449,15 @@ mod tests {
             shape_for(state(terrain_id::LARGE_FERN_LOWER), ShapeUse::Outline)
                 .map(|shape| shape.world_aabb(pos)),
             Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::SWEET_BERRY_BUSH), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::SWEET_BERRY_BUSH), pos),
+            None
         );
         assert_eq!(
             shape_for(state(terrain_id::SUGAR_CANE), ShapeUse::Outline)

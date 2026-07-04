@@ -390,6 +390,7 @@ const FACING_EAST: &[(&str, &str)] = &[("facing", "east")];
 const FACING_SOUTH: &[(&str, &str)] = &[("facing", "south")];
 const FACING_WEST: &[(&str, &str)] = &[("facing", "west")];
 const AGE_0: &[(&str, &str)] = &[("age", "0")];
+const AGE_3: &[(&str, &str)] = &[("age", "3")];
 const AGE_20: &[(&str, &str)] = &[("age", "20")];
 const BAMBOO_TRUNK: &[(&str, &str)] = &[("age", "1"), ("leaves", "none"), ("stage", "0")];
 const PICKLES_1_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "1"), ("waterlogged", "true")];
@@ -541,6 +542,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (129, "minecraft:jungle_leaves", EMPTY_PROPS),
     (130, "minecraft:bamboo", BAMBOO_TRUNK),
     (131, "minecraft:lily_pad", EMPTY_PROPS),
+    (132, "minecraft:sweet_berry_bush", AGE_3),
 ];
 
 #[cfg(test)]
@@ -559,7 +561,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 132);
+        assert_eq!(registry.len(), 133);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -807,6 +809,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:lily_pad"),
             Some(BlockStateId(131))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:sweet_berry_bush[age=3]"),
+            Some(BlockStateId(132))
         );
     }
 

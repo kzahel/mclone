@@ -48,8 +48,8 @@ mod tests {
         LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
         PACKED_ICE, PODZOL, POPPY, RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1,
         SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
-        SPRUCE_LOG, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA,
-        TUBE_CORAL_BLOCK, WATER, is_air_like, is_water,
+        SPRUCE_LOG, STONE, SUGAR_CANE, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER,
+        TERRACOTTA, TUBE_CORAL_BLOCK, WATER, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -131,7 +131,7 @@ mod tests {
         PlainsVegetation,
         DesertDeadBushCactusSugarCane,
         SwampNativeSubsetSugarCaneLilyPad,
-        TaigaSpruceFern,
+        TaigaSpruceFernBerry,
         SnowySpruceFern,
         BadlandsDeadBushCactusSugarCane,
         OceanWaterPlants,
@@ -152,7 +152,7 @@ mod tests {
                 Self::SwampNativeSubsetSugarCaneLilyPad => {
                     "native swamp vegetation/clay subset plus sugar cane/lily pad"
                 }
-                Self::TaigaSpruceFern => "taiga spruce/fern",
+                Self::TaigaSpruceFernBerry => "taiga spruce/fern plus berry bushes",
                 Self::SnowySpruceFern => "snowy spruce/fern",
                 Self::BadlandsDeadBushCactusSugarCane => {
                     "badlands dead bush plus cactus/sugar cane"
@@ -175,12 +175,13 @@ mod tests {
                 Self::SwampNativeSubsetSugarCaneLilyPad => &[
                     OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE, LILY_PAD,
                 ],
-                Self::TaigaSpruceFern => &[
+                Self::TaigaSpruceFernBerry => &[
                     SPRUCE_LOG,
                     SPRUCE_LEAVES,
                     FERN,
                     LARGE_FERN_LOWER,
                     LARGE_FERN_UPPER,
+                    SWEET_BERRY_BUSH,
                 ],
                 Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
@@ -231,6 +232,18 @@ mod tests {
                         .any(|block| chunk.block_count(*block) > 0)
                         && chunk.block_count(SUGAR_CANE) > 0
                         && chunk.block_count(LILY_PAD) > 0
+                }
+                Self::TaigaSpruceFernBerry => {
+                    [
+                        SPRUCE_LOG,
+                        SPRUCE_LEAVES,
+                        FERN,
+                        LARGE_FERN_LOWER,
+                        LARGE_FERN_UPPER,
+                    ]
+                    .iter()
+                    .any(|block| chunk.block_count(*block) > 0)
+                        && chunk.block_count(SWEET_BERRY_BUSH) > 0
                 }
                 Self::WarmOceanCoralSeaPickles => {
                     [
@@ -356,12 +369,12 @@ mod tests {
             feature_family: Some(FeatureFamily::DarkForestCanopyMushrooms),
         },
         PaletteMatrixCase {
-            seed: 14,
+            seed: 29_123,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:snowy_taiga",
             surface_family: SurfaceFamily::Snow,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::TaigaSpruceFernBerry),
         },
         PaletteMatrixCase {
             seed: 19,
@@ -420,12 +433,12 @@ mod tests {
             feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
-            seed: 125,
+            seed: 233,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:taiga",
             surface_family: SurfaceFamily::Grass,
-            feature_family: Some(FeatureFamily::TaigaSpruceFern),
+            feature_family: Some(FeatureFamily::TaigaSpruceFernBerry),
         },
         PaletteMatrixCase {
             seed: 42,

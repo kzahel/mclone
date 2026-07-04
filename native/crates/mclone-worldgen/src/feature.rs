@@ -289,8 +289,8 @@ mod tests {
         HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LAPIS_ORE,
         LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILY_PAD, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG,
         POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
-        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER,
-        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
+        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, SWEET_BERRY_BUSH,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -567,6 +567,36 @@ mod tests {
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
         assert_eq!(chunk.get_block_at_y(8, 3, 8), LARGE_FERN_LOWER);
         assert_eq!(chunk.get_block_at_y(8, 4, 8), LARGE_FERN_UPPER);
+    }
+
+    #[test]
+    fn random_patch_places_sweet_berry_bush_on_grass_whitelist() {
+        let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: SWEET_BERRY_BUSH,
+            weighted_states: &[],
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[GRASS_BLOCK],
+        });
+        let mut grass_chunk = flat_grass_chunk();
+        let mut grass_random = WorldgenRandom::new(0);
+
+        assert!(feature.place(&mut grass_chunk, &mut grass_random, BlockPos::new(8, 3, 8)));
+        assert_eq!(grass_chunk.get_block_at_y(8, 3, 8), SWEET_BERRY_BUSH);
+
+        let mut sand_chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        sand_chunk.set_block_at_y(8, 2, 8, SAND);
+        let mut sand_random = WorldgenRandom::new(0);
+
+        assert!(!feature.place(&mut sand_chunk, &mut sand_random, BlockPos::new(8, 3, 8)));
+        assert_eq!(sand_chunk.get_block_at_y(8, 3, 8), AIR);
     }
 
     #[test]
@@ -1869,8 +1899,71 @@ mod tests {
                 )),
             ]
         );
-        assert_eq!(vegetal_features[13].feature, ConfiguredFeature::noop());
-        assert!(vegetal_features[13].decorators.is_empty());
+        let berry_patch = vegetal_features[13];
+        assert_eq!(
+            berry_patch.decorators,
+            vec![
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
+        );
+        match &berry_patch.feature {
+            ConfiguredFeature::RandomPatch(config) => {
+                assert_eq!(config.state, SWEET_BERRY_BUSH);
+                assert_eq!(config.weighted_states, &[]);
+                assert_eq!(config.tries, 64);
+                assert_eq!(config.xspread, 7);
+                assert_eq!(config.yspread, 3);
+                assert_eq!(config.zspread, 7);
+                assert!(!config.project);
+                assert!(!config.can_replace);
+                assert!(!config.double_plant);
+                assert_eq!(config.column_height, None);
+                assert!(!config.need_water);
+                assert_eq!(config.place_on, &[GRASS_BLOCK]);
+            }
+            other => panic!("expected sweet berry random patch, got {other:?}"),
+        }
+
+        let snowy_taiga = overworld_features_for_biome(get_layered_biome_by_id(30));
+        let snowy_taiga_vegetal_features = snowy_taiga
+            .iter()
+            .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
+            .collect::<Vec<_>>();
+        let snowy_berry_patch = snowy_taiga_vegetal_features
+            .iter()
+            .find(|feature| {
+                matches!(
+                    &feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: SWEET_BERRY_BUSH,
+                        ..
+                    })
+                )
+            })
+            .expect("snowy taiga should include Java berry bush patch");
+        assert_eq!(
+            snowy_berry_patch.decorators,
+            vec![
+                ConfiguredDecorator::chance(12),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
+        );
+
+        let snowy_tundra = overworld_features_for_biome(get_layered_biome_by_id(12));
+        assert!(
+            !snowy_tundra.iter().any(|feature| {
+                matches!(
+                    &feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: SWEET_BERRY_BUSH,
+                        ..
+                    })
+                )
+            }),
+            "snowy tundra should not inherit snowy taiga berry bushes"
+        );
     }
 
     #[test]
