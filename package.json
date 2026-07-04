@@ -68,7 +68,7 @@
     "native:web:glue": "node ./native/apps/mclone-web-client/scripts/build-web-glue.mjs",
     "native:web:typecheck": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --build-only && tsc --noEmit -p native/apps/mclone-web-client/tsconfig.json",
     "native:android:apk": "node ./scripts/run-native-bash.mjs ./android/build-apk.sh",
-    "native:android:apk:avd": "node ./scripts/run-native-bash.mjs ./android/build-apk.sh --abi x86_64",
+    "native:android:apk:avd": "node ./scripts/run-native-bash.mjs ./android/build-apk.sh --abis arm64-v8a,x86_64",
     "native:android:avd-smoke": "node ./scripts/run-native-bash.mjs ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt --smoke-seconds 15",
     "native:android:avd-touch-smoke": "node ./scripts/run-native-bash.mjs ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-touch.png --log /tmp/mclone-android-avd-touch-logcat.txt --smoke-seconds 15 --touch-swipe 1280,820,1680,680,500",
     "native:android:avd-session-smoke": "node ./scripts/run-native-bash.mjs ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-session.png --log /tmp/mclone-android-avd-session-logcat.txt --smoke-seconds 15 --session-smoke new-world",

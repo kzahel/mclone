@@ -14,7 +14,7 @@ LOG_PATH="${MCLONE_ANDROID_LOGCAT:-/tmp/mclone-android-avd-logcat.txt}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-120}"
 SMOKE_SECONDS="${MCLONE_ANDROID_SMOKE_SECONDS:-3}"
 STAGE_ASSETS="${MCLONE_ANDROID_STAGE_ASSETS:-1}"
-BUILD_ABIS="${MCLONE_ANDROID_ABIS:-x86_64}"
+BUILD_ABIS="${MCLONE_ANDROID_ABIS:-}"
 SKIP_BUILD=0
 KEEP_EMULATOR=0
 HEADLESS=1
@@ -34,7 +34,8 @@ Options:
   --serial SERIAL     Use an already-running emulator/device serial.
   --skip-build        Reuse the existing APK.
   --abi ABI           Build for one Android ABI. May be repeated.
-                      Defaults to x86_64 for AVD validation.
+                      Defaults to the attached device or AVD ABI when
+                      discoverable, otherwise x86_64.
   --abis LIST         Build for comma- or space-separated Android ABIs.
   --keep-emulator     Leave an emulator started by this script running.
   --window            Show the emulator window instead of using -no-window.
@@ -176,7 +177,38 @@ done
 if [[ "${#EXPLICIT_ABIS[@]}" -gt 0 ]]; then
     BUILD_ABIS="${EXPLICIT_ABIS[*]}"
 fi
-export MCLONE_ANDROID_ABIS="${MCLONE_ANDROID_ABIS:-$BUILD_ABIS}"
+
+infer_avd_config_abi() {
+    local avd_name="$1"
+    local avd_home="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
+    local config="$avd_home/$avd_name.avd/config.ini"
+    local abi
+
+    [[ -f "$config" ]] || return 1
+    abi="$(sed -n 's/^[[:space:]]*abi\.type[[:space:]]*=[[:space:]]*//p' "$config" | head -1 | tr -d '\r')"
+    case "$abi" in
+        arm64-v8a|x86_64)
+            printf '%s\n' "$abi"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+infer_device_abi() {
+    local serial="$1"
+    local abi
+
+    [[ -n "$serial" ]] || return 1
+    abi="$("$ADB" -s "$serial" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r' || true)"
+    case "$abi" in
+        arm64-v8a|x86_64)
+            printf '%s\n' "$abi"
+            return 0
+            ;;
+    esac
+    return 1
+}
 
 cleanup() {
     local status=$?
@@ -193,6 +225,18 @@ trap cleanup EXIT INT TERM
 cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
 EMULATOR="$(mclone_android_tool emulator emulator/emulator)"
+
+if [[ -z "$BUILD_ABIS" ]]; then
+    if [[ -n "$SERIAL" ]] && BUILD_ABIS="$(infer_device_abi "$SERIAL")"; then
+        :
+    elif BUILD_ABIS="$(infer_avd_config_abi "$AVD_NAME")"; then
+        :
+    else
+        BUILD_ABIS="x86_64"
+    fi
+    mclone_note "Inferred Android ABI(s) for AVD validation: $BUILD_ABIS"
+fi
+export MCLONE_ANDROID_ABIS="$BUILD_ABIS"
 
 mclone_build_apk
 "$ADB" start-server >/dev/null

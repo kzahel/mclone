@@ -15,8 +15,8 @@ Current status:
 - The default host mode is local integrated. Launch-scoped startup arguments
   are passed as JSON argv through intent extra `mclone.startup.argv`; the flat
   Android app feeds those tokens into the shared startup parser.
-- AVD validation builds an x86_64 emulator APK, stages assets, verifies the
-  app-rendered frame marker, and captures a screenshot.
+- AVD validation builds an APK for the selected device or AVD ABI, stages
+  assets, verifies the app-rendered frame marker, and captures a screenshot.
 - Quest-flat validation is scripted, but still needs a machine with an attached
   authorized Quest headset.
 
@@ -26,7 +26,8 @@ Current status:
 - JDK 17 or newer.
 - `cargo-ndk`.
 - Rust target `aarch64-linux-android` for physical Android/Quest devices.
-- Rust target `x86_64-linux-android` for local x86_64 AVD validation.
+- Rust target `aarch64-linux-android` or `x86_64-linux-android` for local AVD
+  validation, depending on the AVD image ABI.
 - Packed assets at `reference/minecraft-1.17.1/extracted.zip`; rebuild with
   `pnpm assets:pack` if needed.
 
@@ -44,16 +45,17 @@ pnpm native:android:apk
 ```
 
 The default APK build targets `arm64-v8a`, which is the physical device/Quest
-path. Build an emulator APK explicitly with:
+path. Build a broadly compatible emulator APK explicitly with:
 
 ```bash
 pnpm native:android:apk:avd
 ```
 
-or:
+To build for one emulator ABI:
 
 ```bash
 bash android/build-apk.sh --abi x86_64
+bash android/build-apk.sh --abi arm64-v8a
 ```
 
 The debug APK is written to:
@@ -70,7 +72,8 @@ Run the full flat Android screenshot smoke:
 pnpm native:android:avd-smoke
 ```
 
-By default this uses the `jstorrent-tablet` AVD, builds the APK, stages
+By default this uses the `jstorrent-tablet` AVD, infers that AVD's ABI from its
+config when no `--abi` is passed, builds the APK, stages
 `reference/minecraft-1.17.1/extracted.zip`, repairs staged asset ownership on
 rootable emulator images, launches the app, requires a rendered-frame log
 marker, and captures:
