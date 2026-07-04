@@ -91,9 +91,12 @@ disable locomotion, wait for no server queues, no compile jobs, no rebuilds, no
 uploads, and no poll changes after a minimum 5 second settle window, then record
 a 20 second steady-state render sample. Persistent deferred render sections are
 recorded as a steady-state condition rather than blocking the sample forever.
-RD7 is the current "hopefully stable" live lane for comfort and product-style
-interpretation. RD10 remains the stress lane for exposing bursty work and tail
-regressions; it should not be the only pass/fail signal for a pacing change.
+RD5 settled orbit is the current lower-distance safety guardrail for throughput
+policy changes. RD7 remains the product-style pressure lane, but the current
+throughput workstream is not trying to perfect RD7 before improving desktop
+streaming throughput. RD10 remains the stress lane for exposing bursty work and
+tail regressions; it should not be the only pass/fail signal for a pacing
+change.
 
 Frozen samples use the same settle gate, then skip runtime polling, section
 sync, traversal-ready refresh, and GPU section uploads during the measured

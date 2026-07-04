@@ -65,7 +65,7 @@ pnpm native:runtime:perf
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
-- `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for faster iteration and easier comparison with Quest RD10 guardrails. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
+- `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
 - `native:android:*`: flat Android validation on AVD and Quest-as-panel. These lanes prove Android packaging, asset staging, NativeActivity startup, wgpu surface creation, touch UI, and first rendered-frame behavior. They are useful for Android startup timing, but they are not OpenXR frame-pacing proof and do not currently emit dropped-frame/headroom metrics.
 - `native:android-xr:perf:*rd5*`: Quest/OpenXR lower-distance control lanes. Use RD5 to distinguish fixed XR/render overhead from view-distance pressure; current records live in `docs/quest-standalone-performance-records.md`.
 - `native:android-xr:perf:*rd7*`: Quest/OpenXR RD7 baseline guardrails. RD7 is the headset product-style frame-pacing lane; current records live in `docs/quest-standalone-performance-records.md`.
@@ -166,9 +166,9 @@ Follow-up gaps:
 - Add flat Android startup markers equivalent to desktop
   playable/full-view-ready/render-quiescent if we want this lane to become a
   true Android startup-streaming benchmark.
-- Run Quest/OpenXR RD10 frame-pacing guardrails after any throughput policy
-  changes. The expected result should be no submitted-frame drops and no stale
-  frames; otherwise desktop throughput changes are not acceptable for Quest.
+- Run Quest/OpenXR RD5 settled-orbit guardrails after any throughput policy
+  changes, plus RD7 for promising or shared-policy candidates. RD5 should remain
+  clean; RD7 should not materially regress.
 
 ### 2026-07-04 - Desktop Startup-Streaming RD20 Long-Run Baseline
 
@@ -197,8 +197,9 @@ Raw output for this local run:
 Benchmark options: seed `12345`, transient local integrated world, render
 distance `20`, render compile workers `1`, simulation cadence `20/20/60`,
 lighting enabled, debug passive showcase disabled, `30,000` paced frames at
-`120 Hz`. This is retained as an explicit long-run checkpoint. The default
-desktop/Quest comparison lane should use RD10 for iteration.
+`120 Hz`. This is retained as an explicit long-run checkpoint. The current
+throughput loop should use desktop RD10/RD15 with Quest RD5 as the safety
+guardrail and Quest RD7 as the pressure check.
 
 Summary:
 
