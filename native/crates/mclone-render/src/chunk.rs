@@ -316,7 +316,12 @@ impl ChunkRenderView {
     /// Minecraft's `renderSky`, which draws into a pose stack carrying only the
     /// camera rotation.
     pub fn sky_view_projection(self) -> Mat4 {
-        let rotation_only_view = Mat4::look_at_rh(Vec3::ZERO, self.camera_forward, self.camera_up);
+        let rotation_only_view = Mat4::from_cols(
+            self.view.x_axis,
+            self.view.y_axis,
+            self.view.z_axis,
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+        );
         self.projection * rotation_only_view
     }
 }
@@ -3945,6 +3950,44 @@ mod tests {
         assert!(
             !mat4_near(base.view_projection, shifted.view_projection, 0.0001),
             "regular view projection should retain camera translation"
+        );
+        assert_mat4_near(
+            base.sky_view_projection(),
+            shifted.sky_view_projection(),
+            0.0001,
+        );
+    }
+
+    #[test]
+    fn sky_view_projection_is_finite_for_vertical_render_pose() {
+        for orientation in [
+            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+        ] {
+            let render_view = test_perspective_pose(Vec3::new(0.0, 64.0, 0.0), orientation)
+                .render_view(1280, 720)
+                .expect("vertical render pose should build");
+            assert_finite_render_view(render_view);
+            assert!(
+                render_view.sky_view_projection().is_finite(),
+                "vertical sky view-projection should be finite"
+            );
+        }
+    }
+
+    #[test]
+    fn sky_view_projection_drops_render_pose_translation() {
+        let orientation = Quat::from_rotation_y(0.37) * Quat::from_rotation_x(-0.41);
+        let base = test_perspective_pose(Vec3::new(8.0, 70.0, 8.0), orientation)
+            .render_view(1280, 720)
+            .expect("base render pose should build");
+        let shifted = test_perspective_pose(Vec3::new(136.0, 59.0, 55.0), orientation)
+            .render_view(1280, 720)
+            .expect("shifted render pose should build");
+
+        assert!(
+            !mat4_near(base.view_projection, shifted.view_projection, 0.0001),
+            "regular view projection should retain render-pose translation"
         );
         assert_mat4_near(
             base.sky_view_projection(),

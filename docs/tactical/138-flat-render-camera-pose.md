@@ -1,6 +1,6 @@
 # 138: Flat Render Camera Pose
 
-Status: proposed; Slices A-C flat pose routing landed 2026-07-04
+Status: proposed; Slices A-D flat pose and sky routing landed 2026-07-04
 Workstream: native Rust, shared render/session boundary, desktop validation first
 
 ## Purpose
@@ -218,18 +218,27 @@ path was separately validated with the direct live app-camera screenshot.
 
 ### Slice D: Sky And Secondary Render Paths
 
-- [ ] Replace `ChunkRenderView::sky_view_projection()` internals so it does not
+- [x] Replace `ChunkRenderView::sky_view_projection()` internals so it does not
       call `look_at_rh` with `camera_forward` and `camera_up`.
-- [ ] Audit entity, selection-outline, far-LOD, world-GUI, and screen-effect
+- [x] Audit entity, selection-outline, far-LOD, world-GUI, and screen-effect
       paths for assumptions that `camera_up` is world-up.
-- [ ] Keep XR multiview behavior unchanged.
-- [ ] Add tests that sky view-projection is finite for vertical flat views and
+- [x] Keep XR multiview behavior unchanged.
+- [x] Add tests that sky view-projection is finite for vertical flat views and
       remains translation-free.
+
+Result: `ChunkRenderView::sky_view_projection()` now reuses the existing view
+matrix basis with translation cleared instead of reconstructing a second
+look-at view. The audit found no production world-up assumptions in entity,
+selection-outline, far-LOD, world-GUI, or screen-effect render paths beyond
+their existing `ChunkRenderView` basis use.
 
 Validation:
 
 - `cargo test --manifest-path native/Cargo.toml -p mclone-render`
-- screenshot comparison at ordinary pitch and vertical pitch
+- ordinary offscreen capture inspected:
+  `/tmp/mclone-sky-pose-ordinary.png`
+- exact-up offscreen capture inspected:
+  `/tmp/mclone-sky-pose-up.png`
 
 ### Slice E: Cleanup And Contract Hardening
 
