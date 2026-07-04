@@ -1,5 +1,16 @@
 #![deny(unsafe_code)]
 
+const ANDROID_REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
+
+fn normalize_android_legacy_remote_addr(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value == ANDROID_REMOTE_ADDR_NONE_SENTINEL {
+        None
+    } else {
+        Some(value.to_owned())
+    }
+}
+
 #[cfg(target_os = "android")]
 mod graphics_vulkan;
 
@@ -879,8 +890,7 @@ mod android {
 
     fn android_remote_addr() -> Option<String> {
         android_property(REMOTE_ADDR_PROPERTY)
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
+            .and_then(|value| super::normalize_android_legacy_remote_addr(&value))
     }
 
     #[allow(unsafe_code)]
@@ -6379,3 +6389,38 @@ mod android {
 
 #[cfg(not(target_os = "android"))]
 pub fn host_placeholder() {}
+
+#[cfg(test)]
+mod tests {
+    use super::{ANDROID_REMOTE_ADDR_NONE_SENTINEL, normalize_android_legacy_remote_addr};
+
+    #[test]
+    fn android_legacy_remote_addr_ignores_empty_values() {
+        assert_eq!(normalize_android_legacy_remote_addr(""), None);
+        assert_eq!(normalize_android_legacy_remote_addr("   \t"), None);
+    }
+
+    #[test]
+    fn android_legacy_remote_addr_ignores_none_sentinel() {
+        assert_eq!(
+            normalize_android_legacy_remote_addr(ANDROID_REMOTE_ADDR_NONE_SENTINEL),
+            None
+        );
+    }
+
+    #[test]
+    fn android_legacy_remote_addr_preserves_real_address() {
+        assert_eq!(
+            normalize_android_legacy_remote_addr(" 192.168.1.10:25565 "),
+            Some("192.168.1.10:25565".to_owned())
+        );
+    }
+
+    #[test]
+    fn android_legacy_remote_addr_preserves_sentinel_near_misses() {
+        assert_eq!(
+            normalize_android_legacy_remote_addr("__mclone_none__:25565"),
+            Some("__mclone_none__:25565".to_owned())
+        );
+    }
+}

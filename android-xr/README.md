@@ -107,8 +107,10 @@ The current wrapper property is:
 debug.mclone.xr_view_pose
 ```
 
-`debug.mclone.remote_addr` is retained only as a legacy fallback and is cleared
-by the install/validate scripts before launch.
+`debug.mclone.remote_addr` is retained only as a legacy fallback. The
+install/validate scripts clear it before launch, and the runtime also ignores
+the shared flat-Android `__mclone_none__` sentinel if that stale value remains
+on the headset.
 
 ## Validate
 

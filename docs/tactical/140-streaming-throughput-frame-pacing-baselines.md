@@ -3,9 +3,12 @@
 Status: active benchmark and attribution checkpoint. Slice A long-run desktop
 startup-streaming RD20 baseline captured on 2026-07-04 at `3adafc1e`; Slice A2
 clean synthetic loading-settle isolation baseline captured on 2026-07-04 at
-`482f0d51`. The primary paired RD10 desktop/Quest baseline is still pending. No
-optimization slices should start from this doc until the RD10 baseline matrix is
-captured and interpreted.
+`482f0d51`. Quest RD7 settled-orbit guardrail evidence was captured on
+2026-07-04 and is recorded in
+`docs/quest-standalone-performance-records.md`. The primary desktop-shaped RD7
+startup-streaming comparison is still pending. No optimization slices should
+start from this doc until the RD7 desktop/Quest baseline pair is captured and
+interpreted.
 Workstream: native Rust performance, desktop throughput, Android XR / Quest
 frame pacing, shared runtime/render scheduling policy.
 
@@ -20,9 +23,9 @@ Capture the current conflict between two valid performance goals:
   update application, render-section compilation, GPU upload, and ready-state
   publication from creating frame-time tails.
 - Desktop and Quest policy comparisons should use the same practical render
-  distance before drawing conclusions. RD10 is the current paired comparison
-  target because it is meaningful on Quest and fast enough to iterate on
-  desktop; RD20/RD30 remain explicit long-run checkpoints.
+  distance before drawing conclusions. RD7 is the Quest XR baseline and should
+  be the first paired desktop/Quest comparison target. RD10 remains a Quest
+  stress lane; RD20/RD30 remain explicit high-distance desktop checkpoints.
 
 The recent startup work fixed the entry gate: local play can enter as soon as
 the center `3x3` publication gate is ready, even when a large render distance
@@ -58,6 +61,12 @@ Known desktop evidence:
 
 Known Quest evidence:
 
+- `docs/quest-standalone-performance-records.md` has the 2026-07-04 Quest 3 RD7
+  settled-orbit guardrail. The measured sample reported `skipped_delta=0`, but
+  app work still averaged `15.460ms` against the `13.889ms` 72 Hz budget and was
+  over-period for `81.9%` of frames. It also exposed a measurement gap: Meta's
+  dropped-frame counter was captured only as a single early absolute value, not
+  as a per-sample delta.
 - `120-vanilla-render-compile-backpressure.md` measured that more render compile
   workers can improve terrain throughput, but on Quest they can also produce
   larger runtime sync and upload tails.
@@ -84,9 +93,10 @@ is a measured policy boundary, not one global knob.
 - Treat desktop-shaped startup streaming as the primary local-play benchmark.
   Synthetic loading-settle remains useful for attribution, but it must not be
   the only target for throughput policy.
-- Use RD10 as the default apples-to-apples desktop/Quest comparison distance.
-  Keep RD20/RD30 out of the default iteration loop unless the question is
-  specifically high-distance long-run behavior.
+- Use RD7 as the default Quest XR baseline and first desktop/Quest comparison
+  distance. Use RD10 as a Quest stress lane after RD7 is understood. Keep
+  RD20/RD30 out of the default iteration loop unless the question is
+  specifically high-distance desktop long-run behavior.
 - Keep runtime settle and render mesh settle separate. A faster mesh path does
   not prove server generation improved.
 - Keep average throughput and frame tails separate. A higher chunks/sec number
@@ -533,6 +543,8 @@ These are hypotheses, not plans:
 ## Cross-Links
 
 - `docs/performance-records.md` owns durable baseline records.
+- `docs/quest-standalone-performance-records.md` owns standalone Quest/OpenXR
+  frame-pacing records.
 - `139-vanilla-chunk-startup-scheduling.md` owns the high-render-distance entry
   gate and loading progress correctness.
 - `120-vanilla-render-compile-backpressure.md` owns the Java-shaped render

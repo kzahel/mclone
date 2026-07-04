@@ -103,6 +103,90 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-04 - Standalone Quest 3 RD7 Settled Orbit Current Guardrail
+
+Benchmarked code: captured from the current local worktree after the Android XR
+legacy remote-address sentinel fix. The commit containing this record also
+contains that XR fix. The worktree was not clean during capture: unrelated
+worldgen files were dirty, so treat this as a current-state guardrail and not as
+a clean regression baseline.
+
+Command:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-settled-orbit \
+  --perf-orbit-speed 4.3 \
+  --perf-metrics \
+  --wait-seconds 270 \
+  --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd7-current-summary.txt \
+  --log /tmp/mclone-quest-openxr-perf-orbit-rd7-current-logcat.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 7 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Launch note: an earlier attempt failed before terrain startup because
+`debug.mclone.remote_addr` still held the flat-Android no-remote sentinel
+`__mclone_none__`; Android XR now ignores that sentinel and logs
+`Android XR remote dedicated address: <none>`.
+
+Summary:
+
+| Lane | Path | Hz | Sample | Settle | FPS | Runtime skipped | App avg | App p50 | App p95 | App p99 | App max | Headroom avg | Over period |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| settled orbit RD7 | per-eye | `72.0` | `45.013s` | `44.564s` | `63.94` | `0` | `15.460ms` | `15.277ms` | `18.515ms` | `21.528ms` | `29.413ms` | `-1.571ms` | `81.9%` |
+
+Additional pacing counters:
+
+- Frame interval summary: `15.586ms` avg / `18.798ms` p95 /
+  `22.307ms` p99 / `32.379ms` max; `2429 / 2878` frames over the
+  `13.889ms` 72 Hz budget, with `3` frames over `2x` budget.
+- Runtime frame counters during the measured sample: `submitted_delta=2878`,
+  `runtime_delta=2878`, `skipped_delta=0`.
+- Meta PerfMetrics single early query: app GPU `2.302ms`, compositor GPU
+  `0.728ms`, GPU util `21.1%`, CPU util avg/worst `83.8% / 88.4%`,
+  motion-to-photon `24.408ms`, dropped-frame counter `19`. This is not yet a
+  measured per-sample dropped-frame delta.
+
+Key max buckets:
+
+| Bucket | Value |
+|---|---:|
+| Runtime upload | `13.902ms` |
+| Runtime sync | `3.674ms` |
+| Runtime GPU upload | `10.139ms` |
+| Upload apply worst mesh upload | `9.414ms` |
+| Shared records | `2.149ms` |
+| Left/right eye | `9.508ms` / `9.133ms` |
+| Stereo poll wait | `10.074ms` |
+| Server tick / scheduler tick | `25.252ms` / `24.617ms` |
+| Ready sections | `3600` |
+| Drawn sections / indices | `191` / `1,512,444` |
+
+Interpretation:
+
+- The 45 second sample did not report runtime skipped frames, which is the
+  guardrail evidence we were missing for this RD7 lane.
+- RD7 is still not comfortably inside the 72 Hz app-work budget. Average app
+  work is `1.57ms` over budget, p95 is `4.63ms` over, and most frames exceed
+  the period.
+- The exact Quest compositor dropped-frame story is still incomplete because
+  the Meta dropped-frame counter is only captured as a single early absolute
+  counter. A follow-up should record a before/after or per-sample delta.
+- The biggest observed tails are upload/GPU-upload and render poll/eye work,
+  not terrain generation alone, so desktop throughput tuning must preserve
+  Quest upload/admission guardrails.
+
 ### 2026-07-01 - Standalone Quest 3 RD7 Settled Orbit Section Accept Budget 4
 
 Benchmarked code: section-accept budget worktree, committed with this record.
