@@ -201,6 +201,15 @@ function blockFaces(block: BlockSpec, pack: TexturePackAsset): FaceReport[] {
 }
 
 function blockComposition(block: BlockSpec, pack: TexturePackAsset): string[] {
+  if (block.kind === "cross") {
+    const textureName = block.faces.all ?? block.faces.side ?? block.faces.top;
+    return textureName ? [`cross planes = ${textureExpression(textureName, pack)}`] : ["cross block has no billboard texture"];
+  }
+  if (block.kind === "flat") {
+    const textureName = block.faces.top ?? block.faces.all;
+    return textureName ? [`ground plane = ${textureExpression(textureName, pack)}`] : ["flat block has no top texture"];
+  }
+
   const lines: string[] = [];
   const top = block.faces.top ?? block.faces.all;
   const bottom = block.faces.bottom ?? block.faces.all;

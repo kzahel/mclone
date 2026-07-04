@@ -11,7 +11,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   const index = await indexResponse.json();
 
   expect(index.pack.name).toBe("mclone-default");
-  expect(index.summary.authoredTextures).toBe(84);
+  expect(index.summary.authoredTextures).toBe(87);
   expect(index.summary.candidateCount).toBe(4);
   expect(index.summary.associatedCandidateCount).toBe(4);
   expect(index.summary.archivedCandidateCount).toBe(1);
@@ -94,6 +94,30 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   await expect(carvedPumpkinSheetResponse).toBeOK();
   const carvedPumpkinSheet = decodePng(await carvedPumpkinSheetResponse.body());
   expect(`${carvedPumpkinSheet.width}x${carvedPumpkinSheet.height}`).toBe("1040x672");
+
+  const grassBlock = index.blocks.find((block: { name: string }) => block.name === "grass");
+  if (!grassBlock) {
+    throw new Error("Missing grass cross block fixture");
+  }
+  expect(grassBlock?.kind).toBe("cross");
+  expect(grassBlock?.faces.map((face: { face: string; textureName: string }) => `${face.face}:${face.textureName}`)).toEqual([
+    "all:grass_cross",
+  ]);
+  expect(grassBlock?.sheet.path).toContain("grass-block-sheet.png");
+  const grassBlockSheetResponse = await request.get(`/api/image?path=${encodeURIComponent(grassBlock.sheet.path)}`);
+  await expect(grassBlockSheetResponse).toBeOK();
+  const grassBlockSheet = decodePng(await grassBlockSheetResponse.body());
+  expect(`${grassBlockSheet.width}x${grassBlockSheet.height}`).toBe("1040x672");
+
+  const redstoneDustDot = index.blocks.find((block: { name: string }) => block.name === "redstone-dust-dot");
+  if (!redstoneDustDot) {
+    throw new Error("Missing redstone dust dot flat block fixture");
+  }
+  expect(redstoneDustDot?.kind).toBe("flat");
+  expect(redstoneDustDot?.faces.map((face: { face: string; textureName: string }) => `${face.face}:${face.textureName}`)).toEqual([
+    "top:redstone_dust_dot",
+  ]);
+  expect(redstoneDustDot?.sheet.path).toContain("redstone-dust-dot-sheet.png");
 
   const selectResponse = await request.post("/api/curation/select", {
     data: { textureName: "grass_block_top", candidateId: archivedCandidate.id },
@@ -264,6 +288,23 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await expect(page.getByText("6 faces")).toBeVisible();
   await expect(page.getByRole("button", { name: "carved-pumpkin north uses Carved Pumpkin", exact: true })).toBeVisible();
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-carved-pumpkin-block.png", fullPage: true });
+
+  await page.getByLabel("Search").fill("grass");
+  const grassBundle = page.locator(".blockBundleCard").filter({ hasText: "Grass" }).filter({ hasText: "cross / 1 faces" });
+  await expect(grassBundle).toBeVisible();
+  await expect(grassBundle.getByRole("button", { name: "grass all uses Grass Cross", exact: true })).toBeVisible();
+
+  await page.getByLabel("Search").fill("redstone-dust-dot");
+  const redstoneBundle = page.locator(".blockBundleCard").filter({ hasText: "Redstone Dust Dot" });
+  await expect(redstoneBundle).toBeVisible();
+  await expect(redstoneBundle).toContainText("flat / 1 faces");
+  const redstoneFaceButton = redstoneBundle.getByRole("button", { name: "redstone-dust-dot top uses Redstone Dust Dot", exact: true });
+  await expect(redstoneFaceButton).toBeVisible();
+  await redstoneFaceButton.click();
+  await expect(page.locator(".inspector")).toContainText("redstone_dust_dot");
+  await expect(page.locator(".inspector")).toContainText("redstone");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-model-shapes.png", fullPage: true });
+
   await page.getByLabel("Search").fill("");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-blocks.png", fullPage: true });
 });
@@ -285,7 +326,7 @@ test("filters texture replacement queues", async ({ page }) => {
   await expect(textureList.getByRole("button", { name: /andesite/ })).toHaveCount(0);
 
   await page.getByLabel("Queue").selectOption({ label: "Needs candidates" });
-  await expect(page.locator(".filterCount")).toHaveText("82 textures");
+  await expect(page.locator(".filterCount")).toHaveText("85 textures");
   await expect(textureList.getByRole("button", { name: /andesite/ })).toBeVisible();
   await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toHaveCount(0);
   await expect(textureList.getByRole("button", { name: /^stone/ })).toHaveCount(0);

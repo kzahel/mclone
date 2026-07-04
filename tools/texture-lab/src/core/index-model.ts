@@ -1,4 +1,5 @@
 import type {
+  BlockKind,
   TintSourceNeutralitySpec,
   TextureCatalogRotation,
   TextureCatalogStatus,
@@ -174,7 +175,7 @@ export interface TextureCurationStaleSelectionEntry {
 
 export interface BlockIndexEntry {
   name: string;
-  kind: "cube";
+  kind: BlockKind;
   faces: BlockFaceIndexEntry[];
   sheet: TextureImageRef;
 }

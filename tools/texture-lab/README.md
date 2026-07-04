@@ -84,7 +84,9 @@ Accepted pack source is committed under:
 ```text
 tools/texture-lab/packs/mclone-default/texture.ts
 tools/texture-lab/packs/mclone-default/block/dirt.ts
+tools/texture-lab/packs/mclone-default/block/directional-cubes.ts
 tools/texture-lab/packs/mclone-default/block/grass-block.ts
+tools/texture-lab/packs/mclone-default/block/plants-and-flats.ts
 tools/texture-lab/packs/mclone-default/block/stone.ts
 ```
 
@@ -323,6 +325,10 @@ The first source format is hybrid:
 - Directional cube block bundles with distinct `north`, `east`, `south`, and
   `west` faces. Their block review sheets show multiple isometric yaw previews
   plus a flat face panel for `top`, `bottom`, and all four lateral faces.
+- Cross-plant and flat ground-sprite block bundles for cutout geometry such as
+  grass, ferns, flowers, redstone dust, and similar non-cube block models.
+  Their review sheets show the cutout texture, model-shaped preview, and small
+  patch context instead of a misleading cube.
 - Preview-only metadata for showing alpha on a checkerboard, controlling tiling
   mode, or disabling cube/rotation panels where they are misleading.
 
@@ -480,6 +486,8 @@ Texture families should be treated differently:
 - directional blocks: logs and planks can be directional, but must declare face
   and axis expectations
 - cutout plants: grass, ferns, and flowers should be mask-heavy
+- flat ground sprites: redstone dust, rails, pressure-plate-like overlays, and
+  other mostly-horizontal cutouts need ground-plane previews
 - fluids/emissive textures: water, lava, and glow lichen need tint/animation or
   light-related rules later
 
@@ -500,6 +508,8 @@ The review sheet should include:
 - seam view that highlights left/right and top/bottom discontinuities.
 - 16x16 downsample and mip chain preview.
 - isolated software-rendered cube in three-quarter view.
+- model-specific block previews for cross plants and flat ground sprites where
+  cube previews would hide the actual silhouette problem.
 - small terrain patch preview, because repetition problems often appear only
   across many blocks.
 - rotation and mirror preview for blocks that rely on deterministic model

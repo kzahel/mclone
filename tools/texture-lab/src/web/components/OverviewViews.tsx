@@ -126,7 +126,9 @@ export function BlockBundleAtlas({
             <section key={block.name} className="blockBundleCard" aria-label={`${block.name} block bundle`}>
               <div className="blockBundleHeader">
                 <strong>{humanizeName(block.name)}</strong>
-                <span>{faces.length} faces</span>
+                <span>
+                  {block.kind} / {faces.length} faces
+                </span>
               </div>
               <div className="blockBundleBody">
                 <BlockSheetPreview blockName={block.name} image={block.sheet} />

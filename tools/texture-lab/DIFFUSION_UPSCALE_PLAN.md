@@ -414,6 +414,12 @@ Local validation on macOS/M4/MPS:
     reference texture navigation by structure/brick/overlay/material role,
     generated candidate galleries with quick pack swapping, block/rendered
     previews, prompt metadata, and candidate accept/reject/freeze actions.
+  - Interactive review foundation is now moving beyond cube-only blocks:
+    block bundle metadata supports `cube`, `cross`, and `flat` kinds; review
+    sheets can render cross-plant cutouts and flat ground sprites; the default
+    pack has first sample authored fixtures for grass, fern, and redstone dust.
+    This is intentionally simple authored art for model-shape validation, not
+    final plant art.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

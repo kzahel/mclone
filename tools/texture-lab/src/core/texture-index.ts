@@ -37,7 +37,7 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
   const blocks = await Promise.all(
     Object.entries(pack.blocks)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([name, block]) => blockEntryFrom(name, block, outputRoot)),
+      .map(([name, block]) => blockEntryFrom(pack, name, block, outputRoot)),
   );
 
   return {
@@ -211,8 +211,8 @@ function frozenRef(pack: TexturePackAsset, textureName: string): TextureIndexEnt
   };
 }
 
-async function blockEntryFrom(name: string, block: BlockSpec, outputRoot: string): Promise<BlockIndexEntry> {
-  const sheetName = `${name}-sheet.png`;
+async function blockEntryFrom(pack: TexturePackAsset, name: string, block: BlockSpec, outputRoot: string): Promise<BlockIndexEntry> {
+  const sheetName = pack.textures[name] ? `${name}-block-sheet.png` : `${name}-sheet.png`;
   return {
     name,
     kind: block.kind,
@@ -305,6 +305,9 @@ function inferMaterialFamily(name: string, texture: TextureSpec, usages: Texture
   }
   if (name.includes("ore")) {
     return "ore";
+  }
+  if (name.includes("redstone") || usages.some((usage) => usage.blockName.includes("redstone"))) {
+    return "redstone";
   }
   if (name.includes("stone") || usages.some((usage) => usage.blockName.includes("stone"))) {
     return "stone";

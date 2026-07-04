@@ -96,9 +96,11 @@ export interface TexturePreviewSpec {
 }
 
 export interface BlockSpec {
-  kind: "cube";
+  kind: BlockKind;
   faces: CubeFaceTextures;
 }
+
+export type BlockKind = "cube" | "cross" | "flat";
 
 export interface CubeFaceTextures {
   all?: string;
@@ -353,12 +355,18 @@ function validateBlock(
   textures: Record<string, TextureSpec>,
   errors: string[],
 ): void {
-  if (block.kind !== "cube") {
+  if (block.kind !== "cube" && block.kind !== "cross" && block.kind !== "flat") {
     errors.push(`block '${blockName}' has unsupported kind '${block.kind}'`);
   }
   const textureNames = Object.values(block.faces).flatMap((value) => (Array.isArray(value) ? value : [value]));
   if (textureNames.length === 0) {
     errors.push(`block '${blockName}' has no face textures`);
+  }
+  if (block.kind === "cross" && !block.faces.all) {
+    errors.push(`block '${blockName}' cross preview requires faces.all`);
+  }
+  if (block.kind === "flat" && !block.faces.top && !block.faces.all) {
+    errors.push(`block '${blockName}' flat preview requires faces.top or faces.all`);
   }
   for (const textureName of textureNames) {
     if (textureName && !textures[textureName]) {

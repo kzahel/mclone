@@ -29,7 +29,7 @@ import type { AuthoringPreviewEntry, RenderedAuthoringPreview, RenderedTexture }
 type TilingMode = "xy" | "x" | "none";
 type RotationPreviewMode = "none" | "y180" | "y90";
 type LateralFaceName = "north" | "east" | "south" | "west";
-type BlockFaceName = "top" | "bottom" | LateralFaceName;
+type BlockFaceName = "top" | "bottom" | "cross" | LateralFaceName;
 
 const SEAM_ERROR_THRESHOLD = 0.04;
 
@@ -192,6 +192,21 @@ export function makeBlockReviewSheet(
   block: BlockSpec,
   texturesByName: Map<string, RenderedTexture>,
 ): RgbaImage {
+  if (block.kind === "cross") {
+    return makeCrossBlockReviewSheet(blockName, block, texturesByName);
+  }
+  if (block.kind === "flat") {
+    return makeFlatBlockReviewSheet(blockName, block, texturesByName);
+  }
+
+  return makeCubeBlockReviewSheet(blockName, block, texturesByName);
+}
+
+function makeCubeBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
   const background: Rgba = [32, 34, 34, 255];
   const panel: Rgba = [52, 54, 54, 255];
   const sheet = solidImage(1040, 672, background);
@@ -238,6 +253,90 @@ export function makeBlockReviewSheet(
   drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
   drawPanelLabel(sheet, "FINAL CUBE", 744, 386, 160, 1);
   drawPanelLabel(sheet, "TINTS", 880, 386, 100, 1);
+
+  return sheet;
+}
+
+function makeCrossBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = tintColorsForBlock(block, texturesByName);
+  const primaryTint = tintColors[0]!;
+  const texture = applyRoleTint(textureForBlockFace(block, texturesByName, "cross"), primaryTint);
+  const tiling = effectiveTiling(textureForBlockFace(block, texturesByName, "cross"), texture);
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawCrossPlant(sheet, texture, 94, 62, 68, 34, 116);
+
+  drawRect(sheet, 340, 16, 328, 328, panel);
+  drawCheckerboard(sheet, 384, 60, texture.width * 6, texture.height * 6, 12);
+  drawScaled(sheet, texture, 384, 60, 6);
+  drawGrid(sheet, 384, 60, texture.width, texture.height, 6, [86, 89, 88, 255]);
+
+  drawRect(sheet, 692, 16, 328, 328, panel);
+  drawPlantPatch(sheet, texture, 724, 64);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawPlantPatch(sheet, texture, 32, 392, 9, 3);
+  drawCrossPlant(sheet, texture, 780, 408, 68, 34, 116);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 900, 412 + index * 34, tint);
+  }
+
+  drawPanelLabel(sheet, "CROSS PLANT", 16, 16, 300);
+  drawPanelLabel(sheet, texturePanelLabel("CUTOUT", tiling), 340, 16, 328);
+  drawPanelLabel(sheet, "PATCH PREVIEW", 692, 16, 328);
+  drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL CROSS", 760, 386, 160, 1);
+  drawPanelLabel(sheet, "TINTS", 890, 386, 100, 1);
+  drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
+
+  return sheet;
+}
+
+function makeFlatBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = tintColorsForBlock(block, texturesByName);
+  const primaryTint = tintColors[0]!;
+  const texture = applyRoleTint(textureForBlockFace(block, texturesByName, "top"), primaryTint);
+  const tiling = effectiveTiling(textureForBlockFace(block, texturesByName, "top"), texture);
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawFlatSprite(sheet, texture, 68, 92, 78, 39);
+
+  drawRect(sheet, 340, 16, 328, 328, panel);
+  drawCheckerboard(sheet, 384, 60, texture.width * 6, texture.height * 6, 12);
+  drawScaled(sheet, texture, 384, 60, 6);
+  drawGrid(sheet, 384, 60, texture.width, texture.height, 6, [86, 89, 88, 255]);
+
+  drawRect(sheet, 692, 16, 328, 328, panel);
+  drawFlatPatch(sheet, texture, 724, 82);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawFlatPatch(sheet, texture, 32, 392, 9, 3);
+  drawFlatSprite(sheet, texture, 760, 442, 78, 39);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 900, 412 + index * 34, tint);
+  }
+
+  drawPanelLabel(sheet, "GROUND SPRITE", 16, 16, 300);
+  drawPanelLabel(sheet, texturePanelLabel("TOP", tiling), 340, 16, 328);
+  drawPanelLabel(sheet, "GROUND PATCH", 692, 16, 328);
+  drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL FLAT", 744, 386, 160, 1);
+  drawPanelLabel(sheet, "TINTS", 890, 386, 100, 1);
+  drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
 
   return sheet;
 }
@@ -738,6 +837,87 @@ function drawSmallIsometricCube(target: RgbaImage, texture: RgbaImage, targetX: 
   );
 }
 
+function drawCrossPlant(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  drawCubeFace(target, texture, 0.88, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 0.5));
+  drawCubeFace(target, texture, 0.98, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 1 - v, u));
+  drawLine(
+    target,
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0, 0, 0.5),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 0, 0.5),
+    [24, 22, 20, 180],
+  );
+  drawLine(
+    target,
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 1),
+    [24, 22, 20, 180],
+  );
+}
+
+function drawFlatSprite(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + halfDepth + 42;
+  drawCubeFace(target, texture, 1, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, 1, u, 1, v));
+  drawCubeOutline(target, [
+    projectIso(originX, originY, halfWidth, halfDepth, 1, 0, 1, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, 1, 1, 1, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, 1, 1, 1, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, 1, 0, 1, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, 1, 0, 1, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, 1, 1, 1, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, 1, 1, 1, 1),
+  ]);
+}
+
+function drawPlantPatch(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  columns = 3,
+  rows = 2,
+): void {
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const offsetX = Math.round(random01("cross-plant-patch-x", column, row) * 10) - 5;
+      const offsetY = Math.round(random01("cross-plant-patch-y", column, row) * 8) - 4;
+      drawCrossPlant(target, texture, targetX + column * 78 + offsetX, targetY + row * 84 + offsetY, 30, 15, 54);
+    }
+  }
+}
+
+function drawFlatPatch(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  columns = 3,
+  rows = 2,
+): void {
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      drawFlatSprite(target, texture, targetX + column * 78, targetY + row * 70, 32, 16);
+    }
+  }
+}
+
 interface CubeFaceImages {
   top: RgbaImage;
   left: RgbaImage;
@@ -814,7 +994,7 @@ function drawDirectionalFacePanel(
   panelX: number,
   panelY: number,
 ): void {
-  const entries: { label: string; face: BlockFaceName }[] = [
+  const entries: { label: string; face: "top" | "bottom" | LateralFaceName }[] = [
     { label: "TOP", face: "top" },
     { label: "BOTTOM", face: "bottom" },
     { label: "NORTH", face: "north" },
@@ -934,6 +1114,9 @@ function textureForBlockFace(block: BlockSpec, texturesByName: Map<string, Rende
 }
 
 function textureNameForBlockFace(block: BlockSpec, face: BlockFaceName): string | undefined {
+  if (face === "cross") {
+    return block.faces.all ?? block.faces.side ?? block.faces.top;
+  }
   if (face === "top") {
     return block.faces.top ?? block.faces.all ?? block.faces.side;
   }

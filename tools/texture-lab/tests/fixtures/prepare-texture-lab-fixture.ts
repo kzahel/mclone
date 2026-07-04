@@ -25,6 +25,18 @@ await run("pnpm", [
   "grass_block_top",
   "--texture",
   "stone",
+  "--texture",
+  "pumpkin_top",
+  "--texture",
+  "pumpkin_side",
+  "--texture",
+  "carved_pumpkin",
+  "--texture",
+  "grass_cross",
+  "--texture",
+  "fern_cross",
+  "--texture",
+  "redstone_dust_dot",
 ]);
 
 await writeCandidateArtifacts();
