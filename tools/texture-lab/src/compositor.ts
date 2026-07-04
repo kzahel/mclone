@@ -29,6 +29,7 @@ import {
   type Rgba,
   type RgbaImage,
 } from "./image";
+import { assertTextureSourcePolicies } from "./source-policy";
 
 export interface RenderedTexture extends RgbaImage {
   name: string;
@@ -54,7 +55,9 @@ export interface AuthoringPreviewEntry {
 }
 
 export function renderAllTextures(pack: TexturePackAsset): RenderedTexture[] {
-  return Object.entries(pack.textures).map(([name, texture]) => renderTexture(pack, name, texture));
+  const textures = Object.entries(pack.textures).map(([name, texture]) => renderTexture(pack, name, texture));
+  assertTextureSourcePolicies(pack, textures);
+  return textures;
 }
 
 export function renderTexture(pack: TexturePackAsset, name: string, texture: TextureSpec): RenderedTexture {

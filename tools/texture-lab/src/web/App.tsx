@@ -461,6 +461,7 @@ function TextureInspector({
         <Field label="palette" value={texture.palette} />
         <Field label="base" value={texture.base} />
         <Field label="tint" value={texture.tintRole ?? "none"} />
+        <Field label="source policy" value={sourcePolicyLabel(texture)} />
       </InspectorSection>
 
       <InspectorSection title="Catalog">
@@ -493,6 +494,18 @@ function TextureInspector({
       <CandidateInspector candidate={candidate} />
     </div>
   );
+}
+
+function sourcePolicyLabel(texture: TextureIndexEntry): string {
+  const neutrality = texture.tint?.sourceNeutrality;
+  if (!neutrality) {
+    return "none";
+  }
+  const parts = [`neutral mean <= ${neutrality.maxMeanSaturation}`];
+  if (neutrality.maxPixelSaturation !== undefined) {
+    parts.push(`pixel <= ${neutrality.maxPixelSaturation}`);
+  }
+  return parts.join(", ");
 }
 
 function CandidateInspector({ candidate }: { candidate: TextureCandidateEntry | null }): JSX.Element {

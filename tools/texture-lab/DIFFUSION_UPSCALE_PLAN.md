@@ -400,6 +400,10 @@ Local validation on macOS/M4/MPS:
     not neutral. `grass_top` is now a neutral grayscale ramp so raw tintable
     source matches the local vanilla raw hue/luminance before biome tint is
     applied.
+  - Follow-up hardening: tintable source neutrality is now a role-level DSL
+    contract. `grass` declares `sourceNeutrality`, `renderAllTextures(pack)`
+    validates alpha-weighted saturation for every rendered tintable texture
+    before export, and generated metadata surfaces the threshold for review.
   - Grass freeze archive:
     `/tmp/mclone-texture-lab/diffusion-archive/grass-top-g5101s74-active-20-2026-07-04/`.
     The committed mask structure still comes from the archived projected PNG;

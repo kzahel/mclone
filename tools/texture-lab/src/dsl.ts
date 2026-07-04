@@ -17,6 +17,12 @@ export type TextureCatalogRotation = "free" | "y90-safe" | "y180-safe" | "fixed"
 export interface TintSpec {
   normal: string;
   alternates?: string[];
+  sourceNeutrality?: TintSourceNeutralitySpec;
+}
+
+export interface TintSourceNeutralitySpec {
+  maxMeanSaturation: number;
+  maxPixelSaturation?: number;
 }
 
 export interface TextureSpec {
@@ -158,6 +164,7 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
           errors.push(`tint '${tintName}' alternate ${alternateIndex} has invalid color '${alternate}'`);
         }
       }
+      validateTintSourceNeutrality(tintName, tint.sourceNeutrality, errors);
     }
   }
   for (const [paletteName, palette] of Object.entries(asset.palettes)) {
@@ -180,6 +187,8 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
         errors.push(`texture '${textureName}' is tintable and must declare tintRole`);
       } else if (!asset.tints?.[texture.tintRole]) {
         errors.push(`texture '${textureName}' references missing tint role '${texture.tintRole}'`);
+      } else if (!asset.tints[texture.tintRole]!.sourceNeutrality) {
+        errors.push(`texture '${textureName}' is tintable and tint role '${texture.tintRole}' must declare sourceNeutrality`);
       }
     } else if (texture.tintRole) {
       errors.push(`texture '${textureName}' declares tintRole but source is '${source}'`);
@@ -227,6 +236,26 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
   }
   if (errors.length > 0) {
     throw new Error(`Invalid texture pack '${asset.name}':\n${errors.map((error) => `- ${error}`).join("\n")}`);
+  }
+}
+
+function validateTintSourceNeutrality(
+  tintName: string,
+  neutrality: TintSourceNeutralitySpec | undefined,
+  errors: string[],
+): void {
+  if (!neutrality) {
+    return;
+  }
+  validateUnitInterval(`tint '${tintName}' sourceNeutrality.maxMeanSaturation`, neutrality.maxMeanSaturation, errors);
+  if (neutrality.maxPixelSaturation !== undefined) {
+    validateUnitInterval(`tint '${tintName}' sourceNeutrality.maxPixelSaturation`, neutrality.maxPixelSaturation, errors);
+  }
+}
+
+function validateUnitInterval(label: string, value: number, errors: string[]): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    errors.push(`${label} must be a finite number between 0 and 1, got ${JSON.stringify(value)}`);
   }
 }
 

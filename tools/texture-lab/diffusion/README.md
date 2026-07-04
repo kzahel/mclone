@@ -216,6 +216,13 @@ The active source palette is now a neutral grayscale ramp calibrated so the
 raw exported average and default-tinted average align with the local vanilla
 reference while preserving the generated mask structure.
 
+Follow-up hardening: tintable source neutrality is now a role-level metadata
+contract. The `grass` tint role declares `sourceNeutrality`, and export validates
+all rendered `source: "tintable"` textures against that alpha-weighted
+saturation threshold before writing active pack assets. Future grass, foliage,
+or water-style diffusion projections must project into a palette that satisfies
+the tint role policy, not just a visually plausible review sheet.
+
 ## Project Candidates
 
 Projection is handled by the TypeScript lab, not the Python runner. It consumes

@@ -113,6 +113,7 @@ async function textureEntryFrom(
           role: texture.tintRole!,
           normal: tint.normal,
           alternates: tint.alternates ?? [],
+          sourceNeutrality: tint.sourceNeutrality ?? null,
         }
       : null,
     materialFamily: inferMaterialFamily(name, texture, blockUsages),

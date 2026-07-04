@@ -1,4 +1,5 @@
 import type {
+  TintSourceNeutralitySpec,
   TextureCatalogRotation,
   TextureCatalogStatus,
   TextureCatalogTiling,
@@ -77,6 +78,7 @@ export interface TextureTintRef {
   role: string;
   normal: string;
   alternates: string[];
+  sourceNeutrality: TintSourceNeutralitySpec | null;
 }
 
 export interface TextureImageRef {

@@ -20,10 +20,12 @@ export function makeMetadataReportMarkdown(pack: TexturePackAsset): string {
   if (tintEntries.length === 0) {
     lines.push("No tint roles declared.");
   } else {
-    lines.push("| Role | Normal | Alternates |");
-    lines.push("|---|---|---|");
+    lines.push("| Role | Normal | Alternates | Source Neutrality |");
+    lines.push("|---|---|---|---|");
     for (const [name, tint] of tintEntries) {
-      lines.push(`| ${md(name)} | ${md(tint.normal)} | ${md((tint.alternates ?? []).join(", ") || "-")} |`);
+      lines.push(
+        `| ${md(name)} | ${md(tint.normal)} | ${md((tint.alternates ?? []).join(", ") || "-")} | ${md(sourceNeutralitySummary(tint))} |`,
+      );
     }
   }
   lines.push("");
@@ -97,6 +99,7 @@ function makeMetadataReport(pack: TexturePackAsset): Record<string, unknown> {
         {
           normal: tint.normal,
           alternates: tint.alternates ?? [],
+          sourceNeutrality: tint.sourceNeutrality ?? null,
         },
       ]),
     ),
@@ -248,6 +251,17 @@ function seamDiagnosticMode(texture: TextureSpec): string {
 
 function sourceCategory(texture: TextureSpec): "final-color" | "tintable" {
   return texture.source ?? "final-color";
+}
+
+function sourceNeutralitySummary(tint: TexturePackAsset["tints"][string]): string {
+  if (!tint.sourceNeutrality) {
+    return "-";
+  }
+  const parts = [`mean <= ${tint.sourceNeutrality.maxMeanSaturation}`];
+  if (tint.sourceNeutrality.maxPixelSaturation !== undefined) {
+    parts.push(`pixel <= ${tint.sourceNeutrality.maxPixelSaturation}`);
+  }
+  return parts.join(", ");
 }
 
 function md(value: string): string {

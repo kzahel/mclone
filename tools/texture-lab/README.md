@@ -223,10 +223,11 @@ The first source format is hybrid:
 - Small procedural texture helpers for natural materials: wraparound noise,
   speckles, pebbles, scratches, cracks, roots, moss, and edge blending.
 - Pack-level tint roles, such as `grass`, with normal and alternate review
-  colors.
+  colors plus a `sourceNeutrality` policy for tintable raw source art.
 - Texture-level source categories: `final-color` or `tintable`.
 - Texture-level `tintRole` links for neutral source art that needs a shared
-  tint relationship.
+  tint relationship. Tintable textures must use a tint role with an explicit
+  source-neutrality threshold.
 - Explicit masks and overlays for blocks with multiple layers, such as grass
   side base plus tinted overlay.
 - Cube block bundles for reviewing a full block from named texture roles.
@@ -238,6 +239,12 @@ shows the raw, tintless source texture; repeat, mip, rotation, and block-context
 panels use the preview tint when one is defined. Grass side textures should be
 judged in block context because the final side is dirt base plus a tinted
 transparent overlay, not either source texture alone.
+
+Tintable raw source is validated before export. `renderAllTextures(pack)` checks
+each rendered `source: "tintable"` texture against its tint role's
+`sourceNeutrality` policy using alpha-weighted saturation. A colored raw grass
+top or transparent grass overlay fails export instead of becoming an active
+double-tinted texture.
 
 Each export also writes a metadata report next to the sheets. The Markdown
 report is for quick human review; the JSON report is for future agent/tool
@@ -273,6 +280,10 @@ The `mclone-default` grass block module encodes that relationship directly:
 tint("grass", {
   normal: "#79b34e",
   alternates: ["#5fa343", "#98b85e", "#6fa35b"],
+  sourceNeutrality: {
+    maxMeanSaturation: 0.005,
+    maxPixelSaturation: 0.01,
+  },
 });
 
 texture("grass_block_top", {

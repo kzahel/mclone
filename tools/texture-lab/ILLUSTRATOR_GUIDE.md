@@ -33,6 +33,7 @@ Write down the relationship graph first:
 - which roles are tintable source art
 - tint roles used by the block, such as `grass`, `foliage`, or `water`
 - normal review tint for each tint role
+- source-neutrality policy for each tintable role
 - tiling mode for each texture: full XY, horizontal strip, or no repeat
 - whether rotation or mirroring is expected to work
 - nearby blocks that should share material language
@@ -66,6 +67,10 @@ The same relationship appears in source as:
 tint("grass", {
   normal: "#79b34e",
   alternates: ["#5fa343", "#98b85e", "#6fa35b"],
+  sourceNeutrality: {
+    maxMeanSaturation: 0.005,
+    maxPixelSaturation: 0.01,
+  },
 });
 
 texture("grass_block_top", {
@@ -96,9 +101,12 @@ color, not yet a full biome color map. Use it as the main target when judging
 source art. Alternate biome swatches are useful, but they should stay secondary
 until the base texture relationship is correct.
 
-Tintable source art should preserve value and texture detail more than hue.
-For grass, raw source colors can look pale yellow-green, gray-green, or almost
-cream. That is expected. The final green appears after tint multiplication.
+Tintable source art should preserve value and texture detail without baking in
+the final hue. For grass, raw source colors should be neutral grayscale unless
+the tint role explicitly defines a different policy. The final green appears
+after tint multiplication. `sourceNeutrality` is enforced on rendered source
+textures before export, using alpha-weighted saturation so transparent overlays
+are checked on their visible pixels.
 
 Final-color source art should not receive a tint. If a brown dirt texture is
 multiplied by a grass tint it will become muddy green-brown, which is usually

@@ -14,6 +14,10 @@ export function defineGrassBlockTextures({
   tint("grass", {
     normal: "#79b34e",
     alternates: ["#5fa343", "#98b85e", "#6fa35b"],
+    sourceNeutrality: {
+      maxMeanSaturation: 0.005,
+      maxPixelSaturation: 0.01,
+    },
   });
 
   // Tintable grass source must stay neutral grayscale. The renderer applies
@@ -58,8 +62,8 @@ export function defineGrassBlockTextures({
 
   palette("grass_overlay", {
     transparent: "#00000000",
-    grass: "#f2f5d2cc",
-    grass_shadow: "#b9c18a99",
+    grass: "#f5f5f5cc",
+    grass_shadow: "#bfbfbf99",
   });
 
   texture("grass_block_top", {

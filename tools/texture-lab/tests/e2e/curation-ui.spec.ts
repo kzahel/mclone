@@ -27,6 +27,10 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(grass?.images.currentExport.exists).toBe(true);
   expect(grass?.images.minecraftReference.exists).toBe(true);
   expect(grass?.tint.normal).toBe("#79b34e");
+  expect(grass?.tint.sourceNeutrality).toEqual({
+    maxMeanSaturation: 0.005,
+    maxPixelSaturation: 0.01,
+  });
   const imageResponse = await request.get(`/api/image?path=${encodeURIComponent(grass.images.currentExport.path)}`);
   await expect(imageResponse).toBeOK();
   expect(imageResponse.headers()["content-type"]).toBe("image/png");
@@ -155,6 +159,7 @@ test("supports texture filtering, candidate selection, inspector details, keyboa
   await expect(page.locator(".candidateCard.selected")).toHaveCount(1);
 
   const inspector = page.locator(".inspector");
+  await expect(inspector).toContainText("neutral mean <= 0.005");
   await expect(inspector).toContainText("G5101S74");
   await expect(inspector).toContainText("grass-top-tufts");
   await expect(inspector).toContainText("playwright-fixture-model");
