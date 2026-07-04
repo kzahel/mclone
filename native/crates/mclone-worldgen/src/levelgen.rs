@@ -446,7 +446,7 @@ mod tests {
             feature_family: Some(FeatureFamily::ForestOakBirchTrees),
         },
         PaletteMatrixCase {
-            seed: 18_246,
+            seed: 18_918,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:swamp",

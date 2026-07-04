@@ -6,8 +6,8 @@ use crate::block::{
     LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, ORANGE_TULIP, OXEYE_DAISY,
     PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_SAND,
     RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SAND, SUGAR_CANE, SUNFLOWER_LOWER,
-    SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP, is_air_like, is_lava, is_water,
-    material_blocks_motion,
+    SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP, block_light_emission,
+    block_light_opacity, is_air_like, is_lava, is_water, material_blocks_motion,
 };
 use crate::noise::PerlinSimplexNoise;
 use crate::placement::BlockPos;
@@ -239,7 +239,7 @@ fn can_survive_simple_plant(
             block if double_plant_halves(block).is_some() => {
                 matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
             }
-            mushroom if is_small_mushroom(mushroom) => material_blocks_motion(block_below),
+            mushroom if is_small_mushroom(mushroom) => false,
             SWEET_BERRY_BUSH => matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM),
             DEAD_BUSH => matches!(
                 block_below,
@@ -276,8 +276,52 @@ fn can_survive_patch_plant<W: FeatureWorld>(
         }
         LILY_PAD => is_water(block_below) || block_below == ICE,
         PUMPKIN => block_below == GRASS_BLOCK,
+        mushroom if is_small_mushroom(mushroom) => {
+            can_survive_small_mushroom(world, pos, block_below)
+        }
         _ => can_survive_simple_plant(block_id, current, block_below),
     }
+}
+
+fn can_survive_small_mushroom<W: FeatureWorld>(
+    world: &mut W,
+    pos: BlockPos,
+    block_below: RawBlockId,
+) -> bool {
+    is_mushroom_grow_block(block_below)
+        || (generated_raw_brightness_at(world, pos).is_some_and(|brightness| brightness < 13)
+            && material_blocks_motion(block_below))
+}
+
+fn generated_raw_brightness_at<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<i32> {
+    let current = world.block_at_world(pos)?;
+    Some((block_light_emission(current) as i32).max(generated_sky_light_at(world, pos)?))
+}
+
+fn generated_sky_light_at<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<i32> {
+    let min_y = world.min_y();
+    let max_y = min_y + world.height();
+    if !(min_y..max_y).contains(&pos.y) {
+        return None;
+    }
+
+    if world
+        .world_surface_height_at(pos.x, pos.z)
+        .is_some_and(|surface_y| pos.y >= surface_y)
+    {
+        return Some(15);
+    }
+
+    let mut light = 15;
+    for y in pos.y + 1..max_y {
+        let opacity =
+            block_light_opacity(world.block_at_world(BlockPos::new(pos.x, y, pos.z))?) as i32;
+        light -= opacity;
+        if light <= 0 {
+            return Some(0);
+        }
+    }
+    Some(light)
 }
 
 fn block_above_is_liquid<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
@@ -325,6 +369,10 @@ fn is_small_flower(block_id: RawBlockId) -> bool {
 
 fn is_small_mushroom(block_id: RawBlockId) -> bool {
     matches!(block_id, BROWN_MUSHROOM | RED_MUSHROOM)
+}
+
+fn is_mushroom_grow_block(block_id: RawBlockId) -> bool {
+    matches!(block_id, MYCELIUM | PODZOL)
 }
 
 fn double_plant_halves(block_id: RawBlockId) -> Option<(RawBlockId, RawBlockId)> {

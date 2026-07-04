@@ -19,7 +19,8 @@ Java-shaped `PATCH_PUMPKIN` table wiring for the currently modeled
 desert/badlands/swamp/default-extra lanes, plus Java-shaped
 `BROWN_MUSHROOM_NORMAL` / `RED_MUSHROOM_NORMAL` table wiring for the current
 forest, swamp, river/beach/shore, dark-forest, savanna, jungle, and
-bamboo-jungle builders
+bamboo-jungle builders, with Java-shaped small-mushroom survival/light/substrate
+gating
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -134,7 +135,7 @@ notes.
 | 3 | `minecraft:mountains` | mountains | grass/stone/gravel mountain surface and sparse oak/spruce tree family checked; forest-rock/emerald/infested-stone gap | seed `33`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 4 | `minecraft:forest` | forest | forest grass tint/surface and oak/birch tree family checked; normal mushroom table wired, flowers/extras gap | seed `0`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 5 | `minecraft:taiga` | taiga | spruce trees, ferns, and sweet berry bushes checked | seed `233`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, mushroom blocks, sugar cane, and lily pads; small/normal mushroom tables and `PATCH_PUMPKIN` wired, seagrass/visible-pumpkin gap | seed `18246`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, mushroom blocks, sugar cane, and lily pads; small/normal mushroom tables and `PATCH_PUMPKIN` wired, seagrass/visible-pumpkin gap | seed `18918`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 7 | `minecraft:river` | river | river water plus `SEAGRASS_RIVER` seagrass/tall-seagrass water plants checked; native water-tree/default-vegetation subset present with normal mushroom and `PATCH_PUMPKIN` table slots wired; banks/visible-pumpkin gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice plus packed/blue iceberg and blue-ice spread coverage checked; structures/exact iceberg gap | seed `779`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice plus default sugar-cane extras checked; normal mushroom and `PATCH_PUMPKIN` table slots wired, visible-pumpkin gap | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -294,6 +295,10 @@ Landed:
   rarity-4/8 no-projection `HEIGHTMAP_DOUBLE_SQUARE` table slots for forest,
   flower-forest, swamp, river/frozen-river, beach/shore, dark-forest, savanna,
   jungle, and bamboo-jungle builders;
+  Java-shaped small-mushroom survival for random patches: podzol/mycelium
+  mushroom-grow blocks bypass the brightness check, while other solid-render
+  substrates require generated raw brightness below 13 using the current
+  generated sky/block-light approximation;
   Java-shaped `PATCH_PUMPKIN` block, asset-registry, rarity-32
   `HEIGHTMAP_DOUBLE_SQUARE`, no-projection, and grass-block survival rules for
   the currently modeled desert/badlands/swamp/default-extra lanes;
@@ -324,22 +329,24 @@ Documented gaps from this slice:
   path represented and normal mushroom table slots wired, but exact parity is
   still incomplete: dark oak still uses a reduced `ThreeLayersFeatureSize`
   free-space approximation, huge mushrooms do not yet model directional
-  cap/stem side-state booleans, exact normal mushroom visibility/count parity is
-  not checked here, and extra forest vegetation patches remain omitted.
+  cap/stem side-state booleans, exact normal mushroom visibility/count parity
+  and full light-engine parity are not checked here, and extra forest
+  vegetation patches remain omitted.
 - Java savanna now has the high-signal acacia selector path represented and
   normal mushroom table slots wired, but exact decorated parity is still
   incomplete: warm flower selection, normal vs shattered grass density, exact
-  normal mushroom visibility/count parity, default extra vegetation,
-  villages/outposts, and exact tree-count mismatch buckets remain owned by
-  later `103` work.
+  normal mushroom visibility/count parity, full light-engine parity, default
+  extra vegetation, villages/outposts, and exact tree-count mismatch buckets
+  remain owned by later `103` work.
 - Java jungle and bamboo jungle now have high-signal jungle log/leaves and
   bamboo stalk coverage plus normal mushroom table slots. Exact parity is still
   incomplete: mega jungle trees use a reduced straight-trunk/blob-foliage
   approximation instead of the 2x2 trunk/branch/mega foliage placers, jungle
   bushes use the existing blob foliage approximation, cocoa/vines are not
   generated, bamboo top leaf states are not separate block IDs yet, exact normal
-  mushroom visibility/count parity is not checked here, and warm flower / jungle
-  extra vegetation parity remains later `103` work.
+  mushroom visibility/count parity and full light-engine parity are not checked
+  here, and warm flower / jungle extra vegetation parity remains later `103`
+  work.
 - Java normal/cold/lukewarm ocean water-plant tables are represented by broad
   seagrass/kelp checks, and warm ocean now has seagrass, live coral blocks, and
   sea pickles. Native still omits the `SEAGRASS_SIMPLE` carving-mask decorator
@@ -357,15 +364,17 @@ Documented gaps from this slice:
   river. Native also wires the Java `TREES_WATER`, `FLOWER_DEFAULT`,
   `PATCH_GRASS_BADLANDS`, normal mushroom, `PATCH_PUMPKIN`, and spring slots.
   Exact parity is still incomplete: visible pumpkin fixtures, exact normal
-  mushroom and water-tree visibility/counts, river-bank boundary shape, exact
-  seagrass counts, and full waterlogged/fluid-state modeling for water plants
-  remain later `103` or boundary work.
+  mushroom and water-tree visibility/counts, full light-engine parity,
+  river-bank boundary shape, exact seagrass counts, and full
+  waterlogged/fluid-state modeling for water plants remain later `103` or
+  boundary work.
 - Java beach, snowy beach, and stone shore now have deterministic default
   sugar-cane extra coverage, plus the shared default flower/grass, normal
   mushroom, and spring table slots. Exact parity is still incomplete: visible
-  pumpkin fixtures, exact normal mushroom visibility/counts, buried treasure,
-  shipwrecks, mineshafts, steep shore/coast boundaries, and exact decorated
-  mismatch buckets remain later `103`, structure, or boundary work.
+  pumpkin fixtures, exact normal mushroom visibility/counts, full light-engine
+  parity, buried treasure, shipwrecks, mineshafts, steep shore/coast
+  boundaries, and exact decorated mismatch buckets remain later `103`,
+  structure, or boundary work.
 - Java swamp and swamp hills now have high-signal water-lily, blue-orchid,
   small/normal-mushroom, and sugar-cane coverage, and the `PATCH_PUMPKIN` table
   slot is wired. Exact parity is still incomplete: swamp-hills fossil ordering,
@@ -416,15 +425,16 @@ Documented gaps from this slice:
 - Java ordinary forest now has high-signal oak/birch tree coverage for forest
   and wooded hills through the existing `BIRCH_OTHER`-shaped selector, plus
   normal mushroom table slots. Exact parity is still incomplete: flowers, exact
-  normal mushroom visibility/count parity, default extra vegetation, bee-nest
-  side effects, and exact tree-count mismatch buckets remain later `103` work.
+  normal mushroom visibility/count parity, full light-engine parity, default
+  extra vegetation, bee-nest side effects, and exact tree-count mismatch buckets
+  remain later `103` work.
 - Java flower forest now has high-signal dense small-flower coverage through
   the Java `FLOWER_FOREST` random patch and `ForestFlowerProvider` noise family,
   plus broad common lilac/rose-bush/peony/lily-of-the-valley vegetation coverage
   through `FOREST_FLOWER_VEGETATION_COMMON`, plus normal mushroom table slots.
   Exact parity is still incomplete: exact normal mushroom visibility/count
-  parity, default extra vegetation, bee-nest side effects, and exact decorated
-  mismatch buckets remain later `103` work.
+  parity, full light-engine parity, default extra vegetation, bee-nest side
+  effects, and exact decorated mismatch buckets remain later `103` work.
 - Java sunflower plains now has high-signal sunflower coverage through
   `PATCH_SUNFLOWER`. Exact parity is still incomplete: the Java sunflower-plains
   sugar-cane and pumpkin extras, villages/outposts, normal plains mismatch
@@ -442,16 +452,17 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-The emitted-row palette matrix is now full, `PATCH_PUMPKIN` is table-wired, and
-the first normal-mushroom table lanes are wired. Move the next chunk to the
-remaining mushroom correctness boundary:
+The emitted-row palette matrix is now full, `PATCH_PUMPKIN` is table-wired, the
+first normal-mushroom table lanes are wired, and the small-mushroom survival
+gate is no longer over-permissive. Move the next chunk to remaining mushroom
+table breadth:
 
-1. Port the vanilla small-mushroom survival/light/substrate rules from
-   `MushroomBlock.canSurvive` / `mayPlaceOn` so normal mushroom patches do not
-   over-place in sunlit dry rows just because the current reduced placement path
-   accepts broad motion-blocking surfaces.
-2. Then widen `BROWN_MUSHROOM_NORMAL` / `RED_MUSHROOM_NORMAL` table coverage to
-   the remaining default-mushroom lanes such as plains, taiga/giant-taiga,
-   birch, snowy/mountain, mushroom-field, and fallback default-land rows.
-3. Keep deterministic table-shape tests first, and add visible fixture seeds
-   only where mushroom blocks actually surface under the native placement path.
+1. Re-read `BiomeDefaultFeatures` / `VanillaBiomes` and audit every remaining
+   omitted mushroom slot by builder, including default mushrooms, taiga
+   mushrooms, giant-taiga mushrooms, and mushroom-field small mushroom patches.
+2. Add table-shape tests before widening builders such as plains/sunflower,
+   birch/tall-birch, taiga/giant-taiga, snowy/mountain/default-land, and
+   mushroom-field/shore.
+3. Add visible fixture seeds only where mushroom blocks surface under the
+   stricter native placement path; keep exact counts and full light-engine
+   parity in `103`.
