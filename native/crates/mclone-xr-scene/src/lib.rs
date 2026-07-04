@@ -3086,9 +3086,18 @@ where
         &mut self,
         camera_position: Vec3,
         upload_backpressured: bool,
+        skip_refresh: bool,
         timing: &mut XrTerrainFrameTiming,
     ) -> usize {
         let ready_start = Instant::now();
+        if skip_refresh {
+            timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
+            let ready_publish_start = Instant::now();
+            self.draw
+                .record_traversal_ready_sections_skipped(upload_backpressured);
+            timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
+            return self.draw.traversal_ready_section_count();
+        }
         let draw_section_generation = self.draw.traversal_ready_source_generation();
         let refresh = {
             let runtime = self
@@ -3163,7 +3172,7 @@ where
         };
         if !poll_changed && !has_runtime_render_work && !self.section_uploads.has_pending_work() {
             let traversal_ready_section_count =
-                self.refresh_traversal_ready_sections(camera_position, false, timing);
+                self.refresh_traversal_ready_sections(camera_position, false, false, timing);
             let runtime = self
                 .runtime
                 .as_ref()
@@ -3406,9 +3415,17 @@ where
                 .as_ref()
                 .map_or(0, |runtime| runtime.render_compile_pending_job_count());
         }
+        // Removal-only drains already remove their keys from the draw ready set.
+        // While the upload queue is still backpressured, avoid a full
+        // traversal-ready recompute/publish until uploads or runtime work
+        // introduce new ready candidates.
+        let skip_ready_refresh = upload_frame_decision.upload_backpressured
+            && upload_report.uploaded_section_count == 0
+            && upload_report.removed_section_count > 0;
         let traversal_ready_section_count = self.refresh_traversal_ready_sections(
             camera_position,
             upload_frame_decision.upload_backpressured,
+            skip_ready_refresh,
             timing,
         );
         let runtime = self

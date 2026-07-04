@@ -1731,6 +1731,29 @@ longer appeared in the worst sampled frames; the recurring tails were terrain
 poll wait, upload apply, and eye encode/submit. After the deferred-drop slice,
 that remains true: the top sampled frames had zero or small update-apply work.
 
+Follow-up slice: removal-only backpressured upload drains now skip the full
+traversal-ready recompute/publish for that frame. This is safe because removed
+section keys are already deleted from the draw resource's ready set during
+upload apply; frames that upload new sections still recompute readiness before
+publication. The same Quest churn lane passed and wrote
+`/tmp/mclone-quest-openxr-churn-removal-ready-skip-summary.txt` plus
+`/tmp/mclone-quest-openxr-churn-removal-ready-skip-logcat.txt`.
+
+Measured effect versus the previous deferred-drop baseline:
+
+- backpressured ready-set calls dropped from `334` to `85`, with
+  `ready_set_backpressured_skipped=255`;
+- `prepared_rebuild_backpressured_dirty` dropped from `6` to `3`;
+- `max_runtime_ready_sections_ms` improved from `2.046` to `1.482`;
+- `prepared_rebuild_max_ms` improved from `2.467` to `1.902`;
+- `max_runtime_upload_apply_ms` was slightly lower (`5.217` to `4.840`).
+
+Caveat: this run's `max_runtime_poll_ms=5.500` was dominated by
+`deferred_chunk_drop_ms=5.489`, not ready publication. Keep deferred cleanup
+budget retuning as the first fallback if that repeats, but the terrain
+coordinator direction remains upload apply, ready/publication ownership, and
+per-eye encode/submit.
+
 Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
 default policy. It was the best held-capacity result, but the controlled churn
 run proves the remaining unload/update-pump issue is not solved by those caps
