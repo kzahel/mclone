@@ -507,6 +507,10 @@ Slice G1 result:
   surface phase with only the center-bounded admitted feature work green. It no
   longer captures as an all-black frame or paints the whole RD30 square green at
   the first repaint.
+- `high_render_distance_startup_pump_reaches_playable_before_full_view_settles`
+  now locks the RD30 local startup contract: the fullscreen startup percent can
+  hit `9/9` for the playable gate while the post-join view-readiness overlay is
+  still below the full RD30 tracked chunk target.
 
 Completed validation:
 
@@ -514,7 +518,7 @@ Completed validation:
 - `cargo test --manifest-path native/Cargo.toml -p mclone-server` passed on
   2026-07-04 (`361` passed, `0` ignored).
 - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime` passed
-  on 2026-07-04 (`80` passed, `0` ignored).
+  on 2026-07-04 (`81` passed, `0` ignored).
 - `cargo test --manifest-path native/Cargo.toml -p mclone-native-client` passed
   on 2026-07-04 (`144` passed, `0` ignored).
 - RD30 progress screenshots were captured and inspected at

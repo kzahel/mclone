@@ -2234,6 +2234,82 @@ mod tests {
     }
 
     #[test]
+    fn high_render_distance_startup_pump_reaches_playable_before_full_view_settles() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let render_distance = 30;
+        let tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
+        let full_view_chunk_count = {
+            let side = tracking_radius as usize * 2 + 1;
+            side * side
+        };
+        let playable_gate_chunk_count = 9;
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let mut pump = LocalSingleViewStartupPump::with_mesh_assets(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
+                .with_lighting_enabled(false),
+            mesh_assets,
+        )
+        .unwrap();
+        let camera_position = Vec3::new(8.0, 80.0, 8.0);
+        let deadline = Instant::now() + Duration::from_secs(30);
+
+        loop {
+            let step = pump.step(camera_position).unwrap();
+            if step.playable_ready {
+                let startup_progress = step.progress.as_ref().unwrap();
+                assert_eq!(startup_progress.display_radius, tracking_radius);
+                assert_eq!(
+                    startup_progress.target_chunk_count,
+                    playable_gate_chunk_count
+                );
+                assert_eq!(
+                    startup_progress.target_ready_chunks,
+                    playable_gate_chunk_count
+                );
+                assert_eq!(startup_progress.percent(), 100);
+                assert!(startup_progress.playable_ready);
+
+                let view_progress = pump
+                    .runtime
+                    .last_runner_diagnostics
+                    .as_ref()
+                    .and_then(view_readiness_overlay_from_diagnostics)
+                    .unwrap();
+                assert_eq!(view_progress.display_radius, tracking_radius);
+                assert_eq!(view_progress.target_chunk_count, full_view_chunk_count);
+                assert!(
+                    view_progress.target_ready_chunks < view_progress.target_chunk_count,
+                    "RD30 startup should not wait for the full view to settle; view_progress={view_progress:?}"
+                );
+                assert!(view_progress.playable_ready);
+
+                assert!(step.cached_section_count > 0);
+                let runtime = pump.into_runtime();
+                let loaded_chunk_count = runtime.loaded_chunk_count();
+                assert!(
+                    loaded_chunk_count < full_view_chunk_count,
+                    "RD30 startup should enter before loading all tracked chunks; loaded_chunk_count={loaded_chunk_count} full_view_chunk_count={full_view_chunk_count}"
+                );
+                assert!(
+                    runtime
+                        .client()
+                        .chunk_snapshot(ChunkPos::new(0, 0))
+                        .is_some()
+                );
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "RD30 startup pump did not reach playable before deadline; last_step={step:?}"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
     fn native_single_view_session_runtime_records_local_session() {
         if !extracted_asset_root().exists() {
             return;
