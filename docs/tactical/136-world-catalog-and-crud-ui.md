@@ -1,9 +1,9 @@
 # 136: World Catalog And CRUD UI
 
-Status: active; Slices 1-4 shared catalog contract, catalog-aware session
+Status: active; Slices 1-5 shared catalog contract, catalog-aware session
 request vocabulary, native filesystem/SQLite catalog backend, and shared UI v2
-world catalog screens landed. Owns follow-up persistence lifecycle work from
-closed
+world catalog screens plus desktop flat lifecycle wiring landed. Owns follow-up
+persistence lifecycle work from closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -434,6 +434,8 @@ button.
 
 ### Slice 5: Desktop Lifecycle Wiring
 
+Status: first pass landed 2026-07-04.
+
 Wire desktop flat end to end:
 
 - boot to title/world list when requested
@@ -451,6 +453,49 @@ Validation:
 - delete after quit removes the catalog entry and blocks reopen
 - attempt to delete active world is rejected
 - `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+
+Recorded Slice 5 result:
+
+- Added a desktop `--world-root PATH` catalog root with default app-data
+  placement and kept `--world-dir PATH` as the direct-open developer bypass.
+  `--transient` disables the menu-managed native catalog and preserves
+  transient-only behavior.
+- Wired `FlatClientDriver` to a native `NativeWorldCatalog` cache that converts
+  `LocalWorldSummary` values into shared `WorldCatalogUiState` rows with stable
+  UI row keys, selected row state, active-world marking, capability flags, and
+  UI status messages.
+- Replaced desktop placeholder handling for `OpenWorld`, `CreateCatalogWorld`,
+  and `DeleteWorld`: create/open resolve catalog summaries and queue the
+  existing non-blocking local startup pump with identity-bearing session
+  descriptors; delete removes inactive worlds and surfaces active-world/storage
+  errors in the world-list UI.
+- Extended the desktop pending-start payload so `OpenLocalWorld { id }` can keep
+  the shared request vocabulary small while carrying the resolved catalog
+  summary descriptor through desktop lifecycle glue.
+- Fixed the full-frame/headless render path to commit the live driver catalog
+  state, so screenshots and desktop rendering show persistent catalog
+  availability instead of the Slice 4 placeholder state.
+
+Validation after Slice 5 first pass on 2026-07-04:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_rejects_conflicting_world_storage_args
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo fmt --manifest-path native/Cargo.toml --all --check
+git diff --check
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-world-list-slice5.png --screenshot-ui world-list --world-root /tmp/mclone-slice5-worlds-ui-20260704b --startup-wait none --width 1280 --height 720
+```
+
+Native screenshot inspected:
+
+```bash
+/tmp/mclone-world-list-slice5.png
+```
+
+The world-list capture rendered a persistent empty catalog state (`NO WORLDS
+FOUND`) with `Create` enabled and `Open`/`Delete` disabled.
 
 ### Slice 6: Web IndexedDB Catalog
 

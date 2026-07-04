@@ -494,6 +494,38 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_world_root_and_transient_catalog_mode() {
+        let cli = Cli::parse(["--world-root".to_owned(), "/tmp/mclone-worlds".to_owned()]).unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::Window {
+                scene: SceneOptions {
+                    world_root: Some(PathBuf::from("/tmp/mclone-worlds")),
+                    ..SceneOptions::default()
+                },
+                render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            }
+        );
+
+        let cli = Cli::parse(["--transient".to_owned()]).unwrap();
+        assert_eq!(
+            cli,
+            Cli::Window {
+                scene: SceneOptions {
+                    world_root: None,
+                    ..SceneOptions::default()
+                },
+                render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            }
+        );
+    }
+
+    #[test]
     fn cli_rejects_conflicting_world_storage_args() {
         let err = Cli::parse([
             "--transient".to_owned(),
@@ -503,6 +535,15 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("--transient cannot be combined with --world-dir"));
+
+        let err = Cli::parse([
+            "--transient".to_owned(),
+            "--world-root".to_owned(),
+            "/tmp/mclone-worlds".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("--transient cannot be combined with --world-root"));
 
         let err = Cli::parse([
             "--world-dir".to_owned(),
@@ -1212,6 +1253,7 @@ mod tests {
                     render_compile_worker_count:
                         mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
                     remote_addr: None,
+                    world_root: SceneOptions::default().world_root,
                     world_dir: None,
                     day_time_override: None,
                     freeze_time: false,

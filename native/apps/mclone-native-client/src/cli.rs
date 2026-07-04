@@ -41,6 +41,7 @@ pub(crate) struct SceneOptions {
     pub(crate) render_distance: i32,
     pub(crate) render_compile_worker_count: usize,
     pub(crate) remote_addr: Option<String>,
+    pub(crate) world_root: Option<PathBuf>,
     pub(crate) world_dir: Option<PathBuf>,
     /// Debug override: force the day/night clock to this `dayTime` (ticks) for
     /// captures, instead of using whatever the simulation has advanced to.
@@ -320,6 +321,7 @@ impl Default for SceneOptions {
             render_distance: DEFAULT_RENDER_DISTANCE,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             remote_addr: None,
+            world_root: Some(default_native_world_root()),
             world_dir: None,
             day_time_override: None,
             freeze_time: false,
@@ -360,6 +362,7 @@ impl SceneOptions {
                 .context("desktop render distance does not fit i32")?,
             render_compile_worker_count: scene.render_compile_worker_count,
             remote_addr: scene.remote_addr,
+            world_root: Some(default_native_world_root()),
             world_dir: None,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
@@ -488,6 +491,8 @@ impl Cli {
         let mut rebuild_render_scale = None;
         let mut far_lod = FarTerrainLodConfig::default();
         let mut explicit_transient = false;
+        let mut world_root_explicit = false;
+        let mut world_root = Some(default_native_world_root());
         let mut world_dir = None;
         let mut args = args.into_iter();
 
@@ -499,6 +504,12 @@ impl Cli {
                 "--world-dir" => {
                     world_dir = Some(PathBuf::from(
                         args.next().context("--world-dir requires PATH")?,
+                    ));
+                }
+                "--world-root" => {
+                    world_root_explicit = true;
+                    world_root = Some(PathBuf::from(
+                        args.next().context("--world-root requires PATH")?,
                     ));
                 }
                 "--xr-clear-smoke" => {
@@ -857,6 +868,9 @@ impl Cli {
         if explicit_transient && world_dir.is_some() {
             bail!("--transient cannot be combined with --world-dir");
         }
+        if explicit_transient && world_root_explicit {
+            bail!("--transient cannot be combined with --world-root");
+        }
         if startup_wait.is_some()
             && (perf_mode_count > 0
                 || xr_clear_smoke
@@ -882,6 +896,7 @@ impl Cli {
         scene.first_person_player_visible = first_person_player_visible;
         scene.simulation_cadence = simulation_cadence;
         scene.far_lod = far_lod;
+        scene.world_root = if explicit_transient { None } else { world_root };
         scene.world_dir = world_dir;
         if simulation_cadence_explicit && scene.remote_addr.is_some() {
             bail!("--simulation-cadence applies only to local integrated worlds");
@@ -1043,6 +1058,50 @@ fn set_headless_mode(mode: &mut Option<HeadlessMode>, next: HeadlessMode) -> Res
     }
     *mode = Some(next);
     Ok(())
+}
+
+pub(crate) fn default_native_world_root() -> PathBuf {
+    if let Some(path) = std::env::var_os("MCLONE_WORLD_ROOT") {
+        return PathBuf::from(path);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(path) = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA"))
+        {
+            return PathBuf::from(path).join("mclone").join("worlds");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("mclone")
+                .join("worlds");
+        }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
+            return PathBuf::from(path).join("mclone").join("worlds");
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("mclone")
+                .join("worlds");
+        }
+    }
+
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".mclone")
+        .join("worlds")
 }
 
 fn parse_movement_steps_arg(flag: &str, value: Option<String>) -> Result<usize> {
@@ -1332,7 +1391,7 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
@@ -1347,6 +1406,6 @@ fn print_help() {
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-dir to open a persistent SQLite-backed local world directory; without it, or with --transient, local worlds use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

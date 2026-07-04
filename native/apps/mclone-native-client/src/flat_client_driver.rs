@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -16,6 +17,10 @@ use mclone_app_runtime::session::{
     StartedGameSession,
 };
 use mclone_app_runtime::set_player_appearance_command_for_ui_model;
+use mclone_app_runtime::world_catalog::{
+    LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, NativeWorldCatalog,
+    WorldCatalogCapabilities, WorldCatalogError,
+};
 use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
@@ -50,7 +55,9 @@ use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
     GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUiAction, GameUiHost,
     GameUiRenderState, GuiKey, GuiScale, LoadingProgressOverlay, LoadingProgressOverlayLayer,
-    Point, StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, touch_controls_mode_label,
+    Point, StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, WORLD_CATALOG_UI_ROW_CAPACITY,
+    WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiStatus, WorldCatalogUiText,
+    WorldCatalogUiWorldId, touch_controls_mode_label,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -135,6 +142,9 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
+    world_catalog: Option<NativeWorldCatalog>,
+    world_catalog_entries: Vec<FlatClientWorldCatalogEntry>,
+    world_catalog_ui: WorldCatalogUiState,
     desktop_blink_debug: DesktopBlinkDebugState,
     desktop_blink_debug_worker: Option<NativeTeleportPreviewWorker>,
     underwater_effect: UnderwaterEffectState,
@@ -146,14 +156,22 @@ pub(crate) struct FlatClientPendingSessionStart {
     pub(crate) scene: SceneOptions,
     pub(crate) arm_mouse_lock: bool,
     pub(crate) show_title_on_failure: bool,
+    pub(crate) descriptor: Option<ActiveSessionDescriptor>,
 }
 
 #[derive(Debug)]
 pub(crate) struct FlatClientPendingStartup {
     request: SessionStartRequest,
+    descriptor: ActiveSessionDescriptor,
     arm_mouse_lock: bool,
     show_title_on_failure: bool,
     pump: WindowSceneStartupPump,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FlatClientWorldCatalogEntry {
+    ui_id: WorldCatalogUiWorldId,
+    summary: LocalWorldSummary,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -319,7 +337,7 @@ impl FlatClientDriver {
             scene.movement_speed_multiplier,
             scene.first_person_player_visible,
         );
-        Self {
+        let mut driver = Self {
             scene: scene.clone(),
             runtime: None,
             startup: None,
@@ -336,11 +354,16 @@ impl FlatClientDriver {
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
+            world_catalog: scene.world_root.clone().map(NativeWorldCatalog::new),
+            world_catalog_entries: Vec::new(),
+            world_catalog_ui: WorldCatalogUiState::default(),
             desktop_blink_debug: DesktopBlinkDebugState::default(),
             desktop_blink_debug_worker: None,
             underwater_effect: UnderwaterEffectState::new(),
             seed_reroll_state: initial_seed_reroll_state(scene.seed),
-        }
+        };
+        driver.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+        driver
     }
 
     pub(crate) fn camera_view(&self) -> FlatClientCameraView {
@@ -667,8 +690,110 @@ impl FlatClientDriver {
             player_model: self.player_model,
             server_cadence: self.server_simulation_cadence(),
         });
+        state.world_catalog = self.world_catalog_ui_for_render();
         state.block_palette = block_palette;
         state
+    }
+
+    fn world_catalog_ui_for_render(&self) -> WorldCatalogUiState {
+        let mut state = self.world_catalog_ui;
+        state.active = self.active_local_world_ui_id();
+        state
+    }
+
+    fn refresh_world_catalog_ui(&mut self, status: WorldCatalogUiStatus) {
+        let Some(catalog) = self.world_catalog.clone() else {
+            self.world_catalog_entries.clear();
+            let mut state = WorldCatalogUiState::empty();
+            state.status = status;
+            self.world_catalog_ui = state;
+            return;
+        };
+
+        match catalog.list_worlds() {
+            Ok(worlds) => {
+                self.set_world_catalog_worlds(catalog.capabilities(), worlds, status);
+            }
+            Err(error) => {
+                log::warn!("failed to refresh local world catalog: {error}");
+                self.world_catalog_entries.clear();
+                let mut state = world_catalog_ui_state_for_capabilities(catalog.capabilities());
+                state.status = world_catalog_error_status(&error);
+                self.world_catalog_ui = state;
+            }
+        }
+    }
+
+    fn set_world_catalog_worlds(
+        &mut self,
+        capabilities: WorldCatalogCapabilities,
+        worlds: Vec<LocalWorldSummary>,
+        status: WorldCatalogUiStatus,
+    ) {
+        let previous_selected = self.world_catalog_ui.selected;
+        let active_world = self.active_local_world_id().cloned();
+        let total_world_count = worlds.len();
+        let mut used_ui_ids = BTreeSet::new();
+        let mut cached_entries = Vec::new();
+        let mut ui_entries = Vec::new();
+
+        for summary in worlds.into_iter().take(WORLD_CATALOG_UI_ROW_CAPACITY) {
+            let ui_id = allocate_world_catalog_ui_id(&summary.id, &mut used_ui_ids);
+            ui_entries.push(world_catalog_ui_entry(ui_id, &summary));
+            cached_entries.push(FlatClientWorldCatalogEntry { ui_id, summary });
+        }
+
+        let mut state = world_catalog_ui_state_for_capabilities(capabilities);
+        state.selected = previous_selected;
+        state.active = active_world.as_ref().and_then(|active| {
+            cached_entries
+                .iter()
+                .find(|entry| &entry.summary.id == active)
+                .map(|entry| entry.ui_id)
+        });
+        state.status = if status.visible {
+            status
+        } else if total_world_count > WORLD_CATALOG_UI_ROW_CAPACITY {
+            WorldCatalogUiStatus::new("Showing first 8 worlds", true)
+        } else {
+            WorldCatalogUiStatus::hidden()
+        };
+        state.set_entries(&ui_entries);
+
+        self.world_catalog_entries = cached_entries;
+        self.world_catalog_ui = state;
+    }
+
+    fn active_local_world_id(&self) -> Option<&LocalWorldId> {
+        let GameSessionState::Active { session } = self.session.state() else {
+            return None;
+        };
+        session.local_world_id()
+    }
+
+    fn active_local_world_ui_id(&self) -> Option<WorldCatalogUiWorldId> {
+        let active = self.active_local_world_id()?;
+        self.world_catalog_entries
+            .iter()
+            .find(|entry| &entry.summary.id == active)
+            .map(|entry| entry.ui_id)
+            .or_else(|| Some(world_catalog_ui_id_for_local_world(active)))
+    }
+
+    fn local_world_id_for_ui_id(&self, ui_id: WorldCatalogUiWorldId) -> Option<&LocalWorldId> {
+        self.world_catalog_entries
+            .iter()
+            .find(|entry| entry.ui_id == ui_id)
+            .map(|entry| &entry.summary.id)
+    }
+
+    fn set_world_catalog_error(&mut self, error: &WorldCatalogError) {
+        log::warn!("world catalog action failed: {error}");
+        self.world_catalog_ui.status = world_catalog_error_status(error);
+    }
+
+    fn set_world_catalog_message(&mut self, message: &str, ok: bool) {
+        self.world_catalog_ui.status = WorldCatalogUiStatus::new(message, ok);
     }
 
     pub(crate) fn apply_ui_pointer_click(
@@ -696,9 +821,22 @@ impl FlatClientDriver {
 
     pub(crate) fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
         match descriptor {
-            ActiveSessionDescriptor::LocalWorld { seed, .. } => {
-                self.ui.apply_action(GameUiAction::CreateWorld(*seed));
-                log::info!("created local world seed={seed}");
+            ActiveSessionDescriptor::LocalWorld {
+                seed,
+                id,
+                display_name,
+            } => {
+                if let Some(id) = id {
+                    self.ui.close();
+                    log::info!(
+                        "started local world {} ({}) seed={seed}",
+                        display_name.as_deref().unwrap_or(id.as_str()),
+                        id
+                    );
+                } else {
+                    self.ui.apply_action(GameUiAction::CreateWorld(*seed));
+                    log::info!("created local world seed={seed}");
+                }
             }
             ActiveSessionDescriptor::Remote { endpoint } => {
                 self.ui.apply_action(GameUiAction::JoinRemote);
@@ -757,6 +895,7 @@ impl FlatClientDriver {
                 scene,
                 arm_mouse_lock,
                 show_title_on_failure,
+                descriptor: None,
             },
         );
     }
@@ -769,9 +908,123 @@ impl FlatClientDriver {
                 scene,
                 arm_mouse_lock,
                 show_title_on_failure: false,
+                descriptor: None,
             },
         );
         self.clear_ui_input();
+    }
+
+    fn request_catalog_world_create(&mut self, arm_mouse_lock: bool) -> bool {
+        let Some(catalog) = self.world_catalog.clone() else {
+            self.set_world_catalog_message("Persistent worlds unavailable", false);
+            return false;
+        };
+
+        let display_name = if self.world_catalog_ui.create_display_name.is_empty() {
+            "New World"
+        } else {
+            self.world_catalog_ui.create_display_name.as_str()
+        };
+        let options = match LocalWorldCreateOptions::new(display_name, self.ui.new_world_seed()) {
+            Ok(options) => options,
+            Err(error) => {
+                self.set_world_catalog_error(&error);
+                return false;
+            }
+        };
+        let summary = match catalog.create_world(options.clone()) {
+            Ok(summary) => summary,
+            Err(error) => {
+                self.set_world_catalog_error(&error);
+                return false;
+            }
+        };
+        let request =
+            SessionStartRequest::create_local_world(options.with_requested_id(summary.id.clone()));
+        self.request_catalog_world_start(
+            request,
+            ActiveSessionDescriptor::from_local_world_summary(&summary),
+            self.catalog_world_scene(&summary, catalog.world_dir(&summary.id)),
+            arm_mouse_lock,
+        );
+        self.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+        true
+    }
+
+    fn request_catalog_world_open(
+        &mut self,
+        ui_id: WorldCatalogUiWorldId,
+        arm_mouse_lock: bool,
+    ) -> bool {
+        let Some(catalog) = self.world_catalog.clone() else {
+            self.set_world_catalog_message("Persistent worlds unavailable", false);
+            return false;
+        };
+        let Some(id) = self.local_world_id_for_ui_id(ui_id).cloned() else {
+            self.set_world_catalog_message("Selected world is unavailable", false);
+            return false;
+        };
+
+        let opened = match catalog.open_world(&id) {
+            Ok(opened) => opened,
+            Err(error) => {
+                self.set_world_catalog_error(&error);
+                return false;
+            }
+        };
+        let summary = opened.summary;
+        self.request_catalog_world_start(
+            SessionStartRequest::open_local_world(summary.id.clone()),
+            ActiveSessionDescriptor::from_local_world_summary(&summary),
+            self.catalog_world_scene(&summary, opened.dir),
+            arm_mouse_lock,
+        );
+        self.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+        true
+    }
+
+    fn request_catalog_world_start(
+        &mut self,
+        request: SessionStartRequest,
+        descriptor: ActiveSessionDescriptor,
+        scene: SceneOptions,
+        arm_mouse_lock: bool,
+    ) {
+        self.session.request_start(
+            request,
+            FlatClientPendingSessionStart {
+                scene,
+                arm_mouse_lock,
+                show_title_on_failure: false,
+                descriptor: Some(descriptor),
+            },
+        );
+        self.clear_ui_input();
+    }
+
+    fn delete_catalog_world(&mut self, ui_id: WorldCatalogUiWorldId) {
+        let Some(catalog) = self.world_catalog.clone() else {
+            self.set_world_catalog_message("Persistent worlds unavailable", false);
+            return;
+        };
+        let Some(id) = self.local_world_id_for_ui_id(ui_id).cloned() else {
+            self.set_world_catalog_message("Selected world is unavailable", false);
+            return;
+        };
+
+        let active_world = self.active_local_world_id().cloned();
+        match catalog.delete_world(&id, active_world.as_ref()) {
+            Ok(summary) => {
+                self.refresh_world_catalog_ui(WorldCatalogUiStatus::new(
+                    &format!("Deleted {}", summary.display_name),
+                    true,
+                ));
+            }
+            Err(error) => {
+                self.set_world_catalog_error(&error);
+                self.refresh_world_catalog_ui(world_catalog_error_status(&error));
+            }
+        }
     }
 
     pub(crate) fn request_remote_session_start(
@@ -788,6 +1041,7 @@ impl FlatClientDriver {
                 scene: self.remote_session_scene(remote_addr),
                 arm_mouse_lock,
                 show_title_on_failure: false,
+                descriptor: None,
             },
         );
         self.clear_ui_input();
@@ -815,6 +1069,7 @@ impl FlatClientDriver {
         if matches!(
             &pending.request,
             SessionStartRequest::CreateLocalWorld { .. }
+                | SessionStartRequest::OpenLocalWorld { .. }
         ) {
             let request = pending.request.clone();
             let show_title_on_failure = pending.payload.show_title_on_failure;
@@ -1136,19 +1391,38 @@ impl FlatClientDriver {
             GameUiAction::OpenWorldCreate => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
+                self.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
                 self.clear_inactive_session_status();
             }
-            GameUiAction::OpenWorldList
-            | GameUiAction::SelectWorld(_)
-            | GameUiAction::ConfirmDeleteWorld(_)
-            | GameUiAction::CancelDeleteWorld => {
+            GameUiAction::OpenWorldList => {
+                self.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
                 self.clear_inactive_session_status();
             }
-            GameUiAction::OpenWorld(_)
-            | GameUiAction::CreateCatalogWorld
-            | GameUiAction::DeleteWorld(_) => {
-                log::warn!("persistent world catalog action is not wired to desktop runtime yet");
+            GameUiAction::SelectWorld(id) => {
+                if self.world_catalog_ui.entry(id).is_some() {
+                    self.world_catalog_ui.selected = Some(id);
+                }
+                self.clear_inactive_session_status();
+            }
+            GameUiAction::ConfirmDeleteWorld(_) | GameUiAction::CancelDeleteWorld => {
+                self.clear_inactive_session_status();
+            }
+            GameUiAction::OpenWorld(id) => {
+                if self.request_catalog_world_open(id, context.from_pointer_click) {
+                    result.session_start_queued = true;
+                    result.mouse_lock_requested = Some(false);
+                }
                 apply_ui_action = false;
+            }
+            GameUiAction::CreateCatalogWorld => {
+                if self.request_catalog_world_create(context.from_pointer_click) {
+                    result.session_start_queued = true;
+                    result.mouse_lock_requested = Some(false);
+                }
+                apply_ui_action = false;
+            }
+            GameUiAction::DeleteWorld(id) => {
+                self.delete_catalog_world(id);
             }
             GameUiAction::OpenJoinRemote => {
                 let remote_addr = context
@@ -1219,6 +1493,13 @@ impl FlatClientDriver {
         let mut scene = self.scene.clone();
         scene.seed = seed;
         scene.remote_addr = None;
+        scene.world_dir = None;
+        scene
+    }
+
+    fn catalog_world_scene(&self, summary: &LocalWorldSummary, world_dir: PathBuf) -> SceneOptions {
+        let mut scene = self.local_world_scene(summary.seed);
+        scene.world_dir = Some(world_dir);
         scene
     }
 
@@ -1317,9 +1598,14 @@ impl FlatClientDriver {
         if pending.payload.scene.remote_addr.is_some() {
             anyhow::bail!("local startup pump received a remote scene");
         }
-        if pending.request.active_descriptor().is_none() {
+        let Some(descriptor) = pending
+            .payload
+            .descriptor
+            .clone()
+            .or_else(|| pending.request.active_descriptor())
+        else {
             anyhow::bail!("unsupported local session start");
-        }
+        };
 
         self.startup = None;
         self.runtime = None;
@@ -1342,6 +1628,7 @@ impl FlatClientDriver {
         );
         self.startup = Some(FlatClientPendingStartup {
             request: pending.request,
+            descriptor,
             arm_mouse_lock: pending.payload.arm_mouse_lock,
             show_title_on_failure: pending.payload.show_title_on_failure,
             pump,
@@ -1355,10 +1642,7 @@ impl FlatClientDriver {
         step: LocalSingleViewStartupStep,
         device: Option<&wgpu::Device>,
     ) -> anyhow::Result<FlatClientSessionUpdate> {
-        let descriptor = startup
-            .request
-            .active_descriptor()
-            .context("unsupported local session start")?;
+        let descriptor = startup.descriptor;
         self.runtime = Some(startup.pump.into_runtime());
         self.sync_player_appearance()
             .context("failed to sync initial player appearance")?;
@@ -2055,6 +2339,7 @@ impl FlatClientDriver {
             || loading_progress_overlay.is_some()
             || debug_view_readiness_overlay.is_some();
         let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
+        ui_render_state.world_catalog = self.world_catalog_ui_for_render();
         ui_render_state.block_palette = ui_frame.block_palette;
         let base_ui_draw = self.ui.render_draw_list(ui_render_state);
         let gui_state = FullFrameGui::new(
@@ -2385,6 +2670,64 @@ fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest 
     )
 }
 
+fn world_catalog_ui_state_for_capabilities(
+    capabilities: WorldCatalogCapabilities,
+) -> WorldCatalogUiState {
+    WorldCatalogUiState {
+        persistent: capabilities.persistent,
+        list_supported: capabilities.list_supported,
+        create_supported: capabilities.create_supported,
+        open_supported: capabilities.open_supported,
+        delete_supported: capabilities.delete_supported,
+        create_display_name: if capabilities.create_supported {
+            WorldCatalogUiText::new("New World")
+        } else {
+            WorldCatalogUiText::empty()
+        },
+        ..WorldCatalogUiState::empty()
+    }
+}
+
+fn world_catalog_ui_entry(
+    id: WorldCatalogUiWorldId,
+    summary: &LocalWorldSummary,
+) -> WorldCatalogUiEntry {
+    WorldCatalogUiEntry::new(id, &summary.display_name, summary.seed)
+        .with_created_unix_millis(summary.created_unix_millis)
+        .with_last_played_unix_millis(summary.last_played_unix_millis)
+        .locked(summary.locked)
+        .compatible(summary.compatible)
+}
+
+fn allocate_world_catalog_ui_id(
+    id: &LocalWorldId,
+    used_ui_ids: &mut BTreeSet<u64>,
+) -> WorldCatalogUiWorldId {
+    let mut ui_id = world_catalog_ui_id_for_local_world(id).0;
+    while !used_ui_ids.insert(ui_id) {
+        ui_id = ui_id.wrapping_add(1);
+        if ui_id == 0 {
+            ui_id = 1;
+        }
+    }
+    WorldCatalogUiWorldId(ui_id)
+}
+
+fn world_catalog_ui_id_for_local_world(id: &LocalWorldId) -> WorldCatalogUiWorldId {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    for byte in id.as_str().bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    WorldCatalogUiWorldId(hash.max(1))
+}
+
+fn world_catalog_error_status(error: &WorldCatalogError) -> WorldCatalogUiStatus {
+    WorldCatalogUiStatus::new(&error.message, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2418,6 +2761,21 @@ mod tests {
             .iter()
             .find(|widget| widget.id == hovered)
             .map(|widget| widget.label.as_str())
+    }
+
+    fn scene_with_world_root(root: std::path::PathBuf) -> SceneOptions {
+        SceneOptions {
+            world_root: Some(root),
+            ..SceneOptions::default()
+        }
+    }
+
+    fn unique_temp_world_root(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("mclone-{name}-{}-{nanos}", std::process::id()))
     }
 
     #[test]
@@ -2539,6 +2897,154 @@ mod tests {
         );
         assert!(pending.payload.arm_mouse_lock);
         assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
+    }
+
+    #[test]
+    fn catalog_create_world_action_creates_world_and_queues_local_start() {
+        let root = unique_temp_world_root("catalog-create");
+        let scene = scene_with_world_root(root.clone());
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        driver.set_ui_screen(Some(GameScreen::WorldCreate));
+        driver.set_new_world_seed(4242);
+
+        let result = driver.apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
+
+        assert!(result.session_start_queued);
+        assert_eq!(result.mouse_lock_requested, Some(false));
+        assert_eq!(driver.world_catalog_entries.len(), 1);
+        let summary = driver.world_catalog_entries[0].summary.clone();
+        let pending = driver.session.take_pending_start().unwrap();
+        assert_eq!(
+            pending.request,
+            SessionStartRequest::create_local_world(
+                LocalWorldCreateOptions::new("New World", 4242)
+                    .unwrap()
+                    .with_requested_id(summary.id.clone())
+            )
+        );
+        assert_eq!(pending.payload.scene.seed, 4242);
+        assert_eq!(pending.payload.scene.remote_addr, None);
+        assert_eq!(
+            pending.payload.scene.world_dir,
+            Some(root.join(summary.id.as_str()))
+        );
+        assert_eq!(
+            pending.payload.descriptor,
+            Some(ActiveSessionDescriptor::from_local_world_summary(&summary))
+        );
+        assert!(root.join(summary.id.as_str()).join("world.json").is_file());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn catalog_open_world_action_resolves_row_and_queues_open_start() {
+        let root = unique_temp_world_root("catalog-open");
+        let catalog = NativeWorldCatalog::new(root.clone());
+        let summary = catalog
+            .create_world(LocalWorldCreateOptions::new("Alpha Base", 99).unwrap())
+            .unwrap();
+        let scene = scene_with_world_root(root.clone());
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        let ui_id = driver
+            .world_catalog_entries
+            .iter()
+            .find(|entry| entry.summary.id == summary.id)
+            .unwrap()
+            .ui_id;
+
+        let result = driver.apply_ui_action(GameUiAction::OpenWorld(ui_id), ui_action_context());
+
+        assert!(result.session_start_queued);
+        assert_eq!(result.mouse_lock_requested, Some(false));
+        let opened_summary = driver
+            .world_catalog_entries
+            .iter()
+            .find(|entry| entry.summary.id == summary.id)
+            .unwrap()
+            .summary
+            .clone();
+        let pending = driver.session.take_pending_start().unwrap();
+        assert_eq!(
+            pending.request,
+            SessionStartRequest::open_local_world(summary.id.clone())
+        );
+        assert_eq!(pending.payload.scene.seed, 99);
+        assert_eq!(
+            pending.payload.scene.world_dir,
+            Some(root.join(summary.id.as_str()))
+        );
+        assert_eq!(
+            pending.payload.descriptor,
+            Some(ActiveSessionDescriptor::from_local_world_summary(
+                &opened_summary
+            ))
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn catalog_delete_world_action_removes_inactive_world() {
+        let root = unique_temp_world_root("catalog-delete");
+        let catalog = NativeWorldCatalog::new(root.clone());
+        let summary = catalog
+            .create_world(LocalWorldCreateOptions::new("Delete Me", 7).unwrap())
+            .unwrap();
+        let scene = scene_with_world_root(root.clone());
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        let ui_id = driver
+            .world_catalog_entries
+            .iter()
+            .find(|entry| entry.summary.id == summary.id)
+            .unwrap()
+            .ui_id;
+
+        let result = driver.apply_ui_action(GameUiAction::DeleteWorld(ui_id), ui_action_context());
+
+        assert!(!result.session_start_queued);
+        assert_eq!(driver.ui_screen(), Some(GameScreen::WorldList));
+        assert!(!catalog.world_dir(&summary.id).exists());
+        assert!(driver.world_catalog_ui.status.visible);
+        assert!(driver.world_catalog_ui.status.ok);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn catalog_delete_world_action_rejects_active_world() {
+        let root = unique_temp_world_root("catalog-delete-active");
+        let catalog = NativeWorldCatalog::new(root.clone());
+        let summary = catalog
+            .create_world(LocalWorldCreateOptions::new("Active World", 11).unwrap())
+            .unwrap();
+        let scene = scene_with_world_root(root.clone());
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        let ui_id = driver
+            .world_catalog_entries
+            .iter()
+            .find(|entry| entry.summary.id == summary.id)
+            .unwrap()
+            .ui_id;
+        driver
+            .session
+            .complete_start(ActiveSessionDescriptor::from_local_world_summary(&summary));
+
+        let result = driver.apply_ui_action(GameUiAction::DeleteWorld(ui_id), ui_action_context());
+        let state = driver
+            .current_ui_render_state(FramePacingUiState::default(), BlockPaletteOverlay::hidden());
+
+        assert!(!result.session_start_queued);
+        assert!(catalog.world_dir(&summary.id).exists());
+        assert_eq!(state.world_catalog.active, Some(ui_id));
+        assert!(state.world_catalog.status.visible);
+        assert!(!state.world_catalog.status.ok);
+        assert!(
+            state
+                .world_catalog
+                .status
+                .message
+                .as_str()
+                .contains("cannot delete active local world")
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
