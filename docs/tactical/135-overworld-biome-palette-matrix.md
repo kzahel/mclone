@@ -28,7 +28,8 @@ Java-shaped `BROWN_MUSHROOM_TAIGA` / `RED_MUSHROOM_TAIGA` and counted
 giant-taiga mushroom table wiring, with Java-shaped small-mushroom
 survival/light/substrate gating, and deterministic low-visibility fixtures for
 plains/taiga/mushroom-field small mushrooms plus savanna/sunflower-plains
-default spring liquid ticks
+default spring liquid ticks, plus Java-shaped jungle-family `PATCH_MELON` /
+`VINES` table slots and broad melon/vine placement/rendering
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -156,9 +157,9 @@ notes.
 | 18 | `minecraft:wooded_hills` | forest | forest hill grass and oak/birch tree family checked; normal mushroom, default extra, and spring table slots wired; flowers/bee-side-effects gap | seed `2`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 19 | `minecraft:taiga_hills` | taiga | taiga hill grass plus spruce/fern and sweet berry bushes checked; taiga/normal mushroom, default extra, and spring table slots wired | seed `29`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 20 | `minecraft:mountain_edge` | mountains | tint checked; Java 1.17 final layered source appears not to emit this registered ID | no B/S fixture | `[ ] B [x] T [ ] S [ ] F` |
-| 21 | `minecraft:jungle` | jungle | grass tint/surface and jungle log/leaves tree family checked; normal mushroom, default extra, and spring table slots wired; jungle extra vegetation/vines/cocoa gap | seed `71`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 22 | `minecraft:jungle_hills` | jungle | jungle hill surface/tint and jungle log/leaves tree family checked; normal mushroom, default extra, and spring table slots wired; jungle extra vegetation/vines/cocoa gap | seed `146`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface and lower-density jungle log/leaves tree family checked; normal mushroom, default extra, and spring table slots wired; jungle extra vegetation/vines/cocoa gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 21 | `minecraft:jungle` | jungle | grass tint/surface and jungle log/leaves tree family checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; cocoa/exact vine face-state gap | seed `71`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 22 | `minecraft:jungle_hills` | jungle | jungle hill surface/tint and jungle log/leaves tree family checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; cocoa/exact vine face-state gap | seed `146`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface and lower-density jungle log/leaves tree family checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; cocoa/exact vine face-state gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 24 | `minecraft:deep_ocean` | ocean-default | deep water checked; seagrass/kelp water plants checked | seed `4`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 25 | `minecraft:stone_shore` | mountains | stone shore plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired, steep coast/structure-context/visible-pumpkin gap | seed `74739`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired, visible-pumpkin gap | seed `5006`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -203,8 +204,8 @@ notes.
 | 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface plus dead bush and sugar-cane/cactus family checked; `PATCH_PUMPKIN` and spring table slots wired but visible pumpkin remains grass-survival/boundary gap; pillar feature gap | seed `8464`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | wooded badlands modified plateau plus dead bush and sugar-cane/cactus family checked; `PATCH_PUMPKIN` and spring table slots wired but visible pumpkin remains grass-survival/boundary gap; wooded plateau tree gap | seed `3823`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau plus dead bush and sugar-cane/cactus family checked; `PATCH_PUMPKIN` and spring table slots wired but visible pumpkin remains grass-survival/boundary gap | seed `65916`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks, and jungle log/leaves vegetation checked; normal mushroom, default extra, and spring table slots wired; vines/cocoa/top bamboo leaf states gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks, and jungle log/leaves vegetation checked; normal mushroom, default extra, and spring table slots wired; vines/cocoa/top bamboo leaf states gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks, and jungle log/leaves vegetation checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; cocoa/top bamboo leaf states/exact vine face-state gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks, and jungle log/leaves vegetation checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; cocoa/top bamboo leaf states/exact vine face-state gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 
 ## Notes And Early Gaps
 
@@ -324,6 +325,10 @@ Landed:
   Java-shaped `PATCH_PUMPKIN` block, asset-registry, rarity-32
   `HEIGHTMAP_DOUBLE_SQUARE`, no-projection, and grass-block survival rules for
   the currently modeled desert/badlands/swamp and default-extra lanes;
+  Java-shaped jungle-family `PATCH_MELON` table slot, melon block/asset
+  registry/render facts, no-projection grass-block survival with `canReplace`,
+  and broad `VINES` table slot/feature/block placement against solid neighbors
+  using a representative vanilla vine model state;
   Java-shaped `ICEBERG_PACKED` / `ICEBERG_BLUE` local-modification placement
   and direct `BLUE_ICE` spread placement;
   Java-shaped giant taiga `MEGA_SPRUCE` / `MEGA_PINE` 2x2 trunk, mega-pine
@@ -373,13 +378,16 @@ Documented gaps from this slice:
   parity, villages/outposts, and exact tree-count mismatch buckets remain owned
   by later `103` work.
 - Java jungle and bamboo jungle now have high-signal jungle log/leaves and
-  bamboo stalk coverage plus normal mushroom table slots. Exact parity is still
-  incomplete: mega jungle trees use a reduced straight-trunk/blob-foliage
-  approximation instead of the 2x2 trunk/branch/mega foliage placers, jungle
-  bushes use the existing blob foliage approximation, cocoa/vines are not
-  generated, bamboo top leaf states are not separate block IDs yet, exact normal
-  mushroom visibility/count parity and full light-engine parity are not checked
-  here, and warm flower / jungle extra vegetation parity remains later `103`
+  bamboo stalk coverage plus normal mushroom table slots, and the Java
+  `PATCH_MELON` / `VINES` jungle extra vegetation slots are wired with broad
+  native block placement. Exact parity is still incomplete: mega jungle trees
+  use a reduced straight-trunk/blob-foliage approximation instead of the 2x2
+  trunk/branch/mega foliage placers, jungle bushes use the existing blob
+  foliage approximation, vines use one representative block ID instead of
+  preserving directional face-state booleans, cocoa is not generated, bamboo
+  top leaf states are not separate block IDs yet, exact normal
+  mushroom/default-extra visibility/count parity and full light-engine parity
+  are not checked here, and exact decorated mismatch buckets remain later `103`
   work.
 - Java normal/cold/lukewarm ocean water-plant tables are represented by broad
   seagrass/kelp checks, and warm ocean now has seagrass, live coral blocks, and
@@ -496,11 +504,11 @@ Documented gaps from this slice:
 
 The emitted-row palette matrix is now full, the main land-builder
 normal/taiga/giant mushroom table lanes are wired, Java default extra
-vegetation and springs are table-wired for the current main land lanes, and the
-small-mushroom survival gate is no longer over-permissive, and the first
-low-visibility mushroom/spring fixtures are pinned. Move the next chunk to
-either the remaining low-visibility table breadth or a visible row-specific
-fixture slice:
+vegetation and springs are table-wired for the current main land lanes, the
+small-mushroom survival gate is no longer over-permissive, the first
+low-visibility mushroom/spring fixtures are pinned, and jungle extra
+melon/vine slots are represented. Move the next chunk to either the remaining
+low-visibility fixture breadth or a visible row-specific feature slice:
 
 1. Re-read `BiomeDefaultFeatures` / `VanillaBiomes` and decide whether to wire
    default mushroom table slots into desert, badlands, and ocean builders now,
@@ -511,6 +519,6 @@ fixture slice:
    initial plains/taiga/mushroom-field fixtures, and spring fixtures that
    produce deterministic visible water/lava columns rather than only liquid
    ticks.
-3. Pick one missing high-signal family outside the broad table slots: jungle
-   extra vegetation (`PATCH_MELON` / vines) or the remaining warm flower/grass
-   density distinctions in savanna and forest-family rows.
+3. Pick one missing high-signal family outside the broad table slots: remaining
+   warm flower/grass density distinctions in savanna and forest-family rows, or
+   a contained jungle follow-up for cocoa plus exact vine face-state modeling.

@@ -1048,6 +1048,7 @@ pub enum ConfiguredFeature {
     SeaPickle(CountConfiguration),
     Seagrass(SeagrassConfiguration),
     Bamboo(BambooConfiguration),
+    Vines,
     Kelp,
     Ore(OreConfiguration),
     FreezeTopLayer,
@@ -1152,6 +1153,10 @@ impl ConfiguredFeature {
 
     pub const fn bamboo(config: BambooConfiguration) -> Self {
         Self::Bamboo(config)
+    }
+
+    pub const fn vines() -> Self {
+        Self::Vines
     }
 
     pub const fn kelp() -> Self {

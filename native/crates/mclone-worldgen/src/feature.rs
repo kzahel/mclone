@@ -21,6 +21,7 @@ mod spring;
 mod tables;
 mod top_layer;
 mod tree;
+mod vines;
 
 pub use configured::{
     BambooConfiguration, BasicTreeConfiguration, ConfiguredFeature, CoralShape,
@@ -183,6 +184,7 @@ impl ConfiguredFeature {
             Self::SeaPickle(config) => ocean::place_sea_pickle(world, random, origin, *config),
             Self::Seagrass(config) => ocean::place_seagrass(world, random, origin, *config),
             Self::Bamboo(config) => bamboo::place_bamboo(world, random, origin, *config),
+            Self::Vines => vines::place_vines(world, origin),
             Self::Kelp => ocean::place_kelp(world, random, origin),
             Self::Ore(config) => ore::place_ore(world, random, origin, config),
             Self::FreezeTopLayer => top_layer::place_freeze_top_layer(world, biomes, origin),
@@ -298,11 +300,12 @@ mod tests {
         DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
         GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
         KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER,
-        LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE,
-        PEONY_LOWER, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK, REDSTONE_ORE,
-        ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
-        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, SUNFLOWER_LOWER,
-        SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
+        LILY_OF_THE_VALLEY, LILY_PAD, MELON, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
+        PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
+        REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2,
+        SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE,
+        SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER,
+        TUBE_CORAL_BLOCK, TUFF, VINE, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -1195,6 +1198,67 @@ mod tests {
     }
 
     #[test]
+    fn melon_patch_places_on_grass_and_honors_can_replace() {
+        let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: MELON,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: false,
+            can_replace: true,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[GRASS_BLOCK],
+        });
+
+        let mut air_chunk = flat_grass_chunk();
+        let mut air_random = WorldgenRandom::new(8);
+        assert!(feature.place(&mut air_chunk, &mut air_random, BlockPos::new(8, 3, 8)));
+        assert_eq!(air_chunk.get_block_at_y(8, 3, 8), MELON);
+
+        let mut grass_chunk = flat_grass_chunk();
+        grass_chunk.set_block_at_y(8, 3, 8, GRASS);
+        let mut grass_random = WorldgenRandom::new(8);
+        assert!(feature.place(&mut grass_chunk, &mut grass_random, BlockPos::new(8, 3, 8)));
+        assert_eq!(grass_chunk.get_block_at_y(8, 3, 8), MELON);
+    }
+
+    #[test]
+    fn vines_feature_places_against_solid_neighbor_only() {
+        let feature = ConfiguredFeature::vines();
+
+        let mut unsupported = flat_grass_chunk();
+        let mut unsupported_random = WorldgenRandom::new(9);
+        assert!(!feature.place(
+            &mut unsupported,
+            &mut unsupported_random,
+            BlockPos::new(8, 3, 8)
+        ));
+        assert_eq!(unsupported.get_block_at_y(8, 3, 8), AIR);
+
+        let mut supported = flat_grass_chunk();
+        supported.set_block_at_y(9, 3, 8, STONE);
+        let mut supported_random = WorldgenRandom::new(9);
+        assert!(feature.place(
+            &mut supported,
+            &mut supported_random,
+            BlockPos::new(8, 3, 8)
+        ));
+        assert_eq!(supported.get_block_at_y(8, 3, 8), VINE);
+
+        let mut occupied = flat_grass_chunk();
+        occupied.set_block_at_y(8, 3, 8, GRASS);
+        occupied.set_block_at_y(9, 3, 8, STONE);
+        let mut occupied_random = WorldgenRandom::new(9);
+        assert!(!feature.place(&mut occupied, &mut occupied_random, BlockPos::new(8, 3, 8)));
+        assert_eq!(occupied.get_block_at_y(8, 3, 8), GRASS);
+    }
+
+    #[test]
     fn huge_mushrooms_place_cap_and_stem_blocks() {
         let mut brown_chunk = flat_grass_chunk();
         let mut brown_random = WorldgenRandom::new(3);
@@ -1794,6 +1858,10 @@ mod tests {
                 ConfiguredFeature::Bamboo(BambooConfiguration { probability: 0.0 })
             )
         }));
+        assert!(has_jungle_melon_patch(&jungle));
+        assert!(has_jungle_vines_feature(&jungle));
+        assert!(has_jungle_melon_patch(&modified));
+        assert!(has_jungle_vines_feature(&modified));
 
         let edge_tree = edge
             .iter()
@@ -1816,6 +1884,8 @@ mod tests {
             }
             other => panic!("expected jungle edge random selector, got {other:?}"),
         }
+        assert!(has_jungle_melon_patch(&edge));
+        assert!(has_jungle_vines_feature(&edge));
     }
 
     #[test]
@@ -1877,6 +1947,8 @@ mod tests {
             }
             other => panic!("expected bamboo random selector, got {other:?}"),
         }
+        assert!(has_jungle_melon_patch(&bamboo_jungle));
+        assert!(has_jungle_vines_feature(&bamboo_jungle));
     }
 
     #[test]
@@ -2088,6 +2160,47 @@ mod tests {
                         place_on: &[GRASS_BLOCK],
                     })
                 )
+        })
+    }
+
+    fn has_jungle_melon_patch(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: MELON,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 64,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: false,
+                        can_replace: true,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[GRASS_BLOCK],
+                    })
+                )
+        })
+    }
+
+    fn has_jungle_vines_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.feature == ConfiguredFeature::vines()
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::count(50),
+                        ConfiguredDecorator::square(),
+                    ]
         })
     }
 

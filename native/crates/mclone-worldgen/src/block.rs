@@ -157,6 +157,8 @@ pub const BROWN_MUSHROOM: RawBlockId = 151;
 pub const RED_MUSHROOM: RawBlockId = 152;
 pub const BLUE_ICE: RawBlockId = 153;
 pub const PUMPKIN: RawBlockId = 154;
+pub const MELON: RawBlockId = 155;
+pub const VINE: RawBlockId = 156;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -241,6 +243,8 @@ impl GeneratedBlockId {
     pub const RED_MUSHROOM: Self = Self(RED_MUSHROOM);
     pub const BLUE_ICE: Self = Self(BLUE_ICE);
     pub const PUMPKIN: Self = Self(PUMPKIN);
+    pub const MELON: Self = Self(MELON);
+    pub const VINE: Self = Self(VINE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -303,6 +307,7 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | BLUE_ORCHID
             | BROWN_MUSHROOM
             | RED_MUSHROOM
+            | VINE
             | GLOW_LICHEN
             | POINTED_DRIPSTONE
             | TORCH
@@ -497,6 +502,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         RED_SANDSTONE => "minecraft:red_sandstone",
         PACKED_ICE => "minecraft:packed_ice",
         BLUE_ICE => "minecraft:blue_ice",
+        MELON => "minecraft:melon",
         OBSIDIAN => "minecraft:obsidian",
         MAGMA_BLOCK => "minecraft:magma_block",
         RED_SAND => "minecraft:red_sand",
@@ -540,6 +546,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         BROWN_MUSHROOM => "minecraft:brown_mushroom",
         RED_MUSHROOM => "minecraft:red_mushroom",
         PUMPKIN => "minecraft:pumpkin",
+        VINE => "minecraft:vine",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -624,6 +631,8 @@ mod tests {
         assert_eq!(block_light_opacity(WALL_TORCH_EAST), 0);
         assert_eq!(block_light_opacity(CACTUS), 15);
         assert_eq!(block_light_opacity(PUMPKIN), 15);
+        assert_eq!(block_light_opacity(MELON), 15);
+        assert_eq!(block_light_opacity(VINE), 0);
         assert_eq!(block_light_opacity(SUGAR_CANE), 0);
         assert_eq!(block_light_opacity(SEAGRASS), 0);
         assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
@@ -677,6 +686,8 @@ mod tests {
         assert_eq!(block_name(KELP_PLANT), "minecraft:kelp_plant");
         assert_eq!(block_name(BLUE_ICE), "minecraft:blue_ice");
         assert_eq!(block_name(PUMPKIN), "minecraft:pumpkin");
+        assert_eq!(block_name(MELON), "minecraft:melon");
+        assert_eq!(block_name(VINE), "minecraft:vine");
         assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
         assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
         assert_eq!(block_name(SEA_PICKLE_4), "minecraft:sea_pickle");

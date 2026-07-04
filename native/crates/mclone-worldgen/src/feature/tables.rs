@@ -7,7 +7,7 @@ use crate::block::{
     DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
     DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE, GRANITE, GRASS,
     GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER,
-    LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN,
+    LILY_OF_THE_VALLEY, LILY_PAD, MELON, MYCELIUM, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN,
     RED_MUSHROOM, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SNOW_BLOCK,
     SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
 };
@@ -1049,7 +1049,7 @@ fn jungle_features(light_bamboo: bool, edge: bool) -> Vec<PlacedFeature> {
     features.push(normal_mushroom_patch_feature(RED_MUSHROOM, 8));
     add_default_extra_vegetation(&mut features);
     add_default_springs(&mut features);
-    features.push(omitted_vegetal_feature());
+    add_jungle_extra_vegetation(&mut features);
     features
 }
 
@@ -1064,7 +1064,7 @@ fn bamboo_jungle_features() -> Vec<PlacedFeature> {
     ];
     add_default_extra_vegetation(&mut features);
     add_default_springs(&mut features);
-    features.push(omitted_vegetal_feature());
+    add_jungle_extra_vegetation(&mut features);
     features
 }
 
@@ -1153,6 +1153,11 @@ fn add_default_extra_vegetation(features: &mut Vec<PlacedFeature>) {
 fn add_default_springs(features: &mut Vec<PlacedFeature>) {
     features.push(spring_water_feature());
     features.push(spring_lava_feature());
+}
+
+fn add_jungle_extra_vegetation(features: &mut Vec<PlacedFeature>) {
+    features.push(melon_patch_feature());
+    features.push(vines_feature());
 }
 
 fn tree_feature(
@@ -1992,6 +1997,42 @@ fn pumpkin_patch() -> PlacedFeature {
             ConfiguredDecorator::chance(32),
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
+fn melon_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: MELON,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: true,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[GRASS_BLOCK],
+        }),
+        vec![
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
+fn vines_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::vines(),
+        vec![
+            ConfiguredDecorator::count(50),
+            ConfiguredDecorator::square(),
         ],
     )
 }

@@ -139,6 +139,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::KELP
         | terrain_id::KELP_PLANT
         | terrain_id::SWEET_BERRY_BUSH
+        | terrain_id::VINE
         | terrain_id::SEA_PICKLE_1
         | terrain_id::SEA_PICKLE_2
         | terrain_id::SEA_PICKLE_3

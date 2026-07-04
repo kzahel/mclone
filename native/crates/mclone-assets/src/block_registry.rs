@@ -397,6 +397,13 @@ const PICKLES_1_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "1"), ("waterl
 const PICKLES_2_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "2"), ("waterlogged", "true")];
 const PICKLES_3_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "3"), ("waterlogged", "true")];
 const PICKLES_4_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "4"), ("waterlogged", "true")];
+const VINE_EMPTY: &[(&str, &str)] = &[
+    ("up", "false"),
+    ("north", "false"),
+    ("east", "false"),
+    ("south", "false"),
+    ("west", "false"),
+];
 const LEVEL_0: &[(&str, &str)] = &[("level", "0")];
 const LEVEL_1: &[(&str, &str)] = &[("level", "1")];
 const LEVEL_2: &[(&str, &str)] = &[("level", "2")];
@@ -565,6 +572,8 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (152, "minecraft:red_mushroom", EMPTY_PROPS),
     (153, "minecraft:blue_ice", EMPTY_PROPS),
     (154, "minecraft:pumpkin", EMPTY_PROPS),
+    (155, "minecraft:melon", EMPTY_PROPS),
+    (156, "minecraft:vine", VINE_EMPTY),
 ];
 
 #[cfg(test)]
@@ -583,7 +592,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 155);
+        assert_eq!(registry.len(), 157);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -923,6 +932,16 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:pumpkin"),
             Some(BlockStateId(154))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:melon"),
+            Some(BlockStateId(155))
+        );
+        assert_eq!(
+            registry.id_for_key(
+                "minecraft:vine[east=false,north=false,south=false,up=false,west=false]"
+            ),
+            Some(BlockStateId(156))
         );
     }
 

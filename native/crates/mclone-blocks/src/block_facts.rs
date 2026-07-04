@@ -79,6 +79,8 @@ pub mod terrain_id {
     pub const BLUE_ORCHID: u32 = 150;
     pub const BROWN_MUSHROOM: u32 = 151;
     pub const RED_MUSHROOM: u32 = 152;
+    pub const MELON: u32 = 155;
+    pub const VINE: u32 = 156;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
