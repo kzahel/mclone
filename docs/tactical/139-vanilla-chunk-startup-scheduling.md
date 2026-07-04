@@ -2,11 +2,13 @@
 
 Status: active priority checkpoint before broader render-pipeline and
 streaming-budget follow-ups. Slice A1 landed on 2026-07-04: feature-job size
-diagnostics, high-radius batch-shape regression coverage, and ignored
-future-contract coverage for the Java view halo.
+diagnostics and high-radius batch-shape regression coverage.
 Slice C1 landed on 2026-07-04: high-radius startup feature scheduling now emits
 a center-first `3x3` job before streaming the rest of the view in bounded
 background batches.
+Slice B1 landed on 2026-07-04: local render distance now gets Java's
+`requested + 1` tracking halo for normal values, while startup readiness waits
+for the explicit center `3x3` publication gate.
 Workstream: native Rust, server scheduling, startup readiness, loading UI;
 desktop validation first
 
@@ -83,9 +85,10 @@ The key distinction: Java's radius-8 feature dependency is per chunk/status
 future and mixed-status. It is not a request to fully generate the entire render
 distance plus eight chunks before publishing the player.
 
-## Current Native Problem
+## Original Native Problem
 
-Current native behavior differs in ways that compound at high render distance:
+The native behavior at the start of this tactical differed in ways that
+compounded at high render distance:
 
 - `chunk_tracking_radius_for_render_distance(...)` returns the requested render
   distance for normal values instead of Java's `requested + 1` halo.
@@ -204,8 +207,8 @@ Slice A1 result:
 - A passing scheduler regression records raw high-radius feature expansion: a
   radius-33 target set would produce one `67x67` target job, `69x69`
   feature-center set, and `85x85` dependency set if submitted as a single job.
-- An ignored future-contract test records the desired Java-shaped
-  render-distance halo.
+- The Java-shaped render-distance halo contract started as ignored
+  future-coverage and was enabled by Slice B1.
 
 Validation:
 
@@ -216,20 +219,43 @@ Validation:
 
 ### Slice B: Fix View-Distance Tracking And Startup Gate
 
-- [ ] Change local tracking radius to Java's `requested + 1` halo for normal
+- [x] Change local tracking radius to Java's `requested + 1` halo for normal
       render distances.
-- [ ] Keep render filtering at the requested render distance.
-- [ ] Replace startup `playable_ready` semantics with the center `3x3 FULL`
+- [x] Keep render filtering at the requested render distance.
+- [x] Replace startup `playable_ready` semantics with the center `3x3 FULL`
       gate plus client snapshot/renderable first-frame requirements.
-- [ ] Update or split native `Full` semantics if the current status model cannot
-      express the publication/ticking gate.
-- [ ] Update tests that currently assume `Light` or `Features` alone makes the
+- [x] Make the native publication gate explicit because current native `Full`
+      status is not yet a faithful Java publication/ticking status.
+- [x] Update tests that currently assume `Light` or `Features` alone makes the
       center playable.
 
-Validation:
+Slice B1 result:
 
-- `cargo test --manifest-path native/Cargo.toml -p mclone-server`
-- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `chunk_tracking_radius_for_render_distance(...)` now preserves tiny debug
+  radii `0` and `1`, then maps normal render distances through Java's
+  `clamp(requested + 1, 3, 33)` shape.
+- `SingleViewRuntime::render_section_within_render_distance(...)` remains keyed
+  to the requested render distance, and an app-runtime test now proves the extra
+  tracking halo is not rendered.
+- `ChunkLoadingProgressStats` now carries explicit playable-gate diagnostics:
+  radius, total gate chunks, and ready gate chunks.
+- `playable_chunk_ready` now means the center `3x3` gate has reached the
+  runtime target status (`Light` with lighting, `Features` without lighting),
+  not merely that the center chunk is ready.
+- The startup pump still also requires the client center snapshot and at least
+  one accepted render section before entering play.
+- The scheduler's live view-readiness snapshot uses the same center `3x3` gate
+  as loading progress.
+
+Completed validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server` passed on
+  2026-07-04 (`359` passed, `0` ignored).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime` passed
+  on 2026-07-04 (`80` passed, `0` ignored).
+
+Planned validation:
+
 - desktop local startup at small render distance
 
 ### Slice C: Replace Whole-View Feature Batches

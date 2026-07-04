@@ -26,6 +26,9 @@ pub struct ChunkLoadingProgressStats {
     pub target_chunk_count: usize,
     pub target_ready_chunks: usize,
     pub playable_chunk: ChunkPos,
+    pub playable_gate_radius: u32,
+    pub playable_gate_chunk_count: usize,
+    pub playable_gate_ready_chunks: usize,
     pub playable_chunk_ready: bool,
 }
 
@@ -104,10 +107,13 @@ impl ChunkLoadingProgress {
                     && **status >= self.target_status
             })
             .count();
-        let playable_chunk_ready = self
-            .ready_statuses
-            .get(&view.center)
-            .is_some_and(|status| *status >= self.target_status);
+        let playable_gate_ready_chunks = playable_gate_ready_chunk_count(
+            |pos| self.ready_statuses.get(&pos).copied(),
+            view.center,
+            self.target_status,
+        );
+        let playable_gate_chunk_count = square_chunk_count(PLAYABLE_GATE_RADIUS);
+        let playable_chunk_ready = playable_gate_ready_chunks == playable_gate_chunk_count;
         let stats = ChunkLoadingProgressStats {
             center: view.center,
             target_radius: view.target_radius,
@@ -115,6 +121,9 @@ impl ChunkLoadingProgress {
             target_chunk_count: square_chunk_count(view.target_radius),
             target_ready_chunks,
             playable_chunk: view.center,
+            playable_gate_radius: PLAYABLE_GATE_RADIUS,
+            playable_gate_chunk_count,
+            playable_gate_ready_chunks,
             playable_chunk_ready,
         };
 
@@ -157,6 +166,27 @@ fn square_chunk_count(radius: u32) -> usize {
     side * side
 }
 
+pub(crate) fn playable_gate_ready_chunk_count(
+    mut status_at: impl FnMut(ChunkPos) -> Option<ChunkStatus>,
+    center: ChunkPos,
+    target_status: ChunkStatus,
+) -> usize {
+    let radius =
+        i32::try_from(PLAYABLE_GATE_RADIUS).expect("playable gate radius must fit into i32");
+    let mut ready_chunks = 0;
+    for relative_z in -radius..=radius {
+        for relative_x in -radius..=radius {
+            let pos = ChunkPos::new(center.x + relative_x, center.z + relative_z);
+            if status_at(pos).is_some_and(|status| status >= target_status) {
+                ready_chunks += 1;
+            }
+        }
+    }
+    ready_chunks
+}
+
+pub(crate) const PLAYABLE_GATE_RADIUS: u32 = 1;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +196,22 @@ mod tests {
             center,
             render_distance: radius,
             chunk_tracking_radius: radius,
+        }
+    }
+
+    fn mark_playable_gate_ready(
+        progress: &mut ChunkLoadingProgress,
+        center: ChunkPos,
+        status: ChunkStatus,
+    ) {
+        for relative_z in -1..=1 {
+            for relative_x in -1..=1 {
+                progress.record_status_change(
+                    ChunkPos::new(center.x + relative_x, center.z + relative_z),
+                    status,
+                    ChunkStatusStep::Ready,
+                );
+            }
         }
     }
 
@@ -188,6 +234,9 @@ mod tests {
                 target_chunk_count: 9,
                 target_ready_chunks: 0,
                 playable_chunk: ChunkPos::new(0, 0),
+                playable_gate_radius: PLAYABLE_GATE_RADIUS,
+                playable_gate_chunk_count: 9,
+                playable_gate_ready_chunks: 0,
                 playable_chunk_ready: false,
             }
         );
@@ -210,6 +259,14 @@ mod tests {
 
         let stats = progress.stats().unwrap();
         assert_eq!(stats.target_ready_chunks, 2);
+        assert_eq!(stats.playable_gate_ready_chunks, 2);
+        assert!(!stats.playable_chunk_ready);
+
+        mark_playable_gate_ready(&mut progress, ChunkPos::new(0, 0), ChunkStatus::Light);
+
+        let stats = progress.stats().unwrap();
+        assert_eq!(stats.target_ready_chunks, 9);
+        assert_eq!(stats.playable_gate_ready_chunks, 9);
         assert!(stats.playable_chunk_ready);
     }
 
@@ -234,25 +291,23 @@ mod tests {
         let mut progress = ChunkLoadingProgress::new(ChunkStatus::Features);
         let center = ChunkPos::new(4, -2);
         progress.set_view(&view(center, 0));
-        progress.record_status_change(center, ChunkStatus::Features, ChunkStatusStep::Ready);
+        mark_playable_gate_ready(&mut progress, center, ChunkStatus::Features);
         assert!(progress.stats().unwrap().playable_chunk_ready);
 
         progress.clear_chunk(center);
 
         let stats = progress.stats().unwrap();
         assert_eq!(stats.target_ready_chunks, 0);
+        assert_eq!(stats.playable_gate_ready_chunks, 8);
         assert!(!stats.playable_chunk_ready);
     }
 
     #[test]
     fn target_status_can_follow_lighting_mode() {
         let mut progress = ChunkLoadingProgress::new(ChunkStatus::Light);
-        progress.set_view(&view(ChunkPos::new(0, 0), 0));
-        progress.record_status_change(
-            ChunkPos::new(0, 0),
-            ChunkStatus::Features,
-            ChunkStatusStep::Ready,
-        );
+        let center = ChunkPos::new(0, 0);
+        progress.set_view(&view(center, 0));
+        mark_playable_gate_ready(&mut progress, center, ChunkStatus::Features);
         assert!(!progress.stats().unwrap().playable_chunk_ready);
 
         progress.set_target_status(ChunkStatus::Features);

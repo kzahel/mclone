@@ -2225,6 +2225,9 @@ mod tests {
         assert_eq!(stats.target_chunk_count, 1);
         assert_eq!(stats.target_ready_chunks, 1);
         assert_eq!(stats.playable_chunk, ChunkPos::new(0, 0));
+        assert_eq!(stats.playable_gate_radius, 1);
+        assert_eq!(stats.playable_gate_chunk_count, 9);
+        assert_eq!(stats.playable_gate_ready_chunks, 9);
         assert!(stats.playable_chunk_ready);
     }
 
@@ -2241,6 +2244,7 @@ mod tests {
         assert_eq!(first.stats.target_radius, 0);
         assert_eq!(first.stats.target_chunk_count, 1);
         assert_eq!(first.stats.target_ready_chunks, 1);
+        assert_eq!(first.stats.playable_gate_ready_chunks, 9);
         assert_eq!(first.cells.len(), 1);
         assert!(first.stats.playable_chunk_ready);
 
@@ -2252,6 +2256,7 @@ mod tests {
         assert_eq!(moved.stats.target_radius, 0);
         assert_eq!(moved.stats.target_chunk_count, 1);
         assert_eq!(moved.stats.target_ready_chunks, 1);
+        assert_eq!(moved.stats.playable_gate_ready_chunks, 9);
         assert_eq!(moved.cells.len(), 1);
         assert_eq!(moved.cells[0].relative_x, 0);
         assert_eq!(moved.cells[0].relative_z, 0);
@@ -2271,6 +2276,7 @@ mod tests {
             mclone_core::ChunkStatus::Features
         );
         assert_eq!(unlit.stats.target_ready_chunks, 1);
+        assert_eq!(unlit.stats.playable_gate_ready_chunks, 9);
         assert!(unlit.stats.playable_chunk_ready);
 
         let mut lit_server = IntegratedServer::new(0);
@@ -2280,6 +2286,7 @@ mod tests {
             .expect("lit loaded view should expose readiness snapshot");
         assert_eq!(lit.stats.target_status, mclone_core::ChunkStatus::Light);
         assert_eq!(lit.stats.target_ready_chunks, 1);
+        assert_eq!(lit.stats.playable_gate_ready_chunks, 9);
         assert!(lit.stats.playable_chunk_ready);
     }
 

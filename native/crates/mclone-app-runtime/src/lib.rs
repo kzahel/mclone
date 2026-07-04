@@ -423,12 +423,13 @@ pub fn square_count(radius: i32) -> Result<usize> {
 }
 
 pub fn chunk_tracking_radius_for_render_distance(render_distance: u32) -> u32 {
-    // Java 1.17.1 exposes render distance with a minimum of 2, then the
-    // integrated server path arrives at ChunkMap's clamped minimum of 3.
+    // Java 1.17.1 stores view distance as requested + 1, clamped to 3..=33.
+    // Native tests and debug captures intentionally use radii 0/1, so preserve
+    // those tiny windows instead of raising them to Java's normal minimum.
     if render_distance < JAVA_MIN_TRACKING_RENDER_DISTANCE {
         return render_distance;
     }
-    render_distance.max(3)
+    render_distance.saturating_add(1).clamp(3, 33)
 }
 
 pub fn chunk_view(center: ChunkPos, render_distance: u32, chunk_tracking_radius: u32) -> ChunkView {
@@ -2524,12 +2525,11 @@ mod tests {
         assert_eq!(chunk_tracking_radius_for_render_distance(0), 0);
         assert_eq!(chunk_tracking_radius_for_render_distance(1), 1);
         assert_eq!(chunk_tracking_radius_for_render_distance(2), 3);
-        assert_eq!(chunk_tracking_radius_for_render_distance(3), 3);
-        assert_eq!(chunk_tracking_radius_for_render_distance(4), 4);
+        assert_eq!(chunk_tracking_radius_for_render_distance(3), 4);
+        assert_eq!(chunk_tracking_radius_for_render_distance(4), 5);
     }
 
     #[test]
-    #[ignore = "tactical 139 Slice B: local tracking should use Java's requested + 1 halo"]
     fn chunk_tracking_radius_should_include_java_view_halo() {
         assert_eq!(chunk_tracking_radius_for_render_distance(0), 0);
         assert_eq!(chunk_tracking_radius_for_render_distance(1), 1);
@@ -2537,6 +2537,14 @@ mod tests {
         assert_eq!(chunk_tracking_radius_for_render_distance(12), 13);
         assert_eq!(chunk_tracking_radius_for_render_distance(30), 31);
         assert_eq!(chunk_tracking_radius_for_render_distance(32), 33);
+    }
+
+    #[test]
+    fn render_filter_stays_at_requested_distance_when_tracking_has_halo() {
+        let runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 2, 3);
+
+        assert!(runtime.render_section_within_render_distance(RenderSectionKey::new(2, 0, 0)));
+        assert!(!runtime.render_section_within_render_distance(RenderSectionKey::new(3, 0, 0)));
     }
 
     #[test]
@@ -2694,6 +2702,9 @@ mod tests {
                 target_chunk_count: 9,
                 target_ready_chunks: 2,
                 playable_chunk: ChunkPos::new(4, -3),
+                playable_gate_radius: 1,
+                playable_gate_chunk_count: 9,
+                playable_gate_ready_chunks: 9,
                 playable_chunk_ready: true,
             },
             cells: vec![

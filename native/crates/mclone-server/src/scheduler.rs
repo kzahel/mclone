@@ -47,6 +47,7 @@ use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::loading_progress::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
+    PLAYABLE_GATE_RADIUS, playable_gate_ready_chunk_count,
 };
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
@@ -765,7 +766,20 @@ impl ChunkScheduler {
             side * side
         };
         let mut target_ready_chunks = 0;
-        let mut playable_chunk_ready = false;
+        let playable_gate_ready_chunks = playable_gate_ready_chunk_count(
+            |pos| {
+                self.holders
+                    .get(&pos)
+                    .and_then(ChunkHolder::highest_ready_status)
+            },
+            view.center,
+            target_status,
+        );
+        let playable_gate_chunk_count = {
+            let side = PLAYABLE_GATE_RADIUS as usize * 2 + 1;
+            side * side
+        };
+        let playable_chunk_ready = playable_gate_ready_chunks == playable_gate_chunk_count;
         let mut cells = Vec::with_capacity(target_chunk_count);
 
         for relative_z in -radius..=radius {
@@ -779,9 +793,6 @@ impl ChunkScheduler {
                 let playable = pos == view.center;
                 if target_ready {
                     target_ready_chunks += 1;
-                }
-                if playable {
-                    playable_chunk_ready = target_ready;
                 }
                 cells.push(ChunkLoadingProgressCell {
                     relative_x,
@@ -801,6 +812,9 @@ impl ChunkScheduler {
                 target_chunk_count,
                 target_ready_chunks,
                 playable_chunk: view.center,
+                playable_gate_radius: PLAYABLE_GATE_RADIUS,
+                playable_gate_chunk_count,
+                playable_gate_ready_chunks,
                 playable_chunk_ready,
             },
             cells,
