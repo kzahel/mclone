@@ -64,6 +64,65 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-04 - Desktop Loading-Settle Clean Startup Baseline
+
+Commit reported by native benchmark JSON: `482f0d51`.
+
+`git_dirty=false`; `debug_assertions=false`.
+
+Host: Apple M4 Pro Mac, 48 GiB RAM, Darwin `25.5.0` arm64.
+
+Release loading-settle command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --loading-settle-perf \
+  --loading-settle-distances 5,10,15,20 \
+  --debug-passive-showcase false \
+  --render-compile-workers 1 \
+  --simulation-cadence 20/20/60
+```
+
+Benchmark options: seed `12345`, transient worlds, render compile workers `1`,
+simulation cadence `20/20/60`, lighting enabled, debug passive showcase
+disabled, benchmark idle timeout `600s` per distance. This is the first clean
+baseline after the high-render-distance startup scheduling work in tactical
+`139`; the target chunk counts include the Java-shaped `requested + 1`
+tracking halo.
+
+Summary:
+
+| Render distance | Tracking radius | Target chunks | Runtime settle | Mesh settle | Full settle | Runtime chunks/sec | Full chunks/sec | Sim time | Cached sections | Pending render chunks |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `5` | `6` | `169` | `12,473.178 ms` | `943.591 ms` | `13,416.769 ms` | `13.549` | `12.596` | `12.050 s` | `1,936` | `48` |
+| `10` | `11` | `529` | `33,325.249 ms` | `7,981.598 ms` | `41,306.846 ms` | `15.874` | `12.807` | `33.050 s` | `7,056` | `88` |
+| `15` | `16` | `1,089` | `64,884.972 ms` | `33,042.018 ms` | `97,926.990 ms` | `16.784` | `11.121` | `64.600 s` | `15,376` | `128` |
+| `20` | `21` | `1,849` | `108,077.834 ms` | `94,653.061 ms` | `202,730.895 ms` | `17.108` | `9.120` | `106.500 s` | `26,896` | `168` |
+
+Counters at completion: `target_ready_chunks == target_chunk_count`,
+`loaded_chunks == target_chunk_count`, `pending_jobs=0`,
+`pending_publications=0`, and `pending_render_compile_jobs=0` for every
+distance. The remaining `pending_render_chunks` are edge render chunks waiting
+on outside-neighbor readiness after the requested target chunk square has
+settled.
+
+Interpretation:
+
+- RD20 remains a multi-minute full-view settle even though local entry is now
+  early-playable. The clean RD20 split is `108.078s` runtime/server settle plus
+  `94.653s` render mesh settle.
+- Runtime settle is still the larger RD20 share (`53.3%`), and simulation time
+  (`106.500s`) tracks runtime wall time closely. That makes host cadence,
+  scheduler publication, and server/worldgen/light pacing first-class suspects;
+  this is not only a render compile problem.
+- Mesh settle becomes nearly half the RD20 total (`46.7%`). Single-worker mesh
+  throughput falls with distance, from roughly `2052` cached sections/sec at
+  RD5 to `284` cached sections/sec at RD20, so render compile/mesh throughput
+  also needs its own sweep.
+- The next comparison should keep the phases separate: run a cadence sweep to
+  test runtime throttling, and a render-compile worker sweep to test mesh
+  throughput, before changing defaults or Quest backpressure policies.
+
 ### 2026-07-04 - Desktop Loading-Settle Throughput
 
 Commit reported by native benchmark JSON: `e0106245`.

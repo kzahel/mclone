@@ -1,7 +1,9 @@
 # 140: Streaming Throughput And Frame Pacing Baselines
 
-Status: proposed benchmark and attribution checkpoint. No optimization slices
-should start from this doc until the baseline matrix is captured and interpreted.
+Status: active benchmark and attribution checkpoint. Slice A clean desktop
+default loading-settle baseline captured on 2026-07-04 at `482f0d51`; no
+optimization slices should start from this doc until the baseline matrix is
+captured and interpreted.
 Workstream: native Rust performance, desktop throughput, Android XR / Quest
 frame pacing, shared runtime/render scheduling policy.
 
@@ -240,6 +242,53 @@ Record:
 - terrain runtime sync/upload/ready/publish buckets
 - compile worker pending/queued state and upload/result backlog
 
+## Captured Results
+
+### Slice A: Clean Desktop Default Loading-Settle Baseline
+
+Captured on 2026-07-04 at commit `482f0d51`.
+
+`git_dirty=false`; release build; `debug_assertions=false`.
+
+Raw output for this local run:
+`/tmp/mclone-loading-settle-rd5-20-workers1-cadence20.json`.
+
+Command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --loading-settle-perf \
+  --loading-settle-distances 5,10,15,20 \
+  --debug-passive-showcase false \
+  --render-compile-workers 1 \
+  --simulation-cadence 20/20/60
+```
+
+Summary:
+
+| Render distance | Tracking radius | Target chunks | Runtime settle | Mesh settle | Full settle | Runtime chunks/sec | Full chunks/sec | Cached sections |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `5` | `6` | `169` | `12,473.178 ms` | `943.591 ms` | `13,416.769 ms` | `13.549` | `12.596` | `1,936` |
+| `10` | `11` | `529` | `33,325.249 ms` | `7,981.598 ms` | `41,306.846 ms` | `15.874` | `12.807` | `7,056` |
+| `15` | `16` | `1,089` | `64,884.972 ms` | `33,042.018 ms` | `97,926.990 ms` | `16.784` | `11.121` | `15,376` |
+| `20` | `21` | `1,849` | `108,077.834 ms` | `94,653.061 ms` | `202,730.895 ms` | `17.108` | `9.120` | `26,896` |
+
+Immediate interpretation:
+
+- The current clean RD20 baseline is still multi-minute: `202.731s` full
+  settle, split into `108.078s` runtime/server settle and `94.653s` render mesh
+  settle.
+- Runtime is still the larger RD20 share (`53.3%`), and simulation time
+  (`106.500s`) closely tracks runtime wall time. That makes cadence,
+  scheduler/publication pacing, and server/worldgen/light work first-class
+  suspects.
+- Mesh is already large enough to need its own sweep (`46.7%` of RD20 full
+  settle). Single-worker cached-section throughput falls sharply with distance,
+  from roughly `2052` sections/sec at RD5 to `284` sections/sec at RD20.
+- The next pass should not tune one global backpressure knob. Run the cadence
+  sweep and render-compile-worker sweep separately, then use a desktop
+  movement-frame run and Quest RD7 guardrail before changing defaults.
+
 ## Interpretation Rules
 
 Do not optimize from a single number. Use these reads:
@@ -263,17 +312,17 @@ Do not optimize from a single number. Use these reads:
 
 ## Acceptance Criteria For This Tactical
 
-- A clean commit baseline exists for desktop loading-settle RD5/RD10/RD15/RD20
+- [x] A clean commit baseline exists for desktop loading-settle RD5/RD10/RD15/RD20
   with current defaults.
-- At least one worker-count sweep and one cadence sweep are recorded for
+- [ ] At least one worker-count sweep and one cadence sweep are recorded for
   desktop loading-settle.
-- At least one desktop live streaming frame-budget run is recorded for the
+- [ ] At least one desktop live streaming frame-budget run is recorded for the
   baseline and for any promising throughput candidate.
-- At least one Quest RD7 guardrail run is recorded after the same candidate
+- [ ] At least one Quest RD7 guardrail run is recorded after the same candidate
   policy.
-- The results are summarized in `docs/performance-records.md` with enough raw
+- [ ] The results are summarized in `docs/performance-records.md` with enough raw
   `/tmp` paths or copied summary tables to reproduce the interpretation.
-- A follow-up tactical names the first concrete optimization target and why it
+- [ ] A follow-up tactical names the first concrete optimization target and why it
   should not make the opposite lane worse.
 
 ## Likely Follow-Up Directions
