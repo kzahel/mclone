@@ -33,6 +33,7 @@ use mclone_client::{
     BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
     NativeTeleportPreviewWorker, TeleportConfig, TeleportIntent, TeleportPreview,
     TeleportPreviewRequestId, TeleportPreviewResult, sphere_intersects_solid_blocks,
+    view_vector_from_rot_degrees,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_mesh::quad_face_count_from_indices;
@@ -129,8 +130,6 @@ const XR_BLINK_TELEPORT_DOT_RADIUS: f64 = 0.1;
 const XR_BLINK_TELEPORT_HEADING_ARROW_LENGTH: f64 = 0.7;
 const XR_BLINK_TELEPORT_HEADING_ARROW_HEAD_LENGTH: f64 = 0.22;
 const XR_BLINK_TELEPORT_HEADING_ARROW_HEAD_ANGLE_DEGREES: f64 = 35.0;
-const XR_BLINK_TELEPORT_HEADING_TWIST_DEAD_ZONE_DEGREES: f64 = 8.0;
-const XR_BLINK_TELEPORT_HEADING_TWIST_MAX_DEGREES: f64 = 180.0;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum XrLocomotionMode {
@@ -438,7 +437,7 @@ struct XrBlinkTeleportState {
     preview_request_id: Option<TeleportPreviewRequestId>,
     base_yaw_degrees: f64,
     target_yaw_degrees: f64,
-    activation_aim_orientation: Option<Quat>,
+    activation_left_stick_angle_radians: Option<f64>,
     last_submitted_intent: Option<TeleportIntent>,
 }
 
@@ -2750,7 +2749,7 @@ where
                 .context("apply XR snap turn")?;
         }
         let blink_frame = self
-            .update_xr_blink_teleport(controllers, transform)
+            .update_xr_blink_teleport(controllers, &views, transform)
             .context("update XR Blink teleport")?;
         let movement_yaw_radians = self
             .locomotion_movement_yaw_radians_with_transform(&views, transform)
@@ -2789,6 +2788,7 @@ where
     fn update_xr_blink_teleport(
         &mut self,
         controllers: &[XrControllerSnapshot],
+        views: &[xr::View],
         transform: XrStageToWorld,
     ) -> Result<XrBlinkTeleportFrame> {
         let left_axis = xr_left_stick_raw_axis(controllers);
@@ -2796,7 +2796,7 @@ where
         let blink_engaged = xr_left_stick_blink_engaged(controllers);
         if blink_engaged {
             if !self.blink_teleport.active {
-                self.begin_xr_blink_teleport(controllers);
+                self.begin_xr_blink_teleport(controllers, views, transform);
             }
             self.submit_xr_blink_teleport_request(controllers, transform)?;
             self.poll_xr_blink_teleport_worker();
@@ -2817,12 +2817,25 @@ where
         })
     }
 
-    fn begin_xr_blink_teleport(&mut self, controllers: &[XrControllerSnapshot]) {
+    fn begin_xr_blink_teleport(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+        views: &[xr::View],
+        transform: XrStageToWorld,
+    ) {
         if self.runtime.is_none() {
             self.clear_xr_blink_teleport();
             return;
         }
-        let base_yaw_degrees = self.camera.player().pose().y_rot_degrees;
+        let base_yaw_degrees = match xr_headset_player_yaw_degrees_from_views(views, transform) {
+            Ok(yaw_degrees) => yaw_degrees,
+            Err(error) => {
+                log::warn!(
+                    "failed to capture XR Blink headset heading, falling back to body yaw: {error:#}"
+                );
+                self.camera.player().pose().y_rot_degrees
+            }
+        };
         self.ensure_xr_blink_teleport_worker();
         self.blink_teleport.active = true;
         self.blink_teleport.preview = None;
@@ -2830,7 +2843,8 @@ where
         self.blink_teleport.preview_request_id = None;
         self.blink_teleport.base_yaw_degrees = base_yaw_degrees;
         self.blink_teleport.target_yaw_degrees = base_yaw_degrees;
-        self.blink_teleport.activation_aim_orientation = xr_left_aim_orientation(controllers);
+        self.blink_teleport.activation_left_stick_angle_radians =
+            xr_left_stick_heading_angle_radians(controllers);
         self.blink_teleport.last_submitted_intent = None;
         log::info!("XR Blink teleport preview armed");
     }
@@ -2860,12 +2874,19 @@ where
     ) -> Result<bool> {
         let target_yaw_degrees = self.xr_blink_teleport_target_yaw_degrees(controllers);
         self.blink_teleport.target_yaw_degrees = target_yaw_degrees;
+        if let Some(preview) = self.blink_teleport.preview.as_mut() {
+            preview.target_yaw_degrees = target_yaw_degrees;
+        }
         let Some(intent) =
             xr_blink_teleport_intent(&self.camera, controllers, transform, target_yaw_degrees)
         else {
             return Ok(false);
         };
-        if self.blink_teleport.last_submitted_intent == Some(intent) {
+        if self
+            .blink_teleport
+            .last_submitted_intent
+            .is_some_and(|last| teleport_intent_query_matches(last, intent))
+        {
             return Ok(false);
         }
         self.ensure_xr_blink_teleport_worker();
@@ -2924,7 +2945,9 @@ where
         {
             return false;
         }
-        self.blink_teleport.preview = Some(result.preview);
+        let mut preview = result.preview;
+        preview.target_yaw_degrees = self.blink_teleport.target_yaw_degrees;
+        self.blink_teleport.preview = Some(preview);
         self.blink_teleport.preview_request_id = Some(result.id);
         true
     }
@@ -2966,28 +2989,13 @@ where
 
     fn xr_blink_teleport_target_yaw_degrees(&self, controllers: &[XrControllerSnapshot]) -> f64 {
         let base_yaw_degrees = self.blink_teleport.base_yaw_degrees;
-        let Some(start_orientation) = self.blink_teleport.activation_aim_orientation else {
+        let Some(start_angle) = self.blink_teleport.activation_left_stick_angle_radians else {
             return base_yaw_degrees;
         };
-        let Some(current_orientation) = xr_left_aim_orientation(controllers) else {
+        let Some(current_angle) = xr_left_stick_heading_angle_radians(controllers) else {
             return base_yaw_degrees;
         };
-        let Some(twist_degrees) =
-            controller_roll_delta_degrees(start_orientation, current_orientation)
-        else {
-            return base_yaw_degrees;
-        };
-        normalize_degrees_180(
-            base_yaw_degrees
-                + signed_dead_zone_degrees(
-                    twist_degrees,
-                    XR_BLINK_TELEPORT_HEADING_TWIST_DEAD_ZONE_DEGREES,
-                )
-                .clamp(
-                    -XR_BLINK_TELEPORT_HEADING_TWIST_MAX_DEGREES,
-                    XR_BLINK_TELEPORT_HEADING_TWIST_MAX_DEGREES,
-                ),
-        )
+        target_yaw_degrees_from_stick_delta(base_yaw_degrees, start_angle, current_angle)
     }
 
     pub fn apply_automated_flight_input(
@@ -6217,60 +6225,42 @@ fn xr_blink_teleport_intent(
     ))
 }
 
-fn xr_left_aim_orientation(controllers: &[XrControllerSnapshot]) -> Option<Quat> {
-    let orientation = controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Left)?
-        .aim_orientation?;
-    valid_quat(orientation).then(|| orientation.normalize())
+fn teleport_intent_query_matches(left: TeleportIntent, right: TeleportIntent) -> bool {
+    left.start_feet == right.start_feet
+        && left.aim_origin == right.aim_origin
+        && left.aim_direction == right.aim_direction
 }
 
-fn controller_roll_delta_degrees(
-    start_orientation: Quat,
-    current_orientation: Quat,
-) -> Option<f64> {
-    let start_roll = controller_roll_degrees(start_orientation)?;
-    let current_roll = controller_roll_degrees(current_orientation)?;
-    Some(normalize_degrees_180(current_roll - start_roll))
+fn xr_headset_player_yaw_degrees_from_views(
+    views: &[xr::View],
+    transform: XrStageToWorld,
+) -> Result<f64> {
+    xr_headset_world_yaw_from_views(views, transform).map(|yaw| -f64::from(yaw).to_degrees())
 }
 
-fn controller_roll_degrees(orientation: Quat) -> Option<f64> {
-    if !valid_quat(orientation) {
+fn xr_left_stick_heading_angle_radians(controllers: &[XrControllerSnapshot]) -> Option<f64> {
+    let axis = xr_left_stick_raw_axis(controllers);
+    if axis.length_squared() <= f32::EPSILON {
         return None;
     }
-    let orientation = orientation.normalize();
-    let forward = (orientation * Vec3::NEG_Z).normalize_or_zero();
-    let up = (orientation * Vec3::Y).normalize_or_zero();
-    if forward.length_squared() <= f32::EPSILON || up.length_squared() <= f32::EPSILON {
-        return None;
-    }
-    let reference_seed = if forward.dot(Vec3::Y).abs() < 0.95 {
-        Vec3::Y
-    } else {
-        Vec3::Z
-    };
-    let reference_up = (reference_seed - forward * reference_seed.dot(forward)).normalize_or_zero();
-    let controller_up = (up - forward * up.dot(forward)).normalize_or_zero();
-    if reference_up.length_squared() <= f32::EPSILON
-        || controller_up.length_squared() <= f32::EPSILON
-    {
-        return None;
-    }
-    let sin = forward.dot(reference_up.cross(controller_up)) as f64;
-    let cos = reference_up.dot(controller_up) as f64;
-    Some(sin.atan2(cos).to_degrees())
+    Some(f64::from(axis.y.atan2(axis.x)))
 }
 
-fn signed_dead_zone_degrees(value: f64, dead_zone: f64) -> f64 {
-    if !value.is_finite() {
+fn target_yaw_degrees_from_stick_delta(
+    base_yaw_degrees: f64,
+    start_angle_radians: f64,
+    current_angle_radians: f64,
+) -> f64 {
+    let delta_degrees =
+        normalize_radians_180(current_angle_radians - start_angle_radians).to_degrees();
+    normalize_degrees_180(base_yaw_degrees + delta_degrees)
+}
+
+fn normalize_radians_180(radians: f64) -> f64 {
+    if !radians.is_finite() {
         return 0.0;
     }
-    let magnitude = value.abs();
-    if magnitude <= dead_zone {
-        0.0
-    } else {
-        value.signum() * (magnitude - dead_zone)
-    }
+    (radians + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
 }
 
 fn normalize_degrees_180(degrees: f64) -> f64 {
@@ -6278,14 +6268,6 @@ fn normalize_degrees_180(degrees: f64) -> f64 {
         return 0.0;
     }
     (degrees + 180.0).rem_euclid(360.0) - 180.0
-}
-
-fn valid_quat(value: Quat) -> bool {
-    value.x.is_finite()
-        && value.y.is_finite()
-        && value.z.is_finite()
-        && value.w.is_finite()
-        && value.length_squared() > f32::EPSILON
 }
 
 fn xr_blink_teleport_lines(preview: &TeleportPreview) -> Vec<WorldGuiLine> {
@@ -6385,8 +6367,8 @@ fn horizontal_forward_from_player_yaw_degrees(yaw_degrees: f64) -> Vec3d {
     if !yaw_degrees.is_finite() {
         return Vec3d::ZERO;
     }
-    let yaw = yaw_degrees.to_radians();
-    Vec3d::new(-yaw.sin(), 0.0, yaw.cos())
+    let forward = view_vector_from_rot_degrees(0.0, yaw_degrees);
+    Vec3d::new(forward.x, 0.0, forward.z)
 }
 
 pub fn xr_automated_flight_input(
@@ -7436,29 +7418,37 @@ mod tests {
     }
 
     #[test]
-    fn xr_blink_heading_roll_delta_ignores_plain_aim_rotation() {
-        let start = Quat::IDENTITY;
-        let current = Quat::from_rotation_y(0.5) * Quat::from_rotation_x(-0.35);
+    fn xr_blink_heading_stick_delta_ignores_initial_stick_direction() {
+        let base_yaw_degrees = 17.0;
+        let start = std::f64::consts::PI;
 
-        let delta = controller_roll_delta_degrees(start, current).expect("roll delta");
+        let target = target_yaw_degrees_from_stick_delta(base_yaw_degrees, start, start);
 
-        assert!(
-            delta.abs() < 1.0e-6,
-            "plain aiming should not roll: {delta}"
-        );
+        assert!((target - base_yaw_degrees).abs() < 1.0e-9);
     }
 
     #[test]
-    fn xr_blink_heading_roll_delta_uses_local_aim_axis() {
-        let start = Quat::IDENTITY;
-        let current = Quat::from_axis_angle(Vec3::NEG_Z, 45.0_f32.to_radians());
+    fn xr_blink_heading_stick_delta_rotates_from_left_to_top() {
+        let left = std::f64::consts::PI;
+        let top = std::f64::consts::FRAC_PI_2;
 
-        let delta = controller_roll_delta_degrees(start, current).expect("roll delta");
-        let dead_zoned =
-            signed_dead_zone_degrees(delta, XR_BLINK_TELEPORT_HEADING_TWIST_DEAD_ZONE_DEGREES);
+        let target = target_yaw_degrees_from_stick_delta(0.0, left, top);
+        let forward = horizontal_forward_from_player_yaw_degrees(target);
 
-        assert!((delta - 45.0).abs() < 1.0e-5);
-        assert!((dead_zoned - 37.0).abs() < 1.0e-5);
+        assert!((target + 90.0).abs() < 1.0e-9);
+        assert_vec3d_close(forward, Vec3d::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn xr_blink_heading_arrow_uses_player_view_direction() {
+        assert_vec3d_close(
+            horizontal_forward_from_player_yaw_degrees(0.0),
+            Vec3d::new(0.0, 0.0, 1.0),
+        );
+        assert_vec3d_close(
+            horizontal_forward_from_player_yaw_degrees(-90.0),
+            Vec3d::new(1.0, 0.0, 0.0),
+        );
     }
 
     #[test]
@@ -8118,10 +8108,8 @@ mod tests {
         XrControllerSnapshot {
             hand,
             aim_position: Some(Vec3::ZERO),
-            aim_orientation: Some(Quat::IDENTITY),
             aim_direction: Some(Vec3::NEG_Z),
             grip_position: Some(Vec3::ZERO),
-            grip_orientation: Some(Quat::IDENTITY),
             trigger: 0.0,
             squeeze: 0.0,
             select_pressed: false,

@@ -12,10 +12,8 @@ pub enum XrHand {
 pub struct XrControllerSnapshot {
     pub hand: XrHand,
     pub aim_position: Option<Vec3>,
-    pub aim_orientation: Option<Quat>,
     pub aim_direction: Option<Vec3>,
     pub grip_position: Option<Vec3>,
-    pub grip_orientation: Option<Quat>,
     pub trigger: f32,
     pub squeeze: f32,
     pub select_pressed: bool,
@@ -440,10 +438,8 @@ impl OpenXrControllerActions {
         Some(XrControllerSnapshot {
             hand,
             aim_position: aim_pose.map(|pose| pose.position),
-            aim_orientation: aim_pose.map(|pose| pose.orientation),
             aim_direction: aim_pose.map(|pose| pose.forward),
             grip_position: grip_pose.map(|pose| pose.position),
-            grip_orientation: grip_pose.map(|pose| pose.orientation),
             trigger: Self::read_float_action(session, trigger_action),
             squeeze: Self::read_float_action(session, squeeze_action),
             select_pressed: Self::read_bool_action(session, select_action),
@@ -487,11 +483,9 @@ impl OpenXrControllerActions {
         {
             return None;
         }
-        let orientation = orientation.normalize();
         Some(XrActionPose {
             position,
-            orientation,
-            forward: (orientation * Vec3::NEG_Z).normalize_or_zero(),
+            forward: (orientation.normalize() * Vec3::NEG_Z).normalize_or_zero(),
         })
     }
 
@@ -523,7 +517,6 @@ impl OpenXrControllerActions {
 #[derive(Clone, Copy, Debug)]
 struct XrActionPose {
     position: Vec3,
-    orientation: Quat,
     forward: Vec3,
 }
 

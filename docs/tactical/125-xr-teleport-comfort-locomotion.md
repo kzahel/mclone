@@ -89,10 +89,10 @@ The first XR Blink control target is concrete:
   preview result.
 - Blink has no cancel gesture. Once armed, release commits; if no valid
   completed result exists, commit is a no-op.
-- Blink captures the current body/player heading when it arms. Moving the left
-  controller or stick without twisting it is a no-op for landing yaw.
-- Twisting/rolling the left controller around its aim axis applies a relative
-  heading offset from the captured heading, with a small dead zone.
+- Blink captures the current headset heading when it arms. The direction used
+  to cross the left-stick threshold is a no-op for landing yaw.
+- Rotating the left stick around the gate after arming applies a relative
+  heading offset from the captured headset heading.
 
 The target preview should not conflict with the right-stick snap-turn work from
 `124`. Snap turn remains right-stick based. Blink/Shift target selection should
@@ -328,9 +328,8 @@ Landed:
 - Routed the provisional XR Blink preview through the existing per-eye and
   multiview world-line renderer, showing the same arc, target feet marker, and
   vertically aligned dot used by desktop debug.
-- Extended XR controller snapshots with aim/grip orientation, so Blink captures
-  the current heading on arm and only applies landing-yaw changes from
-  left-controller roll/twist around the aim axis.
+- Blink now captures the current headset heading on arm and only applies
+  landing-yaw changes from the left stick's angular delta after the arm frame.
 - Added a heading arrow to the XR Blink feet marker, showing the exact yaw that
   will be committed.
 - XR Blink commit now moves the shared engine player/body feet pose and syncs
