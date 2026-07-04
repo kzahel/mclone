@@ -1,0 +1,59 @@
+import type { TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
+import type { TextureLabState } from "./textureLabStore";
+
+export const selectIndex = (state: TextureLabState): TextureLabIndex | null => state.index;
+export const selectLoadStatus = (state: TextureLabState): TextureLabState["loadStatus"] => state.loadStatus;
+export const selectError = (state: TextureLabState): string | null => state.error;
+export const selectSelectedTextureName = (state: TextureLabState): string | null => state.selectedTextureName;
+export const selectSearch = (state: TextureLabState): string => state.search;
+export const selectMaterialFilter = (state: TextureLabState): string => state.materialFilter;
+export const selectStatusFilter = (state: TextureLabState): string => state.statusFilter;
+
+export function selectedTexture(state: TextureLabState): TextureIndexEntry | null {
+  if (!state.index || !state.selectedTextureName) {
+    return null;
+  }
+  return state.index.textures.find((texture) => texture.name === state.selectedTextureName) ?? null;
+}
+
+export function filteredTextures(state: TextureLabState): TextureIndexEntry[] {
+  if (!state.index) {
+    return [];
+  }
+  const search = state.search.trim().toLowerCase();
+  return state.index.textures.filter((texture) => {
+    if (state.materialFilter !== "all" && texture.materialFamily !== state.materialFilter) {
+      return false;
+    }
+    if (state.statusFilter !== "all" && texture.status !== state.statusFilter) {
+      return false;
+    }
+    if (!search) {
+      return true;
+    }
+    return [
+      texture.name,
+      texture.displayName,
+      texture.materialFamily,
+      texture.palette,
+      texture.tintRole ?? "",
+      ...texture.tags,
+      ...texture.blockUsages.map((usage) => usage.blockName),
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(search);
+  });
+}
+
+export function materialOptions(state: TextureLabState): string[] {
+  return uniqueSorted(state.index?.textures.map((texture) => texture.materialFamily) ?? []);
+}
+
+export function statusOptions(state: TextureLabState): string[] {
+  return uniqueSorted(state.index?.textures.map((texture) => texture.status) ?? []);
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}

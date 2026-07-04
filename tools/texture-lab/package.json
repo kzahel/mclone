@@ -10,12 +10,24 @@
     "catalog": "tsx src/catalog.ts packs/mclone-default/texture.ts",
     "project-diffusion": "tsx src/project-diffusion.ts packs/mclone-default/texture.ts",
     "runtime-compat": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat",
-    "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only"
+    "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only",
+    "web:dev": "tsx src/web-server/server.ts",
+    "web:build": "vite build --config src/web/vite.config.ts",
+    "web:preview": "vite preview --host 127.0.0.1 --config src/web/vite.config.ts"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
     "tsx": "^4.20.6",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vite": "^8.1.3"
   },
   "engines": {
     "node": ">=20"
