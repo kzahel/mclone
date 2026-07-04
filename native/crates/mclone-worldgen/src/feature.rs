@@ -287,8 +287,9 @@ mod tests {
         DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE,
         DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
         HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LAPIS_ORE,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILY_PAD, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG,
-        POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD,
+        MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PEONY_LOWER, POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE,
+        ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
         SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, SWEET_BERRY_BUSH,
         TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
@@ -569,6 +570,31 @@ mod tests {
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
         assert_eq!(chunk.get_block_at_y(8, 3, 8), LARGE_FERN_LOWER);
         assert_eq!(chunk.get_block_at_y(8, 4, 8), LARGE_FERN_UPPER);
+    }
+
+    #[test]
+    fn random_patch_double_plant_writes_requested_flower_halves() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(3);
+        let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: ROSE_BUSH_LOWER,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: false,
+            can_replace: false,
+            double_plant: true,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        });
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert_eq!(chunk.get_block_at_y(8, 3, 8), ROSE_BUSH_LOWER);
+        assert_eq!(chunk.get_block_at_y(8, 4, 8), ROSE_BUSH_UPPER);
     }
 
     #[test]
@@ -1779,6 +1805,52 @@ mod tests {
             .iter()
             .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
             .collect::<Vec<_>>();
+
+        assert_eq!(
+            vegetal_features[0].decorators,
+            vec![
+                ConfiguredDecorator::count(5),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::spread_32_above(),
+                ConfiguredDecorator::Count(CountConfiguration::from_provider(
+                    IntProvider::clamped_uniform(-1, 3, 0, 3),
+                )),
+            ]
+        );
+        match &vegetal_features[0].feature {
+            ConfiguredFeature::SimpleRandomSelector(config) => {
+                let double_patch = |state| {
+                    ConfiguredFeature::random_patch(RandomPatchConfiguration {
+                        state,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 64,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: false,
+                        can_replace: false,
+                        double_plant: true,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[],
+                    })
+                };
+                assert_eq!(
+                    config.features,
+                    vec![
+                        double_patch(LILAC_LOWER),
+                        double_patch(ROSE_BUSH_LOWER),
+                        double_patch(PEONY_LOWER),
+                        ConfiguredFeature::flower(RandomPatchConfiguration::new(
+                            LILY_OF_THE_VALLEY,
+                        )),
+                    ]
+                );
+            }
+            other => panic!("expected common forest flower simple random selector, got {other:?}"),
+        }
 
         match &vegetal_features[2].feature {
             ConfiguredFeature::RandomSelector(config) => {

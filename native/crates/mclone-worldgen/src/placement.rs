@@ -284,6 +284,12 @@ pub enum IntProvider {
         min_inclusive: i32,
         max_inclusive: i32,
     },
+    ClampedUniform {
+        min_inclusive: i32,
+        max_inclusive: i32,
+        min_allowed: i32,
+        max_allowed: i32,
+    },
     BiasedToBottom {
         min_inclusive: i32,
         max_inclusive: i32,
@@ -299,6 +305,20 @@ impl IntProvider {
         Self::Uniform {
             min_inclusive,
             max_inclusive,
+        }
+    }
+
+    pub const fn clamped_uniform(
+        min_inclusive: i32,
+        max_inclusive: i32,
+        min_allowed: i32,
+        max_allowed: i32,
+    ) -> Self {
+        Self::ClampedUniform {
+            min_inclusive,
+            max_inclusive,
+            min_allowed,
+            max_allowed,
         }
     }
 
@@ -320,6 +340,19 @@ impl IntProvider {
                     min_inclusive
                 } else {
                     random_between_inclusive(random, min_inclusive, max_inclusive)
+                }
+            }
+            Self::ClampedUniform {
+                min_inclusive,
+                max_inclusive,
+                min_allowed,
+                max_allowed,
+            } => {
+                if min_inclusive > max_inclusive {
+                    min_inclusive.clamp(min_allowed, max_allowed)
+                } else {
+                    random_between_inclusive(random, min_inclusive, max_inclusive)
+                        .clamp(min_allowed, max_allowed)
                 }
             }
             Self::BiasedToBottom {
@@ -831,6 +864,26 @@ mod tests {
             ConfiguredDecorator::count(-2)
                 .get_positions(&CONTEXT, &mut negative_random, POS)
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn count_clamped_uniform_repeats_only_clamped_sample_count() {
+        let decorator = ConfiguredDecorator::Count(CountConfiguration::from_provider(
+            IntProvider::clamped_uniform(-1, 3, 0, 3),
+        ));
+
+        for seed in 0..16 {
+            let mut random = SimpleRandomSource::new(seed);
+            let positions = decorator.get_positions(&CONTEXT, &mut random, POS);
+            assert!(positions.len() <= 3, "seed {seed}");
+            assert!(positions.iter().all(|position| *position == POS));
+        }
+
+        let mut random = SimpleRandomSource::new(0);
+        assert_eq!(
+            IntProvider::clamped_uniform(4, 3, 0, 3).sample(&mut random),
+            3
         );
     }
 

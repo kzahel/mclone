@@ -6,7 +6,7 @@ matrix rows landed, including cactus/sugar-cane extras, swamp lily pads, ocean
 water plants, warm-ocean coral/sea-pickle, dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, base taiga/snowy-taiga berry, and ordinary forest
-tree plus flower-forest dense small-flower palette coverage
+tree plus flower-forest dense/common flower palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -163,7 +163,7 @@ notes.
 | 129 | `minecraft:sunflower_plains` | plains | plains tint/surface checked; sunflower patches gap | seed `25`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 130 | `minecraft:desert_lakes` | desert | desert surface checked; lake/fossil/extra-vegetation gap | seed `98`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 131 | `minecraft:gravelly_mountains` | mountains | gravelly mountain surface checked | seed `212`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 132 | `minecraft:flower_forest` | forest | forest grass/tint and dense small-flower palette checked; double-tall flowers/extras gap | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 132 | `minecraft:flower_forest` | forest | forest grass/tint, dense small flowers, and common tall flowers checked; mushrooms/extras gap | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass checked; spruce/fern mountain gap | seed `1326`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 134 | `minecraft:swamp_hills` | swamp | swamp tint/surface checked; hill fossil/vegetation gap | seed `1094`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 140 | `minecraft:ice_spikes` | frozen-land | snow/ice-spikes surface checked; spike feature gap | seed `59`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -221,7 +221,7 @@ Landed:
   blocks and sea pickles, dark-forest dark oak and huge mushroom block
   families, mushroom-field huge mushrooms, birch log/leaves trees, savanna
   acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus jungle
-  log/leaves vegetation, plus flower-forest dense small flowers. Desert and
+  log/leaves vegetation, plus flower-forest dense and common flowers. Desert and
   badlands now require dead bush plus
   cactus/sugar-cane family coverage; ordinary forest and wooded hills require
   an oak or birch log/leaves tree pair; swamp requires the native
@@ -234,15 +234,18 @@ Landed:
   rows require birch logs and leaves; savanna rows require acacia logs and
   leaves; jungle rows require jungle logs and leaves; bamboo jungle rows require
   bamboo plus jungle logs and leaves; flower forest requires at least four
-  distinct Java `ForestFlowerProvider` small-flower states. The assertions are
-  intentionally broad block-family checks, not exact decorated counts.
+  distinct Java `ForestFlowerProvider` small-flower states and one
+  `FOREST_FLOWER_VEGETATION_COMMON` tall-flower lower/upper pair. The
+  assertions are intentionally broad block-family checks, not exact decorated
+  counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
   state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; dark oak
   log/leaves IDs; huge mushroom cap/stem IDs; acacia log/leaves IDs; jungle
   log/leaves IDs; bamboo trunk ID; sweet berry bush age-3 ID; allium,
-  azure bluet, red/orange/white/pink tulips, oxeye daisy, cornflower, and lily
-  of the valley IDs; synthetic asset registry mappings; basic shared
+  azure bluet, red/orange/white/pink tulips, oxeye daisy, cornflower, lily of
+  the valley, and lilac/rose-bush/peony lower/upper IDs; synthetic asset
+  registry mappings; basic shared
   shape/material/render/light facts; Java-style reduced random-patch column
   placement; Java-style waterlily and sweet-berry random-patch placement;
   Java-style `nextBoolean` random-boolean selector placement for mushroom fields;
@@ -251,7 +254,9 @@ Landed:
   tall-birch tree table placement, acacia forking-trunk/flat-canopy placement,
   jungle tree/bush/mega-jungle selector placement, and bamboo
   column/podzol-disk placement; Java-style `ForestFlowerProvider`
-  `BIOME_INFO_NOISE` small-flower selection for flower forests; the
+  `BIOME_INFO_NOISE` small-flower selection and the Java
+  `FOREST_FLOWER_VEGETATION_COMMON` simple-random mixed flower selector for
+  flower forests; the
   `NoiseBasedDecorator` count path used by kelp/coral/bamboo; and
   forest/desert/badlands/swamp/ocean/dark-forest/birch/savanna/jungle/
   bamboo-jungle/flower-forest feature table entries, plus the mushroom-field
@@ -315,22 +320,19 @@ Documented gaps from this slice:
   vegetation, bee-nest side effects, and exact tree-count mismatch buckets
   remain later `103` work.
 - Java flower forest now has high-signal dense small-flower coverage through
-  the Java `FLOWER_FOREST` random patch and `ForestFlowerProvider` noise family.
-  Exact parity is still incomplete: `FOREST_FLOWER_VEGETATION_COMMON` is still
-  omitted, so its lilac, rose bush, peony, and lily-of-the-valley selector still
-  needs a mixed single/double-plant-capable slice; default mushrooms, default
-  extra vegetation, bee-nest side effects, and exact decorated mismatch buckets
-  remain later `103` work.
+  the Java `FLOWER_FOREST` random patch and `ForestFlowerProvider` noise family,
+  plus broad common lilac/rose-bush/peony/lily-of-the-valley vegetation coverage
+  through `FOREST_FLOWER_VEGETATION_COMMON`. Exact parity is still incomplete:
+  default mushrooms, default extra vegetation, bee-nest side effects, and exact
+  decorated mismatch buckets remain later `103` work.
 
 ## Suggested Next Slice
 
-Continue the flower-forest lane by filling the remaining double-plant gap:
+Use the generalized double-plant path to make another distinctive row visible:
 
-1. Add native block IDs/assets/shapes for lilac, rose bush, and peony lower and
-   upper halves, using the existing large-fern double-plant handling as the
-   nearest native pattern.
-2. Port the narrow `FOREST_FLOWER_VEGETATION_COMMON` selector from Java as a
-   simple-random mixed single/double-plant feature for flower forest, keeping
-   exact counts broad in this matrix and detailed mismatch work in `103`.
-3. Extend the row `132` feature-family probe to require at least one double-tall
-   flower family after the feature exists.
+1. Add sunflower lower/upper block IDs/assets/shapes and real-asset smoke
+   coverage for the Java `sunflower` blockstate.
+2. Port the narrow `PATCH_SUNFLOWER` / sunflower-plains table slice from Java
+   for row `129`, keeping the deterministic matrix check broad.
+3. Mark `minecraft:sunflower_plains` F-checked once the fixture requires a
+   sunflower lower/upper pair in the generated chunk.

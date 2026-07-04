@@ -552,6 +552,12 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (139, "minecraft:oxeye_daisy", EMPTY_PROPS),
     (140, "minecraft:cornflower", EMPTY_PROPS),
     (141, "minecraft:lily_of_the_valley", EMPTY_PROPS),
+    (142, "minecraft:lilac", HALF_LOWER),
+    (143, "minecraft:lilac", HALF_UPPER),
+    (144, "minecraft:rose_bush", HALF_LOWER),
+    (145, "minecraft:rose_bush", HALF_UPPER),
+    (146, "minecraft:peony", HALF_LOWER),
+    (147, "minecraft:peony", HALF_UPPER),
 ];
 
 #[cfg(test)]
@@ -570,7 +576,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 142);
+        assert_eq!(registry.len(), 148);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -858,6 +864,30 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:lily_of_the_valley"),
             Some(BlockStateId(141))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:lilac[half=lower]"),
+            Some(BlockStateId(142))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:lilac[half=upper]"),
+            Some(BlockStateId(143))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:rose_bush[half=lower]"),
+            Some(BlockStateId(144))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:rose_bush[half=upper]"),
+            Some(BlockStateId(145))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:peony[half=lower]"),
+            Some(BlockStateId(146))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:peony[half=upper]"),
+            Some(BlockStateId(147))
         );
     }
 

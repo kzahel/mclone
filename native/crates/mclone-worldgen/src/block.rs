@@ -144,6 +144,12 @@ pub const PINK_TULIP: RawBlockId = 138;
 pub const OXEYE_DAISY: RawBlockId = 139;
 pub const CORNFLOWER: RawBlockId = 140;
 pub const LILY_OF_THE_VALLEY: RawBlockId = 141;
+pub const LILAC_LOWER: RawBlockId = 142;
+pub const LILAC_UPPER: RawBlockId = 143;
+pub const ROSE_BUSH_LOWER: RawBlockId = 144;
+pub const ROSE_BUSH_UPPER: RawBlockId = 145;
+pub const PEONY_LOWER: RawBlockId = 146;
+pub const PEONY_UPPER: RawBlockId = 147;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -215,6 +221,12 @@ impl GeneratedBlockId {
     pub const OXEYE_DAISY: Self = Self(OXEYE_DAISY);
     pub const CORNFLOWER: Self = Self(CORNFLOWER);
     pub const LILY_OF_THE_VALLEY: Self = Self(LILY_OF_THE_VALLEY);
+    pub const LILAC_LOWER: Self = Self(LILAC_LOWER);
+    pub const LILAC_UPPER: Self = Self(LILAC_UPPER);
+    pub const ROSE_BUSH_LOWER: Self = Self(ROSE_BUSH_LOWER);
+    pub const ROSE_BUSH_UPPER: Self = Self(ROSE_BUSH_UPPER);
+    pub const PEONY_LOWER: Self = Self(PEONY_LOWER);
+    pub const PEONY_UPPER: Self = Self(PEONY_UPPER);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -266,6 +278,12 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
+            | LILAC_LOWER
+            | LILAC_UPPER
+            | ROSE_BUSH_LOWER
+            | ROSE_BUSH_UPPER
+            | PEONY_LOWER
+            | PEONY_UPPER
             | GLOW_LICHEN
             | POINTED_DRIPSTONE
             | TORCH
@@ -493,6 +511,9 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         OXEYE_DAISY => "minecraft:oxeye_daisy",
         CORNFLOWER => "minecraft:cornflower",
         LILY_OF_THE_VALLEY => "minecraft:lily_of_the_valley",
+        LILAC_LOWER | LILAC_UPPER => "minecraft:lilac",
+        ROSE_BUSH_LOWER | ROSE_BUSH_UPPER => "minecraft:rose_bush",
+        PEONY_LOWER | PEONY_UPPER => "minecraft:peony",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -591,6 +612,12 @@ mod tests {
         assert_eq!(block_light_opacity(OXEYE_DAISY), 0);
         assert_eq!(block_light_opacity(CORNFLOWER), 0);
         assert_eq!(block_light_opacity(LILY_OF_THE_VALLEY), 0);
+        assert_eq!(block_light_opacity(LILAC_LOWER), 0);
+        assert_eq!(block_light_opacity(LILAC_UPPER), 0);
+        assert_eq!(block_light_opacity(ROSE_BUSH_LOWER), 0);
+        assert_eq!(block_light_opacity(ROSE_BUSH_UPPER), 0);
+        assert_eq!(block_light_opacity(PEONY_LOWER), 0);
+        assert_eq!(block_light_opacity(PEONY_UPPER), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
@@ -646,5 +673,11 @@ mod tests {
             block_name(LILY_OF_THE_VALLEY),
             "minecraft:lily_of_the_valley"
         );
+        assert_eq!(block_name(LILAC_LOWER), "minecraft:lilac");
+        assert_eq!(block_name(LILAC_UPPER), "minecraft:lilac");
+        assert_eq!(block_name(ROSE_BUSH_LOWER), "minecraft:rose_bush");
+        assert_eq!(block_name(ROSE_BUSH_UPPER), "minecraft:rose_bush");
+        assert_eq!(block_name(PEONY_LOWER), "minecraft:peony");
+        assert_eq!(block_name(PEONY_UPPER), "minecraft:peony");
     }
 }

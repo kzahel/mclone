@@ -82,6 +82,7 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         }
         terrain_id::KELP => Some(kelp_head_shape()),
         terrain_id::KELP_PLANT => Some(full_block()),
+        id if is_double_plant(id) => Some(full_block()),
         terrain_id::SEA_PICKLE_1 => Some(sea_pickle_shape(1)),
         terrain_id::SEA_PICKLE_2 => Some(sea_pickle_shape(2)),
         terrain_id::SEA_PICKLE_3 => Some(sea_pickle_shape(3)),
@@ -118,6 +119,12 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::DEAD_BUSH
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
+        | terrain_id::LILAC_LOWER
+        | terrain_id::LILAC_UPPER
+        | terrain_id::ROSE_BUSH_LOWER
+        | terrain_id::ROSE_BUSH_UPPER
+        | terrain_id::PEONY_LOWER
+        | terrain_id::PEONY_UPPER
         | terrain_id::GLOW_LICHEN
         | terrain_id::SUGAR_CANE
         | terrain_id::SEAGRASS
@@ -169,6 +176,20 @@ fn is_small_flower(id: u32) -> bool {
             | terrain_id::OXEYE_DAISY
             | terrain_id::CORNFLOWER
             | terrain_id::LILY_OF_THE_VALLEY
+    )
+}
+
+fn is_double_plant(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::LARGE_FERN_LOWER
+            | terrain_id::LARGE_FERN_UPPER
+            | terrain_id::LILAC_LOWER
+            | terrain_id::LILAC_UPPER
+            | terrain_id::ROSE_BUSH_LOWER
+            | terrain_id::ROSE_BUSH_UPPER
+            | terrain_id::PEONY_LOWER
+            | terrain_id::PEONY_UPPER
     )
 }
 
@@ -412,6 +433,12 @@ mod tests {
             terrain_id::DEAD_BUSH,
             terrain_id::LARGE_FERN_LOWER,
             terrain_id::LARGE_FERN_UPPER,
+            terrain_id::LILAC_LOWER,
+            terrain_id::LILAC_UPPER,
+            terrain_id::ROSE_BUSH_LOWER,
+            terrain_id::ROSE_BUSH_UPPER,
+            terrain_id::PEONY_LOWER,
+            terrain_id::PEONY_UPPER,
             terrain_id::GLOW_LICHEN,
             terrain_id::SUGAR_CANE,
             terrain_id::SWEET_BERRY_BUSH,
@@ -495,6 +522,11 @@ mod tests {
         );
         assert_eq!(
             shape_for(state(terrain_id::LARGE_FERN_LOWER), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::LILAC_LOWER), ShapeUse::Outline)
                 .map(|shape| shape.world_aabb(pos)),
             Some(Aabb::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
         );

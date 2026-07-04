@@ -66,6 +66,12 @@ pub mod terrain_id {
     pub const OXEYE_DAISY: u32 = 139;
     pub const CORNFLOWER: u32 = 140;
     pub const LILY_OF_THE_VALLEY: u32 = 141;
+    pub const LILAC_LOWER: u32 = 142;
+    pub const LILAC_UPPER: u32 = 143;
+    pub const ROSE_BUSH_LOWER: u32 = 144;
+    pub const ROSE_BUSH_UPPER: u32 = 145;
+    pub const PEONY_LOWER: u32 = 146;
+    pub const PEONY_UPPER: u32 = 147;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

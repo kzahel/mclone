@@ -45,10 +45,11 @@ mod tests {
         BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT,
         CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK,
         GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
-        KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_OF_THE_VALLEY, LILY_PAD,
-        MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PACKED_ICE,
-        PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, RawBlockId, SAND,
-        SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
+        KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
+        LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP,
+        OXEYE_DAISY, PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY,
+        RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
+        SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
         SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER,
         TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, WHITE_TULIP, is_air_like,
         is_water,
@@ -191,6 +192,12 @@ mod tests {
                     OXEYE_DAISY,
                     CORNFLOWER,
                     LILY_OF_THE_VALLEY,
+                    LILAC_LOWER,
+                    LILAC_UPPER,
+                    ROSE_BUSH_LOWER,
+                    ROSE_BUSH_UPPER,
+                    PEONY_LOWER,
+                    PEONY_UPPER,
                 ],
                 Self::SwampNativeSubsetSugarCaneLilyPad => &[
                     OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE, LILY_PAD,
@@ -258,11 +265,32 @@ mod tests {
                         || (chunk.block_count(BIRCH_LOG) > 0 && chunk.block_count(BIRCH_LEAVES) > 0)
                 }
                 Self::FlowerForestFlowers => {
-                    self.blocks()
-                        .iter()
-                        .filter(|block| chunk.block_count(**block) > 0)
-                        .count()
-                        >= 4
+                    let small_flower_count = [
+                        DANDELION,
+                        POPPY,
+                        ALLIUM,
+                        AZURE_BLUET,
+                        RED_TULIP,
+                        ORANGE_TULIP,
+                        WHITE_TULIP,
+                        PINK_TULIP,
+                        OXEYE_DAISY,
+                        CORNFLOWER,
+                        LILY_OF_THE_VALLEY,
+                    ]
+                    .iter()
+                    .filter(|block| chunk.block_count(**block) > 0)
+                    .count();
+                    let has_double_flower = [
+                        (LILAC_LOWER, LILAC_UPPER),
+                        (ROSE_BUSH_LOWER, ROSE_BUSH_UPPER),
+                        (PEONY_LOWER, PEONY_UPPER),
+                    ]
+                    .iter()
+                    .any(|(lower, upper)| {
+                        chunk.block_count(*lower) > 0 && chunk.block_count(*upper) > 0
+                    });
+                    small_flower_count >= 4 && has_double_flower
                 }
                 Self::TaigaSpruceFernBerry => {
                     [

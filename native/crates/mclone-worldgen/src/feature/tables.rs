@@ -6,8 +6,9 @@ use crate::block::{
     DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
     FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
-    LAVA, LILY_PAD, MYCELIUM, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SUGAR_CANE,
-    SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
+    LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, PEONY_LOWER, PODZOL, POPPY,
+    RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SUGAR_CANE, SWEET_BERRY_BUSH,
+    TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -663,7 +664,7 @@ fn forest_features() -> Vec<PlacedFeature> {
 
 fn flower_forest_features() -> Vec<PlacedFeature> {
     vec![
-        omitted_vegetal_feature(),
+        forest_flower_vegetation_common_feature(),
         glow_lichen_feature(),
         forest_flower_trees_feature(),
         flower_forest_feature(),
@@ -1149,6 +1150,45 @@ fn flower_forest_feature() -> PlacedFeature {
             ConfiguredDecorator::spread_32_above(),
         ],
     )
+}
+
+fn forest_flower_vegetation_common_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::simple_random_selector(SimpleRandomFeatureConfiguration::new([
+            double_plant_patch_feature(LILAC_LOWER),
+            double_plant_patch_feature(ROSE_BUSH_LOWER),
+            double_plant_patch_feature(PEONY_LOWER),
+            ConfiguredFeature::flower(RandomPatchConfiguration::new(LILY_OF_THE_VALLEY)),
+        ])),
+        vec![
+            ConfiguredDecorator::count(5),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::spread_32_above(),
+            ConfiguredDecorator::Count(CountConfiguration::from_provider(
+                IntProvider::clamped_uniform(-1, 3, 0, 3),
+            )),
+        ],
+    )
+}
+
+fn double_plant_patch_feature(state: RawBlockId) -> ConfiguredFeature {
+    ConfiguredFeature::random_patch(RandomPatchConfiguration {
+        state,
+        weighted_states: &[],
+        state_provider: RandomPatchStateProvider::Simple,
+        tries: 64,
+        xspread: 7,
+        yspread: 3,
+        zspread: 7,
+        project: false,
+        can_replace: false,
+        double_plant: true,
+        column_height: None,
+        need_water: false,
+        place_on: &[],
+    })
 }
 
 fn forest_grass_patch_feature() -> PlacedFeature {

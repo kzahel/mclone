@@ -2,9 +2,10 @@ use std::sync::OnceLock;
 
 use crate::block::{
     ALLIUM, AZURE_BLUET, CACTUS, CORNFLOWER, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS,
-    GRASS_BLOCK, ICE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM,
-    ORANGE_TULIP, OXEYE_DAISY, PINK_TULIP, PODZOL, POPPY, RED_SAND, RED_TULIP, RawBlockId, SAND,
-    SUGAR_CANE, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP, is_air_like, is_lava, is_water,
+    GRASS_BLOCK, ICE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
+    LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER,
+    PINK_TULIP, PODZOL, POPPY, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
+    SAND, SUGAR_CANE, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP, is_air_like, is_lava, is_water,
     material_blocks_motion,
 };
 use crate::noise::PerlinSimplexNoise;
@@ -99,10 +100,7 @@ pub(super) fn place_random_patch<W: FeatureWorld>(
             let did_place = if let Some(height_provider) = config.column_height {
                 place_column(world, pos, state, height_provider.sample(random))
             } else if config.double_plant {
-                let lower = world.set_block_world(pos, LARGE_FERN_LOWER);
-                let upper =
-                    world.set_block_world(BlockPos::new(pos.x, pos.y + 1, pos.z), LARGE_FERN_UPPER);
-                lower && upper
+                place_double_plant(world, pos, state)
             } else {
                 world.set_block_world(pos, state)
             };
@@ -129,6 +127,15 @@ fn place_column<W: FeatureWorld>(
         );
     }
     placed
+}
+
+fn place_double_plant<W: FeatureWorld>(world: &mut W, origin: BlockPos, state: RawBlockId) -> bool {
+    let Some((lower_state, upper_state)) = double_plant_halves(state) else {
+        return false;
+    };
+    let lower = world.set_block_world(origin, lower_state);
+    let upper = world.set_block_world(BlockPos::new(origin.x, origin.y + 1, origin.z), upper_state);
+    lower && upper
 }
 
 pub(super) fn place_flower<W: FeatureWorld>(
@@ -228,7 +235,7 @@ fn can_survive_simple_plant(
             flower if is_small_flower(flower) => {
                 matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
             }
-            LARGE_FERN_LOWER | LARGE_FERN_UPPER => {
+            block if double_plant_halves(block).is_some() => {
                 matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
             }
             SWEET_BERRY_BUSH => matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM),
@@ -303,12 +310,21 @@ fn horizontal_neighbor_blocks<W: FeatureWorld>(
 }
 
 fn is_replaceable_plant(block_id: RawBlockId) -> bool {
-    matches!(
-        block_id,
-        GRASS | FERN | DEAD_BUSH | LARGE_FERN_LOWER | LARGE_FERN_UPPER | GLOW_LICHEN
-    ) || is_small_flower(block_id)
+    matches!(block_id, GRASS | FERN | DEAD_BUSH | GLOW_LICHEN)
+        || is_small_flower(block_id)
+        || double_plant_halves(block_id).is_some()
 }
 
 fn is_small_flower(block_id: RawBlockId) -> bool {
     FOREST_FLOWERS.contains(&block_id)
+}
+
+fn double_plant_halves(block_id: RawBlockId) -> Option<(RawBlockId, RawBlockId)> {
+    match block_id {
+        LARGE_FERN_LOWER | LARGE_FERN_UPPER => Some((LARGE_FERN_LOWER, LARGE_FERN_UPPER)),
+        LILAC_LOWER | LILAC_UPPER => Some((LILAC_LOWER, LILAC_UPPER)),
+        ROSE_BUSH_LOWER | ROSE_BUSH_UPPER => Some((ROSE_BUSH_LOWER, ROSE_BUSH_UPPER)),
+        PEONY_LOWER | PEONY_UPPER => Some((PEONY_LOWER, PEONY_UPPER)),
+        _ => None,
+    }
 }
