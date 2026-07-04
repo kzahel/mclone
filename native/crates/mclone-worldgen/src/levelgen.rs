@@ -140,6 +140,7 @@ mod tests {
         TaigaSpruceFernBerry,
         GiantTaigaSpruceTrees,
         SnowySpruceFern,
+        MountainTrees,
         BadlandsDeadBushCactusSugarCane,
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
@@ -165,6 +166,7 @@ mod tests {
                 Self::TaigaSpruceFernBerry => "taiga spruce/fern plus berry bushes",
                 Self::GiantTaigaSpruceTrees => "giant taiga spruce log/leaves plus podzol",
                 Self::SnowySpruceFern => "snowy spruce/fern",
+                Self::MountainTrees => "mountain oak/spruce trees",
                 Self::BadlandsDeadBushCactusSugarCane => {
                     "badlands dead bush plus cactus/sugar cane"
                 }
@@ -227,6 +229,7 @@ mod tests {
                 ],
                 Self::GiantTaigaSpruceTrees => &[SPRUCE_LOG, SPRUCE_LEAVES, PODZOL],
                 Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
+                Self::MountainTrees => &[OAK_LOG, OAK_LEAVES, SPRUCE_LOG, SPRUCE_LEAVES],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::OceanWaterPlants => &[
                     SEAGRASS,
@@ -281,6 +284,11 @@ mod tests {
                 Self::ForestOakBirchTrees => {
                     (chunk.block_count(OAK_LOG) > 0 && chunk.block_count(OAK_LEAVES) > 0)
                         || (chunk.block_count(BIRCH_LOG) > 0 && chunk.block_count(BIRCH_LEAVES) > 0)
+                }
+                Self::MountainTrees => {
+                    (chunk.block_count(OAK_LOG) > 0 && chunk.block_count(OAK_LEAVES) > 0)
+                        || (chunk.block_count(SPRUCE_LOG) > 0
+                            && chunk.block_count(SPRUCE_LEAVES) > 0)
                 }
                 Self::SunflowerPlainsSunflowers => {
                     chunk.block_count(SUNFLOWER_LOWER) > 0 && chunk.block_count(SUNFLOWER_UPPER) > 0
@@ -407,12 +415,12 @@ mod tests {
             feature_family: Some(FeatureFamily::DesertDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
-            seed: 31,
+            seed: 33,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:mountains",
             surface_family: SurfaceFamily::Mountain,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::MountainTrees),
         },
         PaletteMatrixCase {
             seed: 0,
@@ -703,12 +711,12 @@ mod tests {
             feature_family: Some(FeatureFamily::GiantTaigaSpruceTrees),
         },
         PaletteMatrixCase {
-            seed: 3,
+            seed: 58,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:wooded_mountains",
             surface_family: SurfaceFamily::Mountain,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::MountainTrees),
         },
         PaletteMatrixCase {
             seed: 86,
@@ -759,12 +767,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 212,
+            seed: 250,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:gravelly_mountains",
             surface_family: SurfaceFamily::Mountain,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::MountainTrees),
         },
         PaletteMatrixCase {
             seed: 135,
@@ -855,12 +863,12 @@ mod tests {
             feature_family: Some(FeatureFamily::GiantTaigaSpruceTrees),
         },
         PaletteMatrixCase {
-            seed: 83,
+            seed: 1831,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:modified_gravelly_mountains",
             surface_family: SurfaceFamily::Mountain,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::MountainTrees),
         },
         PaletteMatrixCase {
             seed: 2659,
