@@ -640,7 +640,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:snowy_mountains",
             surface_family: SurfaceFamily::Snow,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SnowySpruceFern),
         },
         PaletteMatrixCase {
             seed: 7056,

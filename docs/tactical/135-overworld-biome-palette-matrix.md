@@ -1,15 +1,16 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, twenty-two supported feature-family groups, and 61 F-checked
+overworld tint IDs, twenty-two supported feature-family groups, and 62 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp/swamp-hills
 lily pads, blue orchids, sugar cane, and small mushrooms, ocean water plants,
 warm-ocean coral/sea-pickle, river seagrass, frozen-ocean blue ice,
 ice-spikes packed ice,
 dark-forest canopy/mushroom,
 mushroom-field/shore huge mushrooms, birch and tall-birch trees, savanna acacia,
-jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, and ordinary
-forest tree plus mountain oak/spruce trees, badlands-variant dead
+jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, ordinary
+forest tree plus mountain oak/spruce trees, snowy-mountain spruce/fern,
+badlands-variant dead
 bush/cactus/sugar-cane, desert-variant dead bush/cactus/sugar-cane,
 giant-taiga mega spruce/pine, flower-forest
 dense/common flower, and sunflower-plains sunflower palette coverage
@@ -132,7 +133,7 @@ notes.
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice plus packed/blue iceberg and blue-ice spread coverage checked; structures/exact iceberg gap | seed `779`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice checked | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 12 | `minecraft:snowy_tundra` | frozen-land | snow over grass, native snowy spruce/fern subset | seed `42`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 13 | `minecraft:snowy_mountains` | frozen-land | snowy mountain surface checked | seed `326`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 13 | `minecraft:snowy_mountains` | frozen-land | snowy mountain surface plus native snowy spruce/fern subset checked; Java default grass/extras gap | seed `326`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 14 | `minecraft:mushroom_fields` | mushroom | mycelium and huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `978`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition plus huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `7056`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 16 | `minecraft:beach` | plains | sand beach checked, buried-treasure/shipwreck surface context | seed `45`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -236,7 +237,7 @@ Landed:
   vegetation/clay subset plus blue orchids, small mushrooms, sugar cane, and
   lily pads; taiga, taiga hills, taiga mountains, base snowy taiga, and snowy
   taiga hills require spruce/fern vegetation plus sweet berry bushes; snowy
-  taiga mountains currently requires the snowy spruce/fern family; generated
+  mountains and snowy taiga mountains currently require the snowy spruce/fern family; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   river requires the `SEAGRASS_RIVER` seagrass/tall-seagrass block family;
   frozen-ocean rows require packed ice plus blue ice from the iceberg/blue-ice
@@ -396,14 +397,23 @@ Documented gaps from this slice:
   `ICE_SPIKE` / `ICE_PATCH` surface-structure path. Exact parity is still
   incomplete: spike geometry, patch disk counts, and exact decorated mismatch
   buckets remain later `103` work.
+- Java snowy mountains now has deterministic coverage for the native
+  snowy spruce/fern family through the shared snowy feature table. Exact parity
+  is still incomplete: Java `TREES_SNOWY` uses a much sparser
+  `count_extra(0, 0.1, 1)` spruce table, Java `addDefaultGrass` is
+  `PATCH_GRASS_BADLANDS` rather than fern-heavy vegetation, and default
+  flowers/mushrooms/extra vegetation remain later `103` work.
 
 ## Suggested Next Slice
 
-Move to the snowy-mountains row as the next non-structure palette feature:
+Move to one of the remaining non-structure shore/river rows:
 
-1. Read Java `snowyTundraBiome(...)` / `snowyMountains` setup and the current
-   native snowy feature table before editing.
-2. Try to promote row `13` with a deterministic snowy spruce/fern family check
-   if a better seed/chunk surfaces those blocks.
-3. Keep exact tree counts, default mushrooms/extra vegetation, and snowy/normal
-   mountain boundary probes in `103` or later boundary work.
+1. Read Java `riverBiome(...)`, `beachBiome(...)`, `addWaterTrees`, and
+   `addDefaultExtraVegetation` before editing.
+2. Try to promote `minecraft:frozen_river`, `minecraft:beach`, or
+   `minecraft:snowy_beach` with deterministic non-structure vegetation
+   coverage such as water-tree or sugar-cane/extras if the current fixtures
+   surface those blocks.
+3. Keep buried treasure, shipwrecks, mineshafts, exact beach/shore boundaries,
+   and exact decorated mismatch buckets in `103` or later structure/boundary
+   work.
