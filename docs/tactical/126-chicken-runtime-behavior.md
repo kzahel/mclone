@@ -19,6 +19,10 @@ first.
 - Chicken uses the promoted first-party `mclone:chicken` figure.
 - Chicken has Java-shaped dimensions, eye height, movement speed, and water
   pathfinding malus.
+- Chicken movement speed remains the Java `0.25` value; the shared mob runtime
+  now applies that speed through the first Java-shaped ground-travel subset
+  from tactical [`118`](118-entity-runtime-and-passive-mob-bringup.md) instead
+  of direct per-tick position stepping.
 - Chunk A landed supported passive goals, species flap/egg state, and
   Java-shaped airborne glide damping. Sound events remain deferred behind the
   future sound boundary.

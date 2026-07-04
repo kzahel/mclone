@@ -23,8 +23,12 @@ landed the immediate path service boundary and heap-backed A* core. Slice 5D
 landed one-block step-up path expansion and the first `JumpControl` scaffold.
 Slice 5E landed mob movement attribute facts for navigation and jumping. Slice
 5F landed Minecraft-shaped navigation recompute and timeout state. Slice 5G
-landed block-change path recompute triggers and path-trim hooks. The starter
-passive path is now an explicit debug passive showcase, enabled by default.
+landed block-change path recompute triggers and path-trim hooks. Slice 5H
+landed the first Java-shaped server mob ground travel subset so passive
+movement speed flows through carried horizontal delta, input damping,
+normal-block friction/drag, and stepped collision instead of direct
+position-stepping. The starter passive path is now an explicit debug passive
+showcase, enabled by default.
 Slice 8 landed a bounded farm-animal biome/placement dry run so biome tables,
 on-ground animal predicates, and cow/chicken AABB collision are no longer
 missing subsystems. Slice 9 landed strict raw-brightness sampling for the
@@ -717,6 +721,52 @@ Landed notes:
 - Verified with focused navigation/store tests, `cargo test --manifest-path
   native/Cargo.toml -p mclone-server`, and the full `cargo test
   --manifest-path native/Cargo.toml` workspace gate.
+
+## Slice 5H - Java-Shaped Ground Travel For Mobs (Landed)
+
+Purpose: fix passive mob movement feel without changing vanilla movement-speed
+constants.
+
+Implementation sketch:
+
+- Keep `Cow` and `Chicken` movement speed facts at their Java 1.17.1 values.
+- Change `MoveControl` from directly mutating X/Z position to producing
+  Java-shaped yaw and speed intent.
+- Integrate that intent through a first `LivingEntity.travel(...)` subset:
+  damped forward input, friction-influenced acceleration, carried horizontal
+  `deltaMovement`, gravity, vertical drag, and post-collision horizontal drag.
+- Add Java's `Entity.collide(...)` stepped-collision candidate around the
+  shared AABB clipper so slower velocity-based travel does not regress planned
+  one-block ledge navigation.
+- Use normal-block friction as the first constant until shared block facts
+  expose per-block friction/speed/jump factors.
+
+Landed notes:
+
+- `MoveControl` now reports movement speed intent and jump requests; it no
+  longer spends `movement_speed * speed_modifier` as an immediate block-per-tick
+  position step.
+- `MobGoalContext::apply_controls(...)` now carries X/Z delta between ticks,
+  applies Java's `0.98` input damping, the `0.21600002 / friction^3` ground
+  speed adjustment, normal-block horizontal drag, gravity, and vertical drag.
+- Added a mob movement wrapper for Java's stepped-collision candidate while
+  still using `mclone-blocks` as the shared AABB clipping primitive.
+- Added regressions proving chicken-speed travel is below the raw `0.25`
+  direct step, horizontal delta carries between ticks, lower-floor descent still
+  follows collision, and one-block ledge navigation still reaches the upper
+  block.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p
+  mclone-server entity::mob`, focused cow/chicken passive movement smokes, and
+  `cargo test --manifest-path native/Cargo.toml -p mclone-server`.
+
+Remaining travel follow-ups:
+
+- Move block friction, block speed factor, and jump factor into shared block
+  facts instead of using the normal-block friction constant everywhere.
+- Add fluids, ladders/climbables, powder snow, effects, sprinting, and the
+  broader `AttributeMap` / modifier stack.
+- Revisit path timeout speed estimates once movement speed and effective travel
+  speed are represented as distinct runtime facts.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 

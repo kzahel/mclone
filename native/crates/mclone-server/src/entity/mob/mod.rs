@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use mclone_blocks::{collide_movement, collide_movement_result, collision_aabb_for_feet_position};
-use mclone_core::{BlockPos, BlockStateId, Vec3d};
+use mclone_core::{Aabb, BlockPos, BlockStateId, Vec3d};
 use mclone_protocol::{EntityId, EntityKind};
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -27,6 +27,13 @@ const PLAYER_EYE_HEIGHT: f64 = 1.62;
 const MOB_GRAVITY: f64 = 0.08;
 const MOB_VERTICAL_DRAG: f64 = 0.98;
 const MOB_COLLISION_EPSILON: f64 = 1.0e-7;
+const MOB_INPUT_DAMPING: f64 = 0.98;
+const MOB_DEFAULT_BLOCK_FRICTION: f64 = 0.6;
+const MOB_FRICTION_INFLUENCE_NUMERATOR: f64 = 0.21600002;
+const MOB_GROUND_DRAG_MULTIPLIER: f64 = 0.91;
+const MOB_AIR_DRAG: f64 = 0.91;
+const MOB_FLYING_SPEED: f64 = 0.02;
+const MOB_INPUT_EPSILON_SQR: f64 = 1.0e-7;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PathfindingMalusTable {
@@ -514,9 +521,8 @@ impl<'a> MobGoalContext<'a> {
                 .set_wanted_position(target.position, target.speed_modifier);
         }
 
-        let previous_control_position = self.position;
         let move_tick = self.move_control.tick(
-            &mut self.position,
+            self.position,
             &mut self.y_body_rot_degrees,
             self.attributes.movement_speed,
             self.on_ground,
@@ -532,31 +538,43 @@ impl<'a> MobGoalContext<'a> {
             &mut self.y_head_rot_degrees,
             self.y_body_rot_degrees,
         );
-        let controlled_position = self.position;
-        self.position = previous_control_position;
 
         let requested_y = if jumping && self.on_ground {
             self.attributes.jump_power
         } else {
             self.delta_movement.y
         };
-        let requested = Vec3d::new(
-            controlled_position.x - previous_control_position.x,
-            requested_y,
-            controlled_position.z - previous_control_position.z,
+        let was_on_ground = self.on_ground;
+        let requested = mob_travel_request(
+            Vec3d::new(self.delta_movement.x, requested_y, self.delta_movement.z),
+            move_tick.speed,
+            self.y_body_rot_degrees,
+            was_on_ground,
+            MOB_DEFAULT_BLOCK_FRICTION,
         );
         let bounding_box = collision_aabb_for_feet_position(
-            previous_control_position,
+            self.position,
             f64::from(entity.width),
             f64::from(entity.height),
         );
-        let traveled = collide_movement(self.block_state_at, bounding_box, requested);
+        let traveled = collide_mob_movement(
+            self.block_state_at,
+            bounding_box,
+            requested,
+            self.attributes.max_up_step,
+            was_on_ground,
+        );
         if traveled.length_sqr() > MOB_COLLISION_EPSILON * MOB_COLLISION_EPSILON {
             self.position = self.position.add(traveled);
         }
         let collision = collide_movement_result(requested, traveled);
         self.on_ground = collision.on_ground;
-        self.delta_movement = Vec3d::new(0.0, (traveled.y - MOB_GRAVITY) * MOB_VERTICAL_DRAG, 0.0);
+        self.delta_movement = mob_delta_after_travel(
+            requested,
+            traveled,
+            was_on_ground,
+            MOB_DEFAULT_BLOCK_FRICTION,
+        );
 
         if !move_tick.moved && looked {
             // The current entity protocol has one yaw field. Until head/body yaw
@@ -608,6 +626,143 @@ impl<'a> MobGoalContext<'a> {
     }
 }
 
+fn mob_travel_request(
+    delta_movement: Vec3d,
+    control_speed: f64,
+    y_body_rot_degrees: f32,
+    on_ground: bool,
+    block_friction: f64,
+) -> Vec3d {
+    if control_speed == 0.0 {
+        return delta_movement;
+    }
+
+    let travel_input = Vec3d::new(0.0, 0.0, control_speed * MOB_INPUT_DAMPING);
+    let friction_influenced_speed = if on_ground {
+        control_speed * (MOB_FRICTION_INFLUENCE_NUMERATOR / block_friction.powi(3))
+    } else {
+        MOB_FLYING_SPEED
+    };
+    delta_movement.add(relative_movement_input(
+        travel_input,
+        friction_influenced_speed,
+        y_body_rot_degrees,
+    ))
+}
+
+fn relative_movement_input(input: Vec3d, scale: f64, y_rot_degrees: f32) -> Vec3d {
+    let length_sqr = input.length_sqr();
+    if length_sqr < MOB_INPUT_EPSILON_SQR {
+        return Vec3d::ZERO;
+    }
+
+    let normalized = if length_sqr > 1.0 {
+        input.scale(1.0 / length_sqr.sqrt())
+    } else {
+        input
+    };
+    let scaled = normalized.scale(scale);
+    let radians = (y_rot_degrees as f64).to_radians();
+    let sin = radians.sin();
+    let cos = radians.cos();
+    Vec3d::new(
+        scaled.x * cos - scaled.z * sin,
+        scaled.y,
+        scaled.z * cos + scaled.x * sin,
+    )
+}
+
+fn mob_delta_after_travel(
+    requested: Vec3d,
+    traveled: Vec3d,
+    was_on_ground: bool,
+    block_friction: f64,
+) -> Vec3d {
+    let horizontal_drag = if was_on_ground {
+        block_friction * MOB_GROUND_DRAG_MULTIPLIER
+    } else {
+        MOB_AIR_DRAG
+    };
+    let next_x = if nearly_equal(requested.x, traveled.x) {
+        traveled.x * horizontal_drag
+    } else {
+        0.0
+    };
+    let next_z = if nearly_equal(requested.z, traveled.z) {
+        traveled.z * horizontal_drag
+    } else {
+        0.0
+    };
+
+    Vec3d::new(
+        next_x,
+        (traveled.y - MOB_GRAVITY) * MOB_VERTICAL_DRAG,
+        next_z,
+    )
+}
+
+fn collide_mob_movement(
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+    bounding_box: Aabb,
+    requested: Vec3d,
+    max_up_step: f64,
+    was_on_ground: bool,
+) -> Vec3d {
+    let collided = collide_movement(block_state_at, bounding_box, requested);
+    let collision = collide_movement_result(requested, collided);
+    let can_try_step = max_up_step > 0.0
+        && (was_on_ground || (collision.vertical_collision && requested.y < 0.0))
+        && collision.horizontal_collision;
+    if !can_try_step {
+        return collided;
+    }
+
+    let direct_step = collide_movement(
+        block_state_at,
+        bounding_box,
+        Vec3d::new(requested.x, max_up_step, requested.z),
+    );
+    let vertical_step = collide_movement(
+        block_state_at,
+        bounding_box.expand_towards(Vec3d::new(requested.x, 0.0, requested.z)),
+        Vec3d::new(0.0, max_up_step, 0.0),
+    );
+    let stepped = if vertical_step.y < max_up_step {
+        let horizontal_after_step = collide_movement(
+            block_state_at,
+            bounding_box.move_by(vertical_step),
+            Vec3d::new(requested.x, 0.0, requested.z),
+        )
+        .add(vertical_step);
+        if horizontal_distance_sqr(horizontal_after_step) > horizontal_distance_sqr(direct_step) {
+            horizontal_after_step
+        } else {
+            direct_step
+        }
+    } else {
+        direct_step
+    };
+
+    if horizontal_distance_sqr(stepped) <= horizontal_distance_sqr(collided) {
+        return collided;
+    }
+
+    let step_down = collide_movement(
+        block_state_at,
+        bounding_box.move_by(stepped),
+        Vec3d::new(0.0, -stepped.y + requested.y, 0.0),
+    );
+    stepped.add(step_down)
+}
+
+fn horizontal_distance_sqr(movement: Vec3d) -> f64 {
+    movement.x * movement.x + movement.z * movement.z
+}
+
+fn nearly_equal(a: f64, b: f64) -> bool {
+    (a - b).abs() < MOB_COLLISION_EPSILON
+}
+
 fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
     let kind_id = match kind {
         EntityKind::Cow => 0x00c0_0001_u64,
@@ -652,6 +807,44 @@ mod tests {
         } else {
             BlockStateId(mclone_blocks::terrain_id::AIR)
         })
+    }
+
+    #[test]
+    fn mob_travel_uses_ground_friction_instead_of_raw_speed_step() {
+        let requested = mob_travel_request(
+            Vec3d::ZERO,
+            EntityMetadata::CHICKEN.movement_speed,
+            0.0,
+            true,
+            MOB_DEFAULT_BLOCK_FRICTION,
+        );
+        let expected_z = EntityMetadata::CHICKEN.movement_speed
+            * MOB_INPUT_DAMPING
+            * EntityMetadata::CHICKEN.movement_speed
+            * (MOB_FRICTION_INFLUENCE_NUMERATOR / MOB_DEFAULT_BLOCK_FRICTION.powi(3));
+
+        assert_eq!(requested.x, 0.0);
+        assert!(requested.z > 0.0);
+        assert!(requested.z < EntityMetadata::CHICKEN.movement_speed);
+        assert!((requested.z - expected_z).abs() < 1.0e-12);
+
+        let next_delta =
+            mob_delta_after_travel(requested, requested, true, MOB_DEFAULT_BLOCK_FRICTION);
+        assert_eq!(
+            next_delta.z,
+            requested.z * MOB_DEFAULT_BLOCK_FRICTION * MOB_GROUND_DRAG_MULTIPLIER
+        );
+    }
+
+    #[test]
+    fn mob_travel_carries_horizontal_delta_between_control_ticks() {
+        let first = mob_travel_request(Vec3d::ZERO, 0.2, 0.0, true, MOB_DEFAULT_BLOCK_FRICTION);
+        let first_delta = mob_delta_after_travel(first, first, true, MOB_DEFAULT_BLOCK_FRICTION);
+        let second = mob_travel_request(first_delta, 0.2, 0.0, true, MOB_DEFAULT_BLOCK_FRICTION);
+
+        assert!(first.z > 0.0);
+        assert!(second.z > first.z);
+        assert!(second.z < 0.2);
     }
 
     #[test]
@@ -818,14 +1011,14 @@ mod tests {
         );
 
         assert!(context.move_to(Vec3d::new(2.5, 65.0, 0.5), 1.0));
-        for _ in 0..120 {
+        for _ in 0..240 {
             context.apply_controls(&mut entity);
-            if entity.on_ground && entity.position.x > 1.4 && entity.position.y >= 65.0 {
+            if entity.on_ground && entity.position.x > 1.1 && entity.position.y >= 65.0 {
                 break;
             }
         }
 
-        assert!(entity.position.x > 1.4);
+        assert!(entity.position.x > 1.1);
         assert!(entity.position.y >= 65.0);
         assert!(entity.on_ground);
     }
