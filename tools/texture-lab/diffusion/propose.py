@@ -18,7 +18,15 @@ DEFAULT_MODEL_ID = "stable-diffusion-v1-5/stable-diffusion-v1-5"
 DEFAULT_NEGATIVE_PROMPT = (
     "blurry, smooth plastic, strong shadows, perspective, moss, colorful, glossy"
 )
-DEFAULT_OUT_ROOT = Path("/tmp/mclone-texture-lab/diffusion")
+TEXTURE_LAB_OUTPUT_ROOT_ENV = "MCLONE_TEXTURE_LAB_OUTPUT_ROOT"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+TEXTURE_LAB_OUTPUT_ROOT = Path(
+    os.environ.get(
+        TEXTURE_LAB_OUTPUT_ROOT_ENV,
+        str(REPO_ROOT / "generated-assets" / "texture-lab"),
+    )
+).expanduser()
+DEFAULT_OUT_ROOT = TEXTURE_LAB_OUTPUT_ROOT / "diffusion"
 PROMPT_PRESETS = {
     "stone-granite": {
         "prompt": (
@@ -338,7 +346,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--out-dir",
         type=Path,
         default=None,
-        help="Output directory. Defaults under /tmp/mclone-texture-lab/diffusion/.",
+        help=(
+            "Output directory. Defaults under generated-assets/texture-lab/diffusion/ "
+            f"or ${TEXTURE_LAB_OUTPUT_ROOT_ENV}/diffusion when set."
+        ),
     )
     parser.add_argument(
         "--no-seamless",

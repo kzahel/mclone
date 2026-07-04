@@ -129,7 +129,7 @@
     "texture-lab:catalog": "pnpm --dir ./tools/texture-lab catalog",
     "texture-lab:runtime-compat": "pnpm --dir ./tools/texture-lab runtime-compat",
     "texture-lab:pack-overlay": "pnpm texture-lab:runtime-compat && node ./scripts/run-python.mjs ./tools/minecraft_assets/overlay_pack.py",
-    "texture-lab:coverage": "pnpm texture-lab:pack-overlay && cargo run --manifest-path native/Cargo.toml -p mclone-app-runtime --bin terrain_texture_coverage -- --overlay-pack /tmp/mclone-texture-lab/mclone-default-overlay.pbp --output /tmp/mclone-texture-lab/mclone-default-overlay-coverage.md",
+    "texture-lab:coverage": "pnpm texture-lab:pack-overlay && cargo run --manifest-path native/Cargo.toml -p mclone-app-runtime --bin terrain_texture_coverage -- --overlay-pack generated-assets/texture-lab/mclone-default-overlay.pbp --output generated-assets/texture-lab/mclone-default-overlay-coverage.md",
     "texture-lab:sheet": "pnpm --dir ./tools/texture-lab sheet",
     "texture-lab:web": "pnpm --dir ./tools/texture-lab web:dev",
     "texture-lab:web:build": "pnpm --dir ./tools/texture-lab web:build",

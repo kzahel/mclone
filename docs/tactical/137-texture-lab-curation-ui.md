@@ -1,7 +1,9 @@
 # 137: Texture Lab Curation UI
 
 Status: active; Slice A0 web shell, Zustand store, authored texture index API,
-safe image serving, and read-only browser UI landed 2026-07-04.
+safe image serving, and read-only browser UI landed 2026-07-04. Slice A0.5
+repo-local generated output root landed 2026-07-04. Next priority is generated
+candidate discovery.
 
 ## Purpose
 
@@ -27,7 +29,7 @@ The current texture-lab workflow is productive but sheet-bound:
 - authored pack source lives in TypeScript modules under
   `tools/texture-lab/packs/mclone-default/`
 - review sheets, runtime-compatible exports, projection sheets, and diffusion
-  archives are generated under `/tmp/mclone-texture-lab/`
+  archives default to the repo-local `generated-assets/texture-lab/` root
 - diffusion proposals carry useful prompt, seed, strength, hash, projection,
   and codename metadata
 - accepted outputs are frozen back into source as deterministic ASCII masks,
@@ -139,6 +141,38 @@ Likely package scripts:
 }
 ```
 
+## Output Root Policy
+
+The browser UI should treat generated texture-lab artifacts as first-class local
+project data, not disposable operating-system temp files. The default generated
+root should be:
+
+```text
+generated-assets/texture-lab/
+  pack/
+  runtime-pack/
+  diffusion/
+  diffusion-projection/
+  diffusion-archive/
+  ui-cache/
+  review-state.json
+```
+
+Add `generated-assets/` to `.gitignore`. Do not put this under `assets/`,
+because `assets/` reads as canonical distributable game content while these are
+local generated working artifacts.
+
+The default should still be overrideable for experiments and external disks:
+
+```sh
+MCLONE_TEXTURE_LAB_OUTPUT_ROOT=/some/path pnpm texture-lab:web
+```
+
+All texture-lab CLI defaults, the browser server index, API image allowlist,
+diffusion/projection defaults, preview caches, and review state should converge
+on the same output-root helper. Validation screenshots can still be written to
+`/tmp`.
+
 ## Data Model
 
 The UI should build one unified index from checked-in authored source plus
@@ -147,11 +181,13 @@ local generated artifacts.
 Authoritative sources:
 
 - `tools/texture-lab/packs/mclone-default/texture.ts`
-- texture-lab catalog/export metadata under `/tmp/mclone-texture-lab/`
-- diffusion manifests under `/tmp/mclone-texture-lab/diffusion/**`
+- texture-lab catalog/export metadata under
+  `generated-assets/texture-lab/`
+- diffusion manifests under `generated-assets/texture-lab/diffusion/**`
 - projection summaries and reports under
-  `/tmp/mclone-texture-lab/diffusion-projection/**`
-- archive manifests under `/tmp/mclone-texture-lab/diffusion-archive/**`
+  `generated-assets/texture-lab/diffusion-projection/**`
+- archive manifests under
+  `generated-assets/texture-lab/diffusion-archive/**`
 - optional local-only reference assets from the existing reference lookup
 
 Suggested core types:
@@ -211,8 +247,9 @@ export interface TextureReviewState {
 }
 ```
 
-Persist review state in a local JSON file under `/tmp/mclone-texture-lab/` for
-the first pass. It is user/session state, not canonical source.
+Persist review state in a local JSON file under
+`generated-assets/texture-lab/review-state.json` for the first pass. It is
+user/session state, not canonical source.
 
 ## API Surface
 
@@ -228,7 +265,8 @@ Keep the first API explicit and file-system constrained:
 - `GET /api/image?path=<encoded-path>`
   - streams images from an allowlist only:
     - repo `tools/texture-lab/`
-    - `/tmp/mclone-texture-lab/`
+    - `generated-assets/texture-lab/`
+    - the optional `MCLONE_TEXTURE_LAB_OUTPUT_ROOT`
     - local reference assets already permitted by texture-lab reference lookup
 - `POST /api/review-state`
   - writes local favorite/reject/active/notes changes
@@ -307,6 +345,51 @@ Additional validation:
   no browser console errors, and wrote
   `/tmp/mclone-texture-lab-ui-a0.png`.
 
+### Slice A0.5 - Repo-Local Generated Output Root
+
+Status: landed 2026-07-04.
+
+Move texture-lab generated outputs from `/tmp/mclone-texture-lab/` to the
+repo-local gitignored `generated-assets/texture-lab/` default before expanding
+candidate discovery.
+
+Deliverables:
+
+- add `generated-assets/` to `.gitignore`
+- add a shared output-root helper that defaults to
+  `generated-assets/texture-lab/`
+- support `MCLONE_TEXTURE_LAB_OUTPUT_ROOT` as an override
+- route `export`, `catalog`, `project-diffusion`, the browser index, and image
+  allowlist through that helper
+- leave existing archived provenance comments alone; historical paths in source
+  comments are evidence for already-frozen candidates
+- update texture-lab docs after the implementation, avoiding stale `/tmp`
+  command examples
+
+Validation:
+
+```sh
+pnpm --dir tools/texture-lab typecheck
+pnpm --dir tools/texture-lab export
+pnpm --dir tools/texture-lab web:build
+pnpm --dir tools/texture-lab web:dev
+```
+
+Additional validation:
+
+- `python3 -m py_compile tools/texture-lab/diffusion/propose.py tools/minecraft_assets/overlay_pack.py`
+- `pnpm --dir tools/texture-lab catalog` wrote catalog outputs under
+  `generated-assets/texture-lab/`
+- `pnpm texture-lab:pack-overlay` wrote
+  `generated-assets/texture-lab/mclone-default-overlay.pbp`
+- `/api/index` reported output root
+  `/Users/kgraehl/code/mclone/generated-assets/texture-lab`, 81 textures, 9
+  blocks, 81 current exports, and 81 sheets
+- `/api/image` served an exported texture from `generated-assets/texture-lab/`
+- Playwright loaded `http://127.0.0.1:5177/`, found 81 texture rows, reported
+  no browser console errors, and wrote
+  `/tmp/mclone-texture-lab-ui-a05.png`
+
 ### Slice A1 - Generated Candidate Discovery
 
 Status: next.
@@ -315,10 +398,12 @@ Extend the read-only UI from authored textures to generated candidate artifacts.
 
 Deliverables:
 
-- discover diffusion manifests under `/tmp/mclone-texture-lab/diffusion/**`
+- discover diffusion manifests under
+  `generated-assets/texture-lab/diffusion/**`
 - discover projection summaries and reports under
-  `/tmp/mclone-texture-lab/diffusion-projection/**`
-- discover archive manifests under `/tmp/mclone-texture-lab/diffusion-archive/**`
+  `generated-assets/texture-lab/diffusion-projection/**`
+- discover archive manifests under
+  `generated-assets/texture-lab/diffusion-archive/**`
 - normalize generated outputs into `TextureCandidate` records with codename,
   source type, prompt, negative prompt, seed, strength, projection palette,
   resolution, metrics, archive status, and image paths
@@ -345,7 +430,7 @@ React.
 
 Deliverables:
 
-- cache preview artifacts under `/tmp/mclone-texture-lab/ui-cache/`
+- cache preview artifacts under `generated-assets/texture-lab/ui-cache/`
 - render source, tinted, 3x3 tile, mip strip, block preview, terrain patch, and
   optional local reference panels on demand
 - reuse existing tint, projection, image, and review-sheet helpers where
@@ -370,11 +455,11 @@ Let the human curate without mutating source.
 Deliverables:
 
 - persist favorite/rejected/active/notes/tags in
-  `/tmp/mclone-texture-lab/review-state.json`
+  `generated-assets/texture-lab/review-state.json`
 - add keyboard and click flows for quick candidate marking
 - add temporary pack profiles so selected candidates can be reviewed together
 - generate a temporary runtime-compatible pack from the selected profile under
-  `/tmp/mclone-texture-lab/ui-preview-pack/`
+  `generated-assets/texture-lab/ui-preview-pack/`
 - optionally pack that output as a first-party overlay `.pbp`
 
 Validation:
@@ -445,22 +530,23 @@ Slice A is complete when:
 
 - `pnpm --dir tools/texture-lab web:dev` opens a local app
 - the app lists authored `mclone-default` textures
-- existing diffusion/projection/archive outputs in `/tmp/mclone-texture-lab/`
-  appear as candidates when present
+- existing diffusion/projection/archive outputs in
+  `generated-assets/texture-lab/` appear as candidates when present
 - candidate cards show codenames and core provenance fields
 - selecting a texture shows a candidate detail inspector
 - texture selection, candidate selection, filters, and loading status flow
   through the Zustand store with selector-based component reads
 - images are served only through the allowlisted image endpoint
-- the app handles an empty `/tmp/mclone-texture-lab/` gracefully
+- the app handles an empty `generated-assets/texture-lab/` gracefully
 - `typecheck`, `web:build`, and a browser screenshot validation pass
 
 ## Risks
 
 - Candidate count can grow quickly. Add virtualization only when the grid proves
   too slow, but keep the data model ready for pagination/filtering.
-- `/tmp` artifacts are easy to delete or stale. The UI should show missing,
-  stale, and archived states clearly instead of silently hiding history.
+- Generated artifacts are local working data, not source. The UI should show
+  missing, stale, and archived states clearly instead of silently hiding
+  history.
 - File serving can become a security footgun. Use resolved absolute paths and a
   narrow allowlist.
 - Source mutation from a browser button is risky. Keep freeze as an explicit
@@ -489,6 +575,9 @@ Slice A is complete when:
 Implement Slice A:
 
 1. add the Vite/React shell and local server under `tools/texture-lab/src/`
-2. build a read-only index over authored textures and `/tmp` diffusion outputs
-3. serve thumbnails safely through an allowlisted endpoint
-4. verify with `typecheck`, `web:build`, and a browser screenshot
+2. migrate the default generated output root to
+   `generated-assets/texture-lab/`
+3. build a read-only index over authored textures and generated diffusion
+   outputs
+4. serve thumbnails safely through an allowlisted endpoint
+5. verify with `typecheck`, `web:build`, and a browser screenshot

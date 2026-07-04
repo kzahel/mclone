@@ -3,6 +3,7 @@ target/
 build/
 dist/
 dist-native-web/
+generated-assets/
 oracle/classes/
 node_modules/
 *.wasm

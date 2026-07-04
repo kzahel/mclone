@@ -16,6 +16,7 @@ import {
 import { loadTexturePack } from "./load";
 import { decodePng, encodePng, type RgbaImage } from "./png";
 import { renderTexture, type RenderedTexture } from "./compositor";
+import { textureLabOutputPath } from "./output-root";
 import { drawPixelText, pad3 } from "./text";
 
 interface ProjectArgs {
@@ -1394,7 +1395,7 @@ function parseArgs(argv: string[]): ProjectArgs {
 
   let manifestPath = "";
   let texture = "";
-  let outDir = path.join("/tmp", "mclone-texture-lab", "diffusion-projection");
+  let outDir = textureLabOutputPath("diffusion-projection");
   const candidates: string[] = [];
   let resolutions = [32];
   let paletteColors: string[] = [];

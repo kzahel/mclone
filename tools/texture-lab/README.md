@@ -91,31 +91,43 @@ These TypeScript files are the source of truth. They define palettes, tint
 roles, seeded procedural layers, and ASCII masks. The generated PNGs and review
 sheets are deterministic derived artifacts and stay out of git by default.
 
+The default generated output root is gitignored:
+
+```text
+generated-assets/texture-lab/
+```
+
+Override it when needed:
+
+```sh
+MCLONE_TEXTURE_LAB_OUTPUT_ROOT=/some/path pnpm texture-lab:export
+```
+
 The export command writes the `mclone-default` overlay pack PNGs plus review
 sheets to:
 
 ```text
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/dirt.png
-/tmp/mclone-texture-lab/dirt-sheet.png
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_top.png
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_side.png
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_side_overlay.png
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_bottom.png
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/stone.png
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/coal_ore.png
-/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/iron_ore.png
-/tmp/mclone-texture-lab/grass-block-sheet.png
-/tmp/mclone-texture-lab/grass-block-side-sheet.png
-/tmp/mclone-texture-lab/stone-sheet.png
-/tmp/mclone-texture-lab/stone-block-sheet.png
-/tmp/mclone-texture-lab/coal_ore-sheet.png
-/tmp/mclone-texture-lab/coal-ore-sheet.png
-/tmp/mclone-texture-lab/iron_ore-sheet.png
-/tmp/mclone-texture-lab/iron-ore-sheet.png
-/tmp/mclone-texture-lab/mclone-default-metadata.md
-/tmp/mclone-texture-lab/mclone-default-metadata.json
-/tmp/mclone-texture-lab/mclone-default-texture-catalog.md
-/tmp/mclone-texture-lab/mclone-default-texture-catalog.json
+generated-assets/texture-lab/pack/assets/mclone/textures/block/dirt.png
+generated-assets/texture-lab/dirt-sheet.png
+generated-assets/texture-lab/pack/assets/mclone/textures/block/grass_block_top.png
+generated-assets/texture-lab/pack/assets/mclone/textures/block/grass_block_side.png
+generated-assets/texture-lab/pack/assets/mclone/textures/block/grass_block_side_overlay.png
+generated-assets/texture-lab/pack/assets/mclone/textures/block/grass_block_bottom.png
+generated-assets/texture-lab/pack/assets/mclone/textures/block/stone.png
+generated-assets/texture-lab/pack/assets/mclone/textures/block/coal_ore.png
+generated-assets/texture-lab/pack/assets/mclone/textures/block/iron_ore.png
+generated-assets/texture-lab/grass-block-sheet.png
+generated-assets/texture-lab/grass-block-side-sheet.png
+generated-assets/texture-lab/stone-sheet.png
+generated-assets/texture-lab/stone-block-sheet.png
+generated-assets/texture-lab/coal_ore-sheet.png
+generated-assets/texture-lab/coal-ore-sheet.png
+generated-assets/texture-lab/iron_ore-sheet.png
+generated-assets/texture-lab/iron-ore-sheet.png
+generated-assets/texture-lab/mclone-default-metadata.md
+generated-assets/texture-lab/mclone-default-metadata.json
+generated-assets/texture-lab/mclone-default-texture-catalog.md
+generated-assets/texture-lab/mclone-default-texture-catalog.json
 ```
 
 When a block name collides with a texture name, such as `stone`, the texture
@@ -135,14 +147,14 @@ pnpm --dir tools/texture-lab export -- --reference-root /path/to/extracted
 The runtime-compatible export also writes vanilla-path texture overrides:
 
 ```text
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/dirt.png
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_top.png
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side.png
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side_overlay.png
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_bottom.png
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/stone.png
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/coal_ore.png
-/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/iron_ore.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/dirt.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_top.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side_overlay.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_bottom.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/stone.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/coal_ore.png
+generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/iron_ore.png
 ```
 
 This is a development bridge, not a standalone distributable pack. It overrides
@@ -151,28 +163,28 @@ JSON from `reference/minecraft-1.17.1/extracted/` or `extracted.zip`. To try it
 with the native runtime:
 
 ```sh
-MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack pnpm native:timedemo:smoke
+MCLONE_FIRST_PARTY_ASSET_ROOT=generated-assets/texture-lab/runtime-pack pnpm native:timedemo:smoke
 ```
 
 The packed overlay command builds the same overrides into a first-party-only
 `.pbp` file without reading the local Mojang extraction:
 
 ```text
-/tmp/mclone-texture-lab/mclone-default-overlay.pbp
-/tmp/mclone-texture-lab/mclone-default-overlay.pbp.json
+generated-assets/texture-lab/mclone-default-overlay.pbp
+generated-assets/texture-lab/mclone-default-overlay.pbp.json
 ```
 
 To try the packed overlay:
 
 ```sh
-MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
+MCLONE_ASSET_OVERLAY_PACK=generated-assets/texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
 ```
 
 The coverage command compares that overlay pack against the texture materials
 the native terrain atlas currently requests:
 
 ```text
-/tmp/mclone-texture-lab/mclone-default-overlay-coverage.md
+generated-assets/texture-lab/mclone-default-overlay-coverage.md
 ```
 
 ## Source Format
@@ -284,6 +296,13 @@ face. Vanilla 1.17.1 block textures such as dirt, stone, and grass are commonly
 mip levels. A texture that looks good only at 32x32 is not good enough for the
 game view.
 
+For the open design problem of preserving a successful 16x16 material read
+while adding real native 32x32 detail, see
+[`UPSCALING_PROBLEM_STATEMENT.md`](UPSCALING_PROBLEM_STATEMENT.md). The
+active experiment plan for it — diffusion-proposed detail projected back into
+deterministic, palette-quantized mask source — is
+[`DIFFUSION_UPSCALE_PLAN.md`](DIFFUSION_UPSCALE_PLAN.md).
+
 The lab should make resolution explicit per texture:
 
 ```ts
@@ -360,8 +379,9 @@ The review sheet should include:
 - local-only vanilla reference panel when the gitignored reference assets
   exist; never export or commit that panel as pack source.
 
-Screenshots and review sheets should be written under `/tmp/mclone-texture-lab/`
-by default.
+Review sheets and texture-lab generated outputs should be written under
+`generated-assets/texture-lab/` by default. Ad hoc validation screenshots that
+are not part of the lab output can still go under `/tmp`.
 
 Biome tint previews should stay secondary. The grass block sheet uses one
 primary tint for texture review and keeps alternate tint swatches compact so
@@ -399,16 +419,18 @@ clients agree on visible results.
 Initial exports should be derived and disposable:
 
 ```text
-/tmp/mclone-texture-lab/pack/
-/tmp/mclone-texture-lab/runtime-pack/
-/tmp/mclone-texture-lab/mclone-default-overlay.pbp
-/tmp/mclone-texture-lab/mclone-default-overlay-coverage.md
-/tmp/mclone-texture-lab/sheets/
+generated-assets/texture-lab/pack/
+generated-assets/texture-lab/runtime-pack/
+generated-assets/texture-lab/mclone-default-overlay.pbp
+generated-assets/texture-lab/mclone-default-overlay-coverage.md
+generated-assets/texture-lab/sheets/
 ```
 
 The checked-in original pack source tree lives under
 `tools/texture-lab/packs/mclone-default/`. Generated PNG export still goes to
-`/tmp` by default. Do not place generated review screenshots in the repo.
+`generated-assets/texture-lab/` by default, which is ignored by git. Do not
+commit generated PNGs, review sheets, overlay packs, or local candidate
+archives.
 
 Runtime adoption should go through shared owners such as `mclone-assets`,
 `mclone-render-session`, and `mclone-render`. The desktop app should only gain

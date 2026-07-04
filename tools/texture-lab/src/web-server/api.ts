@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
-import { buildTextureLabIndex, DEFAULT_TEXTURE_LAB_OUTPUT_ROOT } from "../core/texture-index";
+import { buildTextureLabIndex } from "../core/texture-index";
 import type { TextureLabIndex } from "../core/index-model";
+import { textureLabOutputRoot } from "../output-root";
 import { contentTypeForImage, ImageFileError, resolveAllowedImageFile } from "./image-files";
 
 export interface TextureLabApiOptions {
@@ -18,7 +19,7 @@ export interface TextureLabApiHandler {
 export function createTextureLabApi(options: TextureLabApiOptions): TextureLabApiHandler {
   const textureLabRoot = path.resolve(options.textureLabRoot);
   const inputPath = path.resolve(options.inputPath);
-  const outputRoot = path.resolve(options.outputRoot ?? DEFAULT_TEXTURE_LAB_OUTPUT_ROOT);
+  const outputRoot = path.resolve(options.outputRoot ?? textureLabOutputRoot());
   const allowedImageRoots = [
     textureLabRoot,
     outputRoot,

@@ -28,20 +28,23 @@ from an arbitrary root containing `assets/`. It does not read or fingerprint the
 local Mojang extraction. The texture-lab wrapper writes:
 
 ```text
-/tmp/mclone-texture-lab/mclone-default-overlay.pbp
-/tmp/mclone-texture-lab/mclone-default-overlay.pbp.json
+generated-assets/texture-lab/mclone-default-overlay.pbp
+generated-assets/texture-lab/mclone-default-overlay.pbp.json
 ```
+
+Set `MCLONE_TEXTURE_LAB_OUTPUT_ROOT` to move the texture-lab generated root to
+another local directory.
 
 Use it as a runtime overlay while local reference blockstates/models still fill
 in the rest of the asset chain:
 
 ```bash
-MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
+MCLONE_ASSET_OVERLAY_PACK=generated-assets/texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
 ```
 
 `pnpm texture-lab:coverage` compares the first-party overlay pack against the
 native terrain atlas material set and writes:
 
 ```text
-/tmp/mclone-texture-lab/mclone-default-overlay-coverage.md
+generated-assets/texture-lab/mclone-default-overlay-coverage.md
 ```

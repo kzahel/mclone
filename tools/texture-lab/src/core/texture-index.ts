@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
+import { textureLabOutputRoot } from "../output-root";
 import { runtimeCompatTexturePath } from "../reference";
 import {
   TEXTURE_LAB_INDEX_SCHEMA_VERSION,
@@ -14,8 +15,6 @@ import {
   type TextureRole,
 } from "./index-model";
 
-export const DEFAULT_TEXTURE_LAB_OUTPUT_ROOT = path.join("/tmp", "mclone-texture-lab");
-
 export interface BuildTextureLabIndexOptions {
   inputPath: string;
   outputRoot?: string;
@@ -23,7 +22,7 @@ export interface BuildTextureLabIndexOptions {
 
 export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions): Promise<TextureLabIndex> {
   const inputPath = path.resolve(options.inputPath);
-  const outputRoot = path.resolve(options.outputRoot ?? DEFAULT_TEXTURE_LAB_OUTPUT_ROOT);
+  const outputRoot = path.resolve(options.outputRoot ?? textureLabOutputRoot());
   const pack = await loadTexturePack(inputPath);
   const blockUsagesByTexture = collectBlockUsages(pack);
   const textures = await Promise.all(

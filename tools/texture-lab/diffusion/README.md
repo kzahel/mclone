@@ -3,7 +3,10 @@
 Isolated Python runner for diffusion-assisted texture detail proposals. This
 tool is intentionally upstream of committed texture source: it writes raw
 proposal PNGs, tiled review sheets, seam metrics, and provenance manifests
-under `/tmp/mclone-texture-lab/diffusion/`.
+under `generated-assets/texture-lab/diffusion/`.
+
+Set `MCLONE_TEXTURE_LAB_OUTPUT_ROOT` to move that generated root to another
+local directory; diffusion defaults append `diffusion/` below it.
 
 Do not use Mojang textures as img2img input. Feed only owned mclone macro art or
 synthetic test images.
@@ -41,7 +44,7 @@ uv run python propose.py \
   --strengths 0.5 \
   --steps 20 \
   --dtype fp32 \
-  --out-dir /tmp/mclone-texture-lab/diffusion/smoke
+  --out-dir generated-assets/texture-lab/diffusion/smoke
 ```
 
 Outputs include one PNG per seed/strength pair, a 3x3 self-tiled sheet for each
@@ -77,7 +80,7 @@ pnpm --dir tools/texture-lab export -- \
   --texture stone \
   --authoring-role structure \
   --authoring-only \
-  --out /tmp/mclone-texture-lab/diffusion/stone-input
+  --out generated-assets/texture-lab/diffusion/stone-input
 ```
 
 Run the current stone proposal sweep:
@@ -85,13 +88,13 @@ Run the current stone proposal sweep:
 ```sh
 cd tools/texture-lab/diffusion
 uv run python propose.py \
-  --input /tmp/mclone-texture-lab/diffusion/stone-input/authoring/stone-structure.png \
+  --input generated-assets/texture-lab/diffusion/stone-input/authoring/stone-structure.png \
   --prompt "top-down photograph of a rough gray stone surface, chipped granite, matte, flat even lighting, seamless texture, no shadows" \
   --seeds 2001 2002 2003 2004 2005 2006 2007 2008 \
   --strengths 0.35 0.5 0.65 \
   --steps 20 \
   --dtype fp32 \
-  --out-dir /tmp/mclone-texture-lab/diffusion/stone
+  --out-dir generated-assets/texture-lab/diffusion/stone
 ```
 
 Run the M2b prompt/preprocess sweep:
@@ -99,7 +102,7 @@ Run the M2b prompt/preprocess sweep:
 ```sh
 cd tools/texture-lab/diffusion
 uv run python propose.py \
-  --input /tmp/mclone-texture-lab/diffusion/stone-input/authoring/stone-structure.png \
+  --input generated-assets/texture-lab/diffusion/stone-input/authoring/stone-structure.png \
   --prompt-preset stone-hewn-horizontal \
   --seeds 4101 4102 4103 4104 4105 4106 4107 4108 \
   --strengths 0.50 0.58 0.66 0.74 \
@@ -109,10 +112,10 @@ uv run python propose.py \
   --input-grain 0.16 \
   --input-grain-amplitude 18 \
   --input-grain-seed 12345 \
-  --out-dir /tmp/mclone-texture-lab/diffusion/stone-m2b-hewn-horizontal
+  --out-dir generated-assets/texture-lab/diffusion/stone-m2b-hewn-horizontal
 
 uv run python propose.py \
-  --input /tmp/mclone-texture-lab/diffusion/stone-input/authoring/stone-structure.png \
+  --input generated-assets/texture-lab/diffusion/stone-input/authoring/stone-structure.png \
   --prompt-preset stone-dressed-courses \
   --seeds 4201 4202 4203 4204 4205 4206 4207 4208 \
   --strengths 0.50 0.58 0.66 0.74 \
@@ -122,7 +125,7 @@ uv run python propose.py \
   --input-grain 0.16 \
   --input-grain-amplitude 18 \
   --input-grain-seed 12345 \
-  --out-dir /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses
+  --out-dir generated-assets/texture-lab/diffusion/stone-m2b-dressed-courses
 ```
 
 ## Grass Top Sweep
@@ -138,7 +141,7 @@ pnpm --dir tools/texture-lab export -- \
   --texture grass_block_top \
   --authoring-role structure \
   --authoring-only \
-  --out /tmp/mclone-texture-lab/diffusion/grass-top-input
+  --out generated-assets/texture-lab/diffusion/grass-top-input
 ```
 
 Run the first two grass proposal sweeps:
@@ -146,7 +149,7 @@ Run the first two grass proposal sweeps:
 ```sh
 cd tools/texture-lab/diffusion
 uv run python propose.py \
-  --input /tmp/mclone-texture-lab/diffusion/grass-top-input/authoring/grass_block_top-structure.png \
+  --input generated-assets/texture-lab/diffusion/grass-top-input/authoring/grass_block_top-structure.png \
   --prompt-preset grass-top-tufts \
   --seeds 5101 5102 5103 5104 \
   --strengths 0.50 0.62 0.74 \
@@ -156,10 +159,10 @@ uv run python propose.py \
   --input-grain 0.18 \
   --input-grain-amplitude 18 \
   --input-grain-seed 24680 \
-  --out-dir /tmp/mclone-texture-lab/diffusion/grass-top-m1-tufts
+  --out-dir generated-assets/texture-lab/diffusion/grass-top-m1-tufts
 
 uv run python propose.py \
-  --input /tmp/mclone-texture-lab/diffusion/grass-top-input/authoring/grass_block_top-structure.png \
+  --input generated-assets/texture-lab/diffusion/grass-top-input/authoring/grass_block_top-structure.png \
   --prompt-preset grass-top-fine-turf \
   --seeds 5201 5202 5203 5204 \
   --strengths 0.40 0.52 0.64 \
@@ -169,40 +172,40 @@ uv run python propose.py \
   --input-grain 0.20 \
   --input-grain-amplitude 16 \
   --input-grain-seed 24681 \
-  --out-dir /tmp/mclone-texture-lab/diffusion/grass-top-m1-fine-turf
+  --out-dir generated-assets/texture-lab/diffusion/grass-top-m1-fine-turf
 ```
 
 Project both sweeps at 64px for review:
 
 ```sh
 pnpm --dir tools/texture-lab project-diffusion -- \
-  --manifest /tmp/mclone-texture-lab/diffusion/grass-top-m1-tufts/manifest.json \
+  --manifest generated-assets/texture-lab/diffusion/grass-top-m1-tufts/manifest.json \
   --texture grass_block_top \
   --palette-colors dark,shadow,base,blade,light \
   --symbols dsmbh \
   --resolutions 64 \
-  --review-sheet /tmp/mclone-texture-lab/diffusion-projection/grass-top-m1-64/projection-review-all-64.png \
+  --review-sheet generated-assets/texture-lab/diffusion-projection/grass-top-m1-64/projection-review-all-64.png \
   --review-top 12 \
   --review-resolution 64 \
-  --out /tmp/mclone-texture-lab/diffusion-projection/grass-top-m1-64
+  --out generated-assets/texture-lab/diffusion-projection/grass-top-m1-64
 
 pnpm --dir tools/texture-lab project-diffusion -- \
-  --manifest /tmp/mclone-texture-lab/diffusion/grass-top-m1-fine-turf/manifest.json \
+  --manifest generated-assets/texture-lab/diffusion/grass-top-m1-fine-turf/manifest.json \
   --texture grass_block_top \
   --palette-colors dark,shadow,base,blade,light \
   --symbols dsmbh \
   --resolutions 64 \
-  --review-sheet /tmp/mclone-texture-lab/diffusion-projection/grass-top-fine-m1-64/projection-review-all-64.png \
+  --review-sheet generated-assets/texture-lab/diffusion-projection/grass-top-fine-m1-64/projection-review-all-64.png \
   --review-top 12 \
   --review-resolution 64 \
-  --out /tmp/mclone-texture-lab/diffusion-projection/grass-top-fine-m1-64
+  --out generated-assets/texture-lab/diffusion-projection/grass-top-fine-m1-64
 ```
 
 Current read: `G5101S74` is the active grass top trial. The first 5-tone
 projection made grass candidates read too gray and constrained; a 20-tone
 tint-neutral ramp preserved fine tuft coverage better after the default grass
 tint was applied. `G5101S74` was archived at
-`/tmp/mclone-texture-lab/diffusion-archive/grass-top-g5101s74-active-20-2026-07-04/`
+`generated-assets/texture-lab/diffusion-archive/grass-top-g5101s74-active-20-2026-07-04/`
 and frozen into `grass_block_top` as a 64px source mask. The remaining failure
 mode is repetition/directional texture at tile scale, which should be judged in
 block/game context before another prompt sweep.
@@ -219,20 +222,20 @@ Project one candidate at 32/64/128:
 
 ```sh
 pnpm --dir tools/texture-lab project-diffusion -- \
-  --manifest /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
+  --manifest generated-assets/texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
   --candidate candidate-seed4204-strength0p660 \
   --texture stone \
   --palette-colors pit,mid,base,light \
   --symbols pmbh \
   --resolutions 32,64,128 \
-  --out /tmp/mclone-texture-lab/diffusion-projection/stone-dressed-4204-066
+  --out generated-assets/texture-lab/diffusion-projection/stone-dressed-4204-066
 ```
 
 Batch-project a sweep at 64px for ranking:
 
 ```sh
 pnpm --dir tools/texture-lab project-diffusion -- \
-  --manifest /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
+  --manifest generated-assets/texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
   --texture stone \
   --palette-colors pit,mid,base,light \
   --symbols pmbh \
@@ -240,7 +243,7 @@ pnpm --dir tools/texture-lab project-diffusion -- \
   --review-sheet \
   --review-top 8 \
   --review-resolution 64 \
-  --out /tmp/mclone-texture-lab/diffusion-projection/stone-dressed-m2b-64
+  --out generated-assets/texture-lab/diffusion-projection/stone-dressed-m2b-64
 ```
 
 Outputs are written under the selected `--out` directory:
@@ -270,7 +273,7 @@ and a source-ready provenance comment.
 
 ```sh
 pnpm --dir tools/texture-lab project-diffusion -- \
-  --manifest /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
+  --manifest generated-assets/texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
   --candidate candidate-seed4201-strength0p580 \
   --candidate candidate-seed4205-strength0p580 \
   --texture stone \
@@ -280,8 +283,8 @@ pnpm --dir tools/texture-lab project-diffusion -- \
   --review-sheet \
   --review-top 2 \
   --review-resolution 64 \
-  --archive-bundle /tmp/mclone-texture-lab/diffusion-archive/stone-dressed-freeze-candidates-2026-07-03 \
-  --out /tmp/mclone-texture-lab/diffusion-projection/stone-dressed-freeze-64
+  --archive-bundle generated-assets/texture-lab/diffusion-archive/stone-dressed-freeze-candidates-2026-07-03 \
+  --out generated-assets/texture-lab/diffusion-projection/stone-dressed-freeze-64
 ```
 
 The archive bundle includes `archive-manifest.json` as its machine-readable

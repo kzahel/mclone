@@ -59,8 +59,8 @@ pnpm texture-lab:catalog
 The catalog writes:
 
 ```text
-/tmp/mclone-texture-lab/mclone-default-texture-catalog.md
-/tmp/mclone-texture-lab/mclone-default-texture-catalog.json
+generated-assets/texture-lab/mclone-default-texture-catalog.md
+generated-assets/texture-lab/mclone-default-texture-catalog.json
 ```
 
 The catalog does not currently emit this document's color-count distribution.

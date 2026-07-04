@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,8 +14,16 @@ import asset_pack
 
 
 DEFAULT_ASSET_SET = "mclone-default-overlay"
-DEFAULT_SOURCE_ROOT = Path("/tmp/mclone-texture-lab/runtime-pack")
-DEFAULT_OUTPUT = Path("/tmp/mclone-texture-lab/mclone-default-overlay.pbp")
+TEXTURE_LAB_OUTPUT_ROOT_ENV = "MCLONE_TEXTURE_LAB_OUTPUT_ROOT"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TEXTURE_LAB_OUTPUT_ROOT = Path(
+    os.environ.get(
+        TEXTURE_LAB_OUTPUT_ROOT_ENV,
+        str(REPO_ROOT / "generated-assets" / "texture-lab"),
+    )
+).expanduser()
+DEFAULT_SOURCE_ROOT = TEXTURE_LAB_OUTPUT_ROOT / "runtime-pack"
+DEFAULT_OUTPUT = TEXTURE_LAB_OUTPUT_ROOT / "mclone-default-overlay.pbp"
 TOOL_PATH = "tools/minecraft_assets/overlay_pack.py"
 
 

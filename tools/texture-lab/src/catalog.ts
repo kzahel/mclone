@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTexturePack } from "./load";
+import { textureLabOutputRoot } from "./output-root";
 import { decodePng, type RgbaImage } from "./png";
 import { referenceRoots, runtimeCompatTexturePath } from "./reference";
 import type { TexturePackAsset, TextureSpec } from "./dsl";
@@ -231,7 +232,7 @@ interface AuthoredTextureRecord {
   texture: TextureSpec;
 }
 
-const DEFAULT_OUT_DIR = path.join("/tmp", "mclone-texture-lab");
+const DEFAULT_OUT_DIR = textureLabOutputRoot();
 const BLOCK_TEXTURE_PREFIX = "assets/minecraft/textures/block/";
 const BLOCK_TEXTURE_SUFFIX = ".png";
 const JAVA_RENDER_TYPES_PATH = path.join("net", "minecraft", "client", "renderer", "ItemBlockRenderTypes.java");

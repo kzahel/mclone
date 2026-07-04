@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AuthoringLayerRole } from "./dsl";
 import { loadTexturePack } from "./load";
 import { makeLodMaterialsJson } from "./lod-materials";
+import { textureLabOutputRoot } from "./output-root";
 import { encodePng } from "./png";
 import { loadReferenceTexture, runtimeCompatTexturePath } from "./reference";
 import { makeMetadataReportJson, makeMetadataReportMarkdown } from "./report";
@@ -110,7 +111,7 @@ function parseArgs(argv: string[]): ExportArgs {
     );
   }
 
-  let outDir = path.join("/tmp", "mclone-texture-lab");
+  let outDir = textureLabOutputRoot();
   const textures: string[] = [];
   let sheetOnly = false;
   let authoringOnly = false;
