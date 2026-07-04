@@ -67,6 +67,101 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-04 - Desktop Startup-Streaming RD20 Baseline
+
+Commit reported by native benchmark JSON: `3adafc1e`.
+
+`git_dirty=false`; `debug_assertions=false`.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64, macOS `26.5.1`.
+
+Release startup-streaming command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf \
+  --render-distance 20 \
+  --startup-streaming-frames 30000 \
+  --target-hz 120 \
+  --debug-passive-showcase false \
+  --render-compile-workers 1 \
+  --simulation-cadence 20/20/60
+```
+
+Raw output for this local run:
+`/tmp/mclone-startup-streaming-rd20-workers1-cadence20.json`.
+
+Benchmark options: seed `12345`, transient local integrated world, render
+distance `20`, render compile workers `1`, simulation cadence `20/20/60`,
+lighting enabled, debug passive showcase disabled, `30,000` paced frames at
+`120 Hz`.
+
+Summary:
+
+| Metric | Value |
+|---|---:|
+| Playable entry | `1,746.504 ms` |
+| Playable entry frame | `140` |
+| Cached sections at playable entry | `144` |
+| Startup gate readiness | `9 / 9` chunks, `100%` |
+| First full-view ready | frame `9,308`, `97,008.104 ms` after streaming start |
+| First target render quiescent | frame `9,943`, `106,032.752 ms` after streaming start |
+| Total streaming wall time | `334,273.465 ms` |
+| Final target readiness | `1,849 / 1,849` chunks, `100%` |
+| Final loaded chunks | `1,849` |
+| Final cached sections | `8,320` |
+| Final pending jobs/publications/compile/inflight | `0 / 0 / 0 / 0` |
+| Final pending render chunks | `168` |
+
+Frame-loop timing:
+
+| Metric | Value |
+|---|---:|
+| Average measured frame work | `10.318 ms` |
+| p95 measured frame work | `13.699 ms` |
+| p99 measured frame work | `16.075 ms` |
+| Max measured frame work | `18.971 ms` |
+| Frames over `8.333 ms` target | `22,232 / 30,000` |
+| Frames over `16.667 ms` | `224 / 30,000` |
+| Frames over `33.333 ms` | `0 / 30,000` |
+
+Streaming work totals:
+
+| Bucket | Total |
+|---|---:|
+| Runtime poll | `262.906 ms` |
+| Remesh/sync | `4,041.874 ms` |
+| Upload | `697.657 ms` |
+| Render callback | `52,645.397 ms` |
+| Submitted compile sections | `28,995` |
+| Completed compile sections | `29,004` |
+| Uploaded sections | `10,377` |
+| Deadline-skipped compile requests | `0` |
+| Update-pump stalled frames | `0` |
+
+Interpretation:
+
+- The startup gate is fixed for this lane: RD20 enters playable in `1.747s`
+  with only the under-foot `3x3` gate required, then continues streaming.
+- Full target chunk readiness under the desktop-shaped pump arrives at
+  `97.008s`, and the target render stream becomes quiescent at `106.033s`.
+  That is the better local-play answer than the synthetic loading-settle
+  full-drain number because it uses the same startup pump, runtime polling,
+  render-work admission, and frame-deadline sync path as the offscreen client.
+- This does not mean every possible edge render chunk is gone. The final
+  `pending_render_chunks=168` matches the known edge-neighbor behavior where
+  chunks outside the requested target square can still block edge render
+  chunks. Target readiness, jobs, publications, compile queue, and inflight
+  work are all drained.
+- The frame-time numbers are conservative offscreen timing, not final native
+  swapchain pacing. The headless loop waits for `wgpu::PollType::Wait` each
+  frame, so use the readiness/quiescence timings as the primary streaming
+  throughput signal and use native window/Quest runs for final frame pacing.
+- Even with that caveat, the measured offscreen frame work is over a `120 Hz`
+  budget for most frames. Before changing throughput policy, add a frame-loop
+  timing breakdown or true native-window probe so we can separate runtime work,
+  command encoding, GPU wait, and present/swapchain behavior.
+
 ### 2026-07-04 - Desktop Loading-Settle Synthetic Isolation Baseline
 
 Commit reported by native benchmark JSON: `482f0d51`.

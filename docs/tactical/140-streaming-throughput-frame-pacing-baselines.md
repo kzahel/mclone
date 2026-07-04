@@ -1,9 +1,9 @@
 # 140: Streaming Throughput And Frame Pacing Baselines
 
-Status: active benchmark and attribution checkpoint. Slice A2 clean synthetic
-loading-settle isolation baseline captured on 2026-07-04 at `482f0d51`; the
-primary desktop-shaped startup-streaming baseline is still pending. No
-optimization slices should start from this doc until the desktop-shaped baseline
+Status: active benchmark and attribution checkpoint. Slice A clean desktop
+startup-streaming baseline captured on 2026-07-04 at `3adafc1e`; Slice A2 clean
+synthetic loading-settle isolation baseline captured on 2026-07-04 at
+`482f0d51`. No optimization slices should start from this doc until the baseline
 matrix is captured and interpreted.
 Workstream: native Rust performance, desktop throughput, Android XR / Quest
 frame pacing, shared runtime/render scheduling policy.
@@ -89,6 +89,13 @@ is a measured policy boundary, not one global knob.
 Goal: mirror local desktop play. Enter the world at the playable gate, then keep
 polling, syncing render sections, uploading, and rendering through the same
 paced desktop-shaped frame loop while the requested view streams in.
+
+Current caveat: this lane uses the real startup pump, runtime polling,
+render-work admission, and frame-deadline sync path, but it is still an
+offscreen headless loop. Headless rendering waits on `wgpu::PollType::Wait`
+each frame, so readiness/quiescence timings are the primary streaming
+throughput signal. Use native window and Quest runs for final frame-pacing
+policy decisions.
 
 Primary clean baseline:
 
@@ -299,6 +306,61 @@ Record:
 
 ## Captured Results
 
+### Slice A: Clean Desktop Startup-Streaming RD20 Baseline
+
+Captured on 2026-07-04 at commit `3adafc1e`.
+
+`git_dirty=false`; release build; `debug_assertions=false`.
+
+Raw output for this local run:
+`/tmp/mclone-startup-streaming-rd20-workers1-cadence20.json`.
+
+Command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf \
+  --render-distance 20 \
+  --startup-streaming-frames 30000 \
+  --target-hz 120 \
+  --debug-passive-showcase false \
+  --render-compile-workers 1 \
+  --simulation-cadence 20/20/60
+```
+
+Summary:
+
+| Metric | Value |
+|---|---:|
+| Playable entry | `1,746.504 ms` |
+| First full-view ready | frame `9,308`, `97,008.104 ms` |
+| First target render quiescent | frame `9,943`, `106,032.752 ms` |
+| Total streaming wall time | `334,273.465 ms` |
+| Final target readiness | `1,849 / 1,849`, `100%` |
+| Final cached sections | `8,320` |
+| Final pending jobs/publications/compile/inflight | `0 / 0 / 0 / 0` |
+| Final pending render chunks | `168` |
+| Average / p95 / p99 / max measured frame work | `10.318 / 13.699 / 16.075 / 18.971 ms` |
+| Over target / over 2x / over 4x frames | `22,232 / 224 / 0` |
+
+Immediate interpretation:
+
+- The local startup gate is behaving as intended for RD20: enter at the
+  under-foot `3x3` playable gate in `1.747s`, then stream the full requested
+  view in the background.
+- Full target readiness is roughly `97s`, and target render quiescence is
+  roughly `106s`. That is the primary local-play streaming baseline; the older
+  loading-settle full-drain number remains useful only for attribution.
+- Frame-work timing is not yet well enough attributed. The explicit
+  poll/remesh/upload/render callback totals are much smaller than the measured
+  headless frame work, and the headless loop serializes with GPU completion via
+  `wgpu::PollType::Wait`. Add frame-loop timing breakdown or a true native
+  window probe before making frame-pacing policy changes from this number.
+- No compile requests were skipped by the frame deadline, no update-pump stalls
+  were reported, and jobs/publications/compile/inflight work reached zero. The
+  remaining `168` pending render chunks are the known edge-neighbor condition
+  outside the requested target square.
+
 ### Slice A Implementation Smoke
 
 Validated the startup-streaming benchmark path in optimized-dev mode while this
@@ -395,7 +457,7 @@ Do not optimize from a single number. Use these reads:
 
 ## Acceptance Criteria For This Tactical
 
-- [ ] A clean commit baseline exists for desktop startup-streaming RD20 with
+- [x] A clean commit baseline exists for desktop startup-streaming RD20 with
   current defaults.
 - [x] A clean synthetic isolation baseline exists for desktop loading-settle
   RD5/RD10/RD15/RD20 with current defaults.
