@@ -7,9 +7,9 @@ use crate::block::{
     DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
     DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE, GRANITE, GRASS,
     GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER,
-    LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, RED_MUSHROOM,
-    RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SNOW_BLOCK, SUGAR_CANE,
-    SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
+    LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN,
+    RED_MUSHROOM, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SNOW_BLOCK,
+    SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -916,7 +916,12 @@ fn mountain_features() -> Vec<PlacedFeature> {
 }
 
 fn desert_features() -> Vec<PlacedFeature> {
-    vec![dead_bush_patch(2), sugar_cane_patch(60), cactus_patch(10)]
+    vec![
+        dead_bush_patch(2),
+        sugar_cane_patch(60),
+        pumpkin_patch(),
+        cactus_patch(10),
+    ]
 }
 
 fn badlands_features() -> Vec<PlacedFeature> {
@@ -924,6 +929,7 @@ fn badlands_features() -> Vec<PlacedFeature> {
         tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
         dead_bush_patch(2),
         sugar_cane_patch(13),
+        pumpkin_patch(),
         cactus_patch(5),
     ]
 }
@@ -939,6 +945,7 @@ fn swamp_features() -> Vec<PlacedFeature> {
         swamp_mushroom_patch_feature(BROWN_MUSHROOM, 4, false),
         swamp_mushroom_patch_feature(RED_MUSHROOM, 8, true),
         sugar_cane_patch(20),
+        pumpkin_patch(),
     ]
 }
 
@@ -1041,7 +1048,7 @@ fn river_features(frozen: bool) -> Vec<PlacedFeature> {
         omitted_vegetal_feature(),
         omitted_vegetal_feature(),
         sugar_cane_patch(10),
-        omitted_vegetal_feature(),
+        pumpkin_patch(),
         spring_water_feature(),
         spring_lava_feature(),
     ];
@@ -1058,7 +1065,7 @@ fn beach_features() -> Vec<PlacedFeature> {
         omitted_vegetal_feature(),
         omitted_vegetal_feature(),
         sugar_cane_patch(10),
-        omitted_vegetal_feature(),
+        pumpkin_patch(),
         spring_water_feature(),
         spring_lava_feature(),
     ]
@@ -1830,6 +1837,32 @@ fn sugar_cane_patch(count: i32) -> PlacedFeature {
             place_on: &[],
         },
         count,
+    )
+}
+
+fn pumpkin_patch() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: PUMPKIN,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[GRASS_BLOCK],
+        }),
+        vec![
+            ConfiguredDecorator::chance(32),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
     )
 }
 

@@ -299,10 +299,10 @@ mod tests {
         GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
         KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER,
         LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PEONY_LOWER,
-        POPPY, RED_MUSHROOM, RED_MUSHROOM_BLOCK, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER,
-        SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW,
-        SPRUCE_LEAVES, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER,
-        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
+        POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK, REDSTONE_ORE, ROSE_BUSH_LOWER,
+        ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS,
+        SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -1258,10 +1258,13 @@ mod tests {
         let swamp = overworld_features_for_biome(get_layered_biome_by_id(6));
 
         assert!(has_random_patch(&desert, SUGAR_CANE, 60));
+        assert!(has_pumpkin_patch(&desert));
         assert!(has_random_patch(&desert, CACTUS, 10));
         assert!(has_random_patch(&badlands, SUGAR_CANE, 13));
+        assert!(has_pumpkin_patch(&badlands));
         assert!(has_random_patch(&badlands, CACTUS, 5));
         assert!(has_random_patch(&swamp, SUGAR_CANE, 20));
+        assert!(has_pumpkin_patch(&swamp));
         assert!(has_random_patch(&swamp, LILY_PAD, 4));
     }
 
@@ -1283,6 +1286,7 @@ mod tests {
             assert!(has_default_flower_feature(features));
             assert!(has_default_grass_patch_feature(features));
             assert!(has_random_patch(features, SUGAR_CANE, 10));
+            assert!(has_pumpkin_patch(features));
         }
 
         assert!(has_seagrass_feature(&river, 48, 0.4));
@@ -1888,6 +1892,36 @@ mod tests {
                         state: patch_state,
                         ..
                     }) if patch_state == state
+                )
+        })
+    }
+
+    fn has_pumpkin_patch(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::chance(32),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: PUMPKIN,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 64,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: false,
+                        can_replace: false,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[GRASS_BLOCK],
+                    })
                 )
         })
     }

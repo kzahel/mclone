@@ -156,6 +156,7 @@ pub const BLUE_ORCHID: RawBlockId = 150;
 pub const BROWN_MUSHROOM: RawBlockId = 151;
 pub const RED_MUSHROOM: RawBlockId = 152;
 pub const BLUE_ICE: RawBlockId = 153;
+pub const PUMPKIN: RawBlockId = 154;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -239,6 +240,7 @@ impl GeneratedBlockId {
     pub const BROWN_MUSHROOM: Self = Self(BROWN_MUSHROOM);
     pub const RED_MUSHROOM: Self = Self(RED_MUSHROOM);
     pub const BLUE_ICE: Self = Self(BLUE_ICE);
+    pub const PUMPKIN: Self = Self(PUMPKIN);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -537,6 +539,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         BLUE_ORCHID => "minecraft:blue_orchid",
         BROWN_MUSHROOM => "minecraft:brown_mushroom",
         RED_MUSHROOM => "minecraft:red_mushroom",
+        PUMPKIN => "minecraft:pumpkin",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -620,6 +623,7 @@ mod tests {
         assert_eq!(block_light_opacity(TORCH), 0);
         assert_eq!(block_light_opacity(WALL_TORCH_EAST), 0);
         assert_eq!(block_light_opacity(CACTUS), 15);
+        assert_eq!(block_light_opacity(PUMPKIN), 15);
         assert_eq!(block_light_opacity(SUGAR_CANE), 0);
         assert_eq!(block_light_opacity(SEAGRASS), 0);
         assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
@@ -672,6 +676,7 @@ mod tests {
         assert_eq!(block_name(KELP), "minecraft:kelp");
         assert_eq!(block_name(KELP_PLANT), "minecraft:kelp_plant");
         assert_eq!(block_name(BLUE_ICE), "minecraft:blue_ice");
+        assert_eq!(block_name(PUMPKIN), "minecraft:pumpkin");
         assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
         assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
         assert_eq!(block_name(SEA_PICKLE_4), "minecraft:sea_pickle");

@@ -422,7 +422,7 @@ mod tests {
             feature_family: Some(FeatureFamily::PlainsVegetation),
         },
         PaletteMatrixCase {
-            seed: 49,
+            seed: 258,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:desert",
@@ -558,7 +558,7 @@ mod tests {
             feature_family: Some(FeatureFamily::SnowySpruceFern),
         },
         PaletteMatrixCase {
-            seed: 2359,
+            seed: 3748,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:badlands",
@@ -654,7 +654,7 @@ mod tests {
             feature_family: Some(FeatureFamily::MushroomFieldHugeMushrooms),
         },
         PaletteMatrixCase {
-            seed: 446,
+            seed: 348,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:desert_hills",
@@ -734,7 +734,7 @@ mod tests {
             feature_family: Some(FeatureFamily::MountainTrees),
         },
         PaletteMatrixCase {
-            seed: 94_280,
+            seed: 32_398,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:wooded_badlands_plateau",
@@ -774,7 +774,7 @@ mod tests {
             feature_family: Some(FeatureFamily::SunflowerPlainsSunflowers),
         },
         PaletteMatrixCase {
-            seed: 1616,
+            seed: 98,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:desert_lakes",
@@ -894,7 +894,7 @@ mod tests {
             feature_family: Some(FeatureFamily::SavannaAcacia),
         },
         PaletteMatrixCase {
-            seed: 9682,
+            seed: 8464,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:eroded_badlands",
@@ -902,7 +902,7 @@ mod tests {
             feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
-            seed: 198_012,
+            seed: 3823,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:modified_wooded_badlands_plateau",

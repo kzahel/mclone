@@ -4,8 +4,8 @@ use crate::block::{
     ALLIUM, AZURE_BLUET, BLUE_ORCHID, BROWN_MUSHROOM, CACTUS, CORNFLOWER, DANDELION, DEAD_BUSH,
     DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, ICE, LARGE_FERN_LOWER, LARGE_FERN_UPPER,
     LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD, MYCELIUM, ORANGE_TULIP, OXEYE_DAISY,
-    PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM, RED_SAND, RED_TULIP,
-    ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SAND, SUGAR_CANE, SUNFLOWER_LOWER,
+    PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_SAND,
+    RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SAND, SUGAR_CANE, SUNFLOWER_LOWER,
     SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP, is_air_like, is_lava, is_water,
     material_blocks_motion,
 };
@@ -275,6 +275,7 @@ fn can_survive_patch_plant<W: FeatureWorld>(
                     ))
         }
         LILY_PAD => is_water(block_below) || block_below == ICE,
+        PUMPKIN => block_below == GRASS_BLOCK,
         _ => can_survive_simple_plant(block_id, current, block_below),
     }
 }
