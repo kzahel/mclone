@@ -435,19 +435,32 @@ fn default_land_feature_table() -> &'static [PlacedFeature] {
 }
 
 fn plains_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         tree_feature(BasicTreeConfiguration::oak(), 0, 0.35, 1),
         grass_patch(GRASS, 4),
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn sunflower_plains_features() -> Vec<PlacedFeature> {
-    let mut features = vec![sunflower_patch_feature()];
-    features.extend(plains_features());
+    let mut features = vec![
+        sunflower_patch_feature(),
+        tree_feature(BasicTreeConfiguration::oak(), 0, 0.35, 1),
+        grass_patch(GRASS, 4),
+        flower_patch(DANDELION, 1),
+        flower_patch(POPPY, 1),
+        sugar_cane_patch(10),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
+        pumpkin_patch(),
+    ];
+    add_default_springs(&mut features);
     features
 }
 
@@ -749,15 +762,15 @@ fn forest_features() -> Vec<PlacedFeature> {
         forest_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        sugar_cane_patch(10),
+        pumpkin_patch(),
         spring_water_feature(),
         spring_lava_feature(),
     ]
 }
 
 fn flower_forest_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         forest_flower_vegetation_common_feature(),
         glow_lichen_feature(),
         forest_flower_trees_feature(),
@@ -765,31 +778,38 @@ fn flower_forest_features() -> Vec<PlacedFeature> {
         grass_patch(GRASS, 1),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        spring_water_feature(),
-        spring_lava_feature(),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn birch_forest_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         birch_tree_feature(),
         grass_patch(GRASS, 3),
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn tall_birch_forest_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         tall_birch_tree_feature(),
         grass_patch(GRASS, 3),
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn taiga_features() -> Vec<PlacedFeature> {
@@ -803,8 +823,8 @@ fn taiga_features() -> Vec<PlacedFeature> {
         taiga_mushroom_patch_feature(RED_MUSHROOM, 8, true),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        omitted_vegetal_feature(),
-        omitted_vegetal_feature(),
+        sugar_cane_patch(10),
+        pumpkin_patch(),
         spring_water_feature(),
         spring_lava_feature(),
         berry_patch_feature(false),
@@ -812,7 +832,7 @@ fn taiga_features() -> Vec<PlacedFeature> {
 }
 
 fn giant_taiga_features(giant_spruce: bool) -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         large_fern_patch_feature(),
         glow_lichen_feature(),
         giant_taiga_tree_feature(giant_spruce),
@@ -823,19 +843,23 @@ fn giant_taiga_features(giant_spruce: bool) -> Vec<PlacedFeature> {
         counted_taiga_mushroom_patch_feature(RED_MUSHROOM, 8, 3, true),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        spring_water_feature(),
-        spring_lava_feature(),
-        berry_patch_feature(false),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features.push(berry_patch_feature(false));
+    features
 }
 
 fn snowy_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         tree_feature(BasicTreeConfiguration::spruce(), 3, 0.2, 1),
         grass_patch(FERN, 1),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn ice_spikes_features() -> Vec<PlacedFeature> {
@@ -918,13 +942,16 @@ fn blue_ice_feature() -> PlacedFeature {
 }
 
 fn mountain_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         tree_feature(BasicTreeConfiguration::spruce(), 1, 0.25, 1),
         tree_feature(BasicTreeConfiguration::oak(), 0, 0.2, 1),
         grass_patch(GRASS, 1),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn desert_features() -> Vec<PlacedFeature> {
@@ -933,6 +960,8 @@ fn desert_features() -> Vec<PlacedFeature> {
         sugar_cane_patch(60),
         pumpkin_patch(),
         cactus_patch(10),
+        spring_water_feature(),
+        spring_lava_feature(),
     ]
 }
 
@@ -943,6 +972,8 @@ fn badlands_features() -> Vec<PlacedFeature> {
         sugar_cane_patch(13),
         pumpkin_patch(),
         cactus_patch(5),
+        spring_water_feature(),
+        spring_lava_feature(),
     ]
 }
 
@@ -960,43 +991,50 @@ fn swamp_features() -> Vec<PlacedFeature> {
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         sugar_cane_patch(20),
         pumpkin_patch(),
+        spring_water_feature(),
+        spring_lava_feature(),
     ]
 }
 
 fn mushroom_field_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         mushroom_field_vegetation_feature(),
         taiga_mushroom_patch_feature(BROWN_MUSHROOM, 4, false),
         taiga_mushroom_patch_feature(RED_MUSHROOM, 8, true),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        grass_patch(GRASS, 1),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features.push(grass_patch(GRASS, 1));
+    features
 }
 
 fn dark_forest_features(red_mushrooms_first: bool) -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         dark_forest_vegetation_feature(red_mushrooms_first),
         default_flower_feature(),
         forest_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        spring_water_feature(),
-        spring_lava_feature(),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn savanna_features(shattered: bool) -> Vec<PlacedFeature> {
     let tree_count = if shattered { 2 } else { 1 };
-    vec![
+    let mut features = vec![
         savanna_tree_feature(tree_count),
         default_flower_feature(),
         forest_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        spring_water_feature(),
-        spring_lava_feature(),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
 }
 
 fn jungle_features(light_bamboo: bool, edge: bool) -> Vec<PlacedFeature> {
@@ -1009,24 +1047,25 @@ fn jungle_features(light_bamboo: bool, edge: bool) -> Vec<PlacedFeature> {
     features.push(jungle_grass_patch_feature());
     features.push(normal_mushroom_patch_feature(BROWN_MUSHROOM, 4));
     features.push(normal_mushroom_patch_feature(RED_MUSHROOM, 8));
-    features.push(spring_water_feature());
-    features.push(spring_lava_feature());
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
     features.push(omitted_vegetal_feature());
     features
 }
 
 fn bamboo_jungle_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         bamboo_feature(),
         bamboo_vegetation_feature(),
         default_flower_feature(),
         jungle_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-        spring_water_feature(),
-        spring_lava_feature(),
-        omitted_vegetal_feature(),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features.push(omitted_vegetal_feature());
+    features
 }
 
 fn ocean_features(deep: bool) -> Vec<PlacedFeature> {
@@ -1094,13 +1133,26 @@ fn beach_features() -> Vec<PlacedFeature> {
 }
 
 fn default_land_features() -> Vec<PlacedFeature> {
-    vec![
+    let mut features = vec![
         tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
         grass_patch(GRASS, 2),
         flower_patch(DANDELION, 1),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-    ]
+    ];
+    add_default_extra_vegetation(&mut features);
+    add_default_springs(&mut features);
+    features
+}
+
+fn add_default_extra_vegetation(features: &mut Vec<PlacedFeature>) {
+    features.push(sugar_cane_patch(10));
+    features.push(pumpkin_patch());
+}
+
+fn add_default_springs(features: &mut Vec<PlacedFeature>) {
+    features.push(spring_water_feature());
+    features.push(spring_lava_feature());
 }
 
 fn tree_feature(

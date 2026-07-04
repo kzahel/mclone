@@ -1312,12 +1312,18 @@ mod tests {
         assert!(has_random_patch(&desert, SUGAR_CANE, 60));
         assert!(has_pumpkin_patch(&desert));
         assert!(has_random_patch(&desert, CACTUS, 10));
+        assert!(has_default_water_spring(&desert));
+        assert!(has_default_lava_spring(&desert));
         assert!(has_random_patch(&badlands, SUGAR_CANE, 13));
         assert!(has_pumpkin_patch(&badlands));
         assert!(has_random_patch(&badlands, CACTUS, 5));
+        assert!(has_default_water_spring(&badlands));
+        assert!(has_default_lava_spring(&badlands));
         assert!(has_random_patch(&swamp, SUGAR_CANE, 20));
         assert!(has_pumpkin_patch(&swamp));
         assert!(has_random_patch(&swamp, LILY_PAD, 4));
+        assert!(has_default_water_spring(&swamp));
+        assert!(has_default_lava_spring(&swamp));
     }
 
     #[test]
@@ -1379,6 +1385,50 @@ mod tests {
                 true
             ));
         }
+    }
+
+    #[test]
+    fn biome_feature_tables_include_java_default_extra_vegetation_for_current_lanes() {
+        for biome_id in [
+            1, 3, 4, 5, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+            36, 129, 131, 132, 133, 140, 149, 151, 155, 156, 157, 158, 160, 161, 162, 163, 164,
+            168, 169,
+        ] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert!(has_random_patch(&features, SUGAR_CANE, 10));
+            assert!(has_pumpkin_patch(&features));
+        }
+
+        let fallback = overworld_features_for_biome(BiomeDefinition::new(
+            999,
+            "minecraft:test_fallback",
+            0.0,
+            0.0,
+        ));
+        assert!(has_random_patch(&fallback, SUGAR_CANE, 10));
+        assert!(has_pumpkin_patch(&fallback));
+    }
+
+    #[test]
+    fn biome_feature_tables_include_java_default_springs_for_current_land_lanes() {
+        for biome_id in [
+            1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 25, 26, 27,
+            28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 129, 130, 131, 132, 133, 134, 140, 149,
+            151, 155, 156, 157, 158, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169,
+        ] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert!(has_default_water_spring(&features));
+            assert!(has_default_lava_spring(&features));
+        }
+
+        let fallback = overworld_features_for_biome(BiomeDefinition::new(
+            999,
+            "minecraft:test_fallback",
+            0.0,
+            0.0,
+        ));
+        assert!(has_default_water_spring(&fallback));
+        assert!(has_default_lava_spring(&fallback));
     }
 
     #[test]
@@ -2041,6 +2091,40 @@ mod tests {
         })
     }
 
+    fn has_default_water_spring(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.feature == ConfiguredFeature::spring(SpringConfiguration::water())
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::count(50),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::range(HeightProvider::biased_to_bottom(
+                            VerticalAnchor::bottom(),
+                            VerticalAnchor::below_top(8),
+                            8,
+                        )),
+                    ]
+        })
+    }
+
+    fn has_default_lava_spring(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.feature == ConfiguredFeature::spring(SpringConfiguration::lava())
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::count(20),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::range(HeightProvider::very_biased_to_bottom(
+                            VerticalAnchor::bottom(),
+                            VerticalAnchor::below_top(8),
+                            8,
+                        )),
+                    ]
+        })
+    }
+
     fn has_normal_mushroom_patch(
         features: &[PlacedFeature],
         state: RawBlockId,
@@ -2245,12 +2329,28 @@ mod tests {
             ]
         );
         assert_eq!(
-            vegetal_features[7..9]
-                .iter()
-                .filter(|feature| feature.feature == ConfiguredFeature::noop())
-                .count(),
-            2
+            vegetal_features[7].decorators.first(),
+            Some(&ConfiguredDecorator::count(10))
         );
+        assert!(matches!(
+            vegetal_features[7].feature,
+            ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                state: SUGAR_CANE,
+                ..
+            })
+        ));
+        assert_eq!(
+            vegetal_features[8].decorators,
+            vec![
+                ConfiguredDecorator::chance(32),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
+        );
+        assert!(matches!(
+            vegetal_features[8].feature,
+            ConfiguredFeature::RandomPatch(RandomPatchConfiguration { state: PUMPKIN, .. })
+        ));
     }
 
     #[test]
@@ -2490,17 +2590,28 @@ mod tests {
             other => panic!("expected taiga grass random patch, got {other:?}"),
         }
         assert_eq!(
-            vegetal_features[9..11]
-                .iter()
-                .filter(|feature| feature.feature == ConfiguredFeature::noop())
-                .count(),
-            2
+            vegetal_features[9].decorators.first(),
+            Some(&ConfiguredDecorator::count(10))
         );
-        assert!(
-            vegetal_features[9..11]
-                .iter()
-                .all(|feature| feature.decorators.is_empty())
+        assert!(matches!(
+            vegetal_features[9].feature,
+            ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                state: SUGAR_CANE,
+                ..
+            })
+        ));
+        assert_eq!(
+            vegetal_features[10].decorators,
+            vec![
+                ConfiguredDecorator::chance(32),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
         );
+        assert!(matches!(
+            vegetal_features[10].feature,
+            ConfiguredFeature::RandomPatch(RandomPatchConfiguration { state: PUMPKIN, .. })
+        ));
 
         let water_spring =
             vegetal_features[test_support::JAVA_TAIGA_WATER_SPRING_FEATURE_INDEX as usize];

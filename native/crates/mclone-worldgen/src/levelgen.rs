@@ -478,7 +478,7 @@ mod tests {
             feature_family: Some(FeatureFamily::DarkForestCanopyMushrooms),
         },
         PaletteMatrixCase {
-            seed: 2962,
+            seed: 25_122,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:snowy_taiga",
@@ -710,7 +710,7 @@ mod tests {
             feature_family: Some(FeatureFamily::BirchTrees),
         },
         PaletteMatrixCase {
-            seed: 30_823,
+            seed: 18_930,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:snowy_taiga_hills",
