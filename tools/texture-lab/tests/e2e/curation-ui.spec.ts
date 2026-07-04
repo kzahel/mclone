@@ -11,7 +11,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   const index = await indexResponse.json();
 
   expect(index.pack.name).toBe("mclone-default");
-  expect(index.summary.authoredTextures).toBe(81);
+  expect(index.summary.authoredTextures).toBe(84);
   expect(index.summary.candidateCount).toBe(4);
   expect(index.summary.associatedCandidateCount).toBe(4);
   expect(index.summary.archivedCandidateCount).toBe(1);
@@ -79,6 +79,21 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   await expect(pointedReferenceResponse).toBeOK();
   const pointedReference = decodePng(await pointedReferenceResponse.body());
   expect(`${pointedReference.width}x${pointedReference.height}`).toBe("32x80");
+
+  const carvedPumpkin = index.blocks.find((block: { name: string }) => block.name === "carved-pumpkin");
+  expect(carvedPumpkin?.faces.map((face: { face: string; textureName: string }) => `${face.face}:${face.textureName}`)).toEqual([
+    "top:pumpkin_top",
+    "bottom:pumpkin_top",
+    "north:carved_pumpkin",
+    "east:pumpkin_side",
+    "south:pumpkin_side",
+    "west:pumpkin_side",
+  ]);
+  expect(carvedPumpkin?.sheet.exists).toBe(true);
+  const carvedPumpkinSheetResponse = await request.get(`/api/image?path=${encodeURIComponent(carvedPumpkin.sheet.path)}`);
+  await expect(carvedPumpkinSheetResponse).toBeOK();
+  const carvedPumpkinSheet = decodePng(await carvedPumpkinSheetResponse.body());
+  expect(`${carvedPumpkinSheet.width}x${carvedPumpkinSheet.height}`).toBe("1040x672");
 
   const selectResponse = await request.post("/api/curation/select", {
     data: { textureName: "grass_block_top", candidateId: archivedCandidate.id },
@@ -244,6 +259,12 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Block Bundles" })).toBeVisible();
   expect(await page.locator(".blockBundleCard").count()).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "stone all uses Stone", exact: true })).toBeVisible();
+  await page.getByLabel("Search").fill("pumpkin");
+  await expect(page.getByText("Carved Pumpkin")).toBeVisible();
+  await expect(page.getByText("6 faces")).toBeVisible();
+  await expect(page.getByRole("button", { name: "carved-pumpkin north uses Carved Pumpkin", exact: true })).toBeVisible();
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-carved-pumpkin-block.png", fullPage: true });
+  await page.getByLabel("Search").fill("");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-blocks.png", fullPage: true });
 });
 
@@ -264,7 +285,7 @@ test("filters texture replacement queues", async ({ page }) => {
   await expect(textureList.getByRole("button", { name: /andesite/ })).toHaveCount(0);
 
   await page.getByLabel("Queue").selectOption({ label: "Needs candidates" });
-  await expect(page.locator(".filterCount")).toHaveText("79 textures");
+  await expect(page.locator(".filterCount")).toHaveText("82 textures");
   await expect(textureList.getByRole("button", { name: /andesite/ })).toBeVisible();
   await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toHaveCount(0);
   await expect(textureList.getByRole("button", { name: /^stone/ })).toHaveCount(0);

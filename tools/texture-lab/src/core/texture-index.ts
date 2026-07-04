@@ -233,7 +233,17 @@ function blockFaces(block: BlockSpec): BlockFaceIndexEntry[] {
       textureName,
     });
   }
-  return faces.sort((left, right) => left.face.localeCompare(right.face));
+  return faces.sort(compareBlockFaces);
+}
+
+function compareBlockFaces(left: BlockFaceIndexEntry, right: BlockFaceIndexEntry): number {
+  return blockFaceOrder(left.face) - blockFaceOrder(right.face) || left.face.localeCompare(right.face);
+}
+
+function blockFaceOrder(face: string): number {
+  const order = ["all", "top", "bottom", "north", "east", "south", "west", "side", "overlay", "particle"];
+  const index = order.indexOf(face);
+  return index === -1 ? order.length : index;
 }
 
 function textureRoleFromFace(face: string): TextureRole {

@@ -1,0 +1,242 @@
+import type { TextureLabApi, TextureLayerSpec } from "../../../src/dsl";
+
+export function defineDirectionalCubeTextures(api: TextureLabApi): void {
+  const { palette, texture, block, macroNoise, mask, speckles } = api;
+
+  palette("pumpkin", {
+    rind_dark: "#8f3f16",
+    rind_shadow: "#aa501b",
+    rind: "#c56520",
+    rind_light: "#df8431",
+    rind_high: "#efa64e",
+    stem_dark: "#4a3a1e",
+    stem: "#6a5429",
+    cut: "#2b1a11",
+    cut_glow: "#5a2b14",
+  });
+
+  texture("pumpkin_top", {
+    size: 32,
+    source: "final-color",
+    palette: "pumpkin",
+    base: "rind",
+    exportPath: "assets/mclone/textures/block/pumpkin_top.png",
+    catalog: {
+      tiling: "xy",
+      rotation: "y90-safe",
+    },
+    layers: [
+      macroNoise({
+        seed: "pumpkin-top-soft-rind",
+        frequency: 5,
+        octaves: 2,
+        colors: ["rind_shadow", "rind", "rind_light"],
+        opacity: 0.2,
+      }),
+      speckles({
+        seed: "pumpkin-top-speckles",
+        density: 0.11,
+        colors: ["rind_dark", "rind_high"],
+        opacity: 0.42,
+      }),
+      mask({
+        colors: {
+          d: "rind_dark",
+          s: "stem_dark",
+          t: "stem",
+          h: "rind_high",
+        },
+        opacity: 0.9,
+        upscale: "smooth",
+        pixels: [
+          "................................",
+          ".............hhhhhh.............",
+          ".........hhhh......hhhh.........",
+          ".......hhh............hhh.......",
+          ".....hhh................hhh.....",
+          "....hh....................hh....",
+          "...hh.........dddd........hh....",
+          "..hh.......dddddddddd......hh...",
+          "..h......ddd........ddd.....h...",
+          ".hh.....dd............dd....hh..",
+          ".h.....dd.....ssss.....dd....h..",
+          ".h.....d......stts......d....h..",
+          "hh....dd......tttt......dd...hh.",
+          "h.....d.......tttt.......d....h.",
+          "h.....d.......stts.......d....h.",
+          "h.....d........ss........d....h.",
+          "h.....d..................d....h.",
+          "h.....d..................d....h.",
+          "hh....dd................dd...hh.",
+          ".h.....d................d....h..",
+          ".h.....dd..............dd....h..",
+          ".hh.....dd............dd....hh..",
+          "..h......ddd........ddd.....h...",
+          "..hh.......dddddddddd......hh...",
+          "...hh.........dddd........hh....",
+          "....hh....................hh....",
+          ".....hhh................hhh.....",
+          ".......hhh............hhh.......",
+          ".........hhhh......hhhh.........",
+          ".............hhhhhh.............",
+          "................................",
+          "................................",
+        ],
+      }),
+    ],
+  });
+
+  texture("pumpkin_side", {
+    size: 32,
+    source: "final-color",
+    palette: "pumpkin",
+    base: "rind",
+    exportPath: "assets/mclone/textures/block/pumpkin_side.png",
+    catalog: {
+      tiling: "x",
+      rotation: "fixed",
+    },
+    preview: {
+      tiling: "x",
+    },
+    layers: pumpkinSideLayers(api),
+  });
+
+  texture("carved_pumpkin", {
+    size: 32,
+    source: "final-color",
+    palette: "pumpkin",
+    base: "rind",
+    exportPath: "assets/mclone/textures/block/carved_pumpkin.png",
+    catalog: {
+      tiling: "none",
+      rotation: "fixed",
+    },
+    preview: {
+      tiling: "none",
+      rotation: false,
+    },
+    layers: [
+      ...pumpkinSideLayers(api),
+      mask({
+        colors: {
+          c: "cut",
+          g: "cut_glow",
+        },
+        opacity: 0.96,
+        upscale: "nearest",
+        authoring: {
+          role: "structure",
+          label: "PUMPKIN FRONT CUTS",
+        },
+        pixels: [
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          ".....cccccc..........cccccc.....",
+          "....cccccccc........cccccccc....",
+          "...ccccggcccc......ccccggcccc...",
+          "...cccggggccc......cccggggccc...",
+          "...ccccggcccc......ccccggcccc...",
+          "....cccccccc........cccccccc....",
+          ".....cccccc..........cccccc.....",
+          "................................",
+          "................................",
+          "................................",
+          ".............cccccc.............",
+          "............cccccccc............",
+          "...........ccccggcccc...........",
+          "..........ccccggggcccc..........",
+          ".........ccccggggggcccc.........",
+          "........ccccggggggggcccc........",
+          ".......ccccggggggggggcccc.......",
+          "......ccccggggggggggggcccc......",
+          ".....ccccccggggggggggcccccc.....",
+          "....cccccccccccccccccccccccc....",
+          "...cccccccccccccccccccccccccc...",
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+        ],
+      }),
+    ],
+  });
+
+  block("carved-pumpkin", {
+    kind: "cube",
+    faces: {
+      top: "pumpkin_top",
+      bottom: "pumpkin_top",
+      north: "carved_pumpkin",
+      east: "pumpkin_side",
+      south: "pumpkin_side",
+      west: "pumpkin_side",
+    },
+  });
+}
+
+function pumpkinSideLayers({ macroNoise, mask, speckles }: TextureLabApi): TextureLayerSpec[] {
+  return [
+    macroNoise({
+      seed: "pumpkin-side-soft-rind",
+      frequency: 5,
+      octaves: 2,
+      colors: ["rind_shadow", "rind", "rind_light"],
+      opacity: 0.18,
+    }),
+    mask({
+      colors: {
+        d: "rind_dark",
+        s: "rind_shadow",
+        h: "rind_high",
+      },
+      opacity: 0.78,
+      upscale: "smooth",
+      pixels: [
+        "d.....s......d......s.....d.....",
+        "d.....s......d......s.....d.....",
+        "d.....s......d......s.....d.....",
+        "d....ss......d......ss....d.....",
+        "d....s.......d.......s....d.....",
+        "d....s.......d.......s....d.....",
+        "d...ss.......d.......ss...d.....",
+        "d...s........d........s...d.....",
+        "d...s...h....d....h...s...d.....",
+        "d...s..hhh...d...hhh..s...d.....",
+        "d...s...h....d....h...s...d.....",
+        "d...ss.......d.......ss...d.....",
+        "d....s.......d.......s....d.....",
+        "d....s.......d.......s....d.....",
+        "d....ss......d......ss....d.....",
+        "d.....s......d......s.....d.....",
+        "d.....s......d......s.....d.....",
+        "d.....s......d......s.....d.....",
+        "d....ss......d......ss....d.....",
+        "d....s.......d.......s....d.....",
+        "d....s.......d.......s....d.....",
+        "d...ss.......d.......ss...d.....",
+        "d...s........d........s...d.....",
+        "d...s...h....d....h...s...d.....",
+        "d...s..hhh...d...hhh..s...d.....",
+        "d...s...h....d....h...s...d.....",
+        "d...ss.......d.......ss...d.....",
+        "d....s.......d.......s....d.....",
+        "d....s.......d.......s....d.....",
+        "d....ss......d......ss....d.....",
+        "d.....s......d......s.....d.....",
+        "d.....s......d......s.....d.....",
+      ],
+    }),
+    speckles({
+      seed: "pumpkin-side-speckles",
+      density: 0.09,
+      colors: ["rind_dark", "rind_high"],
+      opacity: 0.36,
+    }),
+  ];
+}

@@ -28,6 +28,8 @@ import type { AuthoringPreviewEntry, RenderedAuthoringPreview, RenderedTexture }
 
 type TilingMode = "xy" | "x" | "none";
 type RotationPreviewMode = "none" | "y180" | "y90";
+type LateralFaceName = "north" | "east" | "south" | "west";
+type BlockFaceName = "top" | "bottom" | LateralFaceName;
 
 const SEAM_ERROR_THRESHOLD = 0.04;
 
@@ -197,7 +199,11 @@ export function makeBlockReviewSheet(
   const primaryTint = tintColors[0]!;
 
   drawRect(sheet, 16, 16, 300, 300, panel);
-  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 82, 58);
+  if (hasDirectionalFaces(block)) {
+    drawDirectionalCubePreview(sheet, block, texturesByName, primaryTint, 16, 16);
+  } else {
+    drawIsometricCubeFaces(sheet, cubeFacesForYaw(block, texturesByName, primaryTint, "north"), 82, 58);
+  }
 
   const top = textureForFace(block, texturesByName, "top");
   const topDisplay = applyRoleTint(top, primaryTint);
@@ -213,18 +219,22 @@ export function makeBlockReviewSheet(
   const side = compositeSideTexture(block, texturesByName, primaryTint);
   const sideTiling = effectiveTiling(textureForFace(block, texturesByName, "side"), side);
   drawRect(sheet, 692, 16, 328, 328, panel);
-  drawTilingPreview(sheet, side, 696, 20, sideTiling);
+  if (hasDirectionalFaces(block)) {
+    drawDirectionalFacePanel(sheet, block, texturesByName, primaryTint, 692, 16);
+  } else {
+    drawTilingPreview(sheet, side, 696, 20, sideTiling);
+  }
 
   drawRect(sheet, 16, 360, 1008, 280, panel);
   drawTerrainPatch(sheet, block, texturesByName, primaryTint, 32, 372);
-  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 760, 410);
+  drawIsometricCubeFaces(sheet, cubeFacesForYaw(block, texturesByName, primaryTint, "north"), 760, 410);
   for (const [index, tint] of tintColors.slice(0, 4).entries()) {
     drawTintSwatch(sheet, 890, 412 + index * 34, tint);
   }
 
   drawPanelLabel(sheet, "BLOCK PREVIEW", 16, 16, 300);
   drawPanelLabel(sheet, topRotation !== "none" ? `TOP ${rotationPanelLabel(topRotation)}` : texturePanelLabel("TOP", topTiling), 340, 16, 328);
-  drawPanelLabel(sheet, texturePanelLabel("SIDE", sideTiling), 692, 16, 328);
+  drawPanelLabel(sheet, hasDirectionalFaces(block) ? "DIRECTIONAL FACES" : texturePanelLabel("SIDE", sideTiling), 692, 16, 328);
   drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
   drawPanelLabel(sheet, "FINAL CUBE", 744, 386, 160, 1);
   drawPanelLabel(sheet, "TINTS", 880, 386, 100, 1);
@@ -271,7 +281,7 @@ export function makeBlockSideReviewSheet(
   drawGrid(sheet, 608, 176, top.width, top.height, 3, [86, 89, 88, 255]);
   drawScaled(sheet, composedSide, 728, 176, 3);
   drawGrid(sheet, 728, 176, composedSide.width, composedSide.height, 3, [86, 89, 88, 255]);
-  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 864, 216);
+  drawIsometricCubeFaces(sheet, cubeFacesForYaw(block, texturesByName, primaryTint, "north"), 864, 216);
   for (const [index, tint] of tintColors.slice(0, 4).entries()) {
     drawTintSwatch(sheet, 608, 296 + index * 26, tint);
   }
@@ -764,12 +774,85 @@ function drawIsometricCubeFacesSized(
   ]);
 }
 
-function cubeFaces(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, tint: Rgba): CubeFaceImages {
+function cubeFacesForYaw(
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+  tint: Rgba,
+  yaw: LateralFaceName,
+): CubeFaceImages {
   return {
-    top: applyRoleTint(textureForFace(block, texturesByName, "top"), tint),
-    left: compositeSideTexture(block, texturesByName, tint),
-    right: compositeSideTexture(block, texturesByName, tint),
+    top: applyRoleTint(textureForBlockFace(block, texturesByName, "top"), tint),
+    left: compositeFaceTexture(block, texturesByName, tint, yaw),
+    right: compositeFaceTexture(block, texturesByName, tint, rightFaceForYaw(yaw)),
   };
+}
+
+function drawDirectionalCubePreview(
+  target: RgbaImage,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+  tint: Rgba,
+  panelX: number,
+  panelY: number,
+): void {
+  const yaws: LateralFaceName[] = ["north", "east", "south", "west"];
+  for (const [index, yaw] of yaws.entries()) {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    const x = panelX + 42 + column * 120;
+    const y = panelY + 42 + row * 120;
+    drawIsometricCubeFacesSized(target, cubeFacesForYaw(block, texturesByName, tint, yaw), x, y, 42, 21, 56);
+    drawPixelText(target, `${yaw.toUpperCase()}+${rightFaceForYaw(yaw).toUpperCase()}`, x - 4, y + 104, 1, [214, 218, 210, 255]);
+  }
+}
+
+function drawDirectionalFacePanel(
+  target: RgbaImage,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+  tint: Rgba,
+  panelX: number,
+  panelY: number,
+): void {
+  const entries: { label: string; face: BlockFaceName }[] = [
+    { label: "TOP", face: "top" },
+    { label: "BOTTOM", face: "bottom" },
+    { label: "NORTH", face: "north" },
+    { label: "EAST", face: "east" },
+    { label: "SOUTH", face: "south" },
+    { label: "WEST", face: "west" },
+  ];
+  for (const [index, entry] of entries.entries()) {
+    const column = index % 3;
+    const row = Math.floor(index / 3);
+    const x = panelX + 20 + column * 102;
+    const y = panelY + 54 + row * 122;
+    const image =
+      entry.face === "top" || entry.face === "bottom"
+        ? applyRoleTint(textureForBlockFace(block, texturesByName, entry.face), tint)
+        : compositeFaceTexture(block, texturesByName, tint, entry.face);
+    const scale = Math.max(1, Math.min(2, Math.floor(72 / Math.max(image.width, image.height))));
+    drawPixelText(target, entry.label, x, y - 14, 1, [214, 218, 210, 255]);
+    drawScaled(target, image, x, y, scale);
+    drawGrid(target, x, y, image.width, image.height, scale, [86, 89, 88, 255]);
+  }
+}
+
+function rightFaceForYaw(yaw: LateralFaceName): LateralFaceName {
+  if (yaw === "north") {
+    return "east";
+  }
+  if (yaw === "east") {
+    return "south";
+  }
+  if (yaw === "south") {
+    return "west";
+  }
+  return "north";
+}
+
+function hasDirectionalFaces(block: BlockSpec): boolean {
+  return Boolean(block.faces.north || block.faces.east || block.faces.south || block.faces.west);
 }
 
 function tintColorsForBlock(block: BlockSpec, texturesByName: Map<string, RenderedTexture>): Rgba[] {
@@ -785,6 +868,10 @@ function tintSpecForBlock(block: BlockSpec, texturesByName: Map<string, Rendered
     block.faces.top,
     block.faces.overlay,
     block.faces.side,
+    block.faces.north,
+    block.faces.east,
+    block.faces.south,
+    block.faces.west,
     block.faces.bottom,
     block.faces.all,
   ];
@@ -801,7 +888,7 @@ function tintSpecForBlock(block: BlockSpec, texturesByName: Map<string, Rendered
 }
 
 function textureForFace(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, face: "top" | "bottom" | "side"): RenderedTexture {
-  const textureName = block.faces[face] ?? block.faces.all ?? block.faces.side;
+  const textureName = face === "side" ? lateralTextureName(block, "north") : textureNameForBlockFace(block, face);
   if (!textureName) {
     throw new Error(`Block face '${face}' has no texture`);
   }
@@ -813,7 +900,16 @@ function textureForFace(block: BlockSpec, texturesByName: Map<string, RenderedTe
 }
 
 function compositeSideTexture(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, tint: Rgba): RgbaImage {
-  const side = cloneImage(textureForFace(block, texturesByName, "side"));
+  return compositeFaceTexture(block, texturesByName, tint, "north");
+}
+
+function compositeFaceTexture(
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+  tint: Rgba,
+  face: LateralFaceName,
+): RgbaImage {
+  const side = cloneImage(textureForBlockFace(block, texturesByName, face));
   const overlayName = block.faces.overlay;
   if (!overlayName) {
     return side;
@@ -823,6 +919,32 @@ function compositeSideTexture(block: BlockSpec, texturesByName: Map<string, Rend
     throw new Error(`Block overlay references missing rendered texture '${overlayName}'`);
   }
   return compositeImages(side, applyRoleTint(overlay, tint));
+}
+
+function textureForBlockFace(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, face: BlockFaceName): RenderedTexture {
+  const textureName = textureNameForBlockFace(block, face);
+  if (!textureName) {
+    throw new Error(`Block face '${face}' has no texture`);
+  }
+  const texture = texturesByName.get(textureName);
+  if (!texture) {
+    throw new Error(`Block face '${face}' references missing rendered texture '${textureName}'`);
+  }
+  return texture;
+}
+
+function textureNameForBlockFace(block: BlockSpec, face: BlockFaceName): string | undefined {
+  if (face === "top") {
+    return block.faces.top ?? block.faces.all ?? block.faces.side;
+  }
+  if (face === "bottom") {
+    return block.faces.bottom ?? block.faces.all ?? block.faces.top ?? block.faces.side;
+  }
+  return lateralTextureName(block, face);
+}
+
+function lateralTextureName(block: BlockSpec, face: LateralFaceName): string | undefined {
+  return block.faces[face] ?? block.faces.side ?? block.faces.all;
 }
 
 function drawTerrainPatch(

@@ -320,6 +320,9 @@ The first source format is hybrid:
 - Explicit masks and overlays for blocks with multiple layers, such as grass
   side base plus tinted overlay.
 - Cube block bundles for reviewing a full block from named texture roles.
+- Directional cube block bundles with distinct `north`, `east`, `south`, and
+  `west` faces. Their block review sheets show multiple isometric yaw previews
+  plus a flat face panel for `top`, `bottom`, and all four lateral faces.
 - Preview-only metadata for showing alpha on a checkerboard, controlling tiling
   mode, or disabling cube/rotation panels where they are misleading.
 

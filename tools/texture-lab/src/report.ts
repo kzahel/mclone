@@ -186,16 +186,18 @@ function blockSideSheetPath(pack: TexturePackAsset, blockName: string): string {
 }
 
 function blockFaces(block: BlockSpec, pack: TexturePackAsset): FaceReport[] {
-  return Object.entries(block.faces).map(([role, textureName]) => {
-    const texture = pack.textures[textureName];
-    return {
-      role,
-      textureName,
-      source: texture ? sourceCategory(texture) : "missing",
-      tintRole: texture?.tintRole ?? null,
-      tiling: texture?.preview?.tiling ?? "xy",
-    };
-  });
+  return Object.entries(block.faces)
+    .map(([role, textureName]) => {
+      const texture = pack.textures[textureName];
+      return {
+        role,
+        textureName,
+        source: texture ? sourceCategory(texture) : "missing",
+        tintRole: texture?.tintRole ?? null,
+        tiling: texture?.preview?.tiling ?? "xy",
+      };
+    })
+    .sort((left, right) => blockFaceOrder(left.role) - blockFaceOrder(right.role) || left.role.localeCompare(right.role));
 }
 
 function blockComposition(block: BlockSpec, pack: TexturePackAsset): string[] {
@@ -204,9 +206,16 @@ function blockComposition(block: BlockSpec, pack: TexturePackAsset): string[] {
   const bottom = block.faces.bottom ?? block.faces.all;
   const side = block.faces.side ?? block.faces.all;
   const overlay = block.faces.overlay;
+  const directionalFaces = ["north", "east", "south", "west"] as const;
 
   if (top) {
     lines.push(`top = ${textureExpression(top, pack)}`);
+  }
+  for (const face of directionalFaces) {
+    const textureName = block.faces[face];
+    if (textureName) {
+      lines.push(`${face} = ${textureExpression(textureName, pack)}`);
+    }
   }
   if (side && overlay) {
     lines.push(`side = ${textureExpression(side, pack)} + ${textureExpression(overlay, pack)}`);
@@ -218,6 +227,12 @@ function blockComposition(block: BlockSpec, pack: TexturePackAsset): string[] {
   }
 
   return lines.length > 0 ? lines : ["no face composition available"];
+}
+
+function blockFaceOrder(face: string): number {
+  const order = ["all", "top", "bottom", "north", "east", "south", "west", "side", "overlay", "particle"];
+  const index = order.indexOf(face);
+  return index === -1 ? order.length : index;
 }
 
 function textureExpression(textureName: string, pack: TexturePackAsset): string {
