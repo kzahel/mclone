@@ -29,7 +29,7 @@ use mclone_mesh::{
 use mclone_protocol::{
     ClientCommand, EntityKind, ItemKind, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
 };
-use mclone_render::chunk::PerspectiveRenderPose;
+use mclone_render::chunk::{ChunkCamera, PerspectiveRenderPose};
 use mclone_render::entity::ActorInstance;
 use mclone_render::gui::WorldGuiLine;
 
@@ -1848,16 +1848,6 @@ pub struct EnginePoseCorrectionAcceptance {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct EngineRenderCamera {
-    pub eye: [f32; 3],
-    pub target: [f32; 3],
-    pub up: [f32; 3],
-    pub fov_y_radians: f32,
-    pub z_near: f32,
-    pub z_far: f32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LandingEvent {
     pub impact_speed: f64,
     pub position: Vec3d,
@@ -2467,10 +2457,6 @@ impl EngineCameraController {
         ))
     }
 
-    pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
-        render_camera_from_snapshot_with_view_mode(self.snapshot(), self.view_mode, render_distance)
-    }
-
     pub fn render_pose(&self, render_distance: u32) -> PerspectiveRenderPose {
         render_pose_from_snapshot_with_view_mode(self.snapshot(), self.view_mode, render_distance)
     }
@@ -2610,22 +2596,28 @@ fn sanitize_debug_radius(radius: f64, fallback: f64) -> f64 {
     }
 }
 
-pub fn render_camera_from_snapshot(
+/// Compatibility path for fixed overview/headless diagnostics that still
+/// consume `ChunkCamera`. Player-controlled flat render paths should use
+/// `render_pose_from_snapshot` or `EngineCameraController::render_pose`.
+pub fn legacy_chunk_camera_from_snapshot(
     snapshot: EngineCameraSnapshot,
     render_distance: u32,
-) -> EngineRenderCamera {
-    render_camera_from_snapshot_with_view_mode(
+) -> ChunkCamera {
+    legacy_chunk_camera_from_snapshot_with_view_mode(
         snapshot,
         EngineCameraViewMode::FirstPerson,
         render_distance,
     )
 }
 
-pub fn render_camera_from_snapshot_with_view_mode(
+/// Compatibility path for fixed overview/headless diagnostics that still
+/// consume `ChunkCamera`. Player-controlled flat render paths should use
+/// `render_pose_from_snapshot_with_view_mode`.
+pub fn legacy_chunk_camera_from_snapshot_with_view_mode(
     snapshot: EngineCameraSnapshot,
     view_mode: EngineCameraViewMode,
     render_distance: u32,
-) -> EngineRenderCamera {
+) -> ChunkCamera {
     let forward = view_forward(snapshot.yaw_radians, snapshot.pitch_radians);
     let eye = match view_mode {
         EngineCameraViewMode::FirstPerson => snapshot.eye,
@@ -2634,7 +2626,7 @@ pub fn render_camera_from_snapshot_with_view_mode(
             .add(forward.scale(-THIRD_PERSON_CAMERA_DISTANCE)),
     };
     let target = eye.add(forward);
-    EngineRenderCamera {
+    ChunkCamera {
         eye: vec3d_to_f32_array(eye),
         target: vec3d_to_f32_array(target),
         up: [0.0, 1.0, 0.0],
@@ -5605,7 +5597,7 @@ mod tests {
                 EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), yaw, -0.35, 32.0);
             let before = camera.snapshot();
 
-            let render = render_camera_from_snapshot(before, 1);
+            let render = legacy_chunk_camera_from_snapshot(before, 1);
             let view_dx = f64::from(render.target[0]) - f64::from(render.eye[0]);
             let view_dz = f64::from(render.target[2]) - f64::from(render.eye[2]);
             let view_len = view_dx.hypot(view_dz);
@@ -5649,8 +5641,8 @@ mod tests {
         let snapshot =
             EngineCameraSnapshot::from_eye_pose(Vec3d::new(8.0, 70.0, 8.0), 0.0, 0.0, 24.0);
 
-        let first = render_camera_from_snapshot(snapshot, 2);
-        let third = render_camera_from_snapshot_with_view_mode(
+        let first = legacy_chunk_camera_from_snapshot(snapshot, 2);
+        let third = legacy_chunk_camera_from_snapshot_with_view_mode(
             snapshot,
             EngineCameraViewMode::ThirdPersonBack,
             2,
@@ -5873,16 +5865,18 @@ mod tests {
     }
 
     #[test]
-    fn engine_camera_render_camera_targets_forward_direction() {
+    fn engine_camera_render_pose_targets_forward_direction() {
         let camera =
             EngineCameraController::from_eye_pose(Vec3d::new(1.0, 2.0, 3.0), 0.0, 0.0, 32.0);
 
-        let render_camera = camera.render_camera(2);
+        let render_view = camera
+            .render_pose(2)
+            .render_view(1280, 720)
+            .expect("render pose should build");
 
-        assert_eq!(render_camera.eye, [1.0, 2.0, 3.0]);
-        assert_eq!(render_camera.target, [1.0, 2.0, 4.0]);
-        assert_eq!(render_camera.up, [0.0, 1.0, 0.0]);
-        assert!(render_camera.z_far > 700.0);
+        assert_vec3_close(render_view.camera_position, Vec3::new(1.0, 2.0, 3.0));
+        assert_vec3_close(render_view.camera_forward, Vec3::Z);
+        assert!(render_view.z_far > 700.0);
     }
 
     #[test]

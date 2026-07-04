@@ -1,6 +1,6 @@
 # 138: Flat Render Camera Pose
 
-Status: proposed; Slices A-D flat pose and sky routing landed 2026-07-04
+Status: complete; flat pose route, sky route, and cleanup landed 2026-07-04
 Workstream: native Rust, shared render/session boundary, desktop validation first
 
 ## Purpose
@@ -242,19 +242,27 @@ Validation:
 
 ### Slice E: Cleanup And Contract Hardening
 
-- [ ] Decide whether `EngineRenderCamera` should be replaced outright or kept as
+- [x] Decide whether `EngineRenderCamera` should be replaced outright or kept as
       a deprecated compatibility wrapper.
-- [ ] Remove app-local render-camera conversion helpers that are no longer
+- [x] Remove app-local render-camera conversion helpers that are no longer
       needed.
-- [ ] Add debug assertions or fallible constructors for non-finite camera bases.
-- [ ] Document the render-pose contract in `docs/native-engine-architecture.md`
+- [x] Add debug assertions or fallible constructors for non-finite camera bases.
+- [x] Document the render-pose contract in `docs/native-engine-architecture.md`
       if the public shared boundary changed materially.
+
+Result: `EngineRenderCamera` was removed outright. Remaining diagnostic callers
+that still need fixed `ChunkCamera` values use
+`legacy_chunk_camera_from_snapshot(...)` in `mclone-render-session`, so no app
+crate owns an `EngineRenderCamera -> ChunkCamera` bridge. `ChunkCamera` and sky
+view-projection construction now debug-assert finite render-view output, while
+`PerspectiveRenderPose::render_view(...)` remains the fallible path for
+player-controlled flat rendering.
 
 Validation:
 
-- `cargo test --manifest-path native/Cargo.toml`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-render-session -p mclone-native-client`
 - `pnpm native:web:build`
-- relevant offscreen/web screenshot smokes from `docs/platforms.md`
+- `pnpm native:desktop-offscreen:smoke`
 
 ## Acceptance Criteria
 

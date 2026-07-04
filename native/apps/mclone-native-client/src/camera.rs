@@ -4,8 +4,7 @@ use mclone_render::chunk::ChunkCamera;
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND,
     ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_SPAWN_PITCH_RADIANS,
-    ENGINE_CAMERA_SPAWN_YAW_RADIANS, EngineCameraSnapshot, EngineRenderCamera,
-    render_camera_from_snapshot,
+    ENGINE_CAMERA_SPAWN_YAW_RADIANS, EngineCameraSnapshot, legacy_chunk_camera_from_snapshot,
 };
 
 use crate::cli::SceneOptions;
@@ -37,10 +36,7 @@ impl SpectatorCamera {
     }
 
     pub(crate) fn camera(&self, render_distance: u32) -> ChunkCamera {
-        chunk_camera_from_engine(render_camera_from_snapshot(
-            self.engine_snapshot(),
-            render_distance,
-        ))
+        legacy_chunk_camera_from_snapshot(self.engine_snapshot(), render_distance)
     }
 
     pub(crate) fn engine_snapshot(&self) -> EngineCameraSnapshot {
@@ -76,17 +72,6 @@ impl SpectatorCamera {
     pub(crate) fn forward(&self) -> Vec3 {
         let camera = self.camera(0);
         (Vec3::from_array(camera.target) - Vec3::from_array(camera.eye)).normalize()
-    }
-}
-
-pub(crate) fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
-    ChunkCamera {
-        eye: camera.eye,
-        target: camera.target,
-        up: camera.up,
-        fov_y_radians: camera.fov_y_radians,
-        z_near: camera.z_near,
-        z_far: camera.z_far,
     }
 }
 

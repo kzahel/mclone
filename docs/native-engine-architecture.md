@@ -81,6 +81,12 @@ platform input/lifecycle
 ```
 
 This covers desktop flat, offscreen flat, flat Android, and web canvas paths.
+Player-controlled flat cameras cross this boundary as renderer-facing poses:
+`mclone-render-session` converts engine yaw/pitch snapshots into
+`PerspectiveRenderPose`, and `mclone-render` validates that pose while building
+finite `ChunkRenderView` matrices and camera bases. `ChunkCamera` remains a
+compatibility shape for fixed overview/headless diagnostics; new flat player
+camera paths should not reconstruct rendering from `eye + target + world_up`.
 
 Stereo XR hosts share OpenXR and terrain-scene behavior where practical:
 

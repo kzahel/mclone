@@ -98,7 +98,7 @@ impl ChunkCamera {
         let right = forward.cross(world_up).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
 
-        ChunkRenderView {
+        let render_view = ChunkRenderView {
             view,
             projection,
             view_projection: projection * view,
@@ -111,7 +111,12 @@ impl ChunkCamera {
             z_near: self.z_near,
             z_far: self.z_far,
             projection_kind: ChunkProjectionKind::CameraPerspective,
-        }
+        };
+        debug_assert!(
+            render_view.is_finite(),
+            "ChunkCamera produced a non-finite render view: {render_view:?}"
+        );
+        render_view
     }
 
     pub fn orbit(&mut self, yaw_delta: f32, pitch_delta: f32) {
@@ -316,6 +321,10 @@ impl ChunkRenderView {
     /// Minecraft's `renderSky`, which draws into a pose stack carrying only the
     /// camera rotation.
     pub fn sky_view_projection(self) -> Mat4 {
+        debug_assert!(
+            self.is_finite(),
+            "sky view-projection requires a finite render view: {self:?}"
+        );
         let rotation_only_view = Mat4::from_cols(
             self.view.x_axis,
             self.view.y_axis,
