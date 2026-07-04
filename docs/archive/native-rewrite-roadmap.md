@@ -1,8 +1,10 @@
 # Native Rewrite Roadmap
 
-This is the durable plan for the Rust/native engine. It supersedes older TS-first roadmap language in [`strategy.md`](strategy.md) and the exploratory posture archived in [`archive/native-target.md`](archive/native-target.md).
+Archived: this transition-era roadmap has been superseded by [`../native-engine-architecture.md`](../native-engine-architecture.md), [`../platforms.md`](../platforms.md), and the active tactical index at [`../tactical/README.md`](../tactical/README.md).
 
-The retired browser engine has been removed from the live tree. Retained reference value now lives in the Java oracle harness under [`../oracle/`](../oracle/), shared oracle fixtures under [`../test/fixtures/`](../test/fixtures/), and Git history.
+This was the durable plan for the Rust/native engine while the project was moving away from the earlier browser implementation. It superseded older TS-first roadmap language in [`../strategy.md`](../strategy.md) and the exploratory posture archived in [`native-target.md`](native-target.md).
+
+The retired browser engine has been removed from the live tree. Retained reference value now lives in the Java oracle harness under [`../../oracle/`](../../oracle/), shared oracle fixtures under [`../../test/fixtures/`](../../test/fixtures/), and Git history.
 
 The primary implementation direction is now:
 
@@ -23,7 +25,7 @@ Reference Rust engine for native app/render/XR patterns:
 
 ## Direction
 
-Build the engine as normal Rust crates first, with desktop/native as the fastest main development loop. Keep the other validated lanes alive through explicit contracts and targeted smokes rather than platform-specific feature forks. Current platform posture lives in [`platforms.md`](platforms.md), the offscreen flat-client target lives in [`offscreen-flat-client.md`](offscreen-flat-client.md), and the completed XR frontload sequence is recorded through [`tactical/076-native-xr-frontload-plan.md`](tactical/076-native-xr-frontload-plan.md), [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md), [`tactical/079-desktop-openxr-mclone-frame.md`](tactical/079-desktop-openxr-mclone-frame.md), and [`tactical/083-android-xr-quest-standalone.md`](tactical/083-android-xr-quest-standalone.md).
+Build the engine as normal Rust crates first, with desktop/native as the fastest main development loop. Keep the other validated lanes alive through explicit contracts and targeted smokes rather than platform-specific feature forks. Current platform posture lives in [`../platforms.md`](../platforms.md), the offscreen flat-client target lives in [`../offscreen-flat-client.md`](../offscreen-flat-client.md), and the completed XR frontload sequence is recorded through [`../tactical/076-native-xr-frontload-plan.md`](../tactical/076-native-xr-frontload-plan.md), [`../tactical/077-multiview-render-contract.md`](../tactical/077-multiview-render-contract.md), [`../tactical/079-desktop-openxr-mclone-frame.md`](../tactical/079-desktop-openxr-mclone-frame.md), and [`../tactical/083-android-xr-quest-standalone.md`](../tactical/083-android-xr-quest-standalone.md).
 
 This is not equal effort across targets:
 
@@ -32,7 +34,7 @@ This is not equal effort across targets:
   scripted/network input, and future frame sinks
 - desktop OpenXR is the desktop stereo/runtime validation lane
 - Android XR / Quest standalone is the standalone headset validation lane
-- flat Android is the single-view native mobile validation lane, tracked by [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md)
+- flat Android is the single-view native mobile validation lane, tracked by [`../tactical/074-flat-android-build-smoke.md`](../tactical/074-flat-android-build-smoke.md)
 - web/WASM is the browser compatibility/deploy lane
 - XR remains native-only until there is a concrete WebXR path worth supporting
 
@@ -183,7 +185,7 @@ render via wgpu/web
 2. **Native minimal app**
 
    Add `winit` + `wgpu`, clear screen, camera/input, and one chunk. This becomes the main development loop.
-   The native tactical sequence starts at [`tactical/000-native-render-bringup.md`](tactical/000-native-render-bringup.md); the index is [`tactical/README.md`](tactical/README.md). The parent checklist for reaching the retired engine's capability horizon is [`tactical/003-native-ts-parity-roadmap.md`](tactical/003-native-ts-parity-roadmap.md).
+   The native tactical sequence starts at [`../tactical/000-native-render-bringup.md`](../tactical/000-native-render-bringup.md); the index is [`../tactical/README.md`](../tactical/README.md). The parent checklist for reaching the retired engine's capability horizon is [`../tactical/003-native-ts-parity-roadmap.md`](../tactical/003-native-ts-parity-roadmap.md).
 
 3. **Web smoke very early**
 
@@ -199,7 +201,7 @@ render via wgpu/web
 
 6. **Preserve platform boundaries while adding features**
 
-   Renderer view/projection inputs and render targets are now explicit enough for desktop, headless, web, flat Android, and stereo XR hosts to drive shared rendering. Keep that boundary intact while lighting, UI, entities, and gameplay grow. The first boundary pass is [`tactical/022-platform-target-contract-and-render-boundary.md`](tactical/022-platform-target-contract-and-render-boundary.md); the multi-view pass is [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md).
+   Renderer view/projection inputs and render targets are now explicit enough for desktop, headless, web, flat Android, and stereo XR hosts to drive shared rendering. Keep that boundary intact while lighting, UI, entities, and gameplay grow. The first boundary pass is [`../tactical/022-platform-target-contract-and-render-boundary.md`](../tactical/022-platform-target-contract-and-render-boundary.md); the multi-view pass is [`../tactical/077-multiview-render-contract.md`](../tactical/077-multiview-render-contract.md).
 
 ## Rule Of Thumb
 
@@ -232,7 +234,7 @@ Current native shape:
 Recommended next alignment milestones:
 
 1. keep the platform parity/contract matrices in
-   [`topics/platform-parity.md`](topics/platform-parity.md) current and connect
+   [`../topics/platform-parity.md`](../topics/platform-parity.md) current and connect
    each shared boundary to an explicit smoke/test sentinel
 2. reconcile host-mode convergence for web and XR so local-integrated versus
    remote-dedicated remains a shared runtime/session contract across all lanes
@@ -245,8 +247,9 @@ Recommended next alignment milestones:
 
 ## Documentation Ownership
 
-- This file owns the native rewrite direction and target topology.
-- [`native/README.md`](../native/README.md) owns workspace mechanics and crate list.
-- [`platforms.md`](platforms.md) owns the current platform matrix and validation policy.
-- [`worldgen-status.md`](worldgen-status.md) should describe native worldgen status and oracle fixture coverage.
+- This file is archived historical context.
+- [`../../native/README.md`](../../native/README.md) owns workspace mechanics and crate list.
+- [`../native-engine-architecture.md`](../native-engine-architecture.md) owns the current native engine architecture.
+- [`../platforms.md`](../platforms.md) owns the current platform matrix and validation policy.
+- [`../worldgen-status.md`](../worldgen-status.md) should describe native worldgen status and oracle fixture coverage.
 - Numbered tactical docs remain useful work logs, but older TS-first tactical language should not override this roadmap.

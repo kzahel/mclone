@@ -28,7 +28,7 @@ Shared gameplay, runtime, asset, mesh, UI, renderer, and XR contracts must stay 
 Current project posture and work indexes:
 
 - [`docs/platforms.md`](docs/platforms.md) — current platform matrix
-- [`docs/native-rewrite-roadmap.md`](docs/native-rewrite-roadmap.md) — durable native architecture
+- [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) — durable native architecture
 - [`docs/tactical/`](docs/tactical/README.md) — native Rust workstream tacticals
 - [`docs/topics/`](docs/topics/README.md) — durable subsystem progress indexes
 - [`docs/native-web.md`](docs/native-web.md) — Rust/WASM web build, smoke, and deploy notes

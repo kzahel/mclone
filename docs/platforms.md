@@ -4,8 +4,8 @@ This document owns Mclone's current platform posture for the native Rust
 engine. It is the entrypoint for supported client/platform lanes, validation
 commands, and the boundaries that keep shared engine crates platform-neutral.
 
-The durable rewrite roadmap remains
-[`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). This page is
+The durable native engine architecture lives in
+[`native-engine-architecture.md`](native-engine-architecture.md). This page is
 narrower: app hosts, surfaces, packaging, validation lanes, and cross-platform
 contract health.
 

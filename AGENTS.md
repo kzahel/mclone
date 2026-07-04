@@ -15,6 +15,7 @@ The `.sh` setup scripts (`scripts/decompile-mc.sh`, `scripts/extract-assets.sh`,
 Background docs own the long-form project context:
 
 - [`docs/platforms.md`](docs/platforms.md) owns the current platform posture, Playbox reference entry points, platform boundaries, and validation matrix.
+- [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) owns the current native engine architecture and shared crate/app ownership shape.
 - [`docs/reference-minecraft.md`](docs/reference-minecraft.md) owns the Minecraft 1.17.1 reference tree, bootstrap/mapping notes, vanilla target, and disabled Caves & Cliffs Part 1 systems.
 - [`docs/native-web.md`](docs/native-web.md) owns Rust/WASM web build, smoke, deploy, and local deploy-hook notes.
 
@@ -30,7 +31,7 @@ For web/WASM, keep `wasm32-unknown-unknown` as the browser target unless a tacti
 
 The retired browser engine has been removed from the live tree. Git history is the archive for old implementation context. Retained oracle helpers under `oracle/lib/**` and shared fixture data under `test/fixtures/**` are active reference assets, not legacy engine code.
 
-Native Rust rewrite tactical docs live under `docs/tactical/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Historical legacy tacticals, if still present during cleanup, are not implementation guidance for new work.
+Native Rust tactical docs live under `docs/tactical/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Historical legacy tacticals, if still present during cleanup, are not implementation guidance for new work.
 
 ## Workstream routing
 

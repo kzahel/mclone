@@ -13,7 +13,7 @@ This doc owns three things no other doc owns:
 3. a **shared-contract × consumer matrix** — the burn-down for "proper platform
    interfaces and reuse," i.e. the platform contract matrix that
    [`../platforms.md`](../platforms.md), [`../architecture.md`](../architecture.md),
-   [`../native-rewrite-roadmap.md`](../native-rewrite-roadmap.md), and
+   [`../native-engine-architecture.md`](../native-engine-architecture.md), and
    [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md)
    (Slice 4) all call for.
 

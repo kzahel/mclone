@@ -2,7 +2,7 @@
 
 Current approach: native-first Rust direct translation for parity-critical engine logic, with web/WASM kept alive as an early compatibility gate. The retired browser engine has been removed from the live tree; Git history is the archive for that implementation.
 
-The durable native roadmap lives in [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). This document owns translation/oracle policy and the legal distinction between private direct translation and any future clean-room release.
+The durable native engine architecture lives in [`native-engine-architecture.md`](native-engine-architecture.md). This document owns translation/oracle policy and the legal distinction between private direct translation and any future clean-room release.
 
 For runtime boundaries that are intentionally not a 1:1 translation of Minecraft's host architecture, see [`architecture.md`](./architecture.md).
 
@@ -41,7 +41,7 @@ Ground truth for tests is **real Minecraft**, not our Phase-1 translation.
 | 1.17.1 worldgen (PRNG, noise, biome source, terrain, carvers, surface, features, structure positions) | Direct translation from Java → Rust in Phase 1 |
 | 1.18+ density functions (if we go that route later) | Direct translation from 1.18 decomp into Rust after the target is explicitly changed |
 | Textures, block models, structure NBT | Use Minecraft's for dev (`docs/assets-plan.md`); replace for Phase 2 release |
-| Renderer, physics, UI, networking, chunk storage | Original Rust/native work, shaped by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md) |
+| Renderer, physics, UI, networking, chunk storage | Original Rust/native work, shaped by [`native-engine-architecture.md`](native-engine-architecture.md) |
 
 ## AI agents and copyright
 

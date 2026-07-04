@@ -7,7 +7,7 @@ Render one generated overworld chunk from the native Rust pipeline. This is the 
 ## Dependencies
 
 - [`000-native-render-bringup.md`](000-native-render-bringup.md)
-- [`../native-rewrite-roadmap.md`](../native-rewrite-roadmap.md)
+- [`../native-engine-architecture.md`](../native-engine-architecture.md)
 
 Use `~/code/playbox` only as a reference for `wgpu` buffer/pipeline/depth/headless patterns. Keep this slice specific to voxel rendering and do not import Playbox code or architecture.
 
