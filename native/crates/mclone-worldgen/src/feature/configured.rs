@@ -1,7 +1,7 @@
 use crate::block::{
     ACACIA_LEAVES, ACACIA_LOG, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BROWN_MUSHROOM_BLOCK,
     DARK_OAK_LEAVES, DARK_OAK_LOG, DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, JUNGLE_LEAVES,
-    JUNGLE_LOG, LAVA, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, RED_MUSHROOM_BLOCK, RawBlockId,
+    JUNGLE_LOG, LAVA, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, PODZOL, RED_MUSHROOM_BLOCK, RawBlockId,
     SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF, WATER,
 };
 use crate::placement::{ConfiguredDecorator, CountConfiguration, IntProvider};
@@ -399,6 +399,7 @@ pub enum TrunkPlacerConfiguration {
     Fancy(StraightTrunkPlacerConfiguration),
     Forking(StraightTrunkPlacerConfiguration),
     DarkOak(StraightTrunkPlacerConfiguration),
+    Giant(StraightTrunkPlacerConfiguration),
 }
 
 impl TrunkPlacerConfiguration {
@@ -434,12 +435,21 @@ impl TrunkPlacerConfiguration {
         ))
     }
 
+    pub const fn giant(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
+        Self::Giant(StraightTrunkPlacerConfiguration::new(
+            base_height,
+            height_rand_a,
+            height_rand_b,
+        ))
+    }
+
     pub(super) fn tree_height(self, random: &mut impl RandomSource) -> i32 {
         match self {
             Self::Straight(config)
             | Self::Fancy(config)
             | Self::Forking(config)
-            | Self::DarkOak(config) => config.tree_height(random),
+            | Self::DarkOak(config)
+            | Self::Giant(config) => config.tree_height(random),
         }
     }
 }
@@ -466,6 +476,11 @@ pub enum FoliagePlacerConfiguration {
         offset: IntProvider,
         height: IntProvider,
     },
+    MegaPine {
+        radius: IntProvider,
+        offset: IntProvider,
+        crown_height: IntProvider,
+    },
     Acacia {
         radius: IntProvider,
         offset: IntProvider,
@@ -488,6 +503,7 @@ impl FoliagePlacerConfiguration {
             Self::Fancy { height, .. } => height,
             Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
             Self::Pine { height, .. } => height.sample(random),
+            Self::MegaPine { crown_height, .. } => crown_height.sample(random),
             Self::Acacia { .. } => 0,
             Self::DarkOak { .. } => 4,
         }
@@ -500,6 +516,7 @@ impl FoliagePlacerConfiguration {
             Self::Pine { radius, .. } => {
                 radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
             }
+            Self::MegaPine { radius, .. } => radius.sample(random),
             Self::Acacia { radius, .. } => radius.sample(random),
             Self::DarkOak { radius, .. } => radius.sample(random),
         }
@@ -511,6 +528,7 @@ impl FoliagePlacerConfiguration {
             | Self::Fancy { offset, .. }
             | Self::Spruce { offset, .. }
             | Self::Pine { offset, .. }
+            | Self::MegaPine { offset, .. }
             | Self::Acacia { offset, .. }
             | Self::DarkOak { offset, .. } => offset.sample(random),
         }
@@ -557,6 +575,7 @@ pub struct TreeConfiguration {
     pub foliage_placer: FoliagePlacerConfiguration,
     pub minimum_size: TwoLayersFeatureSize,
     pub beehive_probability: Option<f32>,
+    pub alter_ground_state: Option<RawBlockId>,
 }
 
 impl Eq for TreeConfiguration {}
@@ -576,11 +595,17 @@ impl TreeConfiguration {
             foliage_placer,
             minimum_size,
             beehive_probability: None,
+            alter_ground_state: None,
         }
     }
 
     pub const fn with_beehive_probability(mut self, probability: f32) -> Self {
         self.beehive_probability = Some(probability);
+        self
+    }
+
+    pub const fn with_alter_ground_state(mut self, state: RawBlockId) -> Self {
+        self.alter_ground_state = Some(state);
         self
     }
 
@@ -682,6 +707,36 @@ impl TreeConfiguration {
             },
             TwoLayersFeatureSize::new(2, 0, 2),
         )
+    }
+
+    pub const fn mega_spruce() -> Self {
+        Self::new(
+            SPRUCE_LOG,
+            SPRUCE_LEAVES,
+            TrunkPlacerConfiguration::giant(13, 2, 14),
+            FoliagePlacerConfiguration::MegaPine {
+                radius: IntProvider::constant(0),
+                offset: IntProvider::constant(0),
+                crown_height: IntProvider::uniform(13, 17),
+            },
+            TwoLayersFeatureSize::new(1, 1, 2),
+        )
+        .with_alter_ground_state(PODZOL)
+    }
+
+    pub const fn mega_pine() -> Self {
+        Self::new(
+            SPRUCE_LOG,
+            SPRUCE_LEAVES,
+            TrunkPlacerConfiguration::giant(13, 2, 14),
+            FoliagePlacerConfiguration::MegaPine {
+                radius: IntProvider::constant(0),
+                offset: IntProvider::constant(0),
+                crown_height: IntProvider::uniform(3, 7),
+            },
+            TwoLayersFeatureSize::new(1, 1, 2),
+        )
+        .with_alter_ground_state(PODZOL)
     }
 
     pub const fn dark_oak() -> Self {

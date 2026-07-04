@@ -57,13 +57,15 @@ pub(super) fn overworld_features_for_biome_cached(
         "minecraft:tall_birch_forest" | "minecraft:tall_birch_hills" => {
             tall_birch_forest_feature_table()
         }
-        "minecraft:taiga"
-        | "minecraft:taiga_hills"
-        | "minecraft:taiga_mountains"
-        | "minecraft:giant_tree_taiga"
-        | "minecraft:giant_tree_taiga_hills"
-        | "minecraft:giant_spruce_taiga"
-        | "minecraft:giant_spruce_taiga_hills" => taiga_feature_table(),
+        "minecraft:taiga" | "minecraft:taiga_hills" | "minecraft:taiga_mountains" => {
+            taiga_feature_table()
+        }
+        "minecraft:giant_tree_taiga" | "minecraft:giant_tree_taiga_hills" => {
+            giant_taiga_feature_table(false)
+        }
+        "minecraft:giant_spruce_taiga" | "minecraft:giant_spruce_taiga_hills" => {
+            giant_taiga_feature_table(true)
+        }
         "minecraft:snowy_taiga"
         | "minecraft:snowy_taiga_hills"
         | "minecraft:snowy_taiga_mountains" => snowy_taiga_feature_table(),
@@ -183,6 +185,28 @@ fn taiga_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
         .get_or_init(|| build_overworld_feature_table("minecraft:taiga", taiga_features()))
+        .as_slice()
+}
+
+fn giant_taiga_feature_table(giant_spruce: bool) -> &'static [PlacedFeature] {
+    static GIANT_TREE_TAIGA: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static GIANT_SPRUCE_TAIGA: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if giant_spruce {
+        &GIANT_SPRUCE_TAIGA
+    } else {
+        &GIANT_TREE_TAIGA
+    };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table(
+                if giant_spruce {
+                    "minecraft:giant_spruce_taiga"
+                } else {
+                    "minecraft:giant_tree_taiga"
+                },
+                giant_taiga_features(giant_spruce),
+            )
+        })
         .as_slice()
 }
 
@@ -729,6 +753,24 @@ fn taiga_features() -> Vec<PlacedFeature> {
     ]
 }
 
+fn giant_taiga_features(giant_spruce: bool) -> Vec<PlacedFeature> {
+    vec![
+        large_fern_patch_feature(),
+        glow_lichen_feature(),
+        giant_taiga_tree_feature(giant_spruce),
+        default_flower_feature(),
+        taiga_grass_patch_feature(),
+        dead_bush_patch(1),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
+        berry_patch_feature(false),
+    ]
+}
+
 fn snowy_features() -> Vec<PlacedFeature> {
     vec![
         tree_feature(BasicTreeConfiguration::spruce(), 3, 0.2, 1),
@@ -916,6 +958,44 @@ pub(super) fn taiga_vegetation_feature() -> PlacedFeature {
             ConfiguredDecorator::water_depth_threshold(0),
             ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
         ],
+    )
+}
+
+fn giant_taiga_tree_feature(giant_spruce: bool) -> PlacedFeature {
+    let features = if giant_spruce {
+        vec![
+            WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::mega_spruce()),
+                0.33333334,
+            ),
+            WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::pine()),
+                0.33333334,
+            ),
+        ]
+    } else {
+        vec![
+            WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::mega_spruce()),
+                0.025641026,
+            ),
+            WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::mega_pine()),
+                0.30769232,
+            ),
+            WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::pine()),
+                0.33333334,
+            ),
+        ]
+    };
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            features,
+            ConfiguredFeature::tree(TreeConfiguration::spruce()),
+        )),
+        tree_threshold_decorators(10, 0.1, 1),
     )
 }
 

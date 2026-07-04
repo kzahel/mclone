@@ -1,11 +1,11 @@
 use crate::block::{
     ACACIA_LEAVES, ACACIA_LOG, AIR, ALLIUM, AZURE_BLUET, BIRCH_LEAVES, BIRCH_LOG, BLUE_ORCHID,
-    BROWN_MUSHROOM, CAVE_AIR, CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH,
-    DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, JUNGLE_LEAVES, JUNGLE_LOG, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, MYCELIUM, OAK_LEAVES, OAK_LOG,
-    ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM,
-    RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SPRUCE_LEAVES, SPRUCE_LOG, SUNFLOWER_LOWER,
-    SUNFLOWER_UPPER, WATER, WHITE_TULIP,
+    BROWN_MUSHROOM, CAVE_AIR, COARSE_DIRT, CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
+    DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, JUNGLE_LEAVES, JUNGLE_LOG,
+    LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, MYCELIUM,
+    OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL,
+    POPPY, RED_MUSHROOM, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SPRUCE_LEAVES,
+    SPRUCE_LOG, SUNFLOWER_LOWER, SUNFLOWER_UPPER, WATER, WHITE_TULIP,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -218,6 +218,9 @@ fn place_trunk<W: FeatureWorld>(
         }
         TrunkPlacerConfiguration::DarkOak(_) => {
             place_dark_oak_trunk(world, random, base, height, config, placement)
+        }
+        TrunkPlacerConfiguration::Giant(_) => {
+            place_giant_trunk(world, random, base, height, config, placement)
         }
     }
 }
@@ -528,6 +531,65 @@ fn place_dark_oak_trunk<W: FeatureWorld>(
     attachments
 }
 
+fn place_giant_trunk<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    base: BlockPos,
+    height: i32,
+    config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
+) -> Vec<FoliageAttachment> {
+    let below = BlockPos::new(base.x, base.y - 1, base.z);
+    set_dirt_at(world, random, below);
+    set_dirt_at(world, random, BlockPos::new(below.x + 1, below.y, below.z));
+    set_dirt_at(world, random, BlockPos::new(below.x, below.y, below.z + 1));
+    set_dirt_at(
+        world,
+        random,
+        BlockPos::new(below.x + 1, below.y, below.z + 1),
+    );
+
+    for y_offset in 0..height {
+        let y = base.y + y_offset;
+        place_log(
+            world,
+            random,
+            BlockPos::new(base.x, y, base.z),
+            config,
+            placement,
+        );
+        if y_offset < height - 1 {
+            place_log(
+                world,
+                random,
+                BlockPos::new(base.x + 1, y, base.z),
+                config,
+                placement,
+            );
+            place_log(
+                world,
+                random,
+                BlockPos::new(base.x + 1, y, base.z + 1),
+                config,
+                placement,
+            );
+            place_log(
+                world,
+                random,
+                BlockPos::new(base.x, y, base.z + 1),
+                config,
+                placement,
+            );
+        }
+    }
+
+    vec![FoliageAttachment::new(
+        BlockPos::new(base.x, base.y + height, base.z),
+        0,
+        true,
+    )]
+}
+
 fn create_foliage<W: FeatureWorld>(
     world: &mut W,
     random: &mut impl RandomSource,
@@ -586,6 +648,27 @@ fn create_foliage<W: FeatureWorld>(
                 } else if radius < foliage_radius {
                     radius += 1;
                 }
+            }
+        }
+        FoliagePlacerConfiguration::MegaPine { .. } => {
+            let mut previous_radius = 0;
+            for y_offset in (offset - foliage_height)..=offset {
+                let delta = offset - y_offset;
+                let base_radius = foliage_radius
+                    + attachment.radius_offset
+                    + ((delta as f32 / foliage_height.max(1) as f32) * 3.5).floor() as i32;
+                let radius = if delta > 0
+                    && base_radius == previous_radius
+                    && ((attachment.pos.y + y_offset) & 1) == 0
+                {
+                    base_radius + 1
+                } else {
+                    base_radius
+                };
+                place_leaves_row(
+                    world, random, config, attachment, radius, y_offset, placement,
+                );
+                previous_radius = base_radius;
             }
         }
         FoliagePlacerConfiguration::Acacia { .. } => {
@@ -725,6 +808,13 @@ fn place_leaves_row<W: FeatureWorld>(
                         continue;
                     }
                 }
+                FoliagePlacerConfiguration::MegaPine { .. } => {
+                    let (abs_x, abs_z) =
+                        signed_leaf_offsets_abs(x_offset, z_offset, attachment.double_trunk);
+                    if should_skip_mega_pine_leaf(abs_x, abs_z, radius) {
+                        continue;
+                    }
+                }
                 FoliagePlacerConfiguration::Acacia { .. } => {
                     if should_skip_acacia_leaf(
                         x_offset,
@@ -776,6 +866,10 @@ fn signed_leaf_offsets_abs(x_offset: i32, z_offset: i32, double_trunk: bool) -> 
 
 fn should_skip_conifer_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
     abs_x == radius && abs_z == radius && radius > 0
+}
+
+fn should_skip_mega_pine_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
+    abs_x + abs_z >= 7 || abs_x * abs_x + abs_z * abs_z > radius * radius
 }
 
 fn should_skip_blob_leaf(
@@ -910,8 +1004,38 @@ fn apply_tree_decorators<W: FeatureWorld>(
     config: TreeConfiguration,
     placement: &TreePlacementBlocks,
 ) {
+    if let Some(state) = config.alter_ground_state {
+        apply_alter_ground_decorator(world, state, placement);
+    }
     if let Some(probability) = config.beehive_probability {
         apply_beehive_decorator(world, random, probability, placement);
+    }
+}
+
+fn apply_alter_ground_decorator<W: FeatureWorld>(
+    world: &mut W,
+    state: RawBlockId,
+    placement: &TreePlacementBlocks,
+) {
+    let Some(base_y) = placement.trunks.iter().map(|pos| pos.y).min() else {
+        return;
+    };
+    let base_trunks = placement
+        .trunks
+        .iter()
+        .copied()
+        .filter(|pos| pos.y == base_y)
+        .collect::<Vec<_>>();
+    for base in base_trunks {
+        for x_offset in -1..=2 {
+            for z_offset in -1..=2 {
+                set_ground_at(
+                    world,
+                    BlockPos::new(base.x + x_offset, base.y - 1, base.z + z_offset),
+                    state,
+                );
+            }
+        }
     }
 }
 
@@ -1015,13 +1139,22 @@ fn set_dirt_at<W: FeatureWorld>(
     _random: &mut impl RandomSource,
     pos: BlockPos,
 ) -> bool {
+    set_ground_at(world, pos, DIRT)
+}
+
+fn set_ground_at<W: FeatureWorld>(world: &mut W, pos: BlockPos, state: RawBlockId) -> bool {
     let Some(current) = world.block_at_world(pos) else {
         return false;
     };
-    if matches!(current, DIRT | PODZOL) {
+    if current == state {
         true
+    } else if matches!(
+        current,
+        GRASS_BLOCK | DIRT | PODZOL | COARSE_DIRT | MYCELIUM
+    ) {
+        world.set_block_world(pos, state)
     } else {
-        world.set_block_world(pos, DIRT)
+        false
     }
 }
 
@@ -1078,7 +1211,7 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     )
 }
 
-fn is_tree_leaf(block_id: crate::block::RawBlockId) -> bool {
+fn is_tree_leaf(block_id: RawBlockId) -> bool {
     matches!(
         block_id,
         OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES | ACACIA_LEAVES | JUNGLE_LEAVES

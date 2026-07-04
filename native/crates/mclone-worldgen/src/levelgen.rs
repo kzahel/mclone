@@ -138,6 +138,7 @@ mod tests {
         FlowerForestFlowers,
         SwampNativeSubsetSugarCaneLilyPad,
         TaigaSpruceFernBerry,
+        GiantTaigaSpruceTrees,
         SnowySpruceFern,
         BadlandsDeadBushCactusSugarCane,
         OceanWaterPlants,
@@ -162,6 +163,7 @@ mod tests {
                     "native swamp vegetation/clay subset plus sugar cane/lily pad"
                 }
                 Self::TaigaSpruceFernBerry => "taiga spruce/fern plus berry bushes",
+                Self::GiantTaigaSpruceTrees => "giant taiga spruce log/leaves plus podzol",
                 Self::SnowySpruceFern => "snowy spruce/fern",
                 Self::BadlandsDeadBushCactusSugarCane => {
                     "badlands dead bush plus cactus/sugar cane"
@@ -223,6 +225,7 @@ mod tests {
                     LARGE_FERN_UPPER,
                     SWEET_BERRY_BUSH,
                 ],
+                Self::GiantTaigaSpruceTrees => &[SPRUCE_LOG, SPRUCE_LEAVES, PODZOL],
                 Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::OceanWaterPlants => &[
@@ -321,6 +324,12 @@ mod tests {
                     .iter()
                     .any(|block| chunk.block_count(*block) > 0)
                         && chunk.block_count(SWEET_BERRY_BUSH) > 0
+                }
+                Self::GiantTaigaSpruceTrees => {
+                    chunk.block_count(SPRUCE_LOG) >= 20
+                        && chunk.block_count(SPRUCE_LEAVES) > 0
+                        && chunk.block_count(PODZOL) > 0
+                        && has_two_by_two_log_square(chunk, SPRUCE_LOG)
                 }
                 Self::WarmOceanCoralSeaPickles => {
                     [
@@ -454,12 +463,12 @@ mod tests {
             feature_family: Some(FeatureFamily::TaigaSpruceFernBerry),
         },
         PaletteMatrixCase {
-            seed: 19,
+            seed: 132,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:giant_tree_taiga",
             surface_family: SurfaceFamily::GiantTaiga,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::GiantTaigaSpruceTrees),
         },
         PaletteMatrixCase {
             seed: 978,
@@ -566,12 +575,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 2923,
+            seed: 6232,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:giant_spruce_taiga",
             surface_family: SurfaceFamily::GiantTaiga,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::GiantTaigaSpruceTrees),
         },
         PaletteMatrixCase {
             seed: 62,
@@ -686,12 +695,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 93,
+            seed: 305,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:giant_tree_taiga_hills",
             surface_family: SurfaceFamily::GiantTaiga,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::GiantTaigaSpruceTrees),
         },
         PaletteMatrixCase {
             seed: 3,
@@ -843,7 +852,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:giant_spruce_taiga_hills",
             surface_family: SurfaceFamily::GiantTaiga,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::GiantTaigaSpruceTrees),
         },
         PaletteMatrixCase {
             seed: 83,
@@ -2882,6 +2891,23 @@ mod tests {
             }
         }
         None
+    }
+
+    fn has_two_by_two_log_square(chunk: &GeneratedChunk, log: RawBlockId) -> bool {
+        for y in chunk.min_y..chunk.min_y + chunk.height {
+            for local_z in 0..GeneratedChunk::WIDTH - 1 {
+                for local_x in 0..GeneratedChunk::WIDTH - 1 {
+                    if chunk.block_at_y(local_x, y, local_z).raw() == log
+                        && chunk.block_at_y(local_x + 1, y, local_z).raw() == log
+                        && chunk.block_at_y(local_x, y, local_z + 1).raw() == log
+                        && chunk.block_at_y(local_x + 1, y, local_z + 1).raw() == log
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn assert_panic_message(work: impl FnOnce() + panic::UnwindSafe, expected: &str) {

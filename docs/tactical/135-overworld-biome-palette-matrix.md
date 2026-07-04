@@ -1,14 +1,14 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, seventeen supported feature-family groups, and 36 F-checked
+overworld tint IDs, eighteen supported feature-family groups, and 40 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads,
 blue orchids, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
 dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, base taiga/snowy-taiga berry, and ordinary forest
-tree plus flower-forest dense/common flower and sunflower-plains sunflower
-palette coverage
+tree plus giant-taiga mega spruce/pine, flower-forest dense/common flower, and
+sunflower-plains sunflower palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -147,8 +147,8 @@ notes.
 | 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier, dark oak canopy, and huge mushroom family checked | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 30 | `minecraft:snowy_taiga` | snowy-taiga | snowy surface/tint, spruce/ferns, and sweet berry bushes checked | seed `29123`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 31 | `minecraft:snowy_taiga_hills` | snowy-taiga | snowy taiga hill surface/tint checked; spruce gap | seed `886`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt surface checked, giant taiga trees/ferns | seed `19`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 33 | `minecraft:giant_tree_taiga_hills` | giant-tree-taiga | giant taiga hill podzol/coarse dirt checked; trees gap | seed `93`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt surface plus giant spruce/mega pine log/leaves family checked; exact mushrooms/vegetation gap | seed `132`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 33 | `minecraft:giant_tree_taiga_hills` | giant-tree-taiga | giant taiga hill podzol/coarse dirt plus giant spruce/mega pine log/leaves family checked; exact mushrooms/vegetation gap | seed `305`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 34 | `minecraft:wooded_mountains` | mountains | mountain surface checked; trees gap | seed `3`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 35 | `minecraft:savanna` | savanna | dry grass tint/surface and acacia tree family checked; tall grass/warm flowers gap | seed `62`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau tint/surface and acacia tree family checked; grass/warm flowers gap | seed `126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -175,8 +175,8 @@ notes.
 | 156 | `minecraft:tall_birch_hills` | birch | birch hill tint/surface and tall-birch selector log/leaves family checked | seed `1557`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 157 | `minecraft:dark_forest_hills` | dark-forest | dark-forest tint/surface, dark oak canopy, and huge mushroom family checked | seed `410`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 158 | `minecraft:snowy_taiga_mountains` | snowy-taiga | snowy taiga mountain tint/surface checked; spruce gap | seed `12006`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | podzol/coarse dirt surface checked, giant spruce gap | seed `2923`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 161 | `minecraft:giant_spruce_taiga_hills` | giant-spruce-taiga | giant spruce hill podzol/coarse dirt checked; tree gap | seed `282`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | podzol/coarse dirt surface plus giant spruce log/leaves family checked; exact mushrooms/vegetation gap | seed `6232`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 161 | `minecraft:giant_spruce_taiga_hills` | giant-spruce-taiga | giant spruce hill podzol/coarse dirt plus giant spruce log/leaves family checked; exact mushrooms/vegetation gap | seed `282`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 162 | `minecraft:modified_gravelly_mountains` | mountains | modified gravelly mountain surface checked | seed `83`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface and acacia tree family checked | seed `68`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau surface and acacia tree family checked | seed `2659`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -235,8 +235,10 @@ Landed:
   cap/stem blocks; mushroom fields require a huge mushroom cap plus stem; birch
   rows require birch logs and leaves; savanna rows require acacia logs and
   leaves; jungle rows require jungle logs and leaves; bamboo jungle rows require
-  bamboo plus jungle logs and leaves; flower forest requires at least four
-  distinct Java `ForestFlowerProvider` small-flower states and one
+  bamboo plus jungle logs and leaves; giant taiga rows require a high-signal
+  spruce log/leaves family with podzol from the Java mega spruce/mega pine
+  alter-ground path; flower forest requires at least four distinct Java
+  `ForestFlowerProvider` small-flower states and one
   `FOREST_FLOWER_VEGETATION_COMMON` tall-flower lower/upper pair; sunflower
   plains requires a sunflower lower/upper pair. The assertions are intentionally
   broad block-family checks, not exact decorated counts.
@@ -260,11 +262,13 @@ Landed:
   column/podzol-disk placement; Java-style `ForestFlowerProvider`
   `BIOME_INFO_NOISE` small-flower selection and the Java
   `FOREST_FLOWER_VEGETATION_COMMON` simple-random mixed flower selector for
-  flower forests; Java-style `PATCH_SUNFLOWER` placement for sunflower plains; the
+  flower forests; Java-style `PATCH_SUNFLOWER` placement for sunflower plains;
+  Java-shaped giant taiga `MEGA_SPRUCE` / `MEGA_PINE` 2x2 trunk, mega-pine
+  foliage, podzol alter-ground, and giant taiga feature-table selectors; the
   `NoiseBasedDecorator` count path used by kelp/coral/bamboo; and
   forest/desert/badlands/swamp/ocean/dark-forest/birch/savanna/jungle/
-  bamboo-jungle/flower-forest/sunflower-plains feature table entries, plus the
-  mushroom-field huge mushroom table entry.
+  bamboo-jungle/flower-forest/sunflower-plains/giant-taiga feature table
+  entries, plus the mushroom-field huge mushroom table entry.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
   asserts every matrix row's grass, foliage, and water tint output through the
   shared tint resolver by tint group, including the two registered rows without
@@ -314,10 +318,15 @@ Documented gaps from this slice:
 - Java taiga now has high-signal sweet berry bush coverage for base taiga and
   base snowy taiga, including the Java `PATCH_BERRY_SPARSE` and
   `PATCH_BERRY_DECORATED.rarity(12)` table split. Exact parity is still
-  incomplete: taiga hills/mountains and giant taiga variants still need
-  deterministic F-check seeds, giant-tree taiga does not yet have
-  giant-tree-specific feature parity, and exact decorated mismatch buckets
-  remain later `103` work.
+  incomplete: taiga hills/mountains and snowy taiga hills/mountains still need
+  deterministic F-check seeds, and exact decorated mismatch buckets remain
+  later `103` work.
+- Java giant taiga now has high-signal mega spruce / mega pine tree coverage,
+  including the giant 2x2 trunk, mega-pine foliage family, podzol
+  alter-ground, and giant tree vs giant spruce selector weights. Exact parity
+  is still incomplete: brown/red huge mushrooms, default mushrooms, default
+  extra vegetation, exact alter-ground disk shape, and exact decorated
+  mismatch buckets remain later `103` work.
 - Java ordinary forest now has high-signal oak/birch tree coverage for forest
   and wooded hills through the existing `BIRCH_OTHER`-shaped selector. Exact
   parity is still incomplete: flowers, default mushrooms, default extra
@@ -336,13 +345,12 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Move to the high-signal giant taiga rows without entering structure territory:
+Close the remaining taiga-family checklist rows without entering structure
+territory:
 
-1. Read Java `MEGA_PINE_TREE`, `MEGA_SPRUCE_TREE`, and giant taiga vegetation
-   table sources before editing.
-2. Add broad native giant-taiga / giant-spruce tree family coverage using the
-   existing spruce log/leaves and podzol/coarse-dirt surface facts, keeping the
-   implementation in shared worldgen.
-3. Promote rows `32`, `33`, `160`, and `161` toward deterministic `F` checks
-   where a representative `(0,0)` seed contains the distinctive giant tree
-   family; leave exact 2x2 trunk/foliage/count mismatch buckets to `103`.
+1. Read the Java taiga and snowy-taiga vegetation table sources before editing.
+2. Find or refresh `(0,0)` seeds for rows `19`, `31`, `133`, and `158` that
+   contain the existing spruce/fern/berry family where appropriate.
+3. Promote those rows to deterministic `F` checks if the current shared tables
+   already support them; otherwise add only the narrow missing shared
+   random-patch/table routing needed for broad palette coverage.

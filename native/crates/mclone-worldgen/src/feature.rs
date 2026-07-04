@@ -2271,6 +2271,81 @@ mod tests {
     }
 
     #[test]
+    fn giant_taiga_feature_table_uses_vanilla_mega_tree_selectors() {
+        let giant_tree_taiga = overworld_features_for_biome(get_layered_biome_by_id(32));
+        let giant_spruce_taiga = overworld_features_for_biome(get_layered_biome_by_id(160));
+
+        let giant_tree_vegetal_features = giant_tree_taiga
+            .iter()
+            .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
+            .collect::<Vec<_>>();
+        let giant_spruce_vegetal_features = giant_spruce_taiga
+            .iter()
+            .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
+            .collect::<Vec<_>>();
+
+        let giant_tree_feature = giant_tree_vegetal_features[2];
+        assert_eq!(
+            giant_tree_feature.decorators,
+            tables::tree_threshold_decorators(10, 0.1, 1)
+        );
+        match &giant_tree_feature.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::mega_spruce()),
+                            0.025641026,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::mega_pine()),
+                            0.30769232,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::pine()),
+                            0.33333334,
+                        ),
+                    ]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::spruce())
+                );
+            }
+            other => panic!("expected giant tree taiga random selector, got {other:?}"),
+        }
+
+        let giant_spruce_feature = giant_spruce_vegetal_features[2];
+        assert_eq!(
+            giant_spruce_feature.decorators,
+            tables::tree_threshold_decorators(10, 0.1, 1)
+        );
+        match &giant_spruce_feature.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::mega_spruce()),
+                            0.33333334,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::pine()),
+                            0.33333334,
+                        ),
+                    ]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::spruce())
+                );
+            }
+            other => panic!("expected giant spruce taiga random selector, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn biome_feature_tables_start_with_default_lakes() {
         let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
         let desert = overworld_features_for_biome(get_layered_biome_by_id(2));
