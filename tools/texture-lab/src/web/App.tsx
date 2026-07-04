@@ -3,7 +3,7 @@ import type { JSX, ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { BlockIndexEntry, TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../core/index-model";
 import { primaryCandidateImage } from "./candidate-images";
-import { BlockBundleAtlas, PreviewModeTabs, TextureAtlas } from "./components/OverviewViews";
+import { BlockBundleAtlas, MinecraftCoverageAtlas, PreviewModeTabs, TextureAtlas } from "./components/OverviewViews";
 import {
   activeTextureCandidates,
   filteredTextures,
@@ -188,12 +188,21 @@ export function App(): JSX.Element {
         <section className="previewPane">
           {index ? (
             <>
-              <PreviewModeTabs mode={previewMode} onChange={setPreviewMode} />
+              <div className="previewModeBar">
+                <PreviewModeTabs mode={previewMode} onChange={setPreviewMode} />
+              </div>
               {previewMode === "atlas" ? (
                 <TextureAtlas
                   textures={textures}
                   candidates={index.candidates}
                   previewSelectionsByTexture={visibleSelectionsByTexture}
+                  selectedTextureName={selectedTextureName}
+                  onSelectTexture={selectTexture}
+                />
+              ) : previewMode === "mc" ? (
+                <MinecraftCoverageAtlas
+                  coverage={index.vanillaCoverage}
+                  search={search}
                   selectedTextureName={selectedTextureName}
                   onSelectTexture={selectTexture}
                 />

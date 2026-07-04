@@ -440,6 +440,11 @@ Local validation on macOS/M4/MPS:
     vanilla-derived review blocks, distinct from authored pack block
     definitions. Thin shape textures therefore no longer need manual fixture
     block definitions.
+  - Full Minecraft coverage browsing is now separated from the authored texture
+    atlas. The `MC` tab enumerates every local vanilla block texture and groups
+    it by coverage status, with missing-in-ours textures first, so generation
+    planning can start from the actual vanilla gaps rather than only from what
+    the pack already authored.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

@@ -1,5 +1,13 @@
 import type { JSX } from "react";
-import type { BlockIndexEntry, TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../../core/index-model";
+import type {
+  BlockIndexEntry,
+  TextureCandidateEntry,
+  TextureImageRef,
+  TextureIndexEntry,
+  VanillaCoverageEntry,
+  VanillaCoverageIndex,
+  VanillaCoverageStatus,
+} from "../../core/index-model";
 import { primaryCandidateImage } from "../candidate-images";
 import type { PreviewMode } from "../store/textureLabStore";
 import { imageRefUrl, tintedImageRefUrl } from "../store/textureLabStore";
@@ -17,6 +25,7 @@ export function PreviewModeTabs({
     { mode: "auto", label: "Auto" },
     { mode: "detail", label: "Detail" },
     { mode: "atlas", label: "Atlas" },
+    { mode: "mc", label: "MC" },
     { mode: "blocks", label: "Blocks" },
   ];
   return (
@@ -194,6 +203,70 @@ export function BlockBundleAtlas({
   );
 }
 
+export function MinecraftCoverageAtlas({
+  coverage,
+  search,
+  selectedTextureName,
+  onSelectTexture,
+}: {
+  coverage: VanillaCoverageIndex | null | undefined;
+  search: string;
+  selectedTextureName: string | null;
+  onSelectTexture: (name: string) => void;
+}): JSX.Element {
+  if (!coverage) {
+    return (
+      <div className="overviewStack">
+        <div className="sectionHeader overviewHeader">
+          <div>
+            <h2>MC Atlas</h2>
+            <p>Coverage index unavailable</p>
+          </div>
+        </div>
+        <div className="candidateEmpty">MC coverage is not indexed yet. Reindex after restarting the texture-lab server.</div>
+      </div>
+    );
+  }
+  const entries = filterCoverageEntries(coverage.entries, search);
+  const groups = groupCoverageEntries(entries);
+  return (
+    <div className="overviewStack">
+      <div className="sectionHeader overviewHeader">
+        <div>
+          <h2>MC Atlas</h2>
+          <p>
+            {entries.length} shown / {coverage.summary.vanillaTextureCount} vanilla textures / {coverage.summary.missingTextureCount} missing
+          </p>
+        </div>
+      </div>
+      {coverage.referenceRoot ? (
+        groups.map((group) => (
+          <section key={group.status} className="mcAtlasGroup" aria-label={coverageStatusTitle(group.status)}>
+            <div className="subsectionHeader">
+              <div>
+                <h3>{coverageStatusTitle(group.status)}</h3>
+                <p>{group.entries.length} textures</p>
+              </div>
+            </div>
+            <div className="mcAtlasGrid">
+              {group.entries.map((entry) => (
+                <MinecraftCoverageCard
+                  key={entry.texture}
+                  entry={entry}
+                  selectedTextureName={selectedTextureName}
+                  onSelectTexture={onSelectTexture}
+                />
+              ))}
+            </div>
+          </section>
+        ))
+      ) : (
+        <div className="candidateEmpty">No local Minecraft reference assets found.</div>
+      )}
+    </div>
+  );
+}
+
 function AtlasTextureCard({
   texture,
   candidateCount,
@@ -237,6 +310,65 @@ function AtlasTextureCard({
   );
 }
 
+function MinecraftCoverageCard({
+  entry,
+  selectedTextureName,
+  onSelectTexture,
+}: {
+  entry: VanillaCoverageEntry;
+  selectedTextureName: string | null;
+  onSelectTexture: (name: string) => void;
+}): JSX.Element {
+  const primaryAuthored = entry.authoredTextures[0] ?? null;
+  const selected = Boolean(primaryAuthored && primaryAuthored.textureName === selectedTextureName);
+  const body = (
+    <>
+      <div className="atlasCardHeader">
+        <strong>{entry.displayName}</strong>
+        <span className={`coverageBadge ${entry.status}`}>{coverageStatusBadge(entry.status)}</span>
+      </div>
+      <div className="mcCoverageCompare">
+        <CompareImage label="MC" image={entry.minecraftReference} alt={`${entry.name} Minecraft reference`} compact />
+        {primaryAuthored ? (
+          <CompareImage label="Ours" image={primaryAuthored.currentExport} alt={`${primaryAuthored.textureName} current export`} compact />
+        ) : (
+          <div className="comparePanel">
+            <span className="compareLabel">Ours</span>
+            <div className="compareFrame compactImageFrame missingCoverageFrame">
+              <span>None</span>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="mcCoverageMeta">
+        <span>{entry.name}</span>
+        <span>{entry.materialFamily}</span>
+        <span>{entry.previewHint}</span>
+        {entry.blockCount > 0 ? <span>{entry.blockCount} blocks</span> : null}
+        {entry.candidateCount > 0 ? <span>{entry.candidateCount} candidates</span> : null}
+        {entry.authoredTextures.length > 1 ? <span>{entry.authoredTextures.length} ours</span> : null}
+        {primaryAuthored ? <span>{primaryAuthored.artSourceLabel}</span> : null}
+      </div>
+    </>
+  );
+
+  if (!primaryAuthored) {
+    return <article className="mcCoverageCard missing">{body}</article>;
+  }
+
+  return (
+    <button
+      className={selected ? "mcCoverageCard selected" : "mcCoverageCard"}
+      type="button"
+      aria-pressed={selected}
+      aria-label={`${entry.displayName} MC coverage`}
+      onClick={() => onSelectTexture(primaryAuthored.textureName)}
+    >
+      {body}
+    </button>
+  );
+}
+
 function artSourceMetaClass(texture: TextureIndexEntry): string {
   return texture.artSource.kind === "procedural-placeholder" ? "artSourceMeta placeholderMeta" : "artSourceMeta";
 }
@@ -259,6 +391,63 @@ function blockPreviewSourceLabel(source: BlockIndexEntry["previewSource"]): stri
 
 function blockPreviewSourceTitle(source: BlockIndexEntry["previewSource"]): string {
   return source === "vanilla-derived" ? "Vanilla-Derived Review Blocks" : "Authored Pack Blocks";
+}
+
+function filterCoverageEntries(entries: VanillaCoverageEntry[], search: string): VanillaCoverageEntry[] {
+  const needle = search.trim().toLowerCase();
+  if (!needle) {
+    return entries;
+  }
+  return entries.filter((entry) =>
+    [
+      entry.texture,
+      entry.name,
+      entry.displayName,
+      entry.materialFamily,
+      entry.status,
+      entry.previewHint,
+      ...entry.geometryKinds,
+      ...entry.renderLayers,
+      ...entry.tintRoles,
+      ...entry.authoredTextures.map((texture) => texture.textureName),
+      ...entry.authoredTextures.map((texture) => texture.artSourceLabel),
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle),
+  );
+}
+
+function groupCoverageEntries(entries: VanillaCoverageEntry[]): { status: VanillaCoverageStatus; entries: VanillaCoverageEntry[] }[] {
+  return COVERAGE_STATUS_ORDER.map((status) => ({
+    status,
+    entries: entries.filter((entry) => entry.status === status),
+  })).filter((group) => group.entries.length > 0);
+}
+
+const COVERAGE_STATUS_ORDER: VanillaCoverageStatus[] = ["missing", "placeholder", "candidate", "draft", "reviewed", "accepted", "frozen"];
+
+function coverageStatusTitle(status: VanillaCoverageStatus): string {
+  switch (status) {
+    case "missing":
+      return "Missing In Ours";
+    case "placeholder":
+      return "Placeholder Coverage";
+    case "candidate":
+      return "Candidate Coverage";
+    case "draft":
+      return "Draft Coverage";
+    case "reviewed":
+      return "Reviewed Coverage";
+    case "accepted":
+      return "Accepted Coverage";
+    case "frozen":
+      return "Frozen Coverage";
+  }
+}
+
+function coverageStatusBadge(status: VanillaCoverageStatus): string {
+  return status === "missing" ? "missing" : status;
 }
 
 function BlockSheetPreview({ blockName, image }: { blockName: string; image: TextureImageRef }): JSX.Element {
@@ -318,18 +507,20 @@ function CompareImage({
   image,
   alt,
   tint,
+  compact = false,
 }: {
   label: string;
   image: TextureImageRef;
   alt: string;
   tint?: string;
+  compact?: boolean;
 }): JSX.Element {
   const url = tint ? tintedImageRefUrl(image, tint) : imageRefUrl(image);
   return (
     <div className="comparePanel">
       <span className="compareLabel">{label}</span>
-      <div className="compareFrame">
-        {url ? <img src={url} alt={alt} /> : <span className="compareMissing">Missing</span>}
+      <div className={compact ? "compareFrame compactImageFrame" : "compareFrame"}>
+        {url ? <img src={url} alt={alt} loading="lazy" decoding="async" /> : <span className="compareMissing">Missing</span>}
       </div>
     </div>
   );

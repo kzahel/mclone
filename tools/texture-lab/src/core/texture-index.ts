@@ -3,6 +3,7 @@ import path from "node:path";
 import { discoverTextureCandidates } from "./candidate-index";
 import { buildTextureCurationState } from "./curation";
 import { blockSheetName, deriveVanillaPreviewBlocks, writeVanillaPreviewBlockSheets } from "./vanilla-preview-blocks";
+import { buildVanillaCoverageIndex } from "./vanilla-coverage";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { textureLabOutputRoot } from "../output-root";
@@ -41,6 +42,12 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
       ),
   );
   const vanillaPreviewBlocks = deriveVanillaPreviewBlocks(pack, textures);
+  const vanillaCoverage = await buildVanillaCoverageIndex({
+    referenceRoot: vanillaUsageSemantics.referenceRoot,
+    textures,
+    candidates: candidateDiscovery.candidates,
+    vanillaUsageByTexture: vanillaUsageSemantics.byTexture,
+  });
   await writeVanillaPreviewBlockSheets(pack, vanillaPreviewBlocks, outputRoot);
   const blocks = await Promise.all(
     [
@@ -79,6 +86,7 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
     textures,
     candidates: candidateDiscovery.candidates,
     blocks,
+    vanillaCoverage,
     warnings: [
       ...buildWarnings(textures),
       ...buildCandidateWarnings(candidateDiscovery.candidates),

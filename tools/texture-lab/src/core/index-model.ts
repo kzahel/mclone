@@ -21,6 +21,7 @@ export interface TextureLabIndex {
   textures: TextureIndexEntry[];
   candidates: TextureCandidateEntry[];
   blocks: BlockIndexEntry[];
+  vanillaCoverage: VanillaCoverageIndex;
   warnings: string[];
 }
 
@@ -44,6 +45,51 @@ export interface TextureLabIndexSummary {
   archivedCandidateCount: number;
   curatedSelectionCount: number;
   frozenTextureCount: number;
+}
+
+export interface VanillaCoverageIndex {
+  referenceRoot: string | null;
+  summary: VanillaCoverageSummary;
+  entries: VanillaCoverageEntry[];
+}
+
+export interface VanillaCoverageSummary {
+  vanillaTextureCount: number;
+  coveredTextureCount: number;
+  missingTextureCount: number;
+  placeholderTextureCount: number;
+  candidateTextureCount: number;
+  frozenTextureCount: number;
+}
+
+export type VanillaCoverageStatus = "missing" | "placeholder" | "draft" | "reviewed" | "accepted" | "candidate" | "frozen";
+
+export interface VanillaCoverageEntry {
+  texture: string;
+  name: string;
+  displayName: string;
+  materialFamily: string;
+  status: VanillaCoverageStatus;
+  candidateCount: number;
+  blockCount: number;
+  useCount: number;
+  previewHint: TextureVanillaPreviewHint;
+  geometryKinds: string[];
+  renderLayers: string[];
+  tintRoles: string[];
+  minecraftReference: TextureImageRef;
+  authoredTextures: VanillaCoverageAuthoredTexture[];
+}
+
+export interface VanillaCoverageAuthoredTexture {
+  textureName: string;
+  displayName: string;
+  artSourceLabel: string;
+  artSourceKind: TextureArtSourceKind;
+  status: TextureCatalogStatus;
+  source: TextureSourceCategory;
+  frozen: boolean;
+  currentExport: TextureImageRef;
 }
 
 export interface TextureIndexEntry {

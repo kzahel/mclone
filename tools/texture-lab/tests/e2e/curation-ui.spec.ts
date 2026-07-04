@@ -22,6 +22,20 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   expect(index.curation.manifestPath).toContain("generated-assets/texture-lab-playwright/curation/selections.v1.json");
   expect(index.pack.blockCount).toBe(13);
   expect(index.blocks.length).toBeGreaterThan(index.pack.blockCount);
+  expect(index.vanillaCoverage.summary.vanillaTextureCount).toBeGreaterThan(700);
+  expect(index.vanillaCoverage.summary.missingTextureCount).toBeGreaterThan(500);
+  expect(index.vanillaCoverage.summary.coveredTextureCount).toBeGreaterThan(50);
+
+  expect(index.vanillaCoverage.entries.find((entry: { name: string }) => entry.name === "acacia_planks")).toMatchObject({
+    texture: "minecraft:block/acacia_planks",
+    status: "missing",
+    authoredTextures: [],
+  });
+  expect(index.vanillaCoverage.entries.find((entry: { name: string }) => entry.name === "stone")).toMatchObject({
+    texture: "minecraft:block/stone",
+    status: "frozen",
+    authoredTextures: [{ textureName: "stone", frozen: true }],
+  });
 
   const grassCandidatesResponse = await request.get("/api/candidates?texture=grass_block_top");
   await expect(grassCandidatesResponse).toBeOK();
@@ -424,6 +438,41 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await expect(stoneCard).toHaveAttribute("aria-pressed", "true");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-atlas.png", fullPage: true });
 
+  await page.getByRole("button", { name: "MC" }).click();
+  await expect(page.getByRole("heading", { name: "MC Atlas" })).toBeVisible();
+  await expect(page.locator(".overviewHeader")).toContainText("vanilla textures");
+  await expect(page.locator(".overviewHeader")).toContainText("missing");
+  const unfilteredCoverageSummary = await page.locator(".overviewHeader").innerText();
+  const unfilteredCoverageMatch = unfilteredCoverageSummary.match(/(\d+) shown \/ (\d+) vanilla textures/u);
+  if (!unfilteredCoverageMatch) {
+    throw new Error(`Unexpected MC coverage summary: ${unfilteredCoverageSummary}`);
+  }
+  expect(unfilteredCoverageMatch[1]).toBe(unfilteredCoverageMatch[2]);
+  expect(await page.locator(".mcCoverageCard").count()).toBe(Number(unfilteredCoverageMatch[2]));
+  await expect(page.getByRole("heading", { name: "Missing In Ours" })).toBeVisible();
+  const tabsTopBeforeScroll = await page.locator(".viewTabs").evaluate((element) => element.getBoundingClientRect().top);
+  await page.locator(".previewPane").evaluate((element) => {
+    element.scrollTop = 1600;
+  });
+  await expect(page.getByRole("button", { name: "Auto" })).toBeVisible();
+  const tabsTopAfterScroll = await page.locator(".viewTabs").evaluate((element) => element.getBoundingClientRect().top);
+  expect(Math.abs(tabsTopAfterScroll - tabsTopBeforeScroll)).toBeLessThan(2);
+  await page.locator(".previewPane").evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  const acaciaCoverage = page.locator(".mcCoverageCard").filter({ hasText: "Acacia Planks" });
+  await expect(acaciaCoverage).toContainText("missing");
+  await expect(acaciaCoverage).toContainText("None");
+  await page.getByLabel("Search").fill("stone");
+  await expect(page.getByRole("heading", { name: "Frozen Coverage" })).toBeVisible();
+  const stoneCoverage = page.getByRole("button", { name: "Stone MC coverage", exact: true });
+  await expect(stoneCoverage).toContainText("frozen");
+  await expect(stoneCoverage).toContainText("Ours");
+  await stoneCoverage.click();
+  await page.getByLabel("Search").fill("acacia_planks");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-mc-atlas.png", fullPage: true });
+
+  await page.getByRole("button", { name: "Atlas" }).click();
   await page.getByLabel("Search").fill("pointed_dripstone");
   const pointedCard = page.getByRole("button", { name: "Pointed Dripstone atlas comparison", exact: true });
   await expect(pointedCard).toBeVisible();

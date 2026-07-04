@@ -394,6 +394,13 @@ and Auto previews, so generated vanilla-context cards do not read as source
 definitions. Pane/door/rail/torch review no longer needs hand-authored
 `block(...)` fixture entries.
 
+The browser UI also has a separate `MC` atlas view for full vanilla block-texture
+coverage. The normal `Atlas` tab shows only textures authored by this pack; the
+`MC` tab enumerates every local vanilla `assets/minecraft/textures/block/*.png`
+reference and marks whether mclone has no matching texture, only placeholder
+coverage, candidate coverage, or frozen/accepted coverage. This is the view for
+finding zero-coverage vanilla textures before deciding what to generate next.
+
 The `mclone-default` grass block module encodes that relationship directly:
 
 ```ts
