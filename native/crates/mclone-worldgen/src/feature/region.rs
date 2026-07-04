@@ -4,7 +4,7 @@ use crate::placement::{BlockPos, HeightmapType};
 use mclone_core::{block_to_chunk_coord, local_block_coord};
 
 use super::{
-    Direction, FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureWorld,
+    Direction, FEATURES_BLOCK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureWorld,
     heightmap_height,
 };
 
@@ -40,7 +40,7 @@ impl FeatureRegion {
         Self::with_radii(
             center_chunk_x,
             center_chunk_z,
-            FEATURES_CHUNK_DEPENDENCY_RADIUS,
+            FEATURES_BLOCK_DEPENDENCY_RADIUS,
             FEATURES_WRITE_RADIUS_CUTOFF,
             chunks,
         )

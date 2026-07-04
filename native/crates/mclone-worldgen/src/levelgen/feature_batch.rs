@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::biome::{ChunkBiomeContainer, OverworldBiomeSource};
 use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
 use crate::feature::{
-    FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureRegion,
+    FEATURES_BLOCK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureRegion,
     apply_overworld_biome_decoration_to_region_timed,
 };
 use mclone_core::ChunkPos;
@@ -291,8 +291,8 @@ impl FeatureBatchPlan {
         }
 
         for center in &feature_centers {
-            for dz in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
-                for dx in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
+            for dz in -FEATURES_BLOCK_DEPENDENCY_RADIUS..=FEATURES_BLOCK_DEPENDENCY_RADIUS {
+                for dx in -FEATURES_BLOCK_DEPENDENCY_RADIUS..=FEATURES_BLOCK_DEPENDENCY_RADIUS {
                     dependency_chunks.insert(ChunkPos::new(center.x + dx, center.z + dz));
                 }
             }

@@ -22,7 +22,7 @@ use mclone_worldgen::block::{
     OBSIDIAN, RawBlockId, STONE, block_light_emission, block_light_opacity,
     generated_block_state_id, is_water, material_blocks_motion,
 };
-use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
+use mclone_worldgen::feature::{FEATURES_BLOCK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::{
     GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCacheReport, ScheduledTick,
@@ -2158,7 +2158,6 @@ impl ChunkScheduler {
 
         events.extend(self.enqueue_runtime_chunks(
             sorted_chunk_positions_by_priority(runtime_targets, &priority_centers),
-            &client_visible_set,
             self.runtime_chunk_target_status(),
             &priority_centers,
         )?);
@@ -2168,19 +2167,23 @@ impl ChunkScheduler {
     fn enqueue_runtime_chunks(
         &mut self,
         desired_chunks: Vec<ChunkPos>,
-        _client_visible_set: &BTreeSet<ChunkPos>,
         target_status: ChunkStatus,
         priority_centers: &[ChunkPos],
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let mut events = Vec::new();
         let mut to_generate = Vec::new();
+        let load_request_limit = self.chunk_load_request_limit(desired_chunks.len());
+        let mut scheduled_chunk_loads = 0_usize;
+        let mut scheduled_entity_loads = 0_usize;
 
         for pos in desired_chunks {
             self.holders
                 .entry(pos)
                 .or_insert_with(|| ChunkHolder::new(pos))
                 .target_status = Some(target_status);
-            self.schedule_entity_chunk_load(pos);
+            if scheduled_entity_loads < load_request_limit && self.schedule_entity_chunk_load(pos) {
+                scheduled_entity_loads += 1;
+            }
 
             for status in status_path_to(target_status) {
                 if let Some(slot) = self
@@ -2195,8 +2198,10 @@ impl ChunkScheduler {
                     {
                         if self.stored_chunk_misses.contains(&pos) {
                             to_generate.push(pos);
-                        } else if !self.pending_chunk_load_by_pos.contains_key(&pos) {
-                            self.schedule_chunk_load(pos, target_status);
+                        } else if scheduled_chunk_loads < load_request_limit
+                            && self.schedule_chunk_load(pos, target_status)
+                        {
+                            scheduled_chunk_loads += 1;
                         }
                     }
                     continue;
@@ -2218,8 +2223,10 @@ impl ChunkScheduler {
                 if status == ChunkStatus::Features {
                     if self.stored_chunk_misses.contains(&pos) {
                         to_generate.push(pos);
-                    } else {
-                        self.schedule_chunk_load(pos, target_status);
+                    } else if scheduled_chunk_loads < load_request_limit
+                        && self.schedule_chunk_load(pos, target_status)
+                    {
+                        scheduled_chunk_loads += 1;
                     }
                 } else if status < ChunkStatus::Features {
                     let holder = self
@@ -2239,6 +2246,14 @@ impl ChunkScheduler {
         self.enqueue_feature_job_for_missing_targets(to_generate, priority_centers);
 
         Ok(events)
+    }
+
+    fn chunk_load_request_limit(&self, candidate_count: usize) -> usize {
+        if self.jobs.is_empty() && candidate_count > BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT {
+            STARTUP_CHUNK_LOAD_REQUEST_LIMIT
+        } else {
+            candidate_count.min(BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT)
+        }
     }
 
     fn enqueue_next_pending_feature_job(&mut self) {
@@ -2618,27 +2633,29 @@ impl ChunkScheduler {
         }
     }
 
-    fn schedule_chunk_load(&mut self, pos: ChunkPos, target_status: ChunkStatus) {
+    fn schedule_chunk_load(&mut self, pos: ChunkPos, target_status: ChunkStatus) -> bool {
         if self.pending_chunk_load_by_pos.contains_key(&pos) {
-            return;
+            return false;
         }
         let request_id = self.store.load_chunk(pos);
         self.pending_chunk_loads
             .insert(request_id, PendingChunkLoad { pos, target_status });
         self.pending_chunk_load_by_pos.insert(pos, request_id);
+        true
     }
 
-    fn schedule_entity_chunk_load(&mut self, pos: ChunkPos) {
+    fn schedule_entity_chunk_load(&mut self, pos: ChunkPos) -> bool {
         if !self.entity_chunks_supported()
             || self.loaded_entity_chunks.contains(&pos)
             || self.pending_entity_chunk_load_by_pos.contains_key(&pos)
         {
-            return;
+            return false;
         }
         let request_id = self.store.load_entity_chunk(pos);
         self.pending_entity_chunk_loads.insert(request_id, pos);
         self.pending_entity_chunk_load_by_pos
             .insert(pos, request_id);
+        true
     }
 
     fn clear_pending_chunk_load(&mut self, pos: ChunkPos) {
@@ -2656,10 +2673,13 @@ impl ChunkScheduler {
     fn poll_persistence(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let mut events = Vec::new();
         let stored_chunk_miss_count = self.stored_chunk_misses.len();
+        let pending_load_count = self.pending_persistence_load_count();
         for completion in self.store.drain_completions() {
             events.extend(self.handle_persistence_completion(completion)?);
         }
-        if self.stored_chunk_misses.len() != stored_chunk_miss_count {
+        if self.stored_chunk_misses.len() != stored_chunk_miss_count
+            || self.pending_persistence_load_count() != pending_load_count
+        {
             events.extend(self.reconcile_ticketed_holders()?);
         }
         Ok(events)
@@ -2729,9 +2749,7 @@ impl ChunkScheduler {
         }
 
         let record = result?;
-        if !self.distance_manager.active_levels().contains_key(&pos)
-            || !self.holders.contains_key(&pos)
-        {
+        if !self.holder_is_active(pos) {
             return Ok(Vec::new());
         }
 
@@ -2769,9 +2787,7 @@ impl ChunkScheduler {
         }
 
         let record = result?;
-        if !self.distance_manager.active_levels().contains_key(&pos)
-            || !self.holders.contains_key(&pos)
-        {
+        if !self.holder_is_active(pos) {
             return Ok(Vec::new());
         }
         if let Some(record) = &record
@@ -2784,6 +2800,12 @@ impl ChunkScheduler {
         }
         self.loaded_entity_chunks.insert(pos);
         Ok(vec![ChunkSchedulerEvent::EntityChunkLoaded { pos, record }])
+    }
+
+    fn holder_is_active(&self, pos: ChunkPos) -> bool {
+        self.holders
+            .get(&pos)
+            .is_some_and(|holder| holder.ticket_level <= MAX_CHUNK_DISTANCE)
     }
 
     fn mark_stored_chunk_miss(
@@ -3257,8 +3279,8 @@ fn feature_job_positions(
     }
 
     for center in &feature_centers {
-        for dz in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
-            for dx in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
+        for dz in -FEATURES_BLOCK_DEPENDENCY_RADIUS..=FEATURES_BLOCK_DEPENDENCY_RADIUS {
+            for dx in -FEATURES_BLOCK_DEPENDENCY_RADIUS..=FEATURES_BLOCK_DEPENDENCY_RADIUS {
                 dependency_chunks.insert(ChunkPos::new(center.x + dx, center.z + dz));
             }
         }
@@ -3401,7 +3423,7 @@ mod tests {
         );
         assert_eq!(metrics.latest_feature_job_target_chunks, 67 * 67);
         assert_eq!(metrics.latest_feature_job_feature_centers, 69 * 69);
-        assert_eq!(metrics.latest_feature_job_dependency_chunks, 85 * 85);
+        assert_eq!(metrics.latest_feature_job_dependency_chunks, 71 * 71);
         assert_eq!(
             metrics.max_feature_job_target_chunks,
             metrics.latest_feature_job_target_chunks
@@ -3422,12 +3444,7 @@ mod tests {
             .stored_chunk_misses
             .extend(targets.iter().copied());
         scheduler
-            .enqueue_runtime_chunks(
-                targets.clone(),
-                &BTreeSet::new(),
-                ChunkStatus::Light,
-                &[center],
-            )
+            .enqueue_runtime_chunks(targets.clone(), ChunkStatus::Light, &[center])
             .unwrap();
 
         let metrics = scheduler.metrics();
@@ -3439,20 +3456,53 @@ mod tests {
             STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
         );
         assert_eq!(metrics.latest_feature_job_feature_centers, 5 * 5);
-        assert_eq!(metrics.latest_feature_job_dependency_chunks, 21 * 21);
+        assert_eq!(metrics.latest_feature_job_dependency_chunks, 7 * 7);
         assert_eq!(
             scheduler.stored_chunk_misses.len(),
             (67 * 67) - STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
         );
 
         scheduler
-            .enqueue_runtime_chunks(targets, &BTreeSet::new(), ChunkStatus::Light, &[center])
+            .enqueue_runtime_chunks(targets, ChunkStatus::Light, &[center])
             .unwrap();
         assert_eq!(
             scheduler.job_count(),
             1,
             "a second feature job should not be queued before the first one completes"
         );
+    }
+
+    #[test]
+    fn high_render_distance_initial_persistence_loads_are_center_bounded() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler.set_lighting_enabled(false);
+        let center = ChunkPos::new(0, 0);
+
+        scheduler
+            .apply_interest(ChunkView {
+                center,
+                render_distance: 33,
+                chunk_tracking_radius: 33,
+            })
+            .unwrap();
+
+        assert_eq!(
+            scheduler.pending_persistence_load_count(),
+            STARTUP_CHUNK_LOAD_REQUEST_LIMIT
+        );
+        assert_eq!(scheduler.pending_job_count(), 0);
+        assert_eq!(scheduler.metrics().latest_feature_job_id, None);
+
+        scheduler.poll().unwrap();
+
+        let metrics = scheduler.metrics();
+        assert_eq!(metrics.pending_jobs, 1);
+        assert_eq!(
+            metrics.latest_feature_job_target_chunks,
+            STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
+        );
+        assert_eq!(metrics.latest_feature_job_first_target, Some(center));
+        assert!(scheduler.pending_persistence_load_count() <= BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT);
     }
 
     #[test]
@@ -3465,7 +3515,7 @@ mod tests {
             .stored_chunk_misses
             .extend(targets.iter().copied());
         scheduler
-            .enqueue_runtime_chunks(targets, &BTreeSet::new(), ChunkStatus::Light, &[center])
+            .enqueue_runtime_chunks(targets, ChunkStatus::Light, &[center])
             .unwrap();
         let first_job_id = scheduler.metrics().latest_feature_job_id.unwrap();
         scheduler.mark_job_complete(
@@ -3704,6 +3754,8 @@ pub(crate) const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 pub(crate) const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
 pub(crate) const DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET: usize = 1;
 const CENTER_PRIORITY_LIGHT_STATUS_BATCH_SIZE: usize = 9;
+const STARTUP_CHUNK_LOAD_REQUEST_LIMIT: usize = 9;
+const BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT: usize = 128;
 const STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 9;
 const BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 128;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;

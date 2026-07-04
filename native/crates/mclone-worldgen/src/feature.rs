@@ -49,8 +49,13 @@ pub(crate) use placed::apply_overworld_biome_decoration_to_region_timed;
 #[cfg(test)]
 pub(crate) use placed::test_support;
 
-pub const FEATURES_CHUNK_DEPENDENCY_RADIUS: i32 = 8;
 pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
+/// Java `FEATURES` has status dependency range 8, but current native feature
+/// placement only needs full mutable block buffers in the write/read band. The
+/// farther Java shell is a weaker status/structure dependency and should not
+/// force full terrain generation during startup.
+pub const FEATURES_CHUNK_DEPENDENCY_RADIUS: i32 = 8;
+pub const FEATURES_BLOCK_DEPENDENCY_RADIUS: i32 = FEATURES_WRITE_RADIUS_CUTOFF;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Direction {

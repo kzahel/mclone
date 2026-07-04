@@ -2027,24 +2027,20 @@ mod tests {
         let single = FeatureBatchPlan::new([ChunkPos::new(0, 0)]);
         assert_eq!(single.targets.len(), 1);
         assert_eq!(single.feature_centers.len(), 3 * 3);
-        assert_eq!(single.dependency_chunks.len(), 19 * 19);
+        assert_eq!(single.dependency_chunks.len(), 5 * 5);
 
         let radius_one_targets = (-1..=1).flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)));
         let radius_one = FeatureBatchPlan::new(radius_one_targets);
 
         assert_eq!(radius_one.targets.len(), 3 * 3);
         assert_eq!(radius_one.feature_centers.len(), 5 * 5);
-        assert_eq!(radius_one.dependency_chunks.len(), 21 * 21);
+        assert_eq!(radius_one.dependency_chunks.len(), 7 * 7);
         assert!(
             radius_one
                 .dependency_chunks
-                .contains(&ChunkPos::new(-10, -10))
+                .contains(&ChunkPos::new(-3, -3))
         );
-        assert!(
-            radius_one
-                .dependency_chunks
-                .contains(&ChunkPos::new(10, 10))
-        );
+        assert!(radius_one.dependency_chunks.contains(&ChunkPos::new(3, 3)));
     }
 
     #[test]
@@ -2255,10 +2251,10 @@ mod tests {
         assert_eq!(
             first.cache_report,
             OverworldFeatureDependencyCacheReport {
-                requested_dependency_chunks: 19 * 19,
+                requested_dependency_chunks: 5 * 5,
                 cache_hits: 0,
-                generated_dependency_chunks: 19 * 19,
-                retained_dependency_chunks: 19 * 19,
+                generated_dependency_chunks: 5 * 5,
+                retained_dependency_chunks: 5 * 5,
             }
         );
 
@@ -2266,13 +2262,13 @@ mod tests {
         assert_eq!(
             second.cache_report,
             OverworldFeatureDependencyCacheReport {
-                requested_dependency_chunks: 19 * 19,
-                cache_hits: 18 * 19,
-                generated_dependency_chunks: 19,
-                retained_dependency_chunks: 19 * 19,
+                requested_dependency_chunks: 5 * 5,
+                cache_hits: 4 * 5,
+                generated_dependency_chunks: 5,
+                retained_dependency_chunks: 5 * 5,
             }
         );
-        assert_eq!(cache.retained_chunk_count(), 19 * 19);
+        assert_eq!(cache.retained_chunk_count(), 5 * 5);
         assert_eq!(
             second.chunks.get(&ChunkPos::new(1, 0)),
             Some(&generate_overworld_features_chunk(12_345, 1, 0))
@@ -2289,10 +2285,10 @@ mod tests {
         assert_eq!(
             second.cache_report,
             OverworldFeatureDependencyCacheReport {
-                requested_dependency_chunks: 19 * 19,
-                cache_hits: 19 * 19,
+                requested_dependency_chunks: 5 * 5,
+                cache_hits: 5 * 5,
                 generated_dependency_chunks: 0,
-                retained_dependency_chunks: 19 * 19,
+                retained_dependency_chunks: 5 * 5,
             }
         );
         assert_eq!(
@@ -2311,10 +2307,10 @@ mod tests {
         assert_eq!(
             changed_seed.cache_report,
             OverworldFeatureDependencyCacheReport {
-                requested_dependency_chunks: 19 * 19,
+                requested_dependency_chunks: 5 * 5,
                 cache_hits: 0,
-                generated_dependency_chunks: 19 * 19,
-                retained_dependency_chunks: 19 * 19,
+                generated_dependency_chunks: 5 * 5,
+                retained_dependency_chunks: 5 * 5,
             }
         );
     }

@@ -1941,7 +1941,7 @@ mod tests {
             ),
             (792, 24, 16, 9, 25, 9)
         );
-        assert_eq!(server.scheduler().ready_dependency_chunk_count(), 23 * 23);
+        assert_eq!(server.scheduler().ready_dependency_chunk_count(), 9 * 9);
         assert_eq!(
             server.scheduler().metrics(),
             ChunkSchedulerMetrics {
@@ -1957,21 +1957,21 @@ mod tests {
                 client_visible_chunks: 9,
                 loaded_snapshot_chunks: 25,
                 dependency_holder_chunks: 29 * 29 - 25,
-                ready_dependency_chunks: 23 * 23,
+                ready_dependency_chunks: 9 * 9,
                 dirty_chunks: 0,
                 pending_jobs: 0,
                 completed_jobs: 1,
                 total_seeded_dependency_chunks: 0,
                 total_dependency_cache_hits: 0,
-                total_dependency_cache_misses: 23 * 23,
-                total_retained_dependency_chunks: 23 * 23,
+                total_dependency_cache_misses: 9 * 9,
+                total_retained_dependency_chunks: 9 * 9,
                 max_feature_job_target_chunks: 25,
                 max_feature_job_feature_centers: 7 * 7,
-                max_feature_job_dependency_chunks: 23 * 23,
+                max_feature_job_dependency_chunks: 9 * 9,
                 latest_feature_job_id: Some(ChunkJobId(1)),
                 latest_feature_job_target_chunks: 25,
                 latest_feature_job_feature_centers: 7 * 7,
-                latest_feature_job_dependency_chunks: 23 * 23,
+                latest_feature_job_dependency_chunks: 9 * 9,
                 latest_feature_job_first_target: Some(ChunkPos::new(0, 0)),
                 completed_light_statuses: 25,
                 completed_light_batches: server.scheduler().metrics().completed_light_batches,
@@ -2076,13 +2076,13 @@ mod tests {
         assert_eq!(job.state, ChunkJobState::Complete);
         assert_eq!(job.target_chunks.len(), 25);
         assert_eq!(job.feature_centers.len(), 7 * 7);
-        assert_eq!(job.dependency_chunks.len(), 23 * 23);
+        assert_eq!(job.dependency_chunks.len(), 9 * 9);
         assert_eq!(job.seeded_dependency_chunks, 0);
         assert_eq!(job.dependency_cache_hits, 0);
-        assert_eq!(job.dependency_cache_misses, 23 * 23);
-        assert_eq!(job.retained_dependency_chunks, 23 * 23);
-        assert!(job.dependency_chunks.contains(&ChunkPos::new(-11, -11)));
-        assert!(job.dependency_chunks.contains(&ChunkPos::new(11, 11)));
+        assert_eq!(job.dependency_cache_misses, 9 * 9);
+        assert_eq!(job.retained_dependency_chunks, 9 * 9);
+        assert!(job.dependency_chunks.contains(&ChunkPos::new(-4, -4)));
+        assert!(job.dependency_chunks.contains(&ChunkPos::new(4, 4)));
         for target in &job.target_chunks {
             assert_eq!(
                 server
@@ -3203,7 +3203,7 @@ mod tests {
                 job.dependency_cache_misses,
                 job.retained_dependency_chunks
             )),
-            Some((0, 0, 21 * 21, 21 * 21))
+            Some((0, 0, 7 * 7, 7 * 7))
         );
 
         let moved_updates = handle_command_and_poll(
@@ -3222,7 +3222,7 @@ mod tests {
                 job.dependency_cache_misses,
                 job.retained_dependency_chunks
             )),
-            Some((18 * 21, 18 * 21, 21, 19 * 21))
+            Some((4 * 7, 4 * 7, 7, 5 * 7))
         );
     }
 
@@ -3733,11 +3733,11 @@ mod tests {
         assert_eq!(job.feature_centers.first(), Some(&ChunkPos::new(0, 0)));
         assert_eq!(job.feature_centers.len(), 5 * 5);
         assert_eq!(job.dependency_chunks.first(), Some(&ChunkPos::new(0, 0)));
-        assert_eq!(job.dependency_chunks.len(), 21 * 21);
+        assert_eq!(job.dependency_chunks.len(), 7 * 7);
         assert_eq!(job.seeded_dependency_chunks, 0);
         assert_eq!(job.dependency_cache_hits, 0);
-        assert_eq!(job.dependency_cache_misses, 21 * 21);
-        assert_eq!(job.retained_dependency_chunks, 21 * 21);
+        assert_eq!(job.dependency_cache_misses, 7 * 7);
+        assert_eq!(job.retained_dependency_chunks, 7 * 7);
     }
 
     #[test]

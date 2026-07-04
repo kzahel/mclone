@@ -247,7 +247,7 @@ impl LocalSingleViewStartupPump {
         let poll_start = Instant::now();
         let mut changed = self
             .runtime
-            .poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())?;
+            .poll_with_update_budget(RuntimeUpdatePumpBudget::default_frame())?;
         let poll_ms = elapsed_ms(poll_start.elapsed());
         self.poll_count += 1;
         self.poll_ms += poll_ms;

@@ -11,6 +11,11 @@ Slice B1 landed on 2026-07-04: local render distance now gets Java's
 for the explicit center `3x3` publication gate.
 Slice D1 landed on 2026-07-04: loading progress now keeps latest announced
 status for grid colors separate from ready status for percent/playable counts.
+Slice F1 landed on 2026-07-04: RD30 local startup no longer stalls behind the
+old center-gate cold floor; native feature block dependencies are bounded to
+the Java write radius, startup persistence loads are center-bounded, and the
+startup pump no longer drains unbounded update batches before rechecking the
+playable gate.
 Workstream: native Rust, server scheduling, startup readiness, loading UI;
 desktop validation first
 
@@ -86,6 +91,13 @@ Always read the reference source before changing this area:
 The key distinction: Java's radius-8 feature dependency is per chunk/status
 future and mixed-status. It is not a request to fully generate the entire render
 distance plus eight chunks before publishing the player.
+
+Native now preserves that distinction as two named concepts. The Java chunk
+status dependency radius remains documented as `8`, while the native mutable
+block-buffer dependency radius used by feature execution is `1`, matching the
+feature write radius enforced by `WorldGenRegion.ensureCanWrite(...)`. A fuller
+mixed-status dependency graph can still be ported later without restoring the
+old full-block radius-8 cold floor.
 
 ## Original Native Problem
 
@@ -286,8 +298,10 @@ Slice C1 result:
   distances stream outward instead of blocking startup behind one large
   synchronous `GenerateFeatures` request.
 - The high-radius scheduler contract test is enabled and proves that a
-  radius-33 candidate set starts with `9` target chunks, `5x5` feature centers,
-  and `21x21` dependencies, with the center chunk first.
+  radius-33 candidate set starts with `9` target chunks and `5x5` feature
+  centers, with the center chunk first. Slice F1 later reduced the native
+  full-block dependency surface for that first job from `21x21` chunks to
+  `7x7` chunks.
 
 Planned validation:
 
@@ -350,13 +364,13 @@ Known validation gap:
 
 - [ ] Run local desktop/offscreen startup at render distances `2`, `8`, `12`,
       `20`, and `30`.
-- [ ] Confirm RD30 enters after the center `3x3 FULL` gate instead of waiting
+- [x] Confirm RD30 enters after the center `3x3 FULL` gate instead of waiting
       for the whole view.
 - [ ] Confirm the loading grid changes colors before the world is entered.
 - [ ] Confirm chunks stream outward after entry.
-- [ ] Capture and inspect a drawable screenshot under `/tmp` for at least one
+- [x] Capture and inspect a drawable screenshot under `/tmp` for at least one
       high-radius lane.
-- [ ] Record startup timings and first feature/light job sizes in this doc or a
+- [x] Record startup timings and first feature/light job sizes in this doc or a
       durable performance record.
 
 Validation commands should use the current defaults from
@@ -381,12 +395,24 @@ Validation commands should use the current defaults from
   `START` region ticket. Native's local startup divergence remains valid, but
   it still needs a cheaper way to satisfy or stage the center gate.
 
+2026-07-04 post-Slice-F1 validation:
+
+- RD30 playable screenshot with lighting disabled completed and saved
+  `/tmp/mclone-rd30-playable-f4-unlit.png`. The image was inspected and was
+  nonblank/drawable.
+- RD30 playable screenshot with default lighting completed in `5.95s` and
+  saved `/tmp/mclone-rd30-playable-f4-lit.png`. The image was inspected and was
+  nonblank/drawable.
+- The direct scheduler probe that previously trickled the center gate one chunk
+  at a time after the first persistence completions reached the `3x3` playable
+  gate in roughly `2.5s`.
+
 ### Slice F: Reduce The Center-Gate Cold Feature Floor
 
-- [ ] Decide whether local startup should keep strict `3x3 Features/Light`
+- [x] Decide whether local startup should keep strict `3x3 Features/Light`
       before entry or introduce an explicit staged preview state for
       surface/collision-first entry.
-- [ ] If strict `3x3` remains the gate, reduce the first cold feature job cost
+- [x] If strict `3x3` remains the gate, reduce the first cold feature job cost
       without regressing vanilla feature writes. Candidate directions:
       mixed-status Java-style dependencies instead of full liquid-carved terrain
       for the full radius-8 shell, retained dependency prewarming, or smaller
@@ -395,8 +421,61 @@ Validation commands should use the current defaults from
       job is in flight. Offscreen teardown currently waits for in-flight native
       worldgen jobs, so validation needs either a non-blocking capture mode or
       an orderly cancellation/drain story.
-- [ ] Re-run RD20/RD30 playable screenshots and inspect at least one resulting
-      world screenshot under `/tmp`.
+- [x] Re-run RD30 playable screenshots and inspect at least one resulting world
+      screenshot under `/tmp`.
+
+Slice F1 result:
+
+- The local startup gate remains strict: enter local play only after the center
+  `3x3` runtime target is ready, the client has the center snapshot/light data,
+  and the renderer has accepted a first drawable section. No early preview state
+  was introduced.
+- Native feature execution now distinguishes Java's `FEATURES` status
+  dependency radius from the full mutable block-buffer dependency radius. The
+  full block dependency radius is `1`, matching Java's feature write radius;
+  the Java status dependency radius `8` remains named for future mixed-status
+  parity work.
+- The first RD33-shaped startup feature job remains `9` target chunks and
+  `5x5` feature centers, but its full block dependency surface is now `7x7`
+  chunks instead of `21x21`.
+- The raw whole-view diagnostic shape changed accordingly: a radius-33 target
+  set still has `67x67` targets and `69x69` feature centers, but now records
+  `71x71` block dependencies instead of `85x85`.
+- Startup persistence reads are center-first bounded. The first high-distance
+  admission requests only `9` chunk/entity loads, then background admissions are
+  capped at `128` and continue as completions drain.
+- Persistence completions now trigger reconciliation when the pending load
+  count changes, not only when stored misses increase, so persistent worlds keep
+  streaming after successful loads.
+- Persistence load completions use the holder's ticket level to decide whether
+  a chunk is still active instead of rebuilding the full active-level map for
+  every completion.
+- `LocalSingleViewStartupPump` uses the normal frame update budget while
+  waiting for playability. This keeps high-RD startup from draining a large
+  queued update stream before the next center-gate/progress check.
+
+Completed validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server` passed on
+  2026-07-04 (`361` passed, `0` ignored).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime` passed
+  on 2026-07-04 (`80` passed, `0` ignored).
+- RD30 playable screenshots were captured and inspected at
+  `/tmp/mclone-rd30-playable-f4-unlit.png` and
+  `/tmp/mclone-rd30-playable-f4-lit.png`.
+
+Remaining follow-ups:
+
+- Port or explicitly model Java's full mixed-status radius-8 feature dependency
+  graph if later parity work needs the outer metadata dependencies visible in
+  the native scheduler.
+- Validate progress-screen repaint behavior during RD30 in-flight startup work,
+  not only the final playable screenshot.
+- Run movement/background-streaming smokes at RD20/RD30 after entry so render
+  compile backpressure and far-view streaming can be measured independently of
+  startup admission.
 
 ## Open Questions
 
