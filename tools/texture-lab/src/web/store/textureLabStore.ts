@@ -10,6 +10,7 @@ export interface TextureLabState {
   index: TextureLabIndex | null;
   selectedTextureName: string | null;
   selectedCandidateId: string | null;
+  previewSelectionsByTexture: Record<string, string>;
   themeMode: ThemeMode;
   themeSource: ThemeSource;
   previewMode: PreviewMode;
@@ -22,6 +23,8 @@ export interface TextureLabState {
   reindex: () => Promise<void>;
   selectTexture: (name: string) => void;
   selectCandidate: (id: string) => void;
+  setPreviewCandidate: (textureName: string, candidateId: string) => void;
+  clearPreviewCandidate: (textureName: string) => void;
   setPreviewMode: (mode: PreviewMode) => void;
   syncSystemTheme: (themeMode: ThemeMode) => void;
   toggleTheme: () => void;
@@ -34,6 +37,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   index: null,
   selectedTextureName: null,
   selectedCandidateId: null,
+  previewSelectionsByTexture: {},
   themeMode: systemThemeMode(),
   themeSource: "system",
   previewMode: "detail",
@@ -55,6 +59,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
         index,
         selectedTextureName,
         selectedCandidateId: selectCandidateAfterLoad(index, selectedTextureName, get().selectedCandidateId),
+        previewSelectionsByTexture: prunePreviewSelections(index, get().previewSelectionsByTexture),
         loadStatus: "ready",
         error: null,
       });
@@ -72,6 +77,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
         index,
         selectedTextureName,
         selectedCandidateId: selectCandidateAfterLoad(index, selectedTextureName, get().selectedCandidateId),
+        previewSelectionsByTexture: prunePreviewSelections(index, get().previewSelectionsByTexture),
         loadStatus: "ready",
         error: null,
       });
@@ -90,6 +96,27 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
 
   selectCandidate(id) {
     set({ selectedCandidateId: id });
+  },
+
+  setPreviewCandidate(textureName, candidateId) {
+    const index = get().index;
+    const candidate = index?.candidates.find((entry) => entry.id === candidateId);
+    if (!candidate || candidate.textureName !== textureName) {
+      return;
+    }
+    set((state) => ({
+      previewSelectionsByTexture: {
+        ...state.previewSelectionsByTexture,
+        [textureName]: candidateId,
+      },
+    }));
+  },
+
+  clearPreviewCandidate(textureName) {
+    set((state) => {
+      const { [textureName]: _removed, ...previewSelectionsByTexture } = state.previewSelectionsByTexture;
+      return { previewSelectionsByTexture };
+    });
   },
 
   setPreviewMode(previewMode) {
@@ -157,6 +184,20 @@ function selectCandidateAfterLoad(
 
 function firstCandidateForTexture(index: TextureLabIndex, textureName: string): TextureCandidateEntry | null {
   return index.candidates.find((candidate) => candidate.textureName === textureName) ?? null;
+}
+
+function prunePreviewSelections(
+  index: TextureLabIndex,
+  current: Record<string, string>,
+): Record<string, string> {
+  const pruned: Record<string, string> = {};
+  for (const [textureName, candidateId] of Object.entries(current)) {
+    const candidate = index.candidates.find((entry) => entry.id === candidateId);
+    if (candidate?.textureName === textureName) {
+      pruned[textureName] = candidateId;
+    }
+  }
+  return pruned;
 }
 
 function systemThemeMode(): ThemeMode {

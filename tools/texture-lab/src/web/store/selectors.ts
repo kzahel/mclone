@@ -6,6 +6,8 @@ export const selectLoadStatus = (state: TextureLabState): TextureLabState["loadS
 export const selectError = (state: TextureLabState): string | null => state.error;
 export const selectSelectedTextureName = (state: TextureLabState): string | null => state.selectedTextureName;
 export const selectSelectedCandidateId = (state: TextureLabState): string | null => state.selectedCandidateId;
+export const selectPreviewSelectionsByTexture = (state: TextureLabState): Record<string, string> =>
+  state.previewSelectionsByTexture;
 export const selectThemeMode = (state: TextureLabState): TextureLabState["themeMode"] => state.themeMode;
 export const selectPreviewMode = (state: TextureLabState): TextureLabState["previewMode"] => state.previewMode;
 export const selectSearch = (state: TextureLabState): string => state.search;

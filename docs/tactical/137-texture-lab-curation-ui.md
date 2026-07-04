@@ -7,7 +7,8 @@ candidate discovery landed 2026-07-04. Slice A2 read-only candidate selection
 and detail inspection landed 2026-07-04. Slice A2.5 Playwright integration
 coverage landed 2026-07-04. Slice A2.6 system-default light/dark theme toggle
 landed 2026-07-04. Slice A2.7 overview atlas and block-bundle comparison
-views landed 2026-07-04. Next priority is preview generation parity.
+views landed 2026-07-04. Slice A2.8 temporary candidate preview selection
+landed 2026-07-04. Next priority is preview generation parity.
 
 ## Purpose
 

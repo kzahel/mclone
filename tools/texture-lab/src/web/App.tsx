@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../core/index-model";
+import { primaryCandidateImage } from "./candidate-images";
 import { BlockBundleAtlas, PreviewModeTabs, TextureAtlas } from "./components/OverviewViews";
 import {
   activeTextureCandidates,
@@ -12,6 +13,7 @@ import {
   selectLoadStatus,
   selectMaterialFilter,
   selectPreviewMode,
+  selectPreviewSelectionsByTexture,
   selectSearch,
   selectedCandidate as selectedCandidateSelector,
   selectedTexture,
@@ -34,6 +36,7 @@ export function App(): JSX.Element {
   const selectedCandidate = useTextureLabStore(selectedCandidateSelector);
   const selectedTextureName = useTextureLabStore(selectSelectedTextureName);
   const selectedCandidateId = useTextureLabStore(selectSelectedCandidateId);
+  const previewSelectionsByTexture = useTextureLabStore(selectPreviewSelectionsByTexture);
   const themeMode = useTextureLabStore(selectThemeMode);
   const previewMode = useTextureLabStore(selectPreviewMode);
   const search = useTextureLabStore(selectSearch);
@@ -45,6 +48,8 @@ export function App(): JSX.Element {
   const reindex = useTextureLabStore((state) => state.reindex);
   const selectTexture = useTextureLabStore((state) => state.selectTexture);
   const selectCandidate = useTextureLabStore((state) => state.selectCandidate);
+  const setPreviewCandidate = useTextureLabStore((state) => state.setPreviewCandidate);
+  const clearPreviewCandidate = useTextureLabStore((state) => state.clearPreviewCandidate);
   const setPreviewMode = useTextureLabStore((state) => state.setPreviewMode);
   const syncSystemTheme = useTextureLabStore((state) => state.syncSystemTheme);
   const toggleTheme = useTextureLabStore((state) => state.toggleTheme);
@@ -159,6 +164,7 @@ export function App(): JSX.Element {
                 <TextureAtlas
                   textures={textures}
                   candidates={index.candidates}
+                  previewSelectionsByTexture={previewSelectionsByTexture}
                   selectedTextureName={selectedTextureName}
                   onSelectTexture={selectTexture}
                 />
@@ -166,6 +172,8 @@ export function App(): JSX.Element {
                 <BlockBundleAtlas
                   blocks={index.blocks}
                   textures={textures}
+                  candidates={index.candidates}
+                  previewSelectionsByTexture={previewSelectionsByTexture}
                   selectedTextureName={selectedTextureName}
                   onSelectTexture={selectTexture}
                 />
@@ -174,7 +182,10 @@ export function App(): JSX.Element {
                   texture={activeTexture}
                   candidates={activeCandidates}
                   selectedCandidateId={selectedCandidateId}
+                  previewCandidateId={previewSelectionsByTexture[activeTexture.name] ?? null}
                   onSelectCandidate={selectCandidate}
+                  onUsePreview={setPreviewCandidate}
+                  onClearPreview={clearPreviewCandidate}
                 />
               ) : (
                 <EmptyState loadStatus={loadStatus} />
@@ -218,12 +229,18 @@ function TexturePreview({
   texture,
   candidates,
   selectedCandidateId,
+  previewCandidateId,
   onSelectCandidate,
+  onUsePreview,
+  onClearPreview,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
   selectedCandidateId: string | null;
+  previewCandidateId: string | null;
   onSelectCandidate: (id: string) => void;
+  onUsePreview: (textureName: string, candidateId: string) => void;
+  onClearPreview: (textureName: string) => void;
 }): JSX.Element {
   return (
     <>
@@ -250,7 +267,10 @@ function TexturePreview({
         texture={texture}
         candidates={candidates}
         selectedCandidateId={selectedCandidateId}
+        previewCandidateId={previewCandidateId}
         onSelectCandidate={onSelectCandidate}
+        onUsePreview={onUsePreview}
+        onClearPreview={onClearPreview}
       />
     </>
   );
@@ -293,12 +313,18 @@ function CandidateSection({
   texture,
   candidates,
   selectedCandidateId,
+  previewCandidateId,
   onSelectCandidate,
+  onUsePreview,
+  onClearPreview,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
   selectedCandidateId: string | null;
+  previewCandidateId: string | null;
   onSelectCandidate: (id: string) => void;
+  onUsePreview: (textureName: string, candidateId: string) => void;
+  onClearPreview: (textureName: string) => void;
 }): JSX.Element {
   const sortedCandidates = [...candidates].sort(compareCandidateDisplay);
   return (
@@ -308,6 +334,11 @@ function CandidateSection({
           <h3>Generated Candidates</h3>
           <p>{sortedCandidates.length ? `${sortedCandidates.length} linked to ${texture.name}` : "No local candidates linked yet."}</p>
         </div>
+        {previewCandidateId ? (
+          <button className="inlineButton" type="button" onClick={() => onClearPreview(texture.name)}>
+            Clear Preview
+          </button>
+        ) : null}
       </div>
       {sortedCandidates.length ? (
         <div className="candidateGrid">
@@ -316,7 +347,9 @@ function CandidateSection({
               key={candidate.id}
               candidate={candidate}
               selected={candidate.id === selectedCandidateId}
+              previewed={candidate.id === previewCandidateId}
               onSelect={onSelectCandidate}
+              onUsePreview={onUsePreview}
             />
           ))}
         </div>
@@ -330,22 +363,31 @@ function CandidateSection({
 function CandidateCard({
   candidate,
   selected,
+  previewed,
   onSelect,
+  onUsePreview,
 }: {
   candidate: TextureCandidateEntry;
   selected: boolean;
+  previewed: boolean;
   onSelect: (id: string) => void;
+  onUsePreview: (textureName: string, candidateId: string) => void;
 }): JSX.Element {
   const image = primaryCandidateImage(candidate);
   const url = image ? imageRefUrl(image) : null;
   const sourceLabel = candidate.archived ? "archive" : candidate.source;
   return (
     <button
-      className={selected ? "candidateCard selected" : "candidateCard"}
+      className={candidateCardClassName(selected, previewed)}
       type="button"
       aria-pressed={selected}
       aria-label={`${candidate.codename} ${sourceLabel} candidate`}
-      onClick={() => onSelect(candidate.id)}
+      onClick={() => {
+        onSelect(candidate.id);
+        if (candidate.textureName) {
+          onUsePreview(candidate.textureName, candidate.id);
+        }
+      }}
     >
       <div className="candidateImageFrame">
         {url && image ? <img src={url} alt={`${candidate.codename} ${image.label}`} /> : <span>No image</span>}
@@ -353,7 +395,10 @@ function CandidateCard({
       <div className="candidateBody">
         <div className="candidateTitleRow">
           <code>{candidate.codename}</code>
-          <span className="sourcePill">{sourceLabel}</span>
+          <span className="candidatePills">
+            {previewed ? <span className="previewPill">Previewing</span> : null}
+            <span className="sourcePill">{sourceLabel}</span>
+          </span>
         </div>
         <div className="candidateMeta">
           <span>{candidate.status ?? "untriaged"}</span>
@@ -374,16 +419,8 @@ function CandidateCard({
   );
 }
 
-function primaryCandidateImage(candidate: TextureCandidateEntry): TextureImageRef | null {
-  return (
-    [
-      candidate.images.projected,
-      candidate.images.raw,
-      candidate.images.rawTile,
-      candidate.images.reviewSheet,
-      candidate.images.contactSheet,
-    ].find((image) => image.exists) ?? null
-  );
+function candidateCardClassName(selected: boolean, previewed: boolean): string {
+  return ["candidateCard", selected ? "selected" : "", previewed ? "previewed" : ""].filter(Boolean).join(" ");
 }
 
 function compareCandidateDisplay(left: TextureCandidateEntry, right: TextureCandidateEntry): number {

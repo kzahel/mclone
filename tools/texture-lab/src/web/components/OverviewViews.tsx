@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import type { BlockIndexEntry, TextureCandidateEntry, TextureImageRef, TextureIndexEntry } from "../../core/index-model";
+import { primaryCandidateImage } from "../candidate-images";
 import type { PreviewMode } from "../store/textureLabStore";
 import { imageRefUrl } from "../store/textureLabStore";
 
@@ -35,16 +36,19 @@ export function PreviewModeTabs({
 export function TextureAtlas({
   textures,
   candidates,
+  previewSelectionsByTexture,
   selectedTextureName,
   onSelectTexture,
 }: {
   textures: TextureIndexEntry[];
   candidates: TextureCandidateEntry[];
+  previewSelectionsByTexture: Record<string, string>;
   selectedTextureName: string | null;
   onSelectTexture: (name: string) => void;
 }): JSX.Element {
   const groups = groupTexturesByMaterial(textures);
   const candidateCounts = candidateCountByTexture(candidates);
+  const candidateById = candidateMapById(candidates);
 
   return (
     <div className="overviewStack">
@@ -69,6 +73,7 @@ export function TextureAtlas({
                   key={texture.name}
                   texture={texture}
                   candidateCount={candidateCounts.get(texture.name) ?? 0}
+                  previewCandidate={candidateById.get(previewSelectionsByTexture[texture.name] ?? "") ?? null}
                   selected={texture.name === selectedTextureName}
                   onSelect={onSelectTexture}
                 />
@@ -86,15 +91,20 @@ export function TextureAtlas({
 export function BlockBundleAtlas({
   blocks,
   textures,
+  candidates,
+  previewSelectionsByTexture,
   selectedTextureName,
   onSelectTexture,
 }: {
   blocks: BlockIndexEntry[];
   textures: TextureIndexEntry[];
+  candidates: TextureCandidateEntry[];
+  previewSelectionsByTexture: Record<string, string>;
   selectedTextureName: string | null;
   onSelectTexture: (name: string) => void;
 }): JSX.Element {
   const textureByName = new Map(textures.map((texture) => [texture.name, texture]));
+  const candidateById = candidateMapById(candidates);
   const visibleBlocks = blocks
     .map((block) => ({
       block,
@@ -136,7 +146,11 @@ export function BlockBundleAtlas({
                           <strong>{face.face}</strong>
                           <span>{texture.name}</span>
                         </div>
-                        <SplitTextureCompare texture={texture} compact />
+                        <SplitTextureCompare
+                          texture={texture}
+                          previewCandidate={candidateById.get(previewSelectionsByTexture[texture.name] ?? "") ?? null}
+                          compact
+                        />
                       </button>
                     ) : null;
                   })}
@@ -155,11 +169,13 @@ export function BlockBundleAtlas({
 function AtlasTextureCard({
   texture,
   candidateCount,
+  previewCandidate,
   selected,
   onSelect,
 }: {
   texture: TextureIndexEntry;
   candidateCount: number;
+  previewCandidate: TextureCandidateEntry | null;
   selected: boolean;
   onSelect: (name: string) => void;
 }): JSX.Element {
@@ -175,12 +191,13 @@ function AtlasTextureCard({
         <strong>{texture.displayName}</strong>
         <span>{texture.status}</span>
       </div>
-      <SplitTextureCompare texture={texture} />
+      <SplitTextureCompare texture={texture} previewCandidate={previewCandidate} />
       <div className="atlasCardMeta">
         <span>{texture.size}px</span>
         <span>{texture.tiling}</span>
         {texture.tintRole ? <span>{texture.tintRole}</span> : null}
         {candidateCount > 0 ? <span>{candidateCount} candidates</span> : null}
+        {previewCandidate ? <span>preview {previewCandidate.codename}</span> : null}
       </div>
     </button>
   );
@@ -195,10 +212,23 @@ function BlockSheetPreview({ blockName, image }: { blockName: string; image: Tex
   );
 }
 
-function SplitTextureCompare({ texture, compact = false }: { texture: TextureIndexEntry; compact?: boolean }): JSX.Element {
+function SplitTextureCompare({
+  texture,
+  previewCandidate,
+  compact = false,
+}: {
+  texture: TextureIndexEntry;
+  previewCandidate: TextureCandidateEntry | null;
+  compact?: boolean;
+}): JSX.Element {
+  const previewImage = previewCandidate ? primaryCandidateImage(previewCandidate) : null;
   return (
     <div className={compact ? "splitCompare compact" : "splitCompare"}>
-      <CompareImage label="Ours" image={texture.images.currentExport} alt={`${texture.name} current export`} />
+      <CompareImage
+        label={previewCandidate ? `Ours · ${previewCandidate.codename}` : "Ours"}
+        image={previewImage ?? texture.images.currentExport}
+        alt={previewCandidate ? `${previewCandidate.codename} preview candidate` : `${texture.name} current export`}
+      />
       <CompareImage label="Minecraft" image={texture.images.minecraftReference} alt={`${texture.name} Minecraft reference`} />
     </div>
   );
@@ -240,6 +270,10 @@ function candidateCountByTexture(candidates: TextureCandidateEntry[]): Map<strin
     counts.set(candidate.textureName, (counts.get(candidate.textureName) ?? 0) + 1);
   }
   return counts;
+}
+
+function candidateMapById(candidates: TextureCandidateEntry[]): Map<string, TextureCandidateEntry> {
+  return new Map(candidates.map((candidate) => [candidate.id, candidate]));
 }
 
 function humanizeName(name: string): string {

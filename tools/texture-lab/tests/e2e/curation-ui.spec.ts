@@ -94,6 +94,33 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-blocks.png", fullPage: true });
 });
 
+test("uses generated candidates as temporary atlas and block previews", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByLabel("Search").fill("grass_block_top");
+  await page.getByRole("button", { name: /grass_block_top/ }).click();
+  const archiveCard = page.getByRole("button", { name: "G5101S74 archive candidate" });
+  await archiveCard.click();
+  await expect(archiveCard).toContainText("Previewing");
+
+  await page.getByRole("button", { name: "Atlas" }).click();
+  const grassCard = page.getByRole("button", { name: "Grass Block Top atlas comparison", exact: true });
+  await expect(grassCard).toContainText("Ours · G5101S74");
+  await expect(grassCard).toContainText("preview G5101S74");
+  await expect(grassCard.locator("img").first()).toHaveAttribute("alt", "G5101S74 preview candidate");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-preview-selection.png", fullPage: true });
+
+  await page.getByRole("button", { name: "Blocks" }).click();
+  const grassTopFace = page.getByRole("button", { name: "grass-block top uses Grass Block Top", exact: true });
+  await expect(grassTopFace).toContainText("Ours · G5101S74");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-preview-blocks.png", fullPage: true });
+
+  await page.getByRole("button", { name: "Detail" }).click();
+  await page.getByRole("button", { name: "Clear Preview" }).click();
+  await page.getByRole("button", { name: "Atlas" }).click();
+  await expect(grassCard).not.toContainText("G5101S74");
+});
+
 test("supports texture filtering, candidate selection, inspector details, keyboard activation, and reindex preservation", async ({
   page,
 }) => {
