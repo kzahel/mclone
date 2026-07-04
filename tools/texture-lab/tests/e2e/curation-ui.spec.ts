@@ -119,6 +119,20 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   ]);
   expect(redstoneDustDot?.sheet.path).toContain("redstone-dust-dot-sheet.png");
 
+  for (const textureName of ["grass_cross", "fern_cross"]) {
+    const texture = index.textures.find((entry: { name: string }) => entry.name === textureName);
+    if (!texture) {
+      throw new Error(`Missing ${textureName} fixture`);
+    }
+    const exportedResponse = await request.get(`/api/image?path=${encodeURIComponent(texture.images.currentExport.path)}`);
+    await expect(exportedResponse).toBeOK();
+    const referenceResponse = await request.get(`/api/image?path=${encodeURIComponent(texture.images.minecraftReference.path)}`);
+    await expect(referenceResponse).toBeOK();
+    expect(Math.abs(normalizedAlphaCentroidX(decodePng(await exportedResponse.body())) - normalizedAlphaCentroidX(decodePng(await referenceResponse.body())))).toBeLessThan(
+      0.05,
+    );
+  }
+
   const selectResponse = await request.post("/api/curation/select", {
     data: { textureName: "grass_block_top", candidateId: archivedCandidate.id },
   });
@@ -497,6 +511,19 @@ function meanRgb(image: RgbaImage): [number, number, number] {
     blue += image.data[index + 2]!;
   }
   return [red / count, green / count, blue / count];
+}
+
+function normalizedAlphaCentroidX(image: RgbaImage): number {
+  let alphaSum = 0;
+  let weightedX = 0;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const alpha = image.data[(y * image.width + x) * 4 + 3]!;
+      alphaSum += alpha;
+      weightedX += x * alpha;
+    }
+  }
+  return weightedX / alphaSum / (image.width - 1);
 }
 
 function saturation([red, green, blue]: [number, number, number]): number {
