@@ -123,6 +123,8 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::DEAD_BUSH
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
+        | terrain_id::TALL_GRASS_LOWER
+        | terrain_id::TALL_GRASS_UPPER
         | terrain_id::LILAC_LOWER
         | terrain_id::LILAC_UPPER
         | terrain_id::ROSE_BUSH_LOWER
@@ -192,6 +194,8 @@ fn is_double_plant(id: u32) -> bool {
         id,
         terrain_id::LARGE_FERN_LOWER
             | terrain_id::LARGE_FERN_UPPER
+            | terrain_id::TALL_GRASS_LOWER
+            | terrain_id::TALL_GRASS_UPPER
             | terrain_id::LILAC_LOWER
             | terrain_id::LILAC_UPPER
             | terrain_id::ROSE_BUSH_LOWER

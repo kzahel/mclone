@@ -159,6 +159,8 @@ pub const BLUE_ICE: RawBlockId = 153;
 pub const PUMPKIN: RawBlockId = 154;
 pub const MELON: RawBlockId = 155;
 pub const VINE: RawBlockId = 156;
+pub const TALL_GRASS_LOWER: RawBlockId = 157;
+pub const TALL_GRASS_UPPER: RawBlockId = 158;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -186,6 +188,8 @@ impl GeneratedBlockId {
     pub const DEEPSLATE_LAPIS_ORE: Self = Self(DEEPSLATE_LAPIS_ORE);
     pub const LARGE_FERN_LOWER: Self = Self(LARGE_FERN_LOWER);
     pub const LARGE_FERN_UPPER: Self = Self(LARGE_FERN_UPPER);
+    pub const TALL_GRASS_LOWER: Self = Self(TALL_GRASS_LOWER);
+    pub const TALL_GRASS_UPPER: Self = Self(TALL_GRASS_UPPER);
     pub const GLOW_LICHEN: Self = Self(GLOW_LICHEN);
     pub const CAVE_AIR: Self = Self(CAVE_AIR);
     pub const CLAY: Self = Self(CLAY);
@@ -296,6 +300,8 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
+            | TALL_GRASS_LOWER
+            | TALL_GRASS_UPPER
             | LILAC_LOWER
             | LILAC_UPPER
             | ROSE_BUSH_LOWER
@@ -566,6 +572,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         LAPIS_ORE => "minecraft:lapis_ore",
         DEEPSLATE_LAPIS_ORE => "minecraft:deepslate_lapis_ore",
         LARGE_FERN_LOWER | LARGE_FERN_UPPER => "minecraft:large_fern",
+        TALL_GRASS_LOWER | TALL_GRASS_UPPER => "minecraft:tall_grass",
         GLOW_LICHEN => "minecraft:glow_lichen",
         CAVE_AIR => "minecraft:cave_air",
         CLAY => "minecraft:clay",
@@ -633,6 +640,8 @@ mod tests {
         assert_eq!(block_light_opacity(PUMPKIN), 15);
         assert_eq!(block_light_opacity(MELON), 15);
         assert_eq!(block_light_opacity(VINE), 0);
+        assert_eq!(block_light_opacity(TALL_GRASS_LOWER), 0);
+        assert_eq!(block_light_opacity(TALL_GRASS_UPPER), 0);
         assert_eq!(block_light_opacity(SUGAR_CANE), 0);
         assert_eq!(block_light_opacity(SEAGRASS), 0);
         assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
@@ -688,6 +697,7 @@ mod tests {
         assert_eq!(block_name(PUMPKIN), "minecraft:pumpkin");
         assert_eq!(block_name(MELON), "minecraft:melon");
         assert_eq!(block_name(VINE), "minecraft:vine");
+        assert_eq!(block_name(TALL_GRASS_UPPER), "minecraft:tall_grass");
         assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
         assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
         assert_eq!(block_name(SEA_PICKLE_4), "minecraft:sea_pickle");

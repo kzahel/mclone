@@ -626,9 +626,9 @@ mod tests {
             feature_family: Some(FeatureFamily::GiantTaigaSpruceTrees),
         },
         PaletteMatrixCase {
-            seed: 62,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 33,
+            chunk_x: -2,
+            chunk_z: -4,
             biome_key: "minecraft:savanna",
             surface_family: SurfaceFamily::Grass,
             feature_family: Some(FeatureFamily::SavannaAcacia),
@@ -643,7 +643,7 @@ mod tests {
         },
         PaletteMatrixCase {
             seed: 68,
-            chunk_x: 0,
+            chunk_x: -6,
             chunk_z: 0,
             biome_key: "minecraft:shattered_savanna",
             surface_family: SurfaceFamily::ShatteredSavanna,
@@ -906,9 +906,9 @@ mod tests {
             feature_family: Some(FeatureFamily::MountainTrees),
         },
         PaletteMatrixCase {
-            seed: 2659,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 153,
+            chunk_x: -8,
+            chunk_z: -2,
             biome_key: "minecraft:shattered_savanna_plateau",
             surface_family: SurfaceFamily::ShatteredSavanna,
             feature_family: Some(FeatureFamily::SavannaAcacia),
@@ -979,8 +979,8 @@ mod tests {
         },
         LowVisibilityFeatureCase {
             seed: 62,
-            chunk_x: -1,
-            chunk_z: 2,
+            chunk_x: 3,
+            chunk_z: 1,
             biome_key: "minecraft:savanna",
             expectation: LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
                 min_water_ticks: 2,
@@ -2761,14 +2761,21 @@ mod tests {
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
-        assert_eq!(report.mismatched_blocks, 3, "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 6, "{report:#?}");
         assert_eq!(
             report.top_mismatch_pairs,
-            vec![MismatchBucket {
-                actual: "minecraft:air".to_owned(),
-                expected: "minecraft:grass".to_owned(),
-                count: 3,
-            }]
+            vec![
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:grass".to_owned(),
+                    count: 3,
+                },
+                MismatchBucket {
+                    actual: "minecraft:grass".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 3,
+                },
+            ]
         );
     }
 

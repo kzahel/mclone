@@ -57,6 +57,7 @@ fn java_no_collision(block: &ResourceLocation) -> bool {
             | "grass"
             | "fern"
             | "large_fern"
+            | "tall_grass"
             | "dandelion"
             | "poppy"
             | "dead_bush"
@@ -196,6 +197,7 @@ fn java_material_blocks_motion(block: &ResourceLocation) -> bool {
             | "grass"
             | "fern"
             | "large_fern"
+            | "tall_grass"
             | "dandelion"
             | "poppy"
             | "dead_bush"
@@ -242,6 +244,7 @@ fn java_bush_like_block(block: &ResourceLocation) -> bool {
         "grass"
             | "fern"
             | "large_fern"
+            | "tall_grass"
             | "dandelion"
             | "poppy"
             | "dead_bush"
@@ -372,6 +375,7 @@ mod tests {
             "minecraft:grass",
             "minecraft:fern",
             "minecraft:large_fern",
+            "minecraft:tall_grass",
             "minecraft:dandelion",
             "minecraft:poppy",
             "minecraft:dead_bush",

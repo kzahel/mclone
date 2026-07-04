@@ -9,7 +9,7 @@ use crate::block::{
     GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER,
     LILY_OF_THE_VALLEY, LILY_PAD, MELON, MYCELIUM, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN,
     RED_MUSHROOM, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SNOW_BLOCK,
-    SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TERRACOTTA, TUFF, WATER,
+    SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -755,7 +755,7 @@ fn disk_feature(config: DiskConfiguration, count: Option<i32>) -> PlacedFeature 
 
 fn forest_features() -> Vec<PlacedFeature> {
     vec![
-        omitted_vegetal_feature(),
+        forest_flower_vegetation_feature(),
         glow_lichen_feature(),
         forest_birch_other_feature(),
         default_flower_feature(),
@@ -775,7 +775,7 @@ fn flower_forest_features() -> Vec<PlacedFeature> {
         glow_lichen_feature(),
         forest_flower_trees_feature(),
         flower_forest_feature(),
-        grass_patch(GRASS, 1),
+        default_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
     ];
@@ -1013,6 +1013,8 @@ fn mushroom_field_features() -> Vec<PlacedFeature> {
 fn dark_forest_features(red_mushrooms_first: bool) -> Vec<PlacedFeature> {
     let mut features = vec![
         dark_forest_vegetation_feature(red_mushrooms_first),
+        forest_flower_vegetation_feature(),
+        glow_lichen_feature(),
         default_flower_feature(),
         forest_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
@@ -1024,14 +1026,24 @@ fn dark_forest_features(red_mushrooms_first: bool) -> Vec<PlacedFeature> {
 }
 
 fn savanna_features(shattered: bool) -> Vec<PlacedFeature> {
-    let tree_count = if shattered { 2 } else { 1 };
-    let mut features = vec![
-        savanna_tree_feature(tree_count),
-        default_flower_feature(),
-        forest_grass_patch_feature(),
-        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
-        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
-    ];
+    let mut features = if shattered {
+        vec![
+            savanna_tree_feature(2),
+            default_flower_feature(),
+            shattered_savanna_grass_patch_feature(),
+            normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+            normal_mushroom_patch_feature(RED_MUSHROOM, 8),
+        ]
+    } else {
+        vec![
+            savanna_tall_grass_patch_feature(),
+            savanna_tree_feature(1),
+            warm_flower_feature(),
+            savanna_extra_grass_patch_feature(),
+            normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+            normal_mushroom_patch_feature(RED_MUSHROOM, 8),
+        ]
+    };
     add_default_extra_vegetation(&mut features);
     add_default_springs(&mut features);
     features
@@ -1105,7 +1117,7 @@ fn river_features(frozen: bool) -> Vec<PlacedFeature> {
     let mut features = vec![
         water_tree_feature(),
         default_flower_feature(),
-        forest_grass_patch_feature(),
+        default_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         sugar_cane_patch(10),
@@ -1122,7 +1134,7 @@ fn river_features(frozen: bool) -> Vec<PlacedFeature> {
 fn beach_features() -> Vec<PlacedFeature> {
     vec![
         default_flower_feature(),
-        forest_grass_patch_feature(),
+        default_grass_patch_feature(),
         normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
         normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         sugar_cane_patch(10),
@@ -1173,14 +1185,6 @@ fn tree_feature(
             ConfiguredDecorator::count_extra(count, extra_chance, extra_count),
             ConfiguredDecorator::square(),
         ],
-    )
-}
-
-fn omitted_vegetal_feature() -> PlacedFeature {
-    PlacedFeature::new(
-        DecorationStep::VegetalDecoration,
-        ConfiguredFeature::noop(),
-        Vec::new(),
     )
 }
 
@@ -1454,6 +1458,14 @@ pub(super) fn tree_threshold_decorators(
 }
 
 fn default_flower_feature() -> PlacedFeature {
+    default_weighted_flower_feature(2)
+}
+
+fn warm_flower_feature() -> PlacedFeature {
+    default_weighted_flower_feature(4)
+}
+
+fn default_weighted_flower_feature(count: i32) -> PlacedFeature {
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::flower(RandomPatchConfiguration {
@@ -1472,7 +1484,7 @@ fn default_flower_feature() -> PlacedFeature {
             place_on: &[],
         }),
         vec![
-            ConfiguredDecorator::count(2),
+            ConfiguredDecorator::count(count),
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
             ConfiguredDecorator::spread_32_above(),
@@ -1508,6 +1520,14 @@ fn flower_forest_feature() -> PlacedFeature {
 }
 
 fn forest_flower_vegetation_common_feature() -> PlacedFeature {
+    forest_flower_vegetation_feature_with_inner_count(IntProvider::clamped_uniform(-1, 3, 0, 3))
+}
+
+fn forest_flower_vegetation_feature() -> PlacedFeature {
+    forest_flower_vegetation_feature_with_inner_count(IntProvider::clamped_uniform(-3, 1, 0, 1))
+}
+
+fn forest_flower_vegetation_feature_with_inner_count(inner_count: IntProvider) -> PlacedFeature {
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::simple_random_selector(SimpleRandomFeatureConfiguration::new([
@@ -1521,9 +1541,7 @@ fn forest_flower_vegetation_common_feature() -> PlacedFeature {
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
             ConfiguredDecorator::spread_32_above(),
-            ConfiguredDecorator::Count(CountConfiguration::from_provider(
-                IntProvider::clamped_uniform(-1, 3, 0, 3),
-            )),
+            ConfiguredDecorator::Count(CountConfiguration::from_provider(inner_count)),
         ],
     )
 }
@@ -1674,7 +1692,32 @@ fn normal_mushroom_patch_feature(state: RawBlockId, rarity: i32) -> PlacedFeatur
     )
 }
 
+fn default_grass_patch_feature() -> PlacedFeature {
+    default_grass_patch_feature_with_count(None)
+}
+
 fn forest_grass_patch_feature() -> PlacedFeature {
+    default_grass_patch_feature_with_count(Some(2))
+}
+
+fn savanna_extra_grass_patch_feature() -> PlacedFeature {
+    default_grass_patch_feature_with_count(Some(20))
+}
+
+fn shattered_savanna_grass_patch_feature() -> PlacedFeature {
+    default_grass_patch_feature_with_count(Some(5))
+}
+
+fn default_grass_patch_feature_with_count(count: Option<i32>) -> PlacedFeature {
+    let mut decorators = Vec::new();
+    if let Some(count) = count {
+        decorators.push(ConfiguredDecorator::count(count));
+    }
+    decorators.push(ConfiguredDecorator::square());
+    decorators.push(ConfiguredDecorator::heightmap_spread_double(
+        HeightmapType::MotionBlocking,
+    ));
+
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
@@ -1692,9 +1735,33 @@ fn forest_grass_patch_feature() -> PlacedFeature {
             need_water: false,
             place_on: &[],
         }),
+        decorators,
+    )
+}
+
+fn savanna_tall_grass_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: TALL_GRASS_LOWER,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: false,
+            double_plant: true,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        }),
         vec![
+            ConfiguredDecorator::count(7),
             ConfiguredDecorator::square(),
-            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::spread_32_above(),
         ],
     )
 }

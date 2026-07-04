@@ -6,9 +6,9 @@ use crate::block::{
     LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD, MELON, MYCELIUM, ORANGE_TULIP,
     OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM,
     RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SAND, SUGAR_CANE,
-    SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TERRACOTTA, WHITE_TULIP,
-    block_light_emission, block_light_opacity, is_air_like, is_lava, is_water,
-    material_blocks_motion,
+    SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TALL_GRASS_UPPER,
+    TERRACOTTA, WHITE_TULIP, block_light_emission, block_light_opacity, is_air_like, is_lava,
+    is_water, material_blocks_motion,
 };
 use crate::noise::PerlinSimplexNoise;
 use crate::placement::BlockPos;
@@ -379,6 +379,7 @@ fn is_mushroom_grow_block(block_id: RawBlockId) -> bool {
 fn double_plant_halves(block_id: RawBlockId) -> Option<(RawBlockId, RawBlockId)> {
     match block_id {
         LARGE_FERN_LOWER | LARGE_FERN_UPPER => Some((LARGE_FERN_LOWER, LARGE_FERN_UPPER)),
+        TALL_GRASS_LOWER | TALL_GRASS_UPPER => Some((TALL_GRASS_LOWER, TALL_GRASS_UPPER)),
         LILAC_LOWER | LILAC_UPPER => Some((LILAC_LOWER, LILAC_UPPER)),
         ROSE_BUSH_LOWER | ROSE_BUSH_UPPER => Some((ROSE_BUSH_LOWER, ROSE_BUSH_UPPER)),
         PEONY_LOWER | PEONY_UPPER => Some((PEONY_LOWER, PEONY_UPPER)),

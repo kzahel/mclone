@@ -574,6 +574,8 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (154, "minecraft:pumpkin", EMPTY_PROPS),
     (155, "minecraft:melon", EMPTY_PROPS),
     (156, "minecraft:vine", VINE_EMPTY),
+    (157, "minecraft:tall_grass", HALF_LOWER),
+    (158, "minecraft:tall_grass", HALF_UPPER),
 ];
 
 #[cfg(test)]
@@ -592,7 +594,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 157);
+        assert_eq!(registry.len(), 159);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -704,6 +706,14 @@ mod tests {
         assert_eq!(
             registry.by_id(BlockStateId(69)).unwrap().canonical_key(),
             "minecraft:large_fern[half=upper]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:tall_grass[half=lower]"),
+            Some(BlockStateId(157))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(158)).unwrap().canonical_key(),
+            "minecraft:tall_grass[half=upper]"
         );
         assert_eq!(
             registry.id_for_key("minecraft:glow_lichen"),

@@ -304,8 +304,8 @@ mod tests {
         PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
         REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2,
         SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE,
-        SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER,
-        TUBE_CORAL_BLOCK, TUFF, VINE, WATER,
+        SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TALL_GRASS_UPPER, TALL_SEAGRASS_LOWER,
+        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, VINE, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -584,6 +584,31 @@ mod tests {
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
         assert_eq!(chunk.get_block_at_y(8, 3, 8), LARGE_FERN_LOWER);
         assert_eq!(chunk.get_block_at_y(8, 4, 8), LARGE_FERN_UPPER);
+    }
+
+    #[test]
+    fn random_patch_double_plant_writes_tall_grass_halves() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(3);
+        let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: TALL_GRASS_LOWER,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: false,
+            can_replace: false,
+            double_plant: true,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        });
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert_eq!(chunk.get_block_at_y(8, 3, 8), TALL_GRASS_LOWER);
+        assert_eq!(chunk.get_block_at_y(8, 4, 8), TALL_GRASS_UPPER);
     }
 
     #[test]
@@ -1742,7 +1767,17 @@ mod tests {
     #[test]
     fn savanna_feature_table_uses_vanilla_acacia_selector() {
         let savanna = overworld_features_for_biome(get_layered_biome_by_id(35));
+        let savanna_plateau = overworld_features_for_biome(get_layered_biome_by_id(36));
         let shattered = overworld_features_for_biome(get_layered_biome_by_id(163));
+        assert!(has_savanna_tall_grass_patch_feature(&savanna));
+        assert!(has_savanna_tall_grass_patch_feature(&savanna_plateau));
+        assert!(has_warm_flower_feature(&savanna));
+        assert!(has_warm_flower_feature(&savanna_plateau));
+        assert!(has_counted_default_grass_patch_feature(&savanna, 20));
+        assert!(has_counted_default_grass_patch_feature(
+            &savanna_plateau,
+            20
+        ));
         let feature = savanna
             .iter()
             .find(|feature| {
@@ -1788,6 +1823,10 @@ mod tests {
             shattered_feature.decorators.first(),
             Some(&ConfiguredDecorator::count_extra(2, 0.1, 1))
         );
+        assert!(!has_savanna_tall_grass_patch_feature(&shattered));
+        assert!(has_default_flower_feature(&shattered));
+        assert!(!has_warm_flower_feature(&shattered));
+        assert!(has_counted_default_grass_patch_feature(&shattered, 5));
     }
 
     #[test]
@@ -2348,6 +2387,23 @@ mod tests {
         })
     }
 
+    fn has_warm_flower_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators.first() == Some(&ConfiguredDecorator::count(4))
+                && matches!(
+                    &feature.feature,
+                    ConfiguredFeature::Flower(RandomPatchConfiguration {
+                        state: POPPY,
+                        weighted_states,
+                        state_provider: RandomPatchStateProvider::Weighted,
+                        tries: 64,
+                        ..
+                    }) if weighted_states == &tables::DEFAULT_FLOWER_STATES
+                )
+        })
+    }
+
     fn has_default_grass_patch_feature(features: &[PlacedFeature]) -> bool {
         features.iter().any(|feature| {
             feature.step == DecorationStep::VegetalDecoration
@@ -2361,6 +2417,48 @@ mod tests {
                     ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
                         state: GRASS,
                         tries: 32,
+                        ..
+                    })
+                )
+        })
+    }
+
+    fn has_counted_default_grass_patch_feature(features: &[PlacedFeature], count: i32) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::count(count),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: GRASS,
+                        tries: 32,
+                        ..
+                    })
+                )
+        })
+    }
+
+    fn has_savanna_tall_grass_patch_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::count(7),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                        ConfiguredDecorator::spread_32_above(),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: TALL_GRASS_LOWER,
+                        tries: 64,
+                        double_plant: true,
                         ..
                     })
                 )
@@ -2389,7 +2487,22 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(vegetal_features.len(), 11);
-        assert_eq!(vegetal_features[0].feature, ConfiguredFeature::noop());
+        assert_eq!(
+            vegetal_features[0].decorators,
+            vec![
+                ConfiguredDecorator::count(5),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::spread_32_above(),
+                ConfiguredDecorator::Count(CountConfiguration::from_provider(
+                    IntProvider::clamped_uniform(-3, 1, 0, 1),
+                )),
+            ]
+        );
+        assert!(matches!(
+            vegetal_features[0].feature,
+            ConfiguredFeature::SimpleRandomSelector(_)
+        ));
         assert_eq!(
             vegetal_features[1].feature,
             ConfiguredFeature::glow_lichen(GlowLichenConfiguration::default_overworld())
@@ -2437,6 +2550,7 @@ mod tests {
         assert_eq!(
             vegetal_features[4].decorators,
             vec![
+                ConfiguredDecorator::count(2),
                 ConfiguredDecorator::square(),
                 ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
             ]
