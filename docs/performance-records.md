@@ -90,6 +90,76 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-04 - Publication Valve Attribution And Publish-Budget Prototype
+
+Commit reported by native benchmark JSON: `4a3604cf`.
+
+`git_dirty=true`; `debug_assertions=false`. Control runs carried only
+uncommitted tactical/topic doc edits (no code changes). The two prototype runs
+additionally carried a deliberate 2-line diff raising
+`DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET` and
+`DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET` from `1` to `32` in
+`native/crates/mclone-server/src/scheduler.rs`; that diff was reverted after
+measurement and is not landed.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Purpose: falsification pass for the tactical `142` bottleneck model. Question:
+is desktop full-view streaming capped by the scheduler publication valve
+(`1` feature chunk + `1` light status published per gameplay tick, with the
+next feature job gated on full publication of the previous one)?
+
+Startup-streaming RD10 (`6000` frames, `60 Hz`, workers `1`, seed `12345`):
+
+| Config | Playable | Full-view ready | Render quiescent | Frame avg/p95/p99/max | Over budget |
+|---|---:|---:|---:|---|---:|
+| cadence `20/20/60`, publish `1` (control) | `1,078ms` | `27.54s` | `33.06s` | `5.41 / 7.14 / 7.70 / 10.83ms` | `0 / 6000` |
+| cadence `60/20/60`, publish `1` | `1,498ms` | `33.78s` | `39.49s` | `5.39 / 7.25 / 7.95 / 10.88ms` | `0 / 6000` |
+| cadence `20/20/60`, publish `32` (prototype) | `300ms` | `9.23s` | `21.04s` | `5.45 / 7.08 / 7.68 / 11.36ms` | `0 / 6000` |
+
+Loading-settle isolation (`5,10,15`, cadence `20/20/60`):
+
+| Config | RD5 runtime | RD10 runtime | RD15 runtime | RD5 mesh | RD10 mesh | RD15 mesh |
+|---|---:|---:|---:|---:|---:|---:|
+| workers `1`, publish `1` (control) | `12.42s` (`13.6/s`) | `33.38s` (`15.9/s`) | `64.83s` (`16.8/s`) | `0.92s` (`2093 sec/s`) | `7.94s` (`889 sec/s`) | `33.07s` (`465 sec/s`) |
+| workers `1`, publish `32` | `3.87s` (`43.7/s`) | `11.12s` (`47.6/s`) | `22.03s` (`49.4/s`) | `0.91s` (`2134 sec/s`) | `7.77s` (`908 sec/s`) | `32.39s` (`475 sec/s`) |
+| workers `2`, publish `32` | `3.97s` (`42.6/s`) | `11.32s` (`46.7/s`) | `22.19s` (`49.1/s`) | `0.95s` (`2044 sec/s`) | `7.96s` (`886 sec/s`) | `33.05s` (`465 sec/s`) |
+
+Raw local artifacts: `/tmp/exp1-settle-control-cadence20.json`,
+`/tmp/exp2-streaming-rd10-cadence20.json`,
+`/tmp/exp2-streaming-rd10-cadence60.json`,
+`/tmp/exp3-streaming-rd10-publish32.json`,
+`/tmp/exp3-settle-publish32-workers1.json`,
+`/tmp/exp4-settle-publish32-workers2.json`.
+
+Interpretation:
+
+- The publication valve is real and is the dominant desktop throughput limit.
+  Raising the two publish budgets `1` → `32` (no other change) gave `3.0x`
+  full-view-ready and `3.6x` playable entry at RD10, and `2.9x`-`3.2x` runtime
+  settle at RD5-RD15, with mesh settle and desktop frame pacing unchanged
+  (zero over-budget frames in both streaming runs).
+- The valve is driven by the **gameplay tick**, not the host tick:
+  `ChunkScheduler::tick_report_with_record_builders(...)` calls `poll()` once
+  per gameplay tick. Raising only the host rate (`60/20/60`) left the cap in
+  place and measured `~23%` worse, so the `140` cadence-sweep lever is retired.
+- Compile workers `2` left the bulk mesh drain flat at every distance; the
+  isolation mesh drain is admission/prepare-bound, not compile-bound. The
+  superlinear per-section degradation (`2093` → `465` sec/s from RD5 to RD15)
+  persists across all configs.
+- After the prototype, the next limits are visible: server side settles near
+  `50` chunks/sec (feature-job serialization bubble + single worldgen thread),
+  and the streaming render quiescent tail (`9.2s` → `21.0s`) matches the
+  one-chunk-per-frame mesh admission ceiling at 60 Hz.
+- Probe bug: `--loading-settle-perf` with `--simulation-cadence 60/20/60`
+  false-idles in under a second (`target_ready_chunks=0`) because
+  `runner_idle(...)` can be observed before the first interest command
+  produces pending work. Harden before reusing that lane for cadence work.
+- Follow-up implementation direction lives in tactical `142`: elapsed-budget
+  publication drain per tick behind a throughput profile, job-admission
+  overlap with a bounded pending-publication backlog, then mesh admission
+  attribution.
+
 ### 2026-07-04 - Flat Android RD5 Startup Timing Check
 
 Flat Android validation code committed as `daef4977`.

@@ -219,7 +219,10 @@ cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --
   | tee /tmp/mclone-loading-settle-rd5-15-workers4-cadence20.json
 ```
 
-Cadence sweep:
+Cadence sweep (**retired 2026-07-04** — this command currently false-idles
+with `target_ready_chunks=0`, and the host-only cadence increase is a
+falsified throughput lever; see Interpretation Rules and the 2026-07-04
+publication-valve record):
 
 ```bash
 cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
@@ -501,9 +504,18 @@ Immediate interpretation:
 
 Do not optimize from a single number. Use these reads:
 
-- If `--simulation-cadence 60/20/60` improves runtime settle without worsening
-  live frame probes, the current host tick cadence is likely throttling local
-  integrated throughput.
+- ~~If `--simulation-cadence 60/20/60` improves runtime settle without
+  worsening live frame probes, the current host tick cadence is likely
+  throttling local integrated throughput.~~ **Retired 2026-07-04:** measured
+  on streaming RD10, `60/20/60` was ~`23%` *worse* (full-view ready `27.54s`
+  → `33.78s`). Scheduler publication runs once per **gameplay** tick
+  (`tick_report_with_record_builders` → `poll()`), so raising only the host
+  rate cannot open the `1`-per-tick publish valve and just adds runner
+  overhead. The loading-settle lane also false-idles at `60/20/60`
+  (`target_ready_chunks=0` in under a second) because `runner_idle(...)` can
+  be observed before the first interest command produces pending work. See
+  the 2026-07-04 publication-valve record in `docs/performance-records.md`
+  and tactical `142` for the measured replacement direction.
 - If more render compile workers improve mesh settle but not runtime settle, the
   bottleneck is render compilation, not generation.
 - If more render compile workers improve desktop but regress Quest p95/p99 or

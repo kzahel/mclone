@@ -114,7 +114,17 @@ desktop native startup-streaming throughput at RD10/RD15, keep Quest OpenXR RD5
 settled-orbit clean as the safety guardrail, and use Quest RD7 settled-orbit as
 the pressure check. RD5 is not a throughput benchmark; it is the lower-distance
 control that catches fixed XR/render regressions while desktop throughput work
-changes shared worker/admission policy.
+changes shared worker/admission policy. The 142 revision attributes current
+desktop throughput to the server publication valve — `1` feature chunk and `1`
+light status published per **gameplay tick** (20 Hz), with the next feature job
+gated on full publication of the previous one — capping production near `20`
+chunks/sec (measured `13.5`-`17.1` across RD5-RD20). A reverted 2-line
+publish-budget prototype (`1` → `32`) validated the model on 2026-07-04:
+desktop RD10 full-view-ready `27.54s` → `9.23s` and playable entry `1.08s` →
+`0.30s` with unchanged frame pacing; host-only cadence `60/20/60` measured
+worse and is a retired lever; compile workers `2` left the bulk mesh drain
+flat. See the publication-valve record in
+[`../performance-records.md`](../performance-records.md).
 
 ## Priority Queue
 
@@ -127,7 +137,7 @@ changes shared worker/admission policy.
 | P4 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
 | P5 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and movement probes show upload cost is small. Do this when probes show upload/allocation cost is material again. |
 | P6 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
-| P7 | Streaming throughput with Quest guardrails | Native policy | [`142`](../tactical/142-throughput-policy-with-quest-rd5-guardrail.md), [`140`](../tactical/140-streaming-throughput-frame-pacing-baselines.md), [`../performance-records.md`](../performance-records.md), [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md) | active strategy | Optimize desktop RD10/RD15 startup-streaming throughput, not RD5. Quest RD5 stays the safety guardrail; Quest RD7 is the pressure check for shared policy changes. First slice is the repeatable desktop RD10/RD15 matrix, then measured worker/admission candidates. |
+| P7 | Streaming throughput with Quest guardrails | Native policy | [`142`](../tactical/142-throughput-policy-with-quest-rd5-guardrail.md), [`140`](../tactical/140-streaming-throughput-frame-pacing-baselines.md), [`../performance-records.md`](../performance-records.md), [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md) | active strategy | Optimize desktop RD10/RD15 startup-streaming throughput, not RD5. Quest RD5 stays the safety guardrail; Quest RD7 is the pressure check for shared policy changes. Falsification is done (2026-07-04): the publish-budget prototype delivered `3x` RD10 full-view-ready with clean pacing, the host-only cadence lever is retired, and workers do not move the bulk mesh drain. Next: implement the elapsed-budget publication drain behind a throughput profile (142 Candidate A) with per-stage publish/queue instrumentation, then mesh-drain scan attribution (Candidate B). |
 | PX | Quest 72 Hz: RD5 guardrail, RD7 pressure, RD10 stress | Native policy | [`142`](../tactical/142-throughput-policy-with-quest-rd5-guardrail.md) (current guardrail policy), [`117`](../tactical/117-android-xr-rd10-gpu-floor-and-frame-overlap.md) (RD10 stress), [`119`](../tactical/119-android-xr-live-streaming-frame-pacing.md) (active checklist); [`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md), [`106`](../tactical/106-android-xr-static-render-cpu-reduction.md), [`107`](../tactical/107-xr-stereo-uniform-ownership-and-multiview.md) (closed refs) | active; do not chase perfect RD7 before throughput work | E1 showed RD10 is a balanced serial `CPU(~9ms, now ~4ms) + GPU(~10.7ms)` frame (Meta `7ms` GPU counter under-reported; the poll wait is real GPU), so CPU-only work cannot make RD10 comfortably hit 72 Hz alone. Use `PERF_HEADROOM` app-work/headroom fields, not legacy `frame_avg_ms`, for Quest comparisons. Current throughput work must keep RD5 clean and avoid materially worsening RD7; RD10 remains the stress lane, not the primary pass/fail gate for desktop throughput policy. |
 
 ## Java Reference Anchors
