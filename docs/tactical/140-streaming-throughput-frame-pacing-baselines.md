@@ -1,9 +1,10 @@
 # 140: Streaming Throughput And Frame Pacing Baselines
 
-Status: active benchmark and attribution checkpoint. Slice A clean desktop
-default loading-settle baseline captured on 2026-07-04 at `482f0d51`; no
-optimization slices should start from this doc until the baseline matrix is
-captured and interpreted.
+Status: active benchmark and attribution checkpoint. Slice A2 clean synthetic
+loading-settle isolation baseline captured on 2026-07-04 at `482f0d51`; the
+primary desktop-shaped startup-streaming baseline is still pending. No
+optimization slices should start from this doc until the desktop-shaped baseline
+matrix is captured and interpreted.
 Workstream: native Rust performance, desktop throughput, Android XR / Quest
 frame pacing, shared runtime/render scheduling policy.
 
@@ -32,11 +33,12 @@ is limiting each lane.
 
 Known desktop evidence:
 
-- `docs/performance-records.md` has a release loading-settle baseline from
-  2026-07-04. It recorded RD20 as multi-minute: roughly `128s` runtime settle,
-  `82s` render mesh settle, and `210s` full settle. That record was marked
-  `git_dirty=true` and predates the latest startup/readiness work, so it is
-  useful but not sufficient as the new clean baseline.
+- `docs/performance-records.md` has release loading-settle isolation baselines
+  from 2026-07-04. The clean run recorded RD20 as multi-minute: roughly `108s`
+  runtime settle, `95s` render mesh settle, and `203s` full drain. That is
+  useful for splitting server/light/runtime cost from mesh cost, but it is
+  synthetic: it waits for full target readiness and then drains render mesh
+  work, instead of entering playable and streaming under the desktop frame loop.
 - Follow-up local observations around the startup fix still show RD20 full
   settle on the order of minutes. Runtime settle and render mesh settle are both
   large enough that we need to split server/worldgen/light throughput from
@@ -67,6 +69,9 @@ is a measured policy boundary, not one global knob.
   intentional benchmark-doc edits.
 - Save raw command output under `/tmp`; summarize durable findings in
   `docs/performance-records.md` only after the run is interpreted.
+- Treat desktop-shaped startup streaming as the primary local-play benchmark.
+  Synthetic loading-settle remains useful for attribution, but it must not be
+  the only target for throughput policy.
 - Keep runtime settle and render mesh settle separate. A faster mesh path does
   not prove server generation improved.
 - Keep average throughput and frame tails separate. A higher chunks/sec number
@@ -79,10 +84,60 @@ is a measured policy boundary, not one global knob.
 
 ## Baseline Matrix
 
-### A. Desktop Loading-Settle Throughput
+### A. Desktop Startup Streaming Throughput
 
-Goal: split full-view settle into runtime/server throughput and render mesh
-throughput at fixed render distances.
+Goal: mirror local desktop play. Enter the world at the playable gate, then keep
+polling, syncing render sections, uploading, and rendering through the same
+paced desktop-shaped frame loop while the requested view streams in.
+
+Primary clean baseline:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf \
+  --render-distance 20 \
+  --startup-streaming-frames 30000 \
+  --target-hz 120 \
+  --debug-passive-showcase false \
+  --render-compile-workers 1 \
+  --simulation-cadence 20/20/60 \
+  | tee /tmp/mclone-startup-streaming-rd20-workers1-cadence20.json
+```
+
+Smoke:
+
+```bash
+pnpm native:startup-streaming:smoke
+```
+
+Record:
+
+- enter-playable frame/time and cached section count
+- first full-view-ready frame/time
+- first render-quiescent frame/time, if reached
+- final target ready/count/percent and loaded chunk count
+- frame avg/p95/p99/max and over-budget counts at target Hz
+- total poll/remesh/upload/render time during the streaming window
+- submitted/completed/uploaded render sections
+- deadline-skipped compile requests
+- pending jobs/publications/render chunks/render compile jobs/inflight sections
+- update-pump stalled frames and server update queue depth
+
+Interpretation:
+
+- If playable entry is quick but first full-view-ready or quiescent is late,
+  the startup gate is working and the remaining problem is streaming throughput.
+- If frame tails are clean while backlog remains high, desktop throughput is
+  likely being constrained by fixed admission/backpressure rather than raw
+  frame safety.
+- If frame tails are bad while backlog drains quickly, the desktop policy needs
+  the same budget-awareness discipline as Quest, not simply more workers.
+
+### A2. Desktop Loading-Settle Isolation
+
+Goal: split full-view drain into runtime/server throughput and render mesh
+throughput at fixed render distances. This is an auxiliary isolation probe, not
+the primary local desktop startup model.
 
 Primary clean baseline:
 
@@ -244,11 +299,39 @@ Record:
 
 ## Captured Results
 
-### Slice A: Clean Desktop Default Loading-Settle Baseline
+### Slice A Implementation Smoke
+
+Validated the startup-streaming benchmark path in optimized-dev mode while this
+slice was dirty. This is not a durable throughput baseline.
+
+Raw output:
+`/tmp/mclone-startup-streaming-rd5-json-shape.json`.
+
+Command:
+
+```bash
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf \
+  --render-distance 5 \
+  --startup-streaming-frames 5 \
+  --target-hz 120 \
+  --debug-passive-showcase false
+```
+
+Result shape: playable at `1121.869 ms`, `128` cached sections at entry,
+`average_frame_ms=3.916`, `p95_frame_ms=10.508`, final target readiness
+`9/169` after only five paced streaming frames. This verifies the JSON and
+desktop-shaped pump/frame-loop wiring; it intentionally does not wait for full
+view readiness.
+
+### Slice A2: Clean Desktop Loading-Settle Isolation Baseline
 
 Captured on 2026-07-04 at commit `482f0d51`.
 
 `git_dirty=false`; release build; `debug_assertions=false`.
+
+This is retained as a synthetic attribution run. It does not model desktop
+startup followed by progressive streaming under frame-loop backpressure.
 
 Raw output for this local run:
 `/tmp/mclone-loading-settle-rd5-20-workers1-cadence20.json`.
@@ -312,12 +395,15 @@ Do not optimize from a single number. Use these reads:
 
 ## Acceptance Criteria For This Tactical
 
-- [x] A clean commit baseline exists for desktop loading-settle RD5/RD10/RD15/RD20
-  with current defaults.
+- [ ] A clean commit baseline exists for desktop startup-streaming RD20 with
+  current defaults.
+- [x] A clean synthetic isolation baseline exists for desktop loading-settle
+  RD5/RD10/RD15/RD20 with current defaults.
 - [ ] At least one worker-count sweep and one cadence sweep are recorded for
-  desktop loading-settle.
-- [ ] At least one desktop live streaming frame-budget run is recorded for the
-  baseline and for any promising throughput candidate.
+  desktop startup-streaming or, if needed for attribution, desktop
+  loading-settle.
+- [ ] At least one desktop live streaming frame-budget or startup-streaming run
+  is recorded for the baseline and for any promising throughput candidate.
 - [ ] At least one Quest RD7 guardrail run is recorded after the same candidate
   policy.
 - [ ] The results are summarized in `docs/performance-records.md` with enough raw

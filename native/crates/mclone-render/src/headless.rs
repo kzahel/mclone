@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use mclone_mesh::{
@@ -130,6 +130,7 @@ pub struct HeadlessFrameLoopOptions {
     pub width: u32,
     pub height: u32,
     pub frame_count: usize,
+    pub pace_frame_duration: Option<Duration>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -655,6 +656,12 @@ where
             submit_ms,
             device_poll_ms,
         });
+        if let Some(frame_duration) = options.pace_frame_duration {
+            let elapsed = frame_start.elapsed();
+            if elapsed < frame_duration {
+                std::thread::sleep(frame_duration - elapsed);
+            }
+        }
     }
 
     let frame_count = frames.len();

@@ -30,17 +30,17 @@ use crate::camera::{
 };
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, LoadingSettlePerfOptions, MovementPerfOptions,
-    SceneOptions, TimedemoOptions,
+    SceneOptions, StartupStreamingPerfOptions, TimedemoOptions,
 };
 use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
 use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{
-    WindowSceneAssets, WindowSceneRuntime, build_scene_textured_sections,
+    WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, build_scene_textured_sections,
     chunk_tracking_radius_for_render_distance, poll_window_runtime_until_idle,
     poll_window_runtime_until_idle_with_timeout, square_count,
 };
-use crate::{MAX_RENDER_DISTANCE, print_benchmark_metadata};
+use crate::{MAX_RENDER_DISTANCE, MAX_STARTUP_STREAMING_PERF_FRAMES, print_benchmark_metadata};
 
 const LOADING_SETTLE_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -386,6 +386,25 @@ pub(crate) struct LoadingSettlePerfReport {
     samples: Vec<LoadingSettlePerfSampleReport>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct StartupStreamingPerfReport {
+    options: StartupStreamingPerfOptions,
+    asset_load_ms: f64,
+    startup_playable_frame: usize,
+    startup_playable_ms: f64,
+    startup_cached_sections: usize,
+    startup_target_ready_chunks: usize,
+    startup_target_chunk_count: usize,
+    startup_target_percent: u8,
+    streaming_wall_ms: f64,
+    headless: mclone_render::headless::HeadlessFrameLoopReport,
+    frames: Vec<StartupStreamingFrameReport>,
+    first_full_view_ready_frame: Option<usize>,
+    first_full_view_ready_ms: Option<f64>,
+    first_render_quiescent_frame: Option<usize>,
+    first_render_quiescent_ms: Option<f64>,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct LoadingSettlePerfSampleReport {
     render_distance: i32,
@@ -420,6 +439,31 @@ struct LoadingSettlePerfSampleReport {
     pending_render_compile_jobs: usize,
     simulation_tick: u64,
     simulation_seconds: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct StartupStreamingFrameReport {
+    elapsed_ms: f64,
+    poll_ms: f64,
+    remesh_ms: f64,
+    upload_ms: f64,
+    render_ms: f64,
+    target_ready_chunks: usize,
+    target_chunk_count: usize,
+    target_percent: u8,
+    loaded_chunks: usize,
+    cached_sections: usize,
+    pending_jobs: usize,
+    pending_publications: usize,
+    pending_render_chunks: usize,
+    pending_render_compile_jobs: usize,
+    inflight_render_sections: usize,
+    submitted_compile_sections: usize,
+    completed_compile_sections: usize,
+    uploaded_sections: usize,
+    deadline_skipped_compile_requests: usize,
+    update_pump_stalled: bool,
+    server_update_queue_depth: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -845,6 +889,10 @@ impl FrameBudgetProbeReport {
         println!("  \"over_budget_frames\": {},", over_budget);
         println!("  \"over_2x_budget_frames\": {},", over_2x);
         println!("  \"over_4x_budget_frames\": {},", over_4x);
+        println!(
+            "  \"average_frame_ms\": {:.3},",
+            self.headless.average_frame_ms
+        );
         println!("  \"p95_frame_ms\": {:.3},", p95);
         println!("  \"p99_frame_ms\": {:.3},", p99);
         println!("  \"max_frame_ms\": {:.3},", self.headless.max_frame_ms);
@@ -1124,6 +1172,223 @@ impl FrameBudgetProbeReport {
             println!("    }}{suffix}");
         }
         println!("  ]");
+        println!("}}");
+    }
+}
+
+impl StartupStreamingPerfReport {
+    fn target_frame_ms(&self) -> f64 {
+        target_frame_ms(self.options.target_hz)
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.headless.frame_count != self.options.frames {
+            bail!(
+                "startup streaming perf rendered {} frames, expected {}",
+                self.headless.frame_count,
+                self.options.frames
+            );
+        }
+        if self.frames.len() != self.options.frames {
+            bail!(
+                "startup streaming perf recorded {} frame reports, expected {}",
+                self.frames.len(),
+                self.options.frames
+            );
+        }
+        if self.startup_cached_sections == 0 {
+            bail!("startup streaming perf entered playable with no cached render sections");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn print_json(&self) {
+        let target_frame_ms = self.target_frame_ms();
+        let over_budget = frame_budget_over_count(&self.headless.frames, target_frame_ms, 1.0);
+        let over_2x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 2.0);
+        let over_4x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 4.0);
+        let p95 = frame_budget_percentile_ms(&self.headless.frames, 0.95);
+        let p99 = frame_budget_percentile_ms(&self.headless.frames, 0.99);
+        let total_poll_ms = self.frames.iter().map(|frame| frame.poll_ms).sum::<f64>();
+        let total_remesh_ms = self.frames.iter().map(|frame| frame.remesh_ms).sum::<f64>();
+        let total_upload_ms = self.frames.iter().map(|frame| frame.upload_ms).sum::<f64>();
+        let total_render_ms = self.frames.iter().map(|frame| frame.render_ms).sum::<f64>();
+        let total_submitted_compile_sections = self
+            .frames
+            .iter()
+            .map(|frame| frame.submitted_compile_sections)
+            .sum::<usize>();
+        let total_completed_compile_sections = self
+            .frames
+            .iter()
+            .map(|frame| frame.completed_compile_sections)
+            .sum::<usize>();
+        let total_uploaded_sections = self
+            .frames
+            .iter()
+            .map(|frame| frame.uploaded_sections)
+            .sum::<usize>();
+        let total_deadline_skipped_compile_requests = self
+            .frames
+            .iter()
+            .map(|frame| frame.deadline_skipped_compile_requests)
+            .sum::<usize>();
+        let update_pump_stalled_frames = self
+            .frames
+            .iter()
+            .filter(|frame| frame.update_pump_stalled)
+            .count();
+        let final_frame = self.frames.last().copied().unwrap_or_default();
+
+        println!("{{");
+        print_benchmark_metadata("native_startup_streaming_perf", "  ", true);
+        println!("  \"seed\": {},", self.options.scene.seed);
+        println!(
+            "  \"render_distance\": {},",
+            self.options.scene.render_distance
+        );
+        println!(
+            "  \"render_compile_workers\": {},",
+            self.options.scene.render_compile_worker_count
+        );
+        println!(
+            "  \"simulation_cadence\": {{ \"host_hz\": {}, \"gameplay_hz\": {}, \"physics_hz\": {} }},",
+            self.options.scene.simulation_cadence.host_rate_hz,
+            self.options.scene.simulation_cadence.gameplay_rate_hz,
+            self.options.scene.simulation_cadence.physics_rate_hz
+        );
+        println!(
+            "  \"section_occlusion_culling\": {},",
+            self.options.render_options.section_occlusion_culling
+        );
+        println!(
+            "  \"force_fullbright\": {},",
+            self.options.render_options.force_fullbright
+        );
+        println!(
+            "  \"render_color_profile\": \"{}\",",
+            self.options.render_options.color_profile.as_str()
+        );
+        println!(
+            "  \"lighting_enabled\": {},",
+            self.options.scene.lighting_enabled
+        );
+        println!("  \"frames\": {},", self.options.frames);
+        println!("  \"width\": {},", self.options.width);
+        println!("  \"height\": {},", self.options.height);
+        println!("  \"target_hz\": {:.3},", self.options.target_hz);
+        println!("  \"target_frame_ms\": {:.3},", target_frame_ms);
+        println!("  \"asset_load_ms\": {:.3},", self.asset_load_ms);
+        println!(
+            "  \"startup_playable_frame\": {},",
+            self.startup_playable_frame
+        );
+        println!(
+            "  \"startup_playable_ms\": {:.3},",
+            self.startup_playable_ms
+        );
+        println!(
+            "  \"startup_cached_sections\": {},",
+            self.startup_cached_sections
+        );
+        println!(
+            "  \"startup_target_ready_chunks\": {},",
+            self.startup_target_ready_chunks
+        );
+        println!(
+            "  \"startup_target_chunk_count\": {},",
+            self.startup_target_chunk_count
+        );
+        println!(
+            "  \"startup_target_percent\": {},",
+            self.startup_target_percent
+        );
+        println!("  \"streaming_wall_ms\": {:.3},", self.streaming_wall_ms);
+        match self.first_full_view_ready_frame {
+            Some(frame) => println!("  \"first_full_view_ready_frame\": {frame},"),
+            None => println!("  \"first_full_view_ready_frame\": null,"),
+        }
+        match self.first_full_view_ready_ms {
+            Some(ms) => println!("  \"first_full_view_ready_ms\": {ms:.3},"),
+            None => println!("  \"first_full_view_ready_ms\": null,"),
+        }
+        match self.first_render_quiescent_frame {
+            Some(frame) => println!("  \"first_render_quiescent_frame\": {frame},"),
+            None => println!("  \"first_render_quiescent_frame\": null,"),
+        }
+        match self.first_render_quiescent_ms {
+            Some(ms) => println!("  \"first_render_quiescent_ms\": {ms:.3},"),
+            None => println!("  \"first_render_quiescent_ms\": null,"),
+        }
+        println!("  \"over_budget_frames\": {},", over_budget);
+        println!("  \"over_2x_budget_frames\": {},", over_2x);
+        println!("  \"over_4x_budget_frames\": {},", over_4x);
+        println!(
+            "  \"average_frame_ms\": {:.3},",
+            self.headless.average_frame_ms
+        );
+        println!("  \"p95_frame_ms\": {:.3},", p95);
+        println!("  \"p99_frame_ms\": {:.3},", p99);
+        println!("  \"max_frame_ms\": {:.3},", self.headless.max_frame_ms);
+        println!("  \"total_poll_ms\": {:.3},", total_poll_ms);
+        println!("  \"total_remesh_ms\": {:.3},", total_remesh_ms);
+        println!("  \"total_upload_ms\": {:.3},", total_upload_ms);
+        println!("  \"total_render_ms\": {:.3},", total_render_ms);
+        println!(
+            "  \"total_submitted_compile_sections\": {},",
+            total_submitted_compile_sections
+        );
+        println!(
+            "  \"total_completed_compile_sections\": {},",
+            total_completed_compile_sections
+        );
+        println!(
+            "  \"total_uploaded_sections\": {},",
+            total_uploaded_sections
+        );
+        println!(
+            "  \"total_deadline_skipped_compile_requests\": {},",
+            total_deadline_skipped_compile_requests
+        );
+        println!(
+            "  \"update_pump_stalled_frames\": {},",
+            update_pump_stalled_frames
+        );
+        println!("  \"final\": {{");
+        println!("    \"elapsed_ms\": {:.3},", final_frame.elapsed_ms);
+        println!(
+            "    \"target_ready_chunks\": {},",
+            final_frame.target_ready_chunks
+        );
+        println!(
+            "    \"target_chunk_count\": {},",
+            final_frame.target_chunk_count
+        );
+        println!("    \"target_percent\": {},", final_frame.target_percent);
+        println!("    \"loaded_chunks\": {},", final_frame.loaded_chunks);
+        println!("    \"cached_sections\": {},", final_frame.cached_sections);
+        println!("    \"pending_jobs\": {},", final_frame.pending_jobs);
+        println!(
+            "    \"pending_publications\": {},",
+            final_frame.pending_publications
+        );
+        println!(
+            "    \"pending_render_chunks\": {},",
+            final_frame.pending_render_chunks
+        );
+        println!(
+            "    \"pending_render_compile_jobs\": {},",
+            final_frame.pending_render_compile_jobs
+        );
+        println!(
+            "    \"inflight_render_sections\": {},",
+            final_frame.inflight_render_sections
+        );
+        println!(
+            "    \"server_update_queue_depth\": {}",
+            final_frame.server_update_queue_depth
+        );
+        println!("  }}");
         println!("}}");
     }
 }
@@ -1569,6 +1834,290 @@ pub(crate) fn run_loading_settle_perf(
     })
 }
 
+pub(crate) fn run_startup_streaming_perf(
+    options: &StartupStreamingPerfOptions,
+) -> Result<StartupStreamingPerfReport> {
+    if options.scene.remote_addr.is_some() {
+        bail!("--startup-streaming-perf requires the local integrated server path");
+    }
+    if options.scene.world_dir.is_some() {
+        bail!("--startup-streaming-perf uses a fresh transient world; omit --world-dir");
+    }
+
+    let asset_start = Instant::now();
+    let assets = WindowSceneAssets::load().context("failed to load window scene assets")?;
+    let asset_load_ms = elapsed_ms(asset_start.elapsed());
+    let mut scene = options.scene.clone();
+    let spawn_center = initial_spawn_center_for_seed(scene.seed);
+    scene.chunk_x = spawn_center.x;
+    scene.chunk_z = spawn_center.z;
+    scene.world_dir = None;
+    let spectator = SpectatorCamera::spawn_for_scene(&scene);
+    let frame_duration = Duration::from_secs_f64(1.0 / options.target_hz.max(1.0));
+
+    let mut startup = WindowSceneStartupPump::new_local(&scene, &assets)?;
+    let startup_start = Instant::now();
+    let mut startup_playable_frame = 0_usize;
+    let playable_step = loop {
+        let frame_start = Instant::now();
+        let step = startup.step(spectator.position)?;
+        if step.playable_ready {
+            break step;
+        }
+        startup_playable_frame += 1;
+        if startup_playable_frame > MAX_STARTUP_STREAMING_PERF_FRAMES {
+            bail!(
+                "startup streaming perf did not reach playable within {} startup frames",
+                MAX_STARTUP_STREAMING_PERF_FRAMES
+            );
+        }
+        let elapsed = frame_start.elapsed();
+        if elapsed < frame_duration {
+            std::thread::sleep(frame_duration - elapsed);
+        }
+    };
+    let startup_playable_ms = elapsed_ms(startup_start.elapsed());
+    let startup_progress = playable_step.progress.as_ref();
+    let startup_target_ready_chunks =
+        startup_progress.map_or(0, |progress| progress.target_ready_chunks);
+    let startup_target_chunk_count =
+        startup_progress.map_or(0, |progress| progress.target_chunk_count);
+    let startup_target_percent = startup_progress.map_or(0, |progress| progress.percent());
+    let runtime = startup.into_runtime();
+    let initial_sections = runtime.cached_sections();
+    if initial_sections.is_empty() {
+        bail!("startup streaming perf entered playable with no cached render sections");
+    }
+    let initial_index_count = initial_sections
+        .iter()
+        .map(|section| section.stats().index_count)
+        .sum::<u32>();
+
+    let mut frame_reports = Vec::with_capacity(options.frames);
+    let mut first_full_view_ready_frame = None;
+    let mut first_full_view_ready_ms = None;
+    let mut first_render_quiescent_frame = None;
+    let mut first_render_quiescent_ms = None;
+    let render_options = options.render_options;
+    let streaming_start = Instant::now();
+
+    let (headless, _state) = run_headless_frame_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: options.frames,
+            pace_frame_duration: Some(frame_duration),
+        },
+        move |device, queue, format, size| {
+            let depth = ChunkDepthTarget::new(device, size[0], size[1]);
+            let mut draw = TexturedSectionDrawResources::new(
+                device,
+                queue,
+                format,
+                &initial_sections,
+                runtime.mesh_assets().atlas.as_upload(),
+            )?;
+            draw.set_traversal_ready_sections(
+                &runtime.traversal_ready_render_section_keys(spectator.position),
+            );
+            let sky =
+                SkyRenderer::new_with_color_profile(device, format, render_options.color_profile);
+            let actors = ActorDrawResources::new(
+                device,
+                queue,
+                format,
+                runtime.actor_textures.atlas.as_upload(),
+                Some(&runtime.actor_textures.figures),
+            )?;
+            let asset_source = load_asset_source()?;
+            let screen_effects = ScreenEffectsRenderer::new(device, queue, format, &asset_source)?;
+            let gui = GuiRenderer::new(device, format);
+            let render_stats = RenderStreamStats {
+                section_count: draw.section_count(),
+                index_count: initial_index_count,
+                face_count: quad_face_count_from_indices(initial_index_count),
+                ..RenderStreamStats::default()
+            };
+            let mut ui = GameUiHost::new();
+            ui.set_screen(None);
+            ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
+            Ok(FrameBudgetProbeState {
+                runtime,
+                actor_interpolation: ActorInterpolationState::new(),
+                depth,
+                sky,
+                draw,
+                actors,
+                screen_effects,
+                gui,
+                ui,
+                render_stats,
+            })
+        },
+        |index, frame, state| {
+            let frame_start = Instant::now();
+            let frame_deadline = frame_start + frame_duration;
+            let mut report = StartupStreamingFrameReport {
+                elapsed_ms: elapsed_ms(streaming_start.elapsed()),
+                ..StartupStreamingFrameReport::default()
+            };
+
+            let poll_start = Instant::now();
+            let _runtime_changed = state.runtime.poll()?;
+            report.poll_ms = elapsed_ms(poll_start.elapsed());
+            let poll_diagnostics = state.runtime.last_poll_diagnostics();
+            report.update_pump_stalled = poll_diagnostics.update_pump_stalled;
+            report.server_update_queue_depth = poll_diagnostics.server_update_queue_depth;
+
+            if state.runtime.has_pending_render_work(spectator.position) {
+                let update =
+                    probe_sync_upload_sections(&frame, state, spectator.position, frame_deadline)?;
+                report.remesh_ms = update.remesh_ms;
+                report.upload_ms = update.upload_ms;
+                report.submitted_compile_sections = update.submitted_compile_sections;
+                report.completed_compile_sections = update.completed_compile_sections;
+                report.uploaded_sections = update.uploaded_sections;
+                report.deadline_skipped_compile_requests = update.deadline_skipped_compile_requests;
+            }
+
+            let camera = spectator.camera(state.runtime.render_distance());
+            let underwater_overlay =
+                state
+                    .runtime
+                    .camera_inside_water(spectator.position)
+                    .then(|| {
+                        UnderwaterOverlay::vanilla_from_native_camera(
+                            spectator.yaw,
+                            spectator.pitch,
+                        )
+                    });
+            let sky_clear_color = state.runtime.sky_clear_color();
+            let time_of_day = state.runtime.time_of_day();
+            let sun_angle = state.runtime.sun_angle();
+            state
+                .actor_interpolation
+                .reconcile_authoritative(state.runtime.client().actor_presentations());
+            state.actor_interpolation.step(
+                (1.0 / options.target_hz.max(1.0)) as f32,
+                ActorInterpolationConfig::default(),
+            );
+            let actor_instances = actor_instances_from_presentations(
+                &state.actor_interpolation.presentations(),
+                state.runtime.client(),
+            );
+            state.draw.set_traversal_ready_sections(
+                &state
+                    .runtime
+                    .traversal_ready_render_section_keys(spectator.position),
+            );
+            let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
+                render_distance: state.runtime.render_distance() as i32,
+                render_options,
+                far_lod_enabled: false,
+                far_lod_range_chunks:
+                    mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+                frame_pacing: FramePacingUiState::default(),
+                movement_mode: GameMovementMode::Walk,
+                fly_speed_multiplier: 1.0,
+                movement_speed_multiplier: 1.0,
+                player_collision_box_visible: false,
+                first_person_player_visible: false,
+                crosshair_visible: true,
+                player_model: Default::default(),
+                server_cadence: None,
+            });
+            let gui_scale = state.ui.scale();
+            let gui_state = FullFrameGui::new(
+                state.ui.is_active(),
+                state.ui.covers_world(),
+                [gui_scale.width, gui_scale.height],
+            );
+            let ui_draw = state.ui.render_draw_list(ui_render_state);
+            let render_start = Instant::now();
+            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+            render_full_frame_for_view(
+                frame,
+                &state.depth,
+                &state.sky,
+                &mut state.draw,
+                Some(&mut state.actors),
+                Some(&mut state.screen_effects),
+                Some(&mut state.gui),
+                render_view,
+                &actor_instances,
+                underwater_overlay,
+                sky_clear_color,
+                time_of_day,
+                sun_angle,
+                render_options,
+                gui_state,
+                |_| ui_draw,
+                &mut state.render_stats,
+            )?;
+            report.render_ms = elapsed_ms(render_start.elapsed());
+
+            let view_progress = state.runtime.view_readiness_overlay();
+            report.target_ready_chunks = view_progress
+                .as_ref()
+                .map_or(0, |progress| progress.target_ready_chunks);
+            report.target_chunk_count = view_progress
+                .as_ref()
+                .map_or(0, |progress| progress.target_chunk_count);
+            report.target_percent = view_progress
+                .as_ref()
+                .map_or(0, |progress| progress.percent());
+            let stats = state.runtime.stats();
+            report.loaded_chunks = stats.loaded_chunks;
+            report.cached_sections = state.draw.section_count();
+            report.pending_jobs = stats.pending_jobs;
+            report.pending_publications = stats.pending_publications;
+            report.pending_render_chunks = stats.pending_render_chunks;
+            report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
+            report.inflight_render_sections = stats.inflight_render_sections;
+
+            let full_view_ready = report.target_chunk_count > 0
+                && report.target_ready_chunks == report.target_chunk_count;
+            if full_view_ready && first_full_view_ready_frame.is_none() {
+                first_full_view_ready_frame = Some(index);
+                first_full_view_ready_ms = Some(report.elapsed_ms);
+            }
+            let render_quiescent = full_view_ready
+                && report.pending_jobs == 0
+                && report.pending_publications == 0
+                && report.pending_render_compile_jobs == 0
+                && report.inflight_render_sections == 0
+                && report.submitted_compile_sections == 0
+                && report.completed_compile_sections == 0
+                && report.uploaded_sections == 0;
+            if render_quiescent && first_render_quiescent_frame.is_none() {
+                first_render_quiescent_frame = Some(index);
+                first_render_quiescent_ms = Some(report.elapsed_ms);
+            }
+
+            frame_reports.push(report);
+            Ok(())
+        },
+    )?;
+
+    Ok(StartupStreamingPerfReport {
+        options: options.clone(),
+        asset_load_ms,
+        startup_playable_frame,
+        startup_playable_ms,
+        startup_cached_sections: playable_step.cached_section_count,
+        startup_target_ready_chunks,
+        startup_target_chunk_count,
+        startup_target_percent,
+        streaming_wall_ms: elapsed_ms(streaming_start.elapsed()),
+        headless,
+        frames: frame_reports,
+        first_full_view_ready_frame,
+        first_full_view_ready_ms,
+        first_render_quiescent_frame,
+        first_render_quiescent_ms,
+    })
+}
+
 pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
     if options.scene.remote_addr.is_some() {
         bail!("--timedemo currently requires the local integrated server path");
@@ -1715,6 +2264,7 @@ pub(crate) fn run_frame_budget_probe(
             width: options.width,
             height: options.height,
             frame_count: options.frames,
+            pace_frame_duration: None,
         },
         move |device, queue, format, size| {
             let depth = ChunkDepthTarget::new(device, size[0], size[1]);

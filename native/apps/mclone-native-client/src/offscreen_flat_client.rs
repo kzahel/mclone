@@ -728,6 +728,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             width: options.width,
             height: options.height,
             frame_count: startup_wait.offscreen_capture_frame_count(),
+            pace_frame_duration: None,
         },
         move |device, queue, format, size| {
             let mut host = OffscreenFlatClientHost::new(

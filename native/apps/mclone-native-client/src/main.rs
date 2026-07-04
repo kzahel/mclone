@@ -30,16 +30,18 @@ use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessActorReviewSheetOptions,
     HeadlessActorWalkReviewOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
     HeadlessScreenshotUi, LoadingSettlePerfOptions, MovementPerfOptions,
-    RemotePlayerVisualSmokeOptions, RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions,
-    TorchLightProbeOptions, WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions,
-    XrUnderwaterMode, XrViewPose, parse_screenshot_ui_arg,
+    RemotePlayerVisualSmokeOptions, RendererRebuildSmokeOptions, SceneOptions,
+    StartupStreamingPerfOptions, TimedemoOptions, TorchLightProbeOptions, WindowStartIntent,
+    XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
+    parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, run_renderer_rebuild_smoke, write_actor_review_sheet,
     write_actor_walk_review, write_headless_dual_view,
 };
 use crate::perf::{
-    run_frame_budget_probe, run_loading_settle_perf, run_movement_perf_smoke, run_timedemo,
+    run_frame_budget_probe, run_loading_settle_perf, run_movement_perf_smoke,
+    run_startup_streaming_perf, run_timedemo,
 };
 use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
 use crate::torch_light_probe::run_torch_light_probe;
@@ -65,10 +67,12 @@ const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;
 const DEFAULT_TIMEDEMO_FRAMES: usize = 120;
 const DEFAULT_TIMEDEMO_PATH_RADIUS: i32 = 4;
 const DEFAULT_FRAME_BUDGET_PROBE_FRAMES: usize = 240;
+const DEFAULT_STARTUP_STREAMING_PERF_FRAMES: usize = 2400;
 const DEFAULT_FRAME_BUDGET_TARGET_HZ: f64 = 120.0;
 const MAX_MOVEMENT_PERF_STEPS: usize = 512;
 const MAX_TIMEDEMO_FRAMES: usize = 4096;
 const MAX_FRAME_BUDGET_PROBE_FRAMES: usize = 4096;
+const MAX_STARTUP_STREAMING_PERF_FRAMES: usize = 72000;
 const MAX_MOVEMENT_PERF_PATH_RADIUS: i32 = 128;
 const MAX_LOADING_SETTLE_DISTANCE_COUNT: usize = 16;
 
@@ -268,6 +272,12 @@ fn main() -> Result<()> {
         }
         Cli::FrameBudgetProbe { options } => {
             let report = run_frame_budget_probe(&options)?;
+            report.validate()?;
+            report.print_json();
+            Ok(())
+        }
+        Cli::StartupStreamingPerf { options } => {
+            let report = run_startup_streaming_perf(&options)?;
             report.validate()?;
             report.print_json();
             Ok(())
@@ -1690,6 +1700,94 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("distances must be between 2 and 32"));
+    }
+
+    #[test]
+    fn cli_parses_startup_streaming_perf_options() {
+        let cli = Cli::parse([
+            "--startup-streaming-perf".to_owned(),
+            "--startup-streaming-frames".to_owned(),
+            "30000".to_owned(),
+            "--target-hz".to_owned(),
+            "120".to_owned(),
+            "--render-distance".to_owned(),
+            "20".to_owned(),
+            "--render-compile-workers".to_owned(),
+            "2".to_owned(),
+            "--width".to_owned(),
+            "1024".to_owned(),
+            "--height".to_owned(),
+            "768".to_owned(),
+            "--debug-passive-showcase".to_owned(),
+            "false".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::StartupStreamingPerf {
+                options: StartupStreamingPerfOptions {
+                    scene: SceneOptions {
+                        render_distance: 20,
+                        render_compile_worker_count: 2,
+                        debug_passive_showcase: false,
+                        ..SceneOptions::default()
+                    },
+                    render_options: TexturedSectionRenderOptions::default(),
+                    width: 1024,
+                    height: 768,
+                    frames: 30000,
+                    target_hz: 120.0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_allows_startup_streaming_target_hz_before_mode_flag() {
+        let cli = Cli::parse([
+            "--target-hz".to_owned(),
+            "90".to_owned(),
+            "--startup-streaming-frames".to_owned(),
+            "120".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::StartupStreamingPerf {
+                options: StartupStreamingPerfOptions {
+                    scene: SceneOptions::default(),
+                    render_options: TexturedSectionRenderOptions::default(),
+                    width: 1280,
+                    height: 720,
+                    frames: 120,
+                    target_hz: 90.0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_rejects_startup_streaming_with_other_perf_modes() {
+        let err = Cli::parse([
+            "--startup-streaming-perf".to_owned(),
+            "--loading-settle-perf".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("mutually exclusive"));
+
+        let err = Cli::parse([
+            "--frame-budget-frames".to_owned(),
+            "10".to_owned(),
+            "--startup-streaming-perf".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("mutually exclusive"));
     }
 
     #[test]

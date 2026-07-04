@@ -6,7 +6,7 @@ Use release builds for final budgets. Optimized-dev smokes are still useful for 
 
 ## Benchmark Lanes
 
-Primary three-lane smoke:
+Primary smoke:
 
 ```bash
 pnpm native:perf:smoke
@@ -18,6 +18,7 @@ Individual lanes:
 pnpm native:worldgen:smoke
 pnpm native:movement:smoke
 pnpm native:movement-frame:smoke
+pnpm native:startup-streaming:smoke
 pnpm native:loading-settle:smoke
 pnpm native:timedemo:smoke
 ```
@@ -28,6 +29,7 @@ Release-oriented lanes:
 pnpm native:worldgen:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
+pnpm native:startup-streaming:perf
 pnpm native:loading-settle:perf
 pnpm native:timedemo:perf
 ```
@@ -44,7 +46,8 @@ pnpm native:runtime:perf
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
-- `native:loading-settle:*`: desktop-native integrated client/server loading-settle throughput. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters.
+- `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness.
+- `native:loading-settle:*`: synthetic full-drain isolation probe. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters. Use it to split server/light/runtime cost from mesh cost, not as the primary desktop startup policy target.
 - `native:timedemo:*`: deterministic headless GPU render path over a fixed camera orbit. Reports scene build time, render setup, per-frame render time, and drawn section/index pressure. It does not read back PNGs per frame.
 - `native:runtime:*`: lower-level server scheduler movement benchmark without client remesh/render work.
 
@@ -64,7 +67,7 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
-### 2026-07-04 - Desktop Loading-Settle Clean Startup Baseline
+### 2026-07-04 - Desktop Loading-Settle Synthetic Isolation Baseline
 
 Commit reported by native benchmark JSON: `482f0d51`.
 
@@ -85,10 +88,12 @@ cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --
 
 Benchmark options: seed `12345`, transient worlds, render compile workers `1`,
 simulation cadence `20/20/60`, lighting enabled, debug passive showcase
-disabled, benchmark idle timeout `600s` per distance. This is the first clean
-baseline after the high-render-distance startup scheduling work in tactical
-`139`; the target chunk counts include the Java-shaped `requested + 1`
-tracking halo.
+disabled, benchmark idle timeout `600s` per distance. This is a clean
+synthetic full-drain isolation baseline after the high-render-distance startup
+scheduling work in tactical `139`; the target chunk counts include the
+Java-shaped `requested + 1` tracking halo. It does not model desktop-native
+entry followed by progressive streaming; use the startup-streaming lane for
+that policy decision.
 
 Summary:
 
@@ -108,9 +113,9 @@ settled.
 
 Interpretation:
 
-- RD20 remains a multi-minute full-view settle even though local entry is now
-  early-playable. The clean RD20 split is `108.078s` runtime/server settle plus
-  `94.653s` render mesh settle.
+- RD20 remains a multi-minute full-view drain in this synthetic isolation lane.
+  The clean RD20 split is `108.078s` runtime/server settle plus `94.653s`
+  render mesh settle.
 - Runtime settle is still the larger RD20 share (`53.3%`), and simulation time
   (`106.500s`) tracks runtime wall time closely. That makes host cadence,
   scheduler publication, and server/worldgen/light pacing first-class suspects;
@@ -123,14 +128,15 @@ Interpretation:
   test runtime throttling, and a render-compile worker sweep to test mesh
   throughput, before changing defaults or Quest backpressure policies.
 
-### 2026-07-04 - Desktop Loading-Settle Throughput
+### 2026-07-04 - Desktop Loading-Settle Synthetic Throughput
 
 Commit reported by native benchmark JSON: `e0106245`.
 
 Note: `git_dirty=true` because this was captured while adding the
 loading-settle benchmark lane and with unrelated tactical-doc edits in the
 worktree. Treat this as the first durable desktop-native loading-settle
-baseline, not a clean historical state of `e0106245`.
+isolation baseline, not a clean historical state of `e0106245` and not a
+desktop-shaped startup streaming result.
 
 Host: Apple M4 Pro Mac, 48 GiB RAM, Darwin `25.5.0` arm64.
 

@@ -199,6 +199,7 @@ pub(crate) fn write_actor_review_sheet(
             width: panel_width,
             height: panel_height,
             frame_count: view_count,
+            pace_frame_duration: None,
         },
         move |device, queue, format, _size| {
             Ok(ActorReviewSheetState {
@@ -266,6 +267,7 @@ pub(crate) fn write_actor_walk_review(
             width: frame_width,
             height: frame_height,
             frame_count,
+            pace_frame_duration: None,
         },
         move |device, queue, format, _size| {
             Ok(ActorReviewSheetState {
@@ -981,6 +983,7 @@ pub(crate) fn run_renderer_rebuild_smoke(
             width: options.width,
             height: options.height,
             frame_count: 2,
+            pace_frame_duration: None,
         },
         move |device, queue, format, size| {
             let render_config =

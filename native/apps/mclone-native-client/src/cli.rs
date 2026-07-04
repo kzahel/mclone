@@ -16,10 +16,11 @@ use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPE
 use crate::{
     DEFAULT_CHUNK_X, DEFAULT_CHUNK_Z, DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
     DEFAULT_FRAME_BUDGET_TARGET_HZ, DEFAULT_MOVEMENT_PERF_PATH_RADIUS, DEFAULT_MOVEMENT_PERF_STEPS,
-    DEFAULT_RENDER_DISTANCE, DEFAULT_SEED, DEFAULT_TIMEDEMO_FRAMES, DEFAULT_TIMEDEMO_PATH_RADIUS,
-    MAX_FRAME_BUDGET_PROBE_FRAMES, MAX_LOADING_SETTLE_DISTANCE_COUNT,
-    MAX_MOVEMENT_PERF_PATH_RADIUS, MAX_MOVEMENT_PERF_STEPS, MAX_RENDER_DISTANCE,
-    MAX_TIMEDEMO_FRAMES, MIN_RENDER_DISTANCE,
+    DEFAULT_RENDER_DISTANCE, DEFAULT_SEED, DEFAULT_STARTUP_STREAMING_PERF_FRAMES,
+    DEFAULT_TIMEDEMO_FRAMES, DEFAULT_TIMEDEMO_PATH_RADIUS, MAX_FRAME_BUDGET_PROBE_FRAMES,
+    MAX_LOADING_SETTLE_DISTANCE_COUNT, MAX_MOVEMENT_PERF_PATH_RADIUS, MAX_MOVEMENT_PERF_STEPS,
+    MAX_RENDER_DISTANCE, MAX_STARTUP_STREAMING_PERF_FRAMES, MAX_TIMEDEMO_FRAMES,
+    MIN_RENDER_DISTANCE,
 };
 
 const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
@@ -98,6 +99,16 @@ pub(crate) struct FrameBudgetProbeOptions {
 pub(crate) struct LoadingSettlePerfOptions {
     pub(crate) scene: SceneOptions,
     pub(crate) distances: Vec<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct StartupStreamingPerfOptions {
+    pub(crate) scene: SceneOptions,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) frames: usize,
+    pub(crate) target_hz: f64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -427,6 +438,9 @@ pub(crate) enum Cli {
     FrameBudgetProbe {
         options: FrameBudgetProbeOptions,
     },
+    StartupStreamingPerf {
+        options: StartupStreamingPerfOptions,
+    },
     LoadingSettlePerf {
         options: LoadingSettlePerfOptions,
     },
@@ -481,11 +495,14 @@ impl Cli {
         let mut timedemo = false;
         let mut frame_budget_probe = false;
         let mut explicit_frame_budget_probe = false;
+        let mut frame_budget_frames_explicit = false;
         let mut movement_frame_probe = false;
+        let mut startup_streaming_perf = false;
         let mut loading_settle_perf = false;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
         let mut timedemo_frames = DEFAULT_TIMEDEMO_FRAMES;
         let mut frame_budget_frames = DEFAULT_FRAME_BUDGET_PROBE_FRAMES;
+        let mut startup_streaming_frames = DEFAULT_STARTUP_STREAMING_PERF_FRAMES;
         let mut loading_settle_distances = default_loading_settle_distances();
         let mut target_hz = DEFAULT_FRAME_BUDGET_TARGET_HZ;
         let mut movement_speed = SPECTATOR_BASE_SPEED;
@@ -531,6 +548,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                         || xr_mclone_smoke
                     {
@@ -544,6 +562,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                         || xr_clear_smoke
                     {
@@ -576,6 +595,20 @@ impl Cli {
                         );
                     }
                     loading_settle_perf = true;
+                }
+                "--startup-streaming-perf" => {
+                    if mode.is_some() {
+                        bail!(
+                            "--startup-streaming-perf cannot be combined with a headless output mode"
+                        );
+                    }
+                    if frame_budget_probe
+                        && !explicit_frame_budget_probe
+                        && !frame_budget_frames_explicit
+                    {
+                        frame_budget_probe = false;
+                    }
+                    startup_streaming_perf = true;
                 }
                 "--frame-budget-probe" => {
                     if mode.is_some() {
@@ -614,6 +647,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -629,6 +663,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -644,6 +679,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -680,6 +716,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -695,6 +732,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -710,6 +748,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -725,6 +764,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -740,6 +780,7 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || startup_streaming_perf
                         || loading_settle_perf
                     {
                         bail!("headless output modes cannot be combined with perf modes");
@@ -816,14 +857,26 @@ impl Cli {
                     timedemo_frames = parse_timedemo_frames_arg("--timedemo-frames", args.next())?;
                 }
                 "--frame-budget-frames" => {
+                    frame_budget_frames_explicit = true;
                     if !movement_frame_probe {
                         frame_budget_probe = true;
                     }
                     frame_budget_frames =
                         parse_frame_budget_frames_arg("--frame-budget-frames", args.next())?;
                 }
+                "--startup-streaming-frames" => {
+                    if frame_budget_probe
+                        && !explicit_frame_budget_probe
+                        && !frame_budget_frames_explicit
+                    {
+                        frame_budget_probe = false;
+                    }
+                    startup_streaming_perf = true;
+                    startup_streaming_frames =
+                        parse_startup_streaming_frames_arg(&arg, args.next())?;
+                }
                 "--target-hz" => {
-                    if !movement_frame_probe {
+                    if !movement_frame_probe && !startup_streaming_perf {
                         frame_budget_probe = true;
                     }
                     target_hz = parse_target_hz_arg("--target-hz", args.next())?;
@@ -892,10 +945,11 @@ impl Cli {
             + timedemo as u8
             + frame_budget_probe as u8
             + movement_frame_probe as u8
+            + startup_streaming_perf as u8
             + loading_settle_perf as u8;
         if perf_mode_count > 1 {
             bail!(
-                "--movement-perf, --timedemo, --frame-budget-probe, --movement-frame-probe, and --loading-settle-perf are mutually exclusive"
+                "--movement-perf, --timedemo, --frame-budget-probe, --movement-frame-probe, --startup-streaming-perf, and --loading-settle-perf are mutually exclusive"
             );
         }
         if (xr_clear_smoke || xr_mclone_smoke) && (mode.is_some() || perf_mode_count > 0) {
@@ -1096,6 +1150,16 @@ impl Cli {
                     movement_speed,
                 },
             }),
+            None if startup_streaming_perf => Ok(Self::StartupStreamingPerf {
+                options: StartupStreamingPerfOptions {
+                    scene,
+                    render_options,
+                    width: width.unwrap_or(1280),
+                    height: height.unwrap_or(720),
+                    frames: startup_streaming_frames,
+                    target_hz,
+                },
+            }),
             None if loading_settle_perf => Ok(Self::LoadingSettlePerf {
                 options: LoadingSettlePerfOptions {
                     scene,
@@ -1242,6 +1306,17 @@ fn parse_frame_budget_frames_arg(flag: &str, value: Option<String>) -> Result<us
         .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
     if !(1..=MAX_FRAME_BUDGET_PROBE_FRAMES).contains(&parsed) {
         bail!("{flag} must be between 1 and {MAX_FRAME_BUDGET_PROBE_FRAMES}");
+    }
+    Ok(parsed)
+}
+
+fn parse_startup_streaming_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<usize>()
+        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
+    if !(1..=MAX_STARTUP_STREAMING_PERF_FRAMES).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_STARTUP_STREAMING_PERF_FRAMES}");
     }
     Ok(parsed)
 }
@@ -1516,9 +1591,10 @@ fn print_help() {
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --startup-streaming-perf [--width 1280] [--height 720] [--seed 12345] [--render-distance 20] [--render-compile-workers 1] [--startup-streaming-frames 2400] [--target-hz 120] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in."
     );
 }
