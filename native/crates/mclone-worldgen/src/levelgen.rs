@@ -791,12 +791,12 @@ mod tests {
             feature_family: Some(FeatureFamily::TaigaSpruceFernBerry),
         },
         PaletteMatrixCase {
-            seed: 1094,
+            seed: 89_335,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:swamp_hills",
             surface_family: SurfaceFamily::Swamp,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SwampNativeSubsetSugarCaneLilyPad),
         },
         PaletteMatrixCase {
             seed: 59,

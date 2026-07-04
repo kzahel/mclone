@@ -1,9 +1,10 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, nineteen supported feature-family groups, and 56 F-checked
-matrix rows landed, including cactus/sugar-cane extras, swamp lily pads,
-blue orchids, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
+overworld tint IDs, nineteen supported feature-family groups, and 57 F-checked
+matrix rows landed, including cactus/sugar-cane extras, swamp/swamp-hills
+lily pads, blue orchids, sugar cane, and small mushrooms, ocean water plants,
+warm-ocean coral/sea-pickle,
 dark-forest canopy/mushroom,
 mushroom-field/shore huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, taiga/snowy-taiga spruce/fern/berry, and ordinary
@@ -169,7 +170,7 @@ notes.
 | 131 | `minecraft:gravelly_mountains` | mountains | gravelly mountain surface plus sparse oak/spruce tree family checked; forest-rock/emerald/infested-stone gap | seed `250`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 132 | `minecraft:flower_forest` | forest | forest grass/tint, dense small flowers, and common tall flowers checked; mushrooms/extras gap | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass plus spruce/fern and sweet berry bushes checked | seed `6126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 134 | `minecraft:swamp_hills` | swamp | swamp tint/surface checked; hill fossil/vegetation gap | seed `1094`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 134 | `minecraft:swamp_hills` | swamp | swamp-hills tint/surface plus native swamp subset, blue orchids, small mushrooms, sugar cane, and lily pads checked; hill fossil/seagrass/pumpkin gap | seed `89335`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 140 | `minecraft:ice_spikes` | frozen-land | snow/ice-spikes surface checked; spike feature gap | seed `59`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 149 | `minecraft:modified_jungle` | jungle | jungle tint/surface and jungle log/leaves tree family checked; dense vines/cocoa gap | seed `1374`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 151 | `minecraft:modified_jungle_edge` | jungle-edge | jungle-edge tint/surface and jungle log/leaves tree family checked; vegetation gap | seed `314096`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -229,7 +230,7 @@ Landed:
   sunflower-plains sunflower patches. Desert, desert hills, desert lakes, and
   all generated badlands rows now require dead bush plus cactus/sugar-cane
   family coverage; ordinary forest and wooded hills require an oak or birch
-  log/leaves tree pair; swamp requires the native
+  log/leaves tree pair; swamp and swamp hills require the native
   vegetation/clay subset plus blue orchids, small mushrooms, sugar cane, and
   lily pads; taiga, taiga hills, taiga mountains, base snowy taiga, and snowy
   taiga hills require spruce/fern vegetation plus sweet berry bushes; snowy
@@ -308,9 +309,10 @@ Documented gaps from this slice:
   path, coral plants, coral fans/wall fans, exact coral mismatch parity, and
   full waterlogged/fluid-state modeling for water plants in the raw generated
   block lane.
-- Java swamp now has high-signal water-lily, blue-orchid, and small-mushroom
-  coverage. Exact parity is still incomplete: swamp seagrass/extras, pumpkin,
-  and exact decorated counts remain later `103` work.
+- Java swamp and swamp hills now have high-signal water-lily, blue-orchid,
+  small-mushroom, and sugar-cane coverage. Exact parity is still incomplete:
+  swamp-hills fossil ordering, swamp seagrass/extras, pumpkin, and exact
+  decorated counts remain later `103` work.
 - Java mushroom fields and mushroom-field shore now have high-signal huge
   mushroom coverage. Exact parity is still incomplete: small brown/red mushroom
   patches, default mushroom patches, default extra vegetation, exact huge
@@ -371,11 +373,12 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Move to the swamp hills row without entering fossil or exact-count work:
+Move to the ice-spikes row as the next visible palette feature:
 
-1. Read Java swamp / swamp hills feature table sources before editing.
-2. Try to promote row `134` with deterministic swamp surface plus the existing
-   swamp native subset, blue-orchid, small-mushroom, sugar-cane, and lily-pad
-   family checks.
-3. Keep hill fossils, swamp seagrass/extras, pumpkin, and exact decorated-count
-   mismatch buckets in `103`.
+1. Read Java `tundraBiome(..., iceSpikes=true, ...)`, `Features.ICE_SPIKE`,
+   and `Features.ICE_PATCH` before editing.
+2. Add a narrow native shared feature-family path for row `140` that checks
+   visible packed-ice/spike coverage without trying to solve exact spike shape
+   parity in the first slice.
+3. Keep exact spike/patch mismatch buckets and any broader frozen-ocean iceberg
+   work in `103`.
