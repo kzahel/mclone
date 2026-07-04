@@ -11,7 +11,7 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   const index = await indexResponse.json();
 
   expect(index.pack.name).toBe("mclone-default");
-  expect(index.summary.authoredTextures).toBe(87);
+  expect(index.summary.authoredTextures).toBe(94);
   expect(index.summary.candidateCount).toBe(4);
   expect(index.summary.associatedCandidateCount).toBe(4);
   expect(index.summary.archivedCandidateCount).toBe(1);
@@ -119,6 +119,33 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   ]);
   expect(redstoneDustDot?.sheet.path).toContain("redstone-dust-dot-sheet.png");
 
+  expect(index.blocks.find((block: { name: string }) => block.name === "glass-pane")).toMatchObject({
+    kind: "pane",
+    faces: [
+      { face: "top", textureName: "glass_pane_top" },
+      { face: "side", textureName: "glass" },
+    ],
+  });
+  expect(index.blocks.find((block: { name: string }) => block.name === "rail")).toMatchObject({
+    kind: "rail",
+    faces: [{ face: "top", textureName: "rail" }],
+  });
+  expect(index.blocks.find((block: { name: string }) => block.name === "torch")).toMatchObject({
+    kind: "torch",
+    faces: [{ face: "side", textureName: "torch" }],
+  });
+  expect(index.blocks.find((block: { name: string }) => block.name === "oak-door")).toMatchObject({
+    kind: "door",
+    faces: [
+      { face: "top", textureName: "oak_door_top" },
+      { face: "bottom", textureName: "oak_door_bottom" },
+    ],
+  });
+  expect(index.blocks.find((block: { name: string }) => block.name === "oak-trapdoor")).toMatchObject({
+    kind: "trapdoor",
+    faces: [{ face: "top", textureName: "oak_trapdoor" }],
+  });
+
   for (const textureName of ["grass_cross", "fern_cross"]) {
     const texture = index.textures.find((entry: { name: string }) => entry.name === textureName);
     if (!texture) {
@@ -152,6 +179,22 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     tintRoles: ["tintindex:0"],
   });
   expect(redstoneDustDotTexture?.vanillaUsage.uses.map((use: { block: string }) => use.block)).toContain("minecraft:redstone_wire");
+
+  const shapeUsageExpectations = [
+    ["glass_pane_top", "partial", "pane", "minecraft:glass_pane"],
+    ["rail", "flat", "flat-ground", "minecraft:rail"],
+    ["torch", "partial", "torch", "minecraft:torch"],
+    ["oak_door_top", "partial", "door", "minecraft:oak_door"],
+    ["oak_trapdoor", "partial", "trapdoor", "minecraft:oak_trapdoor"],
+  ] as const;
+  for (const [textureName, previewHint, geometryKind, vanillaBlock] of shapeUsageExpectations) {
+    const texture = index.textures.find((entry: { name: string }) => entry.name === textureName);
+    expect(texture?.images.currentExport.exists).toBe(true);
+    expect(texture?.images.sheet.exists).toBe(true);
+    expect(texture?.vanillaUsage?.previewHint).toBe(previewHint);
+    expect(texture?.vanillaUsage?.geometryKinds).toContain(geometryKind);
+    expect(texture?.vanillaUsage?.uses.map((use: { block: string }) => use.block)).toContain(vanillaBlock);
+  }
 
   const selectResponse = await request.post("/api/curation/select", {
     data: { textureName: "grass_block_top", candidateId: archivedCandidate.id },
@@ -311,6 +354,42 @@ test("defaults to automatic rendered previews from vanilla metadata", async ({ p
   await expect(page.getByRole("heading", { name: "Fern Cross" })).toBeVisible();
 });
 
+test("shows shape-specific automatic previews for partial block families", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByLabel("Search").fill("glass_pane_top");
+  await page.getByRole("button", { name: /glass_pane_top/ }).click();
+  await expect(page.getByRole("heading", { name: "Glass Pane Top" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rendered Uses" })).toBeVisible();
+  await expect(page.locator(".overviewHeader")).toContainText("partial / 1 block / 1 face");
+  const glassPaneBundle = page.locator(".blockBundleCard").filter({ hasText: "Glass Pane" });
+  await expect(glassPaneBundle).toContainText("pane / 1 faces");
+  await expect(page.getByRole("button", { name: "glass-pane top uses Glass Pane Top", exact: true })).toBeVisible();
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-shape-pane.png", fullPage: true });
+
+  await page.getByLabel("Search").fill("oak_door_top");
+  await page.getByRole("button", { name: /oak_door_top/ }).click();
+  await expect(page.getByRole("heading", { name: "Oak Door Top" })).toBeVisible();
+  const doorBundle = page.locator(".blockBundleCard").filter({ hasText: "Oak Door" });
+  await expect(doorBundle).toContainText("door / 1 faces");
+  await expect(page.getByRole("button", { name: "oak-door top uses Oak Door Top", exact: true })).toBeVisible();
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-shape-door.png", fullPage: true });
+
+  for (const [textureName, blockName, faceName, displayName, kind] of [
+    ["rail", "rail", "top", "Rail", "rail"],
+    ["torch", "torch", "side", "Torch", "torch"],
+    ["oak_trapdoor", "oak-trapdoor", "top", "Oak Trapdoor", "trapdoor"],
+  ] as const) {
+    await page.getByLabel("Search").fill(textureName);
+    await page.getByRole("button", { name: new RegExp(textureName) }).click();
+    const bundle = page.locator(".blockBundleCard").filter({ hasText: displayName });
+    await expect(bundle).toContainText(`${kind} / 1 faces`);
+    await expect(page.getByRole("button", { name: `${blockName} ${faceName} uses ${displayName}`, exact: true })).toBeVisible();
+  }
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-shape-specials.png", fullPage: true });
+});
+
 test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
@@ -390,7 +469,7 @@ test("filters texture replacement queues", async ({ page }) => {
   await expect(textureList.getByRole("button", { name: /andesite/ })).toHaveCount(0);
 
   await page.getByLabel("Queue").selectOption({ label: "Needs candidates" });
-  await expect(page.locator(".filterCount")).toHaveText("85 textures");
+  await expect(page.locator(".filterCount")).toHaveText("92 textures");
   await expect(textureList.getByRole("button", { name: /andesite/ })).toBeVisible();
   await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toHaveCount(0);
   await expect(textureList.getByRole("button", { name: /^stone/ })).toHaveCount(0);

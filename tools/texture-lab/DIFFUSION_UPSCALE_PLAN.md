@@ -426,6 +426,11 @@ Local validation on macOS/M4/MPS:
     with normalized geometry kinds such as `cross-sprite`, `crop-cross`,
     `flat-ground`, `cube`, `pane`, `rail`, and `door`. This should become the
     primary driver for preview choice and authoring constraints.
+  - Shape-specific block review sheets now cover thin/partial fixtures:
+    `pane`, `rail`, `torch`, `door`, and `trapdoor`. The default pack includes
+    simple authored placeholder fixtures under the matching vanilla texture
+    names so Auto preview can show these model families in rendered context
+    before final art is generated.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

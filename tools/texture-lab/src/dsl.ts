@@ -100,7 +100,7 @@ export interface BlockSpec {
   faces: CubeFaceTextures;
 }
 
-export type BlockKind = "cube" | "cross" | "flat";
+export type BlockKind = "cube" | "cross" | "flat" | "pane" | "rail" | "torch" | "door" | "trapdoor";
 
 export interface CubeFaceTextures {
   all?: string;
@@ -355,7 +355,7 @@ function validateBlock(
   textures: Record<string, TextureSpec>,
   errors: string[],
 ): void {
-  if (block.kind !== "cube" && block.kind !== "cross" && block.kind !== "flat") {
+  if (!["cube", "cross", "flat", "pane", "rail", "torch", "door", "trapdoor"].includes(block.kind)) {
     errors.push(`block '${blockName}' has unsupported kind '${block.kind}'`);
   }
   const textureNames = Object.values(block.faces).flatMap((value) => (Array.isArray(value) ? value : [value]));
@@ -367,6 +367,21 @@ function validateBlock(
   }
   if (block.kind === "flat" && !block.faces.top && !block.faces.all) {
     errors.push(`block '${blockName}' flat preview requires faces.top or faces.all`);
+  }
+  if (block.kind === "pane" && !block.faces.side && !block.faces.all) {
+    errors.push(`block '${blockName}' pane preview requires faces.side or faces.all`);
+  }
+  if (block.kind === "rail" && !block.faces.top && !block.faces.all) {
+    errors.push(`block '${blockName}' rail preview requires faces.top or faces.all`);
+  }
+  if (block.kind === "torch" && !block.faces.side && !block.faces.all) {
+    errors.push(`block '${blockName}' torch preview requires faces.side or faces.all`);
+  }
+  if (block.kind === "door" && (!block.faces.top || !block.faces.bottom)) {
+    errors.push(`block '${blockName}' door preview requires faces.top and faces.bottom`);
+  }
+  if (block.kind === "trapdoor" && !block.faces.top && !block.faces.all) {
+    errors.push(`block '${blockName}' trapdoor preview requires faces.top or faces.all`);
   }
   for (const textureName of textureNames) {
     if (textureName && !textures[textureName]) {

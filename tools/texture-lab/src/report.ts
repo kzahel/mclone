@@ -209,6 +209,36 @@ function blockComposition(block: BlockSpec, pack: TexturePackAsset): string[] {
     const textureName = block.faces.top ?? block.faces.all;
     return textureName ? [`ground plane = ${textureExpression(textureName, pack)}`] : ["flat block has no top texture"];
   }
+  if (block.kind === "pane") {
+    const pane = block.faces.side ?? block.faces.all;
+    const edge = block.faces.top ?? block.faces.bottom;
+    return [
+      pane ? `thin pane faces = ${textureExpression(pane, pack)}` : "pane block has no pane texture",
+      edge ? `edge/post = ${textureExpression(edge, pack)}` : "edge/post uses pane texture",
+    ];
+  }
+  if (block.kind === "rail") {
+    const textureName = block.faces.top ?? block.faces.all;
+    return textureName ? [`flat and raised rail planes = ${textureExpression(textureName, pack)}`] : ["rail block has no top texture"];
+  }
+  if (block.kind === "torch") {
+    const textureName = block.faces.side ?? block.faces.all ?? block.faces.top;
+    return textureName ? [`standing and wall torch billboards = ${textureExpression(textureName, pack)}`] : ["torch block has no sprite texture"];
+  }
+  if (block.kind === "door") {
+    const lines: string[] = [];
+    if (block.faces.top) {
+      lines.push(`upper half = ${textureExpression(block.faces.top, pack)}`);
+    }
+    if (block.faces.bottom) {
+      lines.push(`lower half = ${textureExpression(block.faces.bottom, pack)}`);
+    }
+    return lines.length ? lines : ["door block has no upper/lower textures"];
+  }
+  if (block.kind === "trapdoor") {
+    const textureName = block.faces.top ?? block.faces.all;
+    return textureName ? [`closed slab and open panel = ${textureExpression(textureName, pack)}`] : ["trapdoor block has no texture"];
+  }
 
   const lines: string[] = [];
   const top = block.faces.top ?? block.faces.all;

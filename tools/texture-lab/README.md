@@ -383,6 +383,10 @@ an `Auto` preview mode that uses the vanilla preview hint to show focused
 rendered uses for cube, cross-sprite, flat-ground, and partial-model textures
 when authored block usage is available; alpha-shape diagnostics are secondary
 validation for the model families where centering or cutout coverage matters.
+The block review-sheet renderer has explicit preview kinds for `pane`, `rail`,
+`torch`, `door`, and `trapdoor` fixtures, so partial and thin vanilla model
+families can be judged in shape context instead of as cube or raw-texture-only
+art.
 
 The `mclone-default` grass block module encodes that relationship directly:
 

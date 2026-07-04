@@ -198,6 +198,21 @@ export function makeBlockReviewSheet(
   if (block.kind === "flat") {
     return makeFlatBlockReviewSheet(blockName, block, texturesByName);
   }
+  if (block.kind === "pane") {
+    return makePaneBlockReviewSheet(blockName, block, texturesByName);
+  }
+  if (block.kind === "rail") {
+    return makeRailBlockReviewSheet(blockName, block, texturesByName);
+  }
+  if (block.kind === "torch") {
+    return makeTorchBlockReviewSheet(blockName, block, texturesByName);
+  }
+  if (block.kind === "door") {
+    return makeDoorBlockReviewSheet(blockName, block, texturesByName);
+  }
+  if (block.kind === "trapdoor") {
+    return makeTrapdoorBlockReviewSheet(blockName, block, texturesByName);
+  }
 
   return makeCubeBlockReviewSheet(blockName, block, texturesByName);
 }
@@ -336,6 +351,197 @@ function makeFlatBlockReviewSheet(
   drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
   drawPanelLabel(sheet, "FINAL FLAT", 744, 386, 160, 1);
   drawPanelLabel(sheet, "TINTS", 890, 386, 100, 1);
+  drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
+
+  return sheet;
+}
+
+function makePaneBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = tintColorsForBlock(block, texturesByName);
+  const primaryTint = tintColors[0]!;
+  const pane = applyRoleTint(textureForBlockFace(block, texturesByName, "north"), primaryTint);
+  const edge = applyRoleTint(block.faces.top ? textureForBlockFace(block, texturesByName, "top") : textureForBlockFace(block, texturesByName, "north"), primaryTint);
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawPaneShape(sheet, pane, edge, 70, 78, 96, 48, 144);
+
+  drawShapeTexturePanel(sheet, "PANE FACE", pane, 340, 16);
+  drawShapeTexturePanel(sheet, "EDGE / POST", edge, 692, 16);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawPanePatch(sheet, pane, edge, 54, 426);
+  drawPaneShape(sheet, pane, edge, 760, 420, 74, 37, 112);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 900, 412 + index * 34, tint);
+  }
+
+  drawPanelLabel(sheet, "PANE SHAPE", 16, 16, 300);
+  drawPanelLabel(sheet, "CONNECTED PANE PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL PANE", 744, 386, 160, 1);
+  drawPanelLabel(sheet, "TINTS", 890, 386, 100, 1);
+  drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
+
+  return sheet;
+}
+
+function makeRailBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = tintColorsForBlock(block, texturesByName);
+  const primaryTint = tintColors[0]!;
+  const rail = applyRoleTint(textureForBlockFace(block, texturesByName, "top"), primaryTint);
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawRailFlat(sheet, rail, 70, 116, 82, 41);
+  drawRailRaised(sheet, rail, 78, 132, 82, 41, 96);
+
+  drawShapeTexturePanel(sheet, "RAIL SPRITE", rail, 340, 16);
+
+  drawRect(sheet, 692, 16, 328, 328, panel);
+  drawFlatPatch(sheet, rail, 724, 82);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawRailPatch(sheet, rail, 42, 410);
+  drawRailFlat(sheet, rail, 744, 448, 58, 29);
+  drawRailRaised(sheet, rail, 822, 430, 58, 29, 84);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 900, 412 + index * 34, tint);
+  }
+
+  drawPanelLabel(sheet, "FLAT + RAISED RAIL", 16, 16, 300);
+  drawPanelLabel(sheet, "GROUND PATCH", 692, 16, 328);
+  drawPanelLabel(sheet, "TRACK PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL RAIL", 744, 386, 160, 1);
+  drawPanelLabel(sheet, "TINTS", 890, 386, 100, 1);
+  drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
+
+  return sheet;
+}
+
+function makeTorchBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = tintColorsForBlock(block, texturesByName);
+  const primaryTint = tintColors[0]!;
+  const torch = applyRoleTint(textureForBlockFace(block, texturesByName, "north"), primaryTint);
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawTorchStanding(sheet, torch, 88, 98, 70, 35, 148);
+  drawTorchWall(sheet, torch, 168, 132, 64, 32, 118);
+
+  drawShapeTexturePanel(sheet, "TORCH SPRITE", torch, 340, 16);
+
+  drawRect(sheet, 692, 16, 328, 328, panel);
+  drawTorchPatch(sheet, torch, 734, 88);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawTorchPatch(sheet, torch, 58, 420, 5);
+  drawTorchStanding(sheet, torch, 760, 420, 58, 29, 116);
+  drawTorchWall(sheet, torch, 830, 452, 52, 26, 94);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 918, 412 + index * 34, tint);
+  }
+
+  drawPanelLabel(sheet, "STANDING + WALL TORCH", 16, 16, 300);
+  drawPanelLabel(sheet, "TORCH PATCH", 692, 16, 328);
+  drawPanelLabel(sheet, "LIGHT PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL TORCH", 744, 386, 160, 1);
+  drawPanelLabel(sheet, "TINTS", 908, 386, 100, 1);
+  drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
+
+  return sheet;
+}
+
+function makeDoorBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = tintColorsForBlock(block, texturesByName);
+  const primaryTint = tintColors[0]!;
+  const top = applyRoleTint(textureForBlockFace(block, texturesByName, "top"), primaryTint);
+  const bottom = applyRoleTint(textureForBlockFace(block, texturesByName, "bottom"), primaryTint);
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawDoorShape(sheet, top, bottom, 74, 52, 80, 40, 210, false);
+
+  drawDoorTexturePanel(sheet, top, bottom, 340, 16);
+
+  drawRect(sheet, 692, 16, 328, 328, panel);
+  drawDoorShape(sheet, top, bottom, 790, 58, 72, 36, 192, true);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawDoorPatch(sheet, top, bottom, 48, 392);
+  drawDoorShape(sheet, top, bottom, 760, 406, 54, 27, 142, false);
+  drawDoorShape(sheet, top, bottom, 842, 412, 50, 25, 132, true);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 928, 412 + index * 34, tint);
+  }
+
+  drawPanelLabel(sheet, "CLOSED DOOR", 16, 16, 300);
+  drawPanelLabel(sheet, "OPEN DOOR", 692, 16, 328);
+  drawPanelLabel(sheet, "DOOR PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL DOORS", 744, 386, 170, 1);
+  drawPanelLabel(sheet, "TINTS", 918, 386, 100, 1);
+  drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
+
+  return sheet;
+}
+
+function makeTrapdoorBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = tintColorsForBlock(block, texturesByName);
+  const primaryTint = tintColors[0]!;
+  const texture = applyRoleTint(textureForBlockFace(block, texturesByName, "top"), primaryTint);
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawTrapdoorClosed(sheet, texture, 72, 118, 82, 41, 72);
+  drawTrapdoorOpen(sheet, texture, 150, 104, 68, 34, 112);
+
+  drawShapeTexturePanel(sheet, "TRAPDOOR TEXTURE", texture, 340, 16);
+
+  drawRect(sheet, 692, 16, 328, 328, panel);
+  drawTrapdoorPatch(sheet, texture, 728, 92);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawTrapdoorPatch(sheet, texture, 48, 414, 4);
+  drawTrapdoorClosed(sheet, texture, 760, 442, 78, 39, 68);
+  drawTrapdoorOpen(sheet, texture, 842, 422, 58, 29, 98);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 928, 412 + index * 34, tint);
+  }
+
+  drawPanelLabel(sheet, "CLOSED + OPEN TRAPDOOR", 16, 16, 300);
+  drawPanelLabel(sheet, "TRAPDOOR PATCH", 692, 16, 328);
+  drawPanelLabel(sheet, "HINGE PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL TRAPDOORS", 744, 386, 170, 1);
+  drawPanelLabel(sheet, "TINTS", 918, 386, 100, 1);
   drawPixelText(sheet, blockName.toUpperCase(), 24, 292, 1, [214, 218, 210, 255]);
 
   return sheet;
@@ -927,6 +1133,236 @@ function drawFlatPatch(
     for (let column = 0; column < columns; column += 1) {
       drawFlatSprite(target, texture, targetX + column * 78, targetY + row * 70, 32, 16);
     }
+  }
+}
+
+function drawShapeTexturePanel(
+  target: RgbaImage,
+  label: string,
+  texture: RgbaImage,
+  panelX: number,
+  panelY: number,
+): void {
+  const panel: Rgba = [52, 54, 54, 255];
+  drawRect(target, panelX, panelY, 328, 328, panel);
+  drawPanelLabel(target, label, panelX, panelY, 328);
+  const scale = Math.max(1, Math.min(8, Math.floor(216 / Math.max(texture.width, texture.height))));
+  const width = texture.width * scale;
+  const height = texture.height * scale;
+  const x = panelX + Math.floor((328 - width) / 2);
+  const y = panelY + 60;
+  if (hasTransparency(texture)) {
+    drawCheckerboard(target, x, y, width, height, Math.max(4, scale * 2));
+  }
+  drawScaled(target, texture, x, y, scale);
+  drawGrid(target, x, y, texture.width, texture.height, scale, [86, 89, 88, 255]);
+}
+
+function drawDoorTexturePanel(
+  target: RgbaImage,
+  top: RgbaImage,
+  bottom: RgbaImage,
+  panelX: number,
+  panelY: number,
+): void {
+  const panel: Rgba = [52, 54, 54, 255];
+  drawRect(target, panelX, panelY, 328, 328, panel);
+  drawPanelLabel(target, "DOOR TEXTURES", panelX, panelY, 328);
+  const scale = Math.max(1, Math.min(6, Math.floor(128 / Math.max(top.width, top.height, bottom.width, bottom.height))));
+  const topX = panelX + 48;
+  const bottomX = panelX + 184;
+  const y = panelY + 72;
+  drawPixelText(target, "TOP", topX, y - 18, 1, [214, 218, 210, 255]);
+  drawPixelText(target, "BOTTOM", bottomX, y - 18, 1, [214, 218, 210, 255]);
+  drawTextureWithOptionalChecker(target, top, topX, y, scale);
+  drawTextureWithOptionalChecker(target, bottom, bottomX, y, scale);
+}
+
+function drawTextureWithOptionalChecker(
+  target: RgbaImage,
+  texture: RgbaImage,
+  x: number,
+  y: number,
+  scale: number,
+): void {
+  if (hasTransparency(texture)) {
+    drawCheckerboard(target, x, y, texture.width * scale, texture.height * scale, Math.max(4, scale * 2));
+  }
+  drawScaled(target, texture, x, y, scale);
+  drawGrid(target, x, y, texture.width, texture.height, scale, [86, 89, 88, 255]);
+}
+
+function drawPaneShape(
+  target: RgbaImage,
+  pane: RgbaImage,
+  edge: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  drawCubeFace(target, pane, 0.78, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 0.5));
+  drawCubeFace(target, pane, 0.92, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 1 - v, u));
+  drawCubeFace(target, edge, 1.08, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 0.44 + u * 0.12, 1, v));
+  drawCubeFace(target, edge, 0.96, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1, 0.44 + v * 0.12));
+  drawLine(
+    target,
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0, 0, 0.5),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 0, 0.5),
+    [24, 22, 20, 180],
+  );
+  drawLine(
+    target,
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 0, 1),
+    [24, 22, 20, 180],
+  );
+}
+
+function drawPanePatch(target: RgbaImage, pane: RgbaImage, edge: RgbaImage, targetX: number, targetY: number): void {
+  for (let index = 0; index < 4; index += 1) {
+    drawPaneShape(target, pane, edge, targetX + index * 112, targetY + (index % 2) * 8, 46, 23, 74);
+  }
+}
+
+function drawRailFlat(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+): void {
+  drawFlatSprite(target, texture, targetX, targetY, halfWidth, halfDepth);
+}
+
+function drawRailRaised(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  drawCubeFace(target, texture, 1, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 0.12 + v * 0.72, v));
+}
+
+function drawRailPatch(target: RgbaImage, texture: RgbaImage, targetX: number, targetY: number): void {
+  for (let index = 0; index < 5; index += 1) {
+    drawRailFlat(target, texture, targetX + index * 92, targetY + (index % 2) * 26, 36, 18);
+  }
+}
+
+function drawTorchStanding(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  drawCubeFace(target, texture, 0.92, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 0.5));
+  drawCubeFace(target, texture, 1.06, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 0.5, 1 - v, u));
+}
+
+function drawTorchWall(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  drawCubeFace(target, texture, 0.98, (u, v) =>
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0.16 + u * 0.68, 1 - v * 0.82, 0.18 + u * 0.64),
+  );
+}
+
+function drawTorchPatch(target: RgbaImage, texture: RgbaImage, targetX: number, targetY: number, count = 3): void {
+  for (let index = 0; index < count; index += 1) {
+    const offsetY = Math.round(random01("torch-patch-y", index, 0) * 20) - 10;
+    drawTorchStanding(target, texture, targetX + index * 82, targetY + offsetY, 32, 16, 72);
+  }
+}
+
+function drawDoorShape(
+  target: RgbaImage,
+  top: RgbaImage,
+  bottom: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+  open: boolean,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  const map = open
+    ? (u: number, y: number): Point => projectIso(originX, originY, halfWidth, halfDepth, height, 0.06, y, u)
+    : (u: number, y: number): Point => projectIso(originX, originY, halfWidth, halfDepth, height, u, y, 0.94);
+  drawCubeFace(target, bottom, open ? 0.78 : 0.86, (u, v) => map(u, (1 - v) * 0.5));
+  drawCubeFace(target, top, open ? 0.86 : 0.96, (u, v) => map(u, 0.5 + (1 - v) * 0.5));
+  const leftTop = map(0, 1);
+  const rightTop = map(1, 1);
+  const rightBottom = map(1, 0);
+  const leftBottom = map(0, 0);
+  drawLine(target, leftTop, rightTop, [24, 22, 20, 220]);
+  drawLine(target, rightTop, rightBottom, [24, 22, 20, 220]);
+  drawLine(target, rightBottom, leftBottom, [24, 22, 20, 220]);
+  drawLine(target, leftBottom, leftTop, [24, 22, 20, 220]);
+}
+
+function drawDoorPatch(target: RgbaImage, top: RgbaImage, bottom: RgbaImage, targetX: number, targetY: number): void {
+  drawDoorShape(target, top, bottom, targetX, targetY, 42, 21, 112, false);
+  drawDoorShape(target, top, bottom, targetX + 108, targetY + 2, 42, 21, 112, true);
+  drawDoorShape(target, top, bottom, targetX + 218, targetY, 42, 21, 112, false);
+  drawDoorShape(target, top, bottom, targetX + 326, targetY + 4, 42, 21, 112, true);
+}
+
+function drawTrapdoorClosed(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  drawCubeFace(target, texture, 1.04, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 0.88, v));
+}
+
+function drawTrapdoorOpen(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+  drawCubeFace(target, texture, 0.86, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 0.08));
+}
+
+function drawTrapdoorPatch(target: RgbaImage, texture: RgbaImage, targetX: number, targetY: number, count = 3): void {
+  for (let index = 0; index < count; index += 1) {
+    drawTrapdoorClosed(target, texture, targetX + index * 92, targetY + (index % 2) * 18, 36, 18, 54);
   }
 }
 

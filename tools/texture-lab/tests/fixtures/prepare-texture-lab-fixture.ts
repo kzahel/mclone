@@ -37,6 +37,20 @@ await run("pnpm", [
   "fern_cross",
   "--texture",
   "redstone_dust_dot",
+  "--texture",
+  "glass",
+  "--texture",
+  "glass_pane_top",
+  "--texture",
+  "rail",
+  "--texture",
+  "torch",
+  "--texture",
+  "oak_door_top",
+  "--texture",
+  "oak_door_bottom",
+  "--texture",
+  "oak_trapdoor",
 ]);
 
 await writeCandidateArtifacts();

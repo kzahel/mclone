@@ -580,7 +580,7 @@ function previewHintFor(geometryKinds: GeometryKind[]): TextureVanillaUsage["pre
   if (geometryKinds.includes("cube")) {
     return "cube";
   }
-  if (geometryKinds.includes("door") || geometryKinds.includes("trapdoor") || geometryKinds.includes("pane")) {
+  if (geometryKinds.includes("door") || geometryKinds.includes("trapdoor") || geometryKinds.includes("pane") || geometryKinds.includes("torch")) {
     return "partial";
   }
   if (geometryKinds.includes("fluid")) {
@@ -601,6 +601,9 @@ function authoringNotesFor(
   }
   if (geometryKinds.includes("flat-ground") || geometryKinds.includes("rail")) {
     notes.push("author as a horizontal ground-plane cutout");
+  }
+  if (geometryKinds.includes("pane") || geometryKinds.includes("door") || geometryKinds.includes("trapdoor") || geometryKinds.includes("torch")) {
+    notes.push("judge in the matching thin-shape preview, not a full cube");
   }
   if (geometryKinds.includes("cube")) {
     notes.push("check tile seams and mip readability on cube faces");
