@@ -143,6 +143,7 @@ mod tests {
         MountainTrees,
         BadlandsDeadBushCactusSugarCane,
         IceSpikesPackedIce,
+        RiverSeagrass,
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
         DarkForestCanopyMushrooms,
@@ -172,6 +173,7 @@ mod tests {
                     "badlands dead bush plus cactus/sugar cane"
                 }
                 Self::IceSpikesPackedIce => "ice spikes packed ice",
+                Self::RiverSeagrass => "river seagrass water plants",
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
                 Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
@@ -234,6 +236,7 @@ mod tests {
                 Self::MountainTrees => &[OAK_LOG, OAK_LEAVES, SPRUCE_LOG, SPRUCE_LEAVES],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::IceSpikesPackedIce => &[PACKED_ICE],
+                Self::RiverSeagrass => &[SEAGRASS, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER],
                 Self::OceanWaterPlants => &[
                     SEAGRASS,
                     TALL_SEAGRASS_LOWER,
@@ -447,7 +450,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:river",
             surface_family: SurfaceFamily::Water,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::RiverSeagrass),
         },
         PaletteMatrixCase {
             seed: 333,

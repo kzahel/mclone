@@ -95,6 +95,7 @@ pub(super) fn overworld_features_for_biome_cached(
         | "minecraft:modified_badlands_plateau"
         | "minecraft:modified_wooded_badlands_plateau"
         | "minecraft:eroded_badlands" => badlands_feature_table(),
+        "minecraft:river" => river_feature_table(),
         "minecraft:swamp" | "minecraft:swamp_hills" => swamp_feature_table(),
         "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => {
             mushroom_field_feature_table()
@@ -271,6 +272,13 @@ fn swamp_feature_table() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
         .get_or_init(|| build_overworld_feature_table("minecraft:swamp", swamp_features()))
+        .as_slice()
+}
+
+fn river_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:river", river_features()))
         .as_slice()
 }
 
@@ -963,6 +971,10 @@ fn warm_ocean_features(deep: bool) -> Vec<PlacedFeature> {
             sea_pickle_feature(),
         ]
     }
+}
+
+fn river_features() -> Vec<PlacedFeature> {
+    vec![seagrass_feature(48, 0.4)]
 }
 
 fn default_land_features() -> Vec<PlacedFeature> {
