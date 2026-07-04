@@ -2,8 +2,9 @@
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
 overworld tint IDs, seventeen supported feature-family groups, and 36 F-checked
-matrix rows landed, including cactus/sugar-cane extras, swamp lily pads, ocean
-water plants, warm-ocean coral/sea-pickle, dark-forest canopy/mushroom,
+matrix rows landed, including cactus/sugar-cane extras, swamp lily pads and
+blue orchids, ocean water plants, warm-ocean coral/sea-pickle,
+dark-forest canopy/mushroom,
 mushroom-field huge mushrooms, birch and tall-birch trees, savanna acacia,
 jungle tree, bamboo-jungle, base taiga/snowy-taiga berry, and ordinary forest
 tree plus flower-forest dense/common flower and sunflower-plains sunflower
@@ -122,7 +123,7 @@ notes.
 | 3 | `minecraft:mountains` | mountains | grass/stone/gravel mountain surface checked, sparse trees | seed `31`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 4 | `minecraft:forest` | forest | forest grass tint/surface and oak/birch tree family checked; flowers/extras gap | seed `0`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 5 | `minecraft:taiga` | taiga | spruce trees, ferns, and sweet berry bushes checked | seed `233`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus sugar cane and lily pads; mushrooms/seagrass/pumpkin gap | seed `376`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, sugar cane, and lily pads; mushrooms/seagrass/pumpkin gap | seed `36`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 7 | `minecraft:river` | river | river water checked, banks/seagrass gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice checked, icebergs/blue ice gap | seed `333`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice checked | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -226,7 +227,7 @@ Landed:
   sunflower-plains sunflower patches. Desert and badlands now require dead bush plus
   cactus/sugar-cane family coverage; ordinary forest and wooded hills require
   an oak or birch log/leaves tree pair; swamp requires the native
-  vegetation/clay subset plus sugar cane and lily pads; base taiga and base
+  vegetation/clay subset plus blue orchids, sugar cane, and lily pads; base taiga and base
   snowy taiga require spruce/fern vegetation plus sweet berry bushes; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
@@ -241,14 +242,15 @@ Landed:
   broad block-family checks, not exact decorated counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
-  state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; dark oak
-  log/leaves IDs; huge mushroom cap/stem IDs; acacia log/leaves IDs; jungle
+  state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; blue orchid
+  ID; dark oak log/leaves IDs; huge mushroom cap/stem IDs; acacia log/leaves IDs; jungle
   log/leaves IDs; bamboo trunk ID; sweet berry bush age-3 ID; allium,
   azure bluet, red/orange/white/pink tulips, oxeye daisy, cornflower, lily of
   the valley, lilac/rose-bush/peony lower/upper IDs, and sunflower lower/upper
   IDs; synthetic asset registry mappings; basic shared
   shape/material/render/light facts; Java-style reduced random-patch column
-  placement; Java-style waterlily and sweet-berry random-patch placement;
+  placement; Java-style waterlily, `FLOWER_SWAMP` blue-orchid flower, and
+  sweet-berry random-patch placement;
   Java-style `nextBoolean` random-boolean selector placement for mushroom fields;
   Java-style seagrass, kelp, sea-pickle, and broad coral tree/claw/mushroom
   placement; broad Java-shaped dark oak tree, huge mushroom, birch and
@@ -295,9 +297,9 @@ Documented gaps from this slice:
   path, coral plants, coral fans/wall fans, exact coral mismatch parity, and
   full waterlogged/fluid-state modeling for water plants in the raw generated
   block lane.
-- Java swamp now has high-signal water-lily coverage. Exact parity is still
-  incomplete: brown/red mushroom patches, swamp seagrass/extras, pumpkin, and
-  exact decorated counts remain later `103` work.
+- Java swamp now has high-signal water-lily and blue-orchid coverage. Exact
+  parity is still incomplete: brown/red mushroom patches, swamp
+  seagrass/extras, pumpkin, and exact decorated counts remain later `103` work.
 - Java mushroom fields now have high-signal huge mushroom coverage. Exact
   parity is still incomplete: small brown/red mushroom patches, default mushroom
   patches, default extra vegetation, exact huge mushroom side-state booleans,
@@ -333,12 +335,12 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Move to another distinctive single-biome flower family:
+Continue the same swamp row with the next missing visible vanilla vegetation:
 
-1. Add a blue orchid generated block ID/assets/shapes and real-asset smoke
-   coverage for the Java `blue_orchid` blockstate.
-2. Port the narrow `FLOWER_SWAMP` random patch from
-   `BiomeDefaultFeatures.addSwampVegetation`, keeping the existing swamp row's
-   broad vegetation/clay/sugar-cane/lily-pad check intact.
-3. Extend row `6` to require a blue orchid in the generated swamp fixture once
-   the patch exists.
+1. Add brown and red small mushroom generated block IDs/assets/shapes and
+   real-asset smoke coverage for the Java `brown_mushroom` and `red_mushroom`
+   blockstates.
+2. Port the narrow `BROWN_MUSHROOM_SWAMP` and `RED_MUSHROOM_SWAMP` random
+   patches from `BiomeDefaultFeatures.addSwampVegetation`.
+3. Extend row `6` to require at least one small mushroom family member while
+   leaving exact decorated counts and swamp extras under later `103` work.

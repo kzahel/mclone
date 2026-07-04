@@ -280,7 +280,7 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG,
+        ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ORCHID,
         BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CAVE_AIR, CLAY,
         COAL_ORE, COPPER_ORE, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE,
         DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
@@ -1241,6 +1241,55 @@ mod tests {
         assert!(has_random_patch(&badlands, CACTUS, 5));
         assert!(has_random_patch(&swamp, SUGAR_CANE, 20));
         assert!(has_random_patch(&swamp, LILY_PAD, 4));
+    }
+
+    #[test]
+    fn swamp_feature_table_includes_java_blue_orchid_patch() {
+        let swamp = overworld_features_for_biome(get_layered_biome_by_id(6));
+        let blue_orchid = swamp
+            .iter()
+            .find(|feature| {
+                matches!(
+                    feature.feature,
+                    ConfiguredFeature::Flower(RandomPatchConfiguration {
+                        state: BLUE_ORCHID,
+                        ..
+                    })
+                )
+            })
+            .expect("swamp blue orchid feature");
+
+        assert_eq!(
+            blue_orchid.decorators,
+            vec![
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::spread_32_above(),
+            ]
+        );
+        match &blue_orchid.feature {
+            ConfiguredFeature::Flower(config) => {
+                assert_eq!(
+                    *config,
+                    RandomPatchConfiguration {
+                        state: BLUE_ORCHID,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 64,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: true,
+                        can_replace: false,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on: &[],
+                    }
+                );
+            }
+            other => panic!("expected blue orchid flower feature, got {other:?}"),
+        }
     }
 
     #[test]

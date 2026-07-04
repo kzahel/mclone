@@ -42,10 +42,10 @@ mod tests {
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
         ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BIRCH_LEAVES, BIRCH_LOG,
-        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT,
-        CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK,
-        GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
-        KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
+        BLUE_ORCHID, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY,
+        COARSE_DIRT, CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN,
+        FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES,
+        JUNGLE_LOG, KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
         LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP,
         OXEYE_DAISY, PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY,
         RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
@@ -203,7 +203,15 @@ mod tests {
                     PEONY_UPPER,
                 ],
                 Self::SwampNativeSubsetSugarCaneLilyPad => &[
-                    OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY, SUGAR_CANE, LILY_PAD,
+                    OAK_LOG,
+                    OAK_LEAVES,
+                    GRASS,
+                    POPPY,
+                    DEAD_BUSH,
+                    BLUE_ORCHID,
+                    CLAY,
+                    SUGAR_CANE,
+                    LILY_PAD,
                 ],
                 Self::TaigaSpruceFernBerry => &[
                     SPRUCE_LOG,
@@ -260,6 +268,7 @@ mod tests {
                     [OAK_LOG, OAK_LEAVES, GRASS, POPPY, DEAD_BUSH, CLAY]
                         .iter()
                         .any(|block| chunk.block_count(*block) > 0)
+                        && chunk.block_count(BLUE_ORCHID) > 0
                         && chunk.block_count(SUGAR_CANE) > 0
                         && chunk.block_count(LILY_PAD) > 0
                 }
@@ -402,7 +411,7 @@ mod tests {
             feature_family: Some(FeatureFamily::ForestOakBirchTrees),
         },
         PaletteMatrixCase {
-            seed: 376,
+            seed: 36,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:swamp",

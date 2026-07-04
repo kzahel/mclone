@@ -560,6 +560,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (147, "minecraft:peony", HALF_UPPER),
     (148, "minecraft:sunflower", HALF_LOWER),
     (149, "minecraft:sunflower", HALF_UPPER),
+    (150, "minecraft:blue_orchid", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -578,7 +579,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 150);
+        assert_eq!(registry.len(), 151);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -898,6 +899,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:sunflower[half=upper]"),
             Some(BlockStateId(149))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:blue_orchid"),
+            Some(BlockStateId(150))
         );
     }
 

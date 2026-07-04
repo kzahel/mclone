@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use crate::biome::BiomeDefinition;
 use crate::block::{
-    ANDESITE, CACTUS, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
+    ANDESITE, BLUE_ORCHID, CACTUS, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
     DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
     FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
@@ -766,6 +766,7 @@ fn badlands_features() -> Vec<PlacedFeature> {
 fn swamp_features() -> Vec<PlacedFeature> {
     vec![
         tree_feature(BasicTreeConfiguration::oak(), 2, 0.25, 1),
+        swamp_flower_feature(),
         grass_patch(GRASS, 2),
         flower_patch(POPPY, 1),
         dead_bush_patch(1),
@@ -1213,6 +1214,32 @@ fn sunflower_patch_feature() -> PlacedFeature {
         double_plant_patch_feature(SUNFLOWER_LOWER),
         vec![
             ConfiguredDecorator::count(10),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::spread_32_above(),
+        ],
+    )
+}
+
+fn swamp_flower_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::flower(RandomPatchConfiguration {
+            state: BLUE_ORCHID,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[],
+        }),
+        vec![
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
             ConfiguredDecorator::spread_32_above(),

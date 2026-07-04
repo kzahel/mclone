@@ -74,6 +74,7 @@ pub mod terrain_id {
     pub const PEONY_UPPER: u32 = 147;
     pub const SUNFLOWER_LOWER: u32 = 148;
     pub const SUNFLOWER_UPPER: u32 = 149;
+    pub const BLUE_ORCHID: u32 = 150;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

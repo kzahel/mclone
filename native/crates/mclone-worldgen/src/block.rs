@@ -152,6 +152,7 @@ pub const PEONY_LOWER: RawBlockId = 146;
 pub const PEONY_UPPER: RawBlockId = 147;
 pub const SUNFLOWER_LOWER: RawBlockId = 148;
 pub const SUNFLOWER_UPPER: RawBlockId = 149;
+pub const BLUE_ORCHID: RawBlockId = 150;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -231,6 +232,7 @@ impl GeneratedBlockId {
     pub const PEONY_UPPER: Self = Self(PEONY_UPPER);
     pub const SUNFLOWER_LOWER: Self = Self(SUNFLOWER_LOWER);
     pub const SUNFLOWER_UPPER: Self = Self(SUNFLOWER_UPPER);
+    pub const BLUE_ORCHID: Self = Self(BLUE_ORCHID);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -290,6 +292,7 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | PEONY_UPPER
             | SUNFLOWER_LOWER
             | SUNFLOWER_UPPER
+            | BLUE_ORCHID
             | GLOW_LICHEN
             | POINTED_DRIPSTONE
             | TORCH
@@ -521,6 +524,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         ROSE_BUSH_LOWER | ROSE_BUSH_UPPER => "minecraft:rose_bush",
         PEONY_LOWER | PEONY_UPPER => "minecraft:peony",
         SUNFLOWER_LOWER | SUNFLOWER_UPPER => "minecraft:sunflower",
+        BLUE_ORCHID => "minecraft:blue_orchid",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -627,6 +631,7 @@ mod tests {
         assert_eq!(block_light_opacity(PEONY_UPPER), 0);
         assert_eq!(block_light_opacity(SUNFLOWER_LOWER), 0);
         assert_eq!(block_light_opacity(SUNFLOWER_UPPER), 0);
+        assert_eq!(block_light_opacity(BLUE_ORCHID), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
@@ -690,5 +695,6 @@ mod tests {
         assert_eq!(block_name(PEONY_UPPER), "minecraft:peony");
         assert_eq!(block_name(SUNFLOWER_LOWER), "minecraft:sunflower");
         assert_eq!(block_name(SUNFLOWER_UPPER), "minecraft:sunflower");
+        assert_eq!(block_name(BLUE_ORCHID), "minecraft:blue_orchid");
     }
 }

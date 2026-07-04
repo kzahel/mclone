@@ -116,6 +116,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::OXEYE_DAISY
         | terrain_id::CORNFLOWER
         | terrain_id::LILY_OF_THE_VALLEY
+        | terrain_id::BLUE_ORCHID
         | terrain_id::DEAD_BUSH
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
@@ -178,6 +179,7 @@ fn is_small_flower(id: u32) -> bool {
             | terrain_id::OXEYE_DAISY
             | terrain_id::CORNFLOWER
             | terrain_id::LILY_OF_THE_VALLEY
+            | terrain_id::BLUE_ORCHID
     )
 }
 
@@ -434,6 +436,7 @@ mod tests {
             terrain_id::OXEYE_DAISY,
             terrain_id::CORNFLOWER,
             terrain_id::LILY_OF_THE_VALLEY,
+            terrain_id::BLUE_ORCHID,
             terrain_id::DEAD_BUSH,
             terrain_id::LARGE_FERN_LOWER,
             terrain_id::LARGE_FERN_UPPER,
