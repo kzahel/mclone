@@ -89,9 +89,10 @@ The first XR Blink control target is concrete:
   preview result.
 - Blink has no cancel gesture. Once armed, release commits; if no valid
   completed result exists, commit is a no-op.
-- Stick direction may influence landing yaw, so the player can choose the
-  facing direction before committing, but any direction over threshold arms
-  Blink.
+- Blink captures the current body/player heading when it arms. Moving the left
+  controller or stick without twisting it is a no-op for landing yaw.
+- Twisting/rolling the left controller around its aim axis applies a relative
+  heading offset from the captured heading, with a small dead zone.
 
 The target preview should not conflict with the right-stick snap-turn work from
 `124`. Snap turn remains right-stick based. Blink/Shift target selection should
@@ -212,19 +213,19 @@ Important preview contract:
 
 First-pass algorithm shape:
 
-1. Build a fixed-range intent arc from controller/camera pose. This should be a
-   bounded parametric arc, not an unconstrained physics projectile; raising the
-   hand should not extend range without limit.
+1. Build a capped projectile-like intent arc from controller/camera pose.
+   Controller pitch should shorten or lengthen the intended landing range up to
+   the max distance; raising the hand should not extend range without limit.
 2. Search reachable player-foot candidates in a bounded tube/cone around that
    arc and intent direction. Use `mclone-path` for coarse reachability, but keep
    the search intent-constrained rather than general NPC navigation.
 3. Treat obstructions as stopping/bounce-like constraints. If the aim points at
    a wall or a body-too-small opening, prefer the best reachable body-valid
    landing before the obstruction over routing around to a surprising far target.
-4. Score candidates by forward progress along the intent, proximity to the arc,
-   reachable path cost, stable support, headroom/body clearance, and modest
-   vertical change. Invalid should mean no reasonable reachable candidate exists
-   inside the loaded/searchable window.
+4. Score candidates by closeness to the projectile-derived intended range,
+   proximity to the arc, reachable path cost, stable support, headroom/body
+   clearance, and modest vertical change. Invalid should mean no reasonable
+   reachable candidate exists inside the loaded/searchable window.
 5. Refine the winning coarse foot cell into a continuous `Vec3d` feet pose.
    The player body is narrower than one block, so final placement must validate
    the actual standing AABB, headroom, and support footprint rather than snapping
@@ -297,15 +298,16 @@ Landed:
 - Added `mclone-client::teleport` with shared `TeleportIntent`,
   `TeleportConfig`, `TeleportPreview`, `TeleportValidityReason`, and
   `TeleportCollisionWorld`.
-- Implemented a synchronous resolver that builds a bounded fixed-range intent
-  arc, searches body-valid standing candidates near the intent, uses
+- Implemented a synchronous resolver that builds a bounded projectile-derived
+  intent arc, searches body-valid standing candidates near the intent, uses
   `mclone-path` for reachability and nearest reachable fallback, and refines
   the final target to a continuous feet pose rather than a block center.
 - The resolved dot/marker contract is represented in the preview as
   `marker_dot`, with `marker_dot.xz == target_feet.xz`.
 - Added deterministic flat/offscreen unit tests for wall stop, too-small
   opening rejection, one-block-up landing, unloaded/no-candidate invalid
-  behavior, and off-block-center continuous placement.
+  behavior, off-block-center continuous placement, current-heading preservation,
+  and downward aim resolving to a nearer target than horizontal aim.
 - Added a desktop flat debug adapter on the `T` key: hold to arm/update Blink
   preview from mouse-look aim, release to commit the latest valid result or
   no-op, using a synthetic left-hand origin and slight upward pitch bias.
@@ -326,6 +328,11 @@ Landed:
 - Routed the provisional XR Blink preview through the existing per-eye and
   multiview world-line renderer, showing the same arc, target feet marker, and
   vertically aligned dot used by desktop debug.
+- Extended XR controller snapshots with aim/grip orientation, so Blink captures
+  the current heading on arm and only applies landing-yaw changes from
+  left-controller roll/twist around the aim axis.
+- Added a heading arrow to the XR Blink feet marker, showing the exact yaw that
+  will be committed.
 - XR Blink commit now moves the shared engine player/body feet pose and syncs
   through the existing XR camera/server commit path. Formal comfort fade and
   movement-mode UI remain future slices.
@@ -337,7 +344,7 @@ Landed:
 
 - [x] Render a world-space target feet marker.
 - [x] Render the dot directly above the resolved feet marker.
-- [ ] Render a facing arrow or short body-forward line.
+- [x] Render a facing arrow or short body-forward line.
 - [x] Render the candidate path/arc/line, with invalid previews visibly
   different from valid previews.
 - [x] Keep the desktop flat debug arc visible from the normal camera by using

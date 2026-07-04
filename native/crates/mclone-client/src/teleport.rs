@@ -26,6 +26,8 @@ const DEFAULT_MAX_DROP: i32 = 3;
 const DEFAULT_MAX_VISITED_NODES: usize = 512;
 const DEFAULT_MARKER_HEIGHT: f64 = 1.45;
 const SUPPORT_PROBE_DEPTH: f64 = 0.08;
+const PROJECTILE_MIN_HAND_HEIGHT: f64 = 0.75;
+const PROJECTILE_MAX_AIM_SLOPE: f64 = 2.0;
 
 pub trait TeleportCollisionWorld {
     fn block_state_at(&self, pos: BlockPos) -> Option<BlockStateId>;
@@ -466,7 +468,8 @@ struct SearchBasis {
     origin: Vec3d,
     forward: Vec3d,
     right: Vec3d,
-    aim_y: f64,
+    aim_slope: f64,
+    intent_distance: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -495,7 +498,7 @@ where
     W: TeleportCollisionWorld + ?Sized,
 {
     let config = sanitize_config(config);
-    let Some(basis) = SearchBasis::new(intent) else {
+    let Some(basis) = SearchBasis::new(intent, config) else {
         return TeleportPreview::invalid(
             TeleportValidityReason::InvalidIntent,
             intent.current_yaw_degrees,
@@ -509,7 +512,7 @@ where
     };
 
     let arc_points = build_intent_arc(basis, config);
-    let target_yaw_degrees = yaw_degrees_from_forward(basis.forward);
+    let target_yaw_degrees = intent.current_yaw_degrees;
     let start_node = BlockPos::containing(intent.start_feet);
     if let Err(reason) = validate_standing_pose(world, intent.start_feet, config) {
         return TeleportPreview::invalid(
@@ -592,7 +595,7 @@ where
 }
 
 impl SearchBasis {
-    fn new(intent: TeleportIntent) -> Option<Self> {
+    fn new(intent: TeleportIntent, config: TeleportConfig) -> Option<Self> {
         if !intent.start_feet.is_finite()
             || !intent.aim_origin.is_finite()
             || !intent.aim_direction.is_finite()
@@ -605,13 +608,22 @@ impl SearchBasis {
         if forward == Vec3d::ZERO {
             return None;
         }
+        let horizontal_len = horizontal.length_sqr().sqrt();
+        if horizontal_len <= TELEPORT_EPSILON {
+            return None;
+        }
+        let aim_slope =
+            (aim.y / horizontal_len).clamp(-PROJECTILE_MAX_AIM_SLOPE, PROJECTILE_MAX_AIM_SLOPE);
+        let intent_distance =
+            projectile_intent_distance(intent.start_feet.y, intent.aim_origin.y, aim_slope, config);
         let right = Vec3d::new(forward.z, 0.0, -forward.x);
         Some(Self {
             start_feet: intent.start_feet,
             origin: intent.aim_origin,
             forward,
             right,
-            aim_y: aim.y.clamp(-0.75, 0.75),
+            aim_slope,
+            intent_distance,
         })
     }
 }
@@ -621,7 +633,7 @@ fn teleport_collision_snapshot_bounds(
     config: TeleportConfig,
 ) -> Option<TeleportCollisionSnapshotBounds> {
     let config = sanitize_config(config);
-    let basis = SearchBasis::new(intent)?;
+    let basis = SearchBasis::new(intent, config)?;
     let start_node = BlockPos::containing(basis.start_feet);
     let xz_margin = config.body_width * 0.5 + 1.0;
     let lateral_extent = config.candidate_radius + xz_margin + 0.75;
@@ -724,22 +736,58 @@ fn build_intent_arc(basis: SearchBasis, config: TeleportConfig) -> Vec<Vec3d> {
     let mut points = Vec::with_capacity(config.arc_samples + 1);
     for index in 0..=config.arc_samples {
         let t = index as f64 / config.arc_samples as f64;
-        points.push(arc_point_at_t(basis, config, t));
+        points.push(arc_point_at_progress(
+            basis,
+            config,
+            basis.intent_distance * t,
+        ));
     }
     points
 }
 
-fn arc_point_at_t(basis: SearchBasis, config: TeleportConfig, t: f64) -> Vec3d {
-    let progress = config.max_distance * t;
-    let arc_lift = config.arc_height * 4.0 * t * (1.0 - t);
+fn arc_point_at_progress(basis: SearchBasis, config: TeleportConfig, progress: f64) -> Vec3d {
+    let gravity = projectile_gravity_per_block(basis, config);
     basis
         .origin
         .add(basis.forward.scale(progress))
         .add(Vec3d::new(
             0.0,
-            basis.aim_y * config.arc_height * t + arc_lift,
+            basis.aim_slope * progress - gravity * progress * progress,
             0.0,
         ))
+}
+
+fn projectile_intent_distance(
+    start_feet_y: f64,
+    aim_origin_y: f64,
+    aim_slope: f64,
+    config: TeleportConfig,
+) -> f64 {
+    let hand_height = projectile_hand_height(start_feet_y, aim_origin_y, config);
+    let gravity = hand_height / (config.max_distance * config.max_distance);
+    if gravity <= TELEPORT_EPSILON {
+        return config.max_distance;
+    }
+    let discriminant = aim_slope * aim_slope + 4.0 * gravity * hand_height;
+    if !discriminant.is_finite() || discriminant < 0.0 {
+        return config.max_distance;
+    }
+    let distance = (aim_slope + discriminant.sqrt()) / (2.0 * gravity);
+    if !distance.is_finite() {
+        return config.max_distance;
+    }
+    distance.clamp(config.min_candidate_progress, config.max_distance)
+}
+
+fn projectile_hand_height(start_feet_y: f64, aim_origin_y: f64, config: TeleportConfig) -> f64 {
+    (aim_origin_y - start_feet_y)
+        .max(config.arc_height)
+        .max(PROJECTILE_MIN_HAND_HEIGHT)
+}
+
+fn projectile_gravity_per_block(basis: SearchBasis, config: TeleportConfig) -> f64 {
+    projectile_hand_height(basis.start_feet.y, basis.origin.y, config)
+        / (config.max_distance * config.max_distance)
 }
 
 fn collect_candidates<W>(world: &W, basis: SearchBasis, config: TeleportConfig) -> Vec<Candidate>
@@ -752,8 +800,8 @@ where
 
     for sample in 1..=config.arc_samples {
         let t = sample as f64 / config.arc_samples as f64;
-        let arc = arc_point_at_t(basis, config, t);
-        let progress = config.max_distance * t;
+        let progress = basis.intent_distance * t;
+        let arc = arc_point_at_progress(basis, config, progress);
         if progress < config.min_candidate_progress {
             continue;
         }
@@ -779,7 +827,7 @@ where
                 }
                 let lateral_distance = lateral_distance_for_feet(basis, feet);
                 let vertical_delta = node.y - start_y;
-                let score = candidate_score(progress, lateral_distance, vertical_delta);
+                let score = candidate_score(basis, progress, lateral_distance, vertical_delta);
                 let candidate = Candidate {
                     node,
                     feet,
@@ -845,7 +893,7 @@ fn node_inside_search_window(basis: SearchBasis, config: TeleportConfig, node: B
     let progress = node_progress(basis, node);
     let lateral = node_lateral_distance(basis, node);
     progress >= -0.5
-        && progress <= config.max_distance + 0.75
+        && progress <= basis.intent_distance + 0.75
         && lateral <= config.candidate_radius + 0.75
         && node.y >= BlockPos::containing(basis.start_feet).y - config.max_drop_blocks
         && node.y <= BlockPos::containing(basis.start_feet).y + config.max_step_up_blocks
@@ -975,13 +1023,19 @@ fn support_probe(body: Aabb, feet_y: f64) -> Aabb {
     )
 }
 
-fn candidate_score(progress: f64, lateral_distance: f64, vertical_delta: i32) -> f64 {
-    progress * 10.0 - lateral_distance * 2.0 - (vertical_delta.abs() as f64 * 0.75)
+fn candidate_score(
+    basis: SearchBasis,
+    progress: f64,
+    lateral_distance: f64,
+    vertical_delta: i32,
+) -> f64 {
+    let intent_error = (progress - basis.intent_distance).abs();
+    -intent_error * 10.0 - lateral_distance * 2.0 - (vertical_delta.abs() as f64 * 0.75)
+        + progress * 0.05
 }
 
 fn marker_dot_for(feet: Vec3d, progress: f64, basis: SearchBasis, config: TeleportConfig) -> Vec3d {
-    let t = (progress / config.max_distance).clamp(0.0, 1.0);
-    let arc_y = arc_point_at_t(basis, config, t).y;
+    let arc_y = arc_point_at_progress(basis, config, progress.clamp(0.0, basis.intent_distance)).y;
     Vec3d::new(feet.x, arc_y.max(feet.y + config.marker_height), feet.z)
 }
 
@@ -1008,10 +1062,6 @@ fn node_center(node: BlockPos) -> Vec3d {
 
 fn dot_xz(left: Vec3d, right: Vec3d) -> f64 {
     left.x * right.x + left.z * right.z
-}
-
-fn yaw_degrees_from_forward(forward: Vec3d) -> f64 {
-    -forward.x.atan2(forward.z).to_degrees()
 }
 
 fn start_failure_reason(reason: StandFailure) -> TeleportValidityReason {
@@ -1214,6 +1264,50 @@ mod tests {
             (feet.z - block_center_z).abs() > 0.1,
             "target feet should keep the continuous preferred placement: {feet:?}"
         );
+    }
+
+    #[test]
+    fn downward_aim_selects_a_nearer_target_than_horizontal_aim() {
+        let world = TestWorld::with_flat_floor(-1..=8, -2..=2);
+        let (horizontal_intent, config) = forward_intent(6.0);
+        let downward_intent = TeleportIntent::new(
+            horizontal_intent.start_feet,
+            horizontal_intent.aim_origin,
+            Vec3d::new(1.0, -0.6, 0.0),
+            horizontal_intent.current_yaw_degrees,
+        );
+
+        let horizontal = resolve_teleport_preview(&world, horizontal_intent, config);
+        let downward = resolve_teleport_preview(&world, downward_intent, config);
+
+        assert_eq!(horizontal.validity, TeleportValidityReason::Valid);
+        assert_eq!(downward.validity, TeleportValidityReason::Valid);
+        let horizontal_feet = horizontal.target_feet.expect("horizontal feet");
+        let downward_feet = downward.target_feet.expect("downward feet");
+        assert!(
+            downward_feet.x < horizontal_feet.x - 1.5,
+            "downward aim should shorten Blink distance: horizontal={horizontal_feet:?} downward={downward_feet:?}"
+        );
+        assert!(
+            downward_feet.x < 3.5,
+            "downward aim should allow near Blink targets: {downward_feet:?}"
+        );
+    }
+
+    #[test]
+    fn resolver_preserves_requested_landing_yaw() {
+        let world = TestWorld::with_flat_floor(-1..=5, -2..=2);
+        let intent = TeleportIntent::new(
+            Vec3d::new(0.5, 1.0, 0.5),
+            Vec3d::new(0.5, 2.2, 0.5),
+            Vec3d::new(1.0, 0.0, 0.0),
+            37.0,
+        );
+
+        let preview = resolve_teleport_preview(&world, intent, config(3.0));
+
+        assert_eq!(preview.validity, TeleportValidityReason::Valid);
+        assert_approx_eq(preview.target_yaw_degrees, 37.0);
     }
 
     #[test]
