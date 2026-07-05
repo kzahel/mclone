@@ -780,16 +780,64 @@ Decided in this revision (2026-07-05):
   [Enforcement](#enforcement).
 - **Priority stance**: convergence and enforcement before new user-facing
   feature work, per the status note.
+- **Facade entry point**: `ClientExperienceController::apply_ui_action`
+  routes one `GameUiAction` into per-family effects. The facade composes the
+  existing `flat_client_catalog` controller, the existing
+  `flat_client_session` helper functions, and the new settings controller
+  without moving adapter execution into shared code.
+
+`GameUiAction` classification, produced by migration slice 1:
+
+| Variant | Classification | Owner / notes |
+|---|---|---|
+| `StartWorld` | projection-specific | UI projection closes the start/title surface; adapters may pair pointer focus. |
+| `OpenWorldList` | core action | Catalog controller. |
+| `OpenWorldCreate` | core action | Catalog controller; adapter supplies the seed fact. |
+| `SelectWorld` | core action | Catalog controller. |
+| `OpenWorld` | core action | Catalog controller; completion can emit a session start. |
+| `CreateCatalogWorld` | core action | Catalog controller. |
+| `ConfirmDeleteWorld` | core action | Catalog controller. |
+| `DeleteWorld` | core action | Catalog controller. |
+| `CancelDeleteWorld` | core action | Catalog controller. |
+| `OpenNewWorld` | core action | Session helper. |
+| `OpenJoinRemote` | core action | Session helper. |
+| `RerollSeed` | core action | Session helper; adapter supplies the seed fact. |
+| `CreateWorld` | core action | Session helper emits a local session start request. |
+| `JoinRemote` | core action | Session helper emits a remote session start request. |
+| `Resume` | projection-specific | UI projection returns to gameplay; adapters may pair pointer focus. |
+| `OpenBlockPalette` | projection-specific | UI projection. |
+| `OpenHelp` | projection-specific | UI projection. |
+| `CloseHelp` | projection-specific | UI projection. |
+| `AssignHotbarBlock` | core action | Facade emits a gameplay command effect for the adapter to execute. |
+| `OpenOptions` | projection-specific | UI projection. |
+| `OpenServerSettings` | projection-specific | UI projection. |
+| `BackToTitle` | core action | Session helper clears inactive session status; UI projection owns screen change. |
+| `BackToPause` | projection-specific | UI projection. |
+| `QuitToTitle` | core action | Session helper emits teardown/quit-to-title host effect. |
+| `ToggleSectionOcclusion` | core action | Settings controller. |
+| `ToggleFullbright` | core action | Settings controller. |
+| `ToggleFarLod` | capability-gated | Settings controller; unsupported profiles project shared unavailable state. |
+| `SetFarLodRange` | capability-gated | Settings controller; unsupported profiles project shared unavailable state. |
+| `TogglePlayerCollisionBox` | core action | Settings controller. |
+| `ToggleFirstPersonPlayer` | core action | Settings controller. |
+| `ToggleCrosshair` | capability-gated | Settings controller; hidden/unsupported profiles project shared unavailable state. |
+| `SetPlayerModel` | core action | Settings controller emits player-appearance sync effect. |
+| `SetMovementMode` | core action | Settings controller. |
+| `SetXrTurnMode` | capability-gated | Settings controller; non-XR profiles project shared unavailable state. |
+| `CycleFramePacing` | capability-gated | Settings controller emits a host-executed frame pacing effect. |
+| `CycleFpsCap` | capability-gated | Settings controller emits a host-executed FPS-cap effect. |
+| `SetRenderDistance` | capability-gated | Settings controller clamps and emits runtime render-distance effect. |
+| `SetFlySpeed` | core action | Settings controller. |
+| `SetMovementSpeed` | core action | Settings controller. |
+| `SetTouchLookSensitivity` | capability-gated | Settings controller; non-touch profiles project shared unavailable state. |
+| `SetTouchControlsMode` | capability-gated | Settings controller; non-touch profiles project shared unavailable state. |
+| `SetServerSimulationCadence` | capability-gated | Settings controller validates cadence and emits local-server cadence effect. |
+| `Quit` | host-effect action | Session helper emits process-quit host effect. |
 
 Still open:
 
-- The `GameUiAction` classification table itself — produced by migration
-  slice 1's audit and recorded here when it lands.
 - Which additional profile facts the emulated-XR test needs beyond ray/pose
   and panel placement (comfort fades? snap-turn increments?).
-- Whether the facade exposes one `apply_event` entry point or per-family
-  entry points (catalog/session/settings) behind a small composing wrapper —
-  decide during slice 1 from real call-site shape.
 
 ## Acceptance Criteria
 

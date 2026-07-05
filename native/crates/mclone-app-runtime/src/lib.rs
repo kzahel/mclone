@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod client_experience;
 pub mod far_lod;
 pub mod flat_client_catalog;
 pub mod flat_client_session;

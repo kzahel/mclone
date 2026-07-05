@@ -75,7 +75,7 @@ rg -n "already exists|was not found|cannot delete" \
 | Slice | Closes | Status |
 |---|---|---|
 | 0: enforcement baseline | gates | landed 2026-07-05 |
-| 1: facade + `GameUiAction` classification | V1 (shared side), V2 (policy) | open |
+| 1: facade + `GameUiAction` classification | V1 (shared side), V2 (policy) | landed 2026-07-05 |
 | 2: desktop and web adopt the facade | V1/V2 on flat lanes | open |
 | 3: TypeScript catalog demotion | V3 | open |
 | 4: XR session-machine merge | V4 | open |
@@ -232,7 +232,59 @@ pnpm native:policy:wasm-check
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Changes:
+
+- Added `mclone_app_runtime::client_experience` with
+  `ClientExperienceController`, `ClientExperienceProfile`, exhaustive
+  `GameUiAction` classification helpers, shared capability projection types,
+  and per-family effect records.
+- Added `ClientExperienceSettingsController` as the shared settings/toggle
+  owner for render toggles, movement/player settings, far-LOD, render
+  distance, XR turn mode, frame pacing/FPS cap, touch settings, and local
+  server cadence. The controller is sans-I/O: it mutates shared state and
+  emits effects such as `SetRenderDistance`, `ClearFarLod`,
+  `SyncPlayerAppearance`, or capability/rejection projections for adapters to
+  execute.
+- The facade composes the existing `FlatClientCatalogController` and
+  `flat_client_session_effects_for_action` helpers unchanged, and adds shared
+  gameplay/projection effects for non-settings actions that the apps still
+  execute in later adoption slices.
+- Recorded the full `GameUiAction` classification table in
+  [`../client-experience-architecture.md`](../client-experience-architecture.md#decisions-and-open-questions).
+- Added focused fake-adapter tests for facade catalog/session routing,
+  projection/gameplay effects, settings round-trips, clamping/effect
+  emission, unsupported capability projection, and invalid server cadence
+  rejection.
+- App crates untouched; `docs/topics/platform-parity.md` unchanged because
+  this slice adds the shared owner only and does not change platform support
+  or adoption rows.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+# PASS
+
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+# PASS, 109 lib tests plus bin/doc harnesses.
+
+pnpm native:policy:wasm-check
+# PASS. Existing warning:
+# mclone-server: dead_code for PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks.
+
+git diff --check
+# PASS
+```
+
+Tripwires after Slice 1:
+
+- Dispatch sites: 5 total, unchanged from Slice 0.
+- Inert arms: 14 total, unchanged from Slice 0:
+  `mclone-android-client`: 4, `mclone-native-client`: 2,
+  `mclone-web-client`: 5, `mclone-xr-scene`: 3.
+- TypeScript policy-string hits: 7 total, unchanged from Slice 0.
 
 ## Slice 2: Desktop And Web Adopt The Facade
 

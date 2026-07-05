@@ -12,6 +12,7 @@ log.workspace = true
 mclone-assets.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true
+mclone-input.workspace = true
 mclone-mesh.workspace = true
 mclone-protocol.workspace = true
 mclone-render.workspace = true
