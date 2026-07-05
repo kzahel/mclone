@@ -18,6 +18,9 @@ pnpm native:web:serve
 # Validate the interactive browser app with Playwright screenshots in /tmp.
 pnpm native:web:app-smoke
 
+# Validate native Rust menu-driven world catalog create/open/delete over IndexedDB.
+pnpm native:web:catalog-smoke
+
 # Build the exact deploy bundle into dist-native-web/ without uploading.
 pnpm native:web:bundle
 

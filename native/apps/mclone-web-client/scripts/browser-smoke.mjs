@@ -41,11 +41,14 @@ const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
 const indexedDbReloadProbe = process.argv.includes("--indexeddb-reload-probe")
   || process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE === "1";
+const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
+  || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const appLoop = movementPerf
   || blockEditProbe
   || indexedDbReloadProbe
+  || catalogUiProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
@@ -62,6 +65,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-block-edit-probe.png"
     : indexedDbReloadProbe
     ? "/tmp/mclone-native-web-indexeddb-reload-probe.png"
+    : catalogUiProbe
+    ? "/tmp/mclone-native-web-catalog-ui-probe.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
@@ -72,6 +77,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
     : indexedDbReloadProbe
     ? "/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png"
+    : catalogUiProbe
+    ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
@@ -87,6 +94,8 @@ const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const indexedDbReloadProbeReportPath = process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE_REPORT
   ?? "/tmp/mclone-native-web-indexeddb-reload-probe.json";
+const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
 const movementPerfChunkBoundaries = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
@@ -232,6 +241,37 @@ async function run() {
         };
         await writeFile(indexedDbReloadProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
         assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (catalogUiProbe) {
+        const catalogUiProbeResult = await runCatalogUiProbe(page, canvas);
+        const result = await compactNativeUiState(page);
+        let pageScreenshotCaptured = false;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+          pageScreenshotCaptured = true;
+        } catch (error) {
+          console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          catalogUiProbeReportPath,
+          appLoop,
+          catalogUiProbe,
+          remoteWebSocket,
+          remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
+          canvasPixels,
+          catalogUiProbeResult,
+          result,
+        };
+        await writeFile(catalogUiProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        assertCatalogUiProbeResult(report, pageErrors, canvasPixels);
         console.log(JSON.stringify(report, null, 2));
         return;
       }
@@ -893,6 +933,499 @@ async function runIndexedDbReloadProbe(page, canvas, baseUrl, worldId) {
   };
 }
 
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @returns {Promise<any>}
+ */
+async function runCatalogUiProbe(page, canvas) {
+  await canvas.evaluate((element) => element.focus());
+  await waitForWebAppReady(page);
+  await installIndexedDbCountHelper(page);
+  await clearBrowserIndexedDbCatalogStores(page);
+  const before = await browserIndexedDbCatalogWorlds(page);
+
+  await openNativeWorldList(page, 0);
+  const openCreateReport = await clickWorldListFooterButton(page, 1);
+  await waitForNativeUiScreen(page, "worldCreate", { openCreateReport });
+  await clickWorldCreateCreate(page);
+  const firstSession = await waitForSessionWorldId(page, { notWorldId: null });
+  const firstWorldId = String(firstSession.sessionWorldId);
+  const firstRecords = await browserIndexedDbWorldRecordCounts(page, firstWorldId);
+  const afterFirstCreate = await waitForBrowserCatalogWorldIds(page, [firstWorldId]);
+
+  await openNativeWorldList(page, 1);
+  await clickWorldListFooterButton(page, 1);
+  await waitForNativeUiScreen(page, "worldCreate");
+  await clickWorldCreateCreate(page);
+  const secondSession = await waitForSessionWorldId(page, { notWorldId: firstWorldId });
+  const secondWorldId = String(secondSession.sessionWorldId);
+  const secondRecords = await seedBrowserIndexedDbWorldRecords(page, secondWorldId);
+  const afterSecondCreate = await waitForBrowserCatalogWorldIds(page, [
+    firstWorldId,
+    secondWorldId,
+  ]);
+
+  await openNativeWorldList(page, 2);
+  await clickWorldListRow(page, 1);
+  await clickWorldListFooterButton(page, 0);
+  const openedFirstSession = await waitForSessionWorldId(page, { worldId: firstWorldId });
+  const afterOpenFirst = await waitForBrowserCatalogWorldIds(page, [
+    firstWorldId,
+    secondWorldId,
+  ]);
+
+  await openNativeWorldList(page, 2);
+  await clickWorldListRow(page, 1);
+  await clickWorldListFooterButton(page, 2);
+  await waitForNativeUiScreen(page, "worldDeleteConfirm");
+  await clickWorldDeleteConfirm(page);
+  await waitForNativeUiScreen(page, "worldList");
+  const afterDelete = await waitForBrowserCatalogWorldIds(page, [firstWorldId], [secondWorldId]);
+  const secondRecordsAfterDelete = await waitForBrowserIndexedDbRecordsAtMost(
+    page,
+    secondWorldId,
+    0,
+  );
+  const finalState = await compactNativeUiState(page);
+
+  return {
+    ok: before.length === 0
+      && firstWorldId.length > 0
+      && secondWorldId.length > 0
+      && firstWorldId !== secondWorldId
+      && secondRecords.total > 0
+      && openedFirstSession.sessionWorldId === firstWorldId
+      && afterDelete.some((/** @type {any} */ world) => world.id === firstWorldId)
+      && afterDelete.every((/** @type {any} */ world) => world.id !== secondWorldId)
+      && secondRecordsAfterDelete.total === 0
+      && finalState.sessionState === "active"
+      && finalState.sessionWorldId === firstWorldId
+      && finalState.nativeUiScreen === "worldList"
+      && Number(finalState.worldCatalogEntryCount) === 1
+      && finalState.worldCatalogLoading === false,
+    before,
+    firstWorldId,
+    secondWorldId,
+    firstSession,
+    secondSession,
+    openedFirstSession,
+    firstRecords,
+    secondRecords,
+    secondRecordsAfterDelete,
+    afterFirstCreate,
+    afterSecondCreate,
+    afterOpenFirst,
+    afterDelete,
+    finalState,
+  };
+}
+
+/**
+ * @param {Page} page
+ * @param {number} expectedEntryCount
+ */
+async function openNativeWorldList(page, expectedEntryCount) {
+  await page.evaluate(() => globalThis.__mcloneWebApp.openNativeTitleUi?.());
+  await waitForNativeUiScreen(page, "title");
+  const geometry = await nativeUiGeometry(page);
+  const point = nativeTitleSingleplayerPoint(geometry);
+  const clickReport = await clickNativeUiPoint(page, point);
+  await waitForNativeUiScreen(page, "worldList", { geometry, point, clickReport });
+  await waitForWorldCatalogEntryCount(page, expectedEntryCount);
+}
+
+/**
+ * @param {Page} page
+ * @param {number} index
+ */
+async function clickWorldListFooterButton(page, index) {
+  return clickNativeUiPoint(page, worldListFooterButtonPoint(await nativeUiGeometry(page), index));
+}
+
+/**
+ * @param {Page} page
+ * @param {number} index
+ */
+async function clickWorldListRow(page, index) {
+  await clickNativeUiPoint(page, worldListRowPoint(await nativeUiGeometry(page), index));
+}
+
+/** @param {Page} page */
+async function clickWorldCreateCreate(page) {
+  await clickNativeUiPoint(page, worldCreateCreatePoint(await nativeUiGeometry(page)));
+}
+
+/** @param {Page} page */
+async function clickWorldDeleteConfirm(page) {
+  await clickNativeUiPoint(page, worldDeleteConfirmPoint(await nativeUiGeometry(page)));
+}
+
+/**
+ * @param {Page} page
+ * @param {{ x: number, y: number }} point
+ */
+async function clickNativeUiPoint(page, point) {
+  return page.evaluate(({ x, y }) => {
+    const app = globalThis.__mcloneWebApp;
+    const canvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById("mclone-canvas"));
+    if (!app || !canvas) {
+      return null;
+    }
+    const pixelWidth = Math.max(1, Number(canvas.width) || 1);
+    const pixelHeight = Math.max(1, Number(canvas.height) || 1);
+    let scale = 1;
+    while (
+      scale < 4
+      && Math.floor(pixelWidth / (scale + 1)) >= 320
+      && Math.floor(pixelHeight / (scale + 1)) >= 240
+    ) {
+      scale += 1;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const clientX = rect.left + (x * scale * rect.width) / pixelWidth;
+    const clientY = rect.top + (y * scale * rect.height) / pixelHeight;
+    app.handleNativeUiPointerMove?.(clientX, clientY, "mouse");
+    app.handleNativeUiPointerDown?.(clientX, clientY, "mouse");
+    return app.handleNativeUiPointerUp?.(clientX, clientY, "mouse") ?? null;
+  }, point);
+}
+
+/** @param {Page} page */
+async function nativeUiGeometry(page) {
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    const canvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById("mclone-canvas"));
+    const pixelWidth = Number(state.width) || canvas?.width || 1280;
+    const pixelHeight = Number(state.height) || canvas?.height || 720;
+    let scale = 1;
+    while (
+      scale < 4
+      && Math.floor(pixelWidth / (scale + 1)) >= 320
+      && Math.floor(pixelHeight / (scale + 1)) >= 240
+    ) {
+      scale += 1;
+    }
+    return {
+      width: Math.ceil(pixelWidth / scale),
+      height: Math.ceil(pixelHeight / scale),
+      scale,
+      pixelWidth,
+      pixelHeight,
+    };
+  });
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function nativeTitleSingleplayerPoint(geometry) {
+  return {
+    x: geometry.width * 0.5,
+    y: geometry.height * 0.5 - 24.0,
+  };
+}
+
+/**
+ * @param {{ width: number, height: number }} geometry
+ * @param {number} index
+ */
+function worldListFooterButtonPoint(geometry, index) {
+  const panel = centeredPanel(geometry, 420.0, 286.0);
+  const buttonWidth = 84.0;
+  const gap = 8.0;
+  const total = buttonWidth * 4.0 + gap * 3.0;
+  const x = panel.x + panel.width * 0.5 - total * 0.5 + index * (buttonWidth + gap);
+  return {
+    x: x + buttonWidth * 0.5,
+    y: panel.y + panel.height - 18.0,
+  };
+}
+
+/**
+ * @param {{ width: number, height: number }} geometry
+ * @param {number} index
+ */
+function worldListRowPoint(geometry, index) {
+  const panel = centeredPanel(geometry, 420.0, 286.0);
+  return {
+    x: panel.x + panel.width * 0.5,
+    y: panel.y + 54.0 + index * 23.0,
+  };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function worldCreateCreatePoint(geometry) {
+  const panel = centeredPanel(geometry, 320.0, 178.0);
+  return {
+    x: panel.x + panel.width * 0.5,
+    y: panel.y + 125.0,
+  };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function worldDeleteConfirmPoint(geometry) {
+  const panel = centeredPanel(geometry, 340.0, 158.0);
+  return {
+    x: panel.x + panel.width * 0.5,
+    y: panel.y + 99.0,
+  };
+}
+
+/**
+ * @param {{ width: number, height: number }} geometry
+ * @param {number} width
+ * @param {number} height
+ */
+function centeredPanel(geometry, width, height) {
+  return {
+    x: Math.max(geometry.width - width, 0.0) * 0.5,
+    y: Math.max(geometry.height - height, 0.0) * 0.5,
+    width: Math.min(width, geometry.width),
+    height: Math.min(height, geometry.height),
+  };
+}
+
+/**
+ * @param {Page} page
+ * @param {string} screen
+ * @param {any} [context]
+ */
+async function waitForNativeUiScreen(page, screen, context = null) {
+  try {
+    await page.waitForFunction(
+      (screen) => globalThis.__mcloneWebApp?.state?.nativeUiScreen === screen,
+      screen,
+      { timeout: 30_000 },
+    );
+  } catch (error) {
+    const state = await compactNativeUiState(page);
+    throw new Error(`timed out waiting for native UI screen ${screen}: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify({ context, state }, null, 2)}`);
+  }
+}
+
+/** @param {Page} page */
+async function compactNativeUiState(page) {
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    return {
+      ok: state.ok,
+      ready: state.ready,
+      status: state.status,
+      uiActive: state.uiActive,
+      uiCoversWorld: state.uiCoversWorld,
+      nativeUiScreen: state.nativeUiScreen,
+      lastUiAction: state.lastUiAction,
+      sessionState: state.sessionState,
+      sessionKind: state.sessionKind,
+      sessionWorldId: state.sessionWorldId,
+      clientHost: state.clientHost,
+      sessionBusy: state.sessionBusy,
+      worldCatalogPersistent: state.worldCatalogPersistent,
+      worldCatalogLoading: state.worldCatalogLoading,
+      worldCatalogEntryCount: state.worldCatalogEntryCount,
+      worldCatalogStatusVisible: state.worldCatalogStatusVisible,
+      worldCatalogStatusOk: state.worldCatalogStatusOk,
+      worldCatalogStatusMessage: state.worldCatalogStatusMessage,
+      lastReport: {
+        ok: state.lastReport?.ok,
+        uiActive: state.lastReport?.uiActive,
+        uiCoversWorld: state.lastReport?.uiCoversWorld,
+        uiScreen: state.lastReport?.uiScreen,
+        guiCommandCount: state.lastReport?.guiCommandCount,
+      },
+    };
+  });
+}
+
+/**
+ * @param {Page} page
+ * @param {number} expectedEntryCount
+ */
+async function waitForWorldCatalogEntryCount(page, expectedEntryCount) {
+  await page.waitForFunction(
+    (expectedEntryCount) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.worldCatalogPersistent === true
+        && state.worldCatalogLoading === false
+        && Number(state.worldCatalogEntryCount) === expectedEntryCount;
+    },
+    expectedEntryCount,
+    { timeout: 30_000 },
+  );
+}
+
+/**
+ * @param {Page} page
+ * @param {{ worldId?: string, notWorldId?: string | null }} options
+ */
+async function waitForSessionWorldId(page, options) {
+  await page.waitForFunction(
+    ({ worldId, notWorldId }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const sessionWorldId = String(state?.sessionWorldId ?? "");
+      return state?.ok === true
+        && state.ready === true
+        && state.sessionState === "active"
+        && state.sessionKind === "localWorld"
+        && state.clientHost === "worker-integrated"
+        && state.sessionBusy !== true
+        && state.status === "ready"
+        && sessionWorldId.length > 0
+        && (worldId === undefined || sessionWorldId === worldId)
+        && (notWorldId === undefined || sessionWorldId !== String(notWorldId ?? ""));
+    },
+    options,
+    { timeout: 90_000 },
+  );
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      sessionState: state.sessionState,
+      sessionKind: state.sessionKind,
+      sessionWorldId: state.sessionWorldId,
+      sessionSeedText: state.sessionSeedText,
+      status: state.status,
+      clientHost: state.clientHost,
+      nativeUiScreen: state.nativeUiScreen,
+    };
+  });
+}
+
+/**
+ * @param {Page} page
+ * @param {string[]} requiredIds
+ * @param {string[]} [absentIds]
+ */
+async function waitForBrowserCatalogWorldIds(page, requiredIds, absentIds = []) {
+  await page.waitForFunction(
+    async ({ requiredIds, absentIds }) => {
+      const global = /** @type {any} */ (globalThis);
+      const worlds = await global.__mcloneBrowserSmokeCatalogWorlds();
+      const ids = new Set(worlds.map((/** @type {any} */ world) => world.id));
+      return requiredIds.every((id) => ids.has(id))
+        && absentIds.every((id) => !ids.has(id));
+    },
+    { requiredIds, absentIds },
+    { timeout: 30_000 },
+  );
+  return browserIndexedDbCatalogWorlds(page);
+}
+
+/** @param {Page} page */
+function browserIndexedDbCatalogWorlds(page) {
+  return page.evaluate(() => {
+    const global = /** @type {any} */ (globalThis);
+    return global.__mcloneBrowserSmokeCatalogWorlds();
+  });
+}
+
+/** @param {Page} page */
+async function clearBrowserIndexedDbCatalogStores(page) {
+  await installIndexedDbCatalogHelper(page);
+  await page.evaluate(() => {
+    const global = /** @type {any} */ (globalThis);
+    return global.__mcloneBrowserSmokeClearCatalogStores();
+  });
+}
+
+/** @param {Page} page */
+async function installIndexedDbCatalogHelper(page) {
+  await page.evaluate(() => {
+    const global = /** @type {any} */ (globalThis);
+    if (typeof global.__mcloneBrowserSmokeCatalogWorlds === "function") {
+      return;
+    }
+    /** @returns {Promise<any>} */
+    const catalogModule = () => (
+      // @ts-ignore browser-page-relative import resolved by the served app root.
+      import("./mclone-web-world-catalog.js")
+    );
+    global.__mcloneBrowserSmokeCatalogWorlds = async () => {
+      const catalog = await catalogModule();
+      const db = await catalog.openWorldDb();
+      try {
+        return await catalog.listIndexedDbCatalogWorlds(db);
+      } finally {
+        db.close();
+      }
+    };
+    global.__mcloneBrowserSmokeClearCatalogStores = async () => {
+      const catalog = await catalogModule();
+      const db = await catalog.openWorldDb();
+      try {
+        const stores = [
+          catalog.WORLD_CATALOG_STORE,
+          catalog.WORLD_CHUNK_STORE,
+          catalog.WORLD_ENTITY_CHUNK_STORE,
+        ].filter((storeName) => db.objectStoreNames.contains(storeName));
+        if (stores.length === 0) {
+          return;
+        }
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction(stores, "readwrite");
+          transaction.oncomplete = () => resolve(undefined);
+          transaction.onerror = () => reject(transaction.error ?? new Error("failed to clear IndexedDB catalog stores"));
+          transaction.onabort = () => reject(transaction.error ?? new Error("aborted while clearing IndexedDB catalog stores"));
+          for (const storeName of stores) {
+            transaction.objectStore(storeName).clear();
+          }
+        });
+      } finally {
+        db.close();
+      }
+    };
+    /** @param {string} worldId */
+    global.__mcloneBrowserSmokeSeedWorldRecords = async (worldId) => {
+      const catalog = await catalogModule();
+      const db = await catalog.openWorldDb();
+      try {
+        await new Promise((resolve, reject) => {
+          const stores = [
+            catalog.WORLD_CHUNK_STORE,
+            catalog.WORLD_ENTITY_CHUNK_STORE,
+          ];
+          const transaction = db.transaction(stores, "readwrite");
+          transaction.oncomplete = () => resolve(undefined);
+          transaction.onerror = () => reject(transaction.error ?? new Error("failed to seed IndexedDB world records"));
+          transaction.onabort = () => reject(transaction.error ?? new Error("aborted while seeding IndexedDB world records"));
+          transaction.objectStore(catalog.WORLD_CHUNK_STORE).put({
+            worldId,
+            x: 991,
+            z: 991,
+            record: { smoke: "catalog-delete-chunk" },
+          });
+          transaction.objectStore(catalog.WORLD_ENTITY_CHUNK_STORE).put({
+            worldId,
+            x: 991,
+            z: 991,
+            record: { smoke: "catalog-delete-entity-chunk" },
+          });
+        });
+      } finally {
+        db.close();
+      }
+    };
+  });
+}
+
+/**
+ * @param {Page} page
+ * @param {string} worldId
+ * @param {number} maxRecords
+ */
+async function waitForBrowserIndexedDbRecordsAtMost(page, worldId, maxRecords) {
+  const deadline = Date.now() + 30_000;
+  let counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  while (Date.now() < deadline) {
+    if (counts.total <= maxRecords) {
+      return counts;
+    }
+    await page.waitForTimeout(100);
+    counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  }
+  throw new Error(`timed out waiting for IndexedDB world ${worldId} records to fall to ${maxRecords}:\n${JSON.stringify(counts, null, 2)}`);
+}
+
 /** @param {Page} page */
 async function waitForWebAppReady(page) {
   await page.waitForFunction(
@@ -1010,16 +1543,16 @@ async function waitForBlockStateAt(page, pos, expectedBlockStateId) {
  * @param {number} minChunks
  */
 async function waitForBrowserIndexedDbChunkRecords(page, worldId, minChunks) {
-  await page.waitForFunction(
-    async (payload) => {
-      const typed = /** @type {{ worldId: string, minChunks: number }} */ (payload);
-      const counts = await /** @type {any} */ (globalThis).__mcloneBrowserSmokeIndexedDbCounts(typed.worldId);
-      return counts.chunks >= typed.minChunks;
-    },
-    { worldId, minChunks },
-    { timeout: 30_000 },
-  );
-  return browserIndexedDbWorldRecordCounts(page, worldId);
+  const deadline = Date.now() + 30_000;
+  let counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  while (Date.now() < deadline) {
+    if (counts.chunks >= minChunks) {
+      return counts;
+    }
+    await page.waitForTimeout(100);
+    counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  }
+  throw new Error(`timed out waiting for IndexedDB world ${worldId} to store ${minChunks} chunk records:\n${JSON.stringify(counts, null, 2)}`);
 }
 
 /**
@@ -1031,6 +1564,37 @@ function browserIndexedDbWorldRecordCounts(page, worldId) {
     (worldId) => /** @type {any} */ (globalThis).__mcloneBrowserSmokeIndexedDbCounts(worldId),
     worldId,
   );
+}
+
+/**
+ * @param {Page} page
+ * @param {string} worldId
+ */
+async function seedBrowserIndexedDbWorldRecords(page, worldId) {
+  await installIndexedDbCatalogHelper(page);
+  await page.evaluate((worldId) => {
+    const global = /** @type {any} */ (globalThis);
+    return global.__mcloneBrowserSmokeSeedWorldRecords(worldId);
+  }, worldId);
+  return waitForBrowserIndexedDbRecordsAtLeast(page, worldId, 2);
+}
+
+/**
+ * @param {Page} page
+ * @param {string} worldId
+ * @param {number} minRecords
+ */
+async function waitForBrowserIndexedDbRecordsAtLeast(page, worldId, minRecords) {
+  const deadline = Date.now() + 30_000;
+  let counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  while (Date.now() < deadline) {
+    if (counts.total >= minRecords) {
+      return counts;
+    }
+    await page.waitForTimeout(100);
+    counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  }
+  throw new Error(`timed out waiting for IndexedDB world ${worldId} records to reach ${minRecords}:\n${JSON.stringify(counts, null, 2)}`);
 }
 
 /** @param {Page} page */
@@ -2598,6 +3162,57 @@ function assertBlockEditProbeResult(report, pageErrors, canvasPixels) {
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`block edit probe canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+/**
+ * @param {any} report
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ */
+function assertCatalogUiProbeResult(report, pageErrors, canvasPixels) {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser catalog UI probe page errors:\n${pageErrors.join("\n")}`);
+  }
+  const probe = report?.catalogUiProbeResult;
+  if (!probe?.ok) {
+    throw new Error(`native web catalog UI probe failed:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    typeof probe.firstWorldId !== "string"
+    || probe.firstWorldId.length === 0
+    || typeof probe.secondWorldId !== "string"
+    || probe.secondWorldId.length === 0
+    || probe.firstWorldId === probe.secondWorldId
+  ) {
+    throw new Error(`native web catalog UI probe did not create two distinct catalog worlds:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (
+    probe.secondRecords?.total <= 0
+    || probe.secondRecordsAfterDelete?.total !== 0
+  ) {
+    throw new Error(`native web catalog UI probe did not use and clean IndexedDB world records:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (
+    probe.openedFirstSession?.sessionWorldId !== probe.firstWorldId
+    || probe.finalState?.sessionWorldId !== probe.firstWorldId
+    || probe.finalState?.nativeUiScreen !== "worldList"
+    || Number(probe.finalState?.worldCatalogEntryCount) !== 1
+  ) {
+    throw new Error(`native web catalog UI probe did not reopen the first world and end on the one-row world list:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (
+    !Array.isArray(probe.afterDelete)
+    || !probe.afterDelete.some((/** @type {any} */ world) => world.id === probe.firstWorldId)
+    || probe.afterDelete.some((/** @type {any} */ world) => world.id === probe.secondWorldId)
+  ) {
+    throw new Error(`native web catalog UI probe did not delete the inactive world from the catalog:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (!report.result?.ok || !report.result?.ready) {
+    throw new Error(`native web catalog UI probe ended with an unhealthy app state:\n${JSON.stringify(report.result, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`catalog UI probe canvas screenshot did not contain rendered app pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 

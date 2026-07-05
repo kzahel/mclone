@@ -2719,6 +2719,7 @@ impl WebChunkRenderSession {
         let effects = self
             .world_catalog
             .apply_catalog_response(request_id, response);
+        self.commit_current_ui_world_catalog_state();
         self.catalog_effects_to_js_value(effects)
             .map_err(JsValue::from)
     }
@@ -2734,6 +2735,7 @@ impl WebChunkRenderSession {
             request_id,
             WorldCatalogError::new(WorldCatalogErrorKind::StorageFailure, message),
         );
+        self.commit_current_ui_world_catalog_state();
         self.catalog_effects_to_js_value(effects)
             .map_err(JsValue::from)
     }
@@ -3081,6 +3083,29 @@ impl WebChunkRenderSession {
             set_string(object, "statusOverlayMessage", &status_overlay.message)?;
         }
         write_web_session_status_to_js_object(object, &self.session)?;
+        let world_catalog = self
+            .world_catalog
+            .ui_state_with_active_world(self.active_local_world_id());
+        set_bool(object, "worldCatalogPersistent", world_catalog.persistent)?;
+        set_bool(object, "worldCatalogLoading", world_catalog.loading)?;
+        set_number(
+            object,
+            "worldCatalogEntryCount",
+            world_catalog.entry_count() as f64,
+        )?;
+        set_bool(
+            object,
+            "worldCatalogStatusVisible",
+            world_catalog.status.visible,
+        )?;
+        set_bool(object, "worldCatalogStatusOk", world_catalog.status.ok)?;
+        if world_catalog.status.visible {
+            set_string(
+                object,
+                "worldCatalogStatusMessage",
+                world_catalog.status.message.as_str(),
+            )?;
+        }
         set_bool(
             object,
             "touchLookSensitivityAvailable",
@@ -3129,6 +3154,7 @@ impl WebChunkRenderSession {
     fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
         let mut effects = FlatClientCatalogEffects::default();
         let mut apply_ui_action = true;
+        let mut refresh_world_catalog_render_state = false;
         match action {
             GameUiAction::ToggleSectionOcclusion => {
                 self.section_occlusion_culling = !self.section_occlusion_culling;
@@ -3202,6 +3228,7 @@ impl WebChunkRenderSession {
             | GameUiAction::ConfirmDeleteWorld(_)
             | GameUiAction::DeleteWorld(_)
             | GameUiAction::CancelDeleteWorld => {
+                refresh_world_catalog_render_state = true;
                 let active_world = self.active_local_world_id().cloned();
                 self.world_catalog.set_active_world(active_world);
                 effects = self.world_catalog.apply_ui_action(
@@ -3212,6 +3239,7 @@ impl WebChunkRenderSession {
                 );
             }
             GameUiAction::OpenWorld(_) | GameUiAction::CreateCatalogWorld => {
+                refresh_world_catalog_render_state = true;
                 let active_world = self.active_local_world_id().cloned();
                 self.world_catalog.set_active_world(active_world);
                 effects = self.world_catalog.apply_ui_action(
@@ -3242,6 +3270,9 @@ impl WebChunkRenderSession {
         }
         if apply_ui_action {
             self.ui.apply_action(action);
+        }
+        if refresh_world_catalog_render_state {
+            self.commit_current_ui_world_catalog_state();
         }
         effects
     }
@@ -3487,6 +3518,14 @@ impl WebChunkRenderSession {
                 self.interaction.selected_hotbar_slot(),
             ),
         }
+    }
+
+    fn commit_current_ui_world_catalog_state(&mut self) {
+        let mut state = self.ui.committed_render_state();
+        state.world_catalog = self
+            .world_catalog
+            .ui_state_with_active_world(self.active_local_world_id());
+        self.ui.commit_render_state(state);
     }
 
     async fn new(canvas: HtmlCanvasElement, asset_pack_bytes: Vec<u8>) -> Result<Self, String> {

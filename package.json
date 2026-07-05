@@ -62,6 +62,7 @@
     "native:web:canvas-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas",
     "native:web:chunk-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas --require-chunk",
     "native:web:app-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop",
+    "native:web:catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --catalog-ui-probe",
     "native:web:mobile-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --mobile-app-loop",
     "native:web:movement-perf": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --movement-perf",
     "native:web:block-edit-probe": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --block-edit-probe",

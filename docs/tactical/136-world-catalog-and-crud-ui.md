@@ -7,7 +7,10 @@ persistence/delete smoke coverage landed. Slice 6 browser IndexedDB catalog
 store/smoke first pass landed; tactical
 [`141-flat-client-platform-policy-convergence.md`](141-flat-client-platform-policy-convergence.md)
 Slice 3 wired the native web menu path through the shared catalog controller
-and IndexedDB adapter. Owns follow-up persistence lifecycle work from closed
+and IndexedDB adapter; the 2026-07-05 follow-up added
+`pnpm native:web:catalog-smoke` coverage for menu-driven web
+Create/Open/Delete and IndexedDB delete cleanup. Owns follow-up persistence
+lifecycle work from closed
 [`134-shared-persistence-architecture.md`](134-shared-persistence-architecture.md).
 
 ## Purpose
@@ -563,9 +566,14 @@ Follow-up after tactical 141 Slice 3:
 - `WebChunkRenderSession` now renders controller-owned catalog state and starts
   catalog-created/opened local worlds with `worldStorage=indexeddb` plus the
   selected/generated `worldId`.
+- `pnpm native:web:catalog-smoke` now drives the native web Rust menu through
+  create/open/delete, verifies active local `sessionWorldId` transitions, and
+  confirms delete clears seeded chunk/entity IndexedDB records for the deleted
+  world.
 - Remaining browser persistence work is lifecycle depth, not menu policy:
   player/world metadata records, save/flush shutdown discipline, richer
-  summaries, and app-smoke coverage for the visible catalog UI flow.
+  summaries, and folding catalog coverage into broader app-smoke once the
+  unrelated block-interaction probe is stable.
 
 Validation after Slice 6 first pass on 2026-07-04:
 
@@ -574,6 +582,14 @@ pnpm exec tsc --noEmit -p native/apps/mclone-web-client/tsconfig.json
 pnpm native:web:typecheck
 pnpm native:web:build
 pnpm native:web:smoke
+```
+
+Additional validation after tactical 141 Slice 3 follow-up on 2026-07-05:
+
+```bash
+pnpm native:web:typecheck
+pnpm native:web:catalog-smoke
+cargo fmt --manifest-path native/Cargo.toml --all --check
 ```
 
 ### Slice 7: Android And XR Adoption

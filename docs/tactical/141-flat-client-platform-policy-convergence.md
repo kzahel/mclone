@@ -16,7 +16,10 @@ native catalog backend, world-root selection, `SceneOptions`, and startup
 payloads as desktop adapter responsibilities. Slice 3 landed on 2026-07-05:
 native web now renders controller-owned catalog state and routes menu
 Create/Open/Delete through controller request/completion effects while keeping
-IndexedDB promises and worker startup in the browser adapter.
+IndexedDB promises and worker startup in the browser adapter. Slice 3 follow-up
+landed on 2026-07-05: the web adapter now refreshes committed catalog render
+state after catalog actions/responses, and `pnpm native:web:catalog-smoke`
+covers menu-driven create/open/delete plus IndexedDB delete cleanup.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -447,6 +450,15 @@ Recorded Slice 3 result:
 - Updated the platform parity tracker to mark web world-select/persistence as
   partial and to add the shared flat catalog controller as an explicit contract
   adoption row.
+- Added a focused browser catalog UI smoke, `pnpm native:web:catalog-smoke`,
+  that drives the shared Rust menu through Create/Open/Delete, verifies active
+  `sessionWorldId` transitions, seeds deterministic IndexedDB chunk/entity
+  records for the deleted world, and asserts delete removes both stores.
+- Fixed the web adapter's committed UI render-state refresh after catalog
+  actions/responses so pointer hit-testing sees the latest controller-owned
+  catalog state without waiting for another render frame.
+- Aligned the smoke's menu hit points with the Rust `GuiScale` and clamped
+  `centered_panel` layout rules.
 
 Validation after Slice 3:
 
@@ -454,6 +466,7 @@ Validation after Slice 3:
 pnpm native:web:typecheck
 pnpm native:web:build
 pnpm native:web:smoke
+pnpm native:web:catalog-smoke
 pnpm native:web:app-smoke
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog
 git diff --check
@@ -464,6 +477,7 @@ Results on 2026-07-05:
 - Passed: `pnpm native:web:typecheck`
 - Passed: `pnpm native:web:build`
 - Passed: `pnpm native:web:smoke`
+- Passed: `pnpm native:web:catalog-smoke`
 - Passed: `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog`
 - Passed: `git diff --check`
 - Repeated validation issue: `pnpm native:web:app-smoke` failed twice in the

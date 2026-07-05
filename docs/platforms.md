@@ -234,6 +234,7 @@ pnpm native:android-xr:validate -- --debug --skip-build --start-server --server-
 # Web/WASM
 pnpm native:web:smoke
 pnpm native:web:app-smoke
+pnpm native:web:catalog-smoke
 pnpm native:web:mobile-smoke
 ```
 

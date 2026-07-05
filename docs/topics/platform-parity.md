@@ -31,7 +31,8 @@ and the rule that keeps new features from re-forking.
 > shared desktop/offscreen `--startup-wait` readiness policy. Refreshed on
 > 2026-07-05 after tactical 141 Slice 3 wired native web world catalog
 > Create/Open/Delete through the shared flat catalog controller and IndexedDB
-> adapter.
+> adapter, then added `native:web:catalog-smoke` coverage for the menu flow and
+> delete cleanup.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -167,7 +168,7 @@ use (and should) · — n/a.
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
-| `app-runtime::flat_client_catalog` (world catalog UI/action policy) | ✅ (desktop adapter executes native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; app-smoke interaction probe currently failing outside catalog path) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_catalog`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; tactical 141 Slice 3 |
+| `app-runtime::flat_client_catalog` (world catalog UI/action policy) | ✅ (desktop adapter executes native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; focused catalog smoke covers create/open/delete) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_catalog`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; tactical 141 Slice 3 |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
@@ -361,8 +362,9 @@ these first:
    and user headset validation says the shared XR menu/pointer works mostly
    fine. Remaining work is an automated XR controller-click replacement/menu
    smoke, a dedicated web Join Remote connect-screen smoke, and the `mclone-ui`
-   text-input/connect-world UI needed to choose endpoints and worlds in app
-   instead of via CLI/properties/query params. (tactical 095)
+   text-input/connect-world UI needed to choose endpoints in app instead of via
+   CLI/properties/query params. World catalog selection now has focused web
+   menu smoke coverage through tactical 141. (tactical 095)
 3. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
    and XR app shells use blocking TCP/session adapters, while browser
    worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.

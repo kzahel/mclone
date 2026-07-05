@@ -1743,6 +1743,7 @@ function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
     if (kind !== "localWorld") {
       state.sessionSeed = null;
       state.sessionSeedText = null;
+      state.sessionWorldId = null;
     }
     if (kind !== "remote") {
       state.sessionRemoteEndpoint = null;
@@ -1753,6 +1754,9 @@ function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
   }
   if (typeof report.sessionSeedText !== "undefined") {
     state.sessionSeedText = String(report.sessionSeedText);
+  }
+  if (typeof report.sessionWorldId !== "undefined") {
+    state.sessionWorldId = String(report.sessionWorldId);
   }
   if (typeof report.sessionRemoteEndpoint !== "undefined") {
     state.sessionRemoteEndpoint = String(report.sessionRemoteEndpoint);
@@ -1783,6 +1787,26 @@ function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
     state.statusOverlayMessage = String(report.statusOverlayMessage);
   } else if (report.statusOverlayVisible === false) {
     state.statusOverlayMessage = "";
+  }
+  if (typeof report.worldCatalogPersistent !== "undefined") {
+    state.worldCatalogPersistent = Boolean(report.worldCatalogPersistent);
+  }
+  if (typeof report.worldCatalogLoading !== "undefined") {
+    state.worldCatalogLoading = Boolean(report.worldCatalogLoading);
+  }
+  if (typeof report.worldCatalogEntryCount !== "undefined") {
+    state.worldCatalogEntryCount = Number(report.worldCatalogEntryCount) || 0;
+  }
+  if (typeof report.worldCatalogStatusVisible !== "undefined") {
+    state.worldCatalogStatusVisible = Boolean(report.worldCatalogStatusVisible);
+  }
+  if (typeof report.worldCatalogStatusOk !== "undefined") {
+    state.worldCatalogStatusOk = Boolean(report.worldCatalogStatusOk);
+  }
+  if (typeof report.worldCatalogStatusMessage !== "undefined") {
+    state.worldCatalogStatusMessage = String(report.worldCatalogStatusMessage);
+  } else if (report.worldCatalogStatusVisible === false) {
+    state.worldCatalogStatusMessage = "";
   }
 }
 
