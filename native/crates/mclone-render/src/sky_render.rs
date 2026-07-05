@@ -16,12 +16,14 @@ use std::ops::Range;
 
 use anyhow::{Result, bail};
 use glam::{Mat4, Quat, Vec3};
+use mclone_diagnostics::GpuPassId;
 use wgpu::util::DeviceExt;
 
 use crate::color_profile::{
     RenderColorProfile, RenderConfig, RenderTargetColorTransform, color_transform_rgb,
     color_transform_wgpu,
 };
+use crate::gpu_timestamps::GpuTimestampFrameEncoder;
 use crate::sky::sunrise_color;
 use crate::uniform::{
     PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
@@ -249,6 +251,31 @@ impl SkyRenderer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub fn render_with_gpu_timestamps(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
+        sky_view_projection: Mat4,
+        time_of_day: f32,
+        sun_angle: f32,
+        gpu_timestamps: &GpuTimestampFrameEncoder,
+    ) {
+        self.render_in_slot_inner(
+            queue,
+            encoder,
+            color_view,
+            clear_color,
+            sky_view_projection,
+            time_of_day,
+            sun_angle,
+            SINGLE_VIEW_SLOT,
+            Some(gpu_timestamps),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn render_in_slot(
         &self,
         queue: &wgpu::Queue,
@@ -259,6 +286,58 @@ impl SkyRenderer {
         time_of_day: f32,
         sun_angle: f32,
         view_slot: PerViewSlot,
+    ) {
+        self.render_in_slot_inner(
+            queue,
+            encoder,
+            color_view,
+            clear_color,
+            sky_view_projection,
+            time_of_day,
+            sun_angle,
+            view_slot,
+            None,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_in_slot_with_gpu_timestamps(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
+        sky_view_projection: Mat4,
+        time_of_day: f32,
+        sun_angle: f32,
+        view_slot: PerViewSlot,
+        gpu_timestamps: &GpuTimestampFrameEncoder,
+    ) {
+        self.render_in_slot_inner(
+            queue,
+            encoder,
+            color_view,
+            clear_color,
+            sky_view_projection,
+            time_of_day,
+            sun_angle,
+            view_slot,
+            Some(gpu_timestamps),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_in_slot_inner(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
+        sky_view_projection: Mat4,
+        time_of_day: f32,
+        sun_angle: f32,
+        view_slot: PerViewSlot,
+        gpu_timestamps: Option<&GpuTimestampFrameEncoder>,
     ) {
         let clear_color = color_transform_wgpu(clear_color, self.color_transform);
         let sky_color = [
@@ -304,6 +383,8 @@ impl SkyRenderer {
                 },
             })],
             depth_stencil_attachment: None,
+            timestamp_writes: gpu_timestamps
+                .and_then(|timestamps| timestamps.render_pass_timestamp_writes(GpuPassId::Sky)),
             ..Default::default()
         });
         pass.set_bind_group(0, &self.bind_group, &[uniform_offset]);
@@ -331,6 +412,58 @@ impl SkyRenderer {
         time_of_day: f32,
         sun_angle: f32,
     ) -> Result<()> {
+        self.render_multiview_inner(
+            device,
+            queue,
+            encoder,
+            color_view,
+            clear_color,
+            sky_view_projections,
+            time_of_day,
+            sun_angle,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_multiview_with_gpu_timestamps(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
+        sky_view_projections: [Mat4; 2],
+        time_of_day: f32,
+        sun_angle: f32,
+        gpu_timestamps: &GpuTimestampFrameEncoder,
+    ) -> Result<()> {
+        self.render_multiview_inner(
+            device,
+            queue,
+            encoder,
+            color_view,
+            clear_color,
+            sky_view_projections,
+            time_of_day,
+            sun_angle,
+            Some(gpu_timestamps),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_multiview_inner(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
+        sky_view_projections: [Mat4; 2],
+        time_of_day: f32,
+        sun_angle: f32,
+        gpu_timestamps: Option<&GpuTimestampFrameEncoder>,
+    ) -> Result<()> {
         let (clear_color, disc_range, glow_range) =
             self.prepare_vertices(queue, clear_color, time_of_day, sun_angle);
         let renderer = self.multiview_renderer(device)?;
@@ -347,6 +480,8 @@ impl SkyRenderer {
                 },
             })],
             depth_stencil_attachment: None,
+            timestamp_writes: gpu_timestamps
+                .and_then(|timestamps| timestamps.render_pass_timestamp_writes(GpuPassId::Sky)),
             ..Default::default()
         });
         pass.set_bind_group(0, &renderer.bind_group, &[]);

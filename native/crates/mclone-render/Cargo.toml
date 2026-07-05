@@ -11,6 +11,7 @@ glam.workspace = true
 image.workspace = true
 mclone-assets.workspace = true
 mclone-core.workspace = true
+mclone-diagnostics.workspace = true
 mclone-mesh.workspace = true
 mclone-ui.workspace = true
 rustc-hash = "1"

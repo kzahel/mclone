@@ -4,8 +4,10 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use mclone_diagnostics::{
     CriticalPathLabel, FrameAccountingConfig, FrameAccumulator, FrameObservation,
-    FramePipelineReport, QueuePanelReport, StageId, StageSpan, clock,
+    FramePipelineReport, GpuTimestampPanelReport, QueuePanelReport, StageId, StageSpan, clock,
 };
+use mclone_render::gpu_timestamps::run_gpu_timestamp_calibration;
+use mclone_render::headless::create_headless_device;
 use serde_json::json;
 
 const DEFAULT_SPIN_MS: f64 = 6.0;
@@ -82,7 +84,9 @@ fn main() -> Result<()> {
         );
     }
 
-    let pipeline = FramePipelineReport::new(summary, QueuePanelReport::new(Vec::new()));
+    let (gpu_calibration, gpu_timestamp_panel) = run_gpu_calibration_smoke()?;
+    let pipeline = FramePipelineReport::new(summary, QueuePanelReport::new(Vec::new()))
+        .with_gpu_timestamp_panel(gpu_timestamp_panel);
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
@@ -95,11 +99,33 @@ fn main() -> Result<()> {
             "attributed_ms": attributed_ms,
             "attribution_error_ms": attribution_error_ms,
             "break_attribution": options.break_attribution,
+            "gpu_timestamp_calibration": gpu_calibration,
             "frame_pipeline_accounting": pipeline,
         }))
         .context("serialize accounting smoke report")?
     );
     Ok(())
+}
+
+fn run_gpu_calibration_smoke() -> Result<(serde_json::Value, GpuTimestampPanelReport)> {
+    let (device, queue) = create_headless_device().context("create headless GPU device")?;
+    let report = run_gpu_timestamp_calibration(&device, &queue, 2048)
+        .context("run GPU timestamp calibration")?;
+    let panel = report.panel.clone();
+    Ok((
+        json!({
+            "supported": report.supported,
+            "timestamp_period_ns": report.timestamp_period_ns,
+            "light_pass_ms": report.light_pass_ms,
+            "light_pass_valid": report.light_pass_valid,
+            "heavy_pass_ms": report.heavy_pass_ms,
+            "heavy_pass_valid": report.heavy_pass_valid,
+            "heavy_quad_count": report.heavy_quad_count,
+            "scale_ratio": report.scale_ratio,
+            "panel": report.panel,
+        }),
+        panel,
+    ))
 }
 
 fn parse_options(args: impl IntoIterator<Item = String>) -> Result<Options> {

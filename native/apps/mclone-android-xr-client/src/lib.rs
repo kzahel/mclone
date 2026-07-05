@@ -274,6 +274,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        perf_metrics_periodic: bool,
         frame_accounting_enabled: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
@@ -307,6 +308,7 @@ mod android {
                 perf_settled_stationary: false,
                 perf_frozen_render: false,
                 perf_metrics: false,
+                perf_metrics_periodic: false,
                 frame_accounting_enabled: true,
                 multiview_proof: false,
                 terrain_multiview_proof: false,
@@ -567,6 +569,10 @@ mod android {
                 }
                 "--perf-metrics" => {
                     options.perf_metrics = true;
+                }
+                "--perf-metrics-periodic" => {
+                    options.perf_metrics = true;
+                    options.perf_metrics_periodic = true;
                 }
                 "--frame-accounting" => {
                     options.frame_accounting_enabled = parse_bool_arg(
@@ -1119,6 +1125,10 @@ mod android {
             startup_options.perf_metrics
         );
         log::info!(
+            "Android XR performance metrics periodic: {}",
+            startup_options.perf_metrics_periodic
+        );
+        log::info!(
             "Android XR frame accounting: {}",
             startup_options.frame_accounting_enabled
         );
@@ -1222,6 +1232,7 @@ mod android {
             startup_options.perf_settled_stationary,
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
+            startup_options.perf_metrics_periodic,
             startup_options.frame_accounting_enabled,
             startup_options.multiview_proof,
             startup_options.terrain_multiview_proof,
@@ -1259,6 +1270,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        perf_metrics_periodic: bool,
         frame_accounting_enabled: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
@@ -1696,6 +1708,7 @@ mod android {
                 perf_settled_stationary,
                 perf_frozen_render,
                 perf_metrics,
+                perf_metrics_periodic,
                 frame_accounting_enabled,
                 [scene_options.chunk_x, scene_options.chunk_z],
                 startup_view_pose,
@@ -1812,6 +1825,7 @@ mod android {
             perf_settled_stationary,
             perf_frozen_render,
             perf_metrics,
+            perf_metrics_periodic,
             frame_accounting_enabled,
             [scene_options.chunk_x, scene_options.chunk_z],
             startup_view_pose,
@@ -3013,6 +3027,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        perf_metrics_periodic: bool,
         frame_accounting_enabled: bool,
         startup_center: [i32; 2],
         fixed_render_view_pose: Option<XrStartupViewPose>,
@@ -3053,9 +3068,15 @@ mod android {
             xr_eye_size,
         );
         let mut performance_metrics_probe = if perf_metrics {
+            let mode = if perf_metrics_periodic {
+                perf_metrics::XrPerformanceMetricsMode::Periodic
+            } else {
+                perf_metrics::XrPerformanceMetricsMode::OneShot
+            };
             let probe = perf_metrics::XrPerformanceMetricsProbe::new(
                 graphics.session.instance(),
                 &graphics.session,
+                mode,
             );
             if probe.is_none() {
                 log::warn!(

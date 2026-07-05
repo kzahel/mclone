@@ -4,6 +4,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 use anyhow::{Context, Result, bail};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use mclone_assets::{ActorFigureId, default_player_figure_id};
+use mclone_diagnostics::GpuPassId;
 
 use crate::asset_lab_figure::{CompiledFigureClip, CompiledFigureTransform};
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
@@ -416,6 +417,7 @@ impl ActorDrawResources {
                 }),
                 stencil_ops: None,
             }),
+            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
             ..Default::default()
         });
         pass.set_pipeline(&self.renderer.pipeline);
@@ -489,6 +491,7 @@ impl ActorDrawResources {
                 }),
                 stencil_ops: None,
             }),
+            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
             ..Default::default()
         });
         pass.set_pipeline(&renderer.pipeline);

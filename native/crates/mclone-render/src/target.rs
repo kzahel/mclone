@@ -1,8 +1,13 @@
+use mclone_diagnostics::GpuPassId;
+
+use crate::gpu_timestamps::GpuTimestampFrameEncoder;
+
 #[derive(Clone, Copy)]
 pub struct RenderFrameTarget<'a> {
     pub color_view: &'a wgpu::TextureView,
     pub depth_view: Option<&'a wgpu::TextureView>,
     pub size: [u32; 2],
+    pub gpu_timestamps: Option<&'a GpuTimestampFrameEncoder>,
 }
 
 impl<'a> RenderFrameTarget<'a> {
@@ -11,6 +16,7 @@ impl<'a> RenderFrameTarget<'a> {
             color_view,
             depth_view: None,
             size,
+            gpu_timestamps: None,
         }
     }
 
@@ -19,6 +25,21 @@ impl<'a> RenderFrameTarget<'a> {
             depth_view: Some(depth_view),
             ..self
         }
+    }
+
+    pub fn with_gpu_timestamps(self, gpu_timestamps: &'a GpuTimestampFrameEncoder) -> Self {
+        Self {
+            gpu_timestamps: Some(gpu_timestamps),
+            ..self
+        }
+    }
+
+    pub fn gpu_timestamp_writes(
+        self,
+        pass: GpuPassId,
+    ) -> Option<wgpu::RenderPassTimestampWrites<'a>> {
+        self.gpu_timestamps
+            .and_then(|timestamps| timestamps.render_pass_timestamp_writes(pass))
     }
 }
 

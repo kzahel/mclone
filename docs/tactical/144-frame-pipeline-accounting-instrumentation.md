@@ -170,7 +170,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 | 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | landed 2026-07-05 |
 | 4: calibration, invariants, meter overhead | 7 | Mac with Quest | landed 2026-07-05 |
 | 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | landed 2026-07-05 |
-| 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | open |
+| 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | Mac implementation landed 2026-07-05; checkpoint B pending |
 | 7: debug overlay through the shared facade | 8 | Mac | open |
 
 Gap numbers refer to the law doc's
@@ -1280,7 +1280,79 @@ git diff --check
 Plus one Quest metrics lane recorded in this section if Quest-side wgpu
 timestamps are enabled.
 
-Recorded result: (pending)
+Recorded result: Mac implementation landed 2026-07-05; Windows checkpoint B
+and Quest agreement rows remain pending before the slice fully closes.
+
+Changes:
+
+- Added schema v4 GPU timestamp reports in `mclone-diagnostics`, including
+  capability state, tick period, submitted/resolved/pending counters, raw
+  begin/end ticks, elapsed milliseconds, and per-pass validity.
+- Added the `mclone-render` timestamp profiler with a frames-in-flight query
+  pool, async map/readback, `Queue::get_timestamp_period()` conversion, and
+  unsupported projection when `TIMESTAMP_QUERY` is absent.
+- Routed timestamp writes through shared render targets for sky/background,
+  terrain (`all`, opaque, translucent), actor, and UI passes. Query-set
+  creation stays in `mclone-render`; the native surface only starts frames,
+  resolves before submit, and marks readbacks pending after submit.
+- Added a GPU calibration block to `native:accounting:smoke`. On the Mac
+  Metal lane, the calibration used a trailing sentinel pass because Metal
+  left the final timestamped pass end query unwritten without a following
+  pass. Final reported calibration: light `0.071333 ms`, heavy
+  `1.371458 ms`, ratio `19.23`, `timestampPeriodNs=1.0`, both reported
+  passes valid.
+- Promoted `XR_META_performance_metrics` to an explicit periodic mode via
+  `--perf-metrics-periodic` / `MCLONE_ANDROID_XR_PERF_METRICS_PERIODIC=1`.
+  Existing `--perf-metrics` lanes remain one-shot. Added
+  `native:android-xr:perf:stationary:rd10:metrics-periodic` for Quest-side
+  sampling.
+
+Tripwire results:
+
+- Non-vendored timestamp sites are in shared render crates only:
+  `mclone-render` owns `create_query_set` and render pass timestamp writes;
+  `mclone-app-runtime` only propagates the shared target timestamp hook for
+  the sky/background fallback. No platform app owns query creation.
+- `native/crates/mclone-xr-host/src/lib.rs` still has a pre-existing
+  `timestamp_writes: None` descriptor; vendored `wgpu-hal` hits were
+  excluded from the slice count.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+# PASS.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
+# PASS. 14 tests passed.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-render
+# PASS. 126 passed, 2 ignored.
+
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+# PASS. Existing non-Android dead-code warnings for legacy remote-addr helpers.
+
+pnpm native:accounting:smoke
+# PASS. Schema version 4; GPU timestamp panel supported on Mac Metal.
+
+pnpm native:desktop-offscreen:smoke
+# PASS. Saved /tmp/mclone-desktop-offscreen.png and inspected it.
+
+pnpm native:xr:check
+# PASS on the Mac WiVRn check-only lane.
+
+node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"
+# PASS.
+
+git diff --check
+# PASS.
+```
+
+Next step: run Windows checkpoint B after switching hosts: preparation pass,
+Vulkan/DX12 timestamp calibration, and PIX or RenderDoc spot-check. If a
+Quest is available in that session, run the periodic metrics lane and record
+`XR_META` agreement; otherwise run it from the Mac with the Quest attached
+before closing Slice 6.
 
 ## Slice 7: Debug Overlay Through The Shared Facade
 

@@ -452,9 +452,10 @@ changes. Tactical
 is the executable checklist for gaps 1-8, including sequencing relative to
 tactical 143; gaps 9-10 are follow-on work.
 
-As of 2026-07-05, gaps 1-5 and the CPU/conservation/meter parts of gap 7 are
-landed in tactical 144. Gap 6 (GPU timestamps and periodic Quest perf-metrics)
-and gap 8 (debug overlay) remain in this tactical.
+As of 2026-07-05, gaps 1-5, the CPU/conservation/meter parts of gap 7, and
+the Mac implementation of gap 6 are landed in tactical 144. Gap 6 still needs
+Windows checkpoint B plus Quest agreement rows before tactical closure. Gap 8
+(debug overlay) remains in this tactical.
 
 1. Extract the shared accounting owner (`mclone-diagnostics`): one
    budget/percentile/over-period/headroom implementation and one versioned

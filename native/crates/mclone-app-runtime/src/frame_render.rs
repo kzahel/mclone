@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use mclone_assets::AssetSource;
+use mclone_render::GpuPassId;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
     DEPTH_FORMAT, PerspectiveRenderPose, PreparedTexturedSectionRecords,
@@ -17,7 +18,7 @@ use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRe
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
-use mclone_render::target::RenderFrameContext;
+use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::{PerViewSlot, SINGLE_VIEW_SLOT};
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_ui::{GuiDrawList, UiDrawCacheStats};
@@ -419,10 +420,12 @@ impl FlatRenderResources {
             encoder,
             target,
         } = frame;
-        let render_target = self
-            .scaled_color
-            .as_ref()
-            .map_or(target, |scaled| scaled.render_target());
+        let render_target = self.scaled_color.as_ref().map_or(target, |scaled| {
+            let scaled_target = scaled.render_target();
+            target.gpu_timestamps.map_or(scaled_target, |timestamps| {
+                scaled_target.with_gpu_timestamps(timestamps)
+            })
+        });
         let render_view = build_render_view(render_target.size)?;
         let selection_render_view =
             render_view_with_underwater_effect(render_view, underwater_overlay);
@@ -1411,19 +1414,33 @@ where
     if !gui.covers_world {
         let sky_start = timing.is_some().then(std::time::Instant::now);
         let background_clear_color = if fog.enabled {
-            clear_frame_color(frame.encoder, frame.target.color_view, fog.clear_color());
+            clear_frame_color(frame.encoder, frame.target, fog.clear_color());
             fog.clear_color()
         } else {
-            sky.render_in_slot(
-                frame.queue,
-                frame.encoder,
-                frame.target.color_view,
-                sky_clear_color,
-                render_view.sky_view_projection(),
-                time_of_day,
-                sun_angle,
-                view_slot,
-            );
+            if let Some(gpu_timestamps) = frame.target.gpu_timestamps {
+                sky.render_in_slot_with_gpu_timestamps(
+                    frame.queue,
+                    frame.encoder,
+                    frame.target.color_view,
+                    sky_clear_color,
+                    render_view.sky_view_projection(),
+                    time_of_day,
+                    sun_angle,
+                    view_slot,
+                    gpu_timestamps,
+                );
+            } else {
+                sky.render_in_slot(
+                    frame.queue,
+                    frame.encoder,
+                    frame.target.color_view,
+                    sky_clear_color,
+                    render_view.sky_view_projection(),
+                    time_of_day,
+                    sun_angle,
+                    view_slot,
+                );
+            }
             sky_clear_color
         };
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), sky_start) {
@@ -1647,13 +1664,13 @@ pub fn record_render_section_update_stats(
 
 fn clear_frame_color(
     encoder: &mut wgpu::CommandEncoder,
-    color_view: &wgpu::TextureView,
+    target: RenderFrameTarget<'_>,
     color: wgpu::Color,
 ) {
     let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("mclone_world_background_clear_pass"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: color_view,
+            view: target.color_view,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(color),
@@ -1661,6 +1678,7 @@ fn clear_frame_color(
             },
         })],
         depth_stencil_attachment: None,
+        timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Sky),
         ..Default::default()
     });
 }

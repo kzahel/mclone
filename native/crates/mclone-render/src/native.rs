@@ -2,10 +2,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
+use mclone_diagnostics::GpuTimestampPanelReport;
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 use crate::color_profile::{RenderColorProfile, RenderConfig};
+use crate::gpu_timestamps::GpuTimestampProfiler;
 use crate::gpu_util::{native_backends, optional_gpu_features};
 use crate::target::{RenderFrameContext, RenderFrameTarget};
 
@@ -18,6 +20,7 @@ pub struct NativeSurfaceContext {
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
     pub render_config: RenderConfig,
+    gpu_timestamp_profiler: Option<GpuTimestampProfiler>,
     supported_present_modes: Vec<wgpu::PresentMode>,
 }
 
@@ -98,6 +101,7 @@ impl NativeSurfaceContext {
             );
         }
         log::info!("wgpu render config: {}", render_config.diagnostic_label());
+        let gpu_timestamp_profiler = GpuTimestampProfiler::new(&device, &queue);
 
         Ok(Self {
             surface,
@@ -105,6 +109,7 @@ impl NativeSurfaceContext {
             queue,
             config,
             render_config,
+            gpu_timestamp_profiler,
             supported_present_modes: caps.present_modes,
         })
     }
@@ -124,6 +129,13 @@ impl NativeSurfaceContext {
 
     pub fn present_mode(&self) -> wgpu::PresentMode {
         self.config.present_mode
+    }
+
+    pub fn gpu_timestamp_panel_report(&self) -> GpuTimestampPanelReport {
+        self.gpu_timestamp_profiler
+            .as_ref()
+            .map(GpuTimestampProfiler::panel_report)
+            .unwrap_or_else(GpuTimestampPanelReport::unsupported)
     }
 
     fn set_present_mode(&mut self, requested: wgpu::PresentMode) -> wgpu::PresentMode {
@@ -201,18 +213,49 @@ impl NativeSurfaceContext {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_native_frame_encoder"),
             });
+        if let Some(profiler) = self.gpu_timestamp_profiler.as_mut() {
+            profiler.poll_completed(&self.device);
+        }
+        let mut gpu_timestamp_frame = self
+            .gpu_timestamp_profiler
+            .as_mut()
+            .and_then(GpuTimestampProfiler::begin_frame);
         let target =
             RenderFrameTarget::color(&view, [self.config.width.max(1), self.config.height.max(1)]);
+        let target = gpu_timestamp_frame
+            .as_ref()
+            .map_or(target, |timestamps| target.with_gpu_timestamps(timestamps));
         let encode_start = Instant::now();
-        encode(RenderFrameContext::new(
+        let encode_result = encode(RenderFrameContext::new(
             &self.device,
             &self.queue,
             &mut encoder,
             target,
-        ))?;
+        ));
+        if let Err(error) = encode_result {
+            if let (Some(profiler), Some(frame)) = (
+                self.gpu_timestamp_profiler.as_mut(),
+                gpu_timestamp_frame.take(),
+            ) {
+                profiler.discard_frame(frame);
+            }
+            return Err(error);
+        }
+        let encoded_gpu_timestamps = match (
+            self.gpu_timestamp_profiler.as_mut(),
+            gpu_timestamp_frame.take(),
+        ) {
+            (Some(profiler), Some(frame)) => profiler.resolve_frame(&mut encoder, frame),
+            _ => None,
+        };
         let encode_ms = elapsed_ms(encode_start);
         let submit_start = Instant::now();
         self.queue.submit(std::iter::once(encoder.finish()));
+        if let (Some(profiler), Some(frame)) =
+            (self.gpu_timestamp_profiler.as_mut(), encoded_gpu_timestamps)
+        {
+            profiler.mark_submitted(frame);
+        }
         let submit_ms = elapsed_ms(submit_start);
         let present_start = Instant::now();
         frame.present();

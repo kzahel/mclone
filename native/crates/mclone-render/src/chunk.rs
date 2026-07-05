@@ -12,6 +12,7 @@ use glam::{Mat4, Quat, Vec3, Vec4};
 use mclone_core::{
     block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord, chunk_min_block_coord,
 };
+use mclone_diagnostics::GpuPassId;
 use mclone_mesh::{
     CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey, SectionFace,
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilitySet, VisibleChunkMesh,
@@ -22,6 +23,7 @@ use wgpu::util::DeviceExt;
 
 use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
+use crate::gpu_timestamps::GpuTimestampFrameEncoder;
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
 use crate::uniform::{
@@ -347,6 +349,7 @@ pub struct ChunkRenderTarget<'a> {
     pub size: [u32; 2],
     pub clear_color: wgpu::Color,
     pub clear_depth: f32,
+    pub gpu_timestamps: Option<&'a GpuTimestampFrameEncoder>,
     /// When `true`, the color attachment is loaded instead of cleared — used when
     /// an earlier pass (the sky dome) has already drawn the background.
     pub load_color: bool,
@@ -368,6 +371,7 @@ impl<'a> ChunkRenderTarget<'a> {
             size,
             clear_color,
             clear_depth: 1.0,
+            gpu_timestamps: None,
             load_color: false,
             load_depth: false,
         }
@@ -380,12 +384,10 @@ impl<'a> ChunkRenderTarget<'a> {
         let depth_view = target
             .depth_view
             .context("chunk render target requires a depth attachment")?;
-        Ok(Self::new(
-            target.color_view,
-            depth_view,
-            target.size,
-            clear_color,
-        ))
+        Ok(
+            Self::new(target.color_view, depth_view, target.size, clear_color)
+                .with_gpu_timestamps_option(target.gpu_timestamps),
+        )
     }
 
     /// Preserve the color attachment's existing contents instead of clearing,
@@ -398,6 +400,24 @@ impl<'a> ChunkRenderTarget<'a> {
     pub fn with_loaded_depth(mut self) -> Self {
         self.load_depth = true;
         self
+    }
+
+    pub fn with_gpu_timestamps(mut self, gpu_timestamps: &'a GpuTimestampFrameEncoder) -> Self {
+        self.gpu_timestamps = Some(gpu_timestamps);
+        self
+    }
+
+    pub fn with_gpu_timestamps_option(
+        mut self,
+        gpu_timestamps: Option<&'a GpuTimestampFrameEncoder>,
+    ) -> Self {
+        self.gpu_timestamps = gpu_timestamps;
+        self
+    }
+
+    fn gpu_timestamp_writes(self, pass: GpuPassId) -> Option<wgpu::RenderPassTimestampWrites<'a>> {
+        self.gpu_timestamps
+            .and_then(|timestamps| timestamps.render_pass_timestamp_writes(pass))
     }
 
     fn color_load_op(self) -> wgpu::LoadOp<wgpu::Color> {
@@ -449,6 +469,14 @@ impl TexturedSectionRenderPhase {
 
     const fn draws_translucent(self) -> bool {
         matches!(self, Self::All | Self::Translucent)
+    }
+
+    fn gpu_pass_id(self) -> GpuPassId {
+        match self {
+            Self::All => GpuPassId::Terrain,
+            Self::Opaque => GpuPassId::TerrainOpaque,
+            Self::Translucent => GpuPassId::TerrainTranslucent,
+        }
     }
 }
 
@@ -2451,6 +2479,7 @@ pub struct ChunkMultiviewRenderTarget<'a> {
     pub size: [u32; 2],
     pub clear_color: wgpu::Color,
     pub clear_depth: f32,
+    pub gpu_timestamps: Option<&'a GpuTimestampFrameEncoder>,
     pub load_color: bool,
     pub load_depth: bool,
 }
@@ -2468,6 +2497,7 @@ impl<'a> ChunkMultiviewRenderTarget<'a> {
             size,
             clear_color,
             clear_depth: 1.0,
+            gpu_timestamps: None,
             load_color: false,
             load_depth: false,
         }
@@ -2481,6 +2511,16 @@ impl<'a> ChunkMultiviewRenderTarget<'a> {
     pub fn with_loaded_depth(mut self) -> Self {
         self.load_depth = true;
         self
+    }
+
+    pub fn with_gpu_timestamps(mut self, gpu_timestamps: &'a GpuTimestampFrameEncoder) -> Self {
+        self.gpu_timestamps = Some(gpu_timestamps);
+        self
+    }
+
+    fn gpu_timestamp_writes(self, pass: GpuPassId) -> Option<wgpu::RenderPassTimestampWrites<'a>> {
+        self.gpu_timestamps
+            .and_then(|timestamps| timestamps.render_pass_timestamp_writes(pass))
     }
 
     fn color_load_op(self) -> wgpu::LoadOp<wgpu::Color> {
@@ -3273,6 +3313,7 @@ impl TexturedSectionDrawResources {
                     }),
                     stencil_ops: None,
                 }),
+                timestamp_writes: target.gpu_timestamp_writes(phase.gpu_pass_id()),
                 ..Default::default()
             });
             pass.set_bind_group(0, &renderer.bind_group, &[]);
@@ -3398,6 +3439,7 @@ impl TexturedSectionDrawResources {
                     }),
                     stencil_ops: None,
                 }),
+                timestamp_writes: target.gpu_timestamp_writes(phase.gpu_pass_id()),
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
@@ -3528,6 +3570,7 @@ impl TexturedSectionDrawResources {
                     }),
                     stencil_ops: None,
                 }),
+                timestamp_writes: target.gpu_timestamp_writes(phase.gpu_pass_id()),
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);

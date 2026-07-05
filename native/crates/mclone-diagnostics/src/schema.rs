@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    FrameSummaryReport, PeerThreadPanelReport, QueuePanelReport, StageSpan, WorstFrameDetail,
+    FrameSummaryReport, GpuTimestampPanelReport, PeerThreadPanelReport, QueuePanelReport,
+    StageSpan, WorstFrameDetail,
 };
 
-pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 3;
+pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +15,7 @@ pub struct FramePipelineReport {
     pub stage_spans: Vec<StageSpan>,
     pub queue_panel: QueuePanelReport,
     pub peer_thread_panel: PeerThreadPanelReport,
+    pub gpu_timestamp_panel: GpuTimestampPanelReport,
     pub worst_frames: Vec<WorstFrameDetail>,
 }
 
@@ -26,11 +28,20 @@ impl FramePipelineReport {
             frame_summary,
             queue_panel,
             peer_thread_panel: PeerThreadPanelReport::empty(),
+            gpu_timestamp_panel: GpuTimestampPanelReport::unsupported(),
         }
     }
 
     pub fn with_peer_thread_panel(mut self, peer_thread_panel: PeerThreadPanelReport) -> Self {
         self.peer_thread_panel = peer_thread_panel;
+        self
+    }
+
+    pub fn with_gpu_timestamp_panel(
+        mut self,
+        gpu_timestamp_panel: GpuTimestampPanelReport,
+    ) -> Self {
+        self.gpu_timestamp_panel = gpu_timestamp_panel;
         self
     }
 }
@@ -60,6 +71,10 @@ mod tests {
         );
         assert_eq!(
             json["peerThreadPanel"]["schemaVersion"],
+            FRAME_PIPELINE_SCHEMA_VERSION
+        );
+        assert_eq!(
+            json["gpuTimestampPanel"]["schemaVersion"],
             FRAME_PIPELINE_SCHEMA_VERSION
         );
     }

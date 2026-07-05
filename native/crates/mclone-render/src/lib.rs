@@ -11,6 +11,7 @@ pub mod color_profile;
 pub mod entity;
 pub mod far_lod;
 pub mod fog;
+pub mod gpu_timestamps;
 pub mod gui;
 pub mod light_texture;
 pub mod screen_effect;
@@ -20,6 +21,8 @@ pub mod sky_render;
 pub mod target;
 mod texture_mips;
 pub mod uniform;
+
+pub use mclone_diagnostics::GpuPassId;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;

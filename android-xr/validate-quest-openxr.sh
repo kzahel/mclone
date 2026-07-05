@@ -50,6 +50,7 @@ PERF_CHURN_OFFSET_CHUNKS="${MCLONE_ANDROID_XR_PERF_CHURN_OFFSET_CHUNKS:-}"
 PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
 PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
 PERF_METRICS="${MCLONE_ANDROID_XR_PERF_METRICS:-0}"
+PERF_METRICS_PERIODIC="${MCLONE_ANDROID_XR_PERF_METRICS_PERIODIC:-0}"
 FRAME_ACCOUNTING="${MCLONE_ANDROID_XR_FRAME_ACCOUNTING:-}"
 MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_MULTIVIEW_PROOF:-0}"
 TERRAIN_MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF:-0}"
@@ -69,6 +70,9 @@ XR_RENDER_SCALE="${MCLONE_ANDROID_XR_RENDER_SCALE:-}"
 XR_DISPLAY_REFRESH_RATE="${MCLONE_ANDROID_XR_DISPLAY_REFRESH_RATE:-}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
+fi
+if [[ "$PERF_METRICS_PERIODIC" == "1" ]]; then
+    PERF_METRICS=1
 fi
 if [[ -n "$PERF_CHURN_INTERVAL_SECONDS" || -n "$PERF_CHURN_OFFSET_CHUNKS" ]]; then
     PERF_CHUNK_VIEW_CHURN=1
@@ -179,6 +183,10 @@ Options:
                      app/compositor GPU+CPU frametime and utilization so render
                      cost can be split into CPU, GPU, and compositor buckets.
                      Combine with a perf lane (e.g. --perf-frozen-render).
+  --perf-metrics-periodic
+                     Keep the XR_META_performance_metrics probe enabled after
+                     the first valid sample and emit repeated markers during
+                     longer perf lanes. Implies --perf-metrics.
   --frame-accounting true|false
                      Enable or disable per-frame shared accounting work during
                      perf samples. The default is true; false is for overhead
@@ -592,6 +600,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --perf-metrics)
             PERF_METRICS=1
+            shift
+            ;;
+        --perf-metrics-periodic)
+            PERF_METRICS=1
+            PERF_METRICS_PERIODIC=1
             shift
             ;;
         --frame-accounting)
@@ -1010,7 +1023,9 @@ fi
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     STARTUP_ARGV+=(--perf-frozen-render)
 fi
-if [[ "$PERF_METRICS" == "1" ]]; then
+if [[ "$PERF_METRICS_PERIODIC" == "1" ]]; then
+    STARTUP_ARGV+=(--perf-metrics-periodic)
+elif [[ "$PERF_METRICS" == "1" ]]; then
     STARTUP_ARGV+=(--perf-metrics)
 fi
 if [[ -n "$FRAME_ACCOUNTING" ]]; then

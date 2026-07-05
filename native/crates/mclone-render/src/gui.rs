@@ -4,6 +4,7 @@ use std::ops::Range;
 
 use anyhow::{Result, bail};
 use glam::{Mat4, Vec3};
+use mclone_diagnostics::GpuPassId;
 use mclone_ui::{
     ClipRect, Color, Font, GuiDrawCommand, GuiDrawList, GuiTextureUv, Rect, UiPanelRevision,
 };
@@ -464,6 +465,7 @@ impl GuiRenderer {
                         },
                     })],
                     depth_stencil_attachment: None,
+                    timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Ui),
                     ..Default::default()
                 });
             }
@@ -489,6 +491,7 @@ impl GuiRenderer {
                 },
             })],
             depth_stencil_attachment: None,
+            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Ui),
             ..Default::default()
         });
         let vertex_buffer = self

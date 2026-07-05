@@ -1,9 +1,11 @@
 //! `XR_META_performance_metrics` probe for standalone Quest / Android XR.
 //!
-//! Opt-in, one-shot on-device diagnostic. When the Oculus runtime exposes the
-//! extension this enumerates the available performance-metric counter paths,
-//! enables collection, then after a steady-state warmup queries every counter,
-//! logs the values/units, and disables collection again.
+//! Opt-in on-device diagnostic. When the Oculus runtime exposes the extension
+//! this enumerates the available performance-metric counter paths, enables
+//! collection, then after a steady-state warmup queries every counter and logs
+//! the values/units. The default `--perf-metrics` probe is one-shot and
+//! disables collection after the first valid sample; `--perf-metrics-periodic`
+//! keeps sampling for longer perf lanes.
 //!
 //! The point is to split a heavy frame (e.g. the RD10 frozen-render lane) into
 //! the buckets the app's own `Instant`-based timers cannot see:
@@ -16,8 +18,9 @@
 //! wall-clock timers (which `device.poll(Wait)` already conflates with GPU
 //! execution) they attribute cost to the GPU and compositor directly.
 //!
-//! Gated behind `--perf-metrics`; ordinary launches never enable collection or
-//! emit any of these markers. Modelled on the Playbox reference probe.
+//! Gated behind `--perf-metrics` / `--perf-metrics-periodic`; ordinary launches
+//! never enable collection or emit any of these markers. Modelled on the Playbox
+//! reference probe.
 #![allow(unsafe_code)]
 
 use std::ptr;
@@ -30,6 +33,8 @@ use openxr as xr;
 const WARMUP_FRAMES: u32 = 720;
 /// Frames to wait between sampling attempts when no counter has a value yet.
 const RETRY_FRAMES: u32 = 120;
+/// Frames to wait between successful periodic samples.
+const PERIODIC_SAMPLE_INTERVAL_FRAMES: u32 = 180;
 /// Give up after this many attempts so a runtime that never populates the
 /// counters does not keep the collection state enabled forever.
 const MAX_ATTEMPTS: u32 = 8;
@@ -37,6 +42,25 @@ const MAX_ATTEMPTS: u32 = 8;
 const WARMUP_SWEEPS: u32 = 1;
 /// Timed sweeps; the last sweep's values are the ones reported.
 const TIMED_SWEEPS: u32 = 8;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum XrPerformanceMetricsMode {
+    OneShot,
+    Periodic,
+}
+
+impl XrPerformanceMetricsMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::OneShot => "one-shot",
+            Self::Periodic => "periodic",
+        }
+    }
+
+    fn is_periodic(self) -> bool {
+        matches!(self, Self::Periodic)
+    }
+}
 
 /// Opt-in probe holding the loaded extension function pointers and the
 /// enumerated counter paths. Self-contained after construction (it copies the
@@ -49,6 +73,8 @@ pub(super) struct XrPerformanceMetricsProbe {
     frames: u32,
     next_attempt_frame: u32,
     attempts: u32,
+    samples_logged: u32,
+    mode: XrPerformanceMetricsMode,
     done: bool,
 }
 
@@ -59,6 +85,7 @@ impl XrPerformanceMetricsProbe {
     pub(super) fn new<G: xr::Graphics>(
         instance: &xr::Instance,
         session: &xr::Session<G>,
+        mode: XrPerformanceMetricsMode,
     ) -> Option<Self> {
         let fp = *instance.exts().meta_performance_metrics.as_ref()?;
         let counters = match enumerate_counters(instance, &fp) {
@@ -88,7 +115,10 @@ impl XrPerformanceMetricsProbe {
             log::warn!("XR_META_performance_metrics: enabling collection failed: {err:?}");
             return None;
         }
-        log::info!("XR_META_performance_metrics: collection enabled, warming up");
+        log::info!(
+            "XR_META_performance_metrics: collection enabled, mode={}, warming up",
+            mode.label()
+        );
         Some(Self {
             fp,
             session: session_handle,
@@ -96,13 +126,14 @@ impl XrPerformanceMetricsProbe {
             frames: 0,
             next_attempt_frame: WARMUP_FRAMES,
             attempts: 0,
+            samples_logged: 0,
+            mode,
             done: false,
         })
     }
 
-    /// Advance one rendered frame. Once warmed up, samples every counter, emits
-    /// the marker block, and disables collection. Cheap and a no-op after the
-    /// one-shot sample completes.
+    /// Advance one rendered frame. Once warmed up, samples every counter and
+    /// emits the marker block. Cheap and a no-op after one-shot completion.
     pub(super) fn tick(&mut self) {
         if self.done {
             return;
@@ -113,16 +144,28 @@ impl XrPerformanceMetricsProbe {
         }
         self.attempts += 1;
         let any_valid = self.sample_and_log();
-        if any_valid || self.attempts >= MAX_ATTEMPTS {
-            if let Err(err) = set_metrics_enabled(&self.fp, self.session, false) {
-                log::warn!("XR_META_performance_metrics: disabling collection failed: {err:?}");
+        if any_valid {
+            self.samples_logged += 1;
+            if self.mode.is_periodic() {
+                self.attempts = 0;
+                self.next_attempt_frame = self.frames + PERIODIC_SAMPLE_INTERVAL_FRAMES;
             } else {
-                log::info!("XR_META_performance_metrics: probe complete, collection disabled");
+                self.disable_and_finish("probe complete");
             }
-            self.done = true;
+        } else if self.attempts >= MAX_ATTEMPTS {
+            self.disable_and_finish("probe gave up without a valid sample");
         } else {
             self.next_attempt_frame = self.frames + RETRY_FRAMES;
         }
+    }
+
+    fn disable_and_finish(&mut self, reason: &str) {
+        if let Err(err) = set_metrics_enabled(&self.fp, self.session, false) {
+            log::warn!("XR_META_performance_metrics: disabling collection failed: {err:?}");
+        } else {
+            log::info!("XR_META_performance_metrics: {reason}, collection disabled");
+        }
+        self.done = true;
     }
 
     fn sample_and_log(&self) -> bool {
@@ -174,7 +217,7 @@ impl XrPerformanceMetricsProbe {
         }
 
         log::info!(
-            "MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms={} app_cpu_ms={} compositor_gpu_ms={} compositor_cpu_ms={} gpu_util_pct={} cpu_util_avg_pct={} cpu_util_worst_pct={} motion_to_photon_ms={} dropped_frames={} stale_frames={} counters={} any_valid={} attempt={}/{} per_query_us={:.2}",
+            "MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms={} app_cpu_ms={} compositor_gpu_ms={} compositor_cpu_ms={} gpu_util_pct={} cpu_util_avg_pct={} cpu_util_worst_pct={} motion_to_photon_ms={} dropped_frames={} stale_frames={} counters={} any_valid={} attempt={}/{} per_query_us={:.2} mode={} sample={} interval_frames={}",
             format_metric(sample.app_gpu_ms),
             format_metric(sample.app_cpu_ms),
             format_metric(sample.compositor_gpu_ms),
@@ -189,7 +232,10 @@ impl XrPerformanceMetricsProbe {
             any_valid,
             self.attempts,
             MAX_ATTEMPTS,
-            per_query_us
+            per_query_us,
+            self.mode.label(),
+            self.samples_logged + 1,
+            PERIODIC_SAMPLE_INTERVAL_FRAMES
         );
         any_valid
     }

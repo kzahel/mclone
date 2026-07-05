@@ -1606,6 +1606,7 @@ dependencies = [
  "log",
  "mclone-assets",
  "mclone-core",
+ "mclone-diagnostics",
  "mclone-mesh",
  "mclone-ui",
  "pollster",
