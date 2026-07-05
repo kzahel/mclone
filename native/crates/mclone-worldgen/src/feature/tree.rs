@@ -665,6 +665,14 @@ fn create_foliage<W: FeatureWorld>(
                 );
             }
         }
+        FoliagePlacerConfiguration::Bush { .. } => {
+            for y_offset in ((offset - foliage_height)..=offset).rev() {
+                let radius = foliage_radius + attachment.radius_offset - 1 - y_offset;
+                place_leaves_row(
+                    world, random, config, attachment, radius, y_offset, placement,
+                );
+            }
+        }
         FoliagePlacerConfiguration::Fancy { .. } => {
             for y_offset in ((offset - foliage_height)..=offset).rev() {
                 let radius = foliage_radius
@@ -866,6 +874,11 @@ fn place_leaves_row<W: FeatureWorld>(
                         continue;
                     }
                 }
+                FoliagePlacerConfiguration::Bush { .. } => {
+                    if should_skip_bush_leaf(random, x_offset.abs(), z_offset.abs(), radius) {
+                        continue;
+                    }
+                }
                 FoliagePlacerConfiguration::Fancy { .. } => {
                     if should_skip_fancy_leaf(x_offset, z_offset, radius, attachment.double_trunk) {
                         continue;
@@ -960,6 +973,15 @@ fn should_skip_blob_leaf(
     radius: i32,
 ) -> bool {
     abs_x == radius && abs_z == radius && (random.next_int_bound(2) == 0 || y_offset == 0)
+}
+
+fn should_skip_bush_leaf(
+    random: &mut impl RandomSource,
+    abs_x: i32,
+    abs_z: i32,
+    radius: i32,
+) -> bool {
+    abs_x == radius && abs_z == radius && random.next_int_bound(2) == 0
 }
 
 fn should_skip_fancy_leaf(x_offset: i32, z_offset: i32, radius: i32, double_trunk: bool) -> bool {

@@ -376,6 +376,18 @@ mod tests {
             .count()
     }
 
+    fn count_blocks_at_y(chunk: &MutableChunkBlockBuffer, y: i32, block_id: RawBlockId) -> usize {
+        let mut count = 0;
+        for z in 0..CHUNK_WIDTH {
+            for x in 0..CHUNK_WIDTH {
+                if chunk.get_block_at_y(x, y, z) == block_id {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
     fn has_two_by_two_log_square_at(
         chunk: &MutableChunkBlockBuffer,
         base: BlockPos,
@@ -1279,6 +1291,39 @@ mod tests {
         assert!(has_two_by_two_log_square_at(&chunk, base, JUNGLE_LOG));
         assert!(count_logs_outside_two_by_two_column(&chunk, base, JUNGLE_LOG) >= 5);
         assert!(count_blocks(&chunk, JUNGLE_LEAVES) >= 120);
+    }
+
+    #[test]
+    fn jungle_bush_uses_java_bush_foliage_shape() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(6);
+        let config = TreeConfiguration::jungle_bush();
+        let feature = ConfiguredFeature::tree(config);
+        let base = BlockPos::new(8, 3, 8);
+
+        assert_eq!(config.log, JUNGLE_LOG);
+        assert_eq!(config.leaves, OAK_LEAVES);
+        assert_eq!(
+            config.trunk_placer,
+            TrunkPlacerConfiguration::straight(1, 0, 0)
+        );
+        assert_eq!(
+            config.foliage_placer,
+            FoliagePlacerConfiguration::Bush {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(1),
+                height: 2,
+            }
+        );
+
+        assert!(feature.place(&mut chunk, &mut random, base));
+        assert_eq!(chunk.get_block_at_y(base.x, base.y, base.z), JUNGLE_LOG);
+        assert_eq!(count_blocks(&chunk, JUNGLE_LOG), 1);
+        assert_eq!(count_blocks_at_y(&chunk, base.y + 2, OAK_LEAVES), 1);
+        assert!(count_blocks_at_y(&chunk, base.y + 1, OAK_LEAVES) >= 5);
+        assert!(count_blocks_at_y(&chunk, base.y, OAK_LEAVES) >= 20);
+        assert_eq!(chunk.get_block_at_y(base.x + 2, base.y, base.z), OAK_LEAVES);
+        assert_eq!(chunk.get_block_at_y(base.x, base.y, base.z + 2), OAK_LEAVES);
     }
 
     #[test]

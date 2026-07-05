@@ -471,6 +471,11 @@ pub enum FoliagePlacerConfiguration {
         offset: IntProvider,
         height: i32,
     },
+    Bush {
+        radius: IntProvider,
+        offset: IntProvider,
+        height: i32,
+    },
     Fancy {
         radius: IntProvider,
         offset: IntProvider,
@@ -514,7 +519,7 @@ impl FoliagePlacerConfiguration {
         _config: TreeConfiguration,
     ) -> i32 {
         match self {
-            Self::Blob { height, .. } => height,
+            Self::Blob { height, .. } | Self::Bush { height, .. } => height,
             Self::Fancy { height, .. } => height,
             Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
             Self::Pine { height, .. } => height.sample(random),
@@ -527,7 +532,9 @@ impl FoliagePlacerConfiguration {
 
     pub(super) fn foliage_radius(self, random: &mut impl RandomSource, trunk_height: i32) -> i32 {
         match self {
-            Self::Blob { radius, .. } | Self::Fancy { radius, .. } => radius.sample(random),
+            Self::Blob { radius, .. } | Self::Bush { radius, .. } | Self::Fancy { radius, .. } => {
+                radius.sample(random)
+            }
             Self::Spruce { radius, .. } => radius.sample(random),
             Self::Pine { radius, .. } => {
                 radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
@@ -542,6 +549,7 @@ impl FoliagePlacerConfiguration {
     pub(super) fn offset(self, random: &mut impl RandomSource) -> i32 {
         match self {
             Self::Blob { offset, .. }
+            | Self::Bush { offset, .. }
             | Self::Fancy { offset, .. }
             | Self::Spruce { offset, .. }
             | Self::Pine { offset, .. }
@@ -846,7 +854,7 @@ impl TreeConfiguration {
             JUNGLE_LOG,
             OAK_LEAVES,
             TrunkPlacerConfiguration::straight(1, 0, 0),
-            FoliagePlacerConfiguration::Blob {
+            FoliagePlacerConfiguration::Bush {
                 radius: IntProvider::constant(2),
                 offset: IntProvider::constant(1),
                 height: 2,

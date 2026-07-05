@@ -97,6 +97,9 @@ mod tests {
             min_cocoa: usize,
             min_vines: usize,
         },
+        JungleBushShape {
+            min_matches: usize,
+        },
         DefaultSpringLiquidTicks {
             min_water_ticks: usize,
             min_lava_ticks: usize,
@@ -1023,6 +1026,13 @@ mod tests {
                 min_cocoa: 1,
                 min_vines: 1,
             },
+        },
+        LowVisibilityFeatureCase {
+            seed: 61,
+            chunk_x: 1,
+            chunk_z: 2,
+            biome_key: "minecraft:jungle",
+            expectation: LowVisibilityFeatureExpectation::JungleBushShape { min_matches: 1 },
         },
         LowVisibilityFeatureCase {
             seed: 62,
@@ -2198,6 +2208,18 @@ mod tests {
                         vines
                     );
                 }
+                LowVisibilityFeatureExpectation::JungleBushShape { min_matches } => {
+                    let actual = jungle_bush_shape_count(&chunk);
+                    assert!(
+                        actual >= min_matches,
+                        "seed {} chunk ({}, {}) expected at least {} jungle bush shape matches, found {}",
+                        case.seed,
+                        case.chunk_x,
+                        case.chunk_z,
+                        min_matches,
+                        actual
+                    );
+                }
                 LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
                     min_water_ticks,
                     min_lava_ticks,
@@ -3147,6 +3169,53 @@ mod tests {
             .iter()
             .filter(|tick| tick.target == target)
             .count()
+    }
+
+    fn jungle_bush_shape_count(chunk: &GeneratedChunk) -> usize {
+        let mut matches = 0;
+        for y in chunk.min_y..chunk.min_y + chunk.height - 1 {
+            for local_z in 2..GeneratedChunk::WIDTH - 2 {
+                for local_x in 2..GeneratedChunk::WIDTH - 2 {
+                    if chunk.block_at_y(local_x, y, local_z).raw() != JUNGLE_LOG {
+                        continue;
+                    }
+
+                    let bottom_skirt = [
+                        (local_x - 2, local_z),
+                        (local_x + 2, local_z),
+                        (local_x, local_z - 2),
+                        (local_x, local_z + 2),
+                    ]
+                    .iter()
+                    .filter(|(x, z)| chunk.block_at_y(*x, y, *z).raw() == OAK_LEAVES)
+                    .count();
+                    let middle_leaves = oak_leaf_count_around(chunk, local_x, y + 1, local_z, 1);
+
+                    if bottom_skirt >= 2 && middle_leaves >= 5 {
+                        matches += 1;
+                    }
+                }
+            }
+        }
+        matches
+    }
+
+    fn oak_leaf_count_around(
+        chunk: &GeneratedChunk,
+        center_x: i32,
+        y: i32,
+        center_z: i32,
+        radius: i32,
+    ) -> usize {
+        let mut count = 0;
+        for local_z in center_z - radius..=center_z + radius {
+            for local_x in center_x - radius..=center_x + radius {
+                if chunk.block_at_y(local_x, y, local_z).raw() == OAK_LEAVES {
+                    count += 1;
+                }
+            }
+        }
+        count
     }
 
     fn top_non_air_block(chunk: &GeneratedChunk, local_x: i32, local_z: i32) -> Option<RawBlockId> {
