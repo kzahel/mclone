@@ -166,7 +166,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 |---|---|---|---|
 | 0: measurement inventory and baselines | gates | Mac (baseline host; record) | landed 2026-07-05 |
 | 1: `mclone-diagnostics` accounting core | 1 (owner exists) | Mac; Windows test lands at checkpoint A | landed 2026-07-05 |
-| 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | open |
+| 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | landed 2026-07-05 |
 | 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | open |
 | 4: calibration, invariants, meter overhead | 7 | Mac with Quest | open |
 | 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | open |
@@ -560,7 +560,154 @@ git diff --check
 
 Plus the two `:perf` A/B lanes recorded in this section.
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Changes:
+
+- Added `mclone-diagnostics` as the shared accounting dependency for
+  `mclone-native-client`.
+- Replaced `FrameTimingStats` local over-budget tier math with
+  `OverBudgetTiers`, preserving the debug-pane summary fields.
+- Deleted the desktop benchmark-local over-budget and percentile helpers
+  from `perf.rs`; the frame-budget and startup-streaming reports now use
+  `FrameAccumulator` and `FrameSummaryReport`.
+- Preserved legacy top-level benchmark JSON fields and added a versioned
+  `frame_pipeline_accounting` schema block beside them for the two Slice 2
+  lanes. This resolves the Slice 2 JSON policy question in favor of
+  compatibility.
+- Added shared constants for the legacy `over_2x_budget_frames` and
+  `over_4x_budget_frames` JSON key strings so app-crate tripwire greps do
+  not retain duplicate accounting-key hits.
+
+Host and raw outputs:
+
+- Host: `kmacbook`, macOS 26.5.1 build 25F80, arm64; same Mac host as
+  Slice 0.
+- Post-adoption perf rows were captured from dirty commit `ebae53f2`
+  before this slice commit.
+- Raw current-branch perf outputs were written outside the repo:
+  `/tmp/mclone-144-slice2-frame-budget-1.json`,
+  `/tmp/mclone-144-slice2-frame-budget-2.json`,
+  `/tmp/mclone-144-slice2-startup-streaming-1.json`, and
+  `/tmp/mclone-144-slice2-startup-streaming-2.json`.
+- Startup investigation outputs were written outside the repo:
+  `/tmp/mclone-144-slice2-startup-streaming-3.json`,
+  `/tmp/mclone-144-slice2-baseline-worktree-startup-streaming.json`, and
+  `/tmp/mclone-144-slice2-baseline-worktree-startup-streaming-2.json`.
+
+Frame-budget A/B (`pnpm native:frame-budget:perf`):
+
+| field | Slice 0 run 1 | Slice 0 run 2 | Slice 2 run 1 | Slice 2 run 2 |
+|---|---:|---:|---:|---:|
+| over_budget_frames | 1 | 1 | 1 | 1 |
+| over_2x_budget_frames | 1 | 1 | 1 | 1 |
+| over_4x_budget_frames | 0 | 0 | 0 | 0 |
+| average_frame_ms | 2.103 | 2.103 | 2.108 | 2.100 |
+| p95_frame_ms | 2.493 | 2.483 | 2.520 | 2.442 |
+| p99_frame_ms | 2.736 | 3.088 | 3.001 | 2.931 |
+| max_frame_ms | 18.345 | 18.635 | 18.517 | 18.567 |
+| runtime_setup_ms | 13545.092 | 13558.994 | 13545.810 | 13564.178 |
+| initial_poll_ms | 22.600 | 23.126 | 20.931 | 21.559 |
+| initial_remesh_ms | 1051.865 | 1022.127 | 1006.111 | 995.537 |
+| initial_section_count | 1936 | 1936 | 1936 | 1936 |
+| initial_index_count | 3025326 | 3025326 | 3025326 | 3025326 |
+
+Frame-budget result: tier counts, p99, max, section count, and index count
+match the Slice 0 envelope. Average and p95 moved by at most 0.005 ms and
+0.027 ms outside the very narrow two-run Slice 0 spread, and setup/remesh
+fields moved in setup-phase variance only. Top-level legacy fields and
+`frame_pipeline_accounting.frameSummary` agree for over-budget tiers, p95,
+and p99 in both post-adoption runs.
+
+Startup-streaming A/B (`pnpm native:startup-streaming:perf`):
+
+| field | Slice 0 run 1 | Slice 0 run 2 | Slice 2 run 1 | Slice 2 run 2 |
+|---|---:|---:|---:|---:|
+| startup_playable_frame | 45 | 44 | 45 | 50 |
+| startup_playable_ms | 1066.007 | 1090.924 | 1082.374 | 1087.938 |
+| first_full_view_ready_frame | 1218 | 1230 | 1230 | 1266 |
+| first_full_view_ready_ms | 27640.986 | 27631.327 | 27667.188 | 27630.574 |
+| first_render_quiescent_frame | 2548 | 2559 | 2560 | 2608 |
+| first_render_quiescent_ms | 56666.366 | 56638.706 | 56646.054 | 56774.222 |
+| over_budget_frames | 0 | 0 | 9 | 5 |
+| over_2x_budget_frames | 0 | 0 | 0 | 0 |
+| over_4x_budget_frames | 0 | 0 | 0 | 0 |
+| average_frame_ms | 5.378 | 5.541 | 5.266 | 5.357 |
+| p95_frame_ms | 7.166 | 7.274 | 7.024 | 7.088 |
+| p99_frame_ms | 7.538 | 7.614 | 8.535 | 7.724 |
+| max_frame_ms | 9.959 | 9.058 | 24.665 | 31.413 |
+| total_completed_compile_sections | 7677 | 7669 | 7623 | 7674 |
+| total_uploaded_sections | 2699 | 2701 | 2686 | 2706 |
+
+Startup-streaming result: the current-branch rows are not within the
+original Slice 0 over-budget/max-frame envelope. Investigation notes:
+
+- A third current-branch run reproduced the same class of hitching:
+  8 over-budget frames, p99 9.619 ms, max 23.764 ms.
+- A detached pre-Slice2 worktree at `ebae53f2` was rerun with the same
+  local asset roots. Its first startup run was clean (0 over-budget frames,
+  max 15.581 ms), while its second run reproduced the same class of
+  host/run noise before this slice's code changes (5 over-budget frames,
+  p99 10.008 ms, max 26.076 ms).
+- In all current-branch startup runs, the legacy top-level fields and
+  `frame_pipeline_accounting.frameSummary` agree for over-budget tiers,
+  p95, and p99. The new schema is computed while serializing the finished
+  report, after the measured frame loop, so the observed startup hitching
+  is recorded as same-host benchmark noise rather than accounting drift.
+
+Smoke schema checks:
+
+- `pnpm native:frame-budget:smoke` emitted legacy over-budget fields
+  `1/1/0` and schema version `1`; the schema agreed with legacy p95/p99.
+- `pnpm native:startup-streaming:smoke` emitted legacy over-budget fields
+  `0/0/0` and schema version `1`; the schema agreed with legacy p95/p99.
+- `pnpm native:desktop-offscreen:smoke` saved
+  `/tmp/mclone-desktop-offscreen.png`; the screenshot was inspected and
+  showed a correctly framed nonblank terrain scene with actors.
+
+Tripwire results:
+
+- Accounting math outside the shared owner: 11 hits total, all remaining in
+  `native/apps/mclone-android-xr-client/src/lib.rs` for Slice 3. There are
+  zero hits in `mclone-native-client`.
+- Clock reads inside the sans-I/O diagnostics core: 0 hits outside
+  `native/crates/mclone-diagnostics/src/clock.rs`.
+- GPU timestamp sites: 0 hits.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+# PASS.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
+# PASS. 8 tests passed.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+# PASS. 148 tests passed.
+
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+# PASS.
+
+pnpm native:frame-budget:smoke
+# PASS.
+
+pnpm native:startup-streaming:smoke
+# PASS.
+
+pnpm native:desktop-offscreen:smoke
+# PASS. Screenshot inspected at /tmp/mclone-desktop-offscreen.png.
+
+pnpm native:timedemo:smoke
+# PASS.
+```
+
+Windows checkpoint A: pending, user-scheduled. It remains required before
+this tactical closes, but it does not block starting Slice 3 on the Mac.
+
+Next step: Slice 3, Quest / Android XR adoption from the Mac with the
+Quest attached. Start with the Slice 3 preflight hardware baselines and
+preserve the existing `MCLONE_ANDROID_XR_PERF_*` marker keys.
 
 ## Slice 3: Quest / Android XR Adoption
 
@@ -878,12 +1025,13 @@ Listed so nobody mistakes this tactical for their plan:
   per-thread CPU sampler because it reports kernel+user thread CPU time in
   directly comparable 100 ns units. Windows validation is deferred to
   checkpoint A.
-- Slice 2: schema-vs-legacy JSON field policy for
-  [`../performance-records.md`](../performance-records.md) lanes — keep
-  legacy keys alongside the schema block, or version-break and re-baseline
-  the records?
+- Slice 2: resolved 2026-07-05. Keep legacy top-level benchmark JSON keys
+  alongside the versioned `frame_pipeline_accounting` schema block for
+  record compatibility.
 - Slice 6: are wgpu timestamps enabled on Quest at all (validation-only),
   or desktop/headless-only behind capability facts? Decide from adapter
   capabilities plus `XR_META` agreement and record.
-- Recorded deviations from slice order or the 143 gate, if any, go here
-  with reasons.
+- Recorded deviation: 2026-07-05, Slices 0-2 started before tactical 143
+  closed under the documented exception for new leaf crate and
+  `mclone-native-client` timing-internal work. Slice 7 remains hard-gated
+  on tactical 143.

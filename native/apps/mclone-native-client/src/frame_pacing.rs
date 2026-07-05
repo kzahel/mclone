@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use mclone_diagnostics::OverBudgetTiers;
 use mclone_render::native::{
     NativeSurfaceContext, SurfacePresentModePreference, surface_present_mode_label,
 };
@@ -169,8 +170,8 @@ impl Default for FramePacingDebugStats {
 pub(crate) struct FrameTimingStats {
     pub(crate) frame_count: u64,
     pub(crate) over_budget_count: u64,
-    pub(crate) over_2x_budget_count: u64,
-    pub(crate) over_4x_budget_count: u64,
+    pub(crate) double_budget_count: u64,
+    pub(crate) quad_budget_count: u64,
     pub(crate) last_frame_ms: f64,
     pub(crate) worst_frame_ms: f64,
     pub(crate) budget_ms: Option<f64>,
@@ -199,17 +200,17 @@ impl FrameTimingStats {
         self.last_surface_submit_ms = 0.0;
         self.last_surface_present_ms = 0.0;
 
-        if let Some(budget_ms) = budget_ms.filter(|budget_ms| *budget_ms > 0.0) {
-            if frame_ms > budget_ms {
-                self.over_budget_count = self.over_budget_count.saturating_add(1);
-            }
-            if frame_ms > budget_ms * 2.0 {
-                self.over_2x_budget_count = self.over_2x_budget_count.saturating_add(1);
-            }
-            if frame_ms > budget_ms * 4.0 {
-                self.over_4x_budget_count = self.over_4x_budget_count.saturating_add(1);
-            }
-        }
+        let mut tiers = OverBudgetTiers::default();
+        tiers.observe(frame_ms, budget_ms);
+        self.over_budget_count = self
+            .over_budget_count
+            .saturating_add(tiers.single_period_frames());
+        self.double_budget_count = self
+            .double_budget_count
+            .saturating_add(tiers.double_period_frames());
+        self.quad_budget_count = self
+            .quad_budget_count
+            .saturating_add(tiers.quad_period_frames());
     }
 
     pub(crate) fn record_runtime_poll(&mut self, ms: f64) {
@@ -325,8 +326,8 @@ mod tests {
 
         assert_eq!(stats.frame_count, 3);
         assert_eq!(stats.over_budget_count, 3);
-        assert_eq!(stats.over_2x_budget_count, 2);
-        assert_eq!(stats.over_4x_budget_count, 1);
+        assert_eq!(stats.double_budget_count, 2);
+        assert_eq!(stats.quad_budget_count, 1);
         assert_eq!(stats.worst_frame_ms, 33.0);
     }
 

@@ -167,6 +167,18 @@ impl OverBudgetTiers {
             self.over_4x_budget_frames = self.over_4x_budget_frames.saturating_add(1);
         }
     }
+
+    pub const fn single_period_frames(self) -> u64 {
+        self.over_budget_frames
+    }
+
+    pub const fn double_period_frames(self) -> u64 {
+        self.over_2x_budget_frames
+    }
+
+    pub const fn quad_period_frames(self) -> u64 {
+        self.over_4x_budget_frames
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]

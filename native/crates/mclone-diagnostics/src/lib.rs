@@ -2,6 +2,7 @@
 
 pub mod clock;
 mod frame;
+pub mod legacy_json_keys;
 mod queue;
 mod schema;
 mod stage;

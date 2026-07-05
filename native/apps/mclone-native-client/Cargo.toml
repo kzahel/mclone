@@ -16,7 +16,6 @@ xr = [
     "dep:mclone-xr-scene",
     "dep:openxr",
     "dep:pollster",
-    "dep:serde_json",
 ]
 
 [dependencies]
@@ -31,6 +30,7 @@ mclone-assets.workspace = true
 mclone-app-runtime.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true
+mclone-diagnostics.workspace = true
 mclone-input.workspace = true
 mclone-mesh.workspace = true
 mclone-net.workspace = true
@@ -44,7 +44,7 @@ mclone-xr-host = { workspace = true, optional = true }
 mclone-xr-scene = { workspace = true, optional = true }
 openxr = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 

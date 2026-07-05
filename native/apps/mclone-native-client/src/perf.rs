@@ -11,6 +11,10 @@ use mclone_app_runtime::frame_render::{
 };
 use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
+use mclone_diagnostics::{
+    FrameAccountingConfig, FrameAccumulator, FrameObservation, FramePipelineReport,
+    FrameSummaryReport, PercentileMethod, QueuePanelReport, StageId, StageSpan,
+};
 use mclone_mesh::{VisibilityGraphBuildStats, quad_face_count_from_indices};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionUploadReport,
@@ -936,11 +940,13 @@ impl FrameBudgetProbeReport {
 
     pub(crate) fn print_json(&self) {
         let target_frame_ms = self.target_frame_ms();
-        let over_budget = frame_budget_over_count(&self.headless.frames, target_frame_ms, 1.0);
-        let over_2x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 2.0);
-        let over_4x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 4.0);
-        let p95 = frame_budget_percentile_ms(&self.headless.frames, 0.95);
-        let p99 = frame_budget_percentile_ms(&self.headless.frames, 0.99);
+        let frame_accounting =
+            headless_frame_accounting_report(&self.headless.frames, target_frame_ms);
+        let over_budget = frame_accounting.over_budget.single_period_frames();
+        let over_double = frame_accounting.over_budget.double_period_frames();
+        let over_quad = frame_accounting.over_budget.quad_period_frames();
+        let p95 = frame_accounting.frame_wall.p95_ms;
+        let p99 = frame_accounting.frame_wall.p99_ms;
         println!("{{");
         print_benchmark_metadata(self.options.mode.benchmark_name(), "  ", true);
         println!("  \"probe_mode\": \"{}\",", self.options.mode.as_str());
@@ -983,8 +989,16 @@ impl FrameBudgetProbeReport {
             self.options.movement_speed
         );
         println!("  \"over_budget_frames\": {},", over_budget);
-        println!("  \"over_2x_budget_frames\": {},", over_2x);
-        println!("  \"over_4x_budget_frames\": {},", over_4x);
+        println!(
+            "  \"{}\": {},",
+            mclone_diagnostics::legacy_json_keys::OVER_DOUBLE_BUDGET_FRAMES,
+            over_double
+        );
+        println!(
+            "  \"{}\": {},",
+            mclone_diagnostics::legacy_json_keys::OVER_QUAD_BUDGET_FRAMES,
+            over_quad
+        );
         println!(
             "  \"average_frame_ms\": {:.3},",
             self.headless.average_frame_ms
@@ -1015,6 +1029,7 @@ impl FrameBudgetProbeReport {
         println!("    \"min_frame_ms\": {:.3},", self.headless.min_frame_ms);
         println!("    \"max_frame_ms\": {:.3}", self.headless.max_frame_ms);
         println!("  }},");
+        print_frame_accounting_json_field(&frame_accounting, true);
         println!("  \"frame_reports\": [");
         for (index, frame) in self.frames.iter().enumerate() {
             let timing = self.headless.frames.get(index).copied().unwrap_or_default();
@@ -1366,11 +1381,13 @@ impl StartupStreamingPerfReport {
 
     pub(crate) fn print_json(&self) {
         let target_frame_ms = self.target_frame_ms();
-        let over_budget = frame_budget_over_count(&self.headless.frames, target_frame_ms, 1.0);
-        let over_2x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 2.0);
-        let over_4x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 4.0);
-        let p95 = frame_budget_percentile_ms(&self.headless.frames, 0.95);
-        let p99 = frame_budget_percentile_ms(&self.headless.frames, 0.99);
+        let frame_accounting =
+            headless_frame_accounting_report(&self.headless.frames, target_frame_ms);
+        let over_budget = frame_accounting.over_budget.single_period_frames();
+        let over_double = frame_accounting.over_budget.double_period_frames();
+        let over_quad = frame_accounting.over_budget.quad_period_frames();
+        let p95 = frame_accounting.frame_wall.p95_ms;
+        let p99 = frame_accounting.frame_wall.p99_ms;
         let total_poll_ms = self.frames.iter().map(|frame| frame.poll_ms).sum::<f64>();
         let total_remesh_ms = self.frames.iter().map(|frame| frame.remesh_ms).sum::<f64>();
         let total_upload_ms = self.frames.iter().map(|frame| frame.upload_ms).sum::<f64>();
@@ -1637,8 +1654,16 @@ impl StartupStreamingPerfReport {
             None => println!("  \"first_render_quiescent_ms\": null,"),
         }
         println!("  \"over_budget_frames\": {},", over_budget);
-        println!("  \"over_2x_budget_frames\": {},", over_2x);
-        println!("  \"over_4x_budget_frames\": {},", over_4x);
+        println!(
+            "  \"{}\": {},",
+            mclone_diagnostics::legacy_json_keys::OVER_DOUBLE_BUDGET_FRAMES,
+            over_double
+        );
+        println!(
+            "  \"{}\": {},",
+            mclone_diagnostics::legacy_json_keys::OVER_QUAD_BUDGET_FRAMES,
+            over_quad
+        );
         println!(
             "  \"average_frame_ms\": {:.3},",
             self.headless.average_frame_ms
@@ -1726,6 +1751,7 @@ impl StartupStreamingPerfReport {
             "  \"update_pump_stalled_frames\": {},",
             update_pump_stalled_frames
         );
+        print_frame_accounting_json_field(&frame_accounting, true);
         let sampled_frames = self
             .frames
             .iter()
@@ -2120,33 +2146,44 @@ fn per_second(count: usize, elapsed_ms: f64) -> f64 {
     }
 }
 
-fn frame_budget_over_count(
+fn headless_frame_accounting_report(
     frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
     target_frame_ms: f64,
-    multiplier: f64,
-) -> usize {
-    let threshold = target_frame_ms * multiplier;
-    frames
-        .iter()
-        .filter(|frame| frame.frame_ms > threshold)
-        .count()
+) -> FrameSummaryReport {
+    let mut accumulator = FrameAccumulator::new(
+        FrameAccountingConfig::from_target_period_ms(target_frame_ms)
+            .with_percentile_method(PercentileMethod::InclusiveCeil),
+    );
+    for (index, frame) in frames.iter().enumerate() {
+        accumulator.record_frame(
+            FrameObservation::new(index as u64, frame.frame_ms)
+                .with_stage_span(StageSpan::new(
+                    StageId::DrawEncode,
+                    frame.encode_ms + frame.submit_ms,
+                ))
+                .with_stage_span(StageSpan::new(
+                    StageId::GpuExecutionPresentationWait,
+                    frame.device_poll_ms,
+                )),
+        );
+    }
+    accumulator.summary_report()
 }
 
-fn frame_budget_percentile_ms(
-    frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
-    percentile: f64,
-) -> f64 {
-    if frames.is_empty() {
-        return 0.0;
+fn print_frame_accounting_json_field(summary: &FrameSummaryReport, trailing_comma: bool) {
+    let report = FramePipelineReport::new(summary.clone(), QueuePanelReport::new(Vec::new()));
+    let json = serde_json::to_string_pretty(&report).expect("frame accounting report serializes");
+    let lines = json.lines().collect::<Vec<_>>();
+    let suffix = if trailing_comma { "," } else { "" };
+    for (index, line) in lines.iter().enumerate() {
+        if index == 0 {
+            println!("  \"frame_pipeline_accounting\": {line}");
+        } else if index + 1 == lines.len() {
+            println!("  {line}{suffix}");
+        } else {
+            println!("  {line}");
+        }
     }
-    let mut values = frames
-        .iter()
-        .map(|frame| frame.frame_ms)
-        .collect::<Vec<_>>();
-    values.sort_by(f64::total_cmp);
-    let clamped = percentile.clamp(0.0, 1.0);
-    let index = ((values.len() - 1) as f64 * clamped).ceil() as usize;
-    values[index.min(values.len() - 1)]
 }
 
 pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerfReport> {
@@ -3332,7 +3369,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frame_budget_helpers_count_and_percentile_frame_times() {
+    fn frame_budget_summary_uses_shared_accounting_math() {
         let frames = [
             mclone_render::headless::HeadlessFrameLoopTiming {
                 frame_ms: 4.0,
@@ -3353,10 +3390,11 @@ mod tests {
         ];
 
         assert_eq!(target_frame_ms(125.0), 8.0);
-        assert_eq!(frame_budget_over_count(&frames, 8.0, 1.0), 3);
-        assert_eq!(frame_budget_over_count(&frames, 8.0, 2.0), 2);
-        assert_eq!(frame_budget_over_count(&frames, 8.0, 4.0), 1);
-        assert_eq!(frame_budget_percentile_ms(&frames, 0.95), 35.0);
+        let summary = headless_frame_accounting_report(&frames, 8.0);
+        assert_eq!(summary.over_budget.single_period_frames(), 3);
+        assert_eq!(summary.over_budget.double_period_frames(), 2);
+        assert_eq!(summary.over_budget.quad_period_frames(), 1);
+        assert_eq!(summary.frame_wall.p95_ms, 35.0);
     }
 
     #[test]

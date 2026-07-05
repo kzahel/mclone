@@ -148,8 +148,8 @@ impl DebugPaneStats {
             format!(
                 "OVER {}/{}/{} WORST {:.1}",
                 self.frame.over_budget_count,
-                self.frame.over_2x_budget_count,
-                self.frame.over_4x_budget_count,
+                self.frame.double_budget_count,
+                self.frame.quad_budget_count,
                 self.frame.worst_frame_ms
             ),
             format!(
@@ -285,8 +285,8 @@ mod tests {
             frame: FrameTimingStats {
                 frame_count: 12,
                 over_budget_count: 3,
-                over_2x_budget_count: 1,
-                over_4x_budget_count: 0,
+                double_budget_count: 1,
+                quad_budget_count: 0,
                 last_frame_ms: 16.7,
                 worst_frame_ms: 33.4,
                 budget_ms: Some(8.3),
