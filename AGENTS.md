@@ -2,7 +2,7 @@ See [`README.md`](README.md) for project context.
 
 ## Windows: shell and Rust toolchain
 
-This repo is developed on Windows. Run `cargo`, `pnpm`, and any native build/test/run from **PowerShell** (or the Git Bash / MINGW64 shell) — both use the native Windows Rust toolchain at `C:\Users\<user>\.cargo\bin\cargo.exe` and work correctly (clean `cargo build`/`cargo test`, including MSVC linking and test-binary execution, all pass).
+This repo is developed on both macOS and Windows. macOS is the usual day-to-day host; switch to Windows only when it is specifically needed — Windows has the better native desktop XR runtime (the macOS desktop-XR lane is a self-ported WiVRn convenience path), and some validation (MSVC/Vulkan/DX12, Windows-only APIs) can only run there. Host switches are not free: after switching, bring the asset pipelines up to date and run a smoke/toolchain preparation pass before trusting results, and prefer batching Windows-only work so hosts switch rarely. When on Windows, run `cargo`, `pnpm`, and any native build/test/run from **PowerShell** (or the Git Bash / MINGW64 shell) — both use the native Windows Rust toolchain at `C:\Users\<user>\.cargo\bin\cargo.exe` and work correctly (clean `cargo build`/`cargo test`, including MSVC linking and test-binary execution, all pass).
 
 **Do not run cargo from WSL.** WSL is installed and running on this machine, but it has **no Rust toolchain** (`cargo: command not found`), and even with one it builds over the slow `/mnt/c` mount, which hangs and targets Linux instead of Windows. If a `cargo`/`pnpm` command "gets stuck" or reports `command not found`, you are almost certainly in WSL, not Git Bash — switch shells rather than trying to fix the build.
 

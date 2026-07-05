@@ -30,14 +30,38 @@ generation, lighting, and far-LOD instead of tuning fixed counts blind.
 
 ## Host Machines And Hardware
 
-Two development hosts are in play: the Windows machine (the primary repo
-host per `CLAUDE.md`, native toolchain via PowerShell/Git Bash) and the
-macOS machine (the tactical 143 preflight host, which currently owns the
-WiVRn desktop-XR lanes and the attached Quest 3). Switching hosts is a
-user-managed scheduling step: an implementing agent cannot change machines
-mid-slice, so each slice states its host requirement up front — flag the
-needed host at session start instead of discovering the dependency halfway
-through.
+Development runs on two hosts, and the macOS machine is the preferred
+day-to-day host: this tactical's slices are driven from the Mac by default.
+The Windows machine is the switch-to-when-needed host — it has the better
+(native) desktop XR runtime and is required here for Windows thread-CPU
+sampler and Vulkan/DX12 validation. The Mac desktop-XR lane is our own
+WiVRn port, built specifically so basic XR testing does not force a host
+switch; treat Windows as the desktop-XR runtime authority and the Mac WiVRn
+lane as the convenience lane. Both hosts can drive the Quest 3.
+
+Host switches are not free: every switch requires bringing the asset
+pipelines up to date and running a toolchain/smoke preparation pass (the
+[`../platform-sanity-checklist.md`](../platform-sanity-checklist.md) shape,
+scoped to the lanes the upcoming work needs) before that host's results are
+trustworthy. Switching is user-managed — an implementing agent cannot
+change machines mid-slice — so this plan batches all Windows-required work
+into two named checkpoints, each a single user-scheduled Windows session:
+
+- **Windows checkpoint A** (after Slice 2): host-switch preparation pass,
+  then `cargo test -p mclone-diagnostics`,
+  `cargo test -p mclone-native-client`, and
+  `pnpm native:frame-budget:smoke`. Validates the Slice 1 Windows
+  thread-CPU sampler and the Slice 2 adoption on Windows in one session.
+- **Windows checkpoint B** (during Slice 6): host-switch preparation pass,
+  then Vulkan/DX12 timestamp validation, GPU calibration on the Windows
+  backend, and the PIX or RenderDoc spot-check.
+
+Checkpoint A may be batched into checkpoint B if a single Windows session
+for the whole tactical is preferred — record the deferral; the cost is that
+Windows-only sampler issues surface late. Neither checkpoint blocks the
+next Mac-driven slice from starting, but both must be complete before the
+tactical closes, and no Windows-recorded number is trusted unless that
+session's preparation pass ran first.
 
 Standing rules:
 
@@ -46,18 +70,10 @@ Standing rules:
 - A/B comparisons (contract invariant 4) are valid only against a baseline
   from the same host. Numbers from the other host are a different lane, not
   noise — never mix hosts inside one comparison.
-- Slice 0's desktop baselines must be captured on whichever host will run
-  the Slice 2 A/B; record the choice in Slice 0.
-- Quest lanes run from the host with the Quest 3 attached — per the 143
-  preflight evidence that is currently the macOS machine.
-
-Windows sessions are required for: Slice 1's Windows thread-CPU sampler
-test pass (deferrable to Slice 2 if recorded), Slice 2's Windows desktop
-validation pass, and Slice 6's Vulkan/DX12 timestamp validation plus the
-PIX/RenderDoc spot-check. Quest-attached sessions are required for: Slice 3,
-Slice 4's Quest RD5 overhead A/B, Slice 5's Quest streaming lane, and
-Slice 6's `XR_META` agreement rows. Everything else runs on either desktop
-host.
+- Slice 0's desktop baselines are captured on the Mac by default; record
+  the host either way, and run the Slice 2 A/B on the same host.
+- Quest rows stay on one host per comparison set — the Mac by default.
+- After any host switch, run the preparation pass before recording numbers.
 
 ## Contract For Implementing Agents
 
@@ -148,14 +164,14 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 
 | Slice | Closes (law-doc gap) | Host needed | Status |
 |---|---|---|---|
-| 0: measurement inventory and baselines | gates | Slice 2's A/B host (record which) | open |
-| 1: `mclone-diagnostics` accounting core | 1 (owner exists) | any; Windows for sampler test (deferrable) | open |
-| 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Slice 0's host, plus a Windows pass | open |
-| 3: Quest / Android XR adoption | 1 Quest, 2 | Quest-attached (macOS today) | open |
-| 4: calibration, invariants, meter overhead | 7 | Slice 0's host, plus Quest-attached | open |
-| 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | any desktop, plus Quest-attached | open |
-| 6: GPU timestamp layer and perf-metrics promotion | 6 | macOS and Windows, plus Quest | open |
-| 7: debug overlay through the shared facade | 8 | any desktop | open |
+| 0: measurement inventory and baselines | gates | Mac (baseline host; record) | open |
+| 1: `mclone-diagnostics` accounting core | 1 (owner exists) | Mac; Windows test lands at checkpoint A | open |
+| 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | open |
+| 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | open |
+| 4: calibration, invariants, meter overhead | 7 | Mac with Quest | open |
+| 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | open |
+| 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | open |
+| 7: debug overlay through the shared facade | 8 | Mac | open |
 
 Gap numbers refer to the law doc's
 [Actionable Gaps](../frame-pipeline-accounting.md#actionable-gaps). Gaps 9-10
@@ -249,10 +265,9 @@ Exit criteria:
 - `cargo check -p mclone-diagnostics --target wasm32-unknown-unknown`
   passes;
 - schema structs serialize with a `schema_version` field;
-- the Windows thread-CPU sampler has passed
-  `cargo test -p mclone-diagnostics` on the Windows host, or its deferral
-  to Slice 2's Windows pass is recorded under Open Questions (the unix
-  sampler is covered by whichever host runs this slice).
+- the Windows thread-CPU sampler test is scheduled: by default it defers to
+  Windows checkpoint A — record the deferral here. The unix sampler is
+  covered by the Mac host running this slice.
 
 Validation:
 
@@ -284,12 +299,11 @@ Deliverables:
 - A/B: rerun `pnpm native:frame-budget:perf` and
   `pnpm native:startup-streaming:perf` on the Slice 0 baseline host;
   preserved fields match Slice 0 baselines within the recorded noise;
-- a Windows validation pass, since this slice puts the Windows thread-CPU
-  sampler into real frames for the first time: on the Windows host, run
-  `cargo test -p mclone-diagnostics`, `cargo test -p mclone-native-client`,
-  and `pnpm native:frame-budget:smoke`, and record the results. This is a
-  separate user-scheduled session if the slice is being driven from the
-  Mac.
+- Windows checkpoint A (see Host Machines And Hardware) covers this slice's
+  Windows exposure — it puts the Windows thread-CPU sampler into real
+  frames for the first time. The checkpoint is a separate user-scheduled
+  Windows session; it does not block starting Slice 3 on the Mac, but it is
+  recorded as pending in this section until it runs.
 
 Non-goals / drift tripwires:
 
@@ -330,8 +344,9 @@ the same math.
 
 Preflight (the tactical 143 Slice 4 pattern):
 
-- this slice runs from the Quest-attached host (currently the macOS
-  machine) end to end;
+- this slice runs end to end from one Quest-driving host — the Mac by
+  default (either host can drive the Quest 3; do not split one comparison
+  set across hosts);
 - before production changes, record on attached hardware:
   `pnpm native:android-xr:validate` (launch health),
   `pnpm native:android-xr:perf:orbit:rd5:metrics`, and
@@ -401,9 +416,9 @@ Deliverables:
 - meter-overhead A/B: desktop frame-budget lane and Quest RD5 orbit lane
   run with the always-on set enabled vs disabled; record the deltas here
   and in the law doc's overhead policy; enforce the ceiling (demote
-  offenders to opt-in). Each delta row records its host; the desktop A/B
-  runs on the Slice 0 baseline host, and the Quest A/B needs the
-  Quest-attached host — plan the session split accordingly;
+  offenders to opt-in). Each delta row records its host; by default both
+  A/Bs run from the Mac (the Slice 0 baseline host, with the Quest
+  attached), so this slice needs no host switch;
 - the tolerance and ceiling actually adopted are recorded in this section
   and reconciled into the law doc if they differ from the provisional
   values.
@@ -532,15 +547,16 @@ Exit criteria:
 
 - tripwire grep 3 shows timestamp sites in shared render crates only;
 - GPU calibration passes on desktop headless on both desktop backends:
-  Metal (macOS host) and Vulkan/DX12 (Windows host). Timestamp support,
-  granularity, and `get_timestamp_period` behavior differ per backend, so
-  the layer is not cross-platform until both are validated — plan the two
-  desktop sessions plus the external-capture spot-check (Xcode on macOS,
-  PIX or RenderDoc on Windows; at least one, record which);
+  Metal on the Mac during the slice, and Vulkan/DX12 at Windows
+  checkpoint B. Timestamp support, granularity, and `get_timestamp_period`
+  behavior differ per backend, so the layer is not cross-platform until
+  both are validated; the external-capture spot-check (Xcode on macOS, PIX
+  or RenderDoc at checkpoint B; at least one, record which) rides the same
+  sessions;
 - per-eye and multiview coverage demonstrated (desktop headless dual-view
   plus the existing multiview lanes) or the gap documented;
-- cross-source agreement rows recorded (Quest rows from the Quest-attached
-  host).
+- cross-source agreement rows recorded (Quest rows from the Mac by
+  default).
 
 Validation:
 
