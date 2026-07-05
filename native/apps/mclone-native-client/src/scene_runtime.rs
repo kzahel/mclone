@@ -13,6 +13,7 @@ use mclone_app_runtime::local_single_view::{
 };
 use mclone_app_runtime::{
     GameplayCommandUpdatePolicy, RuntimePollDiagnostics, SingleViewRuntimeStats,
+    TimedRenderSectionCacheUpdate,
 };
 #[cfg(test)]
 use mclone_app_runtime::{camera_position_inside_water_block, snapshot_block_state_at_world};
@@ -382,13 +383,18 @@ impl WindowSceneRuntime {
         self.scene.sync_render_sections(camera_position)
     }
 
-    pub(crate) fn sync_render_sections_until_deadline(
+    pub(crate) fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
         &mut self,
         camera_position: Vec3,
         deadline: Instant,
-    ) -> Result<RenderSectionCacheUpdate> {
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
         self.scene
-            .sync_render_sections_until_deadline(camera_position, deadline)
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+                camera_position,
+                deadline,
+                completed_result_accept_budget,
+            )
     }
 
     pub(crate) fn sync_all_render_sections(

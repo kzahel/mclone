@@ -90,6 +90,7 @@ use mclone_render_session::{
     RenderSectionUploadFramePolicy, RenderSectionUploadPhaseReport,
     actor_instances_from_presentations, engine_debug_world_lines,
 };
+use mclone_server::WorkerFrameMetrics;
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GamePlayerModel,
     GameScreen, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale,
@@ -752,6 +753,9 @@ pub struct XrTerrainUploadSummary {
     pub server_update_queue_bytes: usize,
     pub server_pending_jobs: usize,
     pub server_pending_publications: usize,
+    pub runner_frame_metrics: WorkerFrameMetrics,
+    pub worldgen_job_frame_metrics: WorkerFrameMetrics,
+    pub light_status_job_frame_metrics: WorkerFrameMetrics,
     pub scheduler_pending_jobs: usize,
     pub scheduler_completed_jobs: usize,
     pub scheduler_dirty_chunks: usize,
@@ -5921,6 +5925,9 @@ fn xr_poll_diagnostics_upload_summary(
         server_update_queue_bytes: diagnostics.server_update_queue_bytes,
         server_pending_jobs: diagnostics.server_pending_jobs,
         server_pending_publications: diagnostics.server_pending_publications,
+        runner_frame_metrics: diagnostics.runner_frame_metrics,
+        worldgen_job_frame_metrics: diagnostics.worldgen_job_frame_metrics,
+        light_status_job_frame_metrics: diagnostics.light_status_job_frame_metrics,
         scheduler_pending_jobs: diagnostics.scheduler_pending_jobs,
         scheduler_completed_jobs: diagnostics.scheduler_completed_jobs,
         scheduler_dirty_chunks: diagnostics.scheduler_dirty_chunks,

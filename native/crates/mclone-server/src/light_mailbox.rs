@@ -10,7 +10,11 @@ use std::fmt;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::{sync::mpsc, thread};
+use std::{
+    sync::{Arc, Mutex, mpsc},
+    thread,
+    time::Instant,
+};
 
 use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 
@@ -210,6 +214,7 @@ struct LightStatusMailboxBackend {
     completion_receiver: mpsc::Receiver<CompletedLightStatus>,
     completed: VecDeque<CompletedLightStatus>,
     worker: Option<thread::JoinHandle<()>>,
+    metrics: Arc<Mutex<WorkerFrameMetrics>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -227,6 +232,8 @@ impl LightStatusMailboxBackend {
     fn new(_config: Option<()>) -> Self {
         let (sender, receiver) = mpsc::channel::<LightStatusRequest>();
         let (completion_sender, completion_receiver) = mpsc::channel::<CompletedLightStatus>();
+        let metrics = Arc::new(Mutex::new(WorkerFrameMetrics::message_transfer()));
+        let worker_metrics = Arc::clone(&metrics);
         let worker = thread::Builder::new()
             .name("mclone-light-status".to_owned())
             .spawn(move || {
@@ -234,12 +241,20 @@ impl LightStatusMailboxBackend {
                 while let Ok(request) = receiver.recv() {
                     match request {
                         LightStatusRequest::ComputeBatch(batch) => {
+                            if let Ok(mut metrics) = worker_metrics.lock() {
+                                metrics.record_request(0);
+                            }
+                            let request_start = Instant::now();
                             for completed in
                                 CompletedLightStatus::from_batch(&mut light_state, batch)
                             {
                                 if completion_sender.send(completed).is_err() {
                                     return;
                                 }
+                            }
+                            if let Ok(mut metrics) = worker_metrics.lock() {
+                                metrics.record_response(0);
+                                metrics.record_request_time_us(request_start.elapsed().as_micros());
                             }
                         }
                         LightStatusRequest::Shutdown => break,
@@ -253,6 +268,7 @@ impl LightStatusMailboxBackend {
             completion_receiver,
             completed: VecDeque::new(),
             worker: Some(worker),
+            metrics,
         }
     }
 
@@ -261,7 +277,10 @@ impl LightStatusMailboxBackend {
     }
 
     fn frame_metrics(&self) -> WorkerFrameMetrics {
-        WorkerFrameMetrics::default()
+        self.metrics
+            .lock()
+            .map(|metrics| *metrics)
+            .unwrap_or_default()
     }
 
     fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {

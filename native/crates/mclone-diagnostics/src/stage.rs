@@ -21,9 +21,14 @@ pub enum StageId {
     TransportDecode,
     ClientUpdateApply,
     RenderSectionAdmission,
+    RenderAdmissionDirtyReadyScan,
+    RenderAdmissionRequestBuild,
+    RenderAdmissionWorkerSubmit,
+    RenderAdmissionPreparedRecordMaintenance,
     CpuMeshCompile,
     CompletedResultAcceptance,
     GpuUpload,
+    UploadApply,
     PreparedDrawRecords,
     DrawEncode,
     GpuExecutionPresentationWait,
@@ -36,12 +41,17 @@ impl StageId {
             Self::InputPoseEvents
             | Self::ClientUpdateApply
             | Self::GpuUpload
+            | Self::UploadApply
             | Self::PreparedDrawRecords
             | Self::DrawEncode
             | Self::GpuExecutionPresentationWait => CriticalPathLabel::CurrentFrameCritical,
-            Self::RenderSectionAdmission | Self::CompletedResultAcceptance | Self::UiDebug => {
-                CriticalPathLabel::NextFrameSlack
-            }
+            Self::RenderSectionAdmission
+            | Self::RenderAdmissionDirtyReadyScan
+            | Self::RenderAdmissionRequestBuild
+            | Self::RenderAdmissionWorkerSubmit
+            | Self::RenderAdmissionPreparedRecordMaintenance
+            | Self::CompletedResultAcceptance
+            | Self::UiDebug => CriticalPathLabel::NextFrameSlack,
             Self::TerrainGeneration | Self::LightComputeStatus | Self::CpuMeshCompile => {
                 CriticalPathLabel::ParallelCpuPeer
             }

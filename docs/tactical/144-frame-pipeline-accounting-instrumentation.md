@@ -169,7 +169,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 | 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | landed 2026-07-05 |
 | 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | landed 2026-07-05 |
 | 4: calibration, invariants, meter overhead | 7 | Mac with Quest | landed 2026-07-05 |
-| 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | open |
+| 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | landed 2026-07-05 |
 | 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | open |
 | 7: debug overlay through the shared facade | 8 | Mac | open |
 
@@ -1094,7 +1094,121 @@ git diff --check
 
 Plus one Quest streaming lane (RD7 orbit metrics) recorded in this section.
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Workstream and host:
+
+- Workstream: native Rust shared diagnostics/profiling contract.
+- Implementation host: `kmacbook`, macOS 26.5.1 build 25F80, arm64.
+- Quest validation device: Quest 3, model `Quest_3`, ADB serial
+  `2G0YC1ZF93041Z`, Android API 34.
+
+Implementation summary:
+
+- Bumped the frame-pipeline schema to v3 and added the shared
+  `peerThreadPanel` alongside the existing frame summary and queue panel.
+- Added shared peer-thread report vocabulary for `server-runner`, `worldgen`,
+  `light-status`, and `render-compile-workers`.
+- Added render-admission sub-stages shared by desktop and Android XR:
+  `completed-result-acceptance`, `render-admission-dirty-ready-scan`,
+  `render-admission-request-build`, `render-admission-worker-submit`,
+  `render-admission-prepared-record-maintenance`, `render-section-admission`,
+  and `upload-apply`.
+- Routed native startup-streaming JSON and Android XR marker logs through the
+  same queue, stage, and peer report vocabulary. Existing Android
+  `MCLONE_ANDROID_XR_PERF_*` markers are preserved; additive
+  `FRAME_PIPELINE`, `QUEUE`, `PEER`, and singular `STAGE` markers are now
+  included in the validator summary file.
+- Recorded worldgen and light/status mailbox request/response activity and
+  elapsed request totals without changing scheduling, admission, upload, or
+  worker-count policy.
+- Android `upload-work` is reported as sampled backlog/age because the current
+  direct upload path can apply lifecycle work in the same frame without an
+  intermediate queued item.
+
+Desktop/startup-streaming smoke excerpt:
+
+- Command: `pnpm native:startup-streaming:smoke`, output
+  `/tmp/mclone-144-slice5-startup-smoke.json`.
+- `schemaVersion=3`, `frameSummary.schemaVersion=3`, `frames=600`,
+  `conservationViolations=0`, `p95_frame_ms=5.326`,
+  `max_server_update_oldest_applied_age_ms=47.798`.
+- Queues: `inbound-updates depth=0 maxAge=0.0 violations=0`,
+  `completed-render-results depth=0 maxAge=0.0 violations=0`,
+  `upload-work depth=0 maxAge=0.0 violations=0`,
+  `host-publication depth=34 maxAge=4972.242 violations=0`,
+  `render-compile-jobs depth=1 maxAge=0.0 violations=0`.
+- Peers: `server-runner active=true pending=15 busyMs=5247.103`,
+  `worldgen active=true pending=1 requestFrames=3 responseFrames=3 totalMs=862.945`,
+  `light-status active=true pending=9 requestFrames=29 responseFrames=29 totalMs=6036.524`,
+  `render-compile-workers active=true pending=1 requestFrames=3293 responseFrames=3277`.
+- Latest stage names: `host-session-commands`,
+  `completed-result-acceptance`, `render-admission-dirty-ready-scan`,
+  `render-admission-request-build`, `render-admission-worker-submit`,
+  `render-admission-prepared-record-maintenance`,
+  `render-section-admission`, `upload-apply`, `draw-encode`.
+
+Quest RD7 orbit metrics excerpt:
+
+- Command: `pnpm native:android-xr:perf:orbit:rd7:metrics`, summary
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-metrics.txt`, logcat
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-metrics-logcat.txt`.
+- `MCLONE_ANDROID_XR_PERF_SUMMARY`: `sample_seconds=45.020`,
+  `mode=settled-orbit`, `render_path=per-eye`,
+  `frame_accounting_enabled=true`, `conservation_violations=0`,
+  `render_distance=7`, `frames=2926`, `frame_p95_ms=18.314`,
+  `frame_p99_ms=21.368`, `frame_max_ms=26.605`,
+  `over_budget=2393`, `over_2x_budget=0`, `over_4x_budget=0`.
+- `MCLONE_ANDROID_XR_PERF_HEADROOM`: `app_work_p95_ms=18.011`,
+  `headroom_p50_ms=-1.098`, `headroom_p05_ms=-4.122`,
+  `app_over_period_pct=72.8`.
+- `MCLONE_ANDROID_XR_PERF_METRICS`: `app_gpu_ms=3.304`,
+  `compositor_gpu_ms=1.246`, `gpu_util_pct=34.250`,
+  `cpu_util_avg_pct=87.303`, `motion_to_photon_ms=26.164`.
+- `MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE`: `schema_version=3`,
+  `frames=2926`, `queues=5`, `peers=4`, `stages=12`.
+- Queue markers: all five queues reported `conservation_violations=0`;
+  `host-publication max_oldest_age_ms=2002.295`,
+  `render-compile-jobs max_oldest_age_ms=16.363`.
+- Peer markers: `server-runner active=true pending_jobs=19 busy_ms=62337.362`,
+  `worldgen active=true request_frames=10 response_frames=10 total_request_ms=4420.362`,
+  `light-status active=true request_frames=62 response_frames=62 total_request_ms=25798.816`,
+  `render-compile-workers active=true request_frames=1572 response_frames=1572`.
+- Stage markers included both Android-specific frame stages
+  (`gpu-execution-presentation-wait`, `input-pose-events`) and the shared
+  Slice 5 render-admission/upload names listed above.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`: PASS.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics`: PASS,
+  12 tests.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`: PASS,
+  110 tests.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --bins`:
+  PASS.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`:
+  PASS with the existing non-Android dead-code warnings for the legacy remote
+  address helpers.
+- `pnpm native:accounting:smoke`: PASS, schema v3, zero conservation
+  violations.
+- `pnpm native:startup-streaming:smoke`: PASS, excerpt above.
+- `pnpm native:android-xr:apk`: PASS through the RD7 validator's release APK
+  build/install path.
+- `pnpm native:android-xr:perf:orbit:rd7:metrics`: PASS, excerpt above.
+- `git diff --check`: PASS.
+
+Tripwires:
+
+- Accounting math outside `mclone-diagnostics`: 0 hits.
+- Clock reads inside `mclone-diagnostics` core outside `clock.rs`: 0 hits.
+- GPU timestamp sites before Slice 6: 0 hits.
+
+Next step: Slice 6, GPU timestamp layer and perf-metrics promotion, still from
+the Mac with Quest for the first implementation pass. Windows checkpoint A
+remains deferrable to checkpoint B, but checkpoint B must run on Windows for
+Vulkan/DX12 timestamp validation and the external GPU capture spot-check before
+this tactical closes.
 
 ## Slice 6: GPU Timestamp Layer And Perf-Metrics Promotion
 

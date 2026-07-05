@@ -13,7 +13,11 @@ use std::fmt;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::{sync::mpsc, thread};
+use std::{
+    sync::{Arc, Mutex, mpsc},
+    thread,
+    time::Instant,
+};
 
 use mclone_core::ChunkPos;
 use mclone_worldgen::levelgen::{
@@ -285,6 +289,7 @@ struct WorldgenMailboxBackend {
     completion_receiver: mpsc::Receiver<WorldgenCompletedJob>,
     completed: VecDeque<WorldgenCompletedJob>,
     worker: Option<thread::JoinHandle<()>>,
+    metrics: Arc<Mutex<WorkerFrameMetrics>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -302,6 +307,8 @@ impl WorldgenMailboxBackend {
     fn new(_config: Option<()>) -> Self {
         let (sender, receiver) = mpsc::channel::<WorldgenRequest>();
         let (completion_sender, completion_receiver) = mpsc::channel::<WorldgenCompletedJob>();
+        let metrics = Arc::new(Mutex::new(WorkerFrameMetrics::message_transfer()));
+        let worker_metrics = Arc::clone(&metrics);
         let worker = thread::Builder::new()
             .name("mclone-worldgen".to_owned())
             .spawn(move || {
@@ -313,6 +320,10 @@ impl WorldgenMailboxBackend {
                             targets,
                             dependencies,
                         } => {
+                            if let Ok(mut metrics) = worker_metrics.lock() {
+                                metrics.record_request(0);
+                            }
+                            let request_start = Instant::now();
                             let mut dependency_cache = OverworldFeatureDependencyCache::new();
                             let result = dependency_cache
                                 .generate_features_chunks_with_dependencies(
@@ -320,16 +331,18 @@ impl WorldgenMailboxBackend {
                                     targets.iter().copied(),
                                     dependencies,
                                 );
-                            if completion_sender
-                                .send(WorldgenCompletedJob {
-                                    job_id,
-                                    generated_chunks: result.chunks,
-                                    retained_dependencies: result.retained_dependencies,
-                                    cache_report: result.cache_report,
-                                    timing: result.timing,
-                                })
-                                .is_err()
-                            {
+                            let completed = WorldgenCompletedJob {
+                                job_id,
+                                generated_chunks: result.chunks,
+                                retained_dependencies: result.retained_dependencies,
+                                cache_report: result.cache_report,
+                                timing: result.timing,
+                            };
+                            if let Ok(mut metrics) = worker_metrics.lock() {
+                                metrics.record_response(0);
+                                metrics.record_request_time_us(request_start.elapsed().as_micros());
+                            }
+                            if completion_sender.send(completed).is_err() {
                                 break;
                             }
                         }
@@ -344,6 +357,7 @@ impl WorldgenMailboxBackend {
             completion_receiver,
             completed: VecDeque::new(),
             worker: Some(worker),
+            metrics,
         }
     }
 
@@ -352,7 +366,10 @@ impl WorldgenMailboxBackend {
     }
 
     fn frame_metrics(&self) -> WorkerFrameMetrics {
-        WorkerFrameMetrics::default()
+        self.metrics
+            .lock()
+            .map(|metrics| *metrics)
+            .unwrap_or_default()
     }
 
     fn enqueue_features(

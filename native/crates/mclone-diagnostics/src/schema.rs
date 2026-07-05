@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{FrameSummaryReport, QueuePanelReport, StageSpan, WorstFrameDetail};
+use crate::{
+    FrameSummaryReport, PeerThreadPanelReport, QueuePanelReport, StageSpan, WorstFrameDetail,
+};
 
-pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 2;
+pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,6 +13,7 @@ pub struct FramePipelineReport {
     pub frame_summary: FrameSummaryReport,
     pub stage_spans: Vec<StageSpan>,
     pub queue_panel: QueuePanelReport,
+    pub peer_thread_panel: PeerThreadPanelReport,
     pub worst_frames: Vec<WorstFrameDetail>,
 }
 
@@ -22,7 +25,13 @@ impl FramePipelineReport {
             worst_frames: frame_summary.worst_frames.clone(),
             frame_summary,
             queue_panel,
+            peer_thread_panel: PeerThreadPanelReport::empty(),
         }
+    }
+
+    pub fn with_peer_thread_panel(mut self, peer_thread_panel: PeerThreadPanelReport) -> Self {
+        self.peer_thread_panel = peer_thread_panel;
+        self
     }
 }
 
@@ -47,6 +56,10 @@ mod tests {
         );
         assert_eq!(
             json["queuePanel"]["schemaVersion"],
+            FRAME_PIPELINE_SCHEMA_VERSION
+        );
+        assert_eq!(
+            json["peerThreadPanel"]["schemaVersion"],
             FRAME_PIPELINE_SCHEMA_VERSION
         );
     }

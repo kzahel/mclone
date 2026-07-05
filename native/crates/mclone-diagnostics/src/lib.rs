@@ -3,6 +3,7 @@
 pub mod clock;
 mod frame;
 pub mod legacy_json_keys;
+mod peer;
 mod queue;
 mod schema;
 mod stage;
@@ -12,6 +13,7 @@ pub use frame::{
     FrameSummaryReport, HeadroomSummary, OverBudgetTiers, PercentileMethod, PercentileRing,
     PercentileSummary, WorstFrameDetail, percentile_sorted_ms,
 };
+pub use peer::{PeerThreadActivityReport, PeerThreadId, PeerThreadPanelReport};
 pub use queue::{QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport};
 pub use schema::{FRAME_PIPELINE_SCHEMA_VERSION, FramePipelineReport};
 pub use stage::{CriticalPathLabel, StageId, StageSpan};

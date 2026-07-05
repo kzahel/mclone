@@ -49,7 +49,7 @@ use mclone_render_session::{
 };
 use mclone_server::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ServerRunnerDiagnostics,
-    ServerRunnerKind,
+    ServerRunnerKind, WorkerFrameMetrics,
 };
 use mclone_ui::{
     BlockPaletteEntry, BlockPaletteOverlay, EMPTY_BLOCK_PALETTE_ENTRIES, GamePlayerModel,
@@ -876,6 +876,9 @@ pub struct RuntimePollDiagnostics {
     pub server_update_queue_bytes: usize,
     pub server_pending_jobs: usize,
     pub server_pending_publications: usize,
+    pub runner_frame_metrics: WorkerFrameMetrics,
+    pub worldgen_job_frame_metrics: WorkerFrameMetrics,
+    pub light_status_job_frame_metrics: WorkerFrameMetrics,
     pub flush_commands_ms: f64,
     pub poll_total_ms: f64,
     pub drain_updates_ms: f64,
@@ -2361,6 +2364,10 @@ impl SingleViewRuntime {
         diagnostics.server_update_queue_bytes = runner_diagnostics.update_queue_bytes;
         diagnostics.server_pending_jobs = runner_diagnostics.pending_jobs;
         diagnostics.server_pending_publications = runner_diagnostics.pending_publications;
+        diagnostics.runner_frame_metrics = runner_diagnostics.runner_frame_metrics;
+        diagnostics.worldgen_job_frame_metrics = runner_diagnostics.worldgen_job_frame_metrics;
+        diagnostics.light_status_job_frame_metrics =
+            runner_diagnostics.light_status_job_frame_metrics;
         diagnostics.server_diagnostics_detail_refreshes =
             runner_diagnostics.diagnostics_detail_refreshes;
         diagnostics.server_diagnostics_detail_age_ms = runner_diagnostics.diagnostics_detail_age_ms;

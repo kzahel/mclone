@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::RenderSectionSyncTiming;
 use mclone_app_runtime::frame_render::{
     FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
@@ -13,7 +14,8 @@ use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
     FrameAccountingConfig, FrameAccumulator, FrameObservation, FramePipelineReport,
-    FrameSummaryReport, PercentileMethod, QueuePanelReport, StageId, StageSpan,
+    FrameSummaryReport, PeerThreadActivityReport, PeerThreadId, PeerThreadPanelReport,
+    PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport, StageId, StageSpan,
 };
 use mclone_mesh::{VisibilityGraphBuildStats, quad_face_count_from_indices};
 use mclone_render::chunk::{
@@ -30,7 +32,7 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_server::{SqliteWorldStore, initial_spawn_center_for_seed};
+use mclone_server::{SqliteWorldStore, WorkerFrameMetrics, initial_spawn_center_for_seed};
 use mclone_ui::{GameMovementMode, GameUiHost, GuiScale};
 
 use crate::camera::{
@@ -494,6 +496,7 @@ struct LoadingSettlePerfSampleReport {
 struct StartupStreamingFrameReport {
     elapsed_ms: f64,
     poll_ms: f64,
+    poll_server_reported_total_ms: f64,
     poll_scheduler_publish_completed_ms: f64,
     poll_apply_updates_ms: f64,
     poll_dirty_mark_ms: f64,
@@ -512,9 +515,13 @@ struct StartupStreamingFrameReport {
     ready_render_work_pending: bool,
     pending_render_compile_jobs: usize,
     inflight_render_sections: usize,
+    section_sync_timing: RenderSectionSyncTiming,
     submitted_compile_sections: usize,
+    accepted_compile_results: usize,
+    queued_completed_compile_results: usize,
     completed_compile_sections: usize,
     uploaded_sections: usize,
+    upload_removed_sections: usize,
     deadline_skipped_compile_requests: usize,
     update_pump_stalled: bool,
     server_update_queue_depth: usize,
@@ -535,6 +542,9 @@ struct StartupStreamingFrameReport {
     scheduler_pending_light_publications: usize,
     scheduler_worldgen_mailbox_pending_jobs: usize,
     scheduler_light_mailbox_pending_statuses: usize,
+    runner_frame_metrics: WorkerFrameMetrics,
+    worldgen_job_frame_metrics: WorkerFrameMetrics,
+    light_status_job_frame_metrics: WorkerFrameMetrics,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -604,10 +614,13 @@ struct FrameBudgetProbeFrameReport {
     remesh_ms: f64,
     upload_ms: f64,
     render_ms: f64,
+    section_sync_timing: RenderSectionSyncTiming,
     rebuilt_sections: usize,
     removed_sections: usize,
     submitted_compile_sections: usize,
     deadline_skipped_compile_requests: usize,
+    accepted_compile_results: usize,
+    queued_completed_compile_results: usize,
     completed_compile_sections: usize,
     stale_compile_sections: usize,
     uploaded_sections: usize,
@@ -694,10 +707,13 @@ impl Default for FrameBudgetProbeFrameReport {
             remesh_ms: 0.0,
             upload_ms: 0.0,
             render_ms: 0.0,
+            section_sync_timing: RenderSectionSyncTiming::default(),
             rebuilt_sections: 0,
             removed_sections: 0,
             submitted_compile_sections: 0,
             deadline_skipped_compile_requests: 0,
+            accepted_compile_results: 0,
+            queued_completed_compile_results: 0,
             completed_compile_sections: 0,
             stale_compile_sections: 0,
             uploaded_sections: 0,
@@ -722,10 +738,13 @@ impl FrameBudgetProbeFrameReport {
     fn add_section_timing(&mut self, timing: FrameBudgetProbeSectionTiming) {
         self.remesh_ms += timing.remesh_ms;
         self.upload_ms += timing.upload_ms;
+        self.section_sync_timing.merge(timing.sync_timing);
         self.rebuilt_sections += timing.rebuilt_sections;
         self.removed_sections += timing.removed_sections;
         self.submitted_compile_sections += timing.submitted_compile_sections;
         self.deadline_skipped_compile_requests += timing.deadline_skipped_compile_requests;
+        self.accepted_compile_results += timing.accepted_compile_results;
+        self.queued_completed_compile_results += timing.queued_completed_compile_results;
         self.completed_compile_sections += timing.completed_compile_sections;
         self.stale_compile_sections += timing.stale_compile_sections;
         self.uploaded_sections += timing.uploaded_sections;
@@ -753,10 +772,13 @@ struct FrameBudgetProbeState {
 struct FrameBudgetProbeSectionTiming {
     remesh_ms: f64,
     upload_ms: f64,
+    sync_timing: RenderSectionSyncTiming,
     rebuilt_sections: usize,
     removed_sections: usize,
     submitted_compile_sections: usize,
     deadline_skipped_compile_requests: usize,
+    accepted_compile_results: usize,
+    queued_completed_compile_results: usize,
     completed_compile_sections: usize,
     stale_compile_sections: usize,
     uploaded_sections: usize,
@@ -1063,7 +1085,13 @@ impl FrameBudgetProbeReport {
         println!("    \"min_frame_ms\": {:.3},", self.headless.min_frame_ms);
         println!("    \"max_frame_ms\": {:.3}", self.headless.max_frame_ms);
         println!("  }},");
-        print_frame_accounting_json_field(&frame_accounting, true);
+        let pipeline_frame_accounting = self.frame_accounting.as_ref().unwrap_or(&frame_accounting);
+        print_frame_accounting_json_field(
+            pipeline_frame_accounting,
+            QueuePanelReport::new(Vec::new()),
+            PeerThreadPanelReport::empty(),
+            true,
+        );
         println!("  \"frame_reports\": [");
         for (index, frame) in self.frames.iter().enumerate() {
             let timing = self.headless.frames.get(index).copied().unwrap_or_default();
@@ -1415,8 +1443,11 @@ impl StartupStreamingPerfReport {
 
     pub(crate) fn print_json(&self) {
         let target_frame_ms = self.target_frame_ms();
-        let frame_accounting =
-            headless_frame_accounting_report(&self.headless.frames, target_frame_ms);
+        let frame_accounting = startup_streaming_frame_accounting_report(
+            &self.frames,
+            &self.headless.frames,
+            target_frame_ms,
+        );
         let over_budget = frame_accounting.over_budget.single_period_frames();
         let over_double = frame_accounting.over_budget.double_period_frames();
         let over_quad = frame_accounting.over_budget.quad_period_frames();
@@ -1785,7 +1816,12 @@ impl StartupStreamingPerfReport {
             "  \"update_pump_stalled_frames\": {},",
             update_pump_stalled_frames
         );
-        print_frame_accounting_json_field(&frame_accounting, true);
+        print_frame_accounting_json_field(
+            &frame_accounting,
+            startup_streaming_queue_panel(&self.frames),
+            startup_streaming_peer_panel(&self.frames),
+            true,
+        );
         let sampled_frames = self
             .frames
             .iter()
@@ -2212,16 +2248,15 @@ fn record_frame_budget_probe_accounting(
     frame_ms: f64,
     report: &FrameBudgetProbeFrameReport,
 ) {
-    accumulator.record_frame(
-        FrameObservation::new(frame_index, frame_ms)
-            .with_stage_span(StageSpan::new(StageId::HostSessionCommands, report.poll_ms))
-            .with_stage_span(StageSpan::new(
-                StageId::RenderSectionAdmission,
-                report.remesh_ms,
-            ))
-            .with_stage_span(StageSpan::new(StageId::GpuUpload, report.upload_ms))
-            .with_stage_span(StageSpan::new(StageId::DrawEncode, report.render_ms)),
-    );
+    let mut observation = FrameObservation::new(frame_index, frame_ms)
+        .with_stage_span(StageSpan::new(StageId::HostSessionCommands, report.poll_ms));
+    for span in render_section_sync_stage_spans(report.section_sync_timing, report.remesh_ms) {
+        observation = observation.with_stage_span(span);
+    }
+    observation = observation
+        .with_stage_span(StageSpan::new(StageId::UploadApply, report.upload_ms))
+        .with_stage_span(StageSpan::new(StageId::DrawEncode, report.render_ms));
+    accumulator.record_frame(observation);
 }
 
 fn frame_accounting_total_violations(summary: Option<&FrameSummaryReport>) -> u64 {
@@ -2232,8 +2267,14 @@ fn frame_accounting_observed_frames(summary: Option<&FrameSummaryReport>) -> u64
     summary.map_or(0, |summary| summary.frames)
 }
 
-fn print_frame_accounting_json_field(summary: &FrameSummaryReport, trailing_comma: bool) {
-    let report = FramePipelineReport::new(summary.clone(), QueuePanelReport::new(Vec::new()));
+fn print_frame_accounting_json_field(
+    summary: &FrameSummaryReport,
+    queue_panel: QueuePanelReport,
+    peer_thread_panel: PeerThreadPanelReport,
+    trailing_comma: bool,
+) {
+    let report = FramePipelineReport::new(summary.clone(), queue_panel)
+        .with_peer_thread_panel(peer_thread_panel);
     let json = serde_json::to_string_pretty(&report).expect("frame accounting report serializes");
     let lines = json.lines().collect::<Vec<_>>();
     let suffix = if trailing_comma { "," } else { "" };
@@ -2246,6 +2287,198 @@ fn print_frame_accounting_json_field(summary: &FrameSummaryReport, trailing_comm
             println!("  {line}");
         }
     }
+}
+
+fn render_section_sync_stage_spans(
+    timing: RenderSectionSyncTiming,
+    total_sync_ms: f64,
+) -> Vec<StageSpan> {
+    let dirty_ready_scan_ms = timing.dirty_seed_ms + timing.prepare_ms;
+    let request_build_ms = timing.submit_snapshot_ms + timing.submit_request_build_ms;
+    let worker_submit_ms = timing.submit_compiler_ms;
+    let prepared_record_ms = timing.submit_mark_inflight_ms
+        + timing.submit_apply_ready_plan_ms
+        + timing.submit_ready_update_ms;
+    let attributed_ms = timing.completed_result_accept_ms
+        + dirty_ready_scan_ms
+        + request_build_ms
+        + worker_submit_ms
+        + prepared_record_ms;
+    let unattributed_ms = (total_sync_ms - attributed_ms).max(0.0);
+    vec![
+        StageSpan::new(
+            StageId::CompletedResultAcceptance,
+            timing.completed_result_accept_ms,
+        ),
+        StageSpan::new(StageId::RenderAdmissionDirtyReadyScan, dirty_ready_scan_ms),
+        StageSpan::new(StageId::RenderAdmissionRequestBuild, request_build_ms),
+        StageSpan::new(StageId::RenderAdmissionWorkerSubmit, worker_submit_ms),
+        StageSpan::new(
+            StageId::RenderAdmissionPreparedRecordMaintenance,
+            prepared_record_ms,
+        ),
+        StageSpan::new(StageId::RenderSectionAdmission, unattributed_ms),
+    ]
+}
+
+fn startup_streaming_frame_accounting_report(
+    frames: &[StartupStreamingFrameReport],
+    headless_frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
+    target_frame_ms: f64,
+) -> FrameSummaryReport {
+    let mut accumulator = FrameAccumulator::new(
+        FrameAccountingConfig::from_target_period_ms(target_frame_ms)
+            .with_percentile_method(PercentileMethod::InclusiveCeil),
+    );
+    for (index, frame) in frames.iter().enumerate() {
+        let frame_wall_ms = headless_frames.get(index).map_or(
+            frame.poll_ms + frame.remesh_ms + frame.upload_ms + frame.render_ms,
+            |frame| frame.frame_ms,
+        );
+        let mut observation = FrameObservation::new(index as u64 + 1, frame_wall_ms)
+            .with_stage_span(StageSpan::new(StageId::HostSessionCommands, frame.poll_ms));
+        for span in render_section_sync_stage_spans(frame.section_sync_timing, frame.remesh_ms) {
+            observation = observation.with_stage_span(span);
+        }
+        observation = observation
+            .with_stage_span(StageSpan::new(StageId::UploadApply, frame.upload_ms))
+            .with_stage_span(StageSpan::new(StageId::DrawEncode, frame.render_ms));
+        accumulator.record_frame(observation);
+    }
+    accumulator.summary_report()
+}
+
+fn startup_streaming_queue_panel(frames: &[StartupStreamingFrameReport]) -> QueuePanelReport {
+    let mut inbound_updates = QueueAgeTracker::new(QueueId::InboundUpdates);
+    let mut completed_results = QueueAgeTracker::new(QueueId::CompletedRenderResults);
+    let mut upload_work = QueueAgeTracker::new(QueueId::UploadWork);
+    let mut host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+    let mut render_compile_jobs = QueueAgeTracker::new(QueueId::RenderCompileJobs);
+
+    for frame in frames {
+        let now_ms = frame.elapsed_ms;
+        inbound_updates.reconcile_depth(usize_to_u64(frame.server_update_queue_depth), now_ms);
+
+        let completed = usize_to_u64(frame.completed_compile_sections);
+        if completed > 0 {
+            completed_results.enqueue(completed, now_ms);
+            completed_results.dequeue(completed, now_ms);
+        }
+        completed_results
+            .reconcile_depth(usize_to_u64(frame.queued_completed_compile_results), now_ms);
+
+        let uploaded = usize_to_u64(frame.uploaded_sections + frame.upload_removed_sections);
+        if uploaded > 0 {
+            upload_work.enqueue(uploaded, now_ms);
+            upload_work.dequeue(uploaded, now_ms);
+        }
+
+        let publication_depth = frame
+            .pending_publications
+            .saturating_add(frame.scheduler_pending_worldgen_publication_chunks)
+            .saturating_add(frame.scheduler_pending_light_publications);
+        host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
+        render_compile_jobs
+            .reconcile_depth(usize_to_u64(frame.pending_render_compile_jobs), now_ms);
+    }
+
+    let report_at_ms = frames.last().map_or(0.0, |frame| frame.elapsed_ms);
+    QueuePanelReport::new(vec![
+        inbound_updates.report(report_at_ms),
+        completed_results.report(report_at_ms),
+        upload_work.report(report_at_ms),
+        host_publication.report(report_at_ms),
+        render_compile_jobs.report(report_at_ms),
+    ])
+}
+
+fn startup_streaming_peer_panel(frames: &[StartupStreamingFrameReport]) -> PeerThreadPanelReport {
+    let final_frame = frames.last().copied().unwrap_or_default();
+    let server_busy_ms = frames
+        .iter()
+        .map(|frame| frame.poll_server_reported_total_ms)
+        .sum::<f64>();
+    let max_server_pending_jobs = frames
+        .iter()
+        .map(|frame| frame.pending_jobs)
+        .max()
+        .unwrap_or(0);
+    let max_worldgen_pending_jobs = frames
+        .iter()
+        .map(|frame| frame.scheduler_worldgen_mailbox_pending_jobs)
+        .max()
+        .unwrap_or(0);
+    let max_light_pending_jobs = frames
+        .iter()
+        .map(|frame| frame.scheduler_light_mailbox_pending_statuses)
+        .max()
+        .unwrap_or(0);
+    let max_render_compile_pending_jobs = frames
+        .iter()
+        .map(|frame| frame.pending_render_compile_jobs)
+        .max()
+        .unwrap_or(0);
+    let submitted_compile_sections = frames
+        .iter()
+        .map(|frame| frame.submitted_compile_sections)
+        .sum::<usize>();
+    let completed_compile_sections = frames
+        .iter()
+        .map(|frame| frame.completed_compile_sections)
+        .sum::<usize>();
+
+    PeerThreadPanelReport::new(vec![
+        PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
+            .with_pending_jobs(usize_to_u64(max_server_pending_jobs))
+            .with_busy_idle_ms(Some(server_busy_ms), None),
+        worker_metrics_peer_report(
+            PeerThreadId::Worldgen,
+            final_frame.worldgen_job_frame_metrics,
+            max_worldgen_pending_jobs,
+        ),
+        worker_metrics_peer_report(
+            PeerThreadId::LightStatus,
+            final_frame.light_status_job_frame_metrics,
+            max_light_pending_jobs,
+        ),
+        PeerThreadActivityReport::new(PeerThreadId::RenderCompileWorkers)
+            .with_pending_jobs(usize_to_u64(max_render_compile_pending_jobs))
+            .with_frames(
+                usize_to_u64(submitted_compile_sections),
+                usize_to_u64(completed_compile_sections),
+            ),
+    ])
+}
+
+fn worker_metrics_peer_report(
+    lane: PeerThreadId,
+    metrics: WorkerFrameMetrics,
+    pending_jobs: usize,
+) -> PeerThreadActivityReport {
+    PeerThreadActivityReport::new(lane)
+        .with_pending_jobs(usize_to_u64(pending_jobs))
+        .with_frames(
+            usize_to_u64(metrics.request_frames),
+            usize_to_u64(metrics.response_frames),
+        )
+        .with_bytes(
+            usize_to_u64(metrics.request_bytes),
+            usize_to_u64(metrics.response_bytes),
+        )
+        .with_max_pending_frames(usize_to_u64(metrics.max_pending_frames))
+        .with_request_timing_ms(
+            (metrics.last_request_us > 0).then_some(micros_to_ms(metrics.last_request_us)),
+            micros_to_ms(metrics.total_request_us),
+            micros_to_ms(metrics.max_request_us),
+        )
+}
+
+fn usize_to_u64(value: usize) -> u64 {
+    value.try_into().unwrap_or(u64::MAX)
+}
+
+fn micros_to_ms(value: u128) -> f64 {
+    value as f64 / 1000.0
 }
 
 pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerfReport> {
@@ -2714,6 +2947,7 @@ pub(crate) fn run_startup_streaming_perf(
             let _runtime_changed = state.runtime.poll()?;
             report.poll_ms = elapsed_ms(poll_start.elapsed());
             let poll_diagnostics = state.runtime.last_poll_diagnostics();
+            report.poll_server_reported_total_ms = poll_diagnostics.server_reported_total_ms;
             report.poll_scheduler_publish_completed_ms =
                 poll_diagnostics.scheduler_publish_completed_ms;
             report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
@@ -2754,15 +2988,22 @@ pub(crate) fn run_startup_streaming_perf(
                 poll_diagnostics.scheduler_worldgen_mailbox_pending_jobs;
             report.scheduler_light_mailbox_pending_statuses =
                 poll_diagnostics.scheduler_light_mailbox_pending_statuses;
+            report.runner_frame_metrics = poll_diagnostics.runner_frame_metrics;
+            report.worldgen_job_frame_metrics = poll_diagnostics.worldgen_job_frame_metrics;
+            report.light_status_job_frame_metrics = poll_diagnostics.light_status_job_frame_metrics;
 
             if state.runtime.has_pending_render_work(spectator.position) {
                 let update =
                     probe_sync_upload_sections(&frame, state, spectator.position, frame_deadline)?;
                 report.remesh_ms = update.remesh_ms;
                 report.upload_ms = update.upload_ms;
+                report.section_sync_timing = update.sync_timing;
                 report.submitted_compile_sections = update.submitted_compile_sections;
+                report.accepted_compile_results = update.accepted_compile_results;
+                report.queued_completed_compile_results = update.queued_completed_compile_results;
                 report.completed_compile_sections = update.completed_compile_sections;
                 report.uploaded_sections = update.uploaded_sections;
+                report.upload_removed_sections = update.upload_removed_sections;
                 report.deadline_skipped_compile_requests = update.deadline_skipped_compile_requests;
             }
 
@@ -2948,9 +3189,15 @@ fn probe_sync_upload_sections(
     deadline: Instant,
 ) -> Result<FrameBudgetProbeSectionTiming> {
     let remesh_start = Instant::now();
-    let section_update = state
+    let timed_section_update = state
         .runtime
-        .sync_render_sections_until_deadline(camera_position, deadline)?;
+        .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+            camera_position,
+            deadline,
+            None,
+        )?;
+    let sync_timing = timed_section_update.timing;
+    let section_update = timed_section_update.cache_update;
     let remesh_ms = elapsed_ms(remesh_start.elapsed());
     let upload_start = Instant::now();
     let upload_report = state
@@ -2979,10 +3226,13 @@ fn probe_sync_upload_sections(
     Ok(FrameBudgetProbeSectionTiming {
         remesh_ms,
         upload_ms,
+        sync_timing,
         rebuilt_sections: section_update.rebuilt_section_count(),
         removed_sections: section_update.removed_section_count(),
         submitted_compile_sections: section_update.submitted_compile_section_count,
         deadline_skipped_compile_requests: section_update.deadline_skipped_compile_request_count,
+        accepted_compile_results: section_update.accepted_compile_result_count,
+        queued_completed_compile_results: section_update.queued_completed_compile_result_count,
         completed_compile_sections: section_update.completed_compile_section_count,
         stale_compile_sections: section_update.stale_compile_section_count,
         uploaded_sections: upload_report.uploaded_section_count,

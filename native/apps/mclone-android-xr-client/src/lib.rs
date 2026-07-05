@@ -44,8 +44,10 @@ mod android {
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_diagnostics::{
-        FrameAccountingConfig, FrameAccumulator, FrameObservation, FrameSummaryReport,
-        PercentileMethod, StageId, StageSpan, percentile_sorted_ms,
+        CriticalPathLabel, FrameAccountingConfig, FrameAccumulator, FrameObservation,
+        FramePipelineReport, FrameSummaryReport, PeerThreadActivityReport, PeerThreadId,
+        PeerThreadPanelReport, PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport,
+        StageId, StageSpan, percentile_sorted_ms,
     };
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -4055,6 +4057,11 @@ mod android {
 
         fn log_summary(&mut self, frame_stats: XrFrameStats) {
             let frame_accounting = self.frame_accounting_report();
+            let queue_panel = android_xr_queue_panel(&self.frame_details);
+            let peer_thread_panel = android_xr_peer_thread_panel(&self.frame_details);
+            let frame_pipeline_report =
+                FramePipelineReport::new(frame_accounting.clone(), queue_panel)
+                    .with_peer_thread_panel(peer_thread_panel);
             let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = frame_accounting.frames;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
@@ -4153,6 +4160,7 @@ mod android {
                 frame_accounting.app_over_period_frames,
                 frame_accounting.app_over_period_pct
             );
+            log_android_xr_frame_pipeline_report(&frame_pipeline_report);
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_HEADROOM sample_seconds={:.3} mode={} render_path={} xr_render_scale={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} submitted_fps={:.2} runtime_fps={:.2} wait_frame_avg_ms={:.3} wait_frame_p50_ms={:.3} wait_frame_p95_ms={:.3} wait_frame_max_ms={:.3} app_work_avg_ms={:.3} app_work_min_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} app_work_p99_ms={:.3} app_work_max_ms={:.3} headroom_avg_ms={:.3} headroom_p50_ms={:.3} headroom_p05_ms={:.3} headroom_p01_ms={:.3} headroom_min_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
@@ -4967,7 +4975,7 @@ mod android {
     ) -> FrameObservation {
         let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
         let thread_cpu_ms = timing.thread_cpu_valid.then_some(timing.thread_cpu_ms);
-        FrameObservation::new(sample_frame, timing.frame_wall_ms)
+        let mut observation = FrameObservation::new(sample_frame, timing.frame_wall_ms)
             .with_wait_ms(timing.wait_frame_ms)
             .with_app_work_ms(app_work_ms)
             .with_thread_cpu_ms(thread_cpu_ms)
@@ -4979,11 +4987,273 @@ mod android {
             .with_stage_span(StageSpan::new(
                 StageId::InputPoseEvents,
                 timing.controller_poll_ms,
-            ))
-            .with_stage_span(StageSpan::new(
-                StageId::DrawEncode,
-                timing.render_mclone_frame_ms,
-            ))
+            ));
+        for span in android_xr_render_stage_spans(timing.render) {
+            observation = observation.with_stage_span(span);
+        }
+        observation
+    }
+
+    fn android_xr_render_stage_spans(timing: AndroidXrRenderFrameTiming) -> Vec<StageSpan> {
+        let dirty_ready_scan_ms =
+            timing.terrain_runtime_dirty_seed_ms + timing.terrain_runtime_prepare_ms;
+        let request_build_ms = timing.terrain_runtime_submit_snapshot_ms
+            + timing.terrain_runtime_submit_request_build_ms;
+        let worker_submit_ms = timing.terrain_runtime_submit_compiler_ms;
+        let prepared_record_ms = timing.terrain_runtime_submit_mark_inflight_ms
+            + timing.terrain_runtime_submit_apply_ready_plan_ms
+            + timing.terrain_runtime_submit_ready_update_ms;
+        let attributed_sync_ms = timing.terrain_runtime_result_accept_ms
+            + dirty_ready_scan_ms
+            + request_build_ms
+            + worker_submit_ms
+            + prepared_record_ms;
+        let sync_unattributed_ms = timing
+            .terrain_runtime_sync_unattributed_ms
+            .max((timing.terrain_runtime_sync_ms - attributed_sync_ms).max(0.0));
+        let multiview_draw_ms = timing.terrain_multiview_sky_ms
+            + timing.terrain_multiview_terrain_ms
+            + timing.terrain_multiview_actor_ms
+            + timing.terrain_multiview_screen_effect_ms
+            + timing.terrain_multiview_world_overlays_ms
+            + timing.terrain_multiview_submit_ms;
+        let draw_encode_ms = timing.terrain_render_views_ms.max(multiview_draw_ms);
+        vec![
+            StageSpan::new(StageId::HostSessionCommands, timing.terrain_runtime_poll_ms),
+            StageSpan::new(
+                StageId::CompletedResultAcceptance,
+                timing.terrain_runtime_result_accept_ms,
+            ),
+            StageSpan::new(StageId::RenderAdmissionDirtyReadyScan, dirty_ready_scan_ms),
+            StageSpan::new(StageId::RenderAdmissionRequestBuild, request_build_ms),
+            StageSpan::new(StageId::RenderAdmissionWorkerSubmit, worker_submit_ms),
+            StageSpan::new(
+                StageId::RenderAdmissionPreparedRecordMaintenance,
+                prepared_record_ms,
+            ),
+            StageSpan::new(StageId::RenderSectionAdmission, sync_unattributed_ms),
+            StageSpan::new(StageId::UploadApply, timing.terrain_runtime_gpu_upload_ms),
+            StageSpan::new(
+                StageId::PreparedDrawRecords,
+                timing.terrain_shared_records_ms,
+            ),
+            StageSpan::new(StageId::DrawEncode, draw_encode_ms),
+        ]
+    }
+
+    fn android_xr_queue_panel(details: &[AndroidXrWorstFrameSnapshot]) -> QueuePanelReport {
+        let mut inbound_updates = QueueAgeTracker::new(QueueId::InboundUpdates);
+        let mut completed_results = QueueAgeTracker::new(QueueId::CompletedRenderResults);
+        let mut upload_work = QueueAgeTracker::new(QueueId::UploadWork);
+        let mut host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+        let mut render_compile_jobs = QueueAgeTracker::new(QueueId::RenderCompileJobs);
+        let mut now_ms = 0.0;
+
+        for detail in details {
+            now_ms += detail.timing.frame_wall_ms;
+            let Some(summary) = detail.summary else {
+                continue;
+            };
+            let upload = summary.upload;
+            inbound_updates.reconcile_depth(usize_to_u64(upload.server_update_queue_depth), now_ms);
+
+            let completed = usize_to_u64(upload.completed_compile_section_count);
+            if completed > 0 {
+                completed_results.enqueue(completed, now_ms);
+                completed_results.dequeue(completed, now_ms);
+            }
+            completed_results.reconcile_depth(
+                usize_to_u64(upload.queued_completed_compile_result_count),
+                now_ms,
+            );
+
+            upload_work.reconcile_depth(
+                usize_to_u64(upload.queued_upload_lifecycle_item_count),
+                now_ms,
+            );
+
+            let publication_depth = upload
+                .server_pending_publications
+                .saturating_add(upload.poll_scheduler_pending_worldgen_publication_chunks)
+                .saturating_add(upload.poll_scheduler_pending_light_publications);
+            host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
+            render_compile_jobs
+                .reconcile_depth(usize_to_u64(upload.pending_compile_jobs_after), now_ms);
+        }
+
+        QueuePanelReport::new(vec![
+            inbound_updates.report(now_ms),
+            completed_results.report(now_ms),
+            upload_work.report(now_ms),
+            host_publication.report(now_ms),
+            render_compile_jobs.report(now_ms),
+        ])
+    }
+
+    fn android_xr_peer_thread_panel(
+        details: &[AndroidXrWorstFrameSnapshot],
+    ) -> PeerThreadPanelReport {
+        let latest_upload = details
+            .iter()
+            .rev()
+            .find_map(|detail| detail.summary.map(|summary| summary.upload))
+            .unwrap_or_default();
+        let server_busy_ms = details
+            .iter()
+            .filter_map(|detail| detail.summary)
+            .map(|summary| summary.upload.poll_server_reported_total_ms)
+            .sum::<f64>();
+        let max_server_pending_jobs = details
+            .iter()
+            .filter_map(|detail| detail.summary)
+            .map(|summary| summary.upload.server_pending_jobs)
+            .max()
+            .unwrap_or(0);
+        let max_worldgen_pending_jobs = details
+            .iter()
+            .filter_map(|detail| detail.summary)
+            .map(|summary| summary.upload.poll_scheduler_worldgen_mailbox_pending_jobs)
+            .max()
+            .unwrap_or(0);
+        let max_light_pending_jobs = details
+            .iter()
+            .filter_map(|detail| detail.summary)
+            .map(|summary| summary.upload.poll_scheduler_light_mailbox_pending_statuses)
+            .max()
+            .unwrap_or(0);
+        let max_render_compile_pending_jobs = details
+            .iter()
+            .filter_map(|detail| detail.summary)
+            .map(|summary| summary.upload.pending_compile_jobs_after)
+            .max()
+            .unwrap_or(0);
+        let submitted_compile_sections = details
+            .iter()
+            .filter_map(|detail| detail.summary)
+            .map(|summary| summary.upload.submitted_compile_section_count)
+            .sum::<usize>();
+        let completed_compile_sections = details
+            .iter()
+            .filter_map(|detail| detail.summary)
+            .map(|summary| summary.upload.completed_compile_section_count)
+            .sum::<usize>();
+
+        PeerThreadPanelReport::new(vec![
+            PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
+                .with_pending_jobs(usize_to_u64(max_server_pending_jobs))
+                .with_busy_idle_ms(Some(server_busy_ms), None),
+            worker_metrics_peer_report(
+                PeerThreadId::Worldgen,
+                usize_to_u64(latest_upload.worldgen_job_frame_metrics.request_frames),
+                usize_to_u64(latest_upload.worldgen_job_frame_metrics.response_frames),
+                usize_to_u64(latest_upload.worldgen_job_frame_metrics.request_bytes),
+                usize_to_u64(latest_upload.worldgen_job_frame_metrics.response_bytes),
+                usize_to_u64(latest_upload.worldgen_job_frame_metrics.max_pending_frames),
+                latest_upload.worldgen_job_frame_metrics.last_request_us,
+                latest_upload.worldgen_job_frame_metrics.total_request_us,
+                latest_upload.worldgen_job_frame_metrics.max_request_us,
+                max_worldgen_pending_jobs,
+            ),
+            worker_metrics_peer_report(
+                PeerThreadId::LightStatus,
+                usize_to_u64(latest_upload.light_status_job_frame_metrics.request_frames),
+                usize_to_u64(latest_upload.light_status_job_frame_metrics.response_frames),
+                usize_to_u64(latest_upload.light_status_job_frame_metrics.request_bytes),
+                usize_to_u64(latest_upload.light_status_job_frame_metrics.response_bytes),
+                usize_to_u64(
+                    latest_upload
+                        .light_status_job_frame_metrics
+                        .max_pending_frames,
+                ),
+                latest_upload.light_status_job_frame_metrics.last_request_us,
+                latest_upload
+                    .light_status_job_frame_metrics
+                    .total_request_us,
+                latest_upload.light_status_job_frame_metrics.max_request_us,
+                max_light_pending_jobs,
+            ),
+            PeerThreadActivityReport::new(PeerThreadId::RenderCompileWorkers)
+                .with_pending_jobs(usize_to_u64(max_render_compile_pending_jobs))
+                .with_frames(
+                    usize_to_u64(submitted_compile_sections),
+                    usize_to_u64(completed_compile_sections),
+                ),
+        ])
+    }
+
+    fn worker_metrics_peer_report(
+        lane: PeerThreadId,
+        request_frames: u64,
+        response_frames: u64,
+        request_bytes: u64,
+        response_bytes: u64,
+        max_pending_frames: u64,
+        last_request_us: u128,
+        total_request_us: u128,
+        max_request_us: u128,
+        pending_jobs: usize,
+    ) -> PeerThreadActivityReport {
+        PeerThreadActivityReport::new(lane)
+            .with_pending_jobs(usize_to_u64(pending_jobs))
+            .with_frames(request_frames, response_frames)
+            .with_bytes(request_bytes, response_bytes)
+            .with_max_pending_frames(max_pending_frames)
+            .with_request_timing_ms(
+                (last_request_us > 0).then_some(micros_to_ms(last_request_us)),
+                micros_to_ms(total_request_us),
+                micros_to_ms(max_request_us),
+            )
+    }
+
+    fn log_android_xr_frame_pipeline_report(report: &FramePipelineReport) {
+        log::info!(
+            "MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE schema_version={} frames={} queues={} peers={} stages={}",
+            report.schema_version,
+            report.frame_summary.frames,
+            report.queue_panel.queues.len(),
+            report.peer_thread_panel.peers.len(),
+            report.stage_spans.len()
+        );
+        for queue in &report.queue_panel.queues {
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_QUEUE queue={} enqueued={} dequeued={} depth={} oldest_age_ms={} max_oldest_age_ms={:.3} conservation_violations={}",
+                queue_id_label(&queue.queue),
+                queue.enqueued_total,
+                queue.dequeued_total,
+                queue.depth,
+                format_optional_f64(queue.oldest_age_ms),
+                queue.max_oldest_age_ms,
+                queue.conservation_violations
+            );
+        }
+        for peer in &report.peer_thread_panel.peers {
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_PEER lane={} active={} pending_jobs={} request_frames={} response_frames={} request_bytes={} response_bytes={} max_pending_frames={} busy_ms={} idle_ms={} last_request_ms={} total_request_ms={:.3} max_request_ms={:.3} conservation_violations={}",
+                peer_thread_id_label(&peer.lane),
+                peer.active,
+                peer.pending_jobs,
+                peer.request_frames,
+                peer.response_frames,
+                peer.request_bytes,
+                peer.response_bytes,
+                peer.max_pending_frames,
+                format_optional_f64(peer.busy_ms),
+                format_optional_f64(peer.idle_ms),
+                format_optional_f64(peer.last_request_ms),
+                peer.total_request_ms,
+                peer.max_request_ms,
+                peer.conservation_violations
+            );
+        }
+        for span in &report.stage_spans {
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_STAGE stage={} label={} elapsed_ms={:.3} thread_cpu_ms={}",
+                stage_id_label(span.stage),
+                critical_path_label(span.label),
+                span.elapsed_ms,
+                format_optional_f64(span.thread_cpu_ms)
+            );
+        }
     }
 
     fn perf_budget_ms(target_hz: f64) -> f64 {
@@ -4999,6 +5269,78 @@ mod android {
         value
             .map(|value| value.to_string())
             .unwrap_or_else(|| "unbounded".to_owned())
+    }
+
+    fn format_optional_f64(value: Option<f64>) -> String {
+        value
+            .map(|value| format!("{value:.3}"))
+            .unwrap_or_else(|| "none".to_owned())
+    }
+
+    fn usize_to_u64(value: usize) -> u64 {
+        value.try_into().unwrap_or(u64::MAX)
+    }
+
+    fn micros_to_ms(value: u128) -> f64 {
+        value as f64 / 1000.0
+    }
+
+    fn critical_path_label(label: CriticalPathLabel) -> &'static str {
+        match label {
+            CriticalPathLabel::CurrentFrameCritical => "current-frame-critical",
+            CriticalPathLabel::NextFrameSlack => "next-frame-slack",
+            CriticalPathLabel::ParallelCpuPeer => "parallel-cpu-peer",
+            CriticalPathLabel::RemoteHostWork => "remote-host-work",
+            CriticalPathLabel::QueuedBackpressured => "queued-backpressured",
+        }
+    }
+
+    fn stage_id_label(stage: StageId) -> &'static str {
+        match stage {
+            StageId::InputPoseEvents => "input-pose-events",
+            StageId::HostSessionCommands => "host-session-commands",
+            StageId::TerrainGeneration => "terrain-generation",
+            StageId::LightComputeStatus => "light-compute-status",
+            StageId::SchedulerPublication => "scheduler-publication",
+            StageId::TransportDecode => "transport-decode",
+            StageId::ClientUpdateApply => "client-update-apply",
+            StageId::RenderSectionAdmission => "render-section-admission",
+            StageId::RenderAdmissionDirtyReadyScan => "render-admission-dirty-ready-scan",
+            StageId::RenderAdmissionRequestBuild => "render-admission-request-build",
+            StageId::RenderAdmissionWorkerSubmit => "render-admission-worker-submit",
+            StageId::RenderAdmissionPreparedRecordMaintenance => {
+                "render-admission-prepared-record-maintenance"
+            }
+            StageId::CpuMeshCompile => "cpu-mesh-compile",
+            StageId::CompletedResultAcceptance => "completed-result-acceptance",
+            StageId::GpuUpload => "gpu-upload",
+            StageId::UploadApply => "upload-apply",
+            StageId::PreparedDrawRecords => "prepared-draw-records",
+            StageId::DrawEncode => "draw-encode",
+            StageId::GpuExecutionPresentationWait => "gpu-execution-presentation-wait",
+            StageId::UiDebug => "ui-debug",
+        }
+    }
+
+    fn queue_id_label(queue: &QueueId) -> &str {
+        match queue {
+            QueueId::InboundUpdates => "inbound-updates",
+            QueueId::CompletedRenderResults => "completed-render-results",
+            QueueId::UploadWork => "upload-work",
+            QueueId::HostPublication => "host-publication",
+            QueueId::RenderCompileJobs => "render-compile-jobs",
+            QueueId::Custom(label) => label.as_str(),
+        }
+    }
+
+    fn peer_thread_id_label(peer: &PeerThreadId) -> &str {
+        match peer {
+            PeerThreadId::ServerRunner => "server-runner",
+            PeerThreadId::Worldgen => "worldgen",
+            PeerThreadId::LightStatus => "light-status",
+            PeerThreadId::RenderCompileWorkers => "render-compile-workers",
+            PeerThreadId::Custom(label) => label.as_str(),
+        }
     }
 
     fn format_supported_hz(rates: &[f32]) -> String {
@@ -5711,6 +6053,27 @@ mod android {
             server_pending_publications: a
                 .server_pending_publications
                 .max(b.server_pending_publications),
+            runner_frame_metrics: if a.runner_frame_metrics.total_request_us
+                >= b.runner_frame_metrics.total_request_us
+            {
+                a.runner_frame_metrics
+            } else {
+                b.runner_frame_metrics
+            },
+            worldgen_job_frame_metrics: if a.worldgen_job_frame_metrics.total_request_us
+                >= b.worldgen_job_frame_metrics.total_request_us
+            {
+                a.worldgen_job_frame_metrics
+            } else {
+                b.worldgen_job_frame_metrics
+            },
+            light_status_job_frame_metrics: if a.light_status_job_frame_metrics.total_request_us
+                >= b.light_status_job_frame_metrics.total_request_us
+            {
+                a.light_status_job_frame_metrics
+            } else {
+                b.light_status_job_frame_metrics
+            },
             scheduler_pending_jobs: a.scheduler_pending_jobs.max(b.scheduler_pending_jobs),
             scheduler_completed_jobs: a.scheduler_completed_jobs.max(b.scheduler_completed_jobs),
             scheduler_dirty_chunks: a.scheduler_dirty_chunks.max(b.scheduler_dirty_chunks),

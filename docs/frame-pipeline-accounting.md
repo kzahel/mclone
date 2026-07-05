@@ -264,6 +264,12 @@ sink's formatting code is a defect. The logs remain the benchmark authority
 and the overlay stays a thin view because all three are projections of the
 same data, not because of discipline alone.
 
+As of Slice 5 of tactical 144, schema v3 carries the shared frame summary,
+queue panel, and local peer-thread panel. Desktop startup-streaming JSON and
+Quest/Android XR perf markers use the same render-admission/upload stage names
+for completed-result acceptance, dirty/ready scan, request build, worker submit,
+prepared-record maintenance, admission remainder, and upload apply.
+
 ### Per-Lane Time-Source Authority
 
 | Lane | Frame budget source | CPU attribution | GPU time authority |
@@ -445,6 +451,10 @@ changes. Tactical
 [`tactical/144-frame-pipeline-accounting-instrumentation.md`](tactical/144-frame-pipeline-accounting-instrumentation.md)
 is the executable checklist for gaps 1-8, including sequencing relative to
 tactical 143; gaps 9-10 are follow-on work.
+
+As of 2026-07-05, gaps 1-5 and the CPU/conservation/meter parts of gap 7 are
+landed in tactical 144. Gap 6 (GPU timestamps and periodic Quest perf-metrics)
+and gap 8 (debug overlay) remain in this tactical.
 
 1. Extract the shared accounting owner (`mclone-diagnostics`): one
    budget/percentile/over-period/headroom implementation and one versioned

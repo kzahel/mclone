@@ -84,6 +84,17 @@ impl QueueAgeTracker {
         self.observe_oldest_age(now_ms);
     }
 
+    pub fn reconcile_depth(&mut self, depth: u64, now_ms: f64) {
+        let actual = self.enqueue_times_ms.len() as u64;
+        if depth > actual {
+            self.enqueue(depth - actual, now_ms);
+        } else if actual > depth {
+            self.dequeue(actual - depth, now_ms);
+        } else {
+            self.observe_oldest_age(now_ms);
+        }
+    }
+
     pub fn observe_oldest_age(&mut self, now_ms: f64) -> Option<f64> {
         let age = self
             .enqueue_times_ms
@@ -110,6 +121,28 @@ impl QueueAgeTracker {
             oldest_age_ms,
             max_oldest_age_ms: self.max_oldest_age_ms,
             conservation_violations: self.conservation_violations,
+        }
+    }
+}
+
+impl QueueAgeReport {
+    pub fn snapshot(
+        queue: QueueId,
+        enqueued_total: u64,
+        dequeued_total: u64,
+        depth: u64,
+        oldest_age_ms: Option<f64>,
+        max_oldest_age_ms: f64,
+        conservation_violations: u64,
+    ) -> Self {
+        Self {
+            queue,
+            enqueued_total,
+            dequeued_total,
+            depth,
+            oldest_age_ms: oldest_age_ms.map(sanitize_ms),
+            max_oldest_age_ms: sanitize_ms(max_oldest_age_ms),
+            conservation_violations,
         }
     }
 }
@@ -152,5 +185,17 @@ mod tests {
         assert_eq!(report.dequeued_total, 1);
         assert_eq!(report.depth, 0);
         assert_eq!(report.conservation_violations, 1);
+    }
+
+    #[test]
+    fn queue_age_reconciles_sampled_depth() {
+        let mut queue = QueueAgeTracker::new(QueueId::RenderCompileJobs);
+        queue.reconcile_depth(3, 10.0);
+        queue.reconcile_depth(1, 20.0);
+        let report = queue.report(25.0);
+        assert_eq!(report.enqueued_total, 3);
+        assert_eq!(report.dequeued_total, 2);
+        assert_eq!(report.depth, 1);
+        assert_eq!(report.oldest_age_ms, Some(15.0));
     }
 }
