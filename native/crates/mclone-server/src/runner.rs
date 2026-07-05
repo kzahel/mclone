@@ -19,9 +19,10 @@ use crate::IntegratedServer;
 use crate::SimulationCadence;
 use crate::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkSchedulerMetrics,
-    ChunkStoreError, LightStatusMailboxKind, NaturalSpawningDiagnostics,
-    PlayerChunkTrackingDiagnostics, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
-    ServerSimulationTickTiming, SimulationCadenceConfig, WorldgenMailboxKind,
+    ChunkSchedulerPublicationDiagnostics, ChunkStoreError, LightStatusMailboxKind,
+    NaturalSpawningDiagnostics, PlayerChunkTrackingDiagnostics, ServerPhysicsTickDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, SimulationCadenceConfig,
+    WorldgenMailboxKind,
 };
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
@@ -216,6 +217,7 @@ pub struct ServerRunnerTickDiagnostics {
     pub entity_tick_chunks: usize,
     pub pending_unloads_processed: usize,
     pub scheduler_event_count: usize,
+    pub scheduler_publication: ChunkSchedulerPublicationDiagnostics,
     pub fluid_due_ticks: usize,
     pub fluid_ticks_executed: usize,
     pub deferred_fluid_ticks: usize,
@@ -238,6 +240,7 @@ impl ServerRunnerTickDiagnostics {
             entity_tick_chunks: report.entity_tick_chunks,
             pending_unloads_processed: report.pending_unloads_processed,
             scheduler_event_count: report.scheduler_event_count,
+            scheduler_publication: report.scheduler_publication,
             fluid_due_ticks: report.fluid_due_ticks,
             fluid_ticks_executed: report.fluid_ticks_executed,
             deferred_fluid_ticks: report.deferred_fluid_ticks,
@@ -1836,6 +1839,7 @@ mod native {
                 physics: ServerPhysicsTickDiagnostics::default(),
                 pending_unloads_processed,
                 scheduler_event_count,
+                scheduler_publication: ChunkSchedulerPublicationDiagnostics::default(),
                 chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
                 updates: Vec::new(),
                 timing: ServerSimulationTickTiming::default(),

@@ -643,6 +643,7 @@ impl IntegratedServer {
             entity_ticking_chunks: report.entity_ticking_chunks,
             pending_unloads_processed: report.pending_unloads_processed,
             scheduler_event_count,
+            scheduler_publication: report.publication,
             chunk_tracking,
             updates,
             timing: ServerTickTiming {
@@ -829,6 +830,7 @@ impl IntegratedServer {
             physics,
             pending_unloads_processed: tick_report.pending_unloads_processed,
             scheduler_event_count: tick_report.scheduler_event_count,
+            scheduler_publication: tick_report.scheduler_publication,
             chunk_tracking,
             updates,
             timing: ServerSimulationTickTiming {

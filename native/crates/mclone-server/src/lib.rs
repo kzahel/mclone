@@ -87,9 +87,10 @@ pub use scheduler::{
 };
 pub use spawn::initial_spawn_center_for_seed;
 pub use timing::{
-    ChunkSchedulerTickReport, ChunkSchedulerTickTiming, NaturalSpawningDiagnostics,
-    ServerPhysicsStepReport, ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics,
-    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
+    ChunkSchedulerPublicationDiagnostics, ChunkSchedulerTickReport, ChunkSchedulerTickTiming,
+    NaturalSpawningDiagnostics, ServerPhysicsStepReport, ServerPhysicsStepTiming,
+    ServerPhysicsTickDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
+    ServerTickReport, ServerTickTiming,
 };
 #[cfg(target_arch = "wasm32")]
 pub use types::WasmServerJobWorkerConfig;
@@ -3364,11 +3365,23 @@ mod tests {
         );
         assert!(scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30)));
 
-        let first_events = scheduler.poll().unwrap();
+        let first_report = scheduler.tick_report().unwrap();
+        let first_events = first_report.events;
 
         assert_eq!(
             scheduler.loaded_chunk_count(),
             DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
+        );
+        assert_eq!(first_report.publication.completed_feature_jobs_drained, 1);
+        assert_eq!(
+            first_report.publication.feature_chunks_published,
+            DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
+        );
+        assert_eq!(first_report.publication.feature_chunks_skipped, 0);
+        assert_eq!(first_report.publication.feature_jobs_completed, 0);
+        assert_eq!(
+            first_report.publication.pending_worldgen_publication_chunks,
+            9 - DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
         );
         assert!(scheduler.pending_publication_count() > 0);
         assert_eq!(scheduler.pending_job_count(), 2);

@@ -701,6 +701,21 @@ pub struct XrTerrainUploadSummary {
     pub poll_server_tick_ms: f64,
     pub poll_server_reported_total_ms: f64,
     pub poll_scheduler_tick_ms: f64,
+    pub poll_scheduler_completed_feature_jobs_drained: usize,
+    pub poll_scheduler_feature_chunks_published: usize,
+    pub poll_scheduler_feature_chunks_skipped: usize,
+    pub poll_scheduler_feature_jobs_completed: usize,
+    pub poll_scheduler_feature_snapshot_ready_events: usize,
+    pub poll_scheduler_light_status_batches_enqueued: usize,
+    pub poll_scheduler_completed_light_statuses_drained: usize,
+    pub poll_scheduler_light_statuses_published: usize,
+    pub poll_scheduler_light_statuses_skipped: usize,
+    pub poll_scheduler_light_snapshot_ready_events: usize,
+    pub poll_scheduler_pending_worldgen_publication_jobs: usize,
+    pub poll_scheduler_pending_worldgen_publication_chunks: usize,
+    pub poll_scheduler_pending_light_publications: usize,
+    pub poll_scheduler_worldgen_mailbox_pending_jobs: usize,
+    pub poll_scheduler_light_mailbox_pending_statuses: usize,
     pub poll_updates: usize,
     pub poll_snapshot_updates: usize,
     pub poll_section_block_updates: usize,
@@ -5491,6 +5506,30 @@ fn xr_poll_diagnostics_upload_summary(
         poll_server_tick_ms: diagnostics.server_tick_ms,
         poll_server_reported_total_ms: diagnostics.server_reported_total_ms,
         poll_scheduler_tick_ms: diagnostics.scheduler_tick_ms,
+        poll_scheduler_completed_feature_jobs_drained: diagnostics
+            .scheduler_completed_feature_jobs_drained,
+        poll_scheduler_feature_chunks_published: diagnostics.scheduler_feature_chunks_published,
+        poll_scheduler_feature_chunks_skipped: diagnostics.scheduler_feature_chunks_skipped,
+        poll_scheduler_feature_jobs_completed: diagnostics.scheduler_feature_jobs_completed,
+        poll_scheduler_feature_snapshot_ready_events: diagnostics
+            .scheduler_feature_snapshot_ready_events,
+        poll_scheduler_light_status_batches_enqueued: diagnostics
+            .scheduler_light_status_batches_enqueued,
+        poll_scheduler_completed_light_statuses_drained: diagnostics
+            .scheduler_completed_light_statuses_drained,
+        poll_scheduler_light_statuses_published: diagnostics.scheduler_light_statuses_published,
+        poll_scheduler_light_statuses_skipped: diagnostics.scheduler_light_statuses_skipped,
+        poll_scheduler_light_snapshot_ready_events: diagnostics
+            .scheduler_light_snapshot_ready_events,
+        poll_scheduler_pending_worldgen_publication_jobs: diagnostics
+            .scheduler_pending_worldgen_publication_jobs,
+        poll_scheduler_pending_worldgen_publication_chunks: diagnostics
+            .scheduler_pending_worldgen_publication_chunks,
+        poll_scheduler_pending_light_publications: diagnostics.scheduler_pending_light_publications,
+        poll_scheduler_worldgen_mailbox_pending_jobs: diagnostics
+            .scheduler_worldgen_mailbox_pending_jobs,
+        poll_scheduler_light_mailbox_pending_statuses: diagnostics
+            .scheduler_light_mailbox_pending_statuses,
         poll_updates: diagnostics.updates,
         poll_snapshot_updates: diagnostics.snapshot_updates,
         poll_section_block_updates: diagnostics.section_block_updates,

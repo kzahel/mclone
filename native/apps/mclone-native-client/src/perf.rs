@@ -445,6 +445,10 @@ struct LoadingSettlePerfSampleReport {
 struct StartupStreamingFrameReport {
     elapsed_ms: f64,
     poll_ms: f64,
+    poll_scheduler_publish_completed_ms: f64,
+    poll_apply_updates_ms: f64,
+    poll_dirty_mark_ms: f64,
+    poll_client_apply_updates_ms: f64,
     remesh_ms: f64,
     upload_ms: f64,
     render_ms: f64,
@@ -464,6 +468,23 @@ struct StartupStreamingFrameReport {
     deadline_skipped_compile_requests: usize,
     update_pump_stalled: bool,
     server_update_queue_depth: usize,
+    server_update_queue_bytes: usize,
+    server_update_oldest_applied_age_ms: f64,
+    scheduler_completed_feature_jobs_drained: usize,
+    scheduler_feature_chunks_published: usize,
+    scheduler_feature_chunks_skipped: usize,
+    scheduler_feature_jobs_completed: usize,
+    scheduler_feature_snapshot_ready_events: usize,
+    scheduler_light_status_batches_enqueued: usize,
+    scheduler_completed_light_statuses_drained: usize,
+    scheduler_light_statuses_published: usize,
+    scheduler_light_statuses_skipped: usize,
+    scheduler_light_snapshot_ready_events: usize,
+    scheduler_pending_worldgen_publication_jobs: usize,
+    scheduler_pending_worldgen_publication_chunks: usize,
+    scheduler_pending_light_publications: usize,
+    scheduler_worldgen_mailbox_pending_jobs: usize,
+    scheduler_light_mailbox_pending_statuses: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -485,6 +506,21 @@ struct FrameBudgetProbeFrameReport {
     poll_scheduler_publish_completed_ms: f64,
     poll_scheduler_pending_unload_ms: f64,
     poll_scheduler_apply_events_ms: f64,
+    poll_scheduler_completed_feature_jobs_drained: usize,
+    poll_scheduler_feature_chunks_published: usize,
+    poll_scheduler_feature_chunks_skipped: usize,
+    poll_scheduler_feature_jobs_completed: usize,
+    poll_scheduler_feature_snapshot_ready_events: usize,
+    poll_scheduler_light_status_batches_enqueued: usize,
+    poll_scheduler_completed_light_statuses_drained: usize,
+    poll_scheduler_light_statuses_published: usize,
+    poll_scheduler_light_statuses_skipped: usize,
+    poll_scheduler_light_snapshot_ready_events: usize,
+    poll_scheduler_pending_worldgen_publication_jobs: usize,
+    poll_scheduler_pending_worldgen_publication_chunks: usize,
+    poll_scheduler_pending_light_publications: usize,
+    poll_scheduler_worldgen_mailbox_pending_jobs: usize,
+    poll_scheduler_light_mailbox_pending_statuses: usize,
     poll_block_tick_ms: f64,
     poll_fluid_tick_ms: f64,
     poll_fluid_event_apply_ms: f64,
@@ -560,6 +596,21 @@ impl Default for FrameBudgetProbeFrameReport {
             poll_scheduler_publish_completed_ms: 0.0,
             poll_scheduler_pending_unload_ms: 0.0,
             poll_scheduler_apply_events_ms: 0.0,
+            poll_scheduler_completed_feature_jobs_drained: 0,
+            poll_scheduler_feature_chunks_published: 0,
+            poll_scheduler_feature_chunks_skipped: 0,
+            poll_scheduler_feature_jobs_completed: 0,
+            poll_scheduler_feature_snapshot_ready_events: 0,
+            poll_scheduler_light_status_batches_enqueued: 0,
+            poll_scheduler_completed_light_statuses_drained: 0,
+            poll_scheduler_light_statuses_published: 0,
+            poll_scheduler_light_statuses_skipped: 0,
+            poll_scheduler_light_snapshot_ready_events: 0,
+            poll_scheduler_pending_worldgen_publication_jobs: 0,
+            poll_scheduler_pending_worldgen_publication_chunks: 0,
+            poll_scheduler_pending_light_publications: 0,
+            poll_scheduler_worldgen_mailbox_pending_jobs: 0,
+            poll_scheduler_light_mailbox_pending_statuses: 0,
             poll_block_tick_ms: 0.0,
             poll_fluid_tick_ms: 0.0,
             poll_fluid_event_apply_ms: 0.0,
@@ -986,6 +1037,66 @@ impl FrameBudgetProbeReport {
                 frame.poll_scheduler_publish_completed_ms
             );
             println!(
+                "      \"poll_scheduler_completed_feature_jobs_drained\": {},",
+                frame.poll_scheduler_completed_feature_jobs_drained
+            );
+            println!(
+                "      \"poll_scheduler_feature_chunks_published\": {},",
+                frame.poll_scheduler_feature_chunks_published
+            );
+            println!(
+                "      \"poll_scheduler_feature_chunks_skipped\": {},",
+                frame.poll_scheduler_feature_chunks_skipped
+            );
+            println!(
+                "      \"poll_scheduler_feature_jobs_completed\": {},",
+                frame.poll_scheduler_feature_jobs_completed
+            );
+            println!(
+                "      \"poll_scheduler_feature_snapshot_ready_events\": {},",
+                frame.poll_scheduler_feature_snapshot_ready_events
+            );
+            println!(
+                "      \"poll_scheduler_light_status_batches_enqueued\": {},",
+                frame.poll_scheduler_light_status_batches_enqueued
+            );
+            println!(
+                "      \"poll_scheduler_completed_light_statuses_drained\": {},",
+                frame.poll_scheduler_completed_light_statuses_drained
+            );
+            println!(
+                "      \"poll_scheduler_light_statuses_published\": {},",
+                frame.poll_scheduler_light_statuses_published
+            );
+            println!(
+                "      \"poll_scheduler_light_statuses_skipped\": {},",
+                frame.poll_scheduler_light_statuses_skipped
+            );
+            println!(
+                "      \"poll_scheduler_light_snapshot_ready_events\": {},",
+                frame.poll_scheduler_light_snapshot_ready_events
+            );
+            println!(
+                "      \"poll_scheduler_pending_worldgen_publication_jobs\": {},",
+                frame.poll_scheduler_pending_worldgen_publication_jobs
+            );
+            println!(
+                "      \"poll_scheduler_pending_worldgen_publication_chunks\": {},",
+                frame.poll_scheduler_pending_worldgen_publication_chunks
+            );
+            println!(
+                "      \"poll_scheduler_pending_light_publications\": {},",
+                frame.poll_scheduler_pending_light_publications
+            );
+            println!(
+                "      \"poll_scheduler_worldgen_mailbox_pending_jobs\": {},",
+                frame.poll_scheduler_worldgen_mailbox_pending_jobs
+            );
+            println!(
+                "      \"poll_scheduler_light_mailbox_pending_statuses\": {},",
+                frame.poll_scheduler_light_mailbox_pending_statuses
+            );
+            println!(
                 "      \"poll_scheduler_pending_unload_ms\": {:.3},",
                 frame.poll_scheduler_pending_unload_ms
             );
@@ -1213,6 +1324,84 @@ impl StartupStreamingPerfReport {
         let total_remesh_ms = self.frames.iter().map(|frame| frame.remesh_ms).sum::<f64>();
         let total_upload_ms = self.frames.iter().map(|frame| frame.upload_ms).sum::<f64>();
         let total_render_ms = self.frames.iter().map(|frame| frame.render_ms).sum::<f64>();
+        let total_poll_scheduler_publish_completed_ms = self
+            .frames
+            .iter()
+            .map(|frame| frame.poll_scheduler_publish_completed_ms)
+            .sum::<f64>();
+        let total_poll_apply_updates_ms = self
+            .frames
+            .iter()
+            .map(|frame| frame.poll_apply_updates_ms)
+            .sum::<f64>();
+        let total_poll_dirty_mark_ms = self
+            .frames
+            .iter()
+            .map(|frame| frame.poll_dirty_mark_ms)
+            .sum::<f64>();
+        let total_poll_client_apply_updates_ms = self
+            .frames
+            .iter()
+            .map(|frame| frame.poll_client_apply_updates_ms)
+            .sum::<f64>();
+        let total_scheduler_feature_chunks_published = self
+            .frames
+            .iter()
+            .map(|frame| frame.scheduler_feature_chunks_published)
+            .sum::<usize>();
+        let total_scheduler_light_statuses_published = self
+            .frames
+            .iter()
+            .map(|frame| frame.scheduler_light_statuses_published)
+            .sum::<usize>();
+        let total_scheduler_snapshot_ready_events = self
+            .frames
+            .iter()
+            .map(|frame| {
+                frame.scheduler_feature_snapshot_ready_events
+                    + frame.scheduler_light_snapshot_ready_events
+            })
+            .sum::<usize>();
+        let max_poll_scheduler_publish_completed_ms = self
+            .frames
+            .iter()
+            .map(|frame| frame.poll_scheduler_publish_completed_ms)
+            .fold(0.0, f64::max);
+        let max_server_update_queue_depth = self
+            .frames
+            .iter()
+            .map(|frame| frame.server_update_queue_depth)
+            .max()
+            .unwrap_or(0);
+        let max_server_update_oldest_applied_age_ms = self
+            .frames
+            .iter()
+            .map(|frame| frame.server_update_oldest_applied_age_ms)
+            .fold(0.0, f64::max);
+        let max_scheduler_pending_worldgen_publication_chunks = self
+            .frames
+            .iter()
+            .map(|frame| frame.scheduler_pending_worldgen_publication_chunks)
+            .max()
+            .unwrap_or(0);
+        let max_scheduler_pending_light_publications = self
+            .frames
+            .iter()
+            .map(|frame| frame.scheduler_pending_light_publications)
+            .max()
+            .unwrap_or(0);
+        let max_scheduler_worldgen_mailbox_pending_jobs = self
+            .frames
+            .iter()
+            .map(|frame| frame.scheduler_worldgen_mailbox_pending_jobs)
+            .max()
+            .unwrap_or(0);
+        let max_scheduler_light_mailbox_pending_statuses = self
+            .frames
+            .iter()
+            .map(|frame| frame.scheduler_light_mailbox_pending_statuses)
+            .max()
+            .unwrap_or(0);
         let total_submitted_compile_sections = self
             .frames
             .iter()
@@ -1331,6 +1520,62 @@ impl StartupStreamingPerfReport {
         println!("  \"p99_frame_ms\": {:.3},", p99);
         println!("  \"max_frame_ms\": {:.3},", self.headless.max_frame_ms);
         println!("  \"total_poll_ms\": {:.3},", total_poll_ms);
+        println!(
+            "  \"total_poll_scheduler_publish_completed_ms\": {:.3},",
+            total_poll_scheduler_publish_completed_ms
+        );
+        println!(
+            "  \"total_poll_apply_updates_ms\": {:.3},",
+            total_poll_apply_updates_ms
+        );
+        println!(
+            "  \"total_poll_dirty_mark_ms\": {:.3},",
+            total_poll_dirty_mark_ms
+        );
+        println!(
+            "  \"total_poll_client_apply_updates_ms\": {:.3},",
+            total_poll_client_apply_updates_ms
+        );
+        println!(
+            "  \"max_poll_scheduler_publish_completed_ms\": {:.3},",
+            max_poll_scheduler_publish_completed_ms
+        );
+        println!(
+            "  \"total_scheduler_feature_chunks_published\": {},",
+            total_scheduler_feature_chunks_published
+        );
+        println!(
+            "  \"total_scheduler_light_statuses_published\": {},",
+            total_scheduler_light_statuses_published
+        );
+        println!(
+            "  \"total_scheduler_snapshot_ready_events\": {},",
+            total_scheduler_snapshot_ready_events
+        );
+        println!(
+            "  \"max_server_update_queue_depth\": {},",
+            max_server_update_queue_depth
+        );
+        println!(
+            "  \"max_server_update_oldest_applied_age_ms\": {:.3},",
+            max_server_update_oldest_applied_age_ms
+        );
+        println!(
+            "  \"max_scheduler_pending_worldgen_publication_chunks\": {},",
+            max_scheduler_pending_worldgen_publication_chunks
+        );
+        println!(
+            "  \"max_scheduler_pending_light_publications\": {},",
+            max_scheduler_pending_light_publications
+        );
+        println!(
+            "  \"max_scheduler_worldgen_mailbox_pending_jobs\": {},",
+            max_scheduler_worldgen_mailbox_pending_jobs
+        );
+        println!(
+            "  \"max_scheduler_light_mailbox_pending_statuses\": {},",
+            max_scheduler_light_mailbox_pending_statuses
+        );
         println!("  \"total_remesh_ms\": {:.3},", total_remesh_ms);
         println!("  \"total_upload_ms\": {:.3},", total_upload_ms);
         println!("  \"total_render_ms\": {:.3},", total_render_ms);
@@ -1354,6 +1599,116 @@ impl StartupStreamingPerfReport {
             "  \"update_pump_stalled_frames\": {},",
             update_pump_stalled_frames
         );
+        let sampled_frames = self
+            .frames
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index % 60 == 0 || *index + 1 == self.frames.len())
+            .collect::<Vec<_>>();
+        println!("  \"queue_samples\": [");
+        for (sample_index, (index, frame)) in sampled_frames.iter().enumerate() {
+            let suffix = if sample_index + 1 == sampled_frames.len() {
+                ""
+            } else {
+                ","
+            };
+            println!("    {{");
+            println!("      \"frame\": {},", index);
+            println!("      \"elapsed_ms\": {:.3},", frame.elapsed_ms);
+            println!(
+                "      \"target_ready_chunks\": {},",
+                frame.target_ready_chunks
+            );
+            println!(
+                "      \"target_chunk_count\": {},",
+                frame.target_chunk_count
+            );
+            println!("      \"loaded_chunks\": {},", frame.loaded_chunks);
+            println!("      \"poll_ms\": {:.3},", frame.poll_ms);
+            println!(
+                "      \"poll_scheduler_publish_completed_ms\": {:.3},",
+                frame.poll_scheduler_publish_completed_ms
+            );
+            println!(
+                "      \"poll_apply_updates_ms\": {:.3},",
+                frame.poll_apply_updates_ms
+            );
+            println!(
+                "      \"poll_dirty_mark_ms\": {:.3},",
+                frame.poll_dirty_mark_ms
+            );
+            println!(
+                "      \"poll_client_apply_updates_ms\": {:.3},",
+                frame.poll_client_apply_updates_ms
+            );
+            println!(
+                "      \"scheduler_feature_chunks_published\": {},",
+                frame.scheduler_feature_chunks_published
+            );
+            println!(
+                "      \"scheduler_light_statuses_published\": {},",
+                frame.scheduler_light_statuses_published
+            );
+            println!(
+                "      \"scheduler_feature_snapshot_ready_events\": {},",
+                frame.scheduler_feature_snapshot_ready_events
+            );
+            println!(
+                "      \"scheduler_light_snapshot_ready_events\": {},",
+                frame.scheduler_light_snapshot_ready_events
+            );
+            println!(
+                "      \"scheduler_pending_worldgen_publication_jobs\": {},",
+                frame.scheduler_pending_worldgen_publication_jobs
+            );
+            println!(
+                "      \"scheduler_pending_worldgen_publication_chunks\": {},",
+                frame.scheduler_pending_worldgen_publication_chunks
+            );
+            println!(
+                "      \"scheduler_pending_light_publications\": {},",
+                frame.scheduler_pending_light_publications
+            );
+            println!(
+                "      \"scheduler_worldgen_mailbox_pending_jobs\": {},",
+                frame.scheduler_worldgen_mailbox_pending_jobs
+            );
+            println!(
+                "      \"scheduler_light_mailbox_pending_statuses\": {},",
+                frame.scheduler_light_mailbox_pending_statuses
+            );
+            println!(
+                "      \"server_update_queue_depth\": {},",
+                frame.server_update_queue_depth
+            );
+            println!(
+                "      \"server_update_queue_bytes\": {},",
+                frame.server_update_queue_bytes
+            );
+            println!(
+                "      \"server_update_oldest_applied_age_ms\": {:.3},",
+                frame.server_update_oldest_applied_age_ms
+            );
+            println!(
+                "      \"pending_render_chunks\": {},",
+                frame.pending_render_chunks
+            );
+            println!(
+                "      \"pending_render_compile_jobs\": {},",
+                frame.pending_render_compile_jobs
+            );
+            println!(
+                "      \"submitted_compile_sections\": {},",
+                frame.submitted_compile_sections
+            );
+            println!(
+                "      \"completed_compile_sections\": {},",
+                frame.completed_compile_sections
+            );
+            println!("      \"uploaded_sections\": {}", frame.uploaded_sections);
+            println!("    }}{suffix}");
+        }
+        println!("  ],");
         println!("  \"final\": {{");
         println!("    \"elapsed_ms\": {:.3},", final_frame.elapsed_ms);
         println!(
@@ -1385,8 +1740,36 @@ impl StartupStreamingPerfReport {
             final_frame.inflight_render_sections
         );
         println!(
-            "    \"server_update_queue_depth\": {}",
+            "    \"server_update_queue_depth\": {},",
             final_frame.server_update_queue_depth
+        );
+        println!(
+            "    \"server_update_queue_bytes\": {},",
+            final_frame.server_update_queue_bytes
+        );
+        println!(
+            "    \"server_update_oldest_applied_age_ms\": {:.3},",
+            final_frame.server_update_oldest_applied_age_ms
+        );
+        println!(
+            "    \"scheduler_pending_worldgen_publication_jobs\": {},",
+            final_frame.scheduler_pending_worldgen_publication_jobs
+        );
+        println!(
+            "    \"scheduler_pending_worldgen_publication_chunks\": {},",
+            final_frame.scheduler_pending_worldgen_publication_chunks
+        );
+        println!(
+            "    \"scheduler_pending_light_publications\": {},",
+            final_frame.scheduler_pending_light_publications
+        );
+        println!(
+            "    \"scheduler_worldgen_mailbox_pending_jobs\": {},",
+            final_frame.scheduler_worldgen_mailbox_pending_jobs
+        );
+        println!(
+            "    \"scheduler_light_mailbox_pending_statuses\": {}",
+            final_frame.scheduler_light_mailbox_pending_statuses
         );
         println!("  }}");
         println!("}}");
@@ -1966,8 +2349,46 @@ pub(crate) fn run_startup_streaming_perf(
             let _runtime_changed = state.runtime.poll()?;
             report.poll_ms = elapsed_ms(poll_start.elapsed());
             let poll_diagnostics = state.runtime.last_poll_diagnostics();
+            report.poll_scheduler_publish_completed_ms =
+                poll_diagnostics.scheduler_publish_completed_ms;
+            report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
+            report.poll_dirty_mark_ms = poll_diagnostics.dirty_mark_ms;
+            report.poll_client_apply_updates_ms = poll_diagnostics.client_apply_updates_ms;
             report.update_pump_stalled = poll_diagnostics.update_pump_stalled;
             report.server_update_queue_depth = poll_diagnostics.server_update_queue_depth;
+            report.server_update_queue_bytes = poll_diagnostics.server_update_queue_bytes;
+            report.server_update_oldest_applied_age_ms =
+                poll_diagnostics.server_update_oldest_applied_age_ms;
+            report.scheduler_completed_feature_jobs_drained =
+                poll_diagnostics.scheduler_completed_feature_jobs_drained;
+            report.scheduler_feature_chunks_published =
+                poll_diagnostics.scheduler_feature_chunks_published;
+            report.scheduler_feature_chunks_skipped =
+                poll_diagnostics.scheduler_feature_chunks_skipped;
+            report.scheduler_feature_jobs_completed =
+                poll_diagnostics.scheduler_feature_jobs_completed;
+            report.scheduler_feature_snapshot_ready_events =
+                poll_diagnostics.scheduler_feature_snapshot_ready_events;
+            report.scheduler_light_status_batches_enqueued =
+                poll_diagnostics.scheduler_light_status_batches_enqueued;
+            report.scheduler_completed_light_statuses_drained =
+                poll_diagnostics.scheduler_completed_light_statuses_drained;
+            report.scheduler_light_statuses_published =
+                poll_diagnostics.scheduler_light_statuses_published;
+            report.scheduler_light_statuses_skipped =
+                poll_diagnostics.scheduler_light_statuses_skipped;
+            report.scheduler_light_snapshot_ready_events =
+                poll_diagnostics.scheduler_light_snapshot_ready_events;
+            report.scheduler_pending_worldgen_publication_jobs =
+                poll_diagnostics.scheduler_pending_worldgen_publication_jobs;
+            report.scheduler_pending_worldgen_publication_chunks =
+                poll_diagnostics.scheduler_pending_worldgen_publication_chunks;
+            report.scheduler_pending_light_publications =
+                poll_diagnostics.scheduler_pending_light_publications;
+            report.scheduler_worldgen_mailbox_pending_jobs =
+                poll_diagnostics.scheduler_worldgen_mailbox_pending_jobs;
+            report.scheduler_light_mailbox_pending_statuses =
+                poll_diagnostics.scheduler_light_mailbox_pending_statuses;
 
             if state.runtime.has_pending_render_work(spectator.position) {
                 let update =
@@ -2347,6 +2768,36 @@ pub(crate) fn run_frame_budget_probe(
                 poll_diagnostics.scheduler_publish_completed_ms;
             report.poll_scheduler_pending_unload_ms = poll_diagnostics.scheduler_pending_unload_ms;
             report.poll_scheduler_apply_events_ms = poll_diagnostics.scheduler_apply_events_ms;
+            report.poll_scheduler_completed_feature_jobs_drained =
+                poll_diagnostics.scheduler_completed_feature_jobs_drained;
+            report.poll_scheduler_feature_chunks_published =
+                poll_diagnostics.scheduler_feature_chunks_published;
+            report.poll_scheduler_feature_chunks_skipped =
+                poll_diagnostics.scheduler_feature_chunks_skipped;
+            report.poll_scheduler_feature_jobs_completed =
+                poll_diagnostics.scheduler_feature_jobs_completed;
+            report.poll_scheduler_feature_snapshot_ready_events =
+                poll_diagnostics.scheduler_feature_snapshot_ready_events;
+            report.poll_scheduler_light_status_batches_enqueued =
+                poll_diagnostics.scheduler_light_status_batches_enqueued;
+            report.poll_scheduler_completed_light_statuses_drained =
+                poll_diagnostics.scheduler_completed_light_statuses_drained;
+            report.poll_scheduler_light_statuses_published =
+                poll_diagnostics.scheduler_light_statuses_published;
+            report.poll_scheduler_light_statuses_skipped =
+                poll_diagnostics.scheduler_light_statuses_skipped;
+            report.poll_scheduler_light_snapshot_ready_events =
+                poll_diagnostics.scheduler_light_snapshot_ready_events;
+            report.poll_scheduler_pending_worldgen_publication_jobs =
+                poll_diagnostics.scheduler_pending_worldgen_publication_jobs;
+            report.poll_scheduler_pending_worldgen_publication_chunks =
+                poll_diagnostics.scheduler_pending_worldgen_publication_chunks;
+            report.poll_scheduler_pending_light_publications =
+                poll_diagnostics.scheduler_pending_light_publications;
+            report.poll_scheduler_worldgen_mailbox_pending_jobs =
+                poll_diagnostics.scheduler_worldgen_mailbox_pending_jobs;
+            report.poll_scheduler_light_mailbox_pending_statuses =
+                poll_diagnostics.scheduler_light_mailbox_pending_statuses;
             report.poll_block_tick_ms = poll_diagnostics.block_tick_ms;
             report.poll_fluid_tick_ms = poll_diagnostics.fluid_tick_ms;
             report.poll_fluid_event_apply_ms = poll_diagnostics.fluid_event_apply_ms;

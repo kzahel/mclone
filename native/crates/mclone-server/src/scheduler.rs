@@ -56,8 +56,8 @@ use crate::persistence::{
 };
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
-    ChunkSchedulerTickReport, ChunkSchedulerTickTiming, simulation_timing_elapsed_us,
-    simulation_timing_start,
+    ChunkSchedulerPublicationDiagnostics, ChunkSchedulerTickReport, ChunkSchedulerTickTiming,
+    simulation_timing_elapsed_us, simulation_timing_start,
 };
 use crate::worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 use crate::{
@@ -623,13 +623,27 @@ impl ChunkScheduler {
     }
 
     pub fn poll(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        Ok(self.poll_with_publication_diagnostics()?.0)
+    }
+
+    fn poll_with_publication_diagnostics(
+        &mut self,
+    ) -> ChunkStoreResult<(
+        Vec<ChunkSchedulerEvent>,
+        ChunkSchedulerPublicationDiagnostics,
+    )> {
+        let mut publication = ChunkSchedulerPublicationDiagnostics::default();
         self.store.process_one_background_write();
         let mut events = self.poll_persistence()?;
-        events.extend(self.publish_completed_worldgen_jobs()?);
-        events.extend(self.publish_pending_light_statuses()?);
+        events.extend(self.publish_completed_worldgen_jobs(&mut publication)?);
+        events.extend(self.publish_pending_light_statuses(&mut publication)?);
         self.store.process_one_background_write();
         events.extend(self.poll_persistence()?);
-        Ok(events)
+        publication.pending_worldgen_publication_jobs = self.pending_worldgen_publications.len();
+        publication.pending_worldgen_publication_chunks =
+            self.pending_worldgen_publication_target_count();
+        publication.pending_light_publications = self.pending_light_publications.len();
+        Ok((events, publication))
     }
 
     pub fn wait_for_worldgen_completion(&mut self, timeout: Duration) -> bool {
@@ -672,7 +686,8 @@ impl ChunkScheduler {
         let reconcile_holders_us = simulation_timing_elapsed_us(reconcile_start);
 
         let publish_start = simulation_timing_start();
-        events.extend(self.poll()?);
+        let (publish_events, publication) = self.poll_with_publication_diagnostics()?;
+        events.extend(publish_events);
         let publish_completed_us = simulation_timing_elapsed_us(publish_start);
 
         let pending_unload_start = simulation_timing_start();
@@ -690,6 +705,7 @@ impl ChunkScheduler {
             entity_ticking_chunks: self.entity_ticking_chunks(),
             pending_unloads_processed,
             events,
+            publication,
             timing: ChunkSchedulerTickTiming {
                 total_us: simulation_timing_elapsed_us(total_start),
                 purge_stale_tickets_us,
@@ -988,6 +1004,10 @@ impl ChunkScheduler {
     }
 
     pub fn pending_publication_count(&self) -> usize {
+        self.pending_worldgen_publication_target_count() + self.pending_light_publications.len()
+    }
+
+    fn pending_worldgen_publication_target_count(&self) -> usize {
         self.pending_worldgen_publications
             .iter()
             .map(|publication| {
@@ -1000,7 +1020,6 @@ impl ChunkScheduler {
                     })
             })
             .sum::<usize>()
-            + self.pending_light_publications.len()
     }
 
     pub fn worldgen_mailbox_kind(&self) -> WorldgenMailboxKind {
@@ -2334,13 +2353,16 @@ impl ChunkScheduler {
         }
     }
 
-    fn publish_completed_worldgen_jobs(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        self.pending_worldgen_publications.extend(
-            self.worldgen_mailbox
-                .drain_completed()
-                .into_iter()
-                .map(PendingWorldgenPublication::new),
-        );
+    fn publish_completed_worldgen_jobs(
+        &mut self,
+        diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let completed = self.worldgen_mailbox.drain_completed();
+        diagnostics.completed_feature_jobs_drained = diagnostics
+            .completed_feature_jobs_drained
+            .saturating_add(completed.len());
+        self.pending_worldgen_publications
+            .extend(completed.into_iter().map(PendingWorldgenPublication::new));
         let mut events = Vec::new();
         let mut remaining_budget = DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET;
 
@@ -2348,8 +2370,11 @@ impl ChunkScheduler {
             let Some(publication) = self.pending_worldgen_publications.pop_front() else {
                 break;
             };
-            let (mut published, pending) =
-                self.publish_completed_feature_job(publication, &mut remaining_budget)?;
+            let (mut published, pending) = self.publish_completed_feature_job(
+                publication,
+                &mut remaining_budget,
+                diagnostics,
+            )?;
             events.append(&mut published);
             if let Some(pending) = pending {
                 self.pending_worldgen_publications.push_front(pending);
@@ -2364,6 +2389,7 @@ impl ChunkScheduler {
         &mut self,
         mut publication: PendingWorldgenPublication,
         remaining_budget: &mut usize,
+        diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
     ) -> ChunkStoreResult<(Vec<ChunkSchedulerEvent>, Option<PendingWorldgenPublication>)> {
         let Some(job) = self.jobs.get(&publication.completed.job_id).cloned() else {
             return Ok((Vec::new(), None));
@@ -2386,8 +2412,12 @@ impl ChunkScheduler {
                         && slot.step == ChunkStatusStep::Scheduled
                 });
             if !should_publish {
+                diagnostics.feature_chunks_skipped =
+                    diagnostics.feature_chunks_skipped.saturating_add(1);
                 continue;
             }
+            diagnostics.feature_chunks_published =
+                diagnostics.feature_chunks_published.saturating_add(1);
 
             let revision = ChunkRevision(self.next_revision);
             self.next_revision += 1;
@@ -2446,6 +2476,8 @@ impl ChunkScheduler {
                         .then(|| std::mem::take(statuses))
                 };
                 if let Some(statuses) = ready_light_batch {
+                    diagnostics.light_status_batches_enqueued =
+                        diagnostics.light_status_batches_enqueued.saturating_add(1);
                     self.light_mailbox
                         .enqueue_batch(PendingLightStatusBatch::new(statuses));
                 }
@@ -2459,6 +2491,8 @@ impl ChunkScheduler {
                     .get_mut(&pos)
                     .expect("holder must exist before marking visible")
                     .set_client_visible(true);
+                diagnostics.feature_snapshot_ready_events =
+                    diagnostics.feature_snapshot_ready_events.saturating_add(1);
                 events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
             }
         }
@@ -2476,7 +2510,10 @@ impl ChunkScheduler {
             self.mark_dependency_ready(dependency);
         }
         self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
+        diagnostics.feature_jobs_completed = diagnostics.feature_jobs_completed.saturating_add(1);
         if !pending_light_statuses.is_empty() {
+            diagnostics.light_status_batches_enqueued =
+                diagnostics.light_status_batches_enqueued.saturating_add(1);
             self.light_mailbox
                 .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
         }
@@ -2484,9 +2521,15 @@ impl ChunkScheduler {
         Ok((events, None))
     }
 
-    fn publish_pending_light_statuses(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        self.pending_light_publications
-            .extend(self.light_mailbox.drain_completed());
+    fn publish_pending_light_statuses(
+        &mut self,
+        diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let completed = self.light_mailbox.drain_completed();
+        diagnostics.completed_light_statuses_drained = diagnostics
+            .completed_light_statuses_drained
+            .saturating_add(completed.len());
+        self.pending_light_publications.extend(completed);
         let mut events = Vec::new();
         let mut remaining_budget = DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET;
         while remaining_budget > 0 {
@@ -2501,8 +2544,12 @@ impl ChunkScheduler {
                 .and_then(|holder| holder.status_slot(ChunkStatus::Light))
                 .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
             if !should_publish {
+                diagnostics.light_statuses_skipped =
+                    diagnostics.light_statuses_skipped.saturating_add(1);
                 continue;
             }
+            diagnostics.light_statuses_published =
+                diagnostics.light_statuses_published.saturating_add(1);
 
             let revision = ChunkRevision(self.next_revision);
             self.next_revision += 1;
@@ -2544,6 +2591,8 @@ impl ChunkScheduler {
                     .get_mut(&pos)
                     .expect("holder must exist before marking visible")
                     .set_client_visible(true);
+                diagnostics.light_snapshot_ready_events =
+                    diagnostics.light_snapshot_ready_events.saturating_add(1);
                 events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
             }
         }

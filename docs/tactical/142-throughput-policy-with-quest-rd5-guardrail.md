@@ -354,13 +354,19 @@ instrumentation to watch it:
 - [x] Falsification: compile workers `2` do not move the bulk mesh drain.
 - [x] RD10 startup-streaming control baseline captured (doc-only-dirty tree,
   `4a3604cf`): playable `1.078s`, full-view `27.54s`, quiescent `33.06s`.
-- [ ] Add per-stage publication counters to the scheduler and surface them in
-  the startup-streaming and loading-settle JSON: features published/sec, light
-  published/sec, snapshots client-ready/sec, worldgen mailbox busy vs idle
-  time, pending-publication queue depth, light publication queue depth.
-- [ ] Sample queue depths as a time series (every `~60` frames) in
+- [x] Add scheduler publication counters and surface them through runtime
+  diagnostics, native startup-streaming JSON, frame-budget probe JSON, and Quest
+  perf logs: feature jobs drained, feature chunks published/skipped, feature
+  jobs completed, feature/light snapshot-ready events, light statuses
+  published/skipped, light batches enqueued, pending worldgen-publication jobs
+  and chunks, and pending light publications.
+- [x] Sample queue depths as a time series (every `~60` frames) in
   startup-streaming JSON: pending publications, mailbox pending counts, pending
-  compile jobs, upload queue, `server_update_queue_depth`.
+  compile jobs, `server_update_queue_depth`, update queue bytes/oldest-applied
+  age, and render compile/upload activity.
+- [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
+  mailbox utilization after the publication counters and queue samples are
+  captured on full RD10/RD15 lanes.
 - [ ] Harden the loading-settle idle predicate against the startup false-idle
   window (required before any idle-sensitive sweep reruns).
 - [ ] Add the Meta dropped-frame before/after delta to the Quest perf summary.
@@ -377,6 +383,8 @@ inference:
 - Is desktop full-view readiness still dominated by scheduler publication after
   separating feature publish, light publish, update encode/send, and
   job-admission wait time?
+- How much of `poll_scheduler_publish_completed_ms` is actual feature/light
+  publication work versus update encode/send and downstream client apply work?
 - On Quest streaming, does a larger publication drain remain invisible until
   downstream render work, or does it create measurable server runner spikes,
   update queue depth/age, client accept/store cost, dirty seed/prepare cost, or

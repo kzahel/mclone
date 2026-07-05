@@ -90,6 +90,65 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-05 - Publication Cost Instrumentation Smoke
+
+Commit: pending at capture time.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Purpose: land no-behavior-change instrumentation before Candidate A. New fields
+flow from `ChunkSchedulerPublicationDiagnostics` through runner/runtime
+diagnostics into native startup-streaming JSON, frame-budget probe JSON, and
+Quest `MCLONE_ANDROID_XR_PERF_QUEUE_MAX` / worst-frame upload logs.
+
+Short JSON smoke:
+
+```sh
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf --render-distance 5 --startup-streaming-frames 120 \
+  --target-hz 60 --debug-passive-showcase false \
+  > /tmp/mclone-startup-instrument-smoke.json
+```
+
+Selected parsed fields from `/tmp/mclone-startup-instrument-smoke.json`:
+
+- `startup_playable_ms=1122.983`
+- `total_scheduler_feature_chunks_published=101`
+- `total_scheduler_light_statuses_published=120`
+- `total_scheduler_snapshot_ready_events=120`
+- `max_scheduler_pending_worldgen_publication_chunks=124`
+- `max_scheduler_pending_light_publications=8`
+- `max_scheduler_worldgen_mailbox_pending_jobs=1`
+- `max_scheduler_light_mailbox_pending_statuses=9`
+- `queue_samples` length `3` for `120` frames (`0`, `60`, final)
+- final sample: `target_ready_chunks=50 / 169`,
+  `pending_publications=86`,
+  `scheduler_pending_worldgen_publication_chunks=83`,
+  `scheduler_pending_light_publications=4`,
+  `scheduler_worldgen_mailbox_pending_jobs=0`,
+  `scheduler_light_mailbox_pending_statuses=9`,
+  `server_update_queue_depth=0`
+
+Interpretation: the instrumentation is reporting the expected shape without
+changing budgets: even the short RD5 smoke makes the publication backlog visible
+while the client update queue stays drained. Full RD10/RD15 runs are still
+required before making policy decisions.
+
+Validation:
+
+- `cargo check -p mclone-native-client -p mclone-android-xr-client` passed
+  (existing Android XR unused-code warnings for
+  `ANDROID_REMOTE_ADDR_NONE_SENTINEL` /
+  `normalize_android_legacy_remote_addr`).
+- `cargo test -p mclone-server chunk_scheduler_poll_slices_completed_publication`
+  passed, including assertions for the new publication counters.
+- `cargo test -p mclone-server --lib` compiled and ran, but one unrelated oracle
+  test failed:
+  `generated_origin_chunk_block_light_strict_matches_scheduler_light_oracle_fixture`
+  (`expected 0x00, got 0x01`). Do not treat that as evidence about this
+  diagnostic slice; it should be resolved with the concurrent worldgen/light
+  workstream.
+
 ### 2026-07-04 - Publication Valve Attribution And Publish-Budget Prototype
 
 Commit reported by native benchmark JSON: `4a3604cf`.

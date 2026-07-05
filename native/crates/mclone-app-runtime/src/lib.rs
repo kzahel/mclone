@@ -899,6 +899,21 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_publish_completed_ms: f64,
     pub scheduler_pending_unload_ms: f64,
     pub scheduler_apply_events_ms: f64,
+    pub scheduler_completed_feature_jobs_drained: usize,
+    pub scheduler_feature_chunks_published: usize,
+    pub scheduler_feature_chunks_skipped: usize,
+    pub scheduler_feature_jobs_completed: usize,
+    pub scheduler_feature_snapshot_ready_events: usize,
+    pub scheduler_light_status_batches_enqueued: usize,
+    pub scheduler_completed_light_statuses_drained: usize,
+    pub scheduler_light_statuses_published: usize,
+    pub scheduler_light_statuses_skipped: usize,
+    pub scheduler_light_snapshot_ready_events: usize,
+    pub scheduler_pending_worldgen_publication_jobs: usize,
+    pub scheduler_pending_worldgen_publication_chunks: usize,
+    pub scheduler_pending_light_publications: usize,
+    pub scheduler_worldgen_mailbox_pending_jobs: usize,
+    pub scheduler_light_mailbox_pending_statuses: usize,
     pub block_tick_ms: f64,
     pub fluid_tick_ms: f64,
     pub fluid_event_apply_ms: f64,
@@ -2361,6 +2376,37 @@ impl SingleViewRuntime {
         diagnostics.scheduler_pending_unload_ms =
             micros_to_ms(tick.timing.scheduler_pending_unload_us);
         diagnostics.scheduler_apply_events_ms = micros_to_ms(tick.timing.scheduler_apply_events_us);
+        diagnostics.scheduler_completed_feature_jobs_drained =
+            tick.scheduler_publication.completed_feature_jobs_drained;
+        diagnostics.scheduler_feature_chunks_published =
+            tick.scheduler_publication.feature_chunks_published;
+        diagnostics.scheduler_feature_chunks_skipped =
+            tick.scheduler_publication.feature_chunks_skipped;
+        diagnostics.scheduler_feature_jobs_completed =
+            tick.scheduler_publication.feature_jobs_completed;
+        diagnostics.scheduler_feature_snapshot_ready_events =
+            tick.scheduler_publication.feature_snapshot_ready_events;
+        diagnostics.scheduler_light_status_batches_enqueued =
+            tick.scheduler_publication.light_status_batches_enqueued;
+        diagnostics.scheduler_completed_light_statuses_drained =
+            tick.scheduler_publication.completed_light_statuses_drained;
+        diagnostics.scheduler_light_statuses_published =
+            tick.scheduler_publication.light_statuses_published;
+        diagnostics.scheduler_light_statuses_skipped =
+            tick.scheduler_publication.light_statuses_skipped;
+        diagnostics.scheduler_light_snapshot_ready_events =
+            tick.scheduler_publication.light_snapshot_ready_events;
+        diagnostics.scheduler_pending_worldgen_publication_jobs =
+            tick.scheduler_publication.pending_worldgen_publication_jobs;
+        diagnostics.scheduler_pending_worldgen_publication_chunks = tick
+            .scheduler_publication
+            .pending_worldgen_publication_chunks;
+        diagnostics.scheduler_pending_light_publications =
+            tick.scheduler_publication.pending_light_publications;
+        diagnostics.scheduler_worldgen_mailbox_pending_jobs =
+            runner_diagnostics.worldgen_mailbox_pending_jobs;
+        diagnostics.scheduler_light_mailbox_pending_statuses =
+            runner_diagnostics.light_status_mailbox_pending_statuses;
         diagnostics.block_tick_ms = micros_to_ms(tick.timing.block_tick_us);
         diagnostics.fluid_tick_ms = micros_to_ms(tick.timing.fluid_tick_us);
         diagnostics.fluid_event_apply_ms = micros_to_ms(tick.timing.fluid_event_apply_us);

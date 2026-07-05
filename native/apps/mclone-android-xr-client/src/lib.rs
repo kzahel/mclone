@@ -4587,7 +4587,7 @@ mod android {
                 self.max_upload.poll_mixed_updates
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_QUEUE_MAX server_cmd_q={} server_update_q={} server_pending_jobs={} server_pending_publications={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_visible_chunks={} scheduler_ticket_chunks={} player_visible_chunks={} player_outbound_q={}",
+                "MCLONE_ANDROID_XR_PERF_QUEUE_MAX server_cmd_q={} server_update_q={} server_pending_jobs={} server_pending_publications={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_visible_chunks={} scheduler_ticket_chunks={} player_visible_chunks={} player_outbound_q={} scheduler_feature_published={} scheduler_light_published={} scheduler_snapshot_ready={} scheduler_feature_drained={} scheduler_feature_jobs_completed={} scheduler_pending_worldgen_publication_jobs={} scheduler_pending_worldgen_publication_chunks={} scheduler_pending_light_publications={} scheduler_worldgen_mailbox_pending_jobs={} scheduler_light_mailbox_pending_statuses={}",
                 self.max_upload.server_command_queue_depth,
                 self.max_upload.server_update_queue_depth,
                 self.max_upload.server_pending_jobs,
@@ -4599,7 +4599,23 @@ mod android {
                 self.max_upload.scheduler_client_visible_chunks,
                 self.max_upload.scheduler_active_ticket_chunks,
                 self.max_upload.player_visible_chunks,
-                self.max_upload.player_outbound_queue_depth
+                self.max_upload.player_outbound_queue_depth,
+                self.max_upload.poll_scheduler_feature_chunks_published,
+                self.max_upload.poll_scheduler_light_statuses_published,
+                self.max_upload
+                    .poll_scheduler_feature_snapshot_ready_events
+                    .saturating_add(self.max_upload.poll_scheduler_light_snapshot_ready_events),
+                self.max_upload
+                    .poll_scheduler_completed_feature_jobs_drained,
+                self.max_upload.poll_scheduler_feature_jobs_completed,
+                self.max_upload
+                    .poll_scheduler_pending_worldgen_publication_jobs,
+                self.max_upload
+                    .poll_scheduler_pending_worldgen_publication_chunks,
+                self.max_upload.poll_scheduler_pending_light_publications,
+                self.max_upload.poll_scheduler_worldgen_mailbox_pending_jobs,
+                self.max_upload
+                    .poll_scheduler_light_mailbox_pending_statuses
             );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
@@ -4885,7 +4901,7 @@ mod android {
                     upload.map_or(0, |upload| upload.poll_mixed_updates)
                 );
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD rank={} sample_frame={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} poll_changed={} pending_chunks_after={} pending_jobs_after={} submitted_sections={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} upload_limited={} accept_limited={} backpressured={} held_lifecycle={} held_jobs={} server_cmd_q={} server_update_q={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_ticket_chunks={} request_target_sections={} request_target_sections_single={} request_snapshots={} request_snapshot_sections={} request_snapshot_sections_single={} request_payload_bytes={} request_payload_bytes_single={} dispatcher_pending_jobs={} dispatcher_queued_compile_tasks={}",
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD rank={} sample_frame={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} poll_changed={} pending_chunks_after={} pending_jobs_after={} submitted_sections={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} upload_limited={} accept_limited={} backpressured={} held_lifecycle={} held_jobs={} server_cmd_q={} server_update_q={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_ticket_chunks={} scheduler_feature_published={} scheduler_light_published={} scheduler_snapshot_ready={} scheduler_pending_worldgen_publication_chunks={} scheduler_pending_light_publications={} scheduler_worldgen_mailbox_pending_jobs={} scheduler_light_mailbox_pending_statuses={} request_target_sections={} request_target_sections_single={} request_snapshots={} request_snapshot_sections={} request_snapshot_sections_single={} request_payload_bytes={} request_payload_bytes_single={} dispatcher_pending_jobs={} dispatcher_queued_compile_tasks={}",
                     rank,
                     snapshot.sample_frame,
                     summary.map_or(0, |summary| summary.section_count),
@@ -4915,6 +4931,18 @@ mod android {
                     upload.map_or(0, |upload| upload.scheduler_dirty_chunks),
                     upload.map_or(0, |upload| upload.scheduler_loaded_snapshot_chunks),
                     upload.map_or(0, |upload| upload.scheduler_active_ticket_chunks),
+                    upload.map_or(0, |upload| upload.poll_scheduler_feature_chunks_published),
+                    upload.map_or(0, |upload| upload.poll_scheduler_light_statuses_published),
+                    upload.map_or(0, |upload| upload
+                        .poll_scheduler_feature_snapshot_ready_events
+                        .saturating_add(upload.poll_scheduler_light_snapshot_ready_events)),
+                    upload.map_or(0, |upload| upload
+                        .poll_scheduler_pending_worldgen_publication_chunks),
+                    upload.map_or(0, |upload| upload.poll_scheduler_pending_light_publications),
+                    upload.map_or(0, |upload| upload
+                        .poll_scheduler_worldgen_mailbox_pending_jobs),
+                    upload.map_or(0, |upload| upload
+                        .poll_scheduler_light_mailbox_pending_statuses),
                     render.terrain_runtime_submit_request_target_section_count,
                     render.terrain_runtime_submit_request_target_section_count_worst,
                     render.terrain_runtime_submit_request_snapshot_count,
@@ -5592,6 +5620,51 @@ mod android {
                 .poll_server_reported_total_ms
                 .max(b.poll_server_reported_total_ms),
             poll_scheduler_tick_ms: a.poll_scheduler_tick_ms.max(b.poll_scheduler_tick_ms),
+            poll_scheduler_completed_feature_jobs_drained: a
+                .poll_scheduler_completed_feature_jobs_drained
+                .max(b.poll_scheduler_completed_feature_jobs_drained),
+            poll_scheduler_feature_chunks_published: a
+                .poll_scheduler_feature_chunks_published
+                .max(b.poll_scheduler_feature_chunks_published),
+            poll_scheduler_feature_chunks_skipped: a
+                .poll_scheduler_feature_chunks_skipped
+                .max(b.poll_scheduler_feature_chunks_skipped),
+            poll_scheduler_feature_jobs_completed: a
+                .poll_scheduler_feature_jobs_completed
+                .max(b.poll_scheduler_feature_jobs_completed),
+            poll_scheduler_feature_snapshot_ready_events: a
+                .poll_scheduler_feature_snapshot_ready_events
+                .max(b.poll_scheduler_feature_snapshot_ready_events),
+            poll_scheduler_light_status_batches_enqueued: a
+                .poll_scheduler_light_status_batches_enqueued
+                .max(b.poll_scheduler_light_status_batches_enqueued),
+            poll_scheduler_completed_light_statuses_drained: a
+                .poll_scheduler_completed_light_statuses_drained
+                .max(b.poll_scheduler_completed_light_statuses_drained),
+            poll_scheduler_light_statuses_published: a
+                .poll_scheduler_light_statuses_published
+                .max(b.poll_scheduler_light_statuses_published),
+            poll_scheduler_light_statuses_skipped: a
+                .poll_scheduler_light_statuses_skipped
+                .max(b.poll_scheduler_light_statuses_skipped),
+            poll_scheduler_light_snapshot_ready_events: a
+                .poll_scheduler_light_snapshot_ready_events
+                .max(b.poll_scheduler_light_snapshot_ready_events),
+            poll_scheduler_pending_worldgen_publication_jobs: a
+                .poll_scheduler_pending_worldgen_publication_jobs
+                .max(b.poll_scheduler_pending_worldgen_publication_jobs),
+            poll_scheduler_pending_worldgen_publication_chunks: a
+                .poll_scheduler_pending_worldgen_publication_chunks
+                .max(b.poll_scheduler_pending_worldgen_publication_chunks),
+            poll_scheduler_pending_light_publications: a
+                .poll_scheduler_pending_light_publications
+                .max(b.poll_scheduler_pending_light_publications),
+            poll_scheduler_worldgen_mailbox_pending_jobs: a
+                .poll_scheduler_worldgen_mailbox_pending_jobs
+                .max(b.poll_scheduler_worldgen_mailbox_pending_jobs),
+            poll_scheduler_light_mailbox_pending_statuses: a
+                .poll_scheduler_light_mailbox_pending_statuses
+                .max(b.poll_scheduler_light_mailbox_pending_statuses),
             poll_updates: a.poll_updates.max(b.poll_updates),
             poll_snapshot_updates: a.poll_snapshot_updates.max(b.poll_snapshot_updates),
             poll_section_block_updates: a

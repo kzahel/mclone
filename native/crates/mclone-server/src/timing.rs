@@ -13,6 +13,23 @@ use mclone_protocol::ServerUpdate;
 use crate::{ChunkSchedulerEvent, PlayerChunkTrackingDiagnostics};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ChunkSchedulerPublicationDiagnostics {
+    pub completed_feature_jobs_drained: usize,
+    pub feature_chunks_published: usize,
+    pub feature_chunks_skipped: usize,
+    pub feature_jobs_completed: usize,
+    pub feature_snapshot_ready_events: usize,
+    pub light_status_batches_enqueued: usize,
+    pub completed_light_statuses_drained: usize,
+    pub light_statuses_published: usize,
+    pub light_statuses_skipped: usize,
+    pub light_snapshot_ready_events: usize,
+    pub pending_worldgen_publication_jobs: usize,
+    pub pending_worldgen_publication_chunks: usize,
+    pub pending_light_publications: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct NaturalSpawningDiagnostics {
     pub live_attempts_enabled: bool,
     pub live_spawns_are_volatile: bool,
@@ -58,6 +75,7 @@ pub struct ChunkSchedulerTickReport {
     pub entity_ticking_chunks: Vec<ChunkPos>,
     pub pending_unloads_processed: usize,
     pub events: Vec<ChunkSchedulerEvent>,
+    pub publication: ChunkSchedulerPublicationDiagnostics,
     pub timing: ChunkSchedulerTickTiming,
 }
 
@@ -109,6 +127,7 @@ pub struct ServerTickReport {
     pub entity_ticking_chunks: Vec<ChunkPos>,
     pub pending_unloads_processed: usize,
     pub scheduler_event_count: usize,
+    pub scheduler_publication: ChunkSchedulerPublicationDiagnostics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub updates: Vec<ServerUpdate>,
     pub timing: ServerTickTiming,
@@ -131,6 +150,7 @@ pub struct ServerSimulationTickReport {
     pub physics: ServerPhysicsTickDiagnostics,
     pub pending_unloads_processed: usize,
     pub scheduler_event_count: usize,
+    pub scheduler_publication: ChunkSchedulerPublicationDiagnostics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub updates: Vec<ServerUpdate>,
     pub timing: ServerSimulationTickTiming,
