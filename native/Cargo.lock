@@ -1496,6 +1496,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-diagnostics"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mclone-input"
 version = "0.0.0"
 dependencies = [

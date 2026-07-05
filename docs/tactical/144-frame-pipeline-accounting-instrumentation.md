@@ -165,7 +165,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 | Slice | Closes (law-doc gap) | Host needed | Status |
 |---|---|---|---|
 | 0: measurement inventory and baselines | gates | Mac (baseline host; record) | landed 2026-07-05 |
-| 1: `mclone-diagnostics` accounting core | 1 (owner exists) | Mac; Windows test lands at checkpoint A | open |
+| 1: `mclone-diagnostics` accounting core | 1 (owner exists) | Mac; Windows test lands at checkpoint A | landed 2026-07-05 |
 | 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | open |
 | 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | open |
 | 4: calibration, invariants, meter overhead | 7 | Mac with Quest | open |
@@ -425,7 +425,87 @@ cargo check --manifest-path native/Cargo.toml -p mclone-diagnostics \
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Changes:
+
+- Added the leaf crate `native/crates/mclone-diagnostics` and workspace
+  registration. The crate depends only on `serde` at runtime, with
+  `libc` cfg-gated for non-wasm Unix clock sampling and `serde_json` as a
+  test-only dependency.
+- Added stage vocabulary from the law-doc tables:
+  `StageId`, `CriticalPathLabel`, and `StageSpan`.
+- Added frame accounting core:
+  `FrameAccountingConfig`, `FrameAccumulator`, `FrameObservation`,
+  `PercentileRing`, `PercentileSummary`, `HeadroomSummary`,
+  `OverBudgetTiers`, and `WorstFrameDetail`.
+- Preserved both existing percentile semantics behind
+  `PercentileMethod::NearestRank` (Android XR helper shape) and
+  `PercentileMethod::InclusiveCeil` (desktop benchmark helper shape), so
+  Slices 2-3 can preserve existing numbers while deleting duplicate math.
+- Added queue-age primitives:
+  `QueueAgeTracker`, `QueueId`, `QueueAgeReport`, and `QueuePanelReport`,
+  including enqueue/dequeue/depth conservation bookkeeping.
+- Added versioned serde schema structs with `schema_version`:
+  `FrameSummaryReport`, `QueuePanelReport`, and `FramePipelineReport`.
+- Added `clock` module samplers:
+  monotonic `Instant` sample on native hosts, `CLOCK_THREAD_CPUTIME_ID`
+  per-thread CPU time on non-wasm Unix, `GetThreadTimes` per-thread CPU
+  time on Windows, and `None` capability facts on unsupported/wasm paths.
+
+Windows sampler decision:
+
+- Chosen API: `GetThreadTimes`. It reports kernel+user thread CPU time in
+  100 ns `FILETIME` units and maps directly into the millisecond report
+  schema. `QueryThreadCycleTime` remains a possible future refinement, but
+  it would require cycle-frequency normalization and is not needed for this
+  first shared sampler.
+- Validation deferral: Windows compile/runtime sampler validation remains
+  scheduled for Windows checkpoint A after Slice 2.
+
+Tripwire results:
+
+- Accounting math outside the shared owner: 35 hits total, unchanged from
+  Slice 0. The new crate is excluded by the tripwire as intended.
+  - `native/apps/mclone-android-xr-client/src/lib.rs`: 11
+  - `native/apps/mclone-native-client/src/frame_pacing.rs`: 6
+  - `native/apps/mclone-native-client/src/perf.rs`: 14
+  - `native/apps/mclone-native-client/src/ui.rs`: 4
+- Clock reads inside the sans-I/O diagnostics core: 0 hits outside
+  `native/crates/mclone-diagnostics/src/clock.rs`.
+- GPU timestamp sites: 0 hits.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+# PASS.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
+# PASS. 8 tests passed, including Mac/non-wasm Unix thread CPU sampler,
+# percentile methods, frame summary tiers/headroom/worst-frame capture,
+# queue conservation, and schema-version serialization.
+
+cargo check --manifest-path native/Cargo.toml -p mclone-diagnostics \
+  --target wasm32-unknown-unknown
+# PASS.
+
+git diff --check
+# PASS.
+```
+
+Diff scope:
+
+- New crate: `native/crates/mclone-diagnostics/**`.
+- Workspace registration: `native/Cargo.toml`.
+- Lockfile registration: `native/Cargo.lock`.
+- Documentation status record: this tactical.
+- No app/runtime/render/server adoption changes in this slice.
+
+Next step: Slice 2, desktop flat and benchmark adoption on the same Mac
+baseline host. Preserve Slice 0 `native:frame-budget:perf` and
+`native:startup-streaming:perf` fields within the recorded run-to-run noise,
+then schedule or defer Windows checkpoint A.
 
 ## Slice 2: Desktop Flat And Benchmark Adoption
 
@@ -794,10 +874,10 @@ Listed so nobody mistakes this tactical for their plan:
 
 ## Open Questions
 
-- Slice 1: which Windows per-thread CPU API serves the busy-vs-blocked
-  split — `GetThreadTimes` (coarse ~15.6 ms quanta) or
-  `QueryThreadCycleTime` (cycles, needs frequency normalization)? Decide at
-  implementation and record here.
+- Slice 1: resolved 2026-07-05. Use `GetThreadTimes` for the first Windows
+  per-thread CPU sampler because it reports kernel+user thread CPU time in
+  directly comparable 100 ns units. Windows validation is deferred to
+  checkpoint A.
 - Slice 2: schema-vs-legacy JSON field policy for
   [`../performance-records.md`](../performance-records.md) lanes — keep
   legacy keys alongside the schema block, or version-break and re-baseline
