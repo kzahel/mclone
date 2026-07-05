@@ -151,14 +151,20 @@ Interpretation:
   `50` chunks/sec (feature-job serialization bubble + single worldgen thread),
   and the streaming render quiescent tail (`9.2s` → `21.0s`) matches the
   one-chunk-per-frame mesh admission ceiling at 60 Hz.
+- This is desktop evidence only. It shows that scheduler publication throttles
+  client-visible readiness; it does not prove that publication is an important
+  Quest bottleneck. The Quest question is whether opening this valve remains
+  buffered by the client/render budgets or appears as server runner spikes,
+  update queue age, client accept/store cost, dirty/prepare/upload tails, or
+  dropped-frame deltas.
 - Probe bug: `--loading-settle-perf` with `--simulation-cadence 60/20/60`
   false-idles in under a second (`target_ready_chunks=0`) because
   `runner_idle(...)` can be observed before the first interest command
   produces pending work. Harden before reusing that lane for cadence work.
 - Follow-up implementation direction lives in tactical `142`: elapsed-budget
-  publication drain per tick behind a throughput profile, job-admission
-  overlap with a bounded pending-publication backlog, then mesh admission
-  attribution.
+  publication drain serviced from the gameplay tick behind a throughput
+  profile, job-admission overlap with a bounded pending-publication backlog, and
+  first-class per-stage cost attribution before mesh admission work.
 
 ### 2026-07-04 - Flat Android RD5 Startup Timing Check
 

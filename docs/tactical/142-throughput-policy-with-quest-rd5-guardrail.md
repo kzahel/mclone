@@ -72,6 +72,17 @@ drips, before the next job can even be enqueued. Steady state is roughly
 RD20 asymptote (`17.1` chunks/sec) and the flat `13.5`-`16.8` chunks/sec
 across RD5-RD15.
 
+Scope of the claim: this is a **desktop-proven throughput bottleneck**, not a
+proven Quest win. Scheduler publication is heavier than receiving a packet into
+a client buffer: it converts generated chunks to snapshots, marks holder state,
+queues save/cache records, schedules light publication, emits ready events, and
+unblocks later feature-job admission. That can throttle desktop full-view
+readiness even when the client could have accepted more buffered updates. On
+Quest, the first client accept/store step may be cheap and the renderer should
+smooth downstream dirty/mesh/upload work at display cadence. Candidate A must
+therefore be validated on Quest as a streaming safety question, not assumed to
+be a Quest throughput optimization.
+
 **Prototype validation (2026-07-04, reverted after measurement):** raising both
 publish budgets from `1` to `32` — no other change — produced:
 
@@ -183,14 +194,18 @@ profile decision (below), not as a new global default.
 
 The landing zone for every candidate is a named, session-resolved throughput
 profile (desktop-throughput vs headset-pacing), owning at minimum: publication
-drain budget per gameplay tick, feature-job overlap policy, render compile
-chunk budget, compile worker count, and (XR-only) upload/accept budgets.
-Desktop gets aggressive values; Quest keeps current behavior until separately
-measured. Profile-gated values keep the same scheduler/session contracts on
-all platforms — this is a values split, not a code-path fork. The first
-candidate that introduces the profile plumbing must run the full Quest gate set
-even if Quest values are nominally unchanged, because plumbing mistakes are
-exactly how "unchanged" values change.
+drain service budget, feature-job overlap policy, render compile chunk budget,
+compile worker count, and (XR-only) upload/accept budgets. Servicing
+publication from the gameplay tick is acceptable, but the target budget must be
+derived from the configured tick period, active profile, and recent measured
+cost, not from a magic chunk count that accidentally scales when tick rate
+changes. If the tick period changes, reset moving averages/estimators before
+using them for admission decisions. Desktop gets aggressive values; Quest keeps
+current behavior until separately measured. Profile-gated values keep the same
+scheduler/session contracts on all platforms; this is a values split, not a
+code-path fork. The first candidate that introduces the profile plumbing must
+run the full Quest gate set even if Quest values are nominally unchanged,
+because plumbing mistakes are exactly how "unchanged" values change.
 
 ## Guardrails And Gates
 
@@ -239,7 +254,11 @@ and oldest-applied-update age. Until a durable baseline exists, treat this lane
 as evidence-gathering, not pass/fail — but run it, because settled orbit leaves
 the streaming machinery idle and cannot catch a burstier admission policy.
 Candidate A is exactly the kind of change this lane exists for: it multiplies
-the per-tick publish burst the client must absorb.
+the per-tick publish burst the client must absorb. This is a safety/attribution
+lane, not proof that publication is an important Quest bottleneck; the first
+question is whether larger publication drains show up as server runner spikes,
+update queue age, client accept/store cost, dirty/prepare cost, upload cost, or
+dropped-frame deltas.
 
 **Desktop gates (every candidate):**
 
@@ -291,14 +310,15 @@ Ordered by the measured bottleneck model.
 
 **A. Server publication drain policy (validated by prototype; implement
 properly).** Replace the fixed `1`-per-tick feature and light publish budgets
-with an elapsed-time drain budget per gameplay tick (profile-aware: desktop
-gets several ms, Quest keeps current pacing), and decouple job admission from
-full publication — mark the job pipeline-complete when the mailbox drains,
+with an elapsed-time drain budget serviced from the gameplay tick
+(profile-aware: desktop gets an aggressive measured budget, Quest keeps current
+values until a streaming lane proves a safe change), and decouple job admission
+from full publication: mark the job pipeline-complete when the mailbox drains,
 track the pending-publication backlog separately, and let the next feature job
-enqueue while publication drains. Bound the pending-publication backlog (do
-not enqueue a new job past N pending chunks) so generated-but-unpublished
-snapshots cannot grow memory without limit. The fixed-count `32` prototype
-already delivered `3x` full-view-ready at RD10 with clean desktop pacing; the
+enqueue while publication drains. Bound the pending-publication backlog (do not
+enqueue a new job past N pending chunks) so generated-but-unpublished snapshots
+cannot grow memory without limit. The fixed-count `32` prototype already
+delivered `3x` full-view-ready at RD10 with clean desktop pacing; the
 elapsed-budget version bounds server tick cost too, and job-admission overlap
 should push past the prototype's residual `~50` chunks/sec toward
 generation-bound rates.
@@ -348,6 +368,23 @@ instrumentation to watch it:
   recapture Quest RD5/RD7 settled orbit clean.
 - [ ] Implement Candidate A behind the throughput profile and run the full
   promotion loop, including the Quest streaming check.
+
+## Cost Questions To Resolve First
+
+Before opening shared levers broadly, answer these with counters rather than
+inference:
+
+- Is desktop full-view readiness still dominated by scheduler publication after
+  separating feature publish, light publish, update encode/send, and
+  job-admission wait time?
+- On Quest streaming, does a larger publication drain remain invisible until
+  downstream render work, or does it create measurable server runner spikes,
+  update queue depth/age, client accept/store cost, dirty seed/prepare cost, or
+  upload cost?
+- Are the downstream client budgets actually smoothing 20 Hz server publication
+  into 72 Hz render work, or do update bursts leak through as frame tails?
+- Does job-admission overlap make worldgen itself the next limit, or does
+  pending-publication memory/backlog become the practical bound first?
 
 ## Non-Goals
 
