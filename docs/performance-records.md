@@ -76,7 +76,7 @@ pnpm native:runtime:perf
 - `native:gpu-upload:*`: extends the mesh CPU probe with `--gpu-upload`. After CPU mesh build, it creates headless draw resources, uploads the atlas outside the measured section-upload phase, then times `TexturedSectionDrawResources::apply_section_updates_with_context_timed` for the prebuilt section meshes. It includes real `wgpu` buffer creation and renderer section bookkeeping, but no draw pass, frame loop, runtime upload budget, or Quest frame pacing.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
-- `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
+- `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, stable first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. `native:startup-streaming:persisted:*` first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming without fresh generation/light noise. RD20 is an explicit long-run lane, not the default iteration target.
 - `native:android:*`: flat Android validation on AVD and Quest-as-panel. These lanes prove Android packaging, asset staging, NativeActivity startup, wgpu surface creation, touch UI, and first rendered-frame behavior. They are useful for Android startup timing, but they are not OpenXR frame-pacing proof and do not currently emit dropped-frame/headroom metrics.
 - `native:android-xr:perf:*rd5*`: Quest/OpenXR lower-distance control lanes. Use RD5 to distinguish fixed XR/render overhead from view-distance pressure; current records live in `docs/quest-standalone-performance-records.md`.
 - `native:android-xr:perf:*rd7*`: Quest/OpenXR RD7 baseline guardrails. RD7 is the headset product-style frame-pacing lane; current records live in `docs/quest-standalone-performance-records.md`.
@@ -100,6 +100,74 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-05 - Persisted World Startup-Streaming Split
+
+Commit reported by benchmark JSON: `14ceba0a`.
+
+`git_dirty=true`: this record was captured while adding
+`--startup-streaming-persisted-world`, hardening the startup-streaming
+quiescent marker, fixing native-client package scripts to specify
+`--bin mclone-native-client`, and editing docs. Treat it as a directional
+baseline for the new desktop-shaped persisted lane, not a clean release gate.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Command:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client \
+  --bin mclone-native-client -- \
+  --startup-streaming-persisted-world \
+  --render-distance 10 \
+  --startup-streaming-frames 2400 \
+  --target-hz 60 \
+  --debug-passive-showcase false \
+  | tee /tmp/mclone-startup-streaming-persisted-rd10-release-2400.json
+```
+
+Raw local artifact:
+`/tmp/mclone-startup-streaming-persisted-rd10-release-2400.json`.
+
+The benchmark prewarms a temp SQLite world through the normal local integrated
+server path, drops that runtime, then reopens the same world through
+`WindowSceneStartupPump`. The measured startup/streaming phase therefore uses
+the normal desktop pump, update queue, render compile workers, upload budget,
+and paced 60 Hz headless frame loop, but it should not run fresh worldgen or
+lighting. The report's stable render-quiescent marker is now post-processed
+from the whole frame record and requires no actionable ready render work through
+the end of the capture; transient idle frames no longer count as settled.
+
+| Lane | Prewarm / storage | Playable | Full target view | Stable render idle | Frame pacing |
+|---|---:|---:|---:|---:|---:|
+| RD10 persisted startup-streaming, 60 Hz, workers 1 | `33.421s`, `529/529` target chunks, `34.4 MB` SQLite | `0.125s` | `1.031s` | `25.142s` | `0/2400` over budget, p95 `7.030ms`, max `11.020ms` |
+
+Runtime totals during the measured frame loop:
+
+| Measure | Value |
+|---|---:|
+| Total poll / scheduler publish-completed time | `105.824ms` / `953.132ms` |
+| Total remesh / upload / render time | `313.664ms` / `169.804ms` / `1621.953ms` |
+| Submitted / uploaded sections | `7131` / `2232` |
+| Final target chunks / cached sections | `529/529` / `2149` |
+| Final pending render chunks / actionable render work | `88` / `false` |
+
+Interpretation:
+
+- Already-generated local play enters quickly. The measured reopen reaches the
+  playable gate in `0.125s` and the full target chunk view in `1.031s`.
+- The many-second persisted tail is not server reload, generation, lighting, or
+  GPU upload. Scheduler publish counters stay at `0` generated/light chunks,
+  upload totals only `170ms`, and frame pacing stays clean.
+- The remaining desktop-shaped persisted wall is render admission/mesh
+  progression spread over frames: stable actionable render idle arrives at
+  `25.142s`. That matches the earlier CPU-mesh evidence that mesh/admission is
+  the next already-generated render tail, but this lane shows how it behaves
+  under the real frame loop and budgets.
+- `pending_render_chunks=88` at the end while `ready_render_work_pending=false`
+  means dirty/boundary bookkeeping can remain after all currently actionable
+  ready render work is drained. Optimization and regression checks should use
+  both counters, not only one.
 
 ### 2026-07-05 - Prebuilt Mesh GPU Upload Split
 
@@ -147,9 +215,10 @@ Interpretation:
 - The expensive upload subphase is not GPU completion wait; it is CPU-side
   vertex serialization plus buffer creation. `device.poll` after upload was
   effectively zero on this desktop run.
-- Next split should be desktop-shaped persisted-world startup-streaming: reuse
-  persisted chunks, then observe how server reload, mesh workers, upload
-  budgets, and frame pacing interact in the real runtime shape.
+- The desktop-shaped persisted-world startup-streaming split now confirms the
+  same already-generated tail inside the paced runtime: RD10 reaches full target
+  view in `1.031s`, but stable actionable render idle takes `25.142s` with clean
+  frame pacing.
 
 ### 2026-07-05 - Persisted Snapshot Mesh CPU Split
 
@@ -203,9 +272,9 @@ Interpretation:
   spreads compile/admit/upload work across frames and workers, so use this lane
   to price CPU work and output size, then validate changes with
   `startup-streaming` and Quest guardrails.
-- Next split is GPU upload-only from prebuilt meshes, then a persisted-world
-  startup-streaming lane to combine server reload, mesh CPU, upload, and pacing
-  without fresh generation/light noise.
+- The later GPU upload-only and desktop-shaped persisted startup-streaming
+  records complete this split: upload is small on desktop, while the paced
+  already-generated render tail remains many seconds.
 
 ### 2026-07-05 - Temp SQLite Persisted Server Reload Split
 

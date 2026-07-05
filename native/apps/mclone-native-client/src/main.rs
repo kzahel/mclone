@@ -1738,6 +1738,7 @@ mod tests {
                     height: 768,
                     frames: 30000,
                     target_hz: 120.0,
+                    persisted_world: false,
                 },
             }
         );
@@ -1763,6 +1764,32 @@ mod tests {
                     height: 720,
                     frames: 120,
                     target_hz: 90.0,
+                    persisted_world: false,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_startup_streaming_persisted_world() {
+        let cli = Cli::parse([
+            "--startup-streaming-persisted-world".to_owned(),
+            "--startup-streaming-frames".to_owned(),
+            "120".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::StartupStreamingPerf {
+                options: StartupStreamingPerfOptions {
+                    scene: SceneOptions::default(),
+                    render_options: TexturedSectionRenderOptions::default(),
+                    width: 1280,
+                    height: 720,
+                    frames: 120,
+                    target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
+                    persisted_world: true,
                 },
             }
         );

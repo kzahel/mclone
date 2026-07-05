@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -22,7 +26,7 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_server::initial_spawn_center_for_seed;
+use mclone_server::{SqliteWorldStore, initial_spawn_center_for_seed};
 use mclone_ui::{GameMovementMode, GameUiHost, GuiScale};
 
 use crate::camera::{
@@ -40,7 +44,9 @@ use crate::scene_runtime::{
     chunk_tracking_radius_for_render_distance, poll_window_runtime_until_idle,
     poll_window_runtime_until_idle_with_timeout, square_count,
 };
-use crate::{MAX_RENDER_DISTANCE, MAX_STARTUP_STREAMING_PERF_FRAMES, print_benchmark_metadata};
+use crate::{
+    MAX_RENDER_DISTANCE, MAX_STARTUP_STREAMING_PERF_FRAMES, json_escape, print_benchmark_metadata,
+};
 
 const LOADING_SETTLE_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -389,6 +395,8 @@ pub(crate) struct LoadingSettlePerfReport {
 #[derive(Clone, Debug)]
 pub(crate) struct StartupStreamingPerfReport {
     options: StartupStreamingPerfOptions,
+    world_dir: Option<PathBuf>,
+    prewarm: Option<StartupStreamingPrewarmReport>,
     asset_load_ms: f64,
     startup_playable_frame: usize,
     startup_playable_ms: f64,
@@ -403,6 +411,26 @@ pub(crate) struct StartupStreamingPerfReport {
     first_full_view_ready_ms: Option<f64>,
     first_render_quiescent_frame: Option<usize>,
     first_render_quiescent_ms: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StartupStreamingPrewarmReport {
+    runtime_create_ms: f64,
+    runtime_poll_count: usize,
+    runtime_poll_ms: f64,
+    total_ms: f64,
+    target_ready_chunks: usize,
+    target_chunk_count: usize,
+    target_percent: u8,
+    loaded_chunks: usize,
+    client_visible_chunks: usize,
+    active_ticket_chunks: usize,
+    pending_jobs: usize,
+    pending_publications: usize,
+    pending_render_chunks: usize,
+    pending_render_compile_jobs: usize,
+    player_position_updates: usize,
+    sqlite_storage_bytes: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -460,6 +488,7 @@ struct StartupStreamingFrameReport {
     pending_jobs: usize,
     pending_publications: usize,
     pending_render_chunks: usize,
+    ready_render_work_pending: bool,
     pending_render_compile_jobs: usize,
     inflight_render_sections: usize,
     submitted_compile_sections: usize,
@@ -1310,6 +1339,12 @@ impl StartupStreamingPerfReport {
         if self.startup_cached_sections == 0 {
             bail!("startup streaming perf entered playable with no cached render sections");
         }
+        if self.options.persisted_world && self.prewarm.is_none() {
+            bail!("persisted startup streaming perf did not record a prewarm report");
+        }
+        if self.options.persisted_world && self.world_dir.is_none() {
+            bail!("persisted startup streaming perf did not record a world directory");
+        }
         Ok(())
     }
 
@@ -1430,7 +1465,12 @@ impl StartupStreamingPerfReport {
         let final_frame = self.frames.last().copied().unwrap_or_default();
 
         println!("{{");
-        print_benchmark_metadata("native_startup_streaming_perf", "  ", true);
+        let benchmark_name = if self.options.persisted_world {
+            "native_startup_streaming_persisted_perf"
+        } else {
+            "native_startup_streaming_perf"
+        };
+        print_benchmark_metadata(benchmark_name, "  ", true);
         println!("  \"seed\": {},", self.options.scene.seed);
         println!(
             "  \"render_distance\": {},",
@@ -1467,6 +1507,77 @@ impl StartupStreamingPerfReport {
         println!("  \"height\": {},", self.options.height);
         println!("  \"target_hz\": {:.3},", self.options.target_hz);
         println!("  \"target_frame_ms\": {:.3},", target_frame_ms);
+        println!(
+            "  \"world_storage\": \"{}\",",
+            if self.options.persisted_world {
+                "temp_sqlite_prewarmed"
+            } else {
+                "transient"
+            }
+        );
+        match &self.world_dir {
+            Some(path) => println!(
+                "  \"world_dir\": \"{}\",",
+                json_escape(&path.display().to_string())
+            ),
+            None => println!("  \"world_dir\": null,"),
+        }
+        match self.prewarm {
+            Some(prewarm) => {
+                println!("  \"prewarm\": {{");
+                println!(
+                    "    \"runtime_create_ms\": {:.3},",
+                    prewarm.runtime_create_ms
+                );
+                println!(
+                    "    \"runtime_poll_count\": {},",
+                    prewarm.runtime_poll_count
+                );
+                println!("    \"runtime_poll_ms\": {:.3},", prewarm.runtime_poll_ms);
+                println!("    \"total_ms\": {:.3},", prewarm.total_ms);
+                println!(
+                    "    \"target_ready_chunks\": {},",
+                    prewarm.target_ready_chunks
+                );
+                println!(
+                    "    \"target_chunk_count\": {},",
+                    prewarm.target_chunk_count
+                );
+                println!("    \"target_percent\": {},", prewarm.target_percent);
+                println!("    \"loaded_chunks\": {},", prewarm.loaded_chunks);
+                println!(
+                    "    \"client_visible_chunks\": {},",
+                    prewarm.client_visible_chunks
+                );
+                println!(
+                    "    \"active_ticket_chunks\": {},",
+                    prewarm.active_ticket_chunks
+                );
+                println!("    \"pending_jobs\": {},", prewarm.pending_jobs);
+                println!(
+                    "    \"pending_publications\": {},",
+                    prewarm.pending_publications
+                );
+                println!(
+                    "    \"pending_render_chunks\": {},",
+                    prewarm.pending_render_chunks
+                );
+                println!(
+                    "    \"pending_render_compile_jobs\": {},",
+                    prewarm.pending_render_compile_jobs
+                );
+                println!(
+                    "    \"player_position_updates\": {},",
+                    prewarm.player_position_updates
+                );
+                match prewarm.sqlite_storage_bytes {
+                    Some(bytes) => println!("    \"sqlite_storage_bytes\": {bytes}"),
+                    None => println!("    \"sqlite_storage_bytes\": null"),
+                }
+                println!("  }},");
+            }
+            None => println!("  \"prewarm\": null,"),
+        }
         println!("  \"asset_load_ms\": {:.3},", self.asset_load_ms);
         println!(
             "  \"startup_playable_frame\": {},",
@@ -1694,6 +1805,10 @@ impl StartupStreamingPerfReport {
                 frame.pending_render_chunks
             );
             println!(
+                "      \"ready_render_work_pending\": {},",
+                frame.ready_render_work_pending
+            );
+            println!(
                 "      \"pending_render_compile_jobs\": {},",
                 frame.pending_render_compile_jobs
             );
@@ -1730,6 +1845,10 @@ impl StartupStreamingPerfReport {
         println!(
             "    \"pending_render_chunks\": {},",
             final_frame.pending_render_chunks
+        );
+        println!(
+            "    \"ready_render_work_pending\": {},",
+            final_frame.ready_render_work_pending
         );
         println!(
             "    \"pending_render_compile_jobs\": {},",
@@ -2217,6 +2336,125 @@ pub(crate) fn run_loading_settle_perf(
     })
 }
 
+fn prewarm_startup_streaming_world(
+    scene: &SceneOptions,
+    assets: &WindowSceneAssets,
+    world_dir: &Path,
+) -> Result<StartupStreamingPrewarmReport> {
+    let total_start = Instant::now();
+    let runtime_create_start = Instant::now();
+    let mut runtime = WindowSceneRuntime::with_assets(scene, assets)
+        .context("failed to create persisted startup-streaming prewarm runtime")?;
+    let runtime_create_ms = elapsed_ms(runtime_create_start.elapsed());
+    let (runtime_poll_count, runtime_poll_ms) =
+        poll_window_runtime_until_idle_with_timeout(&mut runtime, LOADING_SETTLE_IDLE_TIMEOUT)
+            .context("failed to prewarm persisted startup-streaming world")?;
+    let progress = runtime.view_readiness_overlay();
+    let target_ready_chunks = progress
+        .as_ref()
+        .map_or(0, |progress| progress.target_ready_chunks);
+    let target_chunk_count = progress
+        .as_ref()
+        .map_or(0, |progress| progress.target_chunk_count);
+    let target_percent = progress.as_ref().map_or(0, |progress| progress.percent());
+    let stats = runtime.stats();
+    let player_position_updates = runtime.drain_player_position_updates().len();
+    drop(runtime);
+    let sqlite_storage_bytes = startup_streaming_sqlite_storage_bytes(world_dir);
+    Ok(StartupStreamingPrewarmReport {
+        runtime_create_ms,
+        runtime_poll_count,
+        runtime_poll_ms,
+        total_ms: elapsed_ms(total_start.elapsed()),
+        target_ready_chunks,
+        target_chunk_count,
+        target_percent,
+        loaded_chunks: stats.loaded_chunks,
+        client_visible_chunks: stats.client_visible_chunks,
+        active_ticket_chunks: stats.active_ticket_chunks,
+        pending_jobs: stats.pending_jobs,
+        pending_publications: stats.pending_publications,
+        pending_render_chunks: stats.pending_render_chunks,
+        pending_render_compile_jobs: stats.pending_render_compile_jobs,
+        player_position_updates,
+        sqlite_storage_bytes,
+    })
+}
+
+fn unique_startup_streaming_world_dir(options: &StartupStreamingPerfOptions) -> PathBuf {
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    env::temp_dir().join(format!(
+        "mclone-startup-streaming-persisted-rd{}-{}-{timestamp_ms}",
+        options.scene.render_distance,
+        std::process::id()
+    ))
+}
+
+fn remove_dir_if_exists(path: &Path) -> Result<()> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "failed to remove existing benchmark world {}",
+                path.display()
+            )
+        }),
+    }
+}
+
+fn startup_streaming_sqlite_storage_bytes(world_dir: &Path) -> Option<u64> {
+    let database_path = SqliteWorldStore::database_path_for_world_dir(world_dir);
+    let mut total = 0_u64;
+    let mut found = false;
+    for path in [
+        database_path.clone(),
+        sqlite_auxiliary_path(&database_path, "-wal"),
+        sqlite_auxiliary_path(&database_path, "-shm"),
+    ] {
+        if let Ok(metadata) = fs::metadata(path) {
+            total = total.saturating_add(metadata.len());
+            found = true;
+        }
+    }
+    found.then_some(total)
+}
+
+fn sqlite_auxiliary_path(database_path: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}{}", database_path.display(), suffix))
+}
+
+fn startup_streaming_frame_render_quiescent(frame: &StartupStreamingFrameReport) -> bool {
+    frame.target_chunk_count > 0
+        && frame.target_ready_chunks == frame.target_chunk_count
+        && frame.pending_jobs == 0
+        && frame.pending_publications == 0
+        && !frame.ready_render_work_pending
+        && frame.pending_render_compile_jobs == 0
+        && frame.inflight_render_sections == 0
+        && frame.submitted_compile_sections == 0
+        && frame.completed_compile_sections == 0
+        && frame.uploaded_sections == 0
+}
+
+fn first_stable_startup_streaming_render_quiescent(
+    frames: &[StartupStreamingFrameReport],
+) -> (Option<usize>, Option<f64>) {
+    let mut suffix_quiescent = true;
+    let mut first_frame = None;
+    let mut first_ms = None;
+    for (index, frame) in frames.iter().enumerate().rev() {
+        suffix_quiescent &= startup_streaming_frame_render_quiescent(frame);
+        if suffix_quiescent {
+            first_frame = Some(index);
+            first_ms = Some(frame.elapsed_ms);
+        }
+    }
+    (first_frame, first_ms)
+}
+
 pub(crate) fn run_startup_streaming_perf(
     options: &StartupStreamingPerfOptions,
 ) -> Result<StartupStreamingPerfReport> {
@@ -2224,7 +2462,7 @@ pub(crate) fn run_startup_streaming_perf(
         bail!("--startup-streaming-perf requires the local integrated server path");
     }
     if options.scene.world_dir.is_some() {
-        bail!("--startup-streaming-perf uses a fresh transient world; omit --world-dir");
+        bail!("--startup-streaming-perf owns its benchmark world storage; omit --world-dir");
     }
 
     let asset_start = Instant::now();
@@ -2234,7 +2472,20 @@ pub(crate) fn run_startup_streaming_perf(
     let spawn_center = initial_spawn_center_for_seed(scene.seed);
     scene.chunk_x = spawn_center.x;
     scene.chunk_z = spawn_center.z;
-    scene.world_dir = None;
+    let world_dir = if options.persisted_world {
+        let world_dir = unique_startup_streaming_world_dir(options);
+        remove_dir_if_exists(&world_dir)?;
+        scene.world_dir = Some(world_dir.clone());
+        Some(world_dir)
+    } else {
+        scene.world_dir = None;
+        None
+    };
+    let prewarm = if let Some(world_dir) = world_dir.as_ref() {
+        Some(prewarm_startup_streaming_world(&scene, &assets, world_dir)?)
+    } else {
+        None
+    };
     let spectator = SpectatorCamera::spawn_for_scene(&scene);
     let frame_duration = Duration::from_secs_f64(1.0 / options.target_hz.max(1.0));
 
@@ -2279,8 +2530,6 @@ pub(crate) fn run_startup_streaming_perf(
     let mut frame_reports = Vec::with_capacity(options.frames);
     let mut first_full_view_ready_frame = None;
     let mut first_full_view_ready_ms = None;
-    let mut first_render_quiescent_frame = None;
-    let mut first_render_quiescent_ms = None;
     let render_options = options.render_options;
     let streaming_start = Instant::now();
 
@@ -2493,6 +2742,8 @@ pub(crate) fn run_startup_streaming_perf(
             report.pending_jobs = stats.pending_jobs;
             report.pending_publications = stats.pending_publications;
             report.pending_render_chunks = stats.pending_render_chunks;
+            report.ready_render_work_pending =
+                state.runtime.has_pending_render_work(spectator.position);
             report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
             report.inflight_render_sections = stats.inflight_render_sections;
 
@@ -2502,26 +2753,17 @@ pub(crate) fn run_startup_streaming_perf(
                 first_full_view_ready_frame = Some(index);
                 first_full_view_ready_ms = Some(report.elapsed_ms);
             }
-            let render_quiescent = full_view_ready
-                && report.pending_jobs == 0
-                && report.pending_publications == 0
-                && report.pending_render_compile_jobs == 0
-                && report.inflight_render_sections == 0
-                && report.submitted_compile_sections == 0
-                && report.completed_compile_sections == 0
-                && report.uploaded_sections == 0;
-            if render_quiescent && first_render_quiescent_frame.is_none() {
-                first_render_quiescent_frame = Some(index);
-                first_render_quiescent_ms = Some(report.elapsed_ms);
-            }
-
             frame_reports.push(report);
             Ok(())
         },
     )?;
+    let (first_render_quiescent_frame, first_render_quiescent_ms) =
+        first_stable_startup_streaming_render_quiescent(&frame_reports);
 
     Ok(StartupStreamingPerfReport {
         options: options.clone(),
+        world_dir,
+        prewarm,
         asset_load_ms,
         startup_playable_frame,
         startup_playable_ms,

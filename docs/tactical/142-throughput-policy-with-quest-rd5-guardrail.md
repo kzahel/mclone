@@ -7,6 +7,10 @@ the same day and their results are folded in below. The publication-valve
 model is now **measured, not hypothesized**: a reverted 2-line publish-budget
 prototype produced a `3x` full-view-ready improvement at desktop RD10 with
 unchanged frame pacing.
+The persisted-world desktop-shaped split is also measured as of 2026-07-05:
+RD10 already-generated startup reaches playable in `0.125s`, full target view
+in `1.031s`, and stable actionable render idle in `25.142s` with `0/2400`
+over-budget frames.
 Workstream: native Rust performance, desktop streaming throughput, Android XR /
 Quest frame-pacing guardrails.
 
@@ -209,10 +213,15 @@ with no `wgpu` device, upload, frame loop, or runtime admission budget. The GPU
 upload split is now implemented too: the same RD10 prebuilt mesh footprint
 uploads `360 MB` of section data in `0.133s` on desktop, with post-upload
 `device.poll` effectively zero. That confirms upload is budget-sensitive but
-not the many-second wall on this machine. Next, add a persisted-world
-startup-streaming lane so server reload, mesh workers, upload budgets, and
-frame pacing are observed together without fresh generation/light noise, then
-add the Quest persisted-world guardrail.
+not the many-second wall on this machine. The persisted-world startup-streaming
+lane now observes those pieces together in the real desktop frame loop: RD10
+prewarm takes `33.421s`, measured reopen reaches playable in `0.125s`, full
+target view in `1.031s`, and stable actionable render idle in `25.142s` with
+`0/2400` over-budget frames. The final report still has `88` dirty/pending
+render chunks but `ready_render_work_pending=false`, so dirty boundary
+bookkeeping and actionable render work must stay separate in future counters.
+Next, add the Quest persisted-world guardrail and instrument the paced render
+admission/mesh tail before changing broad policy.
 
 ### Mesh drain: admission/scan-bound, not worker-bound (measured)
 
@@ -515,9 +524,11 @@ instrumentation to watch it:
 - [x] Add GPU upload-only lane from prebuilt meshes: RD10 uploads `2789`
   non-empty sections (`360 MB`, `1.96M` faces) in `0.133s`; post-upload device
   poll is effectively zero on desktop.
-- [ ] Add desktop-shaped persisted-world startup-streaming lane so reload,
+- [x] Add desktop-shaped persisted-world startup-streaming lane so reload,
   mesh workers, upload budgets, and frame pacing are observed without fresh
-  generation/light noise.
+  generation/light noise: RD10 persisted reopen reaches playable in `0.125s`,
+  full target view in `1.031s`, and stable actionable render idle in `25.142s`
+  with `0/2400` over-budget frames.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
@@ -581,8 +592,13 @@ inference:
   reaches view-ready in `0.572s` and settles in `0.721s`, both from `625`
   already-lit records with no worldgen/light. Mesh CPU-only from persisted
   snapshots then takes `11.037s` for `8464` target sections. GPU upload-only
-  from those prebuilt meshes takes `0.133s` for `360 MB`. Next add a
-  persisted-world startup-streaming lane to observe the paced integrated shape.
+  from those prebuilt meshes takes `0.133s` for `360 MB`. The paced integrated
+  persisted lane now shows server reload/publication and upload are not the
+  remaining wall: measured RD10 reopen is playable in `0.125s`, full target
+  view in `1.031s`, and stable actionable render idle in `25.142s` with total
+  upload `0.170s`, total remesh `0.314s`, and total render `1.622s`. The wall
+  is the paced render admission/mesh progression shape, not aggregate GPU
+  upload bandwidth.
 
 ## Non-Goals
 
