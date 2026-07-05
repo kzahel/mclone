@@ -13,6 +13,8 @@
     "native:scheduler-loading:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf --",
     "native:scheduler-loading:persisted-memory:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --persisted-memory-reload",
     "native:scheduler-loading:persisted-sqlite:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --persisted-sqlite-reload",
+    "native:mesh-cpu:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mesh_cpu_perf -- --render-distance 5 --max-seconds 120",
+    "native:mesh-cpu:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mesh_cpu_perf -- --render-distance 10 --max-seconds 180",
     "native:dedicated:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-dedicated-server -- --multi-client-smoke",
     "native:worldgen:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",

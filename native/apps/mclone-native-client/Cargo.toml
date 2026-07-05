@@ -54,3 +54,7 @@ metal = { workspace = true, optional = true }
 [[bin]]
 name = "mclone-native-client"
 path = "src/main.rs"
+
+[[bin]]
+name = "mesh_cpu_perf"
+path = "src/bin/mesh_cpu_perf.rs"

@@ -17,6 +17,7 @@ Individual lanes:
 ```bash
 pnpm native:worldgen:smoke
 pnpm native:scheduler-loading:smoke
+pnpm native:mesh-cpu:smoke
 pnpm native:movement:smoke
 pnpm native:movement-frame:smoke
 pnpm native:startup-streaming:smoke
@@ -31,6 +32,7 @@ pnpm native:worldgen:perf
 pnpm native:scheduler-loading:perf
 pnpm native:scheduler-loading:persisted-memory:perf
 pnpm native:scheduler-loading:persisted-sqlite:perf
+pnpm native:mesh-cpu:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
 pnpm native:startup-streaming:perf
@@ -68,6 +70,7 @@ pnpm native:runtime:perf
 
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
 - `native:scheduler-loading:*`: server-only loading ceiling probe. Applies one local chunk view to `ChunkScheduler`, hot-polls until the target view is client-visible and server queues drain, and reports target chunks/sec plus worldgen/light/publication counters. It includes current scheduler job admission, publication, light status work, and persistence queues, but no client update pump, mesh preparation, GPU upload, or frame pacing. `native:scheduler-loading:persisted-memory:perf` runs a prewarm pass into shared in-memory `ChunkRecord`s, then measures reload from already-generated/lit records with no disk. `native:scheduler-loading:persisted-sqlite:perf` repeats that shape through a temp SQLite world directory to price the normal record decode/load/storage path separately from generation/light.
+- `native:mesh-cpu:*`: CPU-only render-section mesh probe. The default source prewarms a temp SQLite world, reloads already-generated/lit snapshots through `ChunkScheduler`, then builds all target-column render sections with the shared `mclone-render-session` mesh path. It includes asset catalog load, persisted server reload, snapshot-to-mesh conversion, ambient occlusion, light/tint sampling, and visibility-graph build. It excludes `wgpu`, GPU upload, frame pacing, render draw, and the runtime admission budget.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
@@ -94,6 +97,62 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-05 - Persisted Snapshot Mesh CPU Split
+
+Commit reported by benchmark JSON: `4858ca1f`.
+
+`git_dirty=true`: this record was captured while adding the new
+`mesh_cpu_perf` binary, package scripts, and docs. Treat as a first directional
+baseline for the mesh CPU-only lane, not a clean release gate.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Command shape:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mesh_cpu_perf -- \
+  --render-distance N --max-seconds 180 \
+  > /tmp/mclone-mesh-cpu-rdN-persisted-sqlite-20260705.json
+```
+
+Raw local artifacts:
+`/tmp/mclone-mesh-cpu-rd5-persisted-sqlite-20260705.json` and
+`/tmp/mclone-mesh-cpu-rd10-persisted-sqlite-20260705.json`.
+
+The benchmark prewarms a temp SQLite world, reloads already-generated/lit
+snapshots through `ChunkScheduler`, then measures CPU mesh construction for all
+target-column render sections. The mesh phase uses
+`build_render_sections_from_snapshots_with_biome_zoom_seed`, the same shared
+path used by the render compile worker. It does not create a `wgpu` device,
+upload buffers, run the desktop frame loop, or apply the runtime's per-frame
+admission budget.
+
+| Lane | Target chunks / sections | Persisted reload ready / settled | Mesh CPU build | Mesh throughput | Mesh output |
+|---|---:|---:|---:|---:|---:|
+| RD5 persisted snapshots | `169` / `2704` | `0.079s` / `0.098s` | `1.624s` | `1665` sections/sec (`594` non-empty/sec) | `965` non-empty sections, `739k` faces |
+| RD10 persisted snapshots | `529` / `8464` | `0.540s` / `0.626s` | `11.037s` | `767` sections/sec (`253` non-empty/sec) | `2789` non-empty sections, `1.96M` faces |
+
+RD10 detail: asset catalog load `53.931ms`, `529` reloaded snapshots,
+`625` stored chunk records, SQLite storage `35.5 MB`, visibility-graph total
+`92.171ms`.
+
+Interpretation:
+
+- With persisted snapshots, server reload is sub-second at RD10, but CPU mesh
+  construction alone is an `11.0s` wall for a full target-column build. This is
+  now the largest measured already-generated startup cost.
+- Mesh throughput drops from `1665` sections/sec at RD5 to `767` sections/sec
+  at RD10, and non-empty throughput drops from `594` to `253` sections/sec.
+  That scaling is consistent with the earlier render-quiescence tail and makes
+  mesh CPU/admission a real optimization target after publication.
+- This is still not a desktop-shaped frame-pacing result. The real runtime
+  spreads compile/admit/upload work across frames and workers, so use this lane
+  to price CPU work and output size, then validate changes with
+  `startup-streaming` and Quest guardrails.
+- Next split is GPU upload-only from prebuilt meshes, then a persisted-world
+  startup-streaming lane to combine server reload, mesh CPU, upload, and pacing
+  without fresh generation/light noise.
 
 ### 2026-07-05 - Temp SQLite Persisted Server Reload Split
 

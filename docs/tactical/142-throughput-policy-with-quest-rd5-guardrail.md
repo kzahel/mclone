@@ -202,11 +202,13 @@ The temp SQLite persisted reload mode is now implemented too: RD10 reload from
 the normal world-dir path reached view-ready in `0.572s` and settled in
 `0.721s` from `625` records, with `0` worldgen jobs and `0` light statuses.
 That prices real record decode/load/storage as a modest increment over memory
-reload, not the many-second fresh-path wall. Next, split render work into mesh
-CPU-only (loaded snapshots -> section meshes, no GPU) and GPU upload-only
-(prebuilt meshes -> `wgpu` upload). Once those desktop lanes are understood,
-add a Quest persisted-world guardrail so headset frame pacing can be measured
-without generation/light noise.
+reload, not the many-second fresh-path wall. The mesh CPU-only lane is now
+implemented on persisted SQLite snapshots: RD10 reload reached view-ready in
+`0.540s`, then CPU mesh construction for `8464` target sections took `11.037s`
+with no `wgpu` device, upload, frame loop, or runtime admission budget. Next,
+split GPU upload-only from prebuilt meshes. Once that desktop lane is
+understood, add a Quest persisted-world guardrail so headset frame pacing can be
+measured without generation/light noise.
 
 ### Mesh drain: admission/scan-bound, not worker-bound (measured)
 
@@ -503,8 +505,11 @@ instrumentation to watch it:
 - [x] Add scheduler-only temp SQLite persisted reload mode: RD10 reload through
   a temp world-dir SQLite store reaches view-ready in `0.572s` and settled in
   `0.721s` from `625` records, with `0` worldgen jobs and `0` light statuses.
-- [ ] Add mesh CPU-only and GPU upload-only lanes so render quiescence can be
-  split without server generation or light in the sample.
+- [x] Add mesh CPU-only lane: RD10 persisted SQLite reload reaches view-ready in
+  `0.540s`, then full target-column mesh CPU build takes `11.037s` for `8464`
+  sections (`2789` non-empty), with no GPU upload or frame loop.
+- [ ] Add GPU upload-only lane from prebuilt meshes so render quiescence can be
+  split without server generation, light, or mesh CPU in the sample.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
@@ -563,11 +568,13 @@ inference:
   `4` plus workers `2` cuts RD10 quiescence from `20.089s` to `11.412s`, while
   workers `4` is flat.
 - How much of already-generated startup is persistence/load/publication versus
-  mesh/upload/render? Current answer: server-only reload is now bounded. RD10
-  in-memory reload reaches view-ready in `0.523s`; temp SQLite reaches
-  view-ready in `0.572s` and settles in `0.721s`, both from `625` already-lit
-  records with no worldgen/light. Next add mesh CPU-only and GPU upload-only
-  lanes to price the client render side of already-generated startup.
+  mesh/upload/render? Current answer: server-only reload and mesh CPU are now
+  bounded. RD10 in-memory reload reaches view-ready in `0.523s`; temp SQLite
+  reaches view-ready in `0.572s` and settles in `0.721s`, both from `625`
+  already-lit records with no worldgen/light. Mesh CPU-only from persisted
+  snapshots then takes `11.037s` for `8464` target sections. Next add GPU
+  upload-only from prebuilt meshes, then a persisted-world startup-streaming
+  lane to observe the paced integrated shape.
 
 ## Non-Goals
 
