@@ -164,7 +164,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 
 | Slice | Closes (law-doc gap) | Host needed | Status |
 |---|---|---|---|
-| 0: measurement inventory and baselines | gates | Mac (baseline host; record) | open |
+| 0: measurement inventory and baselines | gates | Mac (baseline host; record) | landed 2026-07-05 |
 | 1: `mclone-diagnostics` accounting core | 1 (owner exists) | Mac; Windows test lands at checkpoint A | open |
 | 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | open |
 | 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | open |
@@ -217,7 +217,153 @@ pnpm native:startup-streaming:perf
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Workstream and host:
+
+- Workstream: native Rust shared diagnostics/profiling contract.
+- Baseline host: `kmacbook`, macOS 26.5.1 build 25F80, arm64.
+- Git baseline for perf rows: `f79d3ebc`, `git_dirty=false`.
+- Raw run outputs were written outside the repo under `/tmp`:
+  `/tmp/mclone-144-frame-budget-1.json`,
+  `/tmp/mclone-144-frame-budget-2.json`,
+  `/tmp/mclone-144-startup-streaming-1.json`, and
+  `/tmp/mclone-144-startup-streaming-2.json`.
+
+Tripwire baselines:
+
+- Accounting math outside the shared owner: 35 hits total.
+  - `native/apps/mclone-android-xr-client/src/lib.rs`: 11
+  - `native/apps/mclone-native-client/src/frame_pacing.rs`: 6
+  - `native/apps/mclone-native-client/src/perf.rs`: 14
+  - `native/apps/mclone-native-client/src/ui.rs`: 4
+- Clock reads inside `mclone-diagnostics`: 0 hits; crate absent before
+  Slice 1 (`native/crates/mclone-diagnostics/src` does not exist yet).
+- GPU timestamp sites: 0 hits.
+
+Report-surface inventory:
+
+- Desktop/native client: no `MCLONE_*` frame-loop marker-line prefixes found
+  in `native/apps/mclone-native-client/src`; the relevant Slice 0 desktop
+  surfaces are hand-written JSON benchmark reports.
+- Android XR: 59 `MCLONE_ANDROID_XR*` marker prefixes found; 43 are
+  `MCLONE_ANDROID_XR_PERF*` prefixes. Slice 3 must preserve the existing
+  `MCLONE_ANDROID_XR_PERF_*` marker keys.
+- Android XR perf prefix inventory:
+  `MCLONE_ANDROID_XR_PERF_COMPILE_MAX`,
+  `MCLONE_ANDROID_XR_PERF_CONFIG`,
+  `MCLONE_ANDROID_XR_PERF_CPU_BLOCKED`,
+  `MCLONE_ANDROID_XR_PERF_DRAW`,
+  `MCLONE_ANDROID_XR_PERF_GPU_SYNC_MAX`,
+  `MCLONE_ANDROID_XR_PERF_HEADROOM`,
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION`,
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_COMMAND`,
+  `MCLONE_ANDROID_XR_PERF_METRICS`,
+  `MCLONE_ANDROID_XR_PERF_METRICS_COUNTER`,
+  `MCLONE_ANDROID_XR_PERF_MULTIVIEW`,
+  `MCLONE_ANDROID_XR_PERF_OVERLAP`,
+  `MCLONE_ANDROID_XR_PERF_QUEUE_MAX`,
+  `MCLONE_ANDROID_XR_PERF_RECORD_CACHE`,
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX`,
+  `MCLONE_ANDROID_XR_PERF_SETTLED`,
+  `MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS`,
+  `MCLONE_ANDROID_XR_PERF_STAGES`,
+  `MCLONE_ANDROID_XR_PERF_START`,
+  `MCLONE_ANDROID_XR_PERF_SUMMARY`,
+  `MCLONE_ANDROID_XR_PERF_TERRAIN`,
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_DISPATCHER_MAX`,
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_ENQUEUE_MAX`,
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT`,
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_PREP`,
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME`,
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX`,
+  `MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX`,
+  `MCLONE_ANDROID_XR_PERF_UPLOAD_APPLY_MAX`,
+  `MCLONE_ANDROID_XR_PERF_UPLOAD_LAST`,
+  `MCLONE_ANDROID_XR_PERF_UPLOAD_MAX`,
+  `MCLONE_ANDROID_XR_PERF_UPLOAD_PHASE_MAX`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_BUDGET`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_EYE_SPLIT`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_GPU_SYNC`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_LOCOMOTION`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_LOCOMOTION_COMMAND`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_RUNTIME`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_TERRAIN`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPDATE_APPLY`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD`, and
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD_APPLY`.
+- `mclone-native-client` hand-written JSON benchmark surfaces using
+  `print_benchmark_metadata`: `native_runtime_movement`,
+  `native_render_timedemo`, `native_frame_budget_probe`,
+  `native_movement_frame_probe`, `native_startup_streaming_perf`,
+  `native_startup_streaming_persisted_perf`, `native_loading_settle`,
+  `native_mesh_cpu_only`, and `native_mesh_cpu_gpu_upload`.
+
+Desktop pre-adoption baselines:
+
+`pnpm native:frame-budget:perf` was run twice on the Mac baseline host.
+
+| field | run 1 | run 2 | abs spread |
+|---|---:|---:|---:|
+| over_budget_frames | 1 | 1 | 0 |
+| over_2x_budget_frames | 1 | 1 | 0 |
+| over_4x_budget_frames | 0 | 0 | 0 |
+| average_frame_ms | 2.103 | 2.103 | 0.000 |
+| p95_frame_ms | 2.493 | 2.483 | 0.010 |
+| p99_frame_ms | 2.736 | 3.088 | 0.352 |
+| max_frame_ms | 18.345 | 18.635 | 0.290 |
+| runtime_setup_ms | 13545.092 | 13558.994 | 13.902 |
+| initial_poll_ms | 22.600 | 23.126 | 0.526 |
+| initial_remesh_ms | 1051.865 | 1022.127 | 29.738 |
+| initial_section_count | 1936 | 1936 | 0 |
+| initial_index_count | 3025326 | 3025326 | 0 |
+
+`pnpm native:startup-streaming:perf` was run twice on the Mac baseline host.
+
+| field | run 1 | run 2 | abs spread |
+|---|---:|---:|---:|
+| startup_playable_frame | 45 | 44 | 1 |
+| startup_playable_ms | 1066.007 | 1090.924 | 24.917 |
+| first_full_view_ready_frame | 1218 | 1230 | 12 |
+| first_full_view_ready_ms | 27640.986 | 27631.327 | 9.659 |
+| first_render_quiescent_frame | 2548 | 2559 | 11 |
+| first_render_quiescent_ms | 56666.366 | 56638.706 | 27.660 |
+| over_budget_frames | 0 | 0 | 0 |
+| over_2x_budget_frames | 0 | 0 | 0 |
+| over_4x_budget_frames | 0 | 0 | 0 |
+| average_frame_ms | 5.378 | 5.541 | 0.163 |
+| p95_frame_ms | 7.166 | 7.274 | 0.108 |
+| p99_frame_ms | 7.538 | 7.614 | 0.076 |
+| max_frame_ms | 9.959 | 9.058 | 0.901 |
+| total_poll_ms | 78.342 | 77.262 | 1.080 |
+| total_poll_scheduler_publish_completed_ms | 737.719 | 689.358 | 48.361 |
+| total_poll_apply_updates_ms | 59.658 | 59.262 | 0.396 |
+| total_remesh_ms | 614.560 | 623.073 | 8.513 |
+| total_upload_ms | 202.806 | 205.200 | 2.394 |
+| total_render_ms | 3889.854 | 3941.162 | 51.308 |
+| total_submitted_compile_sections | 7664 | 7672 | 8 |
+| total_completed_compile_sections | 7677 | 7669 | 8 |
+| total_uploaded_sections | 2699 | 2701 | 2 |
+| total_deadline_skipped_compile_requests | 0 | 0 | 0 |
+| update_pump_stalled_frames | 0 | 0 | 0 |
+
+Validation:
+
+```bash
+pnpm native:frame-budget:perf
+# PASS twice. Recorded rows above.
+
+pnpm native:startup-streaming:perf
+# PASS twice. Recorded rows above.
+
+git diff --check
+# PASS.
+```
+
+Next step: Slice 1, create the `mclone-diagnostics` leaf crate and its
+sans-I/O accounting core on the Mac. Defer Windows sampler validation to
+Windows checkpoint A unless the user schedules a Windows session earlier.
 
 ## Slice 1: `mclone-diagnostics` Accounting Core
 
