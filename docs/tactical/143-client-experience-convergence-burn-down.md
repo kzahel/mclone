@@ -1,6 +1,6 @@
 # 143: Client Experience Convergence Burn-Down
 
-Status: closed, all slices and closeout audit landed 2026-07-05. Opened 2026-07-05. This tactical is the
+Status: closed, all slices, closeout audit, and follow-up device smokes landed 2026-07-05. Opened 2026-07-05. This tactical is the
 executable checklist for
 [`../client-experience-architecture.md`](../client-experience-architecture.md)
 (revised 2026-07-05). That document is law for this work; this tactical is the
@@ -1220,6 +1220,12 @@ Validation:
   (60 tests).
 - `pnpm native:policy:wasm-check`: pass; existing `mclone-server`
   `with_unload_hysteresis_chunks` dead-code warning remains.
+- `pnpm native:xr:mac:wivrn:mclone`: pass on Quest 3 through WiVRn. OpenXR
+  reached `FOCUSED`, submitted 120 frames, and reported active/tracked
+  controller input during the run.
+- `pnpm native:android-xr:session-smoke`: pass on Quest 3. Debug APK
+  built/installed, assets staged, `--session-smoke new-world` launch args
+  applied, and Android XR package launch validation passed.
 - `cargo fmt --manifest-path native/Cargo.toml --all --check`: pass.
 - `git diff --check`: pass.
 
