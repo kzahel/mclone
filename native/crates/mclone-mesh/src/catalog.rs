@@ -271,15 +271,12 @@ impl TexturedMeshCatalog {
                     BlockStateModelRotation::from_variant(variant),
                 )
             } else if variant_key.is_empty() {
-                (
-                    multipart_primary_model(asset, record).ok_or_else(|| {
-                        TexturedMeshError::MissingBlockStateVariant {
-                            block: record.block.clone(),
-                            variant_key: variant_key.clone(),
-                        }
-                    })?,
-                    BlockStateModelRotation::default(),
-                )
+                multipart_primary_model_and_rotation(asset, record).ok_or_else(|| {
+                    TexturedMeshError::MissingBlockStateVariant {
+                        block: record.block.clone(),
+                        variant_key: variant_key.clone(),
+                    }
+                })?
             } else {
                 return Err(TexturedMeshError::MissingBlockStateVariant {
                     block: record.block.clone(),
@@ -404,6 +401,52 @@ impl TexturedMeshCatalog {
             .as_ref()
             .map(|maps| maps.foliage.sample(temperature, downfall))
     }
+}
+
+fn multipart_primary_model_and_rotation<'a>(
+    asset: &'a mclone_assets::BlockStateAsset,
+    record: &BlockStateRecord,
+) -> Option<(&'a ResourceLocation, BlockStateModelRotation)> {
+    let model = multipart_primary_model(asset, record)?;
+    Some((model, multipart_primary_rotation(record)))
+}
+
+fn multipart_primary_rotation(record: &BlockStateRecord) -> BlockStateModelRotation {
+    if record.block.path() == "vine" {
+        if property_is_true(record, "up") {
+            return BlockStateModelRotation {
+                x_steps: 3,
+                y_steps: 0,
+            };
+        }
+        if property_is_true(record, "east") {
+            return BlockStateModelRotation {
+                x_steps: 0,
+                y_steps: 1,
+            };
+        }
+        if property_is_true(record, "south") {
+            return BlockStateModelRotation {
+                x_steps: 0,
+                y_steps: 2,
+            };
+        }
+        if property_is_true(record, "west") {
+            return BlockStateModelRotation {
+                x_steps: 0,
+                y_steps: 3,
+            };
+        }
+    }
+
+    BlockStateModelRotation::default()
+}
+
+fn property_is_true(record: &BlockStateRecord, property: &str) -> bool {
+    record
+        .properties
+        .get(property)
+        .is_some_and(|value| value == "true")
 }
 
 fn multipart_primary_model<'a>(
@@ -916,6 +959,51 @@ mod tests {
         assert_eq!(
             multipart_primary_model(&asset, &record).map(ResourceLocation::path),
             Some("block/bamboo1_age1")
+        );
+    }
+
+    #[test]
+    fn multipart_primary_rotation_preserves_single_face_vine_states() {
+        let block = ResourceLocation::parse("minecraft:vine").unwrap();
+        let record = |props: &[(&str, &str)]| {
+            mclone_assets::BlockStateRecord::new(
+                BlockStateId(0),
+                block.clone(),
+                props.iter().copied(),
+            )
+        };
+
+        assert_eq!(
+            multipart_primary_rotation(&record(&[("north", "true")])),
+            BlockStateModelRotation::default()
+        );
+        assert_eq!(
+            multipart_primary_rotation(&record(&[("east", "true")])),
+            BlockStateModelRotation {
+                x_steps: 0,
+                y_steps: 1,
+            }
+        );
+        assert_eq!(
+            multipart_primary_rotation(&record(&[("south", "true")])),
+            BlockStateModelRotation {
+                x_steps: 0,
+                y_steps: 2,
+            }
+        );
+        assert_eq!(
+            multipart_primary_rotation(&record(&[("west", "true")])),
+            BlockStateModelRotation {
+                x_steps: 0,
+                y_steps: 3,
+            }
+        );
+        assert_eq!(
+            multipart_primary_rotation(&record(&[("up", "true")])),
+            BlockStateModelRotation {
+                x_steps: 3,
+                y_steps: 0,
+            }
         );
     }
 }

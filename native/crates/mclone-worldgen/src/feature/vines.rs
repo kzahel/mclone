@@ -1,4 +1,7 @@
-use crate::block::{VINE, is_air_like, material_blocks_motion};
+use crate::block::{
+    RawBlockId, VINE_EAST, VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, is_air_like,
+    material_blocks_motion,
+};
 use crate::placement::BlockPos;
 
 use super::{Direction, FeatureWorld, offset_pos};
@@ -20,9 +23,23 @@ pub(super) fn place_vines<W: FeatureWorld>(world: &mut W, origin: BlockPos) -> b
             .block_at_world(neighbor)
             .is_some_and(material_blocks_motion)
         {
-            return world.set_block_world(origin, VINE);
+            let Some(vine) = vine_block_for_face(direction) else {
+                continue;
+            };
+            return world.set_block_world(origin, vine);
         }
     }
 
     false
+}
+
+fn vine_block_for_face(face: Direction) -> Option<RawBlockId> {
+    match face {
+        Direction::Up => Some(VINE_UP),
+        Direction::North => Some(VINE_NORTH),
+        Direction::South => Some(VINE_SOUTH),
+        Direction::West => Some(VINE_WEST),
+        Direction::East => Some(VINE_EAST),
+        Direction::Down => None,
+    }
 }

@@ -1,19 +1,29 @@
 use crate::block::{
     ACACIA_LEAVES, ACACIA_LOG, AIR, ALLIUM, AZURE_BLUET, BIRCH_LEAVES, BIRCH_LOG, BLUE_ORCHID,
-    BROWN_MUSHROOM, CAVE_AIR, COARSE_DIRT, CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
-    DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, JUNGLE_LEAVES, JUNGLE_LOG,
-    LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, MYCELIUM,
-    OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL,
-    POPPY, RED_MUSHROOM, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SPRUCE_LEAVES,
-    SPRUCE_LOG, SUNFLOWER_LOWER, SUNFLOWER_UPPER, WATER, WHITE_TULIP,
+    BROWN_MUSHROOM, CAVE_AIR, COARSE_DIRT, COCOA_AGE0_EAST, COCOA_AGE0_NORTH, COCOA_AGE0_SOUTH,
+    COCOA_AGE0_WEST, COCOA_AGE1_EAST, COCOA_AGE1_NORTH, COCOA_AGE1_SOUTH, COCOA_AGE1_WEST,
+    COCOA_AGE2_EAST, COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST, CORNFLOWER, DANDELION,
+    DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK,
+    JUNGLE_LEAVES, JUNGLE_LOG, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
+    LILY_OF_THE_VALLEY, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER,
+    PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM, RED_TULIP, ROSE_BUSH_LOWER,
+    ROSE_BUSH_UPPER, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
+    VINE_EAST, VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_vine,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
 
 use super::{
-    BasicTreeConfiguration, FeatureWorld, FoliagePlacerConfiguration, TreeConfiguration,
-    TrunkPlacerConfiguration, project_to_surface,
+    BasicTreeConfiguration, Direction, FeatureWorld, FoliagePlacerConfiguration, TreeConfiguration,
+    TrunkPlacerConfiguration, offset_pos, project_to_surface,
 };
+
+const JAVA_HORIZONTAL_DIRECTIONS: [Direction; 4] = [
+    Direction::North,
+    Direction::East,
+    Direction::South,
+    Direction::West,
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FoliageAttachment {
@@ -1010,6 +1020,15 @@ fn apply_tree_decorators<W: FeatureWorld>(
     if let Some(probability) = config.beehive_probability {
         apply_beehive_decorator(world, random, probability, placement);
     }
+    if let Some(probability) = config.cocoa_probability {
+        apply_cocoa_decorator(world, random, probability, placement);
+    }
+    if config.trunk_vines {
+        apply_trunk_vine_decorator(world, random, placement);
+    }
+    if config.leaf_vines {
+        apply_leaf_vine_decorator(world, random, placement);
+    }
 }
 
 fn apply_alter_ground_decorator<W: FeatureWorld>(
@@ -1083,6 +1102,170 @@ fn apply_beehive_decorator<W: FeatureWorld>(
         for _ in 0..bee_count {
             let _release_tick = random.next_int_bound(599);
         }
+    }
+}
+
+fn apply_cocoa_decorator<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    probability: f32,
+    placement: &TreePlacementBlocks,
+) {
+    if random.next_float() >= probability {
+        return;
+    }
+    let Some(base_y) = placement.trunks.first().map(|pos| pos.y) else {
+        return;
+    };
+
+    for trunk in &placement.trunks {
+        if trunk.y - base_y > 2 {
+            continue;
+        }
+        for direction in JAVA_HORIZONTAL_DIRECTIONS {
+            if random.next_float() <= 0.25 {
+                let cocoa_pos = offset_pos(*trunk, direction.opposite());
+                if is_air_block(world, cocoa_pos) {
+                    let age = random.next_int_bound(3);
+                    if let Some(cocoa) = cocoa_block_for(direction, age) {
+                        world.set_block_world(cocoa_pos, cocoa);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn apply_trunk_vine_decorator<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    placement: &TreePlacementBlocks,
+) {
+    for trunk in &placement.trunks {
+        maybe_place_trunk_vine(
+            world,
+            random.next_int_bound(3) > 0,
+            BlockPos::new(trunk.x - 1, trunk.y, trunk.z),
+            Direction::East,
+        );
+        maybe_place_trunk_vine(
+            world,
+            random.next_int_bound(3) > 0,
+            BlockPos::new(trunk.x + 1, trunk.y, trunk.z),
+            Direction::West,
+        );
+        maybe_place_trunk_vine(
+            world,
+            random.next_int_bound(3) > 0,
+            BlockPos::new(trunk.x, trunk.y, trunk.z - 1),
+            Direction::South,
+        );
+        maybe_place_trunk_vine(
+            world,
+            random.next_int_bound(3) > 0,
+            BlockPos::new(trunk.x, trunk.y, trunk.z + 1),
+            Direction::North,
+        );
+    }
+}
+
+fn maybe_place_trunk_vine<W: FeatureWorld>(
+    world: &mut W,
+    should_place: bool,
+    pos: BlockPos,
+    face: Direction,
+) {
+    if should_place && is_air_block(world, pos) {
+        place_vine_block(world, pos, face);
+    }
+}
+
+fn apply_leaf_vine_decorator<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    placement: &TreePlacementBlocks,
+) {
+    for leaf in &placement.leaves {
+        if random.next_int_bound(4) == 0 {
+            add_hanging_vine(
+                world,
+                BlockPos::new(leaf.x - 1, leaf.y, leaf.z),
+                Direction::East,
+            );
+        }
+        if random.next_int_bound(4) == 0 {
+            add_hanging_vine(
+                world,
+                BlockPos::new(leaf.x + 1, leaf.y, leaf.z),
+                Direction::West,
+            );
+        }
+        if random.next_int_bound(4) == 0 {
+            add_hanging_vine(
+                world,
+                BlockPos::new(leaf.x, leaf.y, leaf.z - 1),
+                Direction::South,
+            );
+        }
+        if random.next_int_bound(4) == 0 {
+            add_hanging_vine(
+                world,
+                BlockPos::new(leaf.x, leaf.y, leaf.z + 1),
+                Direction::North,
+            );
+        }
+    }
+}
+
+fn add_hanging_vine<W: FeatureWorld>(world: &mut W, pos: BlockPos, face: Direction) {
+    if !is_air_block(world, pos) {
+        return;
+    }
+    place_vine_block(world, pos, face);
+
+    let mut pos = BlockPos::new(pos.x, pos.y - 1, pos.z);
+    for _ in 0..4 {
+        if !is_air_block(world, pos) {
+            return;
+        }
+        place_vine_block(world, pos, face);
+        pos = BlockPos::new(pos.x, pos.y - 1, pos.z);
+    }
+}
+
+fn place_vine_block<W: FeatureWorld>(world: &mut W, pos: BlockPos, face: Direction) -> bool {
+    let Some(vine) = vine_block_for_face(face) else {
+        return false;
+    };
+    world.set_block_world(pos, vine)
+}
+
+fn vine_block_for_face(face: Direction) -> Option<RawBlockId> {
+    match face {
+        Direction::Up => Some(VINE_UP),
+        Direction::North => Some(VINE_NORTH),
+        Direction::South => Some(VINE_SOUTH),
+        Direction::West => Some(VINE_WEST),
+        Direction::East => Some(VINE_EAST),
+        Direction::Down => None,
+    }
+}
+
+fn cocoa_block_for(facing: Direction, age: i32) -> Option<RawBlockId> {
+    match (age, facing) {
+        (0, Direction::North) => Some(COCOA_AGE0_NORTH),
+        (0, Direction::East) => Some(COCOA_AGE0_EAST),
+        (0, Direction::South) => Some(COCOA_AGE0_SOUTH),
+        (0, Direction::West) => Some(COCOA_AGE0_WEST),
+        (1, Direction::North) => Some(COCOA_AGE1_NORTH),
+        (1, Direction::East) => Some(COCOA_AGE1_EAST),
+        (1, Direction::South) => Some(COCOA_AGE1_SOUTH),
+        (1, Direction::West) => Some(COCOA_AGE1_WEST),
+        (2, Direction::North) => Some(COCOA_AGE2_NORTH),
+        (2, Direction::East) => Some(COCOA_AGE2_EAST),
+        (2, Direction::South) => Some(COCOA_AGE2_SOUTH),
+        (2, Direction::West) => Some(COCOA_AGE2_WEST),
+        _ => None,
     }
 }
 
@@ -1170,6 +1353,9 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     let Some(block_id) = world.block_at_world(pos) else {
         return false;
     };
+    if is_vine(block_id) {
+        return true;
+    }
     matches!(
         block_id,
         AIR | CAVE_AIR
@@ -1225,6 +1411,9 @@ fn is_free_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     let Some(block_id) = world.block_at_world(pos) else {
         return false;
     };
+    if is_vine(block_id) {
+        return true;
+    }
     matches!(
         block_id,
         OAK_LOG | BIRCH_LOG | SPRUCE_LOG | DARK_OAK_LOG | ACACIA_LOG | JUNGLE_LOG
@@ -1235,6 +1424,9 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
     let Some(block_id) = world.block_at_world(pos) else {
         return false;
     };
+    if is_vine(block_id) {
+        return true;
+    }
     matches!(
         block_id,
         AIR | CAVE_AIR

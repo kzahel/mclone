@@ -397,13 +397,53 @@ const PICKLES_1_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "1"), ("waterl
 const PICKLES_2_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "2"), ("waterlogged", "true")];
 const PICKLES_3_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "3"), ("waterlogged", "true")];
 const PICKLES_4_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "4"), ("waterlogged", "true")];
-const VINE_EMPTY: &[(&str, &str)] = &[
-    ("up", "false"),
+const VINE_UP: &[(&str, &str)] = &[
+    ("up", "true"),
     ("north", "false"),
     ("east", "false"),
     ("south", "false"),
     ("west", "false"),
 ];
+const VINE_NORTH: &[(&str, &str)] = &[
+    ("up", "false"),
+    ("north", "true"),
+    ("east", "false"),
+    ("south", "false"),
+    ("west", "false"),
+];
+const VINE_EAST: &[(&str, &str)] = &[
+    ("up", "false"),
+    ("north", "false"),
+    ("east", "true"),
+    ("south", "false"),
+    ("west", "false"),
+];
+const VINE_SOUTH: &[(&str, &str)] = &[
+    ("up", "false"),
+    ("north", "false"),
+    ("east", "false"),
+    ("south", "true"),
+    ("west", "false"),
+];
+const VINE_WEST: &[(&str, &str)] = &[
+    ("up", "false"),
+    ("north", "false"),
+    ("east", "false"),
+    ("south", "false"),
+    ("west", "true"),
+];
+const COCOA_AGE0_NORTH: &[(&str, &str)] = &[("age", "0"), ("facing", "north")];
+const COCOA_AGE0_EAST: &[(&str, &str)] = &[("age", "0"), ("facing", "east")];
+const COCOA_AGE0_SOUTH: &[(&str, &str)] = &[("age", "0"), ("facing", "south")];
+const COCOA_AGE0_WEST: &[(&str, &str)] = &[("age", "0"), ("facing", "west")];
+const COCOA_AGE1_NORTH: &[(&str, &str)] = &[("age", "1"), ("facing", "north")];
+const COCOA_AGE1_EAST: &[(&str, &str)] = &[("age", "1"), ("facing", "east")];
+const COCOA_AGE1_SOUTH: &[(&str, &str)] = &[("age", "1"), ("facing", "south")];
+const COCOA_AGE1_WEST: &[(&str, &str)] = &[("age", "1"), ("facing", "west")];
+const COCOA_AGE2_NORTH: &[(&str, &str)] = &[("age", "2"), ("facing", "north")];
+const COCOA_AGE2_EAST: &[(&str, &str)] = &[("age", "2"), ("facing", "east")];
+const COCOA_AGE2_SOUTH: &[(&str, &str)] = &[("age", "2"), ("facing", "south")];
+const COCOA_AGE2_WEST: &[(&str, &str)] = &[("age", "2"), ("facing", "west")];
 const LEVEL_0: &[(&str, &str)] = &[("level", "0")];
 const LEVEL_1: &[(&str, &str)] = &[("level", "1")];
 const LEVEL_2: &[(&str, &str)] = &[("level", "2")];
@@ -573,9 +613,25 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (153, "minecraft:blue_ice", EMPTY_PROPS),
     (154, "minecraft:pumpkin", EMPTY_PROPS),
     (155, "minecraft:melon", EMPTY_PROPS),
-    (156, "minecraft:vine", VINE_EMPTY),
+    (156, "minecraft:vine", VINE_EAST),
     (157, "minecraft:tall_grass", HALF_LOWER),
     (158, "minecraft:tall_grass", HALF_UPPER),
+    (159, "minecraft:vine", VINE_UP),
+    (160, "minecraft:vine", VINE_NORTH),
+    (161, "minecraft:vine", VINE_SOUTH),
+    (162, "minecraft:vine", VINE_WEST),
+    (163, "minecraft:cocoa", COCOA_AGE0_NORTH),
+    (164, "minecraft:cocoa", COCOA_AGE0_EAST),
+    (165, "minecraft:cocoa", COCOA_AGE0_SOUTH),
+    (166, "minecraft:cocoa", COCOA_AGE0_WEST),
+    (167, "minecraft:cocoa", COCOA_AGE1_NORTH),
+    (168, "minecraft:cocoa", COCOA_AGE1_EAST),
+    (169, "minecraft:cocoa", COCOA_AGE1_SOUTH),
+    (170, "minecraft:cocoa", COCOA_AGE1_WEST),
+    (171, "minecraft:cocoa", COCOA_AGE2_NORTH),
+    (172, "minecraft:cocoa", COCOA_AGE2_EAST),
+    (173, "minecraft:cocoa", COCOA_AGE2_SOUTH),
+    (174, "minecraft:cocoa", COCOA_AGE2_WEST),
 ];
 
 #[cfg(test)]
@@ -594,7 +650,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 159);
+        assert_eq!(registry.len(), 175);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -949,9 +1005,45 @@ mod tests {
         );
         assert_eq!(
             registry.id_for_key(
-                "minecraft:vine[east=false,north=false,south=false,up=false,west=false]"
+                "minecraft:vine[east=true,north=false,south=false,up=false,west=false]"
             ),
             Some(BlockStateId(156))
+        );
+        assert_eq!(
+            registry.id_for_key(
+                "minecraft:vine[east=false,north=false,south=false,up=true,west=false]"
+            ),
+            Some(BlockStateId(159))
+        );
+        assert_eq!(
+            registry.id_for_key(
+                "minecraft:vine[east=false,north=true,south=false,up=false,west=false]"
+            ),
+            Some(BlockStateId(160))
+        );
+        assert_eq!(
+            registry.id_for_key(
+                "minecraft:vine[east=false,north=false,south=true,up=false,west=false]"
+            ),
+            Some(BlockStateId(161))
+        );
+        assert_eq!(
+            registry.id_for_key(
+                "minecraft:vine[east=false,north=false,south=false,up=false,west=true]"
+            ),
+            Some(BlockStateId(162))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:cocoa[age=0,facing=north]"),
+            Some(BlockStateId(163))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:cocoa[age=1,facing=east]"),
+            Some(BlockStateId(168))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:cocoa[age=2,facing=west]"),
+            Some(BlockStateId(174))
         );
     }
 

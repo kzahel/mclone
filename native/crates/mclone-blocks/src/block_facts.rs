@@ -80,9 +80,26 @@ pub mod terrain_id {
     pub const BROWN_MUSHROOM: u32 = 151;
     pub const RED_MUSHROOM: u32 = 152;
     pub const MELON: u32 = 155;
-    pub const VINE: u32 = 156;
+    pub const VINE_EAST: u32 = 156;
+    pub const VINE: u32 = VINE_EAST;
     pub const TALL_GRASS_LOWER: u32 = 157;
     pub const TALL_GRASS_UPPER: u32 = 158;
+    pub const VINE_UP: u32 = 159;
+    pub const VINE_NORTH: u32 = 160;
+    pub const VINE_SOUTH: u32 = 161;
+    pub const VINE_WEST: u32 = 162;
+    pub const COCOA_AGE0_NORTH: u32 = 163;
+    pub const COCOA_AGE0_EAST: u32 = 164;
+    pub const COCOA_AGE0_SOUTH: u32 = 165;
+    pub const COCOA_AGE0_WEST: u32 = 166;
+    pub const COCOA_AGE1_NORTH: u32 = 167;
+    pub const COCOA_AGE1_EAST: u32 = 168;
+    pub const COCOA_AGE1_SOUTH: u32 = 169;
+    pub const COCOA_AGE1_WEST: u32 = 170;
+    pub const COCOA_AGE2_NORTH: u32 = 171;
+    pub const COCOA_AGE2_EAST: u32 = 172;
+    pub const COCOA_AGE2_SOUTH: u32 = 173;
+    pub const COCOA_AGE2_WEST: u32 = 174;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

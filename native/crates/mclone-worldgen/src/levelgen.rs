@@ -43,16 +43,19 @@ mod tests {
     use crate::block::{
         ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE,
         BLUE_ORCHID, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
-        CACTUS, CLAY, COARSE_DIRT, CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH,
-        FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES,
-        JUNGLE_LOG, KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
-        LILY_OF_THE_VALLEY, LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP,
-        OXEYE_DAISY, PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM,
-        RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
-        SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
-        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
-        SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK,
-        WATER, WHITE_TULIP, is_air_like, is_water,
+        CACTUS, CLAY, COARSE_DIRT, COCOA_AGE0_EAST, COCOA_AGE0_NORTH, COCOA_AGE0_SOUTH,
+        COCOA_AGE0_WEST, COCOA_AGE1_EAST, COCOA_AGE1_NORTH, COCOA_AGE1_SOUTH, COCOA_AGE1_WEST,
+        COCOA_AGE2_EAST, COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST, CORNFLOWER,
+        DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS,
+        GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD,
+        MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PACKED_ICE,
+        PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
+        RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SAND, SEA_PICKLE_1,
+        SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
+        SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, VINE_EAST,
+        VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -88,6 +91,10 @@ mod tests {
     enum LowVisibilityFeatureExpectation {
         VisibleSmallMushrooms {
             min_count: usize,
+        },
+        JungleCocoaVines {
+            min_cocoa: usize,
+            min_vines: usize,
         },
         DefaultSpringLiquidTicks {
             min_water_ticks: usize,
@@ -174,6 +181,7 @@ mod tests {
         BirchTrees,
         SavannaAcacia,
         JungleTrees,
+        SparseJungleTrees,
         BambooJungle,
     }
 
@@ -207,6 +215,7 @@ mod tests {
                 Self::BirchTrees => "birch log/leaves trees",
                 Self::SavannaAcacia => "savanna acacia trees",
                 Self::JungleTrees => "jungle log/leaves trees",
+                Self::SparseJungleTrees => "sparse jungle tree blocks",
                 Self::BambooJungle => "bamboo plus jungle log/leaves vegetation",
             }
         }
@@ -297,6 +306,7 @@ mod tests {
                 Self::BirchTrees => &[BIRCH_LOG, BIRCH_LEAVES],
                 Self::SavannaAcacia => &[ACACIA_LOG, ACACIA_LEAVES],
                 Self::JungleTrees => &[JUNGLE_LOG, JUNGLE_LEAVES],
+                Self::SparseJungleTrees => &[JUNGLE_LOG, JUNGLE_LEAVES],
                 Self::BambooJungle => &[BAMBOO, JUNGLE_LOG, JUNGLE_LEAVES],
             }
         }
@@ -419,6 +429,9 @@ mod tests {
                 }
                 Self::JungleTrees => {
                     chunk.block_count(JUNGLE_LOG) > 0 && chunk.block_count(JUNGLE_LEAVES) > 0
+                }
+                Self::SparseJungleTrees => {
+                    chunk.block_count(JUNGLE_LOG) > 0 || chunk.block_count(JUNGLE_LEAVES) > 0
                 }
                 Self::BambooJungle => {
                     chunk.block_count(BAMBOO) > 0
@@ -864,7 +877,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:modified_jungle_edge",
             surface_family: SurfaceFamily::Grass,
-            feature_family: Some(FeatureFamily::JungleTrees),
+            feature_family: Some(FeatureFamily::SparseJungleTrees),
         },
         PaletteMatrixCase {
             seed: 48,
@@ -985,6 +998,16 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:mushroom_fields",
             expectation: LowVisibilityFeatureExpectation::VisibleSmallMushrooms { min_count: 2 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 71,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:jungle",
+            expectation: LowVisibilityFeatureExpectation::JungleCocoaVines {
+                min_cocoa: 1,
+                min_vines: 1,
+            },
         },
         LowVisibilityFeatureCase {
             seed: 62,
@@ -2121,6 +2144,43 @@ mod tests {
                         case.chunk_z,
                         min_count,
                         actual
+                    );
+                }
+                LowVisibilityFeatureExpectation::JungleCocoaVines {
+                    min_cocoa,
+                    min_vines,
+                } => {
+                    let cocoa = [
+                        COCOA_AGE0_NORTH,
+                        COCOA_AGE0_EAST,
+                        COCOA_AGE0_SOUTH,
+                        COCOA_AGE0_WEST,
+                        COCOA_AGE1_NORTH,
+                        COCOA_AGE1_EAST,
+                        COCOA_AGE1_SOUTH,
+                        COCOA_AGE1_WEST,
+                        COCOA_AGE2_NORTH,
+                        COCOA_AGE2_EAST,
+                        COCOA_AGE2_SOUTH,
+                        COCOA_AGE2_WEST,
+                    ]
+                    .iter()
+                    .map(|block| chunk.block_count(*block))
+                    .sum::<usize>();
+                    let vines = [VINE_UP, VINE_NORTH, VINE_EAST, VINE_SOUTH, VINE_WEST]
+                        .iter()
+                        .map(|block| chunk.block_count(*block))
+                        .sum::<usize>();
+                    assert!(
+                        cocoa >= min_cocoa && vines >= min_vines,
+                        "seed {} chunk ({}, {}) expected jungle cocoa>={} vines>={}, found cocoa={} vines={}",
+                        case.seed,
+                        case.chunk_x,
+                        case.chunk_z,
+                        min_cocoa,
+                        min_vines,
+                        cocoa,
+                        vines
                     );
                 }
                 LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {

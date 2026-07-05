@@ -62,6 +62,7 @@ fn java_no_collision(block: &ResourceLocation) -> bool {
             | "poppy"
             | "dead_bush"
             | "vine"
+            | "cocoa"
             | "glow_lichen"
             | "sugar_cane"
             | "seagrass"
@@ -204,6 +205,7 @@ fn java_material_blocks_motion(block: &ResourceLocation) -> bool {
             | "brown_mushroom"
             | "red_mushroom"
             | "vine"
+            | "cocoa"
             | "glow_lichen"
             | "sugar_cane"
             | "seagrass"
@@ -469,6 +471,18 @@ mod tests {
             assert!(!facts.occludes, "{block}");
             assert_eq!(facts.light_block, 0, "{block}");
             assert_eq!(facts.light_emission, 14, "{block}");
+            assert!(!facts.view_blocking, "{block}");
+            assert!(!facts.collision_shape_full_block, "{block}");
+            assert_eq!(facts.shade_brightness, 1.0, "{block}");
+        }
+    }
+
+    #[test]
+    fn vine_and_cocoa_are_non_colliding_non_occluders() {
+        for block in ["minecraft:vine", "minecraft:cocoa"] {
+            let facts = block_render_facts(&record(block), false);
+            assert!(!facts.occludes, "{block}");
+            assert_eq!(facts.light_block, 0, "{block}");
             assert!(!facts.view_blocking, "{block}");
             assert!(!facts.collision_shape_full_block, "{block}");
             assert_eq!(facts.shade_brightness, 1.0, "{block}");

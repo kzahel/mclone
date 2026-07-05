@@ -294,18 +294,21 @@ mod tests {
     use crate::block::{
         ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE,
         BLUE_ORCHID, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
-        CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
-        DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
-        DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
-        DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
-        GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
-        KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER,
-        LILY_OF_THE_VALLEY, LILY_PAD, MELON, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
-        PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
-        RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2,
-        SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE,
-        SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TALL_GRASS_UPPER, TALL_SEAGRASS_LOWER,
-        TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, TUFF, VINE, WATER,
+        CACTUS, CAVE_AIR, CLAY, COAL_ORE, COCOA_AGE0_EAST, COCOA_AGE0_NORTH, COCOA_AGE0_SOUTH,
+        COCOA_AGE0_WEST, COCOA_AGE1_EAST, COCOA_AGE1_NORTH, COCOA_AGE1_SOUTH, COCOA_AGE1_WEST,
+        COCOA_AGE2_EAST, COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST, COPPER_ORE,
+        DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
+        DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE,
+        DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK,
+        GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
+        IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER,
+        LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILY_OF_THE_VALLEY, LILY_PAD, MELON, MUSHROOM_STEM,
+        MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN,
+        RED_MUSHROOM, RED_MUSHROOM_BLOCK, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER,
+        SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW,
+        SPRUCE_LEAVES, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER,
+        TALL_GRASS_UPPER, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK,
+        TUFF, VINE_EAST, VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -361,6 +364,14 @@ mod tests {
             .blocks
             .iter()
             .filter(|current| **current == block_id)
+            .count()
+    }
+
+    fn count_any_blocks(chunk: &MutableChunkBlockBuffer, block_ids: &[RawBlockId]) -> usize {
+        chunk
+            .blocks
+            .iter()
+            .filter(|current| block_ids.contains(*current))
             .count()
     }
 
@@ -1213,6 +1224,39 @@ mod tests {
     }
 
     #[test]
+    fn jungle_tree_decorators_place_cocoa_and_face_vines() {
+        let cocoa_states = [
+            COCOA_AGE0_NORTH,
+            COCOA_AGE0_EAST,
+            COCOA_AGE0_SOUTH,
+            COCOA_AGE0_WEST,
+            COCOA_AGE1_NORTH,
+            COCOA_AGE1_EAST,
+            COCOA_AGE1_SOUTH,
+            COCOA_AGE1_WEST,
+            COCOA_AGE2_NORTH,
+            COCOA_AGE2_EAST,
+            COCOA_AGE2_SOUTH,
+            COCOA_AGE2_WEST,
+        ];
+        let vine_states = [VINE_UP, VINE_NORTH, VINE_EAST, VINE_SOUTH, VINE_WEST];
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(6);
+        let config = TreeConfiguration::jungle().with_cocoa_probability(1.0);
+        let feature = ConfiguredFeature::tree(config);
+
+        assert_eq!(TreeConfiguration::jungle().cocoa_probability, Some(0.2));
+        assert!(TreeConfiguration::jungle().trunk_vines);
+        assert!(TreeConfiguration::jungle().leaf_vines);
+        assert!(TreeConfiguration::mega_jungle().trunk_vines);
+        assert!(TreeConfiguration::mega_jungle().leaf_vines);
+        assert_eq!(TreeConfiguration::mega_jungle().cocoa_probability, None);
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert!(count_any_blocks(&chunk, &cocoa_states) > 0);
+        assert!(count_any_blocks(&chunk, &vine_states) > 0);
+    }
+
+    #[test]
     fn bamboo_feature_places_java_height_column() {
         let mut chunk = flat_grass_chunk();
         let mut random = WorldgenRandom::new(7);
@@ -1273,7 +1317,17 @@ mod tests {
             &mut supported_random,
             BlockPos::new(8, 3, 8)
         ));
-        assert_eq!(supported.get_block_at_y(8, 3, 8), VINE);
+        assert_eq!(supported.get_block_at_y(8, 3, 8), VINE_EAST);
+
+        let mut supported_above = flat_grass_chunk();
+        supported_above.set_block_at_y(8, 4, 8, STONE);
+        let mut supported_above_random = WorldgenRandom::new(9);
+        assert!(feature.place(
+            &mut supported_above,
+            &mut supported_above_random,
+            BlockPos::new(8, 3, 8)
+        ));
+        assert_eq!(supported_above.get_block_at_y(8, 3, 8), VINE_UP);
 
         let mut occupied = flat_grass_chunk();
         occupied.set_block_at_y(8, 3, 8, GRASS);

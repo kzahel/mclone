@@ -576,6 +576,9 @@ pub struct TreeConfiguration {
     pub minimum_size: TwoLayersFeatureSize,
     pub beehive_probability: Option<f32>,
     pub alter_ground_state: Option<RawBlockId>,
+    pub cocoa_probability: Option<f32>,
+    pub trunk_vines: bool,
+    pub leaf_vines: bool,
 }
 
 impl Eq for TreeConfiguration {}
@@ -596,6 +599,9 @@ impl TreeConfiguration {
             minimum_size,
             beehive_probability: None,
             alter_ground_state: None,
+            cocoa_probability: None,
+            trunk_vines: false,
+            leaf_vines: false,
         }
     }
 
@@ -607,6 +613,27 @@ impl TreeConfiguration {
     pub const fn with_alter_ground_state(mut self, state: RawBlockId) -> Self {
         self.alter_ground_state = Some(state);
         self
+    }
+
+    pub const fn with_cocoa_probability(mut self, probability: f32) -> Self {
+        self.cocoa_probability = Some(probability);
+        self
+    }
+
+    pub const fn with_trunk_vines(mut self) -> Self {
+        self.trunk_vines = true;
+        self
+    }
+
+    pub const fn with_leaf_vines(mut self) -> Self {
+        self.leaf_vines = true;
+        self
+    }
+
+    pub const fn with_jungle_decorators(self) -> Self {
+        self.with_cocoa_probability(0.2)
+            .with_trunk_vines()
+            .with_leaf_vines()
     }
 
     pub const fn oak() -> Self {
@@ -777,6 +804,7 @@ impl TreeConfiguration {
             },
             TwoLayersFeatureSize::new(1, 0, 1),
         )
+        .with_jungle_decorators()
     }
 
     pub const fn mega_jungle() -> Self {
@@ -791,6 +819,8 @@ impl TreeConfiguration {
             },
             TwoLayersFeatureSize::new(1, 1, 2),
         )
+        .with_trunk_vines()
+        .with_leaf_vines()
     }
 
     pub const fn jungle_bush() -> Self {

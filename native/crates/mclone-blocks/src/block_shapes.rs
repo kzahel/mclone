@@ -83,6 +83,8 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         }
         terrain_id::KELP => Some(kelp_head_shape()),
         terrain_id::KELP_PLANT => Some(full_block()),
+        id if is_vine(id) => None,
+        id if is_cocoa(id) => Some(cocoa_outline_shape()),
         id if is_double_plant(id) => Some(full_block()),
         terrain_id::SEA_PICKLE_1 => Some(sea_pickle_shape(1)),
         terrain_id::SEA_PICKLE_2 => Some(sea_pickle_shape(2)),
@@ -141,7 +143,6 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::KELP
         | terrain_id::KELP_PLANT
         | terrain_id::SWEET_BERRY_BUSH
-        | terrain_id::VINE
         | terrain_id::SEA_PICKLE_1
         | terrain_id::SEA_PICKLE_2
         | terrain_id::SEA_PICKLE_3
@@ -151,6 +152,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::WALL_TORCH_EAST
         | terrain_id::WALL_TORCH_SOUTH
         | terrain_id::WALL_TORCH_WEST => None,
+        id if is_vine(id) || is_cocoa(id) => None,
         terrain_id::CACTUS => Some(cactus_collision_shape()),
         terrain_id::BAMBOO => Some(bamboo_collision_shape()),
         terrain_id::LILY_PAD => Some(lily_pad_shape()),
@@ -207,8 +209,48 @@ fn is_double_plant(id: u32) -> bool {
     )
 }
 
+fn is_vine(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::VINE_EAST
+            | terrain_id::VINE_UP
+            | terrain_id::VINE_NORTH
+            | terrain_id::VINE_SOUTH
+            | terrain_id::VINE_WEST
+    )
+}
+
+fn is_cocoa(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::COCOA_AGE0_NORTH
+            | terrain_id::COCOA_AGE0_EAST
+            | terrain_id::COCOA_AGE0_SOUTH
+            | terrain_id::COCOA_AGE0_WEST
+            | terrain_id::COCOA_AGE1_NORTH
+            | terrain_id::COCOA_AGE1_EAST
+            | terrain_id::COCOA_AGE1_SOUTH
+            | terrain_id::COCOA_AGE1_WEST
+            | terrain_id::COCOA_AGE2_NORTH
+            | terrain_id::COCOA_AGE2_EAST
+            | terrain_id::COCOA_AGE2_SOUTH
+            | terrain_id::COCOA_AGE2_WEST
+    )
+}
+
 fn pointed_dripstone_shape() -> LocalShape {
     local_box(5.0 / 16.0, 0.0, 5.0 / 16.0, 11.0 / 16.0, 1.0, 11.0 / 16.0)
+}
+
+fn cocoa_outline_shape() -> LocalShape {
+    local_box(
+        4.0 / 16.0,
+        3.0 / 16.0,
+        4.0 / 16.0,
+        12.0 / 16.0,
+        12.0 / 16.0,
+        12.0 / 16.0,
+    )
 }
 
 fn cactus_outline_shape() -> LocalShape {

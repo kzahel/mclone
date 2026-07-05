@@ -158,9 +158,26 @@ pub const RED_MUSHROOM: RawBlockId = 152;
 pub const BLUE_ICE: RawBlockId = 153;
 pub const PUMPKIN: RawBlockId = 154;
 pub const MELON: RawBlockId = 155;
-pub const VINE: RawBlockId = 156;
+pub const VINE_EAST: RawBlockId = 156;
+pub const VINE: RawBlockId = VINE_EAST;
 pub const TALL_GRASS_LOWER: RawBlockId = 157;
 pub const TALL_GRASS_UPPER: RawBlockId = 158;
+pub const VINE_UP: RawBlockId = 159;
+pub const VINE_NORTH: RawBlockId = 160;
+pub const VINE_SOUTH: RawBlockId = 161;
+pub const VINE_WEST: RawBlockId = 162;
+pub const COCOA_AGE0_NORTH: RawBlockId = 163;
+pub const COCOA_AGE0_EAST: RawBlockId = 164;
+pub const COCOA_AGE0_SOUTH: RawBlockId = 165;
+pub const COCOA_AGE0_WEST: RawBlockId = 166;
+pub const COCOA_AGE1_NORTH: RawBlockId = 167;
+pub const COCOA_AGE1_EAST: RawBlockId = 168;
+pub const COCOA_AGE1_SOUTH: RawBlockId = 169;
+pub const COCOA_AGE1_WEST: RawBlockId = 170;
+pub const COCOA_AGE2_NORTH: RawBlockId = 171;
+pub const COCOA_AGE2_EAST: RawBlockId = 172;
+pub const COCOA_AGE2_SOUTH: RawBlockId = 173;
+pub const COCOA_AGE2_WEST: RawBlockId = 174;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -249,6 +266,22 @@ impl GeneratedBlockId {
     pub const PUMPKIN: Self = Self(PUMPKIN);
     pub const MELON: Self = Self(MELON);
     pub const VINE: Self = Self(VINE);
+    pub const VINE_UP: Self = Self(VINE_UP);
+    pub const VINE_NORTH: Self = Self(VINE_NORTH);
+    pub const VINE_SOUTH: Self = Self(VINE_SOUTH);
+    pub const VINE_WEST: Self = Self(VINE_WEST);
+    pub const COCOA_AGE0_NORTH: Self = Self(COCOA_AGE0_NORTH);
+    pub const COCOA_AGE0_EAST: Self = Self(COCOA_AGE0_EAST);
+    pub const COCOA_AGE0_SOUTH: Self = Self(COCOA_AGE0_SOUTH);
+    pub const COCOA_AGE0_WEST: Self = Self(COCOA_AGE0_WEST);
+    pub const COCOA_AGE1_NORTH: Self = Self(COCOA_AGE1_NORTH);
+    pub const COCOA_AGE1_EAST: Self = Self(COCOA_AGE1_EAST);
+    pub const COCOA_AGE1_SOUTH: Self = Self(COCOA_AGE1_SOUTH);
+    pub const COCOA_AGE1_WEST: Self = Self(COCOA_AGE1_WEST);
+    pub const COCOA_AGE2_NORTH: Self = Self(COCOA_AGE2_NORTH);
+    pub const COCOA_AGE2_EAST: Self = Self(COCOA_AGE2_EAST);
+    pub const COCOA_AGE2_SOUTH: Self = Self(COCOA_AGE2_SOUTH);
+    pub const COCOA_AGE2_WEST: Self = Self(COCOA_AGE2_WEST);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -277,6 +310,9 @@ pub const fn is_air_like(block_id: RawBlockId) -> bool {
 
 pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
     if has_fluid(block_id) {
+        return false;
+    }
+    if is_vine(block_id) || is_cocoa(block_id) {
         return false;
     }
 
@@ -313,7 +349,6 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | BLUE_ORCHID
             | BROWN_MUSHROOM
             | RED_MUSHROOM
-            | VINE
             | GLOW_LICHEN
             | POINTED_DRIPSTONE
             | TORCH
@@ -385,6 +420,31 @@ pub const fn is_sea_pickle(block_id: RawBlockId) -> bool {
     )
 }
 
+pub const fn is_vine(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        VINE_EAST | VINE_UP | VINE_NORTH | VINE_SOUTH | VINE_WEST
+    )
+}
+
+pub const fn is_cocoa(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        COCOA_AGE0_NORTH
+            | COCOA_AGE0_EAST
+            | COCOA_AGE0_SOUTH
+            | COCOA_AGE0_WEST
+            | COCOA_AGE1_NORTH
+            | COCOA_AGE1_EAST
+            | COCOA_AGE1_SOUTH
+            | COCOA_AGE1_WEST
+            | COCOA_AGE2_NORTH
+            | COCOA_AGE2_EAST
+            | COCOA_AGE2_SOUTH
+            | COCOA_AGE2_WEST
+    )
+}
+
 pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
     match block_id {
         OAK_LOG_X | OAK_LOG_Z => OAK_LOG,
@@ -392,6 +452,10 @@ pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
         SPRUCE_LOG_X | SPRUCE_LOG_Z => SPRUCE_LOG,
         DEEPSLATE_X | DEEPSLATE_Z => DEEPSLATE,
         WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => TORCH,
+        VINE_UP | VINE_NORTH | VINE_SOUTH | VINE_WEST => VINE,
+        COCOA_AGE0_EAST | COCOA_AGE0_SOUTH | COCOA_AGE0_WEST | COCOA_AGE1_NORTH
+        | COCOA_AGE1_EAST | COCOA_AGE1_SOUTH | COCOA_AGE1_WEST | COCOA_AGE2_NORTH
+        | COCOA_AGE2_EAST | COCOA_AGE2_SOUTH | COCOA_AGE2_WEST => COCOA_AGE0_NORTH,
         _ => block_id,
     }
 }
@@ -470,6 +534,12 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
     }
     if is_lava(block_id) {
         return "minecraft:lava";
+    }
+    if is_vine(block_id) {
+        return "minecraft:vine";
+    }
+    if is_cocoa(block_id) {
+        return "minecraft:cocoa";
     }
 
     match block_id {
@@ -552,7 +622,6 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         BROWN_MUSHROOM => "minecraft:brown_mushroom",
         RED_MUSHROOM => "minecraft:red_mushroom",
         PUMPKIN => "minecraft:pumpkin",
-        VINE => "minecraft:vine",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -640,6 +709,9 @@ mod tests {
         assert_eq!(block_light_opacity(PUMPKIN), 15);
         assert_eq!(block_light_opacity(MELON), 15);
         assert_eq!(block_light_opacity(VINE), 0);
+        assert_eq!(block_light_opacity(VINE_NORTH), 0);
+        assert_eq!(block_light_opacity(VINE_WEST), 0);
+        assert_eq!(block_light_opacity(COCOA_AGE2_SOUTH), 0);
         assert_eq!(block_light_opacity(TALL_GRASS_LOWER), 0);
         assert_eq!(block_light_opacity(TALL_GRASS_UPPER), 0);
         assert_eq!(block_light_opacity(SUGAR_CANE), 0);
@@ -685,6 +757,11 @@ mod tests {
         assert_eq!(base_block_id(WALL_TORCH_EAST), TORCH);
         assert_eq!(base_block_id(WALL_TORCH_SOUTH), TORCH);
         assert_eq!(base_block_id(WALL_TORCH_WEST), TORCH);
+        assert_eq!(base_block_id(VINE), VINE);
+        assert_eq!(base_block_id(VINE_UP), VINE);
+        assert_eq!(base_block_id(VINE_NORTH), VINE);
+        assert_eq!(base_block_id(COCOA_AGE0_NORTH), COCOA_AGE0_NORTH);
+        assert_eq!(base_block_id(COCOA_AGE2_WEST), COCOA_AGE0_NORTH);
         assert_eq!(block_name(TORCH), "minecraft:torch");
         assert_eq!(block_name(WALL_TORCH_WEST), "minecraft:wall_torch");
         assert_eq!(block_name(CACTUS), "minecraft:cactus");
@@ -697,6 +774,10 @@ mod tests {
         assert_eq!(block_name(PUMPKIN), "minecraft:pumpkin");
         assert_eq!(block_name(MELON), "minecraft:melon");
         assert_eq!(block_name(VINE), "minecraft:vine");
+        assert_eq!(block_name(VINE_UP), "minecraft:vine");
+        assert_eq!(block_name(VINE_WEST), "minecraft:vine");
+        assert_eq!(block_name(COCOA_AGE0_NORTH), "minecraft:cocoa");
+        assert_eq!(block_name(COCOA_AGE2_WEST), "minecraft:cocoa");
         assert_eq!(block_name(TALL_GRASS_UPPER), "minecraft:tall_grass");
         assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
         assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
