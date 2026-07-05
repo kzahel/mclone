@@ -22,6 +22,8 @@ between sessions.
   render handoff, solver/status/rendering gaps, and next slices.
 - [`performance.md`](performance.md): native performance priority queue,
   baselines, and Java-shaped render/scheduling follow-ups.
+  The broader frame/terrain/host accounting model lives in
+  [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
 
 ## Update Policy
 

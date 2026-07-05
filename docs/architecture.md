@@ -21,6 +21,8 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `player-movement-netcode.md`: paused high-rate player movement and netcode constraint notes
 - `structures.md`: vanilla overworld structure starts, references, placement, and implementation order
 - `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
+- `frame-pipeline-accounting.md`: holistic frame, terrain, host, worker, GPU,
+  and queue accounting for performance work
 - `platforms.md`: supported desktop flat, desktop XR, Android XR, flat Android, and web/WASM lanes plus validation policy
 - this document: how the engine should be split across simulation, rendering, storage, workers, multiplayer hosts, and platform adapters
 

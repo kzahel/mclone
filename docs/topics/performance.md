@@ -5,6 +5,10 @@ Status: active living index.
 This document is the current map for native performance work. Tactical docs
 remain the implementation records; this topic doc records priority, Java
 alignment, current measured state, and where to look next.
+The holistic accounting model for frame pacing, terrain streaming, local
+integrated server work, remote-host contrast, workers, GPU upload, and debug
+counter requirements lives in
+[`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
 
 Update this file whenever a performance slice changes the priority order,
 invalidates an older recommendation, or establishes a new baseline.

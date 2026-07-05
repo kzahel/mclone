@@ -47,6 +47,7 @@ Core architecture docs:
 - [`docs/architecture.md`](docs/architecture.md) — runtime/host split
 - [`docs/runtime-data-model.md`](docs/runtime-data-model.md) — shared chunk/block-state data contracts
 - [`docs/protocol.md`](docs/protocol.md) — host/client message model
+- [`docs/frame-pipeline-accounting.md`](docs/frame-pipeline-accounting.md) — frame/terrain/server accounting model for performance work
 - [`docs/loading-persistence.md`](docs/loading-persistence.md) — world loading and save policy
 - [`docs/persistence-architecture.md`](docs/persistence-architecture.md) — broader shared persistence target
 
