@@ -772,7 +772,7 @@ where
     ))
 }
 
-fn create_headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
+pub fn create_headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(async {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: native_backends(),

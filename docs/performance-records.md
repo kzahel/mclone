@@ -18,6 +18,7 @@ Individual lanes:
 pnpm native:worldgen:smoke
 pnpm native:scheduler-loading:smoke
 pnpm native:mesh-cpu:smoke
+pnpm native:gpu-upload:smoke
 pnpm native:movement:smoke
 pnpm native:movement-frame:smoke
 pnpm native:startup-streaming:smoke
@@ -33,6 +34,7 @@ pnpm native:scheduler-loading:perf
 pnpm native:scheduler-loading:persisted-memory:perf
 pnpm native:scheduler-loading:persisted-sqlite:perf
 pnpm native:mesh-cpu:perf
+pnpm native:gpu-upload:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
 pnpm native:startup-streaming:perf
@@ -71,6 +73,7 @@ pnpm native:runtime:perf
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
 - `native:scheduler-loading:*`: server-only loading ceiling probe. Applies one local chunk view to `ChunkScheduler`, hot-polls until the target view is client-visible and server queues drain, and reports target chunks/sec plus worldgen/light/publication counters. It includes current scheduler job admission, publication, light status work, and persistence queues, but no client update pump, mesh preparation, GPU upload, or frame pacing. `native:scheduler-loading:persisted-memory:perf` runs a prewarm pass into shared in-memory `ChunkRecord`s, then measures reload from already-generated/lit records with no disk. `native:scheduler-loading:persisted-sqlite:perf` repeats that shape through a temp SQLite world directory to price the normal record decode/load/storage path separately from generation/light.
 - `native:mesh-cpu:*`: CPU-only render-section mesh probe. The default source prewarms a temp SQLite world, reloads already-generated/lit snapshots through `ChunkScheduler`, then builds all target-column render sections with the shared `mclone-render-session` mesh path. It includes asset catalog load, persisted server reload, snapshot-to-mesh conversion, ambient occlusion, light/tint sampling, and visibility-graph build. It excludes `wgpu`, GPU upload, frame pacing, render draw, and the runtime admission budget.
+- `native:gpu-upload:*`: extends the mesh CPU probe with `--gpu-upload`. After CPU mesh build, it creates headless draw resources, uploads the atlas outside the measured section-upload phase, then times `TexturedSectionDrawResources::apply_section_updates_with_context_timed` for the prebuilt section meshes. It includes real `wgpu` buffer creation and renderer section bookkeeping, but no draw pass, frame loop, runtime upload budget, or Quest frame pacing.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
@@ -78,7 +81,7 @@ pnpm native:runtime:perf
 - `native:android-xr:perf:*rd5*`: Quest/OpenXR lower-distance control lanes. Use RD5 to distinguish fixed XR/render overhead from view-distance pressure; current records live in `docs/quest-standalone-performance-records.md`.
 - `native:android-xr:perf:*rd7*`: Quest/OpenXR RD7 baseline guardrails. RD7 is the headset product-style frame-pacing lane; current records live in `docs/quest-standalone-performance-records.md`.
 - `native:android-xr:perf:*rd10*`: Quest/OpenXR RD10 stress guardrails. These currently report headset app-work/headroom, dropped/stale frames, runtime/render/upload/compile tails, and Meta performance metrics where enabled. They do not yet emit the same playable/full-view-ready/render-quiescent startup-streaming markers as the desktop startup-streaming lane.
-- `native:loading-settle:*`: synthetic full-drain isolation probe. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters. Use it to split server/light/runtime cost from mesh cost, not as the primary desktop startup policy target. Planned follow-up lanes should split mesh CPU-only from GPU upload-only using already-loaded snapshots/prebuilt meshes.
+- `native:loading-settle:*`: synthetic full-drain isolation probe. Creates fresh transient worlds at fixed render distances, spawns the player at the seed-derived spawn center, waits for all target chunks to become light-ready, then synchronously builds render sections. Reports runtime settle time, render mesh settle time, chunks/sec, simulation time, and pending queue counters. Use it to split server/light/runtime cost from mesh cost, not as the primary desktop startup policy target. Use `native:mesh-cpu:*` and `native:gpu-upload:*` for already-loaded snapshot and prebuilt-mesh splits.
 - `native:timedemo:*`: deterministic headless GPU render path over a fixed camera orbit. Reports scene build time, render setup, per-frame render time, and drawn section/index pressure. It does not read back PNGs per frame.
 - `native:runtime:*`: lower-level server scheduler movement benchmark without client remesh/render work.
 
@@ -97,6 +100,56 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-05 - Prebuilt Mesh GPU Upload Split
+
+Commit reported by benchmark JSON: `bbbb3a75`.
+
+`git_dirty=true`: this record was captured while adding `--gpu-upload`,
+package scripts, and docs. Treat as a first directional baseline for the
+upload-only lane, not a clean release gate.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Command shape:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mesh_cpu_perf -- \
+  --render-distance N --gpu-upload --max-seconds 180 \
+  > /tmp/mclone-gpu-upload-rdN-persisted-sqlite-20260705.json
+```
+
+Raw local artifacts:
+`/tmp/mclone-gpu-upload-rd5-persisted-sqlite-20260705.json` and
+`/tmp/mclone-gpu-upload-rd10-persisted-sqlite-20260705.json`.
+
+The benchmark still prewarms/reloads persisted snapshots and builds CPU meshes
+first, then times only the prebuilt section upload phase. Draw-resource setup
+uploads the texture atlas separately; `update_sections_ms` is the measured
+section mesh upload through `TexturedSectionDrawResources`.
+
+| Lane | Prebuilt mesh output | Section upload | Uploaded bytes | Main upload subphases |
+|---|---:|---:|---:|---|
+| RD5 persisted prebuilt meshes | `965` non-empty sections, `739k` faces | `50.902ms` | `136.0 MB` | vertex bytes `21.624ms`, vertex buffers `18.927ms`, index buffers `7.749ms` |
+| RD10 persisted prebuilt meshes | `2789` non-empty sections, `1.96M` faces | `133.113ms` | `360.4 MB` | vertex bytes `53.459ms`, vertex buffers `51.312ms`, index buffers `21.570ms` |
+
+RD10 setup detail: headless device creation `15.000ms`, draw-resource setup
+including atlas upload `17.032ms`, post-upload device poll `0.003ms`.
+
+Interpretation:
+
+- Desktop GPU upload is not the multi-second wall. RD10 uploads about
+  `360 MB` of prebuilt section data in `133ms`, while the same run spends
+  `10.236s` building CPU meshes.
+- The measured upload cost is still too large to dump into one Quest frame and
+  should remain budgeted, but it is an order-of-magnitude smaller than mesh CPU
+  for the desktop RD10 already-generated case.
+- The expensive upload subphase is not GPU completion wait; it is CPU-side
+  vertex serialization plus buffer creation. `device.poll` after upload was
+  effectively zero on this desktop run.
+- Next split should be desktop-shaped persisted-world startup-streaming: reuse
+  persisted chunks, then observe how server reload, mesh workers, upload
+  budgets, and frame pacing interact in the real runtime shape.
 
 ### 2026-07-05 - Persisted Snapshot Mesh CPU Split
 

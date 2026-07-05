@@ -205,10 +205,14 @@ That prices real record decode/load/storage as a modest increment over memory
 reload, not the many-second fresh-path wall. The mesh CPU-only lane is now
 implemented on persisted SQLite snapshots: RD10 reload reached view-ready in
 `0.540s`, then CPU mesh construction for `8464` target sections took `11.037s`
-with no `wgpu` device, upload, frame loop, or runtime admission budget. Next,
-split GPU upload-only from prebuilt meshes. Once that desktop lane is
-understood, add a Quest persisted-world guardrail so headset frame pacing can be
-measured without generation/light noise.
+with no `wgpu` device, upload, frame loop, or runtime admission budget. The GPU
+upload split is now implemented too: the same RD10 prebuilt mesh footprint
+uploads `360 MB` of section data in `0.133s` on desktop, with post-upload
+`device.poll` effectively zero. That confirms upload is budget-sensitive but
+not the many-second wall on this machine. Next, add a persisted-world
+startup-streaming lane so server reload, mesh workers, upload budgets, and
+frame pacing are observed together without fresh generation/light noise, then
+add the Quest persisted-world guardrail.
 
 ### Mesh drain: admission/scan-bound, not worker-bound (measured)
 
@@ -508,8 +512,12 @@ instrumentation to watch it:
 - [x] Add mesh CPU-only lane: RD10 persisted SQLite reload reaches view-ready in
   `0.540s`, then full target-column mesh CPU build takes `11.037s` for `8464`
   sections (`2789` non-empty), with no GPU upload or frame loop.
-- [ ] Add GPU upload-only lane from prebuilt meshes so render quiescence can be
-  split without server generation, light, or mesh CPU in the sample.
+- [x] Add GPU upload-only lane from prebuilt meshes: RD10 uploads `2789`
+  non-empty sections (`360 MB`, `1.96M` faces) in `0.133s`; post-upload device
+  poll is effectively zero on desktop.
+- [ ] Add desktop-shaped persisted-world startup-streaming lane so reload,
+  mesh workers, upload budgets, and frame pacing are observed without fresh
+  generation/light noise.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
@@ -572,9 +580,9 @@ inference:
   bounded. RD10 in-memory reload reaches view-ready in `0.523s`; temp SQLite
   reaches view-ready in `0.572s` and settles in `0.721s`, both from `625`
   already-lit records with no worldgen/light. Mesh CPU-only from persisted
-  snapshots then takes `11.037s` for `8464` target sections. Next add GPU
-  upload-only from prebuilt meshes, then a persisted-world startup-streaming
-  lane to observe the paced integrated shape.
+  snapshots then takes `11.037s` for `8464` target sections. GPU upload-only
+  from those prebuilt meshes takes `0.133s` for `360 MB`. Next add a
+  persisted-world startup-streaming lane to observe the paced integrated shape.
 
 ## Non-Goals
 

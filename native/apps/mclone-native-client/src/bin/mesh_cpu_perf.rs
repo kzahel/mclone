@@ -13,9 +13,14 @@ use mclone_core::{
     ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_section_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_mesh::{
-    RenderSectionKey, TexturedRenderSectionBuildReport, load_textured_terrain_assets,
+    RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionBuildReport,
+    load_textured_terrain_assets,
 };
 use mclone_protocol::ChunkView;
+use mclone_render::{
+    chunk::{ChunkTextureAtlas, TexturedSectionDrawResources, TexturedSectionUploadTiming},
+    headless::{HEADLESS_FORMAT, create_headless_device},
+};
 use mclone_render_session::build_render_sections_from_snapshots_with_biome_zoom_seed;
 use mclone_server::{ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, SqliteWorldStore};
 
@@ -77,6 +82,11 @@ fn run() -> Result<()> {
     if mesh_stats.non_empty_sections == 0 {
         bail!("mesh build produced no non-empty sections");
     }
+    let gpu_upload = if config.gpu_upload {
+        Some(run_gpu_upload(&terrain_assets.atlas, &mesh_report)?)
+    } else {
+        None
+    };
 
     let report = Report {
         config,
@@ -87,6 +97,7 @@ fn run() -> Result<()> {
         asset_load_ms,
         snapshot_source,
         mesh_stats,
+        gpu_upload,
     };
     report.print_json();
     Ok(())
@@ -101,6 +112,7 @@ struct Config {
     chunk_tracking_radius: Option<u32>,
     lighting_enabled: bool,
     snapshot_source: SnapshotSource,
+    gpu_upload: bool,
     max_seconds: u64,
 }
 
@@ -114,6 +126,7 @@ impl Config {
             chunk_tracking_radius: None,
             lighting_enabled: true,
             snapshot_source: SnapshotSource::PersistedSqliteReload,
+            gpu_upload: false,
             max_seconds: DEFAULT_MAX_SECONDS,
         };
 
@@ -140,6 +153,8 @@ impl Config {
                 "--persisted-sqlite-reload" => {
                     config.snapshot_source = SnapshotSource::PersistedSqliteReload
                 }
+                "--gpu-upload" => config.gpu_upload = true,
+                "--no-gpu-upload" => config.gpu_upload = false,
                 "--max-seconds" => config.max_seconds = parse_next(&mut args, "--max-seconds")?,
                 "--help" | "-h" => bail!("{}", usage()),
                 _ => bail!("unknown argument {arg}\n{}", usage()),
@@ -299,6 +314,23 @@ impl MeshBuildStats {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct GpuUploadStats {
+    device_create_ms: f64,
+    draw_resource_setup_ms: f64,
+    draw_resource_setup_poll_ms: f64,
+    update_sections_ms: f64,
+    device_poll_ms: f64,
+    uploaded_sections: usize,
+    resident_sections: usize,
+    uploaded_vertices: u32,
+    uploaded_indices: u32,
+    uploaded_faces: u32,
+    uploaded_bytes: u64,
+    resident_indices: u32,
+    timing: TexturedSectionUploadTiming,
+}
+
 #[derive(Debug)]
 struct Report {
     config: Config,
@@ -309,12 +341,18 @@ struct Report {
     asset_load_ms: f64,
     snapshot_source: SnapshotSourceReport,
     mesh_stats: MeshBuildStats,
+    gpu_upload: Option<GpuUploadStats>,
 }
 
 impl Report {
     fn print_json(&self) {
         println!("{{");
-        print_benchmark_metadata("native_mesh_cpu_only", "  ", true);
+        let benchmark_name = if self.config.gpu_upload {
+            "native_mesh_cpu_gpu_upload"
+        } else {
+            "native_mesh_cpu_only"
+        };
+        print_benchmark_metadata(benchmark_name, "  ", true);
         println!("  \"seed\": {},", self.config.seed);
         println!(
             "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
@@ -334,9 +372,76 @@ impl Report {
         );
         println!("  \"asset_load_ms\": {:.3},", self.asset_load_ms);
         print_snapshot_source_json("  ", &self.snapshot_source, true, self.target_chunks);
-        print_mesh_stats_json("  ", self.mesh_stats, false);
+        print_mesh_stats_json("  ", self.mesh_stats, true);
+        match self.gpu_upload {
+            Some(stats) => print_gpu_upload_stats_json("  ", stats, false),
+            None => println!("  \"gpu_upload\": null"),
+        }
         println!("}}");
     }
+}
+
+fn run_gpu_upload(
+    atlas: &mclone_mesh::TextureAtlasImage,
+    mesh_report: &TexturedRenderSectionBuildReport,
+) -> Result<GpuUploadStats> {
+    let device_start = Instant::now();
+    let (device, queue) =
+        create_headless_device().context("failed to create headless GPU device")?;
+    let device_create_ms = elapsed_ms(device_start.elapsed());
+
+    let atlas_upload = ChunkTextureAtlas {
+        width: atlas.width,
+        height: atlas.height,
+        rgba: atlas.rgba(),
+    };
+    let setup_start = Instant::now();
+    let mut draw =
+        TexturedSectionDrawResources::new(&device, &queue, HEADLESS_FORMAT, &[], atlas_upload)
+            .context("failed to create empty textured section draw resources")?;
+    let draw_resource_setup_ms = elapsed_ms(setup_start.elapsed());
+    let setup_poll_start = Instant::now();
+    device
+        .poll(wgpu::PollType::Wait)
+        .context("device poll after draw resource setup failed")?;
+    let draw_resource_setup_poll_ms = elapsed_ms(setup_poll_start.elapsed());
+
+    let upload_start = Instant::now();
+    let (upload_report, timing) = draw
+        .apply_section_updates_with_context_timed(
+            &device,
+            &mesh_report.sections,
+            &BTreeSet::new(),
+            false,
+        )
+        .context("failed to upload prebuilt render sections")?;
+    let update_sections_ms = elapsed_ms(upload_start.elapsed());
+    let poll_start = Instant::now();
+    device
+        .poll(wgpu::PollType::Wait)
+        .context("device poll after section upload failed")?;
+    let device_poll_ms = elapsed_ms(poll_start.elapsed());
+
+    let vertex_bytes = u64::from(upload_report.uploaded_vertex_count)
+        .saturating_mul(std::mem::size_of::<TexturedChunkVertex>() as u64);
+    let index_bytes = u64::from(upload_report.uploaded_index_count)
+        .saturating_mul(std::mem::size_of::<u32>() as u64);
+
+    Ok(GpuUploadStats {
+        device_create_ms,
+        draw_resource_setup_ms,
+        draw_resource_setup_poll_ms,
+        update_sections_ms,
+        device_poll_ms,
+        uploaded_sections: upload_report.uploaded_section_count,
+        resident_sections: draw.section_count(),
+        uploaded_vertices: upload_report.uploaded_vertex_count,
+        uploaded_indices: upload_report.uploaded_index_count,
+        uploaded_faces: upload_report.uploaded_face_count(),
+        uploaded_bytes: vertex_bytes.saturating_add(index_bytes),
+        resident_indices: draw.index_count(),
+        timing,
+    })
 }
 
 fn load_snapshots(
@@ -809,6 +914,87 @@ fn print_mesh_stats_json(indent: &str, stats: MeshBuildStats, trailing_comma: bo
     println!("{indent}}}{suffix}");
 }
 
+fn print_gpu_upload_stats_json(indent: &str, stats: GpuUploadStats, trailing_comma: bool) {
+    println!("{indent}\"gpu_upload\": {{");
+    println!(
+        "{indent}  \"device_create_ms\": {:.3},",
+        stats.device_create_ms
+    );
+    println!(
+        "{indent}  \"draw_resource_setup_ms\": {:.3},",
+        stats.draw_resource_setup_ms
+    );
+    println!(
+        "{indent}  \"draw_resource_setup_poll_ms\": {:.3},",
+        stats.draw_resource_setup_poll_ms
+    );
+    println!(
+        "{indent}  \"update_sections_ms\": {:.3},",
+        stats.update_sections_ms
+    );
+    println!("{indent}  \"device_poll_ms\": {:.3},", stats.device_poll_ms);
+    println!(
+        "{indent}  \"uploaded_sections\": {},",
+        stats.uploaded_sections
+    );
+    println!(
+        "{indent}  \"resident_sections\": {},",
+        stats.resident_sections
+    );
+    println!(
+        "{indent}  \"uploaded_vertices\": {},",
+        stats.uploaded_vertices
+    );
+    println!(
+        "{indent}  \"uploaded_indices\": {},",
+        stats.uploaded_indices
+    );
+    println!("{indent}  \"uploaded_faces\": {},", stats.uploaded_faces);
+    println!("{indent}  \"uploaded_bytes\": {},", stats.uploaded_bytes);
+    println!(
+        "{indent}  \"resident_indices\": {},",
+        stats.resident_indices
+    );
+    println!("{indent}  \"timing\": {{");
+    println!("{indent}    \"total_ms\": {:.3},", stats.timing.total_ms);
+    println!(
+        "{indent}    \"dirty_mark_ms\": {:.3},",
+        stats.timing.dirty_mark_ms
+    );
+    println!("{indent}    \"remove_ms\": {:.3},", stats.timing.remove_ms);
+    println!(
+        "{indent}    \"section_state_ms\": {:.3},",
+        stats.timing.section_state_ms
+    );
+    println!(
+        "{indent}    \"vertex_bytes_ms\": {:.3},",
+        stats.timing.vertex_bytes_ms
+    );
+    println!(
+        "{indent}    \"vertex_buffer_ms\": {:.3},",
+        stats.timing.vertex_buffer_ms
+    );
+    println!(
+        "{indent}    \"index_bytes_ms\": {:.3},",
+        stats.timing.index_bytes_ms
+    );
+    println!(
+        "{indent}    \"index_buffer_ms\": {:.3},",
+        stats.timing.index_buffer_ms
+    );
+    println!(
+        "{indent}    \"mesh_insert_ms\": {:.3},",
+        stats.timing.mesh_insert_ms
+    );
+    println!(
+        "{indent}    \"mesh_upload_worst_ms\": {:.3}",
+        stats.timing.mesh_upload_worst_ms
+    );
+    println!("{indent}  }}");
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}}}{suffix}");
+}
+
 fn parse_next<T: std::str::FromStr>(
     args: &mut impl Iterator<Item = String>,
     flag: &str,
@@ -836,7 +1022,7 @@ fn parse_bool_next(args: &mut impl Iterator<Item = String>, flag: &str) -> Resul
 }
 
 fn usage() -> String {
-    "usage: mesh_cpu_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--snapshot-source fresh|persisted-sqlite-reload] [--max-seconds N]"
+    "usage: mesh_cpu_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--snapshot-source fresh|persisted-sqlite-reload] [--gpu-upload] [--max-seconds N]"
         .to_owned()
 }
 
