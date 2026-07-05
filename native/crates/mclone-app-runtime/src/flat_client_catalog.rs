@@ -801,6 +801,40 @@ mod tests {
     }
 
     #[test]
+    fn transient_create_only_allows_create_and_rejects_persistent_actions() {
+        let mut controller = FlatClientCatalogController::new();
+        controller.set_capabilities(WorldCatalogCapabilities::transient_create_only());
+
+        let request = only_request(
+            controller.apply_ui_action(GameUiAction::CreateCatalogWorld, context(4321)),
+        );
+        assert_eq!(
+            request.request,
+            WorldCatalogRequest::CreateWorld {
+                options: LocalWorldCreateOptions::new("New World", 4321).unwrap()
+            }
+        );
+
+        let effects = controller.apply_ui_action(
+            GameUiAction::OpenWorld(WorldCatalogUiWorldId(1)),
+            context(0),
+        );
+        assert!(effects.catalog_requests.is_empty());
+        assert!(effects.session_starts.is_empty());
+        let state = controller.ui_state();
+        assert!(state.create_supported);
+        assert!(!state.list_supported);
+        assert!(!state.open_supported);
+        assert!(!state.delete_supported);
+        assert!(state.status.visible);
+        assert!(!state.status.ok);
+        assert_eq!(
+            state.status.message.as_str(),
+            "Persistent worlds unavailable"
+        );
+    }
+
+    #[test]
     fn catalog_failure_response_covers_duplicate_id_errors() {
         let mut controller = persistent_controller(Vec::new());
         let request =

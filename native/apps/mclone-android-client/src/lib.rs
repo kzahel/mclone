@@ -12,6 +12,21 @@ mod android {
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
+    use mclone_app_runtime::client_experience::{
+        ClientExperienceActionContext, ClientExperienceCapabilityProjection,
+        ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
+        ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
+        ClientExperienceSettingEffect, ClientExperienceSettingsEffects,
+        ClientExperienceSettingsProfile, ClientExperienceSettingsState,
+        client_experience_should_apply_ui_projection,
+    };
+    use mclone_app_runtime::client_session_policy::{
+        ClientSessionEffects, ClientSessionHostAction, ClientSessionUiEffects,
+        client_session_failed_start_ui_effects,
+    };
+    use mclone_app_runtime::flat_client_catalog::{
+        FlatClientCatalogEffects, FlatClientCatalogRequest, FlatClientCatalogSessionStart,
+    };
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
         render_full_frame_for_view,
@@ -28,6 +43,10 @@ mod android {
     };
     use mclone_app_runtime::startup_args::{
         RenderDistanceLimits, StartupArgState, StartupCameraOptions, StartupSceneOptions,
+    };
+    use mclone_app_runtime::world_catalog::{
+        LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
+        WorldCatalogError, WorldCatalogRequest, WorldCatalogResponse,
     };
     use mclone_app_runtime::{
         debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
@@ -59,10 +78,10 @@ mod android {
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
-        GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameUiAction,
-        GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
-        TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats, WorldCatalogUiState,
-        WorldCatalogUiText, touch_action_button_rects, touch_hotbar_slot_rects,
+        GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameTouchSettings,
+        GameUiAction, GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point,
+        StatusOverlay, TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats,
+        touch_action_button_rects, touch_controls_mode_label, touch_hotbar_slot_rects,
         touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
@@ -82,7 +101,9 @@ mod android {
     const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
     const REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
-    const TOUCH_LOOK_RADIANS_PER_SCREEN: f64 = 2.4;
+    const ANDROID_TOUCH_LOOK_SENSITIVITY_DEFAULT: f32 = 2.4;
+    const ANDROID_TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.5;
+    const ANDROID_TOUCH_LOOK_SENSITIVITY_MAX: f32 = 5.0;
     const TOUCH_JOYSTICK_RADIUS_GUI: f32 = 50.0;
     const TOUCH_MOVEMENT_MAX_FRAME_SECONDS: f64 = 0.05;
     const ANDROID_MIN_RENDER_DISTANCE: i32 = 1;
@@ -193,10 +214,12 @@ mod android {
         input_capabilities: InputCapabilityState,
         input_preferences: InputPreferences,
         keyboard_mouse: KeyboardMouseInputAdapter,
+        client_experience: ClientExperienceController,
         render_options: TexturedSectionRenderOptions,
         player_collision_box_visible: bool,
         crosshair_visible: bool,
         player_model: GamePlayerModel,
+        touch_look_sensitivity: f32,
         ui: GameUiHost,
         session_status: StatusOverlay,
         touch_menu_touch_id: Option<u64>,
@@ -583,6 +606,11 @@ mod android {
             let mut gui = GuiRenderer::new(device, format);
             gui.upload_texture_atlas(device, queue, started.scene.mesh_assets().atlas.as_upload())
                 .context("upload Android GUI atlas")?;
+            let mut client_experience =
+                ClientExperienceController::new(android_client_experience_profile());
+            client_experience
+                .catalog_mut()
+                .set_capabilities(WorldCatalogCapabilities::transient_create_only());
 
             Ok(Self {
                 depth,
@@ -599,10 +627,12 @@ mod android {
                 }),
                 input_preferences: InputPreferences::AUTO,
                 keyboard_mouse: KeyboardMouseInputAdapter::new(),
+                client_experience,
                 render_options,
                 player_collision_box_visible: false,
                 crosshair_visible: true,
                 player_model: GamePlayerModel::default(),
+                touch_look_sensitivity: ANDROID_TOUCH_LOOK_SENSITIVITY_DEFAULT,
                 ui: android_game_ui_for_scene(&scene_options),
                 session_status: StatusOverlay::hidden(),
                 touch_menu_touch_id: None,
@@ -629,8 +659,9 @@ mod android {
             height: u32,
         ) -> Result<()> {
             let scale = f64::from(width.min(height).max(1));
-            let yaw_delta = -(delta_x / scale) * TOUCH_LOOK_RADIANS_PER_SCREEN;
-            let pitch_delta = -(delta_y / scale) * TOUCH_LOOK_RADIANS_PER_SCREEN;
+            let sensitivity = f64::from(self.touch_look_sensitivity);
+            let yaw_delta = -(delta_x / scale) * sensitivity;
+            let pitch_delta = -(delta_y / scale) * sensitivity;
             self.camera.turn_mouse_delta(
                 -yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY,
                 -pitch_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY,
@@ -1189,219 +1220,50 @@ mod android {
                 handled: true,
                 quit: false,
             };
-            match action {
-                GameUiAction::ToggleSectionOcclusion => {
-                    self.render_options.section_occlusion_culling =
-                        !self.render_options.section_occlusion_culling;
-                    log::info!(
-                        "Mclone Android section occlusion culling {}",
-                        if self.render_options.section_occlusion_culling {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    );
-                }
-                GameUiAction::ToggleFullbright => {
-                    self.render_options.force_fullbright = !self.render_options.force_fullbright;
-                    log::info!(
-                        "Mclone Android fullbright {}",
-                        if self.render_options.force_fullbright {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    );
-                }
-                GameUiAction::ToggleFarLod => {
-                    log::info!("Mclone Android far LOD toggle ignored; far LOD is not available");
-                }
-                GameUiAction::SetFarLodRange(_) => {}
-                GameUiAction::TogglePlayerCollisionBox => {
-                    self.player_collision_box_visible = !self.player_collision_box_visible;
-                    log::info!(
-                        "Mclone Android player collision box debug {}",
-                        if self.player_collision_box_visible {
-                            "visible"
-                        } else {
-                            "hidden"
-                        }
-                    );
-                }
-                GameUiAction::ToggleCrosshair => {
-                    self.crosshair_visible = !self.crosshair_visible;
-                    log::info!(
-                        "Mclone Android crosshair {}",
-                        if self.crosshair_visible {
-                            "visible"
-                        } else {
-                            "hidden"
-                        }
-                    );
-                }
-                GameUiAction::ToggleFirstPersonPlayer => {
-                    let visible = !self.camera.first_person_player_visible();
-                    self.camera.set_first_person_player_visible(visible);
-                    log::info!(
-                        "Mclone Android first-person player body {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                GameUiAction::SetRenderDistance(render_distance) => {
-                    let render_distance = render_distance
-                        .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE);
-                    if self
-                        .scene
-                        .set_render_distance(render_distance as u32)
-                        .with_context(|| {
-                            format!("set Android render distance from menu to {render_distance}")
-                        })?
-                    {
-                        log::info!(
-                            "Mclone Android render distance set to {} (chunk tracking radius {})",
-                            render_distance,
-                            self.scene.chunk_tracking_radius()
-                        );
-                    }
-                    self.scene_options.render_distance = render_distance as u32;
-                }
-                GameUiAction::SetMovementMode(movement_mode) => {
-                    self.camera
-                        .set_movement_mode(engine_movement_mode(movement_mode));
-                    let movement_mode = self.camera.movement_mode();
-                    log::info!(
-                        "Mclone Android player movement mode {}",
-                        movement_mode.label()
-                    );
-                }
-                GameUiAction::SetXrTurnMode(_) => {}
-                GameUiAction::SetFlySpeed(multiplier) => {
-                    self.camera.set_fly_speed_multiplier(f64::from(multiplier));
-                    log::info!(
-                        "Mclone Android fly speed set to {:.1}x ({:.0} blocks/s)",
-                        self.camera.fly_speed_multiplier(),
-                        self.camera.speed_blocks_per_second()
-                    );
-                }
-                GameUiAction::SetMovementSpeed(multiplier) => {
-                    self.camera
-                        .set_movement_speed_multiplier(f64::from(multiplier));
-                    self.scene_options.movement_speed_multiplier =
-                        self.camera.movement_speed_multiplier() as f32;
-                    log::info!(
-                        "Mclone Android movement speed multiplier set to {:.1}x",
-                        self.camera.movement_speed_multiplier()
-                    );
-                }
-                GameUiAction::SetPlayerModel(model) => {
-                    self.player_model = model;
-                    log::info!("Mclone Android player model set to {}", model.label());
-                    if let Err(error) = self.sync_player_appearance() {
-                        log::warn!("failed to sync Android player appearance: {error:#}");
-                    }
-                }
-                GameUiAction::Quit => {
-                    result.quit = true;
-                }
-                GameUiAction::OpenNewWorld => {
-                    let seed = self.next_new_world_seed();
-                    self.ui.set_new_world_seed(seed);
-                    self.session_status = StatusOverlay::hidden();
-                }
-                GameUiAction::OpenWorldCreate => {
-                    let seed = self.next_new_world_seed();
-                    self.ui.set_new_world_seed(seed);
-                    self.session_status = StatusOverlay::hidden();
-                }
-                GameUiAction::OpenWorldList
-                | GameUiAction::SelectWorld(_)
-                | GameUiAction::ConfirmDeleteWorld(_)
-                | GameUiAction::CancelDeleteWorld => {
-                    self.session_status = StatusOverlay::hidden();
-                }
-                GameUiAction::OpenWorld(_) | GameUiAction::DeleteWorld(_) => {
-                    log::warn!("persistent world catalog action is not wired to Android yet");
-                }
-                GameUiAction::CreateCatalogWorld => {
-                    let seed = self.ui.new_world_seed();
-                    let request = SessionStartRequest::new_seed_local_world(seed);
-                    let options = self.local_world_options(seed);
-                    if self
-                        .start_replacement_session(device, queue, format, request, options)
-                        .is_err()
-                    {
-                        self.ui.set_new_world_seed(seed);
-                        return Ok(result);
-                    }
-                }
-                GameUiAction::OpenJoinRemote => {
-                    let remote_addr = self.scene_options.remote_addr.clone().unwrap_or_else(|| {
-                        normalized_android_remote_addr(self.ui.join_remote_addr())
-                    });
-                    self.ui.set_join_remote_addr(remote_addr);
-                    self.session_status = StatusOverlay::hidden();
-                }
-                GameUiAction::RerollSeed => {
-                    let seed = self.next_new_world_seed();
-                    self.ui.set_new_world_seed(seed);
-                    self.session_status = StatusOverlay::hidden();
-                    log::info!("Mclone Android new-world seed rerolled to {seed}");
-                }
-                GameUiAction::CreateWorld(seed) => {
-                    let request = SessionStartRequest::new_seed_local_world(seed);
-                    let options = self.local_world_options(seed);
-                    if self
-                        .start_replacement_session(device, queue, format, request, options)
-                        .is_err()
-                    {
-                        self.ui.set_new_world_seed(seed);
-                        return Ok(result);
-                    }
-                }
-                GameUiAction::JoinRemote => {
-                    let remote_addr = normalized_android_remote_addr(self.ui.join_remote_addr());
-                    self.ui.set_join_remote_addr(remote_addr.clone());
-                    let request = SessionStartRequest::JoinRemote {
-                        endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-                    };
-                    let options = self.remote_session_options(remote_addr);
-                    if self
-                        .start_replacement_session(device, queue, format, request, options)
-                        .is_err()
-                    {
-                        return Ok(result);
-                    }
-                }
-                GameUiAction::CycleFramePacing
-                | GameUiAction::CycleFpsCap
-                | GameUiAction::SetTouchLookSensitivity(_)
-                | GameUiAction::SetServerSimulationCadence(_) => {}
-                GameUiAction::AssignHotbarBlock { slot, block_state } => {
-                    if let Err(err) = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))
-                    {
-                        log::error!("failed to assign Android debug hotbar slot: {err:#}");
-                    }
-                }
-                GameUiAction::SetTouchControlsMode(mode) => {
-                    self.input_preferences.touch_controls = mode;
-                    log::info!(
-                        "Mclone Android touch controls set to {}",
-                        mclone_ui::touch_controls_mode_label(mode)
-                    );
-                }
-                GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
-                    self.session_status = StatusOverlay::hidden();
-                }
-                GameUiAction::StartWorld
-                | GameUiAction::Resume
-                | GameUiAction::OpenBlockPalette
-                | GameUiAction::OpenHelp(_)
-                | GameUiAction::CloseHelp(_)
-                | GameUiAction::OpenOptions(_)
-                | GameUiAction::OpenServerSettings(_)
-                | GameUiAction::BackToPause => {}
+            let settings_state =
+                ClientExperienceSettingsState::from(self.current_ui_render_state());
+            self.client_experience.set_settings_state(settings_state);
+            let active_world = self.active_local_world_id().cloned();
+            self.client_experience
+                .catalog_mut()
+                .set_active_world(active_world);
+
+            let new_world_seed = if matches!(action, GameUiAction::OpenWorldCreate) {
+                self.next_new_world_seed()
+            } else {
+                self.ui.new_world_seed()
+            };
+            let next_new_world_seed = matches!(
+                action,
+                GameUiAction::OpenNewWorld | GameUiAction::RerollSeed
+            )
+            .then(|| self.next_new_world_seed());
+            let current_join_remote_addr =
+                normalized_android_remote_addr(self.ui.join_remote_addr());
+            let open_join_remote_fallback =
+                matches!(action, GameUiAction::OpenJoinRemote).then(|| {
+                    self.scene_options
+                        .remote_addr
+                        .clone()
+                        .unwrap_or_else(|| current_join_remote_addr.clone())
+                });
+            let effects = self.client_experience.apply_ui_action(
+                action,
+                ClientExperienceActionContext {
+                    new_world_seed,
+                    next_new_world_seed,
+                    current_join_remote_addr: &current_join_remote_addr,
+                    fallback_remote_addr: open_join_remote_fallback.as_deref(),
+                },
+            );
+            let apply_ui_action = client_experience_should_apply_ui_projection(action)
+                && effects.projection.is_empty();
+            if !self.apply_client_experience_effects(effects, device, queue, format, &mut result)? {
+                return Ok(result);
             }
-            self.ui.apply_action(action);
+            if apply_ui_action {
+                self.ui.apply_action(action);
+            }
             if !self.ui.is_active() {
                 self.ui.clear_input();
                 self.ui_touch_id = None;
@@ -1409,13 +1271,387 @@ mod android {
             Ok(result)
         }
 
+        fn apply_client_experience_effects(
+            &mut self,
+            effects: ClientExperienceEffects,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+            result: &mut AndroidUiTouchResult,
+        ) -> Result<bool> {
+            if !self.apply_android_catalog_effects(effects.catalog, device, queue, format)? {
+                return Ok(false);
+            }
+            if !self.apply_client_session_effects(effects.session, device, queue, format, result)? {
+                return Ok(false);
+            }
+            if !self.apply_client_experience_settings_effects(effects.settings)? {
+                return Ok(false);
+            }
+            for effect in effects.gameplay {
+                match effect {
+                    ClientExperienceGameplayEffect::AssignHotbarBlock { slot, block_state } => {
+                        if let Err(err) =
+                            self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))
+                        {
+                            log::error!("failed to assign Android debug hotbar slot: {err:#}");
+                        }
+                    }
+                }
+            }
+            for effect in effects.projection {
+                match effect {
+                    ClientExperienceProjectionEffect::ApplyUiAction(action) => {
+                        self.ui.apply_action(action);
+                    }
+                }
+            }
+            Ok(true)
+        }
+
+        fn apply_android_catalog_effects(
+            &mut self,
+            effects: FlatClientCatalogEffects,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+        ) -> Result<bool> {
+            for request in effects.catalog_requests {
+                if !self.execute_android_catalog_request(request, device, queue, format)? {
+                    return Ok(false);
+                }
+            }
+            for start in effects.session_starts {
+                if !self.apply_android_catalog_session_start(start, device, queue, format)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+
+        fn execute_android_catalog_request(
+            &mut self,
+            request: FlatClientCatalogRequest,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+        ) -> Result<bool> {
+            let response = match request.request {
+                WorldCatalogRequest::CreateWorld { options } => {
+                    match android_transient_catalog_summary(&options) {
+                        Ok(summary) => WorldCatalogResponse::WorldCreated { summary },
+                        Err(error) => {
+                            let effects = self
+                                .client_experience
+                                .catalog_mut()
+                                .apply_catalog_error(request.id, error);
+                            return self
+                                .apply_android_catalog_effects(effects, device, queue, format);
+                        }
+                    }
+                }
+                WorldCatalogRequest::ListWorlds
+                | WorldCatalogRequest::OpenWorld { .. }
+                | WorldCatalogRequest::DeleteWorld { .. } => {
+                    let effects = self.client_experience.catalog_mut().apply_catalog_error(
+                        request.id,
+                        WorldCatalogError::unsupported("Persistent worlds unavailable"),
+                    );
+                    return self.apply_android_catalog_effects(effects, device, queue, format);
+                }
+            };
+
+            let effects = self
+                .client_experience
+                .catalog_mut()
+                .apply_catalog_response(request.id, response);
+            self.apply_android_catalog_effects(effects, device, queue, format)
+        }
+
+        fn apply_android_catalog_session_start(
+            &mut self,
+            start: FlatClientCatalogSessionStart,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+        ) -> Result<bool> {
+            let request = start.request;
+            let options = match android_scene_options_for_session_request(self, &request) {
+                Some(options) => options,
+                None => {
+                    let message = "Android catalog session start is unsupported";
+                    log::warn!("{message}: {request:?}");
+                    self.session_status = StatusOverlay::new(message, false);
+                    return Ok(false);
+                }
+            };
+            if self
+                .start_replacement_session(device, queue, format, request.clone(), options)
+                .is_err()
+            {
+                self.apply_client_session_ui_effects(client_session_failed_start_ui_effects(
+                    &request, false,
+                ));
+                return Ok(false);
+            }
+            self.client_experience
+                .catalog_mut()
+                .set_active_world(Some(start.summary.id));
+            self.ui.set_screen(None);
+            Ok(true)
+        }
+
+        fn apply_client_session_effects(
+            &mut self,
+            effects: ClientSessionEffects,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+            result: &mut AndroidUiTouchResult,
+        ) -> Result<bool> {
+            self.apply_client_session_ui_effects(ClientSessionUiEffects {
+                new_world_seed: effects.new_world_seed,
+                join_remote_addr: effects.join_remote_addr,
+                screen: None,
+            });
+            if effects.clear_inactive_session_status {
+                self.session_status = StatusOverlay::hidden();
+            }
+            if let Some(request) = effects.session_start {
+                let options = match android_scene_options_for_session_request(self, &request) {
+                    Some(options) => options,
+                    None => {
+                        let message = "Android session start is unsupported";
+                        log::warn!("{message}: {request:?}");
+                        self.session_status = StatusOverlay::new(message, false);
+                        return Ok(false);
+                    }
+                };
+                if self
+                    .start_replacement_session(device, queue, format, request.clone(), options)
+                    .is_err()
+                {
+                    self.apply_client_session_ui_effects(client_session_failed_start_ui_effects(
+                        &request, false,
+                    ));
+                    return Ok(false);
+                }
+                self.ui.set_screen(None);
+            }
+            if let Some(host_action) = effects.host_action {
+                match host_action {
+                    ClientSessionHostAction::QuitToTitle => {
+                        self.session_status = StatusOverlay::hidden();
+                        self.ui.apply_action(GameUiAction::QuitToTitle);
+                    }
+                    ClientSessionHostAction::Quit => {
+                        result.quit = true;
+                    }
+                }
+            }
+            Ok(true)
+        }
+
+        fn apply_client_session_ui_effects(&mut self, effects: ClientSessionUiEffects) {
+            if let Some(seed) = effects.new_world_seed {
+                self.ui.set_new_world_seed(seed);
+            }
+            if let Some(addr) = effects.join_remote_addr {
+                self.ui.set_join_remote_addr(addr);
+            }
+            if let Some(screen) = effects.screen {
+                self.ui.set_screen(Some(screen));
+            }
+        }
+
+        fn apply_client_experience_settings_effects(
+            &mut self,
+            effects: ClientExperienceSettingsEffects,
+        ) -> Result<bool> {
+            let mut ok = true;
+            let has_setting_effects = !effects.setting_effects.is_empty();
+            let has_unavailable =
+                !effects.capability_projection.is_empty() || !effects.rejections.is_empty();
+            for effect in effects.setting_effects {
+                match effect {
+                    ClientExperienceSettingEffect::SetSectionOcclusionCulling(enabled) => {
+                        self.render_options.section_occlusion_culling = enabled;
+                        log::info!(
+                            "Mclone Android section occlusion culling {}",
+                            if enabled { "enabled" } else { "disabled" }
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetFullbright(enabled) => {
+                        self.render_options.force_fullbright = enabled;
+                        log::info!(
+                            "Mclone Android fullbright {}",
+                            if enabled { "enabled" } else { "disabled" }
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetFarLod { .. }
+                    | ClientExperienceSettingEffect::ClearFarLod => {
+                        self.session_status =
+                            StatusOverlay::new("Far LOD is unavailable on flat Android", false);
+                        ok = false;
+                    }
+                    ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
+                        self.player_collision_box_visible = visible;
+                        log::info!(
+                            "Mclone Android player collision box debug {}",
+                            if visible { "visible" } else { "hidden" }
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetFirstPersonPlayerVisible(visible) => {
+                        self.camera.set_first_person_player_visible(visible);
+                        log::info!(
+                            "Mclone Android first-person player body {}",
+                            if visible { "visible" } else { "hidden" }
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetCrosshairVisible(visible) => {
+                        self.crosshair_visible = visible;
+                        log::info!(
+                            "Mclone Android crosshair {}",
+                            if visible { "visible" } else { "hidden" }
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetPlayerModel(model) => {
+                        self.player_model = model;
+                        log::info!("Mclone Android player model set to {}", model.label());
+                    }
+                    ClientExperienceSettingEffect::SyncPlayerAppearance => {
+                        if let Err(error) = self.sync_player_appearance() {
+                            log::warn!("failed to sync Android player appearance: {error:#}");
+                        }
+                    }
+                    ClientExperienceSettingEffect::SetMovementMode(movement_mode) => {
+                        self.camera
+                            .set_movement_mode(engine_movement_mode(movement_mode));
+                        let movement_mode = self.camera.movement_mode();
+                        log::info!(
+                            "Mclone Android player movement mode {}",
+                            movement_mode.label()
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetXrTurnMode(_) => {
+                        self.session_status = StatusOverlay::new(
+                            "XR turn mode is unavailable on flat Android",
+                            false,
+                        );
+                        ok = false;
+                    }
+                    ClientExperienceSettingEffect::CycleFramePacing => {
+                        self.session_status = StatusOverlay::new(
+                            "Frame pacing is fixed by Android surface presentation",
+                            false,
+                        );
+                        ok = false;
+                    }
+                    ClientExperienceSettingEffect::CycleFpsCap => {
+                        self.session_status =
+                            StatusOverlay::new("FPS cap is fixed on flat Android", false);
+                        ok = false;
+                    }
+                    ClientExperienceSettingEffect::SetRenderDistance(render_distance_chunks) => {
+                        let render_distance = i32::try_from(render_distance_chunks)
+                            .unwrap_or(ANDROID_MAX_RENDER_DISTANCE)
+                            .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE);
+                        if self
+                            .scene
+                            .set_render_distance(render_distance as u32)
+                            .with_context(|| {
+                                format!(
+                                    "set Android render distance from menu to {render_distance}"
+                                )
+                            })?
+                        {
+                            log::info!(
+                                "Mclone Android render distance set to {} (chunk tracking radius {})",
+                                render_distance,
+                                self.scene.chunk_tracking_radius()
+                            );
+                        }
+                        self.scene_options.render_distance = render_distance as u32;
+                    }
+                    ClientExperienceSettingEffect::SetFlySpeedMultiplier(multiplier) => {
+                        self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                        log::info!(
+                            "Mclone Android fly speed set to {:.1}x ({:.0} blocks/s)",
+                            self.camera.fly_speed_multiplier(),
+                            self.camera.speed_blocks_per_second()
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetMovementSpeedMultiplier(multiplier) => {
+                        self.camera
+                            .set_movement_speed_multiplier(f64::from(multiplier));
+                        self.scene_options.movement_speed_multiplier =
+                            self.camera.movement_speed_multiplier() as f32;
+                        log::info!(
+                            "Mclone Android movement speed multiplier set to {:.1}x",
+                            self.camera.movement_speed_multiplier()
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetTouchLookSensitivity(look_sensitivity) => {
+                        self.touch_look_sensitivity =
+                            clamp_android_touch_look_sensitivity(look_sensitivity);
+                        log::info!(
+                            "Mclone Android touch look sensitivity set to {:.1}x",
+                            self.touch_look_sensitivity
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetTouchControlsMode(mode) => {
+                        self.input_preferences.touch_controls = mode;
+                        log::info!(
+                            "Mclone Android touch controls set to {}",
+                            touch_controls_mode_label(mode)
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetServerSimulationCadence(_) => {
+                        self.session_status = StatusOverlay::new(
+                            "Server simulation cadence is unavailable on flat Android",
+                            false,
+                        );
+                        ok = false;
+                    }
+                }
+            }
+            self.apply_client_experience_capability_projection(effects.capability_projection);
+            for rejection in effects.rejections {
+                log::error!("{}", rejection.message);
+                self.session_status = StatusOverlay::new(rejection.message, false);
+                ok = false;
+            }
+            if has_setting_effects && !has_unavailable && ok {
+                self.session_status = StatusOverlay::hidden();
+            }
+            Ok(ok)
+        }
+
+        fn apply_client_experience_capability_projection(
+            &mut self,
+            projection: ClientExperienceCapabilityProjection,
+        ) {
+            if let Some(unavailable) = projection.first_unavailable() {
+                if let Some(message) = unavailable.status.message() {
+                    log::warn!("{message}");
+                    self.session_status = StatusOverlay::new(message, unavailable.status.ok());
+                }
+            }
+        }
+
+        fn active_local_world_id(&self) -> Option<&LocalWorldId> {
+            match self.scene.active_session()? {
+                ActiveSessionDescriptor::LocalWorld { id, .. } => id.as_ref(),
+                ActiveSessionDescriptor::Remote { .. } => None,
+            }
+        }
+
         fn current_ui_render_state(&self) -> GameUiRenderState {
             let mut state = GameUiRenderState {
-                world_catalog: WorldCatalogUiState {
-                    create_supported: true,
-                    create_display_name: WorldCatalogUiText::new("New World"),
-                    ..Default::default()
-                },
+                world_catalog: self
+                    .client_experience
+                    .catalog()
+                    .ui_state_with_active_world(self.active_local_world_id()),
                 render_distance: (self.scene.render_distance() as i32)
                     .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE),
                 min_render_distance: ANDROID_MIN_RENDER_DISTANCE,
@@ -1445,7 +1681,11 @@ mod android {
                 fps_cap: ANDROID_FIXED_FPS_CAP,
                 server_cadence: None,
                 touch_controls_mode: Some(self.input_preferences.touch_controls),
-                touch_settings: None,
+                touch_settings: Some(GameTouchSettings::new(
+                    self.touch_look_sensitivity,
+                    ANDROID_TOUCH_LOOK_SENSITIVITY_MIN,
+                    ANDROID_TOUCH_LOOK_SENSITIVITY_MAX,
+                )),
                 block_palette: Default::default(),
             };
             state.block_palette = debug_block_palette_overlay(
@@ -2085,6 +2325,68 @@ mod android {
             .wrapping_mul(0x9E37_79B9_7F4A_7C15)
             .wrapping_add(0xD1B5_4A32_D192_ED03)
             .max(1)
+    }
+
+    fn android_client_experience_profile() -> ClientExperienceProfile {
+        let mut settings = ClientExperienceSettingsProfile::all_supported();
+        settings.far_lod =
+            ClientExperienceCapabilityStatus::Unsupported("Far LOD is unavailable on flat Android");
+        settings.xr_turn = ClientExperienceCapabilityStatus::Unsupported(
+            "XR turn mode is unavailable on flat Android",
+        );
+        settings.frame_pacing = ClientExperienceCapabilityStatus::Unsupported(
+            "Frame pacing is fixed by Android surface presentation",
+        );
+        settings.fps_cap =
+            ClientExperienceCapabilityStatus::Unsupported("FPS cap is fixed on flat Android");
+        settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
+            "Server simulation cadence is unavailable on flat Android",
+        );
+        ClientExperienceProfile::new(settings)
+    }
+
+    fn android_scene_options_for_session_request(
+        renderer: &AndroidFrameRenderer,
+        request: &SessionStartRequest,
+    ) -> Option<AndroidSceneOptions> {
+        match request {
+            SessionStartRequest::CreateLocalWorld { options } => {
+                Some(renderer.local_world_options(options.seed))
+            }
+            SessionStartRequest::JoinRemote { endpoint } => {
+                Some(renderer.remote_session_options(endpoint.address.clone()))
+            }
+            SessionStartRequest::OpenLocalWorld { .. } | SessionStartRequest::Unknown => None,
+        }
+    }
+
+    fn android_transient_catalog_summary(
+        options: &LocalWorldCreateOptions,
+    ) -> std::result::Result<LocalWorldSummary, WorldCatalogError> {
+        let id = options
+            .requested_id
+            .clone()
+            .unwrap_or_else(|| android_transient_world_id(options));
+        let mut summary =
+            LocalWorldSummary::new(id, options.display_name.clone(), options.seed, 0)?;
+        summary.last_played_unix_millis = Some(0);
+        summary.backend_label = Some("android-transient".to_owned());
+        Ok(summary)
+    }
+
+    fn android_transient_world_id(options: &LocalWorldCreateOptions) -> LocalWorldId {
+        LocalWorldId::from_display_name(&format!("{} {}", options.display_name, options.seed))
+    }
+
+    fn clamp_android_touch_look_sensitivity(value: f32) -> f32 {
+        finite_or_f32(value, ANDROID_TOUCH_LOOK_SENSITIVITY_DEFAULT).clamp(
+            ANDROID_TOUCH_LOOK_SENSITIVITY_MIN,
+            ANDROID_TOUCH_LOOK_SENSITIVITY_MAX,
+        )
+    }
+
+    fn finite_or_f32(value: f32, fallback: f32) -> f32 {
+        if value.is_finite() { value } else { fallback }
     }
 
     fn android_remote_addr() -> Option<String> {

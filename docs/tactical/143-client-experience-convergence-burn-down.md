@@ -81,7 +81,7 @@ rg -n "already exists|was not found|cannot delete" \
 | 4: XR session-machine merge | V4 | landed 2026-07-05 |
 | 4a: neutral shared session-policy naming | naming guardrail | landed 2026-07-05 |
 | 5: emulated-XR profile test | display-neutrality gate | landed 2026-07-05 |
-| 6: flat Android adopts the facade | V1/V2 on Android | open |
+| 6: flat Android adopts the facade | V1/V2 on Android | landed 2026-07-05 |
 | 7: XR catalog CRUD via shared controller | last V2 no-ops | open |
 
 V1-V4 are defined in
@@ -1024,7 +1024,54 @@ git diff --check
 Plus the AVD touch/session smokes listed in
 [`../platforms.md`](../platforms.md#validation-policy).
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+- Implemented flat Android facade adoption in `mclone-android-client`: Android
+  now routes UI actions through `ClientExperienceController` and executes
+  emitted catalog/session/settings/gameplay/projection effects in the Android
+  host adapter.
+- Resolved the Slice 6 catalog decision as transient create-only: Android does
+  not add persistent storage here; the shared catalog controller advertises
+  create support only, while persistent list/open/delete project visible
+  unsupported state.
+- Added `WorldCatalogCapabilities::transient_create_only()` plus an
+  `mclone-app-runtime` regression test covering create support and persistent
+  action rejection.
+- Wired Android touch-look sensitivity through the shared settings effect
+  instead of leaving the visible action inert.
+- Updated Matrix 2 in `docs/topics/platform-parity.md`: flat Android now
+  consumes `client_session_policy`, `flat_client_catalog`, and
+  `client_experience`.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`: pass
+  (110 tests).
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`:
+  pass.
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`: pass.
+- `pnpm native:policy:wasm-check`: pass; existing `mclone-server`
+  `with_unload_hysteresis_chunks` dead-code warning remains.
+- `pnpm native:android:apk`: pass.
+- `pnpm native:android:avd-smoke`: pass; screenshot
+  `/tmp/mclone-android-avd-chunk.png` inspected, nonblank terrain/HUD/touch UI.
+- `pnpm native:android:avd-touch-smoke`: pass; screenshot
+  `/tmp/mclone-android-avd-touch.png` inspected, post-swipe terrain/HUD/touch UI.
+- `pnpm native:android:avd-session-smoke`: pass; screenshot
+  `/tmp/mclone-android-avd-session.png` inspected, New World replacement
+  rendered terrain/HUD/touch UI.
+- `git diff --check`: pass.
+
+Tripwires:
+
+- dispatch-site grep: 5 hits, expected current sites only:
+  `mclone-xr-scene/src/lib.rs`, `mclone-web-client/src/web_canvas.rs`,
+  `mclone-android-client/src/lib.rs`, `mclone-native-client/src/app.rs`,
+  `mclone-native-client/src/flat_client_driver.rs`.
+- inert-arm grep: 0 hits.
+- Android-specific inert/warn grep for old catalog/no-op arms: 0 hits.
+- web catalog policy-string grep: 3 existing smoke assertion hits
+  (`already exists`, `cannot delete active local world`, `was not found`).
 
 ## Slice 7: XR Catalog CRUD Through The Shared Controller
 
@@ -1060,8 +1107,7 @@ Recorded result: (pending)
 
 ## Open Questions
 
-- Slice 6: does flat Android get a real app-private catalog backend in this
-  workstream, or a capability-gated "no persistent worlds yet" state first?
-  (Storage work may deserve its own tactical; the facade adoption does not
-  depend on the answer.)
+- Slice 6 resolved: flat Android keeps a transient create-only catalog adapter
+  for this convergence slice; persistent Android catalog storage is deferred to
+  a separate storage/platform slice.
 - Recorded deviations from slice order, if any, go here with reasons.

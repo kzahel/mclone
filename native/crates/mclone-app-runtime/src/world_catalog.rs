@@ -224,6 +224,16 @@ impl WorldCatalogCapabilities {
         }
     }
 
+    pub const fn transient_create_only() -> Self {
+        Self {
+            persistent: false,
+            list_supported: false,
+            create_supported: true,
+            open_supported: false,
+            delete_supported: false,
+        }
+    }
+
     pub const fn read_only_persistent() -> Self {
         Self {
             persistent: true,
