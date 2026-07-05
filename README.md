@@ -23,6 +23,12 @@ Native desktop flat remains the fastest daily bring-up path. The headless/offscr
 
 Shared gameplay, runtime, asset, mesh, UI, renderer, and XR contracts must stay host-neutral. Client platform and server host mode are separate axes: every client lane should be able to play against a dedicated server, with future P2P/session topologies fitting behind the same shared command/update contracts.
 
+The current architecture target is a shared client-experience core with
+profile-specific presentation/adapters, so flat, XR, web, Android, offscreen,
+and emulated validation lanes keep one product behavior surface instead of
+separate platform clients. See
+[`docs/client-experience-architecture.md`](docs/client-experience-architecture.md).
+
 ## Project Map
 
 Current project posture and work indexes:
@@ -36,6 +42,7 @@ Current project posture and work indexes:
 
 Core architecture docs:
 
+- [`docs/client-experience-architecture.md`](docs/client-experience-architecture.md) — draft shared client-experience core, profiles, adapters, and platform parity guardrails
 - [`docs/offscreen-flat-client.md`](docs/offscreen-flat-client.md) — offscreen flat-client target
 - [`docs/architecture.md`](docs/architecture.md) — runtime/host split
 - [`docs/runtime-data-model.md`](docs/runtime-data-model.md) — shared chunk/block-state data contracts

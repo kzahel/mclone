@@ -53,6 +53,11 @@ run every device and headset lane unless the change touches platform adapter,
 renderer target/view ownership, OpenXR behavior, Android packaging, browser
 worker/ABI glue, or another boundary where that platform can fail uniquely.
 
+The draft shared client-experience target lives in
+[`client-experience-architecture.md`](client-experience-architecture.md). Use
+that document when deciding whether behavior belongs in a profile-neutral
+client core, a flat/XR/offscreen projection, or a platform adapter.
+
 Near-term product gaps are feature parity and codebase alignment, not more
 platform bring-up:
 

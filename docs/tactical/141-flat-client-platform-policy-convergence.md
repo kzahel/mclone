@@ -1,7 +1,6 @@
 # 141: Flat Client Platform Policy Convergence
 
-Status: proposed architecture and guardrail workstream. Opened on 2026-07-04
-after tactical
+Status: retired architecture workstream. Opened on 2026-07-04 after tactical
 [`136-world-catalog-and-crud-ui.md`](136-world-catalog-and-crud-ui.md) exposed
 another desktop-first policy split: desktop flat can create, open, delete, and
 smoke persistent catalog worlds through `FlatClientDriver`, while native web
@@ -34,7 +33,11 @@ their platform-local runtime hosts. Slice 4d landed on 2026-07-05: shared
 session projection now combines session status with optional startup loading
 progress, so desktop/offscreen and web consume one status/startup projection
 while their platform adapters still own native startup pumps and browser worker
-promises.
+promises. Retired on 2026-07-05 in favor of the broader draft
+[`../client-experience-architecture.md`](../client-experience-architecture.md),
+which generalizes this flat desktop/web convergence into a shared
+client-experience core for flat, XR, web, Android, offscreen, and emulated
+profiles.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -42,6 +45,11 @@ platform adapters; shared crates own client, UI, session, catalog, and runtime
 policy.
 
 ## Purpose
+
+Retirement note: this tactical remains the implementation history for Slices
+1-4d. New controller/core work should start from
+[`../client-experience-architecture.md`](../client-experience-architecture.md)
+instead of extending the flat-specific target shape below.
 
 Stop flat-client features from repeatedly landing as a mature desktop path plus
 parallel web, Android, and XR catch-up wiring.
@@ -154,6 +162,11 @@ Do not force every platform through the same transport shape. Also do not let
 transport differences become a reason to duplicate user-facing rules.
 
 ## Target Shape
+
+Supersession note: this target shape is retained as history for Slices 1-4d.
+New work should use the display-neutral
+[`../client-experience-architecture.md`](../client-experience-architecture.md)
+target rather than creating a durable flat-only controller.
 
 Introduce a shared flat-client controller, initially in `mclone-app-runtime`
 unless dependency pressure proves it deserves a dedicated crate such as

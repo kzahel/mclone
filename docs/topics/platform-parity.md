@@ -20,8 +20,11 @@ This doc owns three things no other doc owns:
 Related docs: [`../platforms.md`](../platforms.md) owns lane status and
 validation policy; [`../offscreen-flat-client.md`](../offscreen-flat-client.md)
 owns the no-window flat-client target; [`../architecture.md`](../architecture.md)
-owns the runtime boundary; this doc owns the per-feature and per-contract grids
-and the rule that keeps new features from re-forking.
+owns the runtime boundary;
+[`../client-experience-architecture.md`](../client-experience-architecture.md)
+owns the draft shared client-experience core/profile/adapter target; this doc
+owns the per-feature and per-contract grids and the rule that keeps new
+features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
 > 2026-06-26 and refreshed on 2026-06-28 after tactical 095 Slice 4f, the

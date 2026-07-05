@@ -4,6 +4,10 @@ This document owns the durable architecture shape for the current Rust engine. M
 
 Current platform posture, validation lanes, Playbox references, and platform boundary details live in [`platforms.md`](platforms.md). Numbered implementation plans and work logs live in [`tactical/`](tactical/README.md).
 
+The draft target for keeping flat, XR, web, Android, offscreen, and emulated
+validation lanes on one product behavior surface lives in
+[`client-experience-architecture.md`](client-experience-architecture.md).
+
 ## Direction
 
 The engine is native-first Rust with five validated client/platform lanes:
@@ -116,6 +120,8 @@ The platform bring-up arc is broad enough that the highest-value work is shared 
 
 Current alignment areas:
 
+- drive shared client-experience policy through
+  [`client-experience-architecture.md`](client-experience-architecture.md)
 - keep the platform parity/contract matrix in [`topics/platform-parity.md`](topics/platform-parity.md) current
 - keep host-mode convergence shared across web, desktop, Android, and XR lanes
 - keep XR terrain, actor, UI, and comfort features in shared XR crates where practical
