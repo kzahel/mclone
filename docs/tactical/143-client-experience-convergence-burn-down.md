@@ -74,7 +74,7 @@ rg -n "already exists|was not found|cannot delete" \
 
 | Slice | Closes | Status |
 |---|---|---|
-| 0: enforcement baseline | gates | open |
+| 0: enforcement baseline | gates | landed 2026-07-05 |
 | 1: facade + `GameUiAction` classification | V1 (shared side), V2 (policy) | open |
 | 2: desktop and web adopt the facade | V1/V2 on flat lanes | open |
 | 3: TypeScript catalog demotion | V3 | open |
@@ -115,7 +115,71 @@ pnpm native:policy:wasm-check
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Changes:
+
+- Added `pnpm native:policy:wasm-check`, running
+  `cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime --lib
+  --target wasm32-unknown-unknown`.
+- No production code changes.
+
+Validation:
+
+```bash
+pnpm native:policy:wasm-check
+# PASS, finished in 16.39s. Existing warning:
+# mclone-server: dead_code for PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks.
+
+git diff --check
+# PASS
+```
+
+Tripwire baselines:
+
+- Dispatch sites: 5 total.
+
+```text
+native/apps/mclone-android-client/src/lib.rs:1180:        fn apply_ui_action(
+native/crates/mclone-xr-scene/src/lib.rs:5204:    fn apply_xr_ui_action(
+native/apps/mclone-web-client/src/web_canvas.rs:3220:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+native/apps/mclone-native-client/src/flat_client_driver.rs:1169:    pub(crate) fn apply_ui_action(
+native/apps/mclone-native-client/src/app.rs:534:    fn apply_ui_action(
+```
+
+- Inert arms: 14 total.
+  `mclone-android-client`: 4, `mclone-native-client`: 2,
+  `mclone-web-client`: 5, `mclone-xr-scene`: 3.
+
+```text
+native/crates/mclone-xr-scene/src/lib.rs:5279:            GameUiAction::ToggleCrosshair => {}
+native/crates/mclone-xr-scene/src/lib.rs:5423:            | GameUiAction::SetServerSimulationCadence(_) => {}
+native/crates/mclone-xr-scene/src/lib.rs:5433:            | GameUiAction::BackToPause => {}
+native/apps/mclone-web-client/src/web_canvas.rs:3231:            GameUiAction::ToggleFarLod => {}
+native/apps/mclone-web-client/src/web_canvas.rs:3232:            GameUiAction::SetFarLodRange(_) => {}
+native/apps/mclone-web-client/src/web_canvas.rs:3253:            GameUiAction::SetXrTurnMode(_) => {}
+native/apps/mclone-web-client/src/web_canvas.rs:3333:            | GameUiAction::SetRenderDistance(_) => {}
+native/apps/mclone-web-client/src/web_canvas.rs:3428:                | GameUiAction::CycleFpsCap => {}
+native/apps/mclone-android-client/src/lib.rs:1218:                GameUiAction::SetFarLodRange(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1276:                GameUiAction::SetXrTurnMode(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1367:                | GameUiAction::SetServerSimulationCadence(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1391:                | GameUiAction::BackToPause => {}
+native/apps/mclone-native-client/src/flat_client_driver.rs:1309:            GameUiAction::SetXrTurnMode(_) => {}
+native/apps/mclone-native-client/src/flat_client_driver.rs:1524:            | GameUiAction::SetTouchLookSensitivity(_) => {}
+```
+
+- TypeScript policy-string hits: 7 total.
+  `mclone-web-smoke.js`: 3, `mclone-web-world-catalog.ts`: 4.
+
+```text
+native/apps/mclone-web-client/www/mclone-web-smoke.js:574:      "already exists",
+native/apps/mclone-web-client/www/mclone-web-smoke.js:578:      "cannot delete active local world",
+native/apps/mclone-web-client/www/mclone-web-smoke.js:591:      "was not found",
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:82:    throw new Error(`local world \`${id}\` already exists`);
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:113:    throw new Error(`local world \`${normalizedId}\` was not found`);
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:130:    throw new Error(`cannot delete active local world \`${normalizedId}\`; quit to title first`);
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:134:    throw new Error(`local world \`${normalizedId}\` was not found`);
+```
 
 ## Slice 1: Facade Plus Full `GameUiAction` Classification
 
