@@ -12,9 +12,9 @@ use mclone_app_runtime::flat_client_catalog::{
 };
 use mclone_app_runtime::flat_client_session::{
     FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
-    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
+    FlatClientSessionProjection, FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
     flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
-    flat_client_session_effects_for_action, flat_client_session_status_overlay,
+    flat_client_session_effects_for_action, flat_client_session_projection,
     flat_client_should_clear_inactive_session_status, flat_client_start_session_transition,
 };
 use mclone_app_runtime::frame_render::{
@@ -797,8 +797,12 @@ impl FlatClientDriver {
         flat_client_quit_to_title_transition(self.session.state())
     }
 
-    pub(crate) fn session_status_overlay(&self) -> StatusOverlay {
-        flat_client_session_status_overlay(self.session.status())
+    pub(crate) fn session_projection(&self) -> FlatClientSessionProjection {
+        flat_client_session_projection(
+            self.session.status(),
+            StatusOverlay::hidden(),
+            self.startup_progress_overlay(),
+        )
     }
 
     pub(crate) fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {

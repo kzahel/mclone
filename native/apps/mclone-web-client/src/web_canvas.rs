@@ -13,9 +13,9 @@ use mclone_app_runtime::flat_client_catalog::{
 };
 use mclone_app_runtime::flat_client_session::{
     FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
-    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
-    flat_client_effective_status_overlay, flat_client_failed_start_ui_effects,
-    flat_client_quit_to_title_transition, flat_client_session_effects_for_action,
+    FlatClientSessionProjection, FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
+    flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
+    flat_client_session_effects_for_action, flat_client_session_projection,
     flat_client_session_ui_effects_for_request, flat_client_should_clear_inactive_session_status,
     flat_client_start_session_transition,
 };
@@ -3788,8 +3788,12 @@ impl WebChunkRenderSession {
         self.runtime.runner_kind() == ServerRunnerKind::RemoteWebSocket
     }
 
+    fn session_projection(&self) -> FlatClientSessionProjection {
+        flat_client_session_projection(self.session.status(), self.status_overlay.clone(), None)
+    }
+
     fn effective_status_overlay(&self) -> StatusOverlay {
-        flat_client_effective_status_overlay(self.session.status(), self.status_overlay.clone())
+        self.session_projection().status_overlay
     }
 
     fn resolved_flat_input_for_hud(&self) -> mclone_input::ResolvedFlatInput {
@@ -4788,6 +4792,7 @@ impl WebChunkRenderSession {
                 Point { x: 4.0, y: 52.0 },
             )
         });
+        let session_projection = self.session_projection();
         let mut hud = FlatHud::new(self.resolved_flat_input_for_hud());
         hud.world_hud_visible = !ui_active;
         hud.crosshair_visible = self.crosshair_visible && !ui_active;
@@ -4800,7 +4805,7 @@ impl WebChunkRenderSession {
         let mut touch = self.touch_overlay;
         touch.hotbar_icons = hotbar_icons;
         hud.touch = touch;
-        hud.status = self.effective_status_overlay();
+        hud.status = session_projection.status_overlay.clone();
         hud.debug = debug_overlay;
         let flat_hud_retained_cache =
             self.ui
@@ -4827,7 +4832,7 @@ impl WebChunkRenderSession {
         frame.present();
         self.render_count += 1;
         self.loaded_chunk_positions = current_loaded_chunks;
-        let effective_status_overlay = self.effective_status_overlay();
+        let effective_status_overlay = session_projection.status_overlay;
 
         Ok(GeneratedChunkRenderReport {
             center,

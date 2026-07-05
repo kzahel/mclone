@@ -1,5 +1,5 @@
 use crate::session::{GameSessionState, RemoteSessionEndpoint, SessionStartRequest, SessionStatus};
-use mclone_ui::{GameScreen, GameUiAction, StatusOverlay};
+use mclone_ui::{GameScreen, GameUiAction, LoadingProgressOverlay, StatusOverlay};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FlatClientSessionActionContext<'a> {
@@ -41,6 +41,12 @@ pub struct FlatClientSessionTransitionEffects {
     pub teardown_world: bool,
     pub clear_session: bool,
     pub ui: FlatClientSessionUiEffects,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatClientSessionProjection {
+    pub status_overlay: StatusOverlay,
+    pub loading_progress_overlay: Option<LoadingProgressOverlay>,
 }
 
 pub fn flat_client_session_effects_for_action(
@@ -118,7 +124,7 @@ pub fn flat_client_failed_start_ui_effects(
 }
 
 pub fn flat_client_session_status_overlay(status: Option<SessionStatus>) -> StatusOverlay {
-    flat_client_effective_status_overlay(status, StatusOverlay::hidden())
+    flat_client_session_projection(status, StatusOverlay::hidden(), None).status_overlay
 }
 
 pub fn flat_client_effective_status_overlay(
@@ -128,6 +134,17 @@ pub fn flat_client_effective_status_overlay(
     status.map_or(fallback, |status| {
         StatusOverlay::new(status.message, status.ok)
     })
+}
+
+pub fn flat_client_session_projection(
+    status: Option<SessionStatus>,
+    fallback_status: StatusOverlay,
+    loading_progress_overlay: Option<LoadingProgressOverlay>,
+) -> FlatClientSessionProjection {
+    FlatClientSessionProjection {
+        status_overlay: flat_client_effective_status_overlay(status, fallback_status),
+        loading_progress_overlay,
+    }
 }
 
 pub fn flat_client_should_clear_inactive_session_status(state: &GameSessionState) -> bool {
@@ -265,6 +282,30 @@ mod tests {
             fallback,
         );
         assert_eq!(overlay, StatusOverlay::new("Connecting...", true));
+    }
+
+    #[test]
+    fn session_projection_combines_status_and_loading_progress() {
+        let progress = LoadingProgressOverlay::new(1, 2, 9, false, []);
+        let projection = flat_client_session_projection(
+            Some(SessionStatus {
+                message: "Loading world...".to_owned(),
+                ok: true,
+            }),
+            StatusOverlay::new("browser status", true),
+            Some(progress.clone()),
+        );
+
+        assert_eq!(
+            projection.status_overlay,
+            StatusOverlay::new("Loading world...", true)
+        );
+        assert_eq!(projection.loading_progress_overlay, Some(progress));
+
+        let fallback = StatusOverlay::new("browser status", true);
+        let projection = flat_client_session_projection(None, fallback.clone(), None);
+        assert_eq!(projection.status_overlay, fallback);
+        assert_eq!(projection.loading_progress_overlay, None);
     }
 
     #[test]

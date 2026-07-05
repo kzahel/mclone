@@ -37,7 +37,9 @@ and the rule that keeps new features from re-forking.
 > effects into `app-runtime::flat_client_session` for desktop and web adapters;
 > Slice 4b added shared request-to-UI restoration, status overlay projection,
 > and inactive-status clear policy for those adapters; Slice 4c added shared
-> teardown-before-start and quit-to-title transition effects for those adapters.
+> teardown-before-start and quit-to-title transition effects for those adapters;
+> Slice 4d added shared session/startup projection for status plus optional
+> loading progress.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -173,7 +175,7 @@ use (and should) · — n/a.
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
-| `app-runtime::flat_client_session` (flat session UI action policy) | ✅ (desktop adapter executes shared seed/join/start/quit effects, status/restoration projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_session`; `cargo test -p mclone-native-client ui_action_routing`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; tactical 141 Slice 4c |
+| `app-runtime::flat_client_session` (flat session UI action policy) | ✅ (desktop adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_session`; `cargo test -p mclone-native-client ui_action_routing`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; tactical 141 Slice 4d |
 | `app-runtime::flat_client_catalog` (world catalog UI/action policy) | ✅ (desktop adapter executes native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; focused catalog smoke covers create/open/delete) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_catalog`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; tactical 141 Slice 3 |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
@@ -217,7 +219,8 @@ Concretely:
   now flow through `mclone-app-runtime::host_mode`. Flat seed/new-world,
   join-remote, start, back-to-title, and quit action effects now flow through
   `mclone-app-runtime::flat_client_session`, including teardown-before-start
-  and quit-to-title transition policy. Session request/state now flows through
+  and quit-to-title transition policy, plus shared session/startup projection
+  for status fallback. Session request/state now flows through
   `mclone-app-runtime::session` for initial local/remote starts and menu-driven
   async New World restart; JoinRemote reconnect is wired, with a dedicated
   connect-screen smoke still pending. The playable browser app can join a

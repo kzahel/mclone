@@ -30,7 +30,11 @@ web adapters applying the shared effects to their local UI hosts. Slice 4c
 landed on 2026-07-05: teardown-before-start and quit-to-title transition
 policy now live in `flat_client_session`, with desktop and web adapters
 executing the resulting runtime shutdown/session-clear/UI effects through
-their platform-local runtime hosts.
+their platform-local runtime hosts. Slice 4d landed on 2026-07-05: shared
+session projection now combines session status with optional startup loading
+progress, so desktop/offscreen and web consume one status/startup projection
+while their platform adapters still own native startup pumps and browser worker
+promises.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -499,7 +503,7 @@ Results on 2026-07-05:
 
 ### Slice 4: Session Replacement And Startup Policy
 
-Status: first three passes landed 2026-07-05.
+Status: first four passes landed 2026-07-05.
 
 Move the remaining shared session action policy out of app-local match arms:
 
@@ -605,9 +609,35 @@ pnpm native:web:smoke
 git diff --check
 ```
 
+Recorded Slice 4d result:
+
+- Added shared `FlatClientSessionProjection`, combining the effective session
+  `StatusOverlay` with an optional `LoadingProgressOverlay`.
+- Kept the native loading-progress source platform-local:
+  `WindowSceneStartupPump` still owns progress snapshots, while desktop and
+  offscreen now pass that adapter fact into the shared flat-client projection.
+- Updated desktop windowed and offscreen frame composition to source HUD status
+  and startup loading-progress overlays from `FlatClientDriver::session_projection`.
+- Updated native web to use the same projection helper with its browser status
+  fallback and no loading-progress grid, preserving worker-promise ownership in
+  the web adapter.
+
+Validation after Slice 4d:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_session
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client ui_action_routing
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_
+pnpm native:desktop-offscreen:smoke
+pnpm native:web:typecheck
+pnpm native:web:catalog-smoke
+pnpm native:web:smoke
+git diff --check
+```
+
 Remaining Slice 4 work:
 
-- centralize loading/startup overlay projection;
 - decide whether `flat_client_session` stays as a helper module or folds into a
   broader flat-client controller with `flat_client_catalog`.
 

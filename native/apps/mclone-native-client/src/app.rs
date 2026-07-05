@@ -1299,9 +1299,12 @@ impl ApplicationHandler for ChunkApp {
                 let render_options = self.driver.effective_render_options();
                 let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
-                let status_overlay = self.driver.session_status_overlay();
-                let flat_hud = self.current_flat_hud(status_overlay, self.driver.ui_is_active());
-                let loading_progress_overlay = self.driver.startup_progress_overlay();
+                let session_projection = self.driver.session_projection();
+                let flat_hud = self.current_flat_hud(
+                    session_projection.status_overlay.clone(),
+                    self.driver.ui_is_active(),
+                );
+                let loading_progress_overlay = session_projection.loading_progress_overlay;
                 let debug_view_readiness_overlay = (self.debug_visible
                     && loading_progress_overlay.is_none())
                 .then(|| {

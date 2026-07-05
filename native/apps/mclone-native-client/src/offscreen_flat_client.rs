@@ -19,7 +19,7 @@ use mclone_render::target::RenderFrameContext;
 use mclone_server::initial_spawn_center_for_seed;
 use mclone_ui::{
     FlatHotbarOverlay, FlatHud, GameScreen, GuiScale, LoadingProgressCellStatus,
-    LoadingProgressOverlay, Point,
+    LoadingProgressOverlay, Point, StatusOverlay,
 };
 
 use crate::camera::SpectatorCamera;
@@ -344,7 +344,10 @@ impl OffscreenFlatClientHost {
                     .and_then(WindowSceneRuntime::view_readiness_overlay)
             })
             .flatten();
-        let hud = options.hud.then(|| self.current_flat_hud());
+        let session_projection = self.driver.session_projection();
+        let hud = options
+            .hud
+            .then(|| self.current_flat_hud(session_projection.status_overlay.clone()));
         let ui_frame = FlatClientUiFrame {
             render_options: FlatClientUiRenderOptions {
                 render_distance: self
@@ -369,7 +372,7 @@ impl OffscreenFlatClientHost {
                 self.driver.interaction.selected_hotbar_slot(),
             ),
             hud,
-            loading_progress_overlay: self.driver.startup_progress_overlay(),
+            loading_progress_overlay: session_projection.loading_progress_overlay,
             debug: FlatClientDebugFrame {
                 stats: debug_stats,
                 view_readiness_overlay: debug_view_readiness_overlay,
@@ -390,7 +393,7 @@ impl OffscreenFlatClientHost {
         Ok(summary)
     }
 
-    fn current_flat_hud(&self) -> FlatHud {
+    fn current_flat_hud(&self, status_overlay: StatusOverlay) -> FlatHud {
         let mut capabilities = InputCapabilities::NONE;
         capabilities.keyboard = true;
         capabilities.mouse = true;
@@ -408,7 +411,7 @@ impl OffscreenFlatClientHost {
                 &self.assets.mesh_assets.catalog,
             ),
         );
-        hud.status = self.driver.session_status_overlay();
+        hud.status = status_overlay;
         hud
     }
 
