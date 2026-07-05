@@ -1,6 +1,8 @@
 # Client Experience Architecture
 
-Status: revised draft. Opened 2026-07-05 after tactical
+Status: accepted rulebook; tactical
+[`143-client-experience-convergence-burn-down.md`](tactical/143-client-experience-convergence-burn-down.md)
+closed 2026-07-05. Opened 2026-07-05 after tactical
 [`141-flat-client-platform-policy-convergence.md`](tactical/141-flat-client-platform-policy-convergence.md)
 made enough desktop/web flat policy shared to expose the larger target: one
 client experience core across flat, XR, web, Android, offscreen, and emulated
@@ -10,21 +12,20 @@ recorded in [Current Violations](#current-violations-burn-down) and drove the
 migration order and enforcement rules below.
 
 Adopted stance (2026-07-05): convergence and enforcement take priority over
-new user-facing feature work. New feature tacticals should not open while the
-burn-down slices below are unowned, and any feature that does land must route
-through the shared core from its first slice rather than being ported later.
+new user-facing feature work. Tactical 143 closed the initial convergence
+burn-down; future feature tacticals must route through the shared core from
+their first slice rather than being ported later.
 
-The executable checklist for this work — per-slice deliverables, non-goals,
-observable exit criteria, validation blocks, and the implementing-agent
-contract — is tactical
+The executable checklist and validation log for this work — per-slice
+deliverables, non-goals, observable exit criteria, validation blocks, and the
+implementing-agent contract — is tactical
 [`143-client-experience-convergence-burn-down.md`](tactical/143-client-experience-convergence-burn-down.md).
-Implementation sessions should work from that tactical; this document stays
-the durable rulebook.
+That tactical is closed; this document stays the durable rulebook.
 
-This document is the architecture target and rulebook for that work. It is not
-a completed implementation claim. It should guide future tacticals and code
-review until it is accepted, revised, or split into more specific architecture
-docs.
+This document is the architecture target and rulebook for future client
+experience work. It is not a claim that all platform parity gaps are closed.
+It should guide future tacticals and code review until it is revised or split
+into more specific architecture docs.
 
 Related docs:
 
@@ -118,15 +119,16 @@ enforcement, not just intent.
 
 ## Current Violations (Burn-Down)
 
-These are the live violations of this architecture as of the 2026-07-05
-audit. Line numbers are anchors from that audit; if a line has moved, the
-symbol name is the durable reference. This list is the acceptance burn-down:
-the doc's target shape is reached when these are gone and the enforcement
-gates below exist to keep them gone.
+These were the live violations of this architecture as of the 2026-07-05
+audit. Tactical 143 closed this acceptance burn-down on 2026-07-05. Line
+numbers are anchors from that audit; if a line has moved, the symbol name is
+the durable reference. This list remains as the rationale for the enforcement
+gates below.
 
 ### V1. Four parallel `GameUiAction` dispatch matches
 
-Each app lane hand-writes the same top-level action dispatch:
+Resolved 2026-07-05 by tactical 143 Slices 1, 2, 4, 6, and 7. At the audit
+point, each app lane hand-wrote the same top-level action dispatch:
 
 - desktop: `mclone-native-client/src/flat_client_driver.rs:1169`
   (`apply_ui_action`)
@@ -134,18 +136,18 @@ Each app lane hand-writes the same top-level action dispatch:
 - XR: `mclone-xr-scene/src/lib.rs:5204` (`apply_xr_ui_action`)
 - Android: `mclone-android-client/src/lib.rs:1180` (`apply_ui_action`)
 
-The settings/toggle bodies are copy-pasted per lane: `SetMovementMode`
+The settings/toggle bodies were copy-pasted per lane: `SetMovementMode`
 (desktop `:1303`, web `:3249`, XR `:5305`, Android `:1267`), and likewise
 `SetFlySpeed`, `SetMovementSpeed`, `ToggleFullbright`, `ToggleCrosshair`, and
-`ToggleFirstPersonPlayer`. This is the half of `GameUiAction` that never got a
-shared controller; catalog and session actions already have one.
+`ToggleFirstPersonPlayer`. This was the half of `GameUiAction` that had not
+yet moved behind a shared controller.
 
 Contrast with the desktop winit layer (`mclone-native-client/src/app.rs:534`,
 also named `apply_ui_action`): that match delegates all policy to the driver
 and only executes returned `FlatClientHostAction` effects — process quit,
-frame pacing, world teardown. That two-layer split is the target shape every
-lane's dispatch should shrink into; the violation here is the duplicated
-*policy* arms, not the existence of an adapter-layer executor match.
+frame pacing, world teardown. That two-layer split remains the target shape
+for every lane: adapter-layer executor matches are allowed, duplicated policy
+arms are not.
 
 ### V2. Silent inert arms for visible shared actions — in both directions
 
@@ -172,8 +174,9 @@ deciding they should.
 
 ### V3. World-catalog policy re-implemented in TypeScript (third copy)
 
-`mclone-web-client/www/mclone-web-world-catalog.ts` re-implements policy that
-Rust already owns in `mclone-app-runtime/src/world_catalog.rs`:
+Resolved 2026-07-05 by tactical 143 Slice 3. At the audit point,
+`mclone-web-client/www/mclone-web-world-catalog.ts` re-implemented policy that
+Rust already owned in `mclone-app-runtime/src/world_catalog.rs`:
 
 - id length limit: TS `LOCAL_WORLD_ID_MAX_LEN` (`:12`) vs Rust (`:21`);
 - error strings: TS `` `local world \`${id}\` already exists` `` (`:82`) and
@@ -186,13 +189,15 @@ Rust already owns in `mclone-app-runtime/src/world_catalog.rs`:
   `available_from_display_name` (`world_catalog.rs:45`);
 - world sort order duplicated in TS.
 
-This violates the "async is completion timing, not a policy fork" rule from
+This violated the "async is completion timing, not a policy fork" rule from
 tactical 141 in its strongest form: the fork crossed a language boundary,
 where drift is hardest to notice. TypeScript must be a dumb IndexedDB
 executor; validation, id generation, ordering, and message text belong in
 Rust, reachable from wasm before/after the raw storage operation.
 
 ### V4. XR forks the session state machine, not just the presentation
+
+Resolved 2026-07-05 by tactical 143 Slices 4, 5, and 7.
 
 At the audit point, `mclone-xr-scene` (8,217-line `lib.rs`) shared the session
 *vocabulary*
@@ -209,8 +214,8 @@ the client session policy effect helpers at all. Instead it owned:
 
 This was the largest single divergence in the tree and the one that compounded
 fastest: every session/catalog/status improvement landed twice or drifted.
-Merging XR onto the shared session machine is the flagship migration slice
-and the proof that the core is not flat-shaped.
+Merging XR onto the shared session machine was the flagship migration slice
+and proved that the core is not flat-shaped.
 
 ## Naming Model
 
@@ -237,7 +242,7 @@ machines in two or more crates, that is the fork smell, regardless of how the
 copies are named. Every policy noun gets exactly one shared owner; other
 crates may hold handles, adapters, and executors for it, never a second
 implementation. V4 (XR's private session machine) and V3 (the TypeScript
-catalog rules) are the current violations of this rule.
+catalog rules) were the original violations that motivated this rule.
 
 ## Layer Topology
 
@@ -517,9 +522,9 @@ Desktop remains the first validation lane for each slice, per
 [`platforms.md`](platforms.md); that is validation order, not ownership order.
 Tactical
 [`143-client-experience-convergence-burn-down.md`](tactical/143-client-experience-convergence-burn-down.md)
-carries the executable version of these slices (plus an enforcement-baseline
-slice 0) with exit criteria and validation blocks; status lives there, not
-here.
+carried the executable version of these slices (plus an enforcement-baseline
+slice 0) with exit criteria and validation blocks; the completed status and
+validation log live there.
 
 1. **Facade plus full `GameUiAction` classification (closes V1, V2).**
    Introduce the display-neutral facade in `mclone-app-runtime` (working name

@@ -1,6 +1,6 @@
 # 143: Client Experience Convergence Burn-Down
 
-Status: open, Slice 7a landed 2026-07-05. Opened 2026-07-05. This tactical is the
+Status: closed, all slices and closeout audit landed 2026-07-05. Opened 2026-07-05. This tactical is the
 executable checklist for
 [`../client-experience-architecture.md`](../client-experience-architecture.md)
 (revised 2026-07-05). That document is law for this work; this tactical is the
@@ -8,8 +8,9 @@ work order and log. If they ever disagree, stop and reconcile the documents
 before writing more code.
 
 Workstream: native Rust shared architecture. Adopted stance: convergence and
-enforcement take priority over new user-facing feature work until this
-burn-down is closed or every remaining slice has an owner.
+enforcement take priority over new user-facing feature work. This burn-down is
+closed; future feature work still routes through the shared core from its
+first slice.
 
 ## Contract For Implementing Agents
 
@@ -1202,9 +1203,44 @@ Tripwires:
 - inert-arm grep remains 0 hits.
 - web catalog policy-string grep remains at the 3 existing smoke assertion hits.
 
+## Closeout Audit
+
+Result: no missed implementation work found for this tactical. The only audit
+finding was documentation drift in
+[`../client-experience-architecture.md`](../client-experience-architecture.md):
+the original V1/V3/V4 violation text still read as current in places. The
+architecture doc now marks the burn-down as closed and the original violation
+list as historical/resolved while keeping the enforcement rationale.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`: pass
+  (110 tests).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`: pass
+  (60 tests).
+- `pnpm native:policy:wasm-check`: pass; existing `mclone-server`
+  `with_unload_hysteresis_chunks` dead-code warning remains.
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`: pass.
+- `git diff --check`: pass.
+
+Tripwires:
+
+- dispatch-site grep remains 5 hits:
+  `mclone-android-client`, `mclone-xr-scene`, `mclone-web-client`,
+  `mclone-native-client/flat_client_driver`, and `mclone-native-client/app`.
+- inert-arm grep remains 0 hits.
+- web catalog policy-string grep remains at the 3 existing smoke assertion
+  hits.
+- old shared catalog module/type grep over active source and docs remains
+  0 hits.
+- XR deleted-warning grep for old catalog/no-op paths remains 0 hits.
+- old shared session module/type grep has no hits in shared/XR/web source;
+  desktop app-local `FlatClientSessionUpdate` remains intentionally scoped to
+  `FlatClientDriver`, as recorded in Slice 4a.
+
 ## Open Questions
 
-- Slice 6 resolved: flat Android keeps a transient create-only catalog adapter
-  for this convergence slice; persistent Android catalog storage is deferred to
-  a separate storage/platform slice.
-- Recorded deviations from slice order, if any, go here with reasons.
+- No unresolved questions remain for this tactical.
+- Follow-up outside this tactical: flat Android keeps a transient create-only
+  catalog adapter for this convergence slice; persistent Android catalog
+  storage is deferred to a separate storage/platform slice.
