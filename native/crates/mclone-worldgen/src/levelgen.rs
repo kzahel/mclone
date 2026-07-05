@@ -49,14 +49,15 @@ mod tests {
         COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST, CORNFLOWER, DANDELION,
         DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK,
         GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD,
-        MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PACKED_ICE,
-        PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
-        RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SAND, SEA_PICKLE_1,
-        SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
-        SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH,
-        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, VINE_EAST,
-        VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_air_like, is_water,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY,
+        LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY,
+        PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM,
+        RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
+        SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
+        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
+        SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK,
+        VINE_EAST, VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_air_like,
+        is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -100,9 +101,9 @@ mod tests {
         JungleBushShape {
             min_matches: usize,
         },
-        DefaultSpringLiquidTicks {
-            min_water_ticks: usize,
-            min_lava_ticks: usize,
+        DefaultSpringVisibleFluids {
+            min_water_blocks: usize,
+            min_lava_blocks: usize,
         },
     }
 
@@ -1039,9 +1040,9 @@ mod tests {
             chunk_x: 3,
             chunk_z: 1,
             biome_key: "minecraft:savanna",
-            expectation: LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
-                min_water_ticks: 2,
-                min_lava_ticks: 1,
+            expectation: LowVisibilityFeatureExpectation::DefaultSpringVisibleFluids {
+                min_water_blocks: 2,
+                min_lava_blocks: 1,
             },
         },
         LowVisibilityFeatureCase {
@@ -1049,9 +1050,9 @@ mod tests {
             chunk_x: -1,
             chunk_z: 1,
             biome_key: "minecraft:sunflower_plains",
-            expectation: LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
-                min_water_ticks: 1,
-                min_lava_ticks: 1,
+            expectation: LowVisibilityFeatureExpectation::DefaultSpringVisibleFluids {
+                min_water_blocks: 1,
+                min_lava_blocks: 1,
             },
         },
     ];
@@ -2220,22 +2221,23 @@ mod tests {
                         actual
                     );
                 }
-                LowVisibilityFeatureExpectation::DefaultSpringLiquidTicks {
-                    min_water_ticks,
-                    min_lava_ticks,
+                LowVisibilityFeatureExpectation::DefaultSpringVisibleFluids {
+                    min_water_blocks,
+                    min_lava_blocks,
                 } => {
-                    let water_ticks = liquid_tick_count(&chunk, "minecraft:water");
-                    let lava_ticks = liquid_tick_count(&chunk, "minecraft:lava");
+                    let water_blocks = exposed_spring_tick_block_count(&chunk, WATER);
+                    let lava_blocks = exposed_spring_tick_block_count(&chunk, LAVA);
                     assert!(
-                        water_ticks >= min_water_ticks && lava_ticks >= min_lava_ticks,
-                        "seed {} chunk ({}, {}) expected spring liquid ticks water>={} lava>={}, found water={} lava={}",
+                        water_blocks >= min_water_blocks && lava_blocks >= min_lava_blocks,
+                        "seed {} chunk ({}, {}) expected exposed spring fluid blocks water>={} lava>={}, found water={} lava={}; liquid ticks: {:?}",
                         case.seed,
                         case.chunk_x,
                         case.chunk_z,
-                        min_water_ticks,
-                        min_lava_ticks,
-                        water_ticks,
-                        lava_ticks
+                        min_water_blocks,
+                        min_lava_blocks,
+                        water_blocks,
+                        lava_blocks,
+                        chunk.liquid_ticks()
                     );
                 }
             }
@@ -3163,12 +3165,60 @@ mod tests {
         count
     }
 
-    fn liquid_tick_count(chunk: &GeneratedChunk, target: &str) -> usize {
+    fn exposed_spring_tick_block_count(chunk: &GeneratedChunk, fluid: RawBlockId) -> usize {
+        let target = match fluid {
+            WATER => "minecraft:water",
+            LAVA => "minecraft:lava",
+            other => panic!(
+                "unexpected spring fluid block {}",
+                crate::block::block_name(other)
+            ),
+        };
         chunk
             .liquid_ticks()
             .iter()
-            .filter(|tick| tick.target == target)
+            .filter(|tick| {
+                tick.target == target
+                    && block_at_tick_position(chunk, tick) == Some(fluid)
+                    && has_air_like_neighbor_at_tick_position(chunk, tick)
+            })
             .count()
+    }
+
+    fn block_at_tick_position(
+        chunk: &GeneratedChunk,
+        tick: &crate::levelgen::ScheduledTick,
+    ) -> Option<RawBlockId> {
+        block_at_world_position(chunk, tick.x, tick.y, tick.z)
+    }
+
+    fn block_at_world_position(
+        chunk: &GeneratedChunk,
+        world_x: i32,
+        y: i32,
+        world_z: i32,
+    ) -> Option<RawBlockId> {
+        let local_x = world_x - chunk_min_block_coord(chunk.chunk_x);
+        let local_z = world_z - chunk_min_block_coord(chunk.chunk_z);
+        if !(0..GeneratedChunk::WIDTH).contains(&local_x)
+            || !(chunk.min_y..chunk.min_y + chunk.height).contains(&y)
+            || !(0..GeneratedChunk::WIDTH).contains(&local_z)
+        {
+            return None;
+        }
+        Some(chunk.block_at_y(local_x, y, local_z).raw())
+    }
+
+    fn has_air_like_neighbor_at_tick_position(
+        chunk: &GeneratedChunk,
+        tick: &crate::levelgen::ScheduledTick,
+    ) -> bool {
+        const SPRING_VISIBLE_DIRECTIONS: [(i32, i32, i32); 5] =
+            [(-1, 0, 0), (1, 0, 0), (0, 0, -1), (0, 0, 1), (0, -1, 0)];
+        SPRING_VISIBLE_DIRECTIONS.iter().any(|(dx, dy, dz)| {
+            block_at_world_position(chunk, tick.x + dx, tick.y + dy, tick.z + dz)
+                .is_some_and(is_air_like)
+        })
     }
 
     fn jungle_bush_shape_count(chunk: &GeneratedChunk) -> usize {
