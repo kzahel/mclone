@@ -1,7 +1,8 @@
 use std::{
     cell::RefCell,
     collections::BTreeMap,
-    env,
+    env, fs,
+    path::{Path, PathBuf},
     process::Command,
     rc::Rc,
     thread,
@@ -10,10 +11,14 @@ use std::{
 
 use mclone_core::ChunkPos;
 use mclone_protocol::ChunkView;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_server::SqliteWorldStore;
 use mclone_server::{
     ChunkRecord, ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, ChunkStoreResult,
     EntityChunkRecord, WorldStore,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rusqlite::Connection;
 
 const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_CHUNK_X: i32 = 0;
@@ -45,6 +50,8 @@ fn run() -> Result<(), String> {
 
     let mut prewarm = None;
     let mut stored_chunk_records = None;
+    let mut sqlite_world_dir = None;
+    let mut sqlite_storage_bytes = None;
     let measured = match config.mode {
         BenchMode::Fresh => {
             let mut scheduler = ChunkScheduler::new(config.seed);
@@ -69,6 +76,51 @@ fn run() -> Result<(), String> {
             validate_persisted_reload(&reload_report)?;
             reload_report
         }
+        BenchMode::PersistedSqliteReload => {
+            #[cfg(target_arch = "wasm32")]
+            {
+                return Err("--persisted-sqlite-reload is unavailable on wasm32".to_owned());
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let world_dir = unique_sqlite_world_dir(&config);
+                let _ = fs::remove_dir_all(&world_dir);
+
+                let prewarm_store =
+                    SqliteWorldStore::open_world_dir(&world_dir).map_err(|error| {
+                        format!(
+                            "failed to open prewarm sqlite world at {}: {error}",
+                            world_dir.display()
+                        )
+                    })?;
+                let mut prewarm_scheduler =
+                    ChunkScheduler::with_world_store(config.seed, Box::new(prewarm_store));
+                prewarm_scheduler.set_lighting_enabled(config.lighting_enabled);
+                let prewarm_report =
+                    run_scheduler_load(&config, &view, target_chunks, prewarm_scheduler)?;
+                stored_chunk_records = sqlite_chunk_record_count(&world_dir)
+                    .or(Some(prewarm_report.final_metrics.loaded_snapshot_chunks));
+                prewarm = Some(prewarm_report);
+
+                let reload_store =
+                    SqliteWorldStore::open_world_dir(&world_dir).map_err(|error| {
+                        format!(
+                            "failed to open reload sqlite world at {}: {error}",
+                            world_dir.display()
+                        )
+                    })?;
+                let mut reload_scheduler =
+                    ChunkScheduler::with_world_store(config.seed, Box::new(reload_store));
+                reload_scheduler.set_lighting_enabled(config.lighting_enabled);
+                let reload_report =
+                    run_scheduler_load(&config, &view, target_chunks, reload_scheduler)?;
+                validate_persisted_reload(&reload_report)?;
+                sqlite_storage_bytes = sqlite_storage_byte_count(&world_dir);
+                sqlite_world_dir = Some(world_dir);
+                reload_report
+            }
+        }
     };
 
     let report = Report {
@@ -78,6 +130,8 @@ fn run() -> Result<(), String> {
         chunk_tracking_radius,
         target_chunks,
         stored_chunk_records,
+        sqlite_world_dir,
+        sqlite_storage_bytes,
         prewarm,
         measured,
     };
@@ -132,6 +186,9 @@ impl Config {
                 "--persisted-memory-reload" => {
                     config.mode = BenchMode::PersistedMemoryReload;
                 }
+                "--persisted-sqlite-reload" => {
+                    config.mode = BenchMode::PersistedSqliteReload;
+                }
                 "--max-seconds" => config.max_seconds = parse_next(&mut args, "--max-seconds")?,
                 "--help" | "-h" => return Err(usage()),
                 _ => return Err(format!("unknown argument {arg}\n{}", usage())),
@@ -156,6 +213,7 @@ impl Config {
 enum BenchMode {
     Fresh,
     PersistedMemoryReload,
+    PersistedSqliteReload,
 }
 
 impl BenchMode {
@@ -163,6 +221,7 @@ impl BenchMode {
         match self {
             Self::Fresh => "fresh",
             Self::PersistedMemoryReload => "persisted_memory_reload",
+            Self::PersistedSqliteReload => "persisted_sqlite_reload",
         }
     }
 }
@@ -339,6 +398,8 @@ struct Report {
     chunk_tracking_radius: u32,
     target_chunks: usize,
     stored_chunk_records: Option<usize>,
+    sqlite_world_dir: Option<PathBuf>,
+    sqlite_storage_bytes: Option<u64>,
     prewarm: Option<LoadRunReport>,
     measured: LoadRunReport,
 }
@@ -364,6 +425,17 @@ impl Report {
         match self.stored_chunk_records {
             Some(count) => println!("  \"stored_chunk_records\": {count},"),
             None => println!("  \"stored_chunk_records\": null,"),
+        }
+        match &self.sqlite_world_dir {
+            Some(path) => println!(
+                "  \"sqlite_world_dir\": \"{}\",",
+                json_escape(&path.display().to_string())
+            ),
+            None => println!("  \"sqlite_world_dir\": null,"),
+        }
+        match self.sqlite_storage_bytes {
+            Some(bytes) => println!("  \"sqlite_storage_bytes\": {bytes},"),
+            None => println!("  \"sqlite_storage_bytes\": null,"),
         }
         if let Some(prewarm) = self.prewarm {
             print_load_run_json("  ", "prewarm", prewarm, true, self.target_chunks);
@@ -683,8 +755,57 @@ fn parse_bool_next(args: &mut impl Iterator<Item = String>, flag: &str) -> Resul
 }
 
 fn usage() -> String {
-    "usage: scheduler_loading_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--poll-mode completion|sleep|spin] [--persisted-memory-reload] [--max-seconds N]"
+    "usage: scheduler_loading_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--poll-mode completion|sleep|spin] [--persisted-memory-reload|--persisted-sqlite-reload] [--max-seconds N]"
         .to_owned()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn unique_sqlite_world_dir(config: &Config) -> PathBuf {
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    env::temp_dir().join(format!(
+        "mclone-scheduler-loading-sqlite-rd{}-{}-{timestamp_ms}",
+        config.render_distance,
+        std::process::id()
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sqlite_chunk_record_count(world_dir: &Path) -> Option<usize> {
+    let database_path = SqliteWorldStore::database_path_for_world_dir(world_dir);
+    let connection = Connection::open(database_path).ok()?;
+    let count = connection
+        .query_row("SELECT COUNT(*) FROM chunk_records", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .ok()?;
+    usize::try_from(count).ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sqlite_storage_byte_count(world_dir: &Path) -> Option<u64> {
+    let database_path = SqliteWorldStore::database_path_for_world_dir(world_dir);
+    let mut total = 0_u64;
+    let mut found = false;
+    for path in [
+        database_path.clone(),
+        sqlite_auxiliary_path(&database_path, "-wal"),
+        sqlite_auxiliary_path(&database_path, "-shm"),
+    ] {
+        if let Ok(metadata) = fs::metadata(path) {
+            total = total.saturating_add(metadata.len());
+            found = true;
+        }
+    }
+    found.then_some(total)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sqlite_auxiliary_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_owned();
+    value.push(suffix);
+    PathBuf::from(value)
 }
 
 fn elapsed_ms(duration: Duration) -> f64 {

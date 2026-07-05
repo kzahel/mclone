@@ -198,8 +198,11 @@ reloads the same view from that store and asserts worldgen/light work stays at
 zero. RD10 reload from `625` in-memory records reached view-ready in `0.523s`
 (`1012.1` chunks/sec) with `0` worldgen jobs and `0` light statuses. That
 isolates scheduler load/publication over already-lit chunks without disk IO.
-Next, add a temp SQLite persisted reload lane using the normal world-dir path
-so encode/decode/storage overhead is measured. Then split render work into mesh
+The temp SQLite persisted reload mode is now implemented too: RD10 reload from
+the normal world-dir path reached view-ready in `0.572s` and settled in
+`0.721s` from `625` records, with `0` worldgen jobs and `0` light statuses.
+That prices real record decode/load/storage as a modest increment over memory
+reload, not the many-second fresh-path wall. Next, split render work into mesh
 CPU-only (loaded snapshots -> section meshes, no GPU) and GPU upload-only
 (prebuilt meshes -> `wgpu` upload). Once those desktop lanes are understood,
 add a Quest persisted-world guardrail so headset frame pacing can be measured
@@ -497,8 +500,9 @@ instrumentation to watch it:
 - [x] Add scheduler-only in-memory persisted reload mode: RD10 reload from
   `625` already-generated/lit in-memory records reaches view-ready in `0.523s`
   (`1012.1` chunks/sec) with `0` worldgen jobs and `0` light statuses.
-- [ ] Add scheduler-only temp SQLite persisted reload mode to price the real
-  persistence encode/decode/storage path separately from generation/light.
+- [x] Add scheduler-only temp SQLite persisted reload mode: RD10 reload through
+  a temp world-dir SQLite store reaches view-ready in `0.572s` and settled in
+  `0.721s` from `625` records, with `0` worldgen jobs and `0` light statuses.
 - [ ] Add mesh CPU-only and GPU upload-only lanes so render quiescence can be
   split without server generation or light in the sample.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
@@ -559,10 +563,11 @@ inference:
   `4` plus workers `2` cuts RD10 quiescence from `20.089s` to `11.412s`, while
   workers `4` is flat.
 - How much of already-generated startup is persistence/load/publication versus
-  mesh/upload/render? Current answer: unmeasured. Add in-memory persisted and
-  temp SQLite scheduler-only reload lanes first, then mesh CPU-only and GPU
-  upload-only lanes. The in-memory server-only half now measures RD10 reload at
-  `0.523s` view-ready from `625` records; temp SQLite remains open.
+  mesh/upload/render? Current answer: server-only reload is now bounded. RD10
+  in-memory reload reaches view-ready in `0.523s`; temp SQLite reaches
+  view-ready in `0.572s` and settles in `0.721s`, both from `625` already-lit
+  records with no worldgen/light. Next add mesh CPU-only and GPU upload-only
+  lanes to price the client render side of already-generated startup.
 
 ## Non-Goals
 

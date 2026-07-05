@@ -30,6 +30,7 @@ Release-oriented lanes:
 pnpm native:worldgen:perf
 pnpm native:scheduler-loading:perf
 pnpm native:scheduler-loading:persisted-memory:perf
+pnpm native:scheduler-loading:persisted-sqlite:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
 pnpm native:startup-streaming:perf
@@ -66,7 +67,7 @@ pnpm native:runtime:perf
 ### What Each Lane Measures
 
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
-- `native:scheduler-loading:*`: server-only loading ceiling probe. Applies one local chunk view to `ChunkScheduler`, hot-polls until the target view is client-visible and server queues drain, and reports target chunks/sec plus worldgen/light/publication counters. It includes current scheduler job admission, publication, light status work, and persistence queues, but no client update pump, mesh preparation, GPU upload, or frame pacing. `native:scheduler-loading:persisted-memory:perf` runs a prewarm pass into shared in-memory `ChunkRecord`s, then measures reload from already-generated/lit records with no disk; planned follow-up is temp SQLite persisted reload for the real encode/decode/storage path.
+- `native:scheduler-loading:*`: server-only loading ceiling probe. Applies one local chunk view to `ChunkScheduler`, hot-polls until the target view is client-visible and server queues drain, and reports target chunks/sec plus worldgen/light/publication counters. It includes current scheduler job admission, publication, light status work, and persistence queues, but no client update pump, mesh preparation, GPU upload, or frame pacing. `native:scheduler-loading:persisted-memory:perf` runs a prewarm pass into shared in-memory `ChunkRecord`s, then measures reload from already-generated/lit records with no disk. `native:scheduler-loading:persisted-sqlite:perf` repeats that shape through a temp SQLite world directory to price the normal record decode/load/storage path separately from generation/light.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
@@ -93,6 +94,56 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-05 - Temp SQLite Persisted Server Reload Split
+
+Commit reported by benchmark JSON: `b3950af8`.
+
+`git_dirty=true`: this record was captured while adding
+`--persisted-sqlite-reload`, package scripts, and docs. Treat as a first
+directional baseline for the new temp-SQLite lane, not a clean release gate.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Command shape:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- \
+  --render-distance N --persisted-sqlite-reload --max-seconds 120 \
+  > /tmp/mclone-scheduler-loading-rdN-persisted-sqlite-20260705.json
+```
+
+Raw local artifacts:
+`/tmp/mclone-scheduler-loading-rd5-persisted-sqlite-20260705.json` and
+`/tmp/mclone-scheduler-loading-rd10-persisted-sqlite-20260705.json`.
+
+The benchmark performs a fresh prewarm pass through the normal SQLite
+`open_world_dir` path in a temp world directory, then creates a fresh scheduler
+over that same directory and measures reload. Reload validation fails if any
+worldgen job, light status, or light compute runs. `sqlite_storage_bytes`
+includes the main database plus WAL/SHM sidecar files when present.
+
+| Lane | Target chunks | Stored chunk records | SQLite storage | Prewarm ready / settled | Reload ready / settled | Reload chunks/sec | Reload worldgen/light |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD5 SQLite reload | `169` | `225` | `13.1 MB` | `3.599s` / `4.594s` | `0.076s` / `0.093s` | `2238.3` ready / `1810.3` settled | `0` jobs, `0` light statuses |
+| RD10 SQLite reload | `529` | `625` | `35.5 MB` | `12.912s` / `14.934s` | `0.572s` / `0.721s` | `925.0` ready / `733.7` settled | `0` jobs, `0` light statuses |
+
+RD10 reload detail: `625` loaded snapshots, `35` polls, `5113` scheduler
+events, max poll call `30.172ms`.
+
+Interpretation:
+
+- Temp SQLite persisted reload is close to the in-memory reload lane at RD5 and
+  modestly slower at RD10 (`0.572s` view-ready vs `0.523s` memory; `0.721s`
+  settled vs `0.607s` memory). The real store path adds decode/load/poll cost,
+  but not a multi-second wall.
+- Persisted server reload remains far faster than fresh generation plus light.
+  The many-second fresh path is still explained by generation/light/admission,
+  not by loading already-generated records.
+- The next split should leave the server-only lane and measure already-loaded
+  snapshots through mesh CPU build and GPU upload separately. That answers how
+  much of desktop render-quiescent tail is client render work once generation
+  and light are removed.
 
 ### 2026-07-05 - In-Memory Persisted Server Reload Split
 
