@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
+use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceCapabilityProjection,
     ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
@@ -23,7 +24,6 @@ use mclone_app_runtime::far_lod::{
     FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
     MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
-use mclone_app_runtime::flat_client_catalog::{FlatClientCatalogEffects, FlatClientCatalogRequest};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view_with_prepared_stereo_draw_in_slot,
@@ -5520,7 +5520,7 @@ where
 
     fn apply_xr_catalog_effects(
         &mut self,
-        effects: FlatClientCatalogEffects,
+        effects: ClientCatalogEffects,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
@@ -5553,7 +5553,7 @@ where
 
     fn execute_xr_catalog_request(
         &mut self,
-        request: FlatClientCatalogRequest,
+        request: ClientCatalogRequest,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
@@ -8531,7 +8531,7 @@ mod tests {
             );
         }
 
-        fn apply_catalog_effects(&mut self, effects: FlatClientCatalogEffects) {
+        fn apply_catalog_effects(&mut self, effects: ClientCatalogEffects) {
             for start in effects.session_starts {
                 self.started_sessions.push(start.request);
             }

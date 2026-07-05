@@ -11,22 +11,22 @@ use mclone_ui::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FlatClientCatalogController {
+pub struct ClientCatalogController {
     capabilities: WorldCatalogCapabilities,
-    entries: Vec<FlatClientCatalogEntry>,
+    entries: Vec<ClientCatalogEntry>,
     ui: WorldCatalogUiState,
     active_world: Option<LocalWorldId>,
     pending: HashMap<WorldCatalogRequestId, PendingCatalogRequest>,
     next_request_id: u64,
 }
 
-impl Default for FlatClientCatalogController {
+impl Default for ClientCatalogController {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl FlatClientCatalogController {
+impl ClientCatalogController {
     pub fn new() -> Self {
         Self {
             capabilities: WorldCatalogCapabilities::default(),
@@ -85,10 +85,10 @@ impl FlatClientCatalogController {
         self.ui.status = WorldCatalogUiStatus::hidden();
     }
 
-    pub fn request_world_list(&mut self) -> FlatClientCatalogEffects {
+    pub fn request_world_list(&mut self) -> ClientCatalogEffects {
         if !self.capabilities.list_supported {
             self.set_unsupported_status();
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         }
         self.queue_catalog_request(WorldCatalogRequest::ListWorlds, PendingCatalogRequest::List)
     }
@@ -96,15 +96,15 @@ impl FlatClientCatalogController {
     pub fn apply_ui_action(
         &mut self,
         action: GameUiAction,
-        context: FlatClientCatalogActionContext,
-    ) -> FlatClientCatalogEffects {
+        context: ClientCatalogActionContext,
+    ) -> ClientCatalogEffects {
         match action {
             GameUiAction::OpenWorldList | GameUiAction::OpenWorldCreate => {
                 self.clear_status();
                 if self.capabilities.list_supported {
                     self.request_world_list()
                 } else {
-                    FlatClientCatalogEffects::default()
+                    ClientCatalogEffects::default()
                 }
             }
             GameUiAction::SelectWorld(id) => {
@@ -112,18 +112,18 @@ impl FlatClientCatalogController {
                     self.ui.selected = Some(id);
                 }
                 self.clear_status();
-                FlatClientCatalogEffects::default()
+                ClientCatalogEffects::default()
             }
             GameUiAction::ConfirmDeleteWorld(_) | GameUiAction::CancelDeleteWorld => {
                 self.clear_status();
-                FlatClientCatalogEffects::default()
+                ClientCatalogEffects::default()
             }
             GameUiAction::OpenWorld(id) => self.request_catalog_world_open(id),
             GameUiAction::CreateCatalogWorld => {
                 self.request_catalog_world_create(context.new_world_seed)
             }
             GameUiAction::DeleteWorld(id) => self.request_catalog_world_delete(id),
-            _ => FlatClientCatalogEffects::default(),
+            _ => ClientCatalogEffects::default(),
         }
     }
 
@@ -131,10 +131,10 @@ impl FlatClientCatalogController {
         &mut self,
         request_id: WorldCatalogRequestId,
         response: WorldCatalogResponse,
-    ) -> FlatClientCatalogEffects {
+    ) -> ClientCatalogEffects {
         let Some(pending) = self.pending.remove(&request_id) else {
             self.update_loading_flag();
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         };
 
         self.update_loading_flag();
@@ -147,13 +147,13 @@ impl FlatClientCatalogController {
                 },
             ) => {
                 self.set_worlds(capabilities, worlds, WorldCatalogUiStatus::hidden());
-                FlatClientCatalogEffects::default()
+                ClientCatalogEffects::default()
             }
             (
                 PendingCatalogRequest::Create { options },
                 WorldCatalogResponse::WorldCreated { summary },
             ) => {
-                let start = FlatClientCatalogSessionStart {
+                let start = ClientCatalogSessionStart {
                     request: SessionStartRequest::create_local_world(
                         options.with_requested_id(summary.id.clone()),
                     ),
@@ -162,17 +162,17 @@ impl FlatClientCatalogController {
                 };
                 self.upsert_world(summary.clone());
                 self.select_local_world(&summary.id);
-                FlatClientCatalogEffects::with_session_start(start)
+                ClientCatalogEffects::with_session_start(start)
             }
             (PendingCatalogRequest::Open { .. }, WorldCatalogResponse::WorldOpened { summary }) => {
-                let start = FlatClientCatalogSessionStart {
+                let start = ClientCatalogSessionStart {
                     request: SessionStartRequest::open_local_world(summary.id.clone()),
                     descriptor: ActiveSessionDescriptor::from_local_world_summary(&summary),
                     summary: summary.clone(),
                 };
                 self.upsert_world(summary.clone());
                 self.select_local_world(&summary.id);
-                FlatClientCatalogEffects::with_session_start(start)
+                ClientCatalogEffects::with_session_start(start)
             }
             (
                 PendingCatalogRequest::Delete { id, display_name },
@@ -181,12 +181,12 @@ impl FlatClientCatalogController {
                 self.remove_world(&deleted_id);
                 self.ui.status =
                     WorldCatalogUiStatus::new(&format!("Deleted {display_name}"), true);
-                FlatClientCatalogEffects::default()
+                ClientCatalogEffects::default()
             }
             _ => {
                 self.ui.status =
                     WorldCatalogUiStatus::new("Unexpected world catalog response", false);
-                FlatClientCatalogEffects::default()
+                ClientCatalogEffects::default()
             }
         }
     }
@@ -195,17 +195,17 @@ impl FlatClientCatalogController {
         &mut self,
         request_id: WorldCatalogRequestId,
         error: WorldCatalogError,
-    ) -> FlatClientCatalogEffects {
+    ) -> ClientCatalogEffects {
         let _ = self.pending.remove(&request_id);
         self.update_loading_flag();
         self.set_world_catalog_error(&error);
-        FlatClientCatalogEffects::default()
+        ClientCatalogEffects::default()
     }
 
-    fn request_catalog_world_create(&mut self, seed: i64) -> FlatClientCatalogEffects {
+    fn request_catalog_world_create(&mut self, seed: i64) -> ClientCatalogEffects {
         if !self.capabilities.create_supported {
             self.set_unsupported_status();
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         }
 
         let display_name = if self.ui.create_display_name.is_empty() {
@@ -217,7 +217,7 @@ impl FlatClientCatalogController {
             Ok(options) => options,
             Err(error) => {
                 self.set_world_catalog_error(&error);
-                return FlatClientCatalogEffects::default();
+                return ClientCatalogEffects::default();
             }
         };
 
@@ -229,21 +229,18 @@ impl FlatClientCatalogController {
         )
     }
 
-    fn request_catalog_world_open(
-        &mut self,
-        ui_id: WorldCatalogUiWorldId,
-    ) -> FlatClientCatalogEffects {
+    fn request_catalog_world_open(&mut self, ui_id: WorldCatalogUiWorldId) -> ClientCatalogEffects {
         if !self.capabilities.open_supported {
             self.set_unsupported_status();
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         }
         if !self.ui.can_open_world(ui_id) {
             self.ui.status = WorldCatalogUiStatus::new("Selected world is unavailable", false);
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         }
         let Some(id) = self.local_world_id_for_ui_id(ui_id).cloned() else {
             self.ui.status = WorldCatalogUiStatus::new("Selected world is unavailable", false);
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         };
 
         self.queue_catalog_request(
@@ -255,17 +252,17 @@ impl FlatClientCatalogController {
     fn request_catalog_world_delete(
         &mut self,
         ui_id: WorldCatalogUiWorldId,
-    ) -> FlatClientCatalogEffects {
+    ) -> ClientCatalogEffects {
         let Some(entry) = self.catalog_entry_for_ui_id(ui_id).cloned() else {
             self.ui.status = WorldCatalogUiStatus::new("Selected world is unavailable", false);
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         };
         if let Err(error) = entry
             .summary
             .can_delete(self.active_world.as_ref(), self.capabilities)
         {
             self.set_world_catalog_error(&error);
-            return FlatClientCatalogEffects::default();
+            return ClientCatalogEffects::default();
         }
 
         self.queue_catalog_request(
@@ -283,11 +280,11 @@ impl FlatClientCatalogController {
         &mut self,
         request: WorldCatalogRequest,
         pending: PendingCatalogRequest,
-    ) -> FlatClientCatalogEffects {
+    ) -> ClientCatalogEffects {
         let request_id = self.next_request_id();
         self.pending.insert(request_id, pending);
         self.update_loading_flag();
-        FlatClientCatalogEffects::with_catalog_request(FlatClientCatalogRequest {
+        ClientCatalogEffects::with_catalog_request(ClientCatalogRequest {
             id: request_id,
             request,
         })
@@ -314,7 +311,7 @@ impl FlatClientCatalogController {
         for summary in worlds.into_iter().take(WORLD_CATALOG_UI_ROW_CAPACITY) {
             let ui_id = allocate_world_catalog_ui_id(&summary.id, &mut used_ui_ids);
             ui_entries.push(world_catalog_ui_entry(ui_id, &summary));
-            cached_entries.push(FlatClientCatalogEntry { ui_id, summary });
+            cached_entries.push(ClientCatalogEntry { ui_id, summary });
         }
 
         let mut state = world_catalog_ui_state_for_capabilities(self.capabilities);
@@ -380,10 +377,7 @@ impl FlatClientCatalogController {
             .collect()
     }
 
-    fn catalog_entry_for_ui_id(
-        &self,
-        ui_id: WorldCatalogUiWorldId,
-    ) -> Option<&FlatClientCatalogEntry> {
+    fn catalog_entry_for_ui_id(&self, ui_id: WorldCatalogUiWorldId) -> Option<&ClientCatalogEntry> {
         self.entries.iter().find(|entry| entry.ui_id == ui_id)
     }
 
@@ -426,25 +420,25 @@ impl FlatClientCatalogController {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FlatClientCatalogActionContext {
+pub struct ClientCatalogActionContext {
     pub new_world_seed: i64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FlatClientCatalogEffects {
-    pub catalog_requests: Vec<FlatClientCatalogRequest>,
-    pub session_starts: Vec<FlatClientCatalogSessionStart>,
+pub struct ClientCatalogEffects {
+    pub catalog_requests: Vec<ClientCatalogRequest>,
+    pub session_starts: Vec<ClientCatalogSessionStart>,
 }
 
-impl FlatClientCatalogEffects {
-    fn with_catalog_request(request: FlatClientCatalogRequest) -> Self {
+impl ClientCatalogEffects {
+    fn with_catalog_request(request: ClientCatalogRequest) -> Self {
         Self {
             catalog_requests: vec![request],
             session_starts: Vec::new(),
         }
     }
 
-    fn with_session_start(start: FlatClientCatalogSessionStart) -> Self {
+    fn with_session_start(start: ClientCatalogSessionStart) -> Self {
         Self {
             catalog_requests: Vec::new(),
             session_starts: vec![start],
@@ -453,20 +447,20 @@ impl FlatClientCatalogEffects {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FlatClientCatalogRequest {
+pub struct ClientCatalogRequest {
     pub id: WorldCatalogRequestId,
     pub request: WorldCatalogRequest,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FlatClientCatalogSessionStart {
+pub struct ClientCatalogSessionStart {
     pub request: SessionStartRequest,
     pub descriptor: ActiveSessionDescriptor,
     pub summary: LocalWorldSummary,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct FlatClientCatalogEntry {
+struct ClientCatalogEntry {
     ui_id: WorldCatalogUiWorldId,
     summary: LocalWorldSummary,
 }
@@ -545,8 +539,8 @@ mod tests {
     use super::*;
     use crate::world_catalog::WorldCatalogErrorKind;
 
-    fn context(seed: i64) -> FlatClientCatalogActionContext {
-        FlatClientCatalogActionContext {
+    fn context(seed: i64) -> ClientCatalogActionContext {
+        ClientCatalogActionContext {
             new_world_seed: seed,
         }
     }
@@ -555,8 +549,8 @@ mod tests {
         LocalWorldSummary::new(LocalWorldId::new(id).unwrap(), display_name, seed, 100).unwrap()
     }
 
-    fn persistent_controller(worlds: Vec<LocalWorldSummary>) -> FlatClientCatalogController {
-        let mut controller = FlatClientCatalogController::new();
+    fn persistent_controller(worlds: Vec<LocalWorldSummary>) -> ClientCatalogController {
+        let mut controller = ClientCatalogController::new();
         controller.set_worlds(
             WorldCatalogCapabilities::persistent_local(),
             worlds,
@@ -565,13 +559,13 @@ mod tests {
         controller
     }
 
-    fn only_request(effects: FlatClientCatalogEffects) -> FlatClientCatalogRequest {
+    fn only_request(effects: ClientCatalogEffects) -> ClientCatalogRequest {
         assert!(effects.session_starts.is_empty());
         assert_eq!(effects.catalog_requests.len(), 1);
         effects.catalog_requests.into_iter().next().unwrap()
     }
 
-    fn only_start(effects: FlatClientCatalogEffects) -> FlatClientCatalogSessionStart {
+    fn only_start(effects: ClientCatalogEffects) -> ClientCatalogSessionStart {
         assert!(effects.catalog_requests.is_empty());
         assert_eq!(effects.session_starts.len(), 1);
         effects.session_starts.into_iter().next().unwrap()
@@ -581,7 +575,7 @@ mod tests {
     fn world_list_response_builds_ui_state_and_stable_ids() {
         let alpha = summary("alpha-base", "Alpha Base", 11);
         let beta = summary("beta-mine", "Beta Mine", 22);
-        let mut controller = FlatClientCatalogController::new();
+        let mut controller = ClientCatalogController::new();
         controller.set_capabilities(WorldCatalogCapabilities::persistent_local());
 
         let request = only_request(controller.request_world_list());
@@ -785,7 +779,7 @@ mod tests {
 
     #[test]
     fn unsupported_catalog_action_surfaces_status_without_request() {
-        let mut controller = FlatClientCatalogController::new();
+        let mut controller = ClientCatalogController::new();
 
         let effects = controller.apply_ui_action(GameUiAction::CreateCatalogWorld, context(1234));
 
@@ -802,7 +796,7 @@ mod tests {
 
     #[test]
     fn transient_create_only_allows_create_and_rejects_persistent_actions() {
-        let mut controller = FlatClientCatalogController::new();
+        let mut controller = ClientCatalogController::new();
         controller.set_capabilities(WorldCatalogCapabilities::transient_create_only());
 
         let request = only_request(

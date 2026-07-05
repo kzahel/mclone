@@ -198,8 +198,8 @@ At the audit point, `mclone-xr-scene` (8,217-line `lib.rs`) shared the session
 *vocabulary*
 (`SessionStartRequest`, `ActiveSessionDescriptor`, `StatusOverlay`,
 `GameUiAction`, `host_mode`) but none of the shared state machines. It did not
-reference `GameSessionCoordinator`, `FlatClientCatalogController`, or the client
-session policy effect helpers at all. Instead it owned:
+reference `GameSessionCoordinator`, the shared catalog policy controller, or
+the client session policy effect helpers at all. Instead it owned:
 
 - a private session-replacement machine (`replace_session_for_request`,
   `lib.rs:3238`);
@@ -524,7 +524,7 @@ here.
 1. **Facade plus full `GameUiAction` classification (closes V1, V2).**
    Introduce the display-neutral facade in `mclone-app-runtime` (working name
    `ClientExperienceController`), composing the existing
-   `flat_client_catalog` and `client_session_policy` helpers. As part of the
+   `client_catalog_policy` and `client_session_policy` helpers. As part of the
    same slice, audit every `GameUiAction` variant and classify it: core
    action, host-effect action, capability-gated (present but unsupported on
    some profiles), or projection-specific. Move the duplicated
@@ -569,9 +569,8 @@ gates from [Enforcement](#enforcement) that cover the policy it moved.
 If behavior must be shared by XR, Android, web, offscreen, and flat desktop,
 its durable owner should not be named `Flat*`. A flat facade may exist, but the
 policy core should be display-neutral. `client_session_policy` is the neutral
-shared session action/status owner; the existing `flat_client_catalog` module
-is the remaining flat-named building block that gets a display-neutral name as
-the facade absorbs catalog CRUD for XR.
+shared session action/status owner; `client_catalog_policy` is the neutral
+shared catalog action/status owner.
 
 ### One Noun, One Owner
 
@@ -786,7 +785,7 @@ Decided in this revision (2026-07-05):
   feature work, per the status note.
 - **Facade entry point**: `ClientExperienceController::apply_ui_action`
   routes one `GameUiAction` into per-family effects. The facade composes the
-  existing `flat_client_catalog` controller, the existing
+  existing `client_catalog_policy` controller, the existing
   `client_session_policy` helper functions, and the new settings controller
   without moving adapter execution into shared code.
 

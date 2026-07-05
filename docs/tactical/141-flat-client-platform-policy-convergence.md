@@ -370,10 +370,9 @@ that currently sits in desktop `FlatClientDriver`.
 
 Recorded Slice 1 result:
 
-- Added `mclone_app_runtime::flat_client_catalog` with
-  `FlatClientCatalogController`, `FlatClientCatalogActionContext`,
-  `FlatClientCatalogEffects`, catalog request effects, and session-start
-  effects.
+- Added `mclone_app_runtime::client_catalog_policy` with
+  `ClientCatalogController`, `ClientCatalogActionContext`,
+  `ClientCatalogEffects`, catalog request effects, and session-start effects.
 - Centralized `LocalWorldSummary -> WorldCatalogUiState` conversion, stable
   `WorldCatalogUiWorldId` allocation, active-world row mapping, create-display
   draft state, persistent/read-only/transient capabilities, loading state, and
@@ -395,7 +394,7 @@ Validation after Slice 1:
 
 ```bash
 cargo fmt --manifest-path native/Cargo.toml --all --check
-cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_catalog_policy
 cargo test --manifest-path native/Cargo.toml -p mclone-ui
 git diff --check
 ```
@@ -417,7 +416,7 @@ shared catalog controller:
 Recorded Slice 2 result:
 
 - Replaced desktop-local catalog row cache and `WorldCatalogUiState` ownership
-  with `FlatClientCatalogController`.
+  with `ClientCatalogController`.
 - Removed duplicate desktop summary-to-UI conversion, stable row-id allocation,
   active-row mapping, unsupported/persistent status messages, create/open/delete
   validation, and delete-active status policy.
@@ -436,7 +435,7 @@ Validation after Slice 2:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_
-cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_catalog_policy
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 cargo fmt --manifest-path native/Cargo.toml --all --check
@@ -461,7 +460,7 @@ of desktop policy:
 
 Recorded Slice 3 result:
 
-- Added `FlatClientCatalogController` ownership to
+- Added `ClientCatalogController` ownership to
   `WebChunkRenderSession` and returned its active-world-aware
   `WorldCatalogUiState` from web `ui_render_state`.
 - Replaced inert web catalog action arms with shared controller calls for
@@ -476,8 +475,8 @@ Recorded Slice 3 result:
   `openWorldDb`, IndexedDB CRUD promises, active-world delete adapter argument,
   worker URLs, and app-smoke/runtime restart plumbing.
 - Updated the platform parity tracker to mark web world-select/persistence as
-  partial and to add the shared flat catalog controller as an explicit contract
-  adoption row.
+  partial and to add the shared catalog policy controller as an explicit
+  contract adoption row.
 - Added a focused browser catalog UI smoke, `pnpm native:web:catalog-smoke`,
   that drives the shared Rust menu through Create/Open/Delete, verifies active
   `sessionWorldId` transitions, seeds deterministic IndexedDB chunk/entity
@@ -496,7 +495,7 @@ pnpm native:web:build
 pnpm native:web:smoke
 pnpm native:web:catalog-smoke
 pnpm native:web:app-smoke
-cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_catalog_policy
 git diff --check
 ```
 
@@ -506,7 +505,7 @@ Results on 2026-07-05:
 - Passed: `pnpm native:web:build`
 - Passed: `pnpm native:web:smoke`
 - Passed: `pnpm native:web:catalog-smoke`
-- Passed: `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_catalog`
+- Passed: `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_catalog_policy`
 - Passed: `git diff --check`
 - Repeated validation issue: `pnpm native:web:app-smoke` failed twice in the
   existing block-place probe with `hitType: miss`, `commandSent: false`, and
@@ -651,8 +650,8 @@ git diff --check
 
 Remaining Slice 4 work:
 
-- decide whether `flat_client_session` stays as a helper module or folds into a
-  broader flat-client controller with `flat_client_catalog`.
+- resolved by later naming slices; current shared owners are
+  `client_session_policy` and `client_catalog_policy`.
 
 ### Slice 5: Broader Flat UI Policy Pass
 

@@ -7,6 +7,9 @@ use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
     WebIntegratedServerRunnerConfig, WebRuntime,
 };
+use mclone_app_runtime::client_catalog_policy::{
+    ClientCatalogEffects, ClientCatalogRequest, ClientCatalogSessionStart,
+};
 use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceCapabilityProjection,
     ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
@@ -21,9 +24,6 @@ use mclone_app_runtime::client_session_policy::{
     client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
     client_session_start_transition, client_session_status_projection,
     client_session_ui_effects_for_request,
-};
-use mclone_app_runtime::flat_client_catalog::{
-    FlatClientCatalogEffects, FlatClientCatalogRequest, FlatClientCatalogSessionStart,
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -3295,7 +3295,7 @@ impl WebChunkRenderSession {
         self.apply_client_session_ui_effects(effects.ui);
     }
 
-    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+    fn apply_web_ui_action(&mut self, action: GameUiAction) -> ClientCatalogEffects {
         self.client_experience
             .set_settings_state(self.client_experience_settings_state());
         let active_world = self.active_local_world_id().cloned();
@@ -3443,7 +3443,7 @@ impl WebChunkRenderSession {
         &mut self,
         handled: bool,
         action: Option<GameUiAction>,
-        effects: FlatClientCatalogEffects,
+        effects: ClientCatalogEffects,
     ) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
         self.write_ui_status_to_js_object(&object)?;
@@ -3534,7 +3534,7 @@ impl WebChunkRenderSession {
 
     fn catalog_effects_to_js_value(
         &mut self,
-        effects: FlatClientCatalogEffects,
+        effects: ClientCatalogEffects,
     ) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
         self.write_ui_status_to_js_object(&object)?;
@@ -3545,7 +3545,7 @@ impl WebChunkRenderSession {
     fn write_catalog_effects_to_js_object(
         &mut self,
         object: &js_sys::Object,
-        effects: FlatClientCatalogEffects,
+        effects: ClientCatalogEffects,
     ) -> Result<(), String> {
         set_number(
             object,
@@ -3571,7 +3571,7 @@ impl WebChunkRenderSession {
     fn write_catalog_request_to_js_object(
         &self,
         object: &js_sys::Object,
-        request: &FlatClientCatalogRequest,
+        request: &ClientCatalogRequest,
     ) -> Result<(), String> {
         set_bool(object, "catalogRequest", true)?;
         set_string(object, "catalogRequestId", &request.id.0.to_string())?;
@@ -3606,7 +3606,7 @@ impl WebChunkRenderSession {
     fn write_catalog_session_start_to_js_object(
         &self,
         object: &js_sys::Object,
-        start: &FlatClientCatalogSessionStart,
+        start: &ClientCatalogSessionStart,
     ) -> Result<(), String> {
         set_bool(object, "catalogSessionStart", true)?;
         match &start.request {

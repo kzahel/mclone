@@ -561,7 +561,7 @@ Recorded Slice 6 first-pass result:
 Follow-up after tactical 141 Slice 3:
 
 - Menu-driven native web Create/Open/Delete now uses the shared
-  `FlatClientCatalogController`; IndexedDB promises remain web-local and feed
+  `ClientCatalogController`; IndexedDB promises remain web-local and feed
   controller completions back through wasm.
 - `WebChunkRenderSession` now renders controller-owned catalog state and starts
   catalog-created/opened local worlds with `worldStorage=indexeddb` plus the

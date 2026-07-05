@@ -1,11 +1,11 @@
+use crate::client_catalog_policy::{
+    ClientCatalogActionContext, ClientCatalogController, ClientCatalogEffects,
+};
 use crate::client_session_policy::{
     ClientSessionActionContext, ClientSessionEffects, client_session_effects_for_action,
 };
 use crate::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-};
-use crate::flat_client_catalog::{
-    FlatClientCatalogActionContext, FlatClientCatalogController, FlatClientCatalogEffects,
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
@@ -16,7 +16,7 @@ use mclone_ui::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientExperienceController {
     profile: ClientExperienceProfile,
-    catalog: FlatClientCatalogController,
+    catalog: ClientCatalogController,
     settings: ClientExperienceSettingsController,
 }
 
@@ -30,7 +30,7 @@ impl ClientExperienceController {
     pub fn new(profile: ClientExperienceProfile) -> Self {
         Self {
             profile,
-            catalog: FlatClientCatalogController::new(),
+            catalog: ClientCatalogController::new(),
             settings: ClientExperienceSettingsController::default(),
         }
     }
@@ -43,11 +43,11 @@ impl ClientExperienceController {
         self.profile = profile;
     }
 
-    pub fn catalog(&self) -> &FlatClientCatalogController {
+    pub fn catalog(&self) -> &ClientCatalogController {
         &self.catalog
     }
 
-    pub fn catalog_mut(&mut self) -> &mut FlatClientCatalogController {
+    pub fn catalog_mut(&mut self) -> &mut ClientCatalogController {
         &mut self.catalog
     }
 
@@ -80,7 +80,7 @@ impl ClientExperienceController {
             | GameUiAction::CancelDeleteWorld => {
                 effects.catalog = self.catalog.apply_ui_action(
                     action,
-                    FlatClientCatalogActionContext {
+                    ClientCatalogActionContext {
                         new_world_seed: context.new_world_seed,
                     },
                 );
@@ -182,7 +182,7 @@ impl Default for ClientExperienceActionContext<'static> {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClientExperienceEffects {
-    pub catalog: FlatClientCatalogEffects,
+    pub catalog: ClientCatalogEffects,
     pub session: ClientSessionEffects,
     pub settings: ClientExperienceSettingsEffects,
     pub gameplay: Vec<ClientExperienceGameplayEffect>,

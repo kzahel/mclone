@@ -1,6 +1,6 @@
 # 143: Client Experience Convergence Burn-Down
 
-Status: open, ready to implement. Opened 2026-07-05. This tactical is the
+Status: open, Slice 7a landed 2026-07-05. Opened 2026-07-05. This tactical is the
 executable checklist for
 [`../client-experience-architecture.md`](../client-experience-architecture.md)
 (revised 2026-07-05). That document is law for this work; this tactical is the
@@ -83,6 +83,7 @@ rg -n "already exists|was not found|cannot delete" \
 | 5: emulated-XR profile test | display-neutrality gate | landed 2026-07-05 |
 | 6: flat Android adopts the facade | V1/V2 on Android | landed 2026-07-05 |
 | 7: XR catalog CRUD via shared controller | last V2 no-ops | landed 2026-07-05 |
+| 7a: neutral shared catalog-policy naming | naming guardrail | landed 2026-07-05 |
 
 V1-V4 are defined in
 [`../client-experience-architecture.md`](../client-experience-architecture.md#current-violations-burn-down).
@@ -143,7 +144,7 @@ Tripwire baselines:
 ```text
 native/apps/mclone-android-client/src/lib.rs:1180:        fn apply_ui_action(
 native/crates/mclone-xr-scene/src/lib.rs:5204:    fn apply_xr_ui_action(
-native/apps/mclone-web-client/src/web_canvas.rs:3220:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+native/apps/mclone-web-client/src/web_canvas.rs:3220:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> ClientCatalogEffects {
 native/apps/mclone-native-client/src/flat_client_driver.rs:1169:    pub(crate) fn apply_ui_action(
 native/apps/mclone-native-client/src/app.rs:534:    fn apply_ui_action(
 ```
@@ -193,8 +194,8 @@ Deliverables:
   host-effect action, capability-gated, or projection-specific; record the
   table in the architecture doc (its Decisions section reserves the slot);
 - add the display-neutral facade in `mclone-app-runtime` (working name
-  `ClientExperienceController`), composing the existing `flat_client_catalog`
-  and `flat_client_session` helpers unchanged;
+  `ClientExperienceController`), composing the existing catalog and session
+  policy helpers unchanged;
 - add a shared settings/toggle controller behind the facade owning the
   duplicated bodies (`SetMovementMode`, `SetFlySpeed`, `SetMovementSpeed`,
   `ToggleFullbright`, `ToggleCrosshair`, `ToggleFirstPersonPlayer`,
@@ -209,8 +210,8 @@ Non-goals / drift tripwires:
 
 - do not modify any app crate in this slice (tactical 141 Slice 1 pattern:
   shared crate only, apps adopt in the next slice);
-- do not rename or restructure `flat_client_catalog`/`flat_client_session`
-  internals beyond what composition requires — renames ride along later;
+- do not rename or restructure catalog/session policy internals beyond what
+  composition requires — renames ride along later;
 - if the facade starts owning input or widget vocabulary rather than routing
   it, that vocabulary belongs in `mclone-input`/`mclone-ui` — stop and put it
   there.
@@ -248,7 +249,7 @@ Changes:
   emits effects such as `SetRenderDistance`, `ClearFarLod`,
   `SyncPlayerAppearance`, or capability/rejection projections for adapters to
   execute.
-- The facade composes the existing `FlatClientCatalogController` and
+- The facade composes the existing catalog controller and
   `client_session_effects_for_action` helpers unchanged, and adds shared
   gameplay/projection effects for non-settings actions that the apps still
   execute in later adoption slices.
@@ -392,7 +393,7 @@ Tripwires after Slice 2:
 ```text
 native/crates/mclone-xr-scene/src/lib.rs:5204:    fn apply_xr_ui_action(
 native/apps/mclone-android-client/src/lib.rs:1180:        fn apply_ui_action(
-native/apps/mclone-web-client/src/web_canvas.rs:3228:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+native/apps/mclone-web-client/src/web_canvas.rs:3228:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> ClientCatalogEffects {
 native/apps/mclone-native-client/src/flat_client_driver.rs:1430:    pub(crate) fn apply_ui_action(
 native/apps/mclone-native-client/src/app.rs:534:    fn apply_ui_action(
 ```
@@ -518,7 +519,7 @@ Tripwires after Slice 3:
 - Dispatch sites: 5 total, unchanged from Slice 2.
 
 ```text
-native/apps/mclone-web-client/src/web_canvas.rs:3301:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+native/apps/mclone-web-client/src/web_canvas.rs:3301:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> ClientCatalogEffects {
 native/crates/mclone-xr-scene/src/lib.rs:5204:    fn apply_xr_ui_action(
 native/apps/mclone-native-client/src/app.rs:534:    fn apply_ui_action(
 native/apps/mclone-android-client/src/lib.rs:1180:        fn apply_ui_action(
@@ -856,8 +857,8 @@ Non-goals / drift tripwires:
 - behavior must not change; this is a naming/contract cleanup;
 - do not rename flat-only adapter types that genuinely belong to
   `FlatClientDriver`;
-- do not rename `flat_client_catalog` in this slice; catalog naming is still
-  tied to the later XR catalog CRUD slice.
+- do not perform catalog naming cleanup in this slice; Slice 7a owns the
+  display-neutral catalog-policy rename.
 
 Exit criteria:
 
@@ -1040,7 +1041,7 @@ Recorded result: landed 2026-07-05.
 - Wired Android touch-look sensitivity through the shared settings effect
   instead of leaving the visible action inert.
 - Updated Matrix 2 in `docs/topics/platform-parity.md`: flat Android now
-  consumes `client_session_policy`, `flat_client_catalog`, and
+  consumes `client_session_policy`, `client_catalog_policy`, and
   `client_experience`.
 
 Validation:
@@ -1081,7 +1082,7 @@ owner, never as an XR-local wiring pass.
 Deliverables:
 
 - XR world-list/create/open/delete routes through
-  `FlatClientCatalogController` (by then display-neutrally named) via the
+  `ClientCatalogController` via the
   facade, projected onto world-space panels;
 - the `log::warn!("persistent world catalog action is not wired to XR scene
   yet")` arms are gone;
@@ -1110,7 +1111,7 @@ Recorded result: landed 2026-07-05.
     refreshes catalog UI state from it, and projects active persistent worlds
     into the shared catalog controller state.
   - XR list/create/open/delete actions route through
-    `ClientExperienceController` and `FlatClientCatalogController`; emitted
+    `ClientExperienceController` and `ClientCatalogController`; emitted
     catalog requests are executed through the native catalog backend and fed back
     with `apply_catalog_response` / `apply_catalog_error`.
   - Catalog create/open session starts now carry the shared
@@ -1146,6 +1147,55 @@ Validation:
 Tripwires:
 
 - `rg -n "persistent world catalog action|local world catalog open is not implemented|not wired to XR scene|emulated XR Slice 5 flow" native/crates/mclone-xr-scene/src/lib.rs native/apps -g '!native/target'`: 0 hits.
+- dispatch-site grep remains 5 hits:
+  `mclone-android-client`, `mclone-xr-scene`, `mclone-web-client`,
+  `mclone-native-client/flat_client_driver`, and `mclone-native-client/app`.
+- inert-arm grep remains 0 hits.
+- web catalog policy-string grep remains at the 3 existing smoke assertion hits.
+
+## Slice 7a: Neutral Shared Catalog-Policy Naming
+
+Why: after Slice 7, the catalog controller is used by desktop flat/offscreen,
+web, flat Android, desktop XR, and Android XR. Keeping the shared owner named
+flat violates the naming guardrail even though the behavior is now neutral.
+
+Deliverables:
+
+- rename the shared app-runtime catalog module to
+  `mclone_app_runtime::client_catalog_policy`;
+- rename the former Flat-prefixed public catalog controller, action context,
+  effects, request, session-start, and internal entry types to
+  `ClientCatalog*`;
+- update desktop, web, Android, XR, durable docs, and related tactical
+  references to the display-neutral names;
+- do not rename genuinely flat display/input/render/app-adapter types.
+
+Exit criteria: behavior is unchanged; no active source or docs reference the
+old shared catalog module/type names; flat-only adapter/HUD/input names remain
+untouched.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_catalog_policy`:
+  pass (9 tests, 101 filtered).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`: pass
+  (60 tests).
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`:
+  pass.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`:
+  pass.
+- `pnpm native:policy:wasm-check`: pass; existing `mclone-server`
+  `with_unload_hysteresis_chunks` dead-code warning remains.
+- `pnpm native:web:typecheck`: pass; existing `mclone-server` dead-code
+  warning remains and wasm-bindgen CLI install emitted registry/future-compat
+  warnings.
+- `pnpm native:android-xr:apk`: pass.
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`: pass.
+- `git diff --check`: pass.
+
+Tripwires:
+
+- old shared catalog module/type grep over active source and docs: 0 hits.
 - dispatch-site grep remains 5 hits:
   `mclone-android-client`, `mclone-xr-scene`, `mclone-web-client`,
   `mclone-native-client/flat_client_driver`, and `mclone-native-client/app`.

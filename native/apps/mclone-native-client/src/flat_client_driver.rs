@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceCapabilityProjection,
     ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
@@ -19,7 +20,6 @@ use mclone_app_runtime::client_session_policy::{
 use mclone_app_runtime::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
-use mclone_app_runtime::flat_client_catalog::{FlatClientCatalogEffects, FlatClientCatalogRequest};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
@@ -880,7 +880,7 @@ impl FlatClientDriver {
 
     fn apply_world_catalog_effects(
         &mut self,
-        effects: FlatClientCatalogEffects,
+        effects: ClientCatalogEffects,
         arm_mouse_lock: bool,
     ) -> bool {
         let mut session_start_queued = false;
@@ -907,7 +907,7 @@ impl FlatClientDriver {
 
     fn execute_world_catalog_request(
         &mut self,
-        request: FlatClientCatalogRequest,
+        request: ClientCatalogRequest,
         arm_mouse_lock: bool,
     ) -> bool {
         let Some(catalog) = self.world_catalog.clone() else {

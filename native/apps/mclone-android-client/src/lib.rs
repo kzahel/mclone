@@ -12,6 +12,9 @@ mod android {
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
+    use mclone_app_runtime::client_catalog_policy::{
+        ClientCatalogEffects, ClientCatalogRequest, ClientCatalogSessionStart,
+    };
     use mclone_app_runtime::client_experience::{
         ClientExperienceActionContext, ClientExperienceCapabilityProjection,
         ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
@@ -23,9 +26,6 @@ mod android {
     use mclone_app_runtime::client_session_policy::{
         ClientSessionEffects, ClientSessionHostAction, ClientSessionUiEffects,
         client_session_failed_start_ui_effects,
-    };
-    use mclone_app_runtime::flat_client_catalog::{
-        FlatClientCatalogEffects, FlatClientCatalogRequest, FlatClientCatalogSessionStart,
     };
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
@@ -1311,7 +1311,7 @@ mod android {
 
         fn apply_android_catalog_effects(
             &mut self,
-            effects: FlatClientCatalogEffects,
+            effects: ClientCatalogEffects,
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             format: wgpu::TextureFormat,
@@ -1331,7 +1331,7 @@ mod android {
 
         fn execute_android_catalog_request(
             &mut self,
-            request: FlatClientCatalogRequest,
+            request: ClientCatalogRequest,
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             format: wgpu::TextureFormat,
@@ -1370,7 +1370,7 @@ mod android {
 
         fn apply_android_catalog_session_start(
             &mut self,
-            start: FlatClientCatalogSessionStart,
+            start: ClientCatalogSessionStart,
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             format: wgpu::TextureFormat,
