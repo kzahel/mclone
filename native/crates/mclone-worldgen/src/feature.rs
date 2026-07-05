@@ -302,10 +302,10 @@ mod tests {
         KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER,
         LILY_OF_THE_VALLEY, LILY_PAD, MELON, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
         PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
-        REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2,
+        RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2,
         SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE,
         SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TALL_GRASS_UPPER, TALL_SEAGRASS_LOWER,
-        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, VINE, WATER,
+        TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, TUFF, VINE, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -1416,11 +1416,32 @@ mod tests {
     }
 
     #[test]
+    fn badlands_feature_tables_match_java_wooded_tree_split() {
+        for biome_id in [37, 39, 165, 167] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert_badlands_common_features(&features);
+            assert!(
+                !has_badlands_tree_feature(&features),
+                "non-wooded badlands biome {biome_id} should not include TREES_BADLANDS"
+            );
+        }
+
+        for biome_id in [38, 166] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert_badlands_common_features(&features);
+            assert!(
+                has_badlands_tree_feature(&features),
+                "wooded badlands biome {biome_id} should include TREES_BADLANDS"
+            );
+        }
+    }
+
+    #[test]
     fn biome_feature_tables_include_java_normal_mushroom_patches_for_current_lanes() {
         for biome_id in [
             1, 3, 4, 5, 6, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 27, 28, 29, 30, 31, 32, 33, 34,
-            35, 36, 129, 131, 132, 133, 134, 140, 149, 151, 155, 156, 157, 158, 160, 161, 162, 163,
-            164, 168, 169,
+            35, 36, 37, 38, 39, 129, 131, 132, 133, 134, 140, 149, 151, 155, 156, 157, 158, 160,
+            161, 162, 163, 164, 165, 166, 167, 168, 169,
         ] {
             let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
             assert!(has_normal_mushroom_patch(&features, BROWN_MUSHROOM, 4));
@@ -2198,6 +2219,56 @@ mod tests {
                         need_water: false,
                         place_on: &[GRASS_BLOCK],
                     })
+                )
+        })
+    }
+
+    fn assert_badlands_common_features(features: &[PlacedFeature]) {
+        assert!(has_default_grass_patch_feature(features));
+        assert!(has_badlands_dead_bush_patch_feature(features));
+        assert!(has_normal_mushroom_patch(features, BROWN_MUSHROOM, 4));
+        assert!(has_normal_mushroom_patch(features, RED_MUSHROOM, 8));
+        assert!(has_random_patch(features, SUGAR_CANE, 13));
+        assert!(has_pumpkin_patch(features));
+        assert!(has_random_patch(features, CACTUS, 5));
+        assert!(has_default_water_spring(features));
+        assert!(has_default_lava_spring(features));
+    }
+
+    fn has_badlands_tree_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators == tables::tree_threshold_decorators(5, 0.1, 1)
+                && feature.feature == ConfiguredFeature::tree(TreeConfiguration::oak())
+        })
+    }
+
+    fn has_badlands_dead_bush_patch_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::VegetalDecoration
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::count(20),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                        state: DEAD_BUSH,
+                        weighted_states: &[],
+                        state_provider: RandomPatchStateProvider::Simple,
+                        tries: 16,
+                        xspread: 7,
+                        yspread: 3,
+                        zspread: 7,
+                        project: true,
+                        can_replace: false,
+                        double_plant: false,
+                        column_height: None,
+                        need_water: false,
+                        place_on,
+                    }) if place_on == &[SAND, RED_SAND, TERRACOTTA, DIRT, GRASS_BLOCK, PODZOL]
                 )
         })
     }

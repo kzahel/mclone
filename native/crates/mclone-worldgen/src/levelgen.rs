@@ -162,6 +162,7 @@ mod tests {
         SnowySpruceFern,
         MountainTrees,
         BadlandsDeadBushCactusSugarCane,
+        WoodedBadlandsTrees,
         IceSpikesPackedIce,
         FrozenOceanIcebergs,
         DefaultExtraSugarCane,
@@ -194,6 +195,7 @@ mod tests {
                 Self::BadlandsDeadBushCactusSugarCane => {
                     "badlands dead bush plus cactus/sugar cane"
                 }
+                Self::WoodedBadlandsTrees => "wooded badlands oak plus dead bush/cactus/sugar cane",
                 Self::IceSpikesPackedIce => "ice spikes packed ice",
                 Self::FrozenOceanIcebergs => "frozen ocean packed/blue icebergs",
                 Self::DefaultExtraSugarCane => "default extra sugar cane",
@@ -259,6 +261,7 @@ mod tests {
                 Self::SnowySpruceFern => &[SPRUCE_LOG, SPRUCE_LEAVES, FERN],
                 Self::MountainTrees => &[OAK_LOG, OAK_LEAVES, SPRUCE_LOG, SPRUCE_LEAVES],
                 Self::BadlandsDeadBushCactusSugarCane => &[DEAD_BUSH, CACTUS, SUGAR_CANE],
+                Self::WoodedBadlandsTrees => &[OAK_LOG, OAK_LEAVES, DEAD_BUSH, CACTUS, SUGAR_CANE],
                 Self::IceSpikesPackedIce => &[PACKED_ICE],
                 Self::FrozenOceanIcebergs => &[PACKED_ICE, BLUE_ICE],
                 Self::DefaultExtraSugarCane => &[SUGAR_CANE],
@@ -302,6 +305,12 @@ mod tests {
             match self {
                 Self::DesertDeadBushCactusSugarCane | Self::BadlandsDeadBushCactusSugarCane => {
                     chunk.block_count(DEAD_BUSH) > 0
+                        && (chunk.block_count(CACTUS) + chunk.block_count(SUGAR_CANE)) > 0
+                }
+                Self::WoodedBadlandsTrees => {
+                    chunk.block_count(OAK_LOG) > 0
+                        && chunk.block_count(OAK_LEAVES) > 0
+                        && chunk.block_count(DEAD_BUSH) > 0
                         && (chunk.block_count(CACTUS) + chunk.block_count(SUGAR_CANE)) > 0
                 }
                 Self::SwampNativeSubsetSugarCaneLilyPad => {
@@ -578,9 +587,9 @@ mod tests {
             feature_family: Some(FeatureFamily::SnowySpruceFern),
         },
         PaletteMatrixCase {
-            seed: 3748,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 28,
+            chunk_x: -2,
+            chunk_z: -8,
             biome_key: "minecraft:badlands",
             surface_family: SurfaceFamily::Badlands,
             feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
@@ -754,17 +763,17 @@ mod tests {
             feature_family: Some(FeatureFamily::MountainTrees),
         },
         PaletteMatrixCase {
-            seed: 32_398,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 4764,
+            chunk_x: 6,
+            chunk_z: -3,
             biome_key: "minecraft:wooded_badlands_plateau",
             surface_family: SurfaceFamily::Badlands,
-            feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
+            feature_family: Some(FeatureFamily::WoodedBadlandsTrees),
         },
         PaletteMatrixCase {
-            seed: 13_089,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 947,
+            chunk_x: -6,
+            chunk_z: -2,
             biome_key: "minecraft:badlands_plateau",
             surface_family: SurfaceFamily::Badlands,
             feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
@@ -914,25 +923,25 @@ mod tests {
             feature_family: Some(FeatureFamily::SavannaAcacia),
         },
         PaletteMatrixCase {
-            seed: 8464,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 868,
+            chunk_x: 7,
+            chunk_z: -8,
             biome_key: "minecraft:eroded_badlands",
             surface_family: SurfaceFamily::Badlands,
             feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
         },
         PaletteMatrixCase {
-            seed: 3823,
+            seed: 12_115,
             chunk_x: 0,
-            chunk_z: 0,
+            chunk_z: -1,
             biome_key: "minecraft:modified_wooded_badlands_plateau",
             surface_family: SurfaceFamily::Badlands,
-            feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),
+            feature_family: Some(FeatureFamily::WoodedBadlandsTrees),
         },
         PaletteMatrixCase {
-            seed: 65_916,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 1150,
+            chunk_x: -7,
+            chunk_z: 1,
             biome_key: "minecraft:modified_badlands_plateau",
             surface_family: SurfaceFamily::Badlands,
             feature_family: Some(FeatureFamily::BadlandsDeadBushCactusSugarCane),

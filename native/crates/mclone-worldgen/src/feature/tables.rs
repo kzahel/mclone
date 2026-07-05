@@ -91,10 +91,11 @@ pub(super) fn overworld_features_for_biome_cached(
         }
         "minecraft:badlands"
         | "minecraft:badlands_plateau"
-        | "minecraft:wooded_badlands_plateau"
         | "minecraft:modified_badlands_plateau"
-        | "minecraft:modified_wooded_badlands_plateau"
-        | "minecraft:eroded_badlands" => badlands_feature_table(),
+        | "minecraft:eroded_badlands" => badlands_feature_table(false),
+        "minecraft:wooded_badlands_plateau" | "minecraft:modified_wooded_badlands_plateau" => {
+            badlands_feature_table(true)
+        }
         "minecraft:river" => river_feature_table(false),
         "minecraft:frozen_river" => river_feature_table(true),
         "minecraft:beach" | "minecraft:snowy_beach" | "minecraft:stone_shore" => {
@@ -265,10 +266,14 @@ fn desert_feature_table() -> &'static [PlacedFeature] {
         .as_slice()
 }
 
-fn badlands_feature_table() -> &'static [PlacedFeature] {
-    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
-    FEATURES
-        .get_or_init(|| build_overworld_feature_table("minecraft:badlands", badlands_features()))
+fn badlands_feature_table(wooded: bool) -> &'static [PlacedFeature] {
+    static BADLANDS: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static WOODED_BADLANDS: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if wooded { &WOODED_BADLANDS } else { &BADLANDS };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:badlands", badlands_features(wooded))
+        })
         .as_slice()
 }
 
@@ -965,16 +970,23 @@ fn desert_features() -> Vec<PlacedFeature> {
     ]
 }
 
-fn badlands_features() -> Vec<PlacedFeature> {
-    vec![
-        tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
-        dead_bush_patch(2),
+fn badlands_features(wooded: bool) -> Vec<PlacedFeature> {
+    let mut features = Vec::new();
+    if wooded {
+        features.push(badlands_tree_feature());
+    }
+    features.extend([
+        default_grass_patch_feature(),
+        badlands_dead_bush_patch_feature(),
+        normal_mushroom_patch_feature(BROWN_MUSHROOM, 4),
+        normal_mushroom_patch_feature(RED_MUSHROOM, 8),
         sugar_cane_patch(13),
         pumpkin_patch(),
         cactus_patch(5),
         spring_water_feature(),
         spring_lava_feature(),
-    ]
+    ]);
+    features
 }
 
 fn swamp_features() -> Vec<PlacedFeature> {
@@ -1404,6 +1416,14 @@ fn water_tree_feature() -> PlacedFeature {
             ConfiguredFeature::tree(TreeConfiguration::oak()),
         )),
         tree_threshold_decorators(0, 0.1, 1),
+    )
+}
+
+fn badlands_tree_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::tree(TreeConfiguration::oak()),
+        tree_threshold_decorators(5, 0.1, 1),
     )
 }
 
@@ -1997,6 +2017,27 @@ fn dead_bush_patch(count: i32) -> PlacedFeature {
             place_on: &[SAND, RED_SAND, TERRACOTTA, DIRT, GRASS_BLOCK, PODZOL],
         },
         count,
+    )
+}
+
+fn badlands_dead_bush_patch_feature() -> PlacedFeature {
+    heightmap_double_random_patch_feature(
+        RandomPatchConfiguration {
+            state: DEAD_BUSH,
+            weighted_states: &[],
+            state_provider: RandomPatchStateProvider::Simple,
+            tries: 16,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[SAND, RED_SAND, TERRACOTTA, DIRT, GRASS_BLOCK, PODZOL],
+        },
+        20,
     )
 }
 
