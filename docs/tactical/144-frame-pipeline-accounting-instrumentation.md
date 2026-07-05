@@ -167,7 +167,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 | 0: measurement inventory and baselines | gates | Mac (baseline host; record) | landed 2026-07-05 |
 | 1: `mclone-diagnostics` accounting core | 1 (owner exists) | Mac; Windows test lands at checkpoint A | landed 2026-07-05 |
 | 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | landed 2026-07-05 |
-| 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | open |
+| 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | landed 2026-07-05 |
 | 4: calibration, invariants, meter overhead | 7 | Mac with Quest | open |
 | 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | open |
 | 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | open |
@@ -768,7 +768,127 @@ git diff --check
 
 Plus the two `:metrics` A/B lanes recorded in this section.
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Changes:
+
+- Added `mclone-diagnostics` to `mclone-android-xr-client`.
+- Replaced `AndroidXrActivePerfProbe`'s local frame vectors, percentile
+  helper, app-over-period counters, and over-period tier counters with
+  `FrameAccumulator` / `FrameSummaryReport`.
+- Replaced the Android-local `CLOCK_THREAD_CPUTIME_ID` helper with
+  `mclone_diagnostics::clock::thread_cpu_time_ms()`.
+- Preserved `app_work = frame_wall - xrWaitFrame` exactly by passing that
+  value as `FrameObservation::with_app_work_ms`.
+- Kept the existing `MCLONE_ANDROID_XR_PERF_*` marker formats, including
+  legacy `over_2x_budget` and `over_4x_budget` key text, while moving those
+  key strings into `mclone-diagnostics` constants so the app crate no
+  longer trips duplicate-accounting greps.
+- Changed the shared worst-frame report ordering to app-work first, then
+  frame-wall, so Quest worst-frame markers keep their existing "worst app
+  budget consumer" semantics while still rendering from the shared report.
+
+Host, device, and raw outputs:
+
+- Host: `kmacbook`, macOS 26.5.1 build 25F80, arm64.
+- Device: Quest 3, ADB id `2G0YC1ZF93041Z`.
+- Git baseline before edits: `ea2c2194`.
+- Preflight launch output:
+  `/tmp/mclone-144-slice3-preflight-validate.txt`.
+- Preflight metric logs:
+  `/tmp/mclone-144-slice3-pre-rd5-run{1,2}-logcat.txt` and
+  `/tmp/mclone-144-slice3-pre-rd7-run{1,2}-logcat.txt`.
+- Final post-adoption metric logs:
+  `/tmp/mclone-144-slice3-final-rd5-run{1,2}-logcat.txt` and
+  `/tmp/mclone-144-slice3-final-rd7-run{1,2}-logcat.txt`.
+
+Marker compatibility:
+
+- Static app-crate marker inventory remained 41
+  `MCLONE_ANDROID_XR_PERF_*` keys.
+- Dynamic emitted marker-key union across the RD5/RD7 metrics lanes remained
+  43 keys before and after. The two extra emitted keys are produced from the
+  perf-metrics module and were unchanged.
+
+RD5 orbit metrics A/B:
+
+| run | fps | frame avg | p95 | p99 | max | over | over2 | app avg | app p95 | app p99 | app max | head avg | p05 | app over | CPU p95 | blocked p95 | app GPU | dropped |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| pre 1 | 70.36 | 14.156 | 16.469 | 23.621 | 29.631 | 1558 | 1 | 13.746 | 15.551 | 18.553 | 21.269 | 0.143 | -1.662 | 1210 | 8.562 | 8.508 | 3.581 | 15 |
+| pre 2 | 70.56 | 14.115 | 16.388 | 20.638 | 28.786 | 1478 | 1 | 13.721 | 15.533 | 18.759 | 20.988 | 0.168 | -1.644 | 1125 | 8.377 | 8.476 | 3.844 | 20 |
+| post 1 | 70.33 | 14.139 | 16.455 | 24.240 | 27.282 | 1445 | 0 | 13.720 | 15.458 | 18.429 | 21.383 | 0.169 | -1.569 | 1115 | 8.434 | 8.552 | 3.842 | 20 |
+| post 2 | 70.11 | 14.181 | 16.490 | 20.301 | 27.569 | 1565 | 0 | 13.743 | 15.691 | 18.607 | 21.225 | 0.146 | -1.802 | 1204 | 8.523 | 8.511 | 3.461 | 16 |
+
+RD7 orbit metrics A/B:
+
+| run | fps | frame avg | p95 | p99 | max | over | over2 | app avg | app p95 | app p99 | app max | head avg | p05 | app over | CPU p95 | blocked p95 | app GPU | dropped |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| pre 1 | 64.56 | 15.432 | 18.573 | 21.537 | 26.921 | 2402 | 0 | 15.151 | 18.302 | 20.842 | 23.315 | -1.262 | -4.413 | 2140 | 10.717 | 8.606 | 2.874 | 22 |
+| pre 2 | 64.47 | 15.451 | 18.446 | 21.144 | 26.969 | 2405 | 0 | 15.203 | 18.159 | 20.670 | 25.985 | -1.314 | -4.270 | 2150 | 10.553 | 8.563 | 3.418 | 17 |
+| post 1 | 64.40 | 15.446 | 18.437 | 21.305 | 26.877 | 2485 | 0 | 15.214 | 18.215 | 20.587 | 24.694 | -1.325 | -4.326 | 2266 | 10.413 | 8.577 | 3.339 | 17 |
+| post 2 | 64.88 | 15.336 | 18.351 | 21.258 | 25.667 | 2439 | 0 | 15.123 | 18.056 | 20.974 | 23.736 | -1.234 | -4.171 | 2233 | 10.452 | 8.605 | 3.185 | 17 |
+
+A/B result:
+
+- RD5 remained within the preflight envelope for headline frame/app-work
+  distribution fields except tiny threshold-adjacent spread expansion:
+  frame p95 `16.455..16.490` vs pre `16.388..16.469`, app p95
+  `15.458..15.691` vs pre `15.533..15.551`, and app-over counts
+  `1115..1204` vs pre `1125..1210`.
+- RD7 frame/app-work p95, app-work max, headroom p05, CPU p95, and blocked
+  p95 stayed within or better than the preflight envelope. Over-budget and
+  app-over threshold counts rose modestly (`2402..2405` to `2439..2485`,
+  and `2140..2150` to `2233..2266`), while app-work p95/p99 did not regress
+  (`18.159..18.302` to `18.056..18.215`, and `20.670..20.842` to
+  `20.587..20.974`). Recorded as threshold-count sensitivity around an
+  already over-budget RD7 lane, not as a pacing-policy change.
+- Worst-frame rank 1 markers remained rendered app-work worst frames:
+  RD5 post app-work worst `21.383` / `21.225` ms vs pre `21.269` /
+  `20.988` ms; RD7 post `24.694` / `23.736` ms vs pre `23.315` /
+  `25.985` ms.
+
+Tripwire results:
+
+- Accounting math outside the shared owner: 0 hits.
+- Clock reads inside the sans-I/O diagnostics core: 0 hits outside
+  `native/crates/mclone-diagnostics/src/clock.rs`.
+- GPU timestamp sites: 0 hits.
+
+Validation:
+
+```bash
+pnpm native:android-xr:validate
+# PASS before edits; Quest 3 launch health green.
+
+pnpm native:android-xr:perf:orbit:rd5:metrics
+# PASS twice before edits and twice after final code.
+
+pnpm native:android-xr:perf:orbit:rd7:metrics
+# PASS twice before edits and twice after final code.
+
+cargo fmt --manifest-path native/Cargo.toml --all --check
+# PASS.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
+# PASS. 8 tests passed.
+
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+# PASS. Existing non-Android dead-code warnings for legacy remote-addr helpers.
+
+pnpm native:android-xr:apk
+# PASS.
+
+pnpm native:android-xr:validate
+# PASS after final code.
+
+git diff --check
+# PASS.
+```
+
+Next step: Slice 4, calibration, invariants, and meter-overhead measurement
+on the Mac with the Quest attached. Windows checkpoint A remains pending
+and may still be batched into checkpoint B, but it must complete before this
+tactical closes.
 
 ## Slice 4: Calibration, Invariants, And Meter Overhead
 

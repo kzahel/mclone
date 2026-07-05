@@ -311,6 +311,20 @@ pub struct WorstFrameDetail {
     pub stage_spans: Vec<StageSpan>,
 }
 
+impl WorstFrameDetail {
+    pub const fn over_single_budget(&self) -> bool {
+        self.over_budget
+    }
+
+    pub const fn over_double_budget(&self) -> bool {
+        self.over_2x_budget
+    }
+
+    pub const fn over_quad_budget(&self) -> bool {
+        self.over_4x_budget
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrameSummaryReport {
@@ -469,8 +483,9 @@ impl FrameAccumulator {
             .collect::<Vec<_>>();
         worst.sort_by(|left, right| {
             right
-                .frame_wall_ms
-                .total_cmp(&left.frame_wall_ms)
+                .app_work_ms
+                .total_cmp(&left.app_work_ms)
+                .then_with(|| right.frame_wall_ms.total_cmp(&left.frame_wall_ms))
                 .then_with(|| left.frame_index.cmp(&right.frame_index))
         });
         worst.truncate(self.config.worst_frame_capacity);

@@ -42,6 +42,10 @@ mod android {
     };
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
+    use mclone_diagnostics::{
+        FrameAccountingConfig, FrameAccumulator, FrameObservation, FrameSummaryReport,
+        PercentileMethod, StageId, StageSpan, percentile_sorted_ms,
+    };
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::{
@@ -2330,8 +2334,8 @@ mod android {
             Self {
                 avg_ms,
                 min_ms: sorted[0],
-                p50_ms: percentile(&sorted, 0.50),
-                p95_ms: percentile(&sorted, 0.95),
+                p50_ms: percentile_sorted_ms(&sorted, 0.50, PercentileMethod::NearestRank),
+                p95_ms: percentile_sorted_ms(&sorted, 0.95, PercentileMethod::NearestRank),
                 max_ms: *sorted.last().expect("non-empty samples checked above"),
             }
         }
@@ -3106,7 +3110,7 @@ mod android {
             let wait_frame_start = Instant::now();
             let frame_state = graphics.frame_wait.wait().context("wait OpenXR frame")?;
             frame_timing.wait_frame_ms = elapsed_ms(wait_frame_start);
-            let thread_cpu_start_ms = thread_cpu_time_ms();
+            let thread_cpu_start_ms = mclone_diagnostics::clock::thread_cpu_time_ms();
             let begin_frame_start = Instant::now();
             graphics
                 .frame_stream
@@ -3267,7 +3271,10 @@ mod android {
                 return Err(error);
             }
             frame_timing.frame_wall_ms = elapsed_ms(frame_wall_start);
-            if let (Some(start_ms), Some(end_ms)) = (thread_cpu_start_ms, thread_cpu_time_ms()) {
+            if let (Some(start_ms), Some(end_ms)) = (
+                thread_cpu_start_ms,
+                mclone_diagnostics::clock::thread_cpu_time_ms(),
+            ) {
                 frame_timing.thread_cpu_ms = (end_ms - start_ms).max(0.0);
                 frame_timing.thread_cpu_valid = true;
             }
@@ -3797,12 +3804,11 @@ mod android {
                 requested: Duration::from_secs(seconds),
                 started: Instant::now(),
                 start_stats: frame_stats,
-                frame_wall_ms: Vec::new(),
-                wait_frame_ms: Vec::new(),
-                app_work_ms: Vec::new(),
-                thread_cpu_ms: Vec::new(),
-                blocked_ms: Vec::new(),
-                thread_cpu_valid_frames: 0,
+                frame_accounting: FrameAccumulator::new(
+                    FrameAccountingConfig::from_target_hz(self.target_hz)
+                        .with_percentile_method(PercentileMethod::NearestRank)
+                        .with_worst_frame_capacity(ANDROID_XR_PERF_WORST_FRAME_COUNT),
+                ),
                 max_wait_begin_ms: 0.0,
                 max_wait_frame_ms: 0.0,
                 max_begin_frame_ms: 0.0,
@@ -3812,10 +3818,6 @@ mod android {
                 max_upload: mclone_xr_scene::XrTerrainUploadSummary::default(),
                 upload_work_frames: 0,
                 diagnostics_refresh_frames: 0,
-                app_over_period_frames: 0,
-                over_budget_frames: 0,
-                over_2x_budget_frames: 0,
-                over_4x_budget_frames: 0,
                 render_distance: self.render_distance,
                 render_compile_worker_count: self.render_compile_worker_count,
                 skip_actors: self.skip_actors,
@@ -3847,7 +3849,7 @@ mod android {
                 record_rebuild_frames: 0,
                 record_rebuild_total_ms: 0.0,
                 record_rebuild_max_ms: 0.0,
-                worst_frames: Vec::new(),
+                frame_details: Vec::new(),
                 latest_summary: rendered.summary,
             });
             true
@@ -3931,12 +3933,7 @@ mod android {
         requested: Duration,
         started: Instant,
         start_stats: XrFrameStats,
-        frame_wall_ms: Vec<f64>,
-        wait_frame_ms: Vec<f64>,
-        app_work_ms: Vec<f64>,
-        thread_cpu_ms: Vec<f64>,
-        blocked_ms: Vec<f64>,
-        thread_cpu_valid_frames: u64,
+        frame_accounting: FrameAccumulator,
         max_wait_begin_ms: f64,
         max_wait_frame_ms: f64,
         max_begin_frame_ms: f64,
@@ -3946,10 +3943,6 @@ mod android {
         max_upload: mclone_xr_scene::XrTerrainUploadSummary,
         upload_work_frames: u64,
         diagnostics_refresh_frames: u64,
-        app_over_period_frames: u64,
-        over_budget_frames: u64,
-        over_2x_budget_frames: u64,
-        over_4x_budget_frames: u64,
         render_distance: u32,
         render_compile_worker_count: usize,
         skip_actors: bool,
@@ -3975,7 +3968,7 @@ mod android {
         record_rebuild_frames: u64,
         record_rebuild_total_ms: f64,
         record_rebuild_max_ms: f64,
-        worst_frames: Vec<AndroidXrWorstFrameSnapshot>,
+        frame_details: Vec<AndroidXrWorstFrameSnapshot>,
         latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
     }
 
@@ -3985,50 +3978,41 @@ mod android {
             timing: AndroidXrFrameTiming,
             rendered: Option<AndroidXrRenderedFrame>,
         ) {
-            let budget_ms = perf_budget_ms(self.target_hz);
-            let sample_frame = self.frame_wall_ms.len() as u64 + 1;
-            self.frame_wall_ms.push(timing.frame_wall_ms);
-            self.wait_frame_ms.push(timing.wait_frame_ms);
+            let sample_frame = self.frame_accounting.len() as u64 + 1;
             let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
-            self.app_work_ms.push(app_work_ms);
-            let thread_cpu_ms = if timing.thread_cpu_valid {
-                timing.thread_cpu_ms
-            } else {
-                0.0
-            };
-            let blocked_ms = if timing.thread_cpu_valid {
-                (app_work_ms - thread_cpu_ms).max(0.0)
-            } else {
-                0.0
-            };
-            if timing.thread_cpu_valid {
-                self.thread_cpu_ms.push(thread_cpu_ms);
-                self.blocked_ms.push(blocked_ms);
-                self.thread_cpu_valid_frames += 1;
-            }
-            self.record_worst_frame(AndroidXrWorstFrameSnapshot {
+            let thread_cpu_ms = timing.thread_cpu_valid.then_some(timing.thread_cpu_ms);
+            self.frame_accounting.record_frame(
+                FrameObservation::new(sample_frame, timing.frame_wall_ms)
+                    .with_wait_ms(timing.wait_frame_ms)
+                    .with_app_work_ms(app_work_ms)
+                    .with_thread_cpu_ms(thread_cpu_ms)
+                    .with_rendered(rendered.is_some())
+                    .with_stage_span(StageSpan::new(
+                        StageId::GpuExecutionPresentationWait,
+                        timing.wait_frame_ms,
+                    ))
+                    .with_stage_span(StageSpan::new(
+                        StageId::InputPoseEvents,
+                        timing.controller_poll_ms,
+                    ))
+                    .with_stage_span(StageSpan::new(
+                        StageId::DrawEncode,
+                        timing.render_mclone_frame_ms,
+                    )),
+            );
+            self.frame_details.push(AndroidXrWorstFrameSnapshot {
                 sample_frame,
                 frame_wall_ms: timing.frame_wall_ms,
                 wait_frame_ms: timing.wait_frame_ms,
                 app_work_ms,
-                thread_cpu_ms,
+                thread_cpu_ms: thread_cpu_ms.unwrap_or(0.0),
                 thread_cpu_valid: timing.thread_cpu_valid,
-                blocked_ms,
+                blocked_ms: thread_cpu_ms
+                    .map(|thread_cpu_ms| (app_work_ms - thread_cpu_ms).max(0.0))
+                    .unwrap_or(0.0),
                 timing,
-                summary: rendered.map(|rendered| rendered.summary),
+                summary: rendered.as_ref().map(|rendered| rendered.summary),
             });
-            if app_work_ms > budget_ms {
-                self.app_over_period_frames += 1;
-            }
-            if timing.frame_wall_ms > budget_ms {
-                self.over_budget_frames += 1;
-            }
-            if timing.frame_wall_ms > budget_ms * 2.0 {
-                self.over_2x_budget_frames += 1;
-            }
-            if timing.frame_wall_ms > budget_ms * 4.0 {
-                self.over_4x_budget_frames += 1;
-            }
             self.max_wait_begin_ms = self.max_wait_begin_ms.max(timing.wait_begin_ms);
             self.max_wait_frame_ms = self.max_wait_frame_ms.max(timing.wait_frame_ms);
             self.max_begin_frame_ms = self.max_begin_frame_ms.max(timing.begin_frame_ms);
@@ -4060,51 +4044,25 @@ mod android {
         }
 
         fn log_summary(&mut self, frame_stats: XrFrameStats) {
-            let mut sorted = self.frame_wall_ms.clone();
-            sorted.sort_by(|a, b| a.total_cmp(b));
-            let mut sorted_wait_frame = self.wait_frame_ms.clone();
-            sorted_wait_frame.sort_by(|a, b| a.total_cmp(b));
-            let mut sorted_app_work = self.app_work_ms.clone();
-            sorted_app_work.sort_by(|a, b| a.total_cmp(b));
-            let mut sorted_thread_cpu = self.thread_cpu_ms.clone();
-            sorted_thread_cpu.sort_by(|a, b| a.total_cmp(b));
-            let mut sorted_blocked = self.blocked_ms.clone();
-            sorted_blocked.sort_by(|a, b| a.total_cmp(b));
+            let frame_accounting = self.frame_accounting.summary_report();
             let sample_seconds = self.started.elapsed().as_secs_f64();
-            let frame_count = self.frame_wall_ms.len() as u64;
+            let frame_count = frame_accounting.frames;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
             let runtime_delta = frame_stats.runtime_frames - self.start_stats.runtime_frames;
             let skipped_delta = frame_stats.skipped_frames - self.start_stats.skipped_frames;
-            let average_frame_ms = average_ms(&self.frame_wall_ms);
-            let min_frame_ms = sorted.first().copied().unwrap_or(0.0);
-            let max_frame_ms = sorted.last().copied().unwrap_or(0.0);
             let budget_ms = perf_budget_ms(self.target_hz);
-            let average_wait_frame_ms = average_ms(&self.wait_frame_ms);
-            let average_app_work_ms = average_ms(&self.app_work_ms);
-            let min_app_work_ms = sorted_app_work.first().copied().unwrap_or(0.0);
-            let max_app_work_ms = sorted_app_work.last().copied().unwrap_or(0.0);
-            let app_work_p50_ms = percentile(&sorted_app_work, 0.50);
-            let app_work_p95_ms = percentile(&sorted_app_work, 0.95);
-            let app_work_p99_ms = percentile(&sorted_app_work, 0.99);
-            let average_thread_cpu_ms = average_ms(&self.thread_cpu_ms);
-            let thread_cpu_p50_ms = percentile(&sorted_thread_cpu, 0.50);
-            let thread_cpu_p95_ms = percentile(&sorted_thread_cpu, 0.95);
-            let thread_cpu_p99_ms = percentile(&sorted_thread_cpu, 0.99);
-            let thread_cpu_max_ms = sorted_thread_cpu.last().copied().unwrap_or(0.0);
-            let average_blocked_ms = average_ms(&self.blocked_ms);
-            let blocked_p50_ms = percentile(&sorted_blocked, 0.50);
-            let blocked_p95_ms = percentile(&sorted_blocked, 0.95);
-            let blocked_p99_ms = percentile(&sorted_blocked, 0.99);
-            let blocked_max_ms = sorted_blocked.last().copied().unwrap_or(0.0);
-            let thread_cpu_valid_pct = if self.frame_wall_ms.is_empty() {
+            let frame_wall = frame_accounting.frame_wall;
+            let wait_frame = frame_accounting.wait;
+            let app_work = frame_accounting.app_work;
+            let thread_cpu = frame_accounting.thread_cpu;
+            let blocked = frame_accounting.blocked;
+            let headroom = frame_accounting.headroom;
+            let over_budget = frame_accounting.over_budget;
+            let thread_cpu_valid_frames = thread_cpu.count;
+            let thread_cpu_valid_pct = if frame_count == 0 {
                 0.0
             } else {
-                self.thread_cpu_valid_frames as f64 * 100.0 / self.frame_wall_ms.len() as f64
-            };
-            let app_over_period_pct = if self.app_work_ms.is_empty() {
-                0.0
-            } else {
-                self.app_over_period_frames as f64 * 100.0 / self.app_work_ms.len() as f64
+                thread_cpu_valid_frames as f64 * 100.0 / frame_count as f64
             };
             let runtime_fps = if sample_seconds > 0.0 {
                 runtime_delta as f64 / sample_seconds
@@ -4134,7 +4092,7 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} {}={} {}={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
@@ -4165,21 +4123,23 @@ mod android {
                 submitted_delta,
                 runtime_delta,
                 skipped_delta,
-                average_frame_ms,
-                min_frame_ms,
-                percentile(&sorted, 0.50),
-                percentile(&sorted, 0.95),
-                percentile(&sorted, 0.99),
-                max_frame_ms,
-                self.over_budget_frames,
-                self.over_2x_budget_frames,
-                self.over_4x_budget_frames,
-                average_app_work_ms,
-                app_work_p50_ms,
-                app_work_p95_ms,
-                budget_ms - average_app_work_ms,
-                self.app_over_period_frames,
-                app_over_period_pct
+                frame_wall.average_ms,
+                frame_wall.min_ms,
+                frame_wall.p50_ms,
+                frame_wall.p95_ms,
+                frame_wall.p99_ms,
+                frame_wall.max_ms,
+                over_budget.single_period_frames(),
+                mclone_diagnostics::legacy_json_keys::OVER_DOUBLE_BUDGET,
+                over_budget.double_period_frames(),
+                mclone_diagnostics::legacy_json_keys::OVER_QUAD_BUDGET,
+                over_budget.quad_period_frames(),
+                app_work.average_ms,
+                app_work.p50_ms,
+                app_work.p95_ms,
+                headroom.average_ms,
+                frame_accounting.app_over_period_frames,
+                frame_accounting.app_over_period_pct
             );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_HEADROOM sample_seconds={:.3} mode={} render_path={} xr_render_scale={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} submitted_fps={:.2} runtime_fps={:.2} wait_frame_avg_ms={:.3} wait_frame_p50_ms={:.3} wait_frame_p95_ms={:.3} wait_frame_max_ms={:.3} app_work_avg_ms={:.3} app_work_min_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} app_work_p99_ms={:.3} app_work_max_ms={:.3} headroom_avg_ms={:.3} headroom_p50_ms={:.3} headroom_p05_ms={:.3} headroom_p01_ms={:.3} headroom_min_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
@@ -4195,23 +4155,23 @@ mod android {
                 skipped_delta,
                 submitted_fps,
                 runtime_fps,
-                average_wait_frame_ms,
-                percentile(&sorted_wait_frame, 0.50),
-                percentile(&sorted_wait_frame, 0.95),
-                sorted_wait_frame.last().copied().unwrap_or(0.0),
-                average_app_work_ms,
-                min_app_work_ms,
-                app_work_p50_ms,
-                app_work_p95_ms,
-                app_work_p99_ms,
-                max_app_work_ms,
-                budget_ms - average_app_work_ms,
-                budget_ms - app_work_p50_ms,
-                budget_ms - app_work_p95_ms,
-                budget_ms - app_work_p99_ms,
-                budget_ms - max_app_work_ms,
-                self.app_over_period_frames,
-                app_over_period_pct
+                wait_frame.average_ms,
+                wait_frame.p50_ms,
+                wait_frame.p95_ms,
+                wait_frame.max_ms,
+                app_work.average_ms,
+                app_work.min_ms,
+                app_work.p50_ms,
+                app_work.p95_ms,
+                app_work.p99_ms,
+                app_work.max_ms,
+                headroom.average_ms,
+                headroom.p50_ms,
+                headroom.p05_ms,
+                headroom.p01_ms,
+                headroom.min_ms,
+                frame_accounting.app_over_period_frames,
+                frame_accounting.app_over_period_pct
             );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_CPU_BLOCKED sample_seconds={:.3} mode={} render_path={} frames={} valid_frames={} valid_pct={:.1} app_work_avg_ms={:.3} thread_cpu_avg_ms={:.3} thread_cpu_p50_ms={:.3} thread_cpu_p95_ms={:.3} thread_cpu_p99_ms={:.3} thread_cpu_max_ms={:.3} blocked_avg_ms={:.3} blocked_p50_ms={:.3} blocked_p95_ms={:.3} blocked_p99_ms={:.3} blocked_max_ms={:.3}",
@@ -4219,21 +4179,21 @@ mod android {
                 self.mode_label,
                 self.render_path.label(),
                 frame_count,
-                self.thread_cpu_valid_frames,
+                thread_cpu_valid_frames,
                 thread_cpu_valid_pct,
-                average_app_work_ms,
-                average_thread_cpu_ms,
-                thread_cpu_p50_ms,
-                thread_cpu_p95_ms,
-                thread_cpu_p99_ms,
-                thread_cpu_max_ms,
-                average_blocked_ms,
-                blocked_p50_ms,
-                blocked_p95_ms,
-                blocked_p99_ms,
-                blocked_max_ms
+                app_work.average_ms,
+                thread_cpu.average_ms,
+                thread_cpu.p50_ms,
+                thread_cpu.p95_ms,
+                thread_cpu.p99_ms,
+                thread_cpu.max_ms,
+                blocked.average_ms,
+                blocked.p50_ms,
+                blocked.p95_ms,
+                blocked.p99_ms,
+                blocked.max_ms
             );
-            self.log_worst_frames(budget_ms);
+            self.log_worst_frames(&frame_accounting);
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_STAGES max_wait_begin_ms={:.3} max_wait_frame_ms={:.3} max_begin_frame_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3}",
                 self.max_wait_begin_ms,
@@ -4698,26 +4658,20 @@ mod android {
             );
         }
 
-        fn record_worst_frame(&mut self, snapshot: AndroidXrWorstFrameSnapshot) {
-            self.worst_frames.push(snapshot);
-            self.worst_frames.sort_by(|a, b| {
-                b.app_work_ms
-                    .total_cmp(&a.app_work_ms)
-                    .then_with(|| b.frame_wall_ms.total_cmp(&a.frame_wall_ms))
-                    .then_with(|| a.sample_frame.cmp(&b.sample_frame))
-            });
-            self.worst_frames
-                .truncate(ANDROID_XR_PERF_WORST_FRAME_COUNT);
-        }
-
-        fn log_worst_frames(&self, budget_ms: f64) {
-            for (index, snapshot) in self.worst_frames.iter().enumerate() {
-                let rank = index + 1;
+        fn log_worst_frames(&self, frame_accounting: &FrameSummaryReport) {
+            for detail in &frame_accounting.worst_frames {
+                let Some(snapshot) = self
+                    .frame_details
+                    .iter()
+                    .find(|snapshot| snapshot.sample_frame == detail.frame_index)
+                else {
+                    continue;
+                };
+                let rank = detail.rank;
                 let timing = snapshot.timing;
                 let render = timing.render;
                 let summary = snapshot.summary;
                 let upload = summary.map(|summary| summary.upload);
-                let headroom_ms = budget_ms - snapshot.app_work_ms;
                 let known_render_ms = render.locate_views_ms
                     + render.locomotion_ms
                     + render.acquire_left_ms
@@ -4736,19 +4690,20 @@ mod android {
                     - eye_poll_wait_ms)
                     .max(0.0);
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME rank={} sample_frame={} rendered={} frame_wall_ms={:.3} wait_frame_ms={:.3} app_work_ms={:.3} thread_cpu_valid={} thread_cpu_ms={:.3} blocked_ms={:.3} headroom_ms={:.3} over_budget={} over_2x_budget={} wait_begin_ms={:.3} begin_frame_ms={:.3} controller_poll_ms={:.3} render_mclone_frame_ms={:.3} locate_views_ms={:.3} locomotion_ms={:.3} acquire_left_ms={:.3} acquire_right_ms={:.3} release_eyes_ms={:.3} end_frame_ms={:.3}",
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME rank={} sample_frame={} rendered={} frame_wall_ms={:.3} wait_frame_ms={:.3} app_work_ms={:.3} thread_cpu_valid={} thread_cpu_ms={:.3} blocked_ms={:.3} headroom_ms={:.3} over_budget={} {}={} wait_begin_ms={:.3} begin_frame_ms={:.3} controller_poll_ms={:.3} render_mclone_frame_ms={:.3} locate_views_ms={:.3} locomotion_ms={:.3} acquire_left_ms={:.3} acquire_right_ms={:.3} release_eyes_ms={:.3} end_frame_ms={:.3}",
                     rank,
-                    snapshot.sample_frame,
-                    summary.is_some(),
-                    snapshot.frame_wall_ms,
-                    snapshot.wait_frame_ms,
-                    snapshot.app_work_ms,
-                    snapshot.thread_cpu_valid,
-                    snapshot.thread_cpu_ms,
-                    snapshot.blocked_ms,
-                    headroom_ms,
-                    snapshot.frame_wall_ms > budget_ms,
-                    snapshot.frame_wall_ms > budget_ms * 2.0,
+                    detail.frame_index,
+                    detail.rendered,
+                    detail.frame_wall_ms,
+                    detail.wait_ms,
+                    detail.app_work_ms,
+                    detail.thread_cpu_ms.is_some(),
+                    detail.thread_cpu_ms.unwrap_or(0.0),
+                    detail.blocked_ms.unwrap_or(0.0),
+                    detail.headroom_ms.unwrap_or(0.0),
+                    detail.over_single_budget(),
+                    mclone_diagnostics::legacy_json_keys::OVER_DOUBLE_BUDGET,
+                    detail.over_double_budget(),
                     timing.wait_begin_ms,
                     timing.begin_frame_ms,
                     timing.controller_poll_ms,
@@ -4763,7 +4718,7 @@ mod android {
                 log::info!(
                     "MCLONE_ANDROID_XR_PERF_WORST_FRAME_LOCOMOTION rank={} sample_frame={} input_ms={:.3} camera_apply_ms={:.3} commit_ms={:.3} commit_server_command_ms={:.3} commit_position_updates_ms={:.3} commit_interest_ms={:.3} gameplay_interaction_ms={:.3}",
                     rank,
-                    snapshot.sample_frame,
+                    detail.frame_index,
                     render.locomotion_input_ms,
                     render.locomotion_camera_apply_ms,
                     render.locomotion_commit_ms,
@@ -5862,19 +5817,6 @@ mod android {
         start.elapsed().as_secs_f64() * 1000.0
     }
 
-    #[allow(unsafe_code)]
-    fn thread_cpu_time_ms() -> Option<f64> {
-        let mut time = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
-        if result != 0 {
-            return None;
-        }
-        Some(time.tv_sec as f64 * 1000.0 + time.tv_nsec as f64 / 1_000_000.0)
-    }
-
     fn copy_locomotion_timing(
         timing: &mut AndroidXrRenderFrameTiming,
         locomotion: mclone_xr_scene::XrLocomotionTiming,
@@ -5902,24 +5844,6 @@ mod android {
         timing.locomotion_commit_position_updates_ms = locomotion.commit_position_updates_ms;
         timing.locomotion_commit_interest_ms = locomotion.commit_interest_ms;
         timing.locomotion_gameplay_interaction_ms = locomotion.gameplay_interaction_ms;
-    }
-
-    fn average_ms(samples: &[f64]) -> f64 {
-        if samples.is_empty() {
-            0.0
-        } else {
-            samples.iter().sum::<f64>() / samples.len() as f64
-        }
-    }
-
-    fn percentile(sorted: &[f64], percentile: f64) -> f64 {
-        if sorted.is_empty() {
-            return 0.0;
-        }
-        let index = ((sorted.len() as f64 * percentile).ceil() as usize)
-            .saturating_sub(1)
-            .min(sorted.len() - 1);
-        sorted[index]
     }
 
     fn log_openxr_host_event(event: OpenXrHostEvent) {
