@@ -1,13 +1,19 @@
 use std::{
+    cell::RefCell,
+    collections::BTreeMap,
     env,
     process::Command,
+    rc::Rc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use mclone_core::ChunkPos;
 use mclone_protocol::ChunkView;
-use mclone_server::{ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics};
+use mclone_server::{
+    ChunkRecord, ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, ChunkStoreResult,
+    EntityChunkRecord, WorldStore,
+};
 
 const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_CHUNK_X: i32 = 0;
@@ -37,86 +43,46 @@ fn run() -> Result<(), String> {
         chunk_tracking_radius,
     };
 
-    let mut scheduler = ChunkScheduler::new(config.seed);
-    scheduler.set_lighting_enabled(config.lighting_enabled);
-
-    let total_start = Instant::now();
-    let apply_start = Instant::now();
-    let initial_events = scheduler
-        .apply_interest(view.clone())
-        .map_err(|error| error.to_string())?;
-    let apply_interest_ms = elapsed_ms(apply_start.elapsed());
-
-    let mut counters = LoopCounters::default();
-    counters.observe_events(&initial_events);
-
-    let mut first_view_ready_ms = None;
-    let max_duration = Duration::from_secs(config.max_seconds);
-    loop {
-        let metrics = scheduler.metrics();
-        let view_ready = metrics.client_visible_chunks == target_chunks;
-        if view_ready && first_view_ready_ms.is_none() {
-            first_view_ready_ms = Some(elapsed_ms(total_start.elapsed()));
+    let mut prewarm = None;
+    let mut stored_chunk_records = None;
+    let measured = match config.mode {
+        BenchMode::Fresh => {
+            let mut scheduler = ChunkScheduler::new(config.seed);
+            scheduler.set_lighting_enabled(config.lighting_enabled);
+            run_scheduler_load(&config, &view, target_chunks, scheduler)?
         }
-        if view_ready && server_idle(&scheduler) {
-            let total_elapsed_ms = elapsed_ms(total_start.elapsed());
-            let report = Report {
-                config,
-                center,
-                render_distance: view.render_distance,
-                chunk_tracking_radius,
-                target_chunks,
-                apply_interest_ms,
-                first_view_ready_ms,
-                total_elapsed_ms,
-                counters,
-                final_metrics: metrics,
-            };
-            report.print_json();
-            return Ok(());
-        }
-        if total_start.elapsed() > max_duration {
-            return Err(format!(
-                "timed out after {:.3}s waiting for render_distance={} tracking_radius={} ready={}/{} pending_jobs={} pending_publications={} pending_loads={} pending_saves={}",
-                elapsed_ms(total_start.elapsed()) / 1000.0,
-                view.render_distance,
-                view.chunk_tracking_radius,
-                metrics.client_visible_chunks,
-                target_chunks,
-                scheduler.pending_job_count(),
-                scheduler.pending_publication_count(),
-                scheduler.pending_persistence_load_count(),
-                scheduler.pending_persistence_save_count()
-            ));
-        }
+        BenchMode::PersistedMemoryReload => {
+            let store = SharedMemoryWorldStore::new();
+            let mut prewarm_scheduler =
+                ChunkScheduler::with_world_store(config.seed, Box::new(store.clone()));
+            prewarm_scheduler.set_lighting_enabled(config.lighting_enabled);
+            let prewarm_report =
+                run_scheduler_load(&config, &view, target_chunks, prewarm_scheduler)?;
+            stored_chunk_records = Some(store.chunk_count());
+            prewarm = Some(prewarm_report);
 
-        match config.poll_mode {
-            PollMode::Completion => wait_for_next_completion(&mut scheduler, &mut counters),
-            PollMode::Sleep => thread::sleep(Duration::from_millis(1)),
-            PollMode::Spin => {}
+            let mut reload_scheduler =
+                ChunkScheduler::with_world_store(config.seed, Box::new(store));
+            reload_scheduler.set_lighting_enabled(config.lighting_enabled);
+            let reload_report =
+                run_scheduler_load(&config, &view, target_chunks, reload_scheduler)?;
+            validate_persisted_reload(&reload_report)?;
+            reload_report
         }
+    };
 
-        let poll_start = Instant::now();
-        let events = scheduler.poll().map_err(|error| error.to_string())?;
-        let poll_elapsed_ms = elapsed_ms(poll_start.elapsed());
-        counters.polls = counters.polls.saturating_add(1);
-        counters.poll_call_ms += poll_elapsed_ms;
-        counters.max_poll_call_ms = counters.max_poll_call_ms.max(poll_elapsed_ms);
-        if events.is_empty() {
-            counters.empty_polls = counters.empty_polls.saturating_add(1);
-        } else {
-            counters.publish_polls = counters.publish_polls.saturating_add(1);
-        }
-        counters.observe_events(&events);
-
-        let unload_start = Instant::now();
-        let unloaded = scheduler
-            .process_pending_unloads(usize::MAX)
-            .map_err(|error| error.to_string())?;
-        counters.pending_unloads_processed =
-            counters.pending_unloads_processed.saturating_add(unloaded);
-        counters.pending_unload_ms += elapsed_ms(unload_start.elapsed());
-    }
+    let report = Report {
+        config,
+        center,
+        render_distance: view.render_distance,
+        chunk_tracking_radius,
+        target_chunks,
+        stored_chunk_records,
+        prewarm,
+        measured,
+    };
+    report.print_json();
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -129,6 +95,7 @@ struct Config {
     lighting_enabled: bool,
     poll_mode: PollMode,
     max_seconds: u64,
+    mode: BenchMode,
 }
 
 impl Config {
@@ -142,6 +109,7 @@ impl Config {
             lighting_enabled: true,
             poll_mode: DEFAULT_POLL_MODE,
             max_seconds: DEFAULT_MAX_SECONDS,
+            mode: BenchMode::Fresh,
         };
 
         let mut args = args.into_iter();
@@ -161,6 +129,9 @@ impl Config {
                 "--disable-lighting" => config.lighting_enabled = false,
                 "--enable-lighting" => config.lighting_enabled = true,
                 "--poll-mode" => config.poll_mode = parse_next(&mut args, "--poll-mode")?,
+                "--persisted-memory-reload" => {
+                    config.mode = BenchMode::PersistedMemoryReload;
+                }
                 "--max-seconds" => config.max_seconds = parse_next(&mut args, "--max-seconds")?,
                 "--help" | "-h" => return Err(usage()),
                 _ => return Err(format!("unknown argument {arg}\n{}", usage())),
@@ -178,6 +149,21 @@ impl Config {
         }
 
         Ok(config)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BenchMode {
+    Fresh,
+    PersistedMemoryReload,
+}
+
+impl BenchMode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::PersistedMemoryReload => "persisted_memory_reload",
+        }
     }
 }
 
@@ -210,6 +196,50 @@ impl std::str::FromStr for PollMode {
                 "invalid poll mode `{value}`; expected completion, sleep, or spin"
             )),
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SharedMemoryWorldStore {
+    chunks: Rc<RefCell<BTreeMap<ChunkPos, ChunkRecord>>>,
+    entity_chunks: Rc<RefCell<BTreeMap<ChunkPos, EntityChunkRecord>>>,
+}
+
+impl SharedMemoryWorldStore {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn chunk_count(&self) -> usize {
+        self.chunks.borrow().len()
+    }
+}
+
+impl WorldStore for SharedMemoryWorldStore {
+    fn supports_entity_chunks(&self) -> bool {
+        true
+    }
+
+    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+        Ok(self.chunks.borrow().get(&pos).cloned())
+    }
+
+    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+        self.chunks
+            .borrow_mut()
+            .insert(record.pos(), record.clone());
+        Ok(())
+    }
+
+    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Ok(self.entity_chunks.borrow().get(&pos).cloned())
+    }
+
+    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+        self.entity_chunks
+            .borrow_mut()
+            .insert(record.pos, record.clone());
+        Ok(())
     }
 }
 
@@ -256,6 +286,51 @@ impl LoopCounters {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct LoadRunReport {
+    apply_interest_ms: f64,
+    first_view_ready_ms: Option<f64>,
+    total_elapsed_ms: f64,
+    counters: LoopCounters,
+    final_metrics: ChunkSchedulerMetrics,
+}
+
+fn print_load_run_json(
+    indent: &str,
+    name: &str,
+    report: LoadRunReport,
+    trailing_comma: bool,
+    target_chunks: usize,
+) {
+    println!("{indent}\"{name}\": {{");
+    println!(
+        "{indent}  \"apply_interest_ms\": {:.3},",
+        report.apply_interest_ms
+    );
+    match report.first_view_ready_ms {
+        Some(ms) => println!("{indent}  \"first_view_ready_ms\": {ms:.3},"),
+        None => println!("{indent}  \"first_view_ready_ms\": null,"),
+    }
+    println!(
+        "{indent}  \"total_elapsed_ms\": {:.3},",
+        report.total_elapsed_ms
+    );
+    println!(
+        "{indent}  \"view_ready_chunks_per_second\": {:.3},",
+        report
+            .first_view_ready_ms
+            .map_or(0.0, |ms| chunks_per_second(target_chunks, ms))
+    );
+    println!(
+        "{indent}  \"settled_chunks_per_second\": {:.3},",
+        chunks_per_second(target_chunks, report.total_elapsed_ms)
+    );
+    print_counters_json(&format!("{indent}  "), report.counters, true);
+    print_metrics_json(&format!("{indent}  "), report.final_metrics, false);
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}}}{suffix}");
+}
+
 #[derive(Debug)]
 struct Report {
     config: Config,
@@ -263,11 +338,9 @@ struct Report {
     render_distance: u32,
     chunk_tracking_radius: u32,
     target_chunks: usize,
-    apply_interest_ms: f64,
-    first_view_ready_ms: Option<f64>,
-    total_elapsed_ms: f64,
-    counters: LoopCounters,
-    final_metrics: ChunkSchedulerMetrics,
+    stored_chunk_records: Option<usize>,
+    prewarm: Option<LoadRunReport>,
+    measured: LoadRunReport,
 }
 
 impl Report {
@@ -287,25 +360,142 @@ impl Report {
         println!("  \"target_chunks\": {},", self.target_chunks);
         println!("  \"lighting_enabled\": {},", self.config.lighting_enabled);
         println!("  \"poll_mode\": \"{}\",", self.config.poll_mode.as_str());
-        println!("  \"apply_interest_ms\": {:.3},", self.apply_interest_ms);
-        match self.first_view_ready_ms {
+        println!("  \"mode\": \"{}\",", self.config.mode.as_str());
+        match self.stored_chunk_records {
+            Some(count) => println!("  \"stored_chunk_records\": {count},"),
+            None => println!("  \"stored_chunk_records\": null,"),
+        }
+        if let Some(prewarm) = self.prewarm {
+            print_load_run_json("  ", "prewarm", prewarm, true, self.target_chunks);
+        } else {
+            println!("  \"prewarm\": null,");
+        }
+        println!(
+            "  \"apply_interest_ms\": {:.3},",
+            self.measured.apply_interest_ms
+        );
+        match self.measured.first_view_ready_ms {
             Some(ms) => println!("  \"first_view_ready_ms\": {ms:.3},"),
             None => println!("  \"first_view_ready_ms\": null,"),
         }
-        println!("  \"total_elapsed_ms\": {:.3},", self.total_elapsed_ms);
+        println!(
+            "  \"total_elapsed_ms\": {:.3},",
+            self.measured.total_elapsed_ms
+        );
         println!(
             "  \"view_ready_chunks_per_second\": {:.3},",
-            self.first_view_ready_ms
+            self.measured
+                .first_view_ready_ms
                 .map_or(0.0, |ms| chunks_per_second(self.target_chunks, ms))
         );
         println!(
             "  \"settled_chunks_per_second\": {:.3},",
-            chunks_per_second(self.target_chunks, self.total_elapsed_ms)
+            chunks_per_second(self.target_chunks, self.measured.total_elapsed_ms)
         );
-        print_counters_json("  ", self.counters, true);
-        print_metrics_json("  ", self.final_metrics, false);
+        print_counters_json("  ", self.measured.counters, true);
+        print_metrics_json("  ", self.measured.final_metrics, false);
         println!("}}");
     }
+}
+
+fn run_scheduler_load(
+    config: &Config,
+    view: &ChunkView,
+    target_chunks: usize,
+    mut scheduler: ChunkScheduler,
+) -> Result<LoadRunReport, String> {
+    let total_start = Instant::now();
+    let apply_start = Instant::now();
+    let initial_events = scheduler
+        .apply_interest(view.clone())
+        .map_err(|error| error.to_string())?;
+    let apply_interest_ms = elapsed_ms(apply_start.elapsed());
+
+    let mut counters = LoopCounters::default();
+    counters.observe_events(&initial_events);
+
+    let mut first_view_ready_ms = None;
+    let max_duration = Duration::from_secs(config.max_seconds);
+    loop {
+        let metrics = scheduler.metrics();
+        let view_ready = metrics.client_visible_chunks == target_chunks;
+        if view_ready && first_view_ready_ms.is_none() {
+            first_view_ready_ms = Some(elapsed_ms(total_start.elapsed()));
+        }
+        if view_ready && server_idle(&scheduler) {
+            return Ok(LoadRunReport {
+                apply_interest_ms,
+                first_view_ready_ms,
+                total_elapsed_ms: elapsed_ms(total_start.elapsed()),
+                counters,
+                final_metrics: metrics,
+            });
+        }
+        if total_start.elapsed() > max_duration {
+            return Err(format!(
+                "timed out after {:.3}s waiting for render_distance={} tracking_radius={} ready={}/{} pending_jobs={} pending_publications={} pending_loads={} pending_saves={}",
+                elapsed_ms(total_start.elapsed()) / 1000.0,
+                view.render_distance,
+                view.chunk_tracking_radius,
+                metrics.client_visible_chunks,
+                target_chunks,
+                scheduler.pending_job_count(),
+                scheduler.pending_publication_count(),
+                scheduler.pending_persistence_load_count(),
+                scheduler.pending_persistence_save_count()
+            ));
+        }
+
+        match config.poll_mode {
+            PollMode::Completion => wait_for_next_completion(&mut scheduler, &mut counters),
+            PollMode::Sleep => thread::sleep(Duration::from_millis(1)),
+            PollMode::Spin => {}
+        }
+
+        let poll_start = Instant::now();
+        let events = scheduler.poll().map_err(|error| error.to_string())?;
+        let poll_elapsed_ms = elapsed_ms(poll_start.elapsed());
+        counters.polls = counters.polls.saturating_add(1);
+        counters.poll_call_ms += poll_elapsed_ms;
+        counters.max_poll_call_ms = counters.max_poll_call_ms.max(poll_elapsed_ms);
+        if events.is_empty() {
+            counters.empty_polls = counters.empty_polls.saturating_add(1);
+        } else {
+            counters.publish_polls = counters.publish_polls.saturating_add(1);
+        }
+        counters.observe_events(&events);
+
+        let unload_start = Instant::now();
+        let unloaded = scheduler
+            .process_pending_unloads(usize::MAX)
+            .map_err(|error| error.to_string())?;
+        counters.pending_unloads_processed =
+            counters.pending_unloads_processed.saturating_add(unloaded);
+        counters.pending_unload_ms += elapsed_ms(unload_start.elapsed());
+    }
+}
+
+fn validate_persisted_reload(report: &LoadRunReport) -> Result<(), String> {
+    let metrics = report.final_metrics;
+    if metrics.completed_jobs != 0 {
+        return Err(format!(
+            "persisted reload unexpectedly completed {} worldgen jobs",
+            metrics.completed_jobs
+        ));
+    }
+    if metrics.completed_light_statuses != 0 {
+        return Err(format!(
+            "persisted reload unexpectedly completed {} light statuses",
+            metrics.completed_light_statuses
+        ));
+    }
+    if metrics.total_light_status_compute_us != 0 {
+        return Err(format!(
+            "persisted reload unexpectedly spent {:.3}ms computing light",
+            micros_to_ms(metrics.total_light_status_compute_us)
+        ));
+    }
+    Ok(())
 }
 
 fn wait_for_next_completion(scheduler: &mut ChunkScheduler, counters: &mut LoopCounters) {
@@ -493,7 +683,7 @@ fn parse_bool_next(args: &mut impl Iterator<Item = String>, flag: &str) -> Resul
 }
 
 fn usage() -> String {
-    "usage: scheduler_loading_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--poll-mode completion|sleep|spin] [--max-seconds N]"
+    "usage: scheduler_loading_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--poll-mode completion|sleep|spin] [--persisted-memory-reload] [--max-seconds N]"
         .to_owned()
 }
 

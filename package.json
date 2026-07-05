@@ -11,6 +11,7 @@
     "native:scheduler:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke --",
     "native:scheduler-loading:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 5 --max-seconds 60",
     "native:scheduler-loading:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf --",
+    "native:scheduler-loading:persisted-memory:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --persisted-memory-reload",
     "native:dedicated:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-dedicated-server -- --multi-client-smoke",
     "native:worldgen:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",

@@ -190,6 +190,21 @@ full-view readiness, and render quiescence. It is valid to use raw/server
 ceiling lanes to identify headroom; it is not valid to optimize for them alone
 without rerunning desktop-shaped and Quest guardrail lanes.
 
+**Persisted and mesh-only lanes:** the next separation pass should add
+already-generated inputs rather than continuing to infer them indirectly. The
+scheduler-only in-memory persisted reload mode is now implemented: pass 1
+generates and lights the requested view into shared `ChunkRecord`s, pass 2
+reloads the same view from that store and asserts worldgen/light work stays at
+zero. RD10 reload from `625` in-memory records reached view-ready in `0.523s`
+(`1012.1` chunks/sec) with `0` worldgen jobs and `0` light statuses. That
+isolates scheduler load/publication over already-lit chunks without disk IO.
+Next, add a temp SQLite persisted reload lane using the normal world-dir path
+so encode/decode/storage overhead is measured. Then split render work into mesh
+CPU-only (loaded snapshots -> section meshes, no GPU) and GPU upload-only
+(prebuilt meshes -> `wgpu` upload). Once those desktop lanes are understood,
+add a Quest persisted-world guardrail so headset frame pacing can be measured
+without generation/light noise.
+
 ### Mesh drain: admission/scan-bound, not worker-bound (measured)
 
 Single-worker cached-section throughput falls `2,093` → `889` → `465`
@@ -479,6 +494,13 @@ instrumentation to watch it:
   lighting off is `126.7` chunks/sec, and scheduler-only with lighting on is
   `40.6` chunks/sec. This proves the desktop-shaped `~50` chunks/sec result is
   not a hardware ceiling.
+- [x] Add scheduler-only in-memory persisted reload mode: RD10 reload from
+  `625` already-generated/lit in-memory records reaches view-ready in `0.523s`
+  (`1012.1` chunks/sec) with `0` worldgen jobs and `0` light statuses.
+- [ ] Add scheduler-only temp SQLite persisted reload mode to price the real
+  persistence encode/decode/storage path separately from generation/light.
+- [ ] Add mesh CPU-only and GPU upload-only lanes so render quiescence can be
+  split without server generation or light in the sample.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
@@ -536,6 +558,11 @@ inference:
   yes for desktop-shaped streaming tail, not for full-view readiness. Budget
   `4` plus workers `2` cuts RD10 quiescence from `20.089s` to `11.412s`, while
   workers `4` is flat.
+- How much of already-generated startup is persistence/load/publication versus
+  mesh/upload/render? Current answer: unmeasured. Add in-memory persisted and
+  temp SQLite scheduler-only reload lanes first, then mesh CPU-only and GPU
+  upload-only lanes. The in-memory server-only half now measures RD10 reload at
+  `0.523s` view-ready from `625` records; temp SQLite remains open.
 
 ## Non-Goals
 
