@@ -1,12 +1,11 @@
+use crate::client_session_policy::{
+    ClientSessionActionContext, ClientSessionEffects, client_session_effects_for_action,
+};
 use crate::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use crate::flat_client_catalog::{
     FlatClientCatalogActionContext, FlatClientCatalogController, FlatClientCatalogEffects,
-};
-use crate::flat_client_session::{
-    FlatClientSessionActionContext, FlatClientSessionEffects,
-    flat_client_session_effects_for_action,
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
@@ -107,9 +106,9 @@ impl ClientExperienceController {
             | GameUiAction::BackToTitle
             | GameUiAction::QuitToTitle
             | GameUiAction::Quit => {
-                effects.session = flat_client_session_effects_for_action(
+                effects.session = client_session_effects_for_action(
                     action,
-                    FlatClientSessionActionContext {
+                    ClientSessionActionContext {
                         next_new_world_seed: context.next_new_world_seed,
                         current_join_remote_addr: context.current_join_remote_addr,
                         fallback_remote_addr: context.fallback_remote_addr,
@@ -184,7 +183,7 @@ impl Default for ClientExperienceActionContext<'static> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClientExperienceEffects {
     pub catalog: FlatClientCatalogEffects,
-    pub session: FlatClientSessionEffects,
+    pub session: ClientSessionEffects,
     pub settings: ClientExperienceSettingsEffects,
     pub gameplay: Vec<ClientExperienceGameplayEffect>,
     pub projection: Vec<ClientExperienceProjectionEffect>,

@@ -12,17 +12,17 @@ use mclone_app_runtime::client_experience::{
     ClientExperienceSettingsProfile, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection,
 };
+use mclone_app_runtime::client_session_policy::{
+    ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
+    ClientSessionTransitionEffects, ClientSessionUiEffects, client_session_failed_start_ui_effects,
+    client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
+    client_session_status_projection,
+};
 use mclone_app_runtime::far_lod::{
     FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
     MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use mclone_app_runtime::flat_client_catalog::FlatClientCatalogEffects;
-use mclone_app_runtime::flat_client_session::{
-    FlatClientSessionEffects, FlatClientSessionHostAction, FlatClientSessionProjection,
-    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
-    flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
-    flat_client_session_projection, flat_client_should_clear_inactive_session_status,
-};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view_with_prepared_stereo_draw_in_slot,
@@ -4531,8 +4531,8 @@ where
         ClientExperienceSettingsState::from(self.current_ui_render_state())
     }
 
-    fn session_projection(&self) -> FlatClientSessionProjection {
-        flat_client_session_projection(
+    fn session_projection(&self) -> ClientSessionStatusProjection {
+        client_session_status_projection(
             self.session.status(),
             self.status_overlay.clone(),
             self.startup_progress_overlay(),
@@ -4560,7 +4560,7 @@ where
     }
 
     fn clear_inactive_session_status(&mut self) {
-        if flat_client_should_clear_inactive_session_status(self.session.state()) {
+        if client_session_should_clear_inactive_status(self.session.state()) {
             self.status_overlay = StatusOverlay::hidden();
         }
     }
@@ -4958,7 +4958,7 @@ where
                 log::error!("failed to start XR session {request:?}: {error:#}");
                 self.session
                     .fail_start(SessionFailure::new(request.default_failure_message()));
-                self.apply_xr_session_ui_effects(flat_client_failed_start_ui_effects(
+                self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(
                     &request, false,
                 ));
                 self.menu_panel_anchor = XrUiPanelAnchor::Head;
@@ -5076,7 +5076,7 @@ where
                 self.session.fail_start(SessionFailure::new(
                     failed_request.default_failure_message(),
                 ));
-                self.apply_xr_session_ui_effects(flat_client_failed_start_ui_effects(
+                self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(
                     &failed_request,
                     false,
                 ));
@@ -5230,7 +5230,7 @@ where
         self.session.fail_start(SessionFailure::new(
             startup.request.default_failure_message(),
         ));
-        self.apply_xr_session_ui_effects(flat_client_failed_start_ui_effects(
+        self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(
             &startup.request,
             false,
         ));
@@ -5428,7 +5428,7 @@ where
 
     fn apply_xr_session_effects(
         &mut self,
-        effects: FlatClientSessionEffects,
+        effects: ClientSessionEffects,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
@@ -5449,11 +5449,11 @@ where
         }
         if let Some(host_action) = effects.host_action {
             match host_action {
-                FlatClientSessionHostAction::QuitToTitle => {
-                    let transition = flat_client_quit_to_title_transition(self.session.state());
+                ClientSessionHostAction::QuitToTitle => {
+                    let transition = client_session_quit_to_title_transition(self.session.state());
                     self.apply_xr_session_transition_effects(transition, device, queue)?;
                 }
-                FlatClientSessionHostAction::Quit => {
+                ClientSessionHostAction::Quit => {
                     log::info!("XR menu quit action ignored by shared scene");
                 }
             }
@@ -5463,7 +5463,7 @@ where
 
     fn apply_xr_session_transition_effects(
         &mut self,
-        effects: FlatClientSessionTransitionEffects,
+        effects: ClientSessionTransitionEffects,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<()> {
@@ -5626,7 +5626,7 @@ where
         }
     }
 
-    fn apply_xr_session_ui_effects(&mut self, effects: FlatClientSessionUiEffects) {
+    fn apply_xr_session_ui_effects(&mut self, effects: ClientSessionUiEffects) {
         if let Some(seed) = effects.new_world_seed {
             self.ui.set_new_world_seed(seed);
         }

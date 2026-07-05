@@ -10,17 +10,16 @@ use mclone_app_runtime::client_experience::{
     ClientExperienceSettingEffect, ClientExperienceSettingsProfile, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection,
 };
+use mclone_app_runtime::client_session_policy::{
+    ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
+    ClientSessionTransitionEffects, ClientSessionUiEffects, client_session_failed_start_ui_effects,
+    client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
+    client_session_start_transition, client_session_status_projection,
+};
 use mclone_app_runtime::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use mclone_app_runtime::flat_client_catalog::{FlatClientCatalogEffects, FlatClientCatalogRequest};
-use mclone_app_runtime::flat_client_session::{
-    FlatClientSessionEffects, FlatClientSessionHostAction, FlatClientSessionProjection,
-    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
-    flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
-    flat_client_session_projection, flat_client_should_clear_inactive_session_status,
-    flat_client_start_session_transition,
-};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
@@ -168,7 +167,7 @@ pub(crate) struct FlatClientPendingSessionStart {
     pub(crate) arm_mouse_lock: bool,
     pub(crate) show_title_on_failure: bool,
     pub(crate) descriptor: Option<ActiveSessionDescriptor>,
-    pub(crate) transition: FlatClientSessionTransitionEffects,
+    pub(crate) transition: ClientSessionTransitionEffects,
 }
 
 #[derive(Debug)]
@@ -797,18 +796,18 @@ impl FlatClientDriver {
         request: &SessionStartRequest,
         show_title_on_failure: bool,
     ) {
-        self.apply_flat_client_session_ui_effects(flat_client_failed_start_ui_effects(
+        self.apply_client_session_ui_effects(client_session_failed_start_ui_effects(
             request,
             show_title_on_failure,
         ));
     }
 
-    pub(crate) fn quit_to_title_transition_effects(&self) -> FlatClientSessionTransitionEffects {
-        flat_client_quit_to_title_transition(self.session.state())
+    pub(crate) fn quit_to_title_transition_effects(&self) -> ClientSessionTransitionEffects {
+        client_session_quit_to_title_transition(self.session.state())
     }
 
-    pub(crate) fn session_projection(&self) -> FlatClientSessionProjection {
-        flat_client_session_projection(
+    pub(crate) fn session_projection(&self) -> ClientSessionStatusProjection {
+        client_session_status_projection(
             self.session.status(),
             self.status_overlay.clone(),
             self.startup_progress_overlay(),
@@ -828,7 +827,7 @@ impl FlatClientDriver {
     ) {
         let scene = self.scene.clone();
         let request = session_start_request_for_scene(&scene);
-        let transition = flat_client_start_session_transition(self.session.state());
+        let transition = client_session_start_transition(self.session.state());
         self.session.request_start(
             request,
             FlatClientPendingSessionStart {
@@ -844,7 +843,7 @@ impl FlatClientDriver {
     pub(crate) fn request_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
         let scene = self.local_world_scene(seed);
         let request = SessionStartRequest::new_seed_local_world(seed);
-        let transition = flat_client_start_session_transition(self.session.state());
+        let transition = client_session_start_transition(self.session.state());
         self.session.request_start(
             request,
             FlatClientPendingSessionStart {
@@ -865,7 +864,7 @@ impl FlatClientDriver {
         scene: SceneOptions,
         arm_mouse_lock: bool,
     ) {
-        let transition = flat_client_start_session_transition(self.session.state());
+        let transition = client_session_start_transition(self.session.state());
         self.session.request_start(
             request,
             FlatClientPendingSessionStart {
@@ -1011,7 +1010,7 @@ impl FlatClientDriver {
             result.session_start_queued = true;
             result.mouse_lock_requested = Some(false);
         }
-        self.apply_flat_client_session_effects(effects.session, arm_mouse_lock, result);
+        self.apply_client_session_effects(effects.session, arm_mouse_lock, result);
         if !self.apply_client_experience_settings_effects(effects.settings, result) {
             return false;
         }
@@ -1035,9 +1034,9 @@ impl FlatClientDriver {
         true
     }
 
-    fn apply_flat_client_session_effects(
+    fn apply_client_session_effects(
         &mut self,
-        effects: FlatClientSessionEffects,
+        effects: ClientSessionEffects,
         arm_mouse_lock: bool,
         result: &mut FlatClientUiActionResult,
     ) {
@@ -1071,8 +1070,8 @@ impl FlatClientDriver {
         }
         if let Some(host_action) = effects.host_action {
             result.host_action = Some(match host_action {
-                FlatClientSessionHostAction::QuitToTitle => FlatClientHostAction::QuitToTitle,
-                FlatClientSessionHostAction::Quit => FlatClientHostAction::Quit,
+                ClientSessionHostAction::QuitToTitle => FlatClientHostAction::QuitToTitle,
+                ClientSessionHostAction::Quit => FlatClientHostAction::Quit,
             });
         }
     }
@@ -1269,7 +1268,7 @@ impl FlatClientDriver {
         }
     }
 
-    fn apply_flat_client_session_ui_effects(&mut self, effects: FlatClientSessionUiEffects) {
+    fn apply_client_session_ui_effects(&mut self, effects: ClientSessionUiEffects) {
         if let Some(seed) = effects.new_world_seed {
             self.ui.set_new_world_seed(seed);
         }
@@ -1281,14 +1280,14 @@ impl FlatClientDriver {
         }
     }
 
-    pub(crate) fn apply_flat_client_session_transition_effects(
+    pub(crate) fn apply_client_session_transition_effects(
         &mut self,
-        effects: FlatClientSessionTransitionEffects,
+        effects: ClientSessionTransitionEffects,
     ) {
         if effects.clear_session {
             self.session.clear();
         }
-        self.apply_flat_client_session_ui_effects(effects.ui);
+        self.apply_client_session_ui_effects(effects.ui);
     }
 
     pub(crate) fn request_remote_session_start(
@@ -1300,7 +1299,7 @@ impl FlatClientDriver {
         let request = SessionStartRequest::JoinRemote {
             endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
         };
-        let transition = flat_client_start_session_transition(self.session.state());
+        let transition = client_session_start_transition(self.session.state());
         self.session.request_start(
             request,
             FlatClientPendingSessionStart {
@@ -1315,7 +1314,7 @@ impl FlatClientDriver {
     }
 
     pub(crate) fn clear_inactive_session_status(&mut self) {
-        if flat_client_should_clear_inactive_session_status(self.session.state()) {
+        if client_session_should_clear_inactive_status(self.session.state()) {
             self.session.clear();
         }
         self.status_overlay = StatusOverlay::hidden();

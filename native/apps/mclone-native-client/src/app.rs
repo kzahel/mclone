@@ -560,7 +560,7 @@ impl ChunkApp {
                         }
                     }
                     self.driver
-                        .apply_flat_client_session_transition_effects(transition);
+                        .apply_client_session_transition_effects(transition);
                 }
                 FlatClientHostAction::Quit => {
                     event_loop.exit();
@@ -2015,7 +2015,7 @@ mod tests {
             app.teardown_world().unwrap();
         }
         app.driver
-            .apply_flat_client_session_transition_effects(transition);
+            .apply_client_session_transition_effects(transition);
         assert_eq!(app.driver.ui_screen(), Some(GameScreen::Title));
         assert!(app.driver.runtime.is_none());
 
@@ -2099,7 +2099,7 @@ mod tests {
             app.teardown_world().unwrap();
         }
         app.driver
-            .apply_flat_client_session_transition_effects(transition);
+            .apply_client_session_transition_effects(transition);
         assert_eq!(app.driver.ui_screen(), Some(GameScreen::Title));
         assert!(app.driver.runtime.is_none());
 

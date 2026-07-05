@@ -15,15 +15,15 @@ use mclone_app_runtime::client_experience::{
     ClientExperienceSettingsProfile, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection,
 };
+use mclone_app_runtime::client_session_policy::{
+    ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
+    ClientSessionTransitionEffects, ClientSessionUiEffects, client_session_failed_start_ui_effects,
+    client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
+    client_session_start_transition, client_session_status_projection,
+    client_session_ui_effects_for_request,
+};
 use mclone_app_runtime::flat_client_catalog::{
     FlatClientCatalogEffects, FlatClientCatalogRequest, FlatClientCatalogSessionStart,
-};
-use mclone_app_runtime::flat_client_session::{
-    FlatClientSessionEffects, FlatClientSessionHostAction, FlatClientSessionProjection,
-    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
-    flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
-    flat_client_session_projection, flat_client_session_ui_effects_for_request,
-    flat_client_should_clear_inactive_session_status, flat_client_start_session_transition,
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -2627,8 +2627,8 @@ impl WebChunkRenderSession {
         bindgen_wasm_url: String,
     ) -> Result<JsValue, JsValue> {
         let request = SessionStartRequest::new_seed_local_world(seed);
-        let transition = flat_client_start_session_transition(self.session.state());
-        self.apply_flat_client_session_transition_effects(transition);
+        let transition = client_session_start_transition(self.session.state());
+        self.apply_client_session_transition_effects(transition);
         self.session.begin_start(request.clone());
         let config = WebIntegratedServerRunnerConfig::new(
             seed,
@@ -2682,8 +2682,8 @@ impl WebChunkRenderSession {
                 )));
             }
         };
-        let transition = flat_client_start_session_transition(self.session.state());
-        self.apply_flat_client_session_transition_effects(transition);
+        let transition = client_session_start_transition(self.session.state());
+        self.apply_client_session_transition_effects(transition);
         self.session.begin_start(request.clone());
         let config = WebIntegratedServerRunnerConfig::new(
             seed,
@@ -2713,8 +2713,8 @@ impl WebChunkRenderSession {
         let request = SessionStartRequest::JoinRemote {
             endpoint: RemoteSessionEndpoint::new(websocket_url.clone()),
         };
-        let transition = flat_client_start_session_transition(self.session.state());
-        self.apply_flat_client_session_transition_effects(transition);
+        let transition = client_session_start_transition(self.session.state());
+        self.apply_client_session_transition_effects(transition);
         self.session.begin_start(request.clone());
         self.ui.set_join_remote_addr(websocket_url.clone());
         match WebRuntime::websocket_remote(websocket_url).await {
@@ -3246,7 +3246,7 @@ impl WebChunkRenderSession {
         self.ui_event_result_to_js_value(handled, action, effects)
     }
 
-    fn apply_flat_client_session_effects(&mut self, effects: FlatClientSessionEffects) {
+    fn apply_client_session_effects(&mut self, effects: ClientSessionEffects) {
         if let Some(seed) = effects.new_world_seed {
             self.ui.set_new_world_seed(seed);
         }
@@ -3254,7 +3254,7 @@ impl WebChunkRenderSession {
             self.ui.set_join_remote_addr(addr);
         }
         if effects.clear_inactive_session_status
-            && flat_client_should_clear_inactive_session_status(self.session.state())
+            && client_session_should_clear_inactive_status(self.session.state())
         {
             self.session.clear();
         }
@@ -3264,16 +3264,16 @@ impl WebChunkRenderSession {
         }
         if let Some(host_action) = effects.host_action {
             match host_action {
-                FlatClientSessionHostAction::QuitToTitle => {
-                    let transition = flat_client_quit_to_title_transition(self.session.state());
-                    self.apply_flat_client_session_transition_effects(transition);
+                ClientSessionHostAction::QuitToTitle => {
+                    let transition = client_session_quit_to_title_transition(self.session.state());
+                    self.apply_client_session_transition_effects(transition);
                 }
-                FlatClientSessionHostAction::Quit => self.runtime.request_shutdown(),
+                ClientSessionHostAction::Quit => self.runtime.request_shutdown(),
             }
         }
     }
 
-    fn apply_flat_client_session_ui_effects(&mut self, effects: FlatClientSessionUiEffects) {
+    fn apply_client_session_ui_effects(&mut self, effects: ClientSessionUiEffects) {
         if let Some(seed) = effects.new_world_seed {
             self.ui.set_new_world_seed(seed);
         }
@@ -3285,17 +3285,14 @@ impl WebChunkRenderSession {
         }
     }
 
-    fn apply_flat_client_session_transition_effects(
-        &mut self,
-        effects: FlatClientSessionTransitionEffects,
-    ) {
+    fn apply_client_session_transition_effects(&mut self, effects: ClientSessionTransitionEffects) {
         if effects.teardown_world {
             self.runtime.request_shutdown();
         }
         if effects.clear_session {
             self.session.clear();
         }
-        self.apply_flat_client_session_ui_effects(effects.ui);
+        self.apply_client_session_ui_effects(effects.ui);
     }
 
     fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
@@ -3337,7 +3334,7 @@ impl WebChunkRenderSession {
     }
 
     fn apply_client_experience_effects(&mut self, effects: ClientExperienceEffects) {
-        self.apply_flat_client_session_effects(effects.session);
+        self.apply_client_session_effects(effects.session);
         self.apply_client_experience_settings_effects(effects.settings);
         for effect in effects.gameplay {
             match effect {
@@ -3896,8 +3893,8 @@ impl WebChunkRenderSession {
         self.runtime.runner_kind() == ServerRunnerKind::RemoteWebSocket
     }
 
-    fn session_projection(&self) -> FlatClientSessionProjection {
-        flat_client_session_projection(self.session.status(), self.status_overlay.clone(), None)
+    fn session_projection(&self) -> ClientSessionStatusProjection {
+        client_session_status_projection(self.session.status(), self.status_overlay.clone(), None)
     }
 
     fn effective_status_overlay(&self) -> StatusOverlay {
@@ -3951,7 +3948,7 @@ impl WebChunkRenderSession {
         web_sys::console::error_1(
             &format!("failed to start web session {request:?}: {error}").into(),
         );
-        self.apply_flat_client_session_ui_effects(flat_client_failed_start_ui_effects(
+        self.apply_client_session_ui_effects(client_session_failed_start_ui_effects(
             &request, false,
         ));
         self.session
@@ -3959,9 +3956,7 @@ impl WebChunkRenderSession {
     }
 
     fn reset_runtime_view_state(&mut self, request: &SessionStartRequest) {
-        self.apply_flat_client_session_ui_effects(flat_client_session_ui_effects_for_request(
-            request,
-        ));
+        self.apply_client_session_ui_effects(client_session_ui_effects_for_request(request));
         self.status_overlay = StatusOverlay::hidden();
         let movement_speed_multiplier = self.camera.movement_speed_multiplier();
         self.camera = EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER);

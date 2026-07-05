@@ -2,64 +2,64 @@ use crate::session::{GameSessionState, RemoteSessionEndpoint, SessionStartReques
 use mclone_ui::{GameScreen, GameUiAction, LoadingProgressOverlay, StatusOverlay};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FlatClientSessionActionContext<'a> {
+pub struct ClientSessionActionContext<'a> {
     pub next_new_world_seed: Option<i64>,
     pub current_join_remote_addr: &'a str,
     pub fallback_remote_addr: Option<&'a str>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FlatClientSessionEffects {
+pub struct ClientSessionEffects {
     pub new_world_seed: Option<i64>,
     pub join_remote_addr: Option<String>,
     pub session_start: Option<SessionStartRequest>,
-    pub host_action: Option<FlatClientSessionHostAction>,
+    pub host_action: Option<ClientSessionHostAction>,
     pub clear_inactive_session_status: bool,
 }
 
-impl FlatClientSessionEffects {
+impl ClientSessionEffects {
     pub fn is_empty(&self) -> bool {
         self == &Self::default()
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FlatClientSessionHostAction {
+pub enum ClientSessionHostAction {
     QuitToTitle,
     Quit,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FlatClientSessionUiEffects {
+pub struct ClientSessionUiEffects {
     pub new_world_seed: Option<i64>,
     pub join_remote_addr: Option<String>,
     pub screen: Option<GameScreen>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FlatClientSessionTransitionEffects {
+pub struct ClientSessionTransitionEffects {
     pub teardown_world: bool,
     pub clear_session: bool,
-    pub ui: FlatClientSessionUiEffects,
+    pub ui: ClientSessionUiEffects,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FlatClientSessionProjection {
+pub struct ClientSessionStatusProjection {
     pub status_overlay: StatusOverlay,
     pub loading_progress_overlay: Option<LoadingProgressOverlay>,
 }
 
-pub fn flat_client_session_effects_for_action(
+pub fn client_session_effects_for_action(
     action: GameUiAction,
-    context: FlatClientSessionActionContext<'_>,
-) -> FlatClientSessionEffects {
+    context: ClientSessionActionContext<'_>,
+) -> ClientSessionEffects {
     match action {
-        GameUiAction::OpenNewWorld | GameUiAction::RerollSeed => FlatClientSessionEffects {
+        GameUiAction::OpenNewWorld | GameUiAction::RerollSeed => ClientSessionEffects {
             new_world_seed: context.next_new_world_seed,
             clear_inactive_session_status: true,
-            ..FlatClientSessionEffects::default()
+            ..ClientSessionEffects::default()
         },
-        GameUiAction::OpenJoinRemote => FlatClientSessionEffects {
+        GameUiAction::OpenJoinRemote => ClientSessionEffects {
             join_remote_addr: Some(
                 context
                     .fallback_remote_addr
@@ -67,67 +67,67 @@ pub fn flat_client_session_effects_for_action(
                     .to_owned(),
             ),
             clear_inactive_session_status: true,
-            ..FlatClientSessionEffects::default()
+            ..ClientSessionEffects::default()
         },
-        GameUiAction::CreateWorld(seed) => FlatClientSessionEffects {
+        GameUiAction::CreateWorld(seed) => ClientSessionEffects {
             session_start: Some(SessionStartRequest::new_seed_local_world(seed)),
-            ..FlatClientSessionEffects::default()
+            ..ClientSessionEffects::default()
         },
-        GameUiAction::JoinRemote => FlatClientSessionEffects {
+        GameUiAction::JoinRemote => ClientSessionEffects {
             session_start: Some(SessionStartRequest::JoinRemote {
                 endpoint: RemoteSessionEndpoint::new(context.current_join_remote_addr.to_owned()),
             }),
-            ..FlatClientSessionEffects::default()
+            ..ClientSessionEffects::default()
         },
-        GameUiAction::BackToTitle => FlatClientSessionEffects {
+        GameUiAction::BackToTitle => ClientSessionEffects {
             clear_inactive_session_status: true,
-            ..FlatClientSessionEffects::default()
+            ..ClientSessionEffects::default()
         },
-        GameUiAction::QuitToTitle => FlatClientSessionEffects {
-            host_action: Some(FlatClientSessionHostAction::QuitToTitle),
-            ..FlatClientSessionEffects::default()
+        GameUiAction::QuitToTitle => ClientSessionEffects {
+            host_action: Some(ClientSessionHostAction::QuitToTitle),
+            ..ClientSessionEffects::default()
         },
-        GameUiAction::Quit => FlatClientSessionEffects {
-            host_action: Some(FlatClientSessionHostAction::Quit),
-            ..FlatClientSessionEffects::default()
+        GameUiAction::Quit => ClientSessionEffects {
+            host_action: Some(ClientSessionHostAction::Quit),
+            ..ClientSessionEffects::default()
         },
-        _ => FlatClientSessionEffects::default(),
+        _ => ClientSessionEffects::default(),
     }
 }
 
-pub fn flat_client_session_ui_effects_for_request(
+pub fn client_session_ui_effects_for_request(
     request: &SessionStartRequest,
-) -> FlatClientSessionUiEffects {
+) -> ClientSessionUiEffects {
     match request {
-        SessionStartRequest::CreateLocalWorld { options } => FlatClientSessionUiEffects {
+        SessionStartRequest::CreateLocalWorld { options } => ClientSessionUiEffects {
             new_world_seed: Some(options.seed),
-            ..FlatClientSessionUiEffects::default()
+            ..ClientSessionUiEffects::default()
         },
-        SessionStartRequest::OpenLocalWorld { .. } => FlatClientSessionUiEffects::default(),
-        SessionStartRequest::JoinRemote { endpoint } => FlatClientSessionUiEffects {
+        SessionStartRequest::OpenLocalWorld { .. } => ClientSessionUiEffects::default(),
+        SessionStartRequest::JoinRemote { endpoint } => ClientSessionUiEffects {
             join_remote_addr: Some(endpoint.address.clone()),
-            ..FlatClientSessionUiEffects::default()
+            ..ClientSessionUiEffects::default()
         },
-        SessionStartRequest::Unknown => FlatClientSessionUiEffects::default(),
+        SessionStartRequest::Unknown => ClientSessionUiEffects::default(),
     }
 }
 
-pub fn flat_client_failed_start_ui_effects(
+pub fn client_session_failed_start_ui_effects(
     request: &SessionStartRequest,
     show_title_on_failure: bool,
-) -> FlatClientSessionUiEffects {
-    let mut effects = flat_client_session_ui_effects_for_request(request);
+) -> ClientSessionUiEffects {
+    let mut effects = client_session_ui_effects_for_request(request);
     if show_title_on_failure {
         effects.screen = Some(GameScreen::Title);
     }
     effects
 }
 
-pub fn flat_client_session_status_overlay(status: Option<SessionStatus>) -> StatusOverlay {
-    flat_client_session_projection(status, StatusOverlay::hidden(), None).status_overlay
+pub fn client_session_status_overlay(status: Option<SessionStatus>) -> StatusOverlay {
+    client_session_status_projection(status, StatusOverlay::hidden(), None).status_overlay
 }
 
-pub fn flat_client_effective_status_overlay(
+pub fn client_session_effective_status_overlay(
     status: Option<SessionStatus>,
     fallback: StatusOverlay,
 ) -> StatusOverlay {
@@ -136,44 +136,42 @@ pub fn flat_client_effective_status_overlay(
     })
 }
 
-pub fn flat_client_session_projection(
+pub fn client_session_status_projection(
     status: Option<SessionStatus>,
     fallback_status: StatusOverlay,
     loading_progress_overlay: Option<LoadingProgressOverlay>,
-) -> FlatClientSessionProjection {
-    FlatClientSessionProjection {
-        status_overlay: flat_client_effective_status_overlay(status, fallback_status),
+) -> ClientSessionStatusProjection {
+    ClientSessionStatusProjection {
+        status_overlay: client_session_effective_status_overlay(status, fallback_status),
         loading_progress_overlay,
     }
 }
 
-pub fn flat_client_should_clear_inactive_session_status(state: &GameSessionState) -> bool {
+pub fn client_session_should_clear_inactive_status(state: &GameSessionState) -> bool {
     !matches!(state, GameSessionState::Active { .. })
 }
 
-pub fn flat_client_start_session_transition(
-    state: &GameSessionState,
-) -> FlatClientSessionTransitionEffects {
-    FlatClientSessionTransitionEffects {
-        teardown_world: flat_client_session_has_teardownable_runtime(state),
-        ..FlatClientSessionTransitionEffects::default()
+pub fn client_session_start_transition(state: &GameSessionState) -> ClientSessionTransitionEffects {
+    ClientSessionTransitionEffects {
+        teardown_world: client_session_has_teardownable_runtime(state),
+        ..ClientSessionTransitionEffects::default()
     }
 }
 
-pub fn flat_client_quit_to_title_transition(
+pub fn client_session_quit_to_title_transition(
     state: &GameSessionState,
-) -> FlatClientSessionTransitionEffects {
-    FlatClientSessionTransitionEffects {
-        teardown_world: flat_client_session_has_teardownable_runtime(state),
+) -> ClientSessionTransitionEffects {
+    ClientSessionTransitionEffects {
+        teardown_world: client_session_has_teardownable_runtime(state),
         clear_session: true,
-        ui: FlatClientSessionUiEffects {
+        ui: ClientSessionUiEffects {
             screen: Some(GameScreen::Title),
-            ..FlatClientSessionUiEffects::default()
+            ..ClientSessionUiEffects::default()
         },
     }
 }
 
-fn flat_client_session_has_teardownable_runtime(state: &GameSessionState) -> bool {
+fn client_session_has_teardownable_runtime(state: &GameSessionState) -> bool {
     matches!(
         state,
         GameSessionState::Active { .. } | GameSessionState::Starting { .. }
@@ -185,8 +183,8 @@ mod tests {
     use super::*;
     use crate::session::{ActiveSessionDescriptor, SessionFailure, SessionStatus};
 
-    fn context() -> FlatClientSessionActionContext<'static> {
-        FlatClientSessionActionContext {
+    fn context() -> ClientSessionActionContext<'static> {
+        ClientSessionActionContext {
             next_new_world_seed: Some(42),
             current_join_remote_addr: "127.0.0.1:25565",
             fallback_remote_addr: Some("10.0.0.9:25565"),
@@ -195,7 +193,7 @@ mod tests {
 
     #[test]
     fn open_new_world_sets_next_seed_and_clears_inactive_status() {
-        let effects = flat_client_session_effects_for_action(GameUiAction::OpenNewWorld, context());
+        let effects = client_session_effects_for_action(GameUiAction::OpenNewWorld, context());
         assert_eq!(effects.new_world_seed, Some(42));
         assert!(effects.clear_inactive_session_status);
         assert_eq!(effects.session_start, None);
@@ -203,16 +201,14 @@ mod tests {
 
     #[test]
     fn open_join_remote_uses_fallback_endpoint() {
-        let effects =
-            flat_client_session_effects_for_action(GameUiAction::OpenJoinRemote, context());
+        let effects = client_session_effects_for_action(GameUiAction::OpenJoinRemote, context());
         assert_eq!(effects.join_remote_addr.as_deref(), Some("10.0.0.9:25565"));
         assert!(effects.clear_inactive_session_status);
     }
 
     #[test]
     fn create_world_emits_seed_local_session_start() {
-        let effects =
-            flat_client_session_effects_for_action(GameUiAction::CreateWorld(1234), context());
+        let effects = client_session_effects_for_action(GameUiAction::CreateWorld(1234), context());
         assert_eq!(
             effects.session_start,
             Some(SessionStartRequest::new_seed_local_world(1234))
@@ -222,7 +218,7 @@ mod tests {
 
     #[test]
     fn join_remote_emits_remote_session_start() {
-        let effects = flat_client_session_effects_for_action(GameUiAction::JoinRemote, context());
+        let effects = client_session_effects_for_action(GameUiAction::JoinRemote, context());
         assert_eq!(
             effects.session_start,
             Some(SessionStartRequest::JoinRemote {
@@ -234,19 +230,18 @@ mod tests {
     #[test]
     fn quit_actions_emit_host_actions() {
         assert_eq!(
-            flat_client_session_effects_for_action(GameUiAction::QuitToTitle, context())
-                .host_action,
-            Some(FlatClientSessionHostAction::QuitToTitle)
+            client_session_effects_for_action(GameUiAction::QuitToTitle, context()).host_action,
+            Some(ClientSessionHostAction::QuitToTitle)
         );
         assert_eq!(
-            flat_client_session_effects_for_action(GameUiAction::Quit, context()).host_action,
-            Some(FlatClientSessionHostAction::Quit)
+            client_session_effects_for_action(GameUiAction::Quit, context()).host_action,
+            Some(ClientSessionHostAction::Quit)
         );
     }
 
     #[test]
     fn failed_start_restores_request_fields_and_optional_title_screen() {
-        let effects = flat_client_failed_start_ui_effects(
+        let effects = client_session_failed_start_ui_effects(
             &SessionStartRequest::new_seed_local_world(3456),
             true,
         );
@@ -254,7 +249,7 @@ mod tests {
         assert_eq!(effects.join_remote_addr, None);
         assert_eq!(effects.screen, Some(GameScreen::Title));
 
-        let effects = flat_client_failed_start_ui_effects(
+        let effects = client_session_failed_start_ui_effects(
             &SessionStartRequest::JoinRemote {
                 endpoint: RemoteSessionEndpoint::new("example.test:25565"),
             },
@@ -271,10 +266,10 @@ mod tests {
     #[test]
     fn status_overlay_prefers_session_status_over_fallback() {
         let fallback = StatusOverlay::new("browser status", true);
-        let overlay = flat_client_effective_status_overlay(None, fallback.clone());
+        let overlay = client_session_effective_status_overlay(None, fallback.clone());
         assert_eq!(overlay, fallback);
 
-        let overlay = flat_client_effective_status_overlay(
+        let overlay = client_session_effective_status_overlay(
             Some(SessionStatus {
                 message: "Connecting...".to_owned(),
                 ok: true,
@@ -287,7 +282,7 @@ mod tests {
     #[test]
     fn session_projection_combines_status_and_loading_progress() {
         let progress = LoadingProgressOverlay::new(1, 2, 9, false, []);
-        let projection = flat_client_session_projection(
+        let projection = client_session_status_projection(
             Some(SessionStatus {
                 message: "Loading world...".to_owned(),
                 ok: true,
@@ -303,20 +298,20 @@ mod tests {
         assert_eq!(projection.loading_progress_overlay, Some(progress));
 
         let fallback = StatusOverlay::new("browser status", true);
-        let projection = flat_client_session_projection(None, fallback.clone(), None);
+        let projection = client_session_status_projection(None, fallback.clone(), None);
         assert_eq!(projection.status_overlay, fallback);
         assert_eq!(projection.loading_progress_overlay, None);
     }
 
     #[test]
     fn inactive_status_clear_policy_keeps_active_sessions() {
-        assert!(flat_client_should_clear_inactive_session_status(
+        assert!(client_session_should_clear_inactive_status(
             &GameSessionState::Failed {
                 request: SessionStartRequest::new_seed_local_world(1),
                 error: SessionFailure::new("failed")
             }
         ));
-        assert!(!flat_client_should_clear_inactive_session_status(
+        assert!(!client_session_should_clear_inactive_status(
             &GameSessionState::Active {
                 session: ActiveSessionDescriptor::new_seed_local_world(1)
             }
@@ -326,37 +321,37 @@ mod tests {
     #[test]
     fn start_transition_tears_down_active_or_starting_sessions_only() {
         assert!(
-            flat_client_start_session_transition(&GameSessionState::Active {
+            client_session_start_transition(&GameSessionState::Active {
                 session: ActiveSessionDescriptor::new_seed_local_world(1)
             })
             .teardown_world
         );
         assert!(
-            flat_client_start_session_transition(&GameSessionState::Starting {
+            client_session_start_transition(&GameSessionState::Starting {
                 request: SessionStartRequest::new_seed_local_world(2)
             })
             .teardown_world
         );
         assert!(
-            !flat_client_start_session_transition(&GameSessionState::Failed {
+            !client_session_start_transition(&GameSessionState::Failed {
                 request: SessionStartRequest::new_seed_local_world(3),
                 error: SessionFailure::new("failed")
             })
             .teardown_world
         );
-        assert!(!flat_client_start_session_transition(&GameSessionState::NoSession).teardown_world);
+        assert!(!client_session_start_transition(&GameSessionState::NoSession).teardown_world);
     }
 
     #[test]
     fn quit_to_title_transition_clears_session_and_opens_title() {
-        let transition = flat_client_quit_to_title_transition(&GameSessionState::Active {
+        let transition = client_session_quit_to_title_transition(&GameSessionState::Active {
             session: ActiveSessionDescriptor::new_seed_local_world(1),
         });
         assert!(transition.teardown_world);
         assert!(transition.clear_session);
         assert_eq!(transition.ui.screen, Some(GameScreen::Title));
 
-        let transition = flat_client_quit_to_title_transition(&GameSessionState::Failed {
+        let transition = client_session_quit_to_title_transition(&GameSessionState::Failed {
             request: SessionStartRequest::new_seed_local_world(2),
             error: SessionFailure::new("failed"),
         });

@@ -79,6 +79,7 @@ rg -n "already exists|was not found|cannot delete" \
 | 2: desktop and web adopt the facade | V1/V2 on flat lanes | landed 2026-07-05 |
 | 3: TypeScript catalog demotion | V3 | landed 2026-07-05 |
 | 4: XR session-machine merge | V4 | landed 2026-07-05 |
+| 4a: neutral shared session-policy naming | naming guardrail | landed 2026-07-05 |
 | 5: emulated-XR profile test | display-neutrality gate | open |
 | 6: flat Android adopts the facade | V1/V2 on Android | open |
 | 7: XR catalog CRUD via shared controller | last V2 no-ops | open |
@@ -248,7 +249,7 @@ Changes:
   `SyncPlayerAppearance`, or capability/rejection projections for adapters to
   execute.
 - The facade composes the existing `FlatClientCatalogController` and
-  `flat_client_session_effects_for_action` helpers unchanged, and adds shared
+  `client_session_effects_for_action` helpers unchanged, and adds shared
   gameplay/projection effects for non-settings actions that the apps still
   execute in later adoption slices.
 - Recorded the full `GameUiAction` classification table in
@@ -832,6 +833,92 @@ Recorded result: landed 2026-07-05.
 - Platform parity was updated to mark desktop XR and Android XR as consumers of
   the shared facade/session policy while leaving flat Android facade adoption
   and XR catalog CRUD to later slices.
+
+## Slice 4a: Neutralize Shared Session Policy Naming
+
+Why: after Slice 4, XR consumes the shared session action/status helpers. The
+old `flat_client_session` module/type names now violate the architecture
+guardrail that generic shared policy must not be named `Flat*`.
+
+Deliverables:
+
+- rename `mclone-app-runtime::flat_client_session` to a display-neutral shared
+  owner, `client_session_policy`;
+- rename exported helper types and functions from `FlatClientSession*` /
+  `flat_client_*session*` to `ClientSession*` / `client_session_*`;
+- update desktop, web, and XR adapters to consume the neutral names without
+  changing behavior;
+- update current architecture/parity/tactical references so live shared
+  session policy is not documented as flat-owned.
+
+Non-goals / drift tripwires:
+
+- behavior must not change; this is a naming/contract cleanup;
+- do not rename flat-only adapter types that genuinely belong to
+  `FlatClientDriver`;
+- do not rename `flat_client_catalog` in this slice; catalog naming is still
+  tied to the later XR catalog CRUD slice.
+
+Exit criteria:
+
+- `rg -n "flat_client_session|FlatClientSession" native/crates/mclone-app-runtime/src native/crates/mclone-xr-scene/src native/apps/mclone-web-client/src`
+  returns nothing;
+- desktop flat app-local names may still contain `FlatClientSessionUpdate` if
+  they are genuinely local to `FlatClientDriver`;
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_session_policy`
+  passes;
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene` passes.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_session_policy
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+pnpm native:policy:wasm-check
+git diff --check
+```
+
+Recorded result: landed 2026-07-05.
+
+- Implementation:
+  - Renamed `mclone-app-runtime::flat_client_session` to
+    `mclone-app-runtime::client_session_policy`.
+  - Renamed exported shared helper types/functions from `FlatClientSession*`
+    / `flat_client_*session*` to `ClientSession*` /
+    `client_session_*`.
+  - Updated desktop, web, and XR adapters to consume the neutral names without
+    behavior changes.
+  - Updated the architecture guardrail text and platform parity matrix so the
+    live shared session policy is documented as display-neutral.
+- Exit criteria:
+  - `rg -n "flat_client_session|FlatClientSession" native/crates/mclone-app-runtime/src native/crates/mclone-xr-scene/src native/apps/mclone-web-client/src`:
+    PASS, no hits.
+  - Desktop flat app-local `FlatClientSessionUpdate` remains intentionally
+    local to `FlatClientDriver`.
+- Validation:
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`: PASS.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime client_session_policy`:
+    PASS, 11 policy tests passed.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`: PASS,
+    59 unit tests and doc tests passed.
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`:
+    PASS.
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`:
+    PASS.
+  - `pnpm native:policy:wasm-check`: PASS with the existing `mclone-server`
+    dead-code warning for
+    `PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks`.
+  - `git diff --check`: PASS.
+- Dispatch tripwires:
+  - `rg -n "fn apply_ui_action|fn apply_web_ui_action|fn apply_xr_ui_action" ...`:
+    unchanged at 5 dispatch functions.
+  - `rg -n "GameUiAction::[A-Za-z]+(\(_\))? => \{\}" native/apps native/crates/mclone-xr-scene/src`:
+    unchanged at 4 remaining inert arms, all in flat Android.
+  - `rg -n "already exists|was not found|cannot delete" native/apps/mclone-web-client/www`:
+    unchanged at 3 smoke-harness assertion strings.
 
 ## Slice 5: Emulated-XR Desktop Profile Test
 
