@@ -16,6 +16,7 @@ Individual lanes:
 
 ```bash
 pnpm native:worldgen:smoke
+pnpm native:scheduler-loading:smoke
 pnpm native:movement:smoke
 pnpm native:movement-frame:smoke
 pnpm native:startup-streaming:smoke
@@ -27,6 +28,7 @@ Release-oriented lanes:
 
 ```bash
 pnpm native:worldgen:perf
+pnpm native:scheduler-loading:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
 pnpm native:startup-streaming:perf
@@ -63,6 +65,7 @@ pnpm native:runtime:perf
 ### What Each Lane Measures
 
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
+- `native:scheduler-loading:*`: server-only loading ceiling probe. Applies one local chunk view to `ChunkScheduler`, hot-polls until the target view is client-visible and server queues drain, and reports target chunks/sec plus worldgen/light/publication counters. It includes current scheduler job admission, publication, light status work, and persistence queues, but no client update pump, mesh preparation, GPU upload, or frame pacing.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. RD20 is an explicit long-run lane, not the default iteration target.
@@ -89,6 +92,83 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-05 - Raw Worldgen vs Server-Only Loading Ceiling Split
+
+Commit reported by benchmark JSON: `ff0e8f57`.
+
+`git_dirty=true`: this record was captured while adding the
+`scheduler_loading_perf` benchmark binary, raising `worldgen_perf`'s benchmark
+radius cap, and editing docs/package scripts. Treat these as ceiling-orientation
+numbers, not clean release gates.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Commands:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf -- \
+  --radius 11 --iterations 1 \
+  > /tmp/mclone-worldgen-r11-current-20260705.json
+
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- \
+  --render-distance 10 --max-seconds 120 \
+  > /tmp/mclone-scheduler-loading-rd10-current-20260705.json
+
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- \
+  --render-distance 10 --lighting false --max-seconds 120 \
+  > /tmp/mclone-scheduler-loading-rd10-lighting-false-current-20260705.json
+```
+
+Additional spot checks:
+`/tmp/mclone-worldgen-r5-current-20260705.json`,
+`/tmp/mclone-worldgen-r8-current-20260705.json`,
+`/tmp/mclone-scheduler-loading-rd5-current-20260705.json`,
+`/tmp/mclone-scheduler-loading-rd5-lighting-false-current-20260705.json`, and
+`/tmp/mclone-scheduler-loading-rd10-lighting-false-spin-current-20260705.json`.
+
+RD10 maps to tracking radius `11`, or `529` target chunks.
+
+| Lane | Lighting | Target chunks | Ready / phase time | Target chunks/sec | Important exclusions |
+|---|---:|---:|---:|---:|---|
+| Raw `worldgen_perf --radius 11` features cold | N/A | `529` | `0.959s` | `551.5` | no scheduler, light, publication, client, mesh, or frame loop |
+| Raw `worldgen_perf --radius 11` features warm | N/A | `529` | `0.426s` | `1243.2` | dependency cache already warm |
+| Server-only `scheduler_loading_perf` RD10 | off | `529` | `4.175s` view-ready / `4.647s` settled | `126.7` ready / `113.8` settled | no client update pump, mesh, GPU upload, or frame pacing |
+| Server-only `scheduler_loading_perf` RD10 | on | `529` | `13.034s` view-ready / `15.047s` settled | `40.6` ready / `35.2` settled | no client update pump, mesh, GPU upload, or frame pacing |
+
+RD5 spot checks:
+
+| Lane | Lighting | Target chunks | Ready / phase time | Target chunks/sec |
+|---|---:|---:|---:|---:|
+| Raw `worldgen_perf --radius 5` features cold | N/A | `121` | `0.305s` | `396.8` |
+| Raw `worldgen_perf --radius 5` features warm | N/A | `121` | `0.120s` | `1006.5` |
+| Server-only `scheduler_loading_perf` RD5 | off | `169` | `0.869s` view-ready / `0.964s` settled | `194.5` ready / `175.3` settled |
+| Server-only `scheduler_loading_perf` RD5 | on | `169` | `3.652s` view-ready / `4.648s` settled | `46.3` ready / `36.4` settled |
+
+RD10 server-only counters:
+
+| Lane | Feature jobs | Loaded snapshots | Completed light statuses | Total light compute | Max poll call |
+|---|---:|---:|---:|---:|---:|
+| Lighting off | `6` | `625` | `0` | `0.000s` | `14.322ms` |
+| Lighting on | `6` | `625` | `625` | `10.784s` | `14.027ms` |
+
+Interpretation:
+
+- `~50` chunks/sec is not a desktop hardware ceiling. Raw feature generation for
+  the same `529`-target RD10 footprint is `551.5` chunks/sec cold and
+  `1243.2` chunks/sec with warm dependencies.
+- Current server-shaped loading is much slower than raw feature generation even
+  with lighting disabled (`126.7` chunks/sec ready). That gap includes current
+  scheduler job batching/admission, one native worldgen worker, publication,
+  holder/status bookkeeping, and cache/persistence plumbing.
+- Lighting is a major server-only cost in this lane: RD10 drops from `126.7` to
+  `40.6` ready chunks/sec with lighting enabled, and the benchmark attributes
+  `10.784s` to light-status compute. This does not make client mesh irrelevant;
+  it means server ceiling, desktop startup streaming, and render quiescence must
+  remain separate rows when judging future levers.
+- `--poll-mode spin` with lighting disabled was flat (`125.5` chunks/sec ready)
+  versus completion-wait mode (`126.7`), so the server-only result is not a
+  wait-loop artifact.
 
 ### 2026-07-05 - Desktop RD10 Publish-Budget And Render-Worker Lever Sweep
 

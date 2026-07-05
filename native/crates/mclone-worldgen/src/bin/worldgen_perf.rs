@@ -14,7 +14,7 @@ const DEFAULT_CHUNK_X: i32 = 0;
 const DEFAULT_CHUNK_Z: i32 = 0;
 const DEFAULT_RADIUS: i32 = 1;
 const DEFAULT_ITERATIONS: usize = 1;
-const MAX_RADIUS: i32 = 8;
+const MAX_RADIUS: i32 = 16;
 const MAX_ITERATIONS: usize = 10_000;
 
 fn main() {

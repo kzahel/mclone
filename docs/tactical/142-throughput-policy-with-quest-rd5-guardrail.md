@@ -144,11 +144,15 @@ absorbed the `32`-per-tick publish bursts without a single over-budget frame
 instrumented in this pass — the elapsed-budget design below addresses them
 regardless.
 
-Post-prototype, the next server-side limit is visible at ~`50` chunks/sec
-(isolation) / ~`57` chunks/sec (streaming): the remaining feature-job
-serialization bubble plus single-thread generation. That is Candidate A's
-second half (overlap job admission with publication), with headroom beyond the
-prototype's `3x`.
+Post-prototype, the next desktop-shaped full-view limit is visible around
+`50`-`57` chunks/sec, but that is not a hardware ceiling. The dedicated ceiling
+split added on 2026-07-05 measured the same RD10 `529`-target footprint at
+`551.5` raw cold feature chunks/sec (`1243.2` warm dependency-cache chunks/sec)
+with no scheduler/light/publication/client, `126.7` server-only chunks/sec with
+lighting disabled, and `40.6` server-only chunks/sec with lighting enabled.
+That gives Candidate A a clearer job: separate current scheduler/job
+admission/publication limits from real generation and light costs, then open
+only the budgeted pieces that are safe under Quest frame-pacing gates.
 
 **Budget response sweep (2026-07-05, temporary edits reverted):** RD10
 startup-streaming with fixed feature/light publish budgets `1/4/8/16/32` showed
@@ -165,6 +169,26 @@ overlap is the likely next server-side throughput lever.
 Lighting-off attribution under budget `4` improved full-view only to `8.154s`
 (`64.9` chunks/sec). Light/status work is real, but it is not the main
 remaining full-view wall after the publication drain opens.
+
+**Ceiling-lane separation (2026-07-05):** `scheduler_loading_perf` is now the
+server-only loading probe: it hot-polls `ChunkScheduler` until the target view
+is visible and server queues drain, but it excludes the client update pump,
+mesh preparation, GPU upload, and frame loop. Use it alongside `worldgen_perf`
+and `startup-streaming`, not in place of them:
+
+| RD10 lane | Lighting | Target chunks/sec | Meaning |
+|---|---:|---:|---|
+| `worldgen_perf --radius 11` features cold | N/A | `551.5` | raw algorithm, no scheduler/light/publication/client |
+| `worldgen_perf --radius 11` features warm | N/A | `1243.2` | raw algorithm with dependency cache already warm |
+| `scheduler_loading_perf --render-distance 10` | off | `126.7` | scheduler/job/publication ceiling without light or client mesh |
+| `scheduler_loading_perf --render-distance 10` | on | `40.6` | scheduler plus light-status compute, still no client mesh |
+
+The server-only lighting-on lane attributed `10.784s` to light-status compute
+for `625` completed light statuses. Future experiments must keep four rows
+separate: raw feature ceiling, server-only loading ceiling, desktop-shaped
+full-view readiness, and render quiescence. It is valid to use raw/server
+ceiling lanes to identify headroom; it is not valid to optimize for them alone
+without rerunning desktop-shaped and Quest guardrail lanes.
 
 ### Mesh drain: admission/scan-bound, not worker-bound (measured)
 
@@ -449,6 +473,12 @@ instrumentation to watch it:
 - [x] Run attribution probes at publish budget `4`: lighting off improves
   full-view only to `8.154s`, while render compile workers `2` cut render
   quiescence from `20.089s` to `11.412s`; workers `4` are flat.
+- [x] Add raw/server ceiling split (`worldgen_perf --radius 11` plus
+  `scheduler_loading_perf --render-distance 10`): raw cold features for the
+  RD10 `529`-target footprint are `551.5` chunks/sec, scheduler-only with
+  lighting off is `126.7` chunks/sec, and scheduler-only with lighting on is
+  `40.6` chunks/sec. This proves the desktop-shaped `~50` chunks/sec result is
+  not a hardware ceiling.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
@@ -497,8 +527,11 @@ inference:
   still leak into tail risk under churn.
 - Does job-admission overlap make worldgen itself the next limit, or does
   pending-publication memory/backlog become the practical bound first?
-  Current answer: unknown until Candidate A or an equivalent prototype exposes
-  generation-bound rates with a bounded pending-publication queue.
+  Current answer: raw RD10 cold feature generation is `551.5` chunks/sec, but
+  current server-only loading is `126.7` chunks/sec with lighting disabled and
+  `40.6` chunks/sec with lighting enabled. Candidate A should explain how much
+  of that gap is job admission/publication versus unavoidable light/generation
+  work.
 - Does mesh worker count matter once publication is opened? Current answer:
   yes for desktop-shaped streaming tail, not for full-view readiness. Budget
   `4` plus workers `2` cuts RD10 quiescence from `20.089s` to `11.412s`, while
