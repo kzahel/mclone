@@ -150,6 +150,22 @@ serialization bubble plus single-thread generation. That is Candidate A's
 second half (overlap job admission with publication), with headroom beyond the
 prototype's `3x`.
 
+**Budget response sweep (2026-07-05, temporary edits reverted):** RD10
+startup-streaming with fixed feature/light publish budgets `1/4/8/16/32` showed
+that full-view throughput saturates early. Budget `1` produced full-view
+`27.492s` (`19.2` chunks/sec). Budget `4` produced full-view `9.681s`
+(`54.6` chunks/sec). Budgets `8` and `16` were flat (`9.716s` / `9.728s`),
+and budget `32` regressed full-view to `10.221s` while producing two 60 Hz
+over-budget frames. This supports the shared budget-calculation direction:
+open the drain based on measured elapsed work and backlog pressure, but do not
+chase a high fixed count. A budget around the cost of publishing a few chunks
+per gameplay tick appears to capture the desktop full-view win; job-admission
+overlap is the likely next server-side throughput lever.
+
+Lighting-off attribution under budget `4` improved full-view only to `8.154s`
+(`64.9` chunks/sec). Light/status work is real, but it is not the main
+remaining full-view wall after the publication drain opens.
+
 ### Mesh drain: admission/scan-bound, not worker-bound (measured)
 
 Single-worker cached-section throughput falls `2,093` → `889` → `465`
@@ -165,12 +181,18 @@ single-worker; RD10 `7.96s` vs `7.77s`). The bulk drain is bounded by per-call
 admission/prepare cost, not compile parallelism, so Candidate B leads with the
 per-call scan attribution and admission batch size. (Worker count still helps
 the live per-frame path — `120` measured near-2x live submissions at 2 workers
-— so it stays a later, profile-aware lever, not the drain fix.)
+— so it belongs in the shared budget/admission calculation, not as the primary
+bulk-drain fix.)
 
 The per-frame streaming variant of the same limit is now the desktop trailing
-edge: with the publish valve opened, RD10 full-view-ready hit `9.2s` but
-render quiescence lagged to `21.0s` — ~`45` chunk-columns/sec, consistent with
-the one-chunk-per-frame admission ceiling at 60 Hz.
+edge. With publish budget `4`, RD10 full-view-ready hit `9.681s` but render
+quiescence lagged to `20.089s`. Raising render compile workers from `1` to `2`
+left full-view unchanged (`9.690s`) but moved render quiescence to `11.412s`;
+workers `4` did not improve further (`11.639s`). This does not undo the
+isolation finding that workers do not fix the full bulk drain, but it changes
+the live-streaming interpretation: after publication opens, workers `2` are a
+real desktop render-tail lever and Candidate B should measure worker count,
+admission, and per-call scan cost together.
 
 ### Upload (not currently limiting on desktop)
 
@@ -222,25 +244,27 @@ names the candidate that may change it; nothing here changes by default.
 | Update-pump elapsed budget / unload cap | `2ms` / `16` | `mclone-app-runtime/src/lib.rs` (`133`) | Quest apply tails | keep; absorbed the `32`/tick prototype bursts cleanly |
 | XR upload/accept/completed-result budgets | `None`; opt-in CLI flags | `mclone-xr-scene`, android-xr CLI | Quest measurement lanes (`128`) | unchanged; lane args, not defaults |
 
-Any candidate that relaxes one of these for desktop must land it as an explicit
-profile decision (below), not as a new global default.
+Any candidate that relaxes one of these must land as a measured budget
+calculation, not as a new fixed global default.
 
-## Throughput Profile Boundary
+## Budget Calculation Boundary
 
-The landing zone for every candidate is a named, session-resolved throughput
-profile (desktop-throughput vs headset-pacing), owning at minimum: publication
-drain service budget, feature-job overlap policy, render compile chunk budget,
-compile worker count, and (XR-only) upload/accept budgets. Servicing
-publication from the gameplay tick is acceptable, but the target budget must be
-derived from the configured tick period, active profile, and recent measured
-cost, not from a magic chunk count that accidentally scales when tick rate
-changes. If the tick period changes, reset moving averages/estimators before
-using them for admission decisions. Desktop gets aggressive values; Quest keeps
-current behavior until separately measured. Profile-gated values keep the same
-scheduler/session contracts on all platforms; this is a values split, not a
-code-path fork. The first candidate that introduces the profile plumbing must
-run the full Quest gate set even if Quest values are nominally unchanged,
-because plumbing mistakes are exactly how "unchanged" values change.
+The landing zone for every candidate is one shared budget algorithm, not a
+hardcoded desktop-vs-headset profile split. The algorithm owns at minimum:
+publication drain service budget, feature-job overlap/backlog bounds, render
+compile chunk budget, compile worker count, and (XR-only) upload/accept budgets.
+Servicing publication from the gameplay tick is acceptable, but the target
+budget must be derived from the configured tick period, recent measured work
+cost, queue/backlog state, and session/device caps, not from a magic chunk count
+that accidentally scales when tick rate changes. If the tick period changes,
+reset moving averages/estimators before using them for admission decisions.
+
+Desktop and Quest may resolve to different numeric limits because they have
+different measured costs, refresh periods, CPU budgets, and local-integrated vs
+remote ownership. That is an input/cap difference, not a separate code path or
+manually selected platform mode. The first candidate that introduces this budget
+plumbing must run the full Quest gate set, because plumbing mistakes are exactly
+how "unchanged" limits change.
 
 ## Guardrails And Gates
 
@@ -320,7 +344,7 @@ Per-candidate inner loop (minutes, not tens of minutes):
 2. Desktop movement-frame probe.
 3. Quest RD5 settled-orbit gate.
 
-Promotion loop (before a default/profile value changes on main):
+Promotion loop (before a shared budget calculation changes on main):
 
 4. Desktop RD15 startup-streaming (`9000` frames at `60 Hz` — `6000` frames is
    `100s`, too close to the current expected RD15 quiescence to leave headroom
@@ -345,27 +369,30 @@ Ordered by the measured bottleneck model.
 
 **A. Server publication drain policy (validated by prototype; implement
 properly).** Replace the fixed `1`-per-tick feature and light publish budgets
-with an elapsed-time drain budget serviced from the gameplay tick
-(profile-aware: desktop gets an aggressive measured budget, Quest keeps current
-values until a streaming lane proves a safe change), and decouple job admission
-from full publication: mark the job pipeline-complete when the mailbox drains,
-track the pending-publication backlog separately, and let the next feature job
-enqueue while publication drains. Bound the pending-publication backlog (do not
-enqueue a new job past N pending chunks) so generated-but-unpublished snapshots
-cannot grow memory without limit. The fixed-count `32` prototype already
-delivered `3x` full-view-ready at RD10 with clean desktop pacing; the
-elapsed-budget version bounds server tick cost too, and job-admission overlap
-should push past the prototype's residual `~50` chunks/sec toward
-generation-bound rates.
+with an elapsed-time drain budget serviced from the gameplay tick. The budget
+calculation should use tick period, recent publish cost, backlog age/size, and
+device/session caps so it can open naturally on desktop without hardcoding a
+desktop-specific branch, while staying bounded on Quest when local integrated
+server work competes with rendering. The fixed-count sweep says the first target
+is a modest drain equivalent to roughly `4` feature/light publications per
+gameplay tick on this desktop lane, not `32`. Decouple job admission from full
+publication: mark the job pipeline-complete when the mailbox drains, track the
+pending-publication backlog separately, and let the next feature job enqueue
+while publication drains. Bound the pending-publication backlog (do not enqueue
+a new job past N pending chunks) so generated-but-unpublished snapshots cannot
+grow memory without limit. The fixed-count prototype/sweep already showed that
+opening the drain to this range delivers about `3x` full-view-ready at RD10
+with clean desktop pacing; the elapsed-budget version bounds server tick cost
+too, and job-admission overlap should push past the prototype's residual `~50`
+chunks/sec toward generation-bound rates.
 
-**B. Mesh drain admission.** Worker count is falsified for the bulk drain
-(flat at 2 workers, all distances), so B starts with per-call attribution:
-time the prepare/scan vs compile vs upload split per sync call at RD15/RD20,
-find the O(loaded-sections) component, then raise the per-call chunk budget
-under the existing frame-deadline admission on desktop (the streaming trailing
-edge is the one-chunk-per-frame ceiling, ~`45`-`60` chunk-columns/sec at
-60 Hz). Sweep compile workers `2/4` only after the scan cost is understood,
-as a live-path, profile-aware lever.
+**B. Mesh drain admission and worker count.** Worker count is falsified for the
+synthetic bulk drain (flat at 2 workers, all distances), but desktop-shaped
+streaming after publication opens measured a clear workers-2 quiescence win
+(`20.089s` -> `11.412s`) and no additional workers-4 win. B should therefore
+measure the live prepare/scan vs compile vs upload split at RD10/RD15 with
+workers `1/2/4`, then decide whether the production budget calculation should
+raise workers to `2`, raise the per-call chunk admission budget, or both.
 
 **C. Upload path.** Only with post-A/B evidence of upload pressure on desktop
 (`mesh_upload_worst_ms`, frame tails during streaming). Buffer
@@ -384,8 +411,10 @@ instrumentation to watch it:
 
 - [x] Falsification: host-only cadence increase does not open the valve
   (measured worse; see above).
-- [x] Falsification: publish budget `1` → `32` prototype delivers `3x`
-  full-view-ready at RD10 with unchanged desktop frame pacing (reverted).
+- [x] Falsification: opening the publish drain beyond budget `1` delivers `3x`
+  full-view-ready at RD10 with unchanged desktop frame pacing (temporary fixed
+  count prototypes reverted; later sweep found budget `4` captures the useful
+  full-view win).
 - [x] Falsification: compile workers `2` do not move the bulk mesh drain.
 - [x] RD10 startup-streaming control baseline captured (doc-only-dirty tree,
   `4a3604cf`): playable `1.078s`, full-view `27.54s`, quiescent `33.06s`.
@@ -413,6 +442,13 @@ instrumentation to watch it:
   bug / architecture gap, not a baseline: remote still ignores `SendOnly`
   command policy, the sample caught a `5.7s` chunk-view command stall, and
   server/scheduler/runtime counters reported zero in the client summary.
+- [x] Run RD10 fixed publish-budget sweep (`1/4/8/16/32`, temporary edits
+  reverted): full-view improves from `27.492s` at budget `1` to `9.681s` at
+  budget `4`, then stays flat through `8/16`; budget `32` does not improve
+  full-view and produced two 60 Hz over-budget frames.
+- [x] Run attribution probes at publish budget `4`: lighting off improves
+  full-view only to `8.154s`, while render compile workers `2` cut render
+  quiescence from `20.089s` to `11.412s`; workers `4` are flat.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
@@ -425,7 +461,7 @@ instrumentation to watch it:
   "server costs moved off headset" comparison: remote `SendOnly` must not block
   the XR frame loop, and the client summary needs network/update/apply counters
   even when server/scheduler counters live on the host.
-- [ ] Implement Candidate A behind the throughput profile and run the full
+- [ ] Implement Candidate A as a shared budget calculation and run the full
   promotion loop, including the Quest streaming check.
 
 ## Cost Questions To Resolve First
@@ -437,7 +473,9 @@ inference:
   separating feature publish, light publish, update encode/send, and
   job-admission wait time? Current answer: yes for the coarse waterfall. RD10
   and RD15 both scale at about `19` target chunks/sec, with empty client update
-  queues and max pending publication chunks near one `128`-target job.
+  queues and max pending publication chunks near one `128`-target job. Raising
+  the fixed drain to `4` moves RD10 full-view to `54.6` chunks/sec; raising it
+  higher does not materially improve full-view.
 - How much of `poll_scheduler_publish_completed_ms` is actual feature/light
   publication work versus update encode/send and downstream client apply work?
   Current answer: total publish time is small per frame (`1.6ms` max desktop),
@@ -461,6 +499,10 @@ inference:
   pending-publication memory/backlog become the practical bound first?
   Current answer: unknown until Candidate A or an equivalent prototype exposes
   generation-bound rates with a bounded pending-publication queue.
+- Does mesh worker count matter once publication is opened? Current answer:
+  yes for desktop-shaped streaming tail, not for full-view readiness. Budget
+  `4` plus workers `2` cuts RD10 quiescence from `20.089s` to `11.412s`, while
+  workers `4` is flat.
 
 ## Non-Goals
 
@@ -483,9 +525,9 @@ inference:
 
 - **Settled orbit cannot catch streaming regressions.** Mitigated by the
   streaming check; do not quietly drop it when it is inconvenient. Candidate A
-  specifically multiplies per-tick publish bursts — the Quest streaming check
-  and the `133` update-pump counters (queue depth, oldest-applied age) are the
-  instruments that would catch the cost.
+  can increase per-tick publish work — the Quest streaming check and the `133`
+  update-pump counters (queue depth, oldest-applied age) are the instruments
+  that would catch the cost.
 - **Server tick-time spikes were not instrumented in the prototype.** Desktop
   client pacing was clean, but the elapsed-budget design must cap per-tick
   publish work on the runner thread, and the A slice should record scheduler

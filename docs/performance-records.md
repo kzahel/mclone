@@ -90,6 +90,75 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-05 - Desktop RD10 Publish-Budget And Render-Worker Lever Sweep
+
+Commit reported by native benchmark JSON: `2603981e`.
+
+`git_dirty=true`: doc edits were present, and each publish-budget run used a
+temporary two-line local prototype changing
+`DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET` and
+`DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET`. The constants were reverted after the
+runs; no code change from this sweep is intended to land.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Common command shape:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf --render-distance 10 --startup-streaming-frames 3000 \
+  --target-hz 60 --debug-passive-showcase false \
+  > /tmp/mclone-rd10-publish-budget-N-current-20260705.json
+```
+
+The startup JSON's `startup_target_chunk_count` is the playable `3x3` gate, so
+the chunks/sec below use `final.target_chunk_count=529`.
+
+Publish-budget sweep, render workers `1`, lighting enabled:
+
+| Feature/light publish budget | Playable | Full-view ready | Full-view chunks/sec | Render quiescent | Quiescent chunks/sec | Frame avg/p95/p99/max | Over budget | Max publish ms | Max pending publication chunks |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `1` | `1.067s` | `27.492s` | `19.2` | `32.540s` | `16.3` | `4.996 / 7.111 / 7.749 / 8.889ms` | `0` | `1.781` | `125` |
+| `4` | `0.478s` | `9.681s` | `54.6` | `20.089s` | `26.3` | `5.486 / 7.349 / 7.787 / 8.830ms` | `0` | `2.639` | `120` |
+| `8` | `0.375s` | `9.716s` | `54.4` | `19.639s` | `26.9` | `5.705 / 7.779 / 8.446 / 12.496ms` | `0` | `3.279` | `112` |
+| `16` | `0.298s` | `9.728s` | `54.4` | `21.200s` | `25.0` | `5.174 / 7.091 / 7.630 / 9.803ms` | `0` | `5.658` | `96` |
+| `32` | `0.299s` | `10.221s` | `51.8` | `18.161s` | `29.1` | `5.571 / 7.440 / 8.674 / 27.793ms` | `2` | `1.075` | `0` |
+
+Attribution probes with publish budget `4`:
+
+| Probe | Full-view ready | Full-view chunks/sec | Render quiescent | Quiescent chunks/sec | Frame avg/p95/p99/max | Over budget |
+|---|---:|---:|---:|---:|---:|---:|
+| workers `1`, lighting on | `9.681s` | `54.6` | `20.089s` | `26.3` | `5.486 / 7.349 / 7.787 / 8.830ms` | `0` |
+| workers `1`, lighting off | `8.154s` | `64.9` | `23.303s` | `22.7` | `6.158 / 8.458 / 9.184 / 15.488ms` | `0` |
+| workers `2`, lighting on | `9.690s` | `54.6` | `11.412s` | `46.4` | `6.423 / 8.699 / 9.787 / 12.031ms` | `0` |
+| workers `4`, lighting on | `9.719s` | `54.5` | `11.639s` | `45.5` | `6.106 / 8.935 / 10.366 / 16.410ms` | `0` |
+
+Raw local artifacts:
+`/tmp/mclone-rd10-publish-budget-1-current-20260705.json`,
+`/tmp/mclone-rd10-publish-budget-4-current-20260705.json`,
+`/tmp/mclone-rd10-publish-budget-8-current-20260705.json`,
+`/tmp/mclone-rd10-publish-budget-16-20260705.json`,
+`/tmp/mclone-rd10-publish-budget-32-20260705.json`,
+`/tmp/mclone-rd10-publish-budget-4-lighting-false-20260705.json`,
+`/tmp/mclone-rd10-publish-budget-4-workers2-20260705.json`, and
+`/tmp/mclone-rd10-publish-budget-4-workers4-20260705.json`.
+
+Interpretation:
+
+- The full-view throughput curve saturates early. Raising publish budget from
+  `1` to `4` gives the large gain (`19.2` -> `54.6` chunks/sec); `8` and `16`
+  are flat, while `32` is not better for full-view and produced two 60 Hz
+  over-budget frames. The first production budget calculation should therefore
+  target measured elapsed work/backlog pressure, not a large fixed count.
+- Disabling lighting under budget `4` improves full-view by only about `1.5s`
+  (`54.6` -> `64.9` chunks/sec). Light/status work is real, but it is not the
+  main remaining full-view wall after opening publication.
+- With publish budget `4`, render compile workers `2` do not change full-view
+  readiness but cut render quiescence from `20.089s` to `11.412s`; workers `4`
+  do not improve further. This sharpens Candidate B: isolation bulk-drain
+  worker sweeps stayed flat, but desktop-shaped live streaming after publication
+  opens has an obvious workers-2 render-tail win.
+
 ### 2026-07-05 - Desktop Startup-Streaming Waterfall With Publication Counters
 
 Commit/reporting note: RD10 reported `2ff3273e` with `git_dirty=true` while
