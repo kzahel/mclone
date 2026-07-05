@@ -41,13 +41,14 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE,
-        BLUE_ORCHID, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
-        CACTUS, CLAY, COARSE_DIRT, COCOA_AGE0_EAST, COCOA_AGE0_NORTH, COCOA_AGE0_SOUTH,
-        COCOA_AGE0_WEST, COCOA_AGE1_EAST, COCOA_AGE1_NORTH, COCOA_AGE1_SOUTH, COCOA_AGE1_WEST,
-        COCOA_AGE2_EAST, COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST, CORNFLOWER,
-        DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS,
-        GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
+        ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BAMBOO_FINAL_LARGE,
+        BAMBOO_TOP_LARGE, BAMBOO_TOP_SMALL, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE, BLUE_ORCHID,
+        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY,
+        COARSE_DIRT, COCOA_AGE0_EAST, COCOA_AGE0_NORTH, COCOA_AGE0_SOUTH, COCOA_AGE0_WEST,
+        COCOA_AGE1_EAST, COCOA_AGE1_NORTH, COCOA_AGE1_SOUTH, COCOA_AGE1_WEST, COCOA_AGE2_EAST,
+        COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST, CORNFLOWER, DANDELION,
+        DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK,
+        GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
         LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD,
         MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PACKED_ICE,
         PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
@@ -307,7 +308,14 @@ mod tests {
                 Self::SavannaAcacia => &[ACACIA_LOG, ACACIA_LEAVES],
                 Self::JungleTrees => &[JUNGLE_LOG, JUNGLE_LEAVES],
                 Self::SparseJungleTrees => &[JUNGLE_LOG, JUNGLE_LEAVES],
-                Self::BambooJungle => &[BAMBOO, JUNGLE_LOG, JUNGLE_LEAVES],
+                Self::BambooJungle => &[
+                    BAMBOO,
+                    BAMBOO_TOP_SMALL,
+                    BAMBOO_TOP_LARGE,
+                    BAMBOO_FINAL_LARGE,
+                    JUNGLE_LOG,
+                    JUNGLE_LEAVES,
+                ],
             }
         }
 
@@ -434,7 +442,14 @@ mod tests {
                     chunk.block_count(JUNGLE_LOG) > 0 || chunk.block_count(JUNGLE_LEAVES) > 0
                 }
                 Self::BambooJungle => {
-                    chunk.block_count(BAMBOO) > 0
+                    (chunk.block_count(BAMBOO)
+                        + chunk.block_count(BAMBOO_TOP_SMALL)
+                        + chunk.block_count(BAMBOO_TOP_LARGE)
+                        + chunk.block_count(BAMBOO_FINAL_LARGE))
+                        > 0
+                        && chunk.block_count(BAMBOO_TOP_SMALL) > 0
+                        && chunk.block_count(BAMBOO_TOP_LARGE) > 0
+                        && chunk.block_count(BAMBOO_FINAL_LARGE) > 0
                         && chunk.block_count(JUNGLE_LOG) > 0
                         && chunk.block_count(JUNGLE_LEAVES) > 0
                 }

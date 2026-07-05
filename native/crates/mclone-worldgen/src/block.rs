@@ -178,6 +178,9 @@ pub const COCOA_AGE2_NORTH: RawBlockId = 171;
 pub const COCOA_AGE2_EAST: RawBlockId = 172;
 pub const COCOA_AGE2_SOUTH: RawBlockId = 173;
 pub const COCOA_AGE2_WEST: RawBlockId = 174;
+pub const BAMBOO_TOP_SMALL: RawBlockId = 175;
+pub const BAMBOO_TOP_LARGE: RawBlockId = 176;
+pub const BAMBOO_FINAL_LARGE: RawBlockId = 177;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -282,6 +285,9 @@ impl GeneratedBlockId {
     pub const COCOA_AGE2_EAST: Self = Self(COCOA_AGE2_EAST);
     pub const COCOA_AGE2_SOUTH: Self = Self(COCOA_AGE2_SOUTH);
     pub const COCOA_AGE2_WEST: Self = Self(COCOA_AGE2_WEST);
+    pub const BAMBOO_TOP_SMALL: Self = Self(BAMBOO_TOP_SMALL);
+    pub const BAMBOO_TOP_LARGE: Self = Self(BAMBOO_TOP_LARGE);
+    pub const BAMBOO_FINAL_LARGE: Self = Self(BAMBOO_FINAL_LARGE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -312,7 +318,7 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
     if has_fluid(block_id) {
         return false;
     }
-    if is_vine(block_id) || is_cocoa(block_id) {
+    if is_vine(block_id) || is_cocoa(block_id) || is_bamboo(block_id) {
         return false;
     }
 
@@ -362,7 +368,6 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | TALL_SEAGRASS_UPPER
             | KELP
             | KELP_PLANT
-            | BAMBOO
             | LILY_PAD
             | SWEET_BERRY_BUSH
             | SEA_PICKLE_1
@@ -445,6 +450,13 @@ pub const fn is_cocoa(block_id: RawBlockId) -> bool {
     )
 }
 
+pub const fn is_bamboo(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        BAMBOO | BAMBOO_TOP_SMALL | BAMBOO_TOP_LARGE | BAMBOO_FINAL_LARGE
+    )
+}
+
 pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
     match block_id {
         OAK_LOG_X | OAK_LOG_Z => OAK_LOG,
@@ -456,6 +468,7 @@ pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
         COCOA_AGE0_EAST | COCOA_AGE0_SOUTH | COCOA_AGE0_WEST | COCOA_AGE1_NORTH
         | COCOA_AGE1_EAST | COCOA_AGE1_SOUTH | COCOA_AGE1_WEST | COCOA_AGE2_NORTH
         | COCOA_AGE2_EAST | COCOA_AGE2_SOUTH | COCOA_AGE2_WEST => COCOA_AGE0_NORTH,
+        BAMBOO_TOP_SMALL | BAMBOO_TOP_LARGE | BAMBOO_FINAL_LARGE => BAMBOO,
         _ => block_id,
     }
 }
@@ -541,6 +554,9 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
     if is_cocoa(block_id) {
         return "minecraft:cocoa";
     }
+    if is_bamboo(block_id) {
+        return "minecraft:bamboo";
+    }
 
     match block_id {
         AIR => "minecraft:air",
@@ -602,7 +618,6 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         ACACIA_LEAVES => "minecraft:acacia_leaves",
         JUNGLE_LOG => "minecraft:jungle_log",
         JUNGLE_LEAVES => "minecraft:jungle_leaves",
-        BAMBOO => "minecraft:bamboo",
         LILY_PAD => "minecraft:lily_pad",
         SWEET_BERRY_BUSH => "minecraft:sweet_berry_bush",
         ALLIUM => "minecraft:allium",
@@ -720,6 +735,9 @@ mod tests {
         assert_eq!(block_light_opacity(KELP), 0);
         assert_eq!(block_light_opacity(KELP_PLANT), 0);
         assert_eq!(block_light_opacity(BAMBOO), 0);
+        assert_eq!(block_light_opacity(BAMBOO_TOP_SMALL), 0);
+        assert_eq!(block_light_opacity(BAMBOO_TOP_LARGE), 0);
+        assert_eq!(block_light_opacity(BAMBOO_FINAL_LARGE), 0);
         assert_eq!(block_light_opacity(LILY_PAD), 0);
         assert_eq!(block_light_opacity(SWEET_BERRY_BUSH), 0);
         assert_eq!(block_light_opacity(ALLIUM), 0);
@@ -762,6 +780,10 @@ mod tests {
         assert_eq!(base_block_id(VINE_NORTH), VINE);
         assert_eq!(base_block_id(COCOA_AGE0_NORTH), COCOA_AGE0_NORTH);
         assert_eq!(base_block_id(COCOA_AGE2_WEST), COCOA_AGE0_NORTH);
+        assert_eq!(base_block_id(BAMBOO), BAMBOO);
+        assert_eq!(base_block_id(BAMBOO_TOP_SMALL), BAMBOO);
+        assert_eq!(base_block_id(BAMBOO_TOP_LARGE), BAMBOO);
+        assert_eq!(base_block_id(BAMBOO_FINAL_LARGE), BAMBOO);
         assert_eq!(block_name(TORCH), "minecraft:torch");
         assert_eq!(block_name(WALL_TORCH_WEST), "minecraft:wall_torch");
         assert_eq!(block_name(CACTUS), "minecraft:cactus");
@@ -798,6 +820,9 @@ mod tests {
         assert_eq!(block_name(JUNGLE_LOG), "minecraft:jungle_log");
         assert_eq!(block_name(JUNGLE_LEAVES), "minecraft:jungle_leaves");
         assert_eq!(block_name(BAMBOO), "minecraft:bamboo");
+        assert_eq!(block_name(BAMBOO_TOP_SMALL), "minecraft:bamboo");
+        assert_eq!(block_name(BAMBOO_TOP_LARGE), "minecraft:bamboo");
+        assert_eq!(block_name(BAMBOO_FINAL_LARGE), "minecraft:bamboo");
         assert_eq!(block_name(LILY_PAD), "minecraft:lily_pad");
         assert_eq!(block_name(SWEET_BERRY_BUSH), "minecraft:sweet_berry_bush");
         assert_eq!(block_name(ALLIUM), "minecraft:allium");

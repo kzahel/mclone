@@ -1,5 +1,6 @@
 use crate::block::{
-    BAMBOO, COARSE_DIRT, DIRT, GRASS_BLOCK, MYCELIUM, PODZOL, RED_SAND, SAND, is_air_like,
+    BAMBOO, BAMBOO_FINAL_LARGE, BAMBOO_TOP_LARGE, BAMBOO_TOP_SMALL, COARSE_DIRT, DIRT, GRASS_BLOCK,
+    MYCELIUM, PODZOL, RED_SAND, SAND, is_air_like, is_bamboo,
 };
 use crate::placement::{BlockPos, HeightmapType};
 use crate::prng::RandomSource;
@@ -36,8 +37,10 @@ pub(super) fn place_bamboo<W: FeatureWorld>(
         pos = BlockPos::new(pos.x, pos.y + 1, pos.z);
     }
 
-    if placed >= 3 && world.block_at_world(pos).is_some_and(is_air_like) {
-        world.set_block_world(pos, BAMBOO);
+    if placed >= 3 {
+        world.set_block_world(pos, BAMBOO_FINAL_LARGE);
+        world.set_block_world(BlockPos::new(pos.x, pos.y - 1, pos.z), BAMBOO_TOP_LARGE);
+        world.set_block_world(BlockPos::new(pos.x, pos.y - 2, pos.z), BAMBOO_TOP_SMALL);
     }
 
     placed > 0
@@ -46,10 +49,11 @@ pub(super) fn place_bamboo<W: FeatureWorld>(
 fn can_survive_bamboo<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     let below = BlockPos::new(pos.x, pos.y - 1, pos.z);
     world.block_at_world(below).is_some_and(|block| {
-        matches!(
-            block,
-            BAMBOO | GRASS_BLOCK | DIRT | COARSE_DIRT | PODZOL | MYCELIUM | SAND | RED_SAND
-        )
+        is_bamboo(block)
+            || matches!(
+                block,
+                GRASS_BLOCK | DIRT | COARSE_DIRT | PODZOL | MYCELIUM | SAND | RED_SAND
+            )
     })
 }
 

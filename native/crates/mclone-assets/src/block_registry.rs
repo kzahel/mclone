@@ -393,6 +393,9 @@ const AGE_0: &[(&str, &str)] = &[("age", "0")];
 const AGE_3: &[(&str, &str)] = &[("age", "3")];
 const AGE_20: &[(&str, &str)] = &[("age", "20")];
 const BAMBOO_TRUNK: &[(&str, &str)] = &[("age", "1"), ("leaves", "none"), ("stage", "0")];
+const BAMBOO_TOP_SMALL: &[(&str, &str)] = &[("age", "1"), ("leaves", "small"), ("stage", "0")];
+const BAMBOO_TOP_LARGE: &[(&str, &str)] = &[("age", "1"), ("leaves", "large"), ("stage", "0")];
+const BAMBOO_FINAL_LARGE: &[(&str, &str)] = &[("age", "1"), ("leaves", "large"), ("stage", "1")];
 const PICKLES_1_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "1"), ("waterlogged", "true")];
 const PICKLES_2_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "2"), ("waterlogged", "true")];
 const PICKLES_3_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "3"), ("waterlogged", "true")];
@@ -632,6 +635,9 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (172, "minecraft:cocoa", COCOA_AGE2_EAST),
     (173, "minecraft:cocoa", COCOA_AGE2_SOUTH),
     (174, "minecraft:cocoa", COCOA_AGE2_WEST),
+    (175, "minecraft:bamboo", BAMBOO_TOP_SMALL),
+    (176, "minecraft:bamboo", BAMBOO_TOP_LARGE),
+    (177, "minecraft:bamboo", BAMBOO_FINAL_LARGE),
 ];
 
 #[cfg(test)]
@@ -650,7 +656,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 175);
+        assert_eq!(registry.len(), 178);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -902,6 +908,18 @@ mod tests {
         assert_eq!(
             registry.by_id(BlockStateId(130)).unwrap().canonical_key(),
             "minecraft:bamboo[age=1,leaves=none,stage=0]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:bamboo[age=1,leaves=small,stage=0]"),
+            Some(BlockStateId(175))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:bamboo[age=1,leaves=large,stage=0]"),
+            Some(BlockStateId(176))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:bamboo[age=1,leaves=large,stage=1]"),
+            Some(BlockStateId(177))
         );
         assert_eq!(
             registry.id_for_key("minecraft:lily_pad"),

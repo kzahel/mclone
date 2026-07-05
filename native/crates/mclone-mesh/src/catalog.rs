@@ -259,19 +259,19 @@ impl TexturedMeshCatalog {
             let variant_key = record
                 .asset_variant_key(asset)
                 .unwrap_or_else(|| record.variant_key());
-            let (model, rotation) = if let Some(variants) = asset.variants_for_key(&variant_key) {
+            let model_selections = if let Some(variants) = asset.variants_for_key(&variant_key) {
                 let variant = variants.first().ok_or_else(|| {
                     TexturedMeshError::MissingBlockStateVariant {
                         block: record.block.clone(),
                         variant_key: variant_key.clone(),
                     }
                 })?;
-                (
+                vec![(
                     &variant.model,
                     BlockStateModelRotation::from_variant(variant),
-                )
+                )]
             } else if variant_key.is_empty() {
-                multipart_primary_model_and_rotation(asset, record).ok_or_else(|| {
+                multipart_models_and_rotations(asset, record).ok_or_else(|| {
                     TexturedMeshError::MissingBlockStateVariant {
                         block: record.block.clone(),
                         variant_key: variant_key.clone(),
@@ -283,19 +283,26 @@ impl TexturedMeshCatalog {
                     variant_key,
                 });
             };
-            let baked = models.bake_model(model)?;
-            let faces = baked
-                .faces
-                .iter()
-                .map(|face| {
-                    TexturedBlockFace::from_baked(
-                        face,
-                        atlas,
-                        rotation,
-                        textured_block_tint(record.block.path(), face.tintindex),
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            let mut faces = Vec::new();
+            let mut ambient_occlusion = true;
+            for (model, rotation) in model_selections {
+                let baked = models.bake_model(model)?;
+                ambient_occlusion &= baked.ambient_occlusion;
+                faces.extend(
+                    baked
+                        .faces
+                        .iter()
+                        .map(|face| {
+                            TexturedBlockFace::from_baked(
+                                face,
+                                atlas,
+                                rotation,
+                                textured_block_tint(record.block.path(), face.tintindex),
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
             let fluid = textured_fluid_model(record, atlas)?;
             let full_cube_occluder = full_cube_occluder(&faces);
             let facts = block_render_facts(record, full_cube_occluder);
@@ -308,7 +315,7 @@ impl TexturedMeshCatalog {
                     fluid,
                     render_layer,
                     occludes: facts.occludes,
-                    ambient_occlusion: baked.ambient_occlusion,
+                    ambient_occlusion,
                     light_emission: facts.light_emission,
                     light_block: facts.light_block,
                     view_blocking: facts.view_blocking,
@@ -411,6 +418,27 @@ fn multipart_primary_model_and_rotation<'a>(
     Some((model, multipart_primary_rotation(record)))
 }
 
+fn multipart_models_and_rotations<'a>(
+    asset: &'a mclone_assets::BlockStateAsset,
+    record: &BlockStateRecord,
+) -> Option<Vec<(&'a ResourceLocation, BlockStateModelRotation)>> {
+    let mut models = vec![multipart_primary_model_and_rotation(asset, record)?];
+    if record.block.path() == "bamboo" {
+        let leaf_model = match record.properties.get("leaves").map(String::as_str) {
+            Some("small") => Some("block/bamboo_small_leaves"),
+            Some("large") => Some("block/bamboo_large_leaves"),
+            _ => None,
+        };
+        if let Some(path) = leaf_model {
+            models.push((
+                multipart_model_ref(asset, path)?,
+                BlockStateModelRotation::default(),
+            ));
+        }
+    }
+    Some(models)
+}
+
 fn multipart_primary_rotation(record: &BlockStateRecord) -> BlockStateModelRotation {
     if record.block.path() == "vine" {
         if property_is_true(record, "up") {
@@ -457,20 +485,24 @@ fn multipart_primary_model<'a>(
     if block_path == "bamboo" {
         if let Some(age) = record.properties.get("age") {
             let preferred_bamboo = format!("block/bamboo1_age{age}");
-            if let Some(model) = asset.model_refs.iter().find(|model| {
-                model.namespace() == asset.block.namespace() && model.path() == preferred_bamboo
-            }) {
+            if let Some(model) = multipart_model_ref(asset, &preferred_bamboo) {
                 return Some(model);
             }
         }
     }
 
     let preferred = format!("block/{block_path}");
+    multipart_model_ref(asset, &preferred).or_else(|| asset.model_refs.iter().next())
+}
+
+fn multipart_model_ref<'a>(
+    asset: &'a mclone_assets::BlockStateAsset,
+    path: &str,
+) -> Option<&'a ResourceLocation> {
     asset
         .model_refs
         .iter()
-        .find(|model| model.namespace() == asset.block.namespace() && model.path() == preferred)
-        .or_else(|| asset.model_refs.iter().next())
+        .find(|model| model.namespace() == asset.block.namespace() && model.path() == path)
 }
 
 fn textured_block_tint(block_path: &str, tintindex: i32) -> TexturedBlockTint {
@@ -905,6 +937,7 @@ mod tests {
             TexturedBlockTint::LilyPad
         );
         assert_eq!(textured_block_tint("lily_pad", -1), TexturedBlockTint::None);
+        assert_eq!(textured_block_tint("bamboo", 0), TexturedBlockTint::None);
     }
 
     #[test]
@@ -959,6 +992,50 @@ mod tests {
         assert_eq!(
             multipart_primary_model(&asset, &record).map(ResourceLocation::path),
             Some("block/bamboo1_age1")
+        );
+    }
+
+    #[test]
+    fn multipart_models_include_bamboo_leaf_model_for_leaf_states() {
+        let block = ResourceLocation::parse("minecraft:bamboo").unwrap();
+        let record = mclone_assets::BlockStateRecord::new(
+            BlockStateId(176),
+            block.clone(),
+            [("age", "1"), ("leaves", "large"), ("stage", "0")],
+        );
+        let asset = mclone_assets::BlockStateAsset {
+            block: block.clone(),
+            path: mclone_assets::AssetPath::blockstate_json(&block),
+            variants: BTreeMap::new(),
+            variant_keys: BTreeSet::new(),
+            model_refs: [
+                ResourceLocation::parse("minecraft:block/bamboo1_age0").unwrap(),
+                ResourceLocation::parse("minecraft:block/bamboo1_age1").unwrap(),
+                ResourceLocation::parse("minecraft:block/bamboo_large_leaves").unwrap(),
+                ResourceLocation::parse("minecraft:block/bamboo_small_leaves").unwrap(),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        let models = multipart_models_and_rotations(&asset, &record)
+            .unwrap()
+            .into_iter()
+            .map(|(model, rotation)| (model.path().to_owned(), rotation))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            models,
+            vec![
+                (
+                    "block/bamboo1_age1".to_owned(),
+                    BlockStateModelRotation::default()
+                ),
+                (
+                    "block/bamboo_large_leaves".to_owned(),
+                    BlockStateModelRotation::default()
+                ),
+            ]
         );
     }
 

@@ -31,7 +31,8 @@ survival/light/substrate gating, and deterministic low-visibility fixtures for
 plains/taiga/mushroom-field small mushrooms plus savanna/sunflower-plains
 default spring liquid ticks, plus Java-shaped jungle-family `PATCH_MELON` /
 `VINES` table slots, directional vine state/rendering, jungle tree cocoa, and
-normal/mega jungle tree trunk/leaf vine decorators,
+normal/mega jungle tree trunk/leaf vine decorators, plus bamboo top leaf block
+states and multipart stem/leaf rendering,
 plus Java-shaped `FOREST_FLOWER_VEGETATION`, `FOREST_FLOWER_VEGETATION_COMMON`,
 `PATCH_GRASS_FOREST`, `FLOWER_WARM`, `PATCH_TALL_GRASS`,
 `PATCH_GRASS_SAVANNA`, shattered-savanna `PATCH_GRASS_NORMAL`, badlands
@@ -211,8 +212,8 @@ notes.
 | 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface plus Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap; pillar feature gap | seed `868`, chunk `(7,-8)` | `[x] B [x] T [x] S [x] F` |
 | 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | modified wooded plateau surface plus Java `TREES_BADLANDS` oak, `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `12115`, chunk `(0,-1)` | `[x] B [x] T [x] S [x] F` |
 | 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau plus Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `1150`, chunk `(-7,1)` | `[x] B [x] T [x] S [x] F` |
-| 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks, jungle log/leaves vegetation, and mega-jungle vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; top bamboo leaf states/exact mega jungle shape gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks, jungle log/leaves vegetation, and mega-jungle vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; top bamboo leaf states/exact mega jungle shape gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, and mega-jungle vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact mega jungle shape gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, and mega-jungle vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact mega jungle shape gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 
 ## Notes And Early Gaps
 
@@ -404,12 +405,14 @@ Documented gaps from this slice:
   `PATCH_MELON` / `VINES` jungle extra vegetation slots are wired with broad
   native block placement. Native also carries directional vine face states,
   normal jungle-tree cocoa decorators, and normal/mega jungle trunk/leaf vine
-  decorators, with a visible jungle cocoa/vine fixture pinned at seed `71`
-  chunk `(0,0)`. Exact parity is still incomplete: mega jungle trees use a
-  reduced straight-trunk/blob-foliage approximation instead of the 2x2
+  decorators. Bamboo generation now emits Java-shaped `leaves=small`,
+  `leaves=large`, and final `stage=1` large top states, and the mesh catalog
+  composes the stem plus leaf multipart models for those states. The visible
+  jungle cocoa/vine fixture remains pinned at seed `71` chunk `(0,0)`. Exact
+  parity is still incomplete: mega jungle trees use a reduced
+  straight-trunk/blob-foliage approximation instead of the 2x2
   trunk/branch/mega foliage placers, jungle bushes use the existing blob
-  foliage approximation, bamboo top leaf states are not separate block IDs yet,
-  exact normal
+  foliage approximation, exact normal
   mushroom/default-extra visibility/count parity and full light-engine parity
   are not checked here, and exact decorated mismatch buckets remain later `103`
   work.
@@ -549,6 +552,6 @@ slice:
    initial plains/taiga/mushroom-field fixtures, and spring fixtures that
    produce deterministic visible water/lava columns rather than only liquid
    ticks.
-3. Pick one missing high-signal family outside the broad table slots: bamboo
-   top leaf block states plus a bamboo-jungle visible fixture, or eroded
-   badlands pillar-shape parity.
+3. Pick one missing high-signal family outside the broad table slots: eroded
+   badlands pillar-shape parity, or the exact mega-jungle 2x2
+   trunk/branch/foliage placer gap.

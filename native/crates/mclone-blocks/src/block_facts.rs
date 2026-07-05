@@ -100,6 +100,9 @@ pub mod terrain_id {
     pub const COCOA_AGE2_EAST: u32 = 172;
     pub const COCOA_AGE2_SOUTH: u32 = 173;
     pub const COCOA_AGE2_WEST: u32 = 174;
+    pub const BAMBOO_TOP_SMALL: u32 = 175;
+    pub const BAMBOO_TOP_LARGE: u32 = 176;
+    pub const BAMBOO_FINAL_LARGE: u32 = 177;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

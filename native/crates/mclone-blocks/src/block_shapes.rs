@@ -75,7 +75,8 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         terrain_id::BROWN_MUSHROOM | terrain_id::RED_MUSHROOM => Some(mushroom_shape()),
         terrain_id::CACTUS => Some(cactus_outline_shape()),
         terrain_id::SUGAR_CANE => Some(sugar_cane_shape()),
-        terrain_id::BAMBOO => Some(bamboo_outline_shape()),
+        id if is_large_bamboo(id) => Some(bamboo_large_outline_shape()),
+        id if is_bamboo(id) => Some(bamboo_outline_shape()),
         terrain_id::LILY_PAD => Some(lily_pad_shape()),
         terrain_id::SEAGRASS => Some(seagrass_shape()),
         terrain_id::TALL_SEAGRASS_LOWER | terrain_id::TALL_SEAGRASS_UPPER => {
@@ -154,7 +155,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::WALL_TORCH_WEST => None,
         id if is_vine(id) || is_cocoa(id) => None,
         terrain_id::CACTUS => Some(cactus_collision_shape()),
-        terrain_id::BAMBOO => Some(bamboo_collision_shape()),
+        id if is_bamboo(id) => Some(bamboo_collision_shape()),
         terrain_id::LILY_PAD => Some(lily_pad_shape()),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         id if is_fluid(BlockStateId(id)) => None,
@@ -238,6 +239,23 @@ fn is_cocoa(id: u32) -> bool {
     )
 }
 
+fn is_bamboo(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::BAMBOO
+            | terrain_id::BAMBOO_TOP_SMALL
+            | terrain_id::BAMBOO_TOP_LARGE
+            | terrain_id::BAMBOO_FINAL_LARGE
+    )
+}
+
+fn is_large_bamboo(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::BAMBOO_TOP_LARGE | terrain_id::BAMBOO_FINAL_LARGE
+    )
+}
+
 fn pointed_dripstone_shape() -> LocalShape {
     local_box(5.0 / 16.0, 0.0, 5.0 / 16.0, 11.0 / 16.0, 1.0, 11.0 / 16.0)
 }
@@ -274,6 +292,11 @@ fn sugar_cane_shape() -> LocalShape {
 
 fn bamboo_outline_shape() -> LocalShape {
     local_box(5.0 / 16.0, 0.0, 5.0 / 16.0, 11.0 / 16.0, 1.0, 11.0 / 16.0)
+        .with_offset(OffsetKind::Xz)
+}
+
+fn bamboo_large_outline_shape() -> LocalShape {
+    local_box(3.0 / 16.0, 0.0, 3.0 / 16.0, 13.0 / 16.0, 1.0, 13.0 / 16.0)
         .with_offset(OffsetKind::Xz)
 }
 
@@ -699,6 +722,53 @@ mod tests {
         );
         assert_eq!(
             block_collision_aabb(state(terrain_id::BAMBOO), pos),
+            Some(Aabb::new(
+                offset.x + 0.40625,
+                0.0,
+                offset.z + 0.40625,
+                offset.x + 0.59375,
+                1.0,
+                offset.z + 0.59375,
+            ))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::BAMBOO_TOP_SMALL), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(
+                offset.x + 0.3125,
+                0.0,
+                offset.z + 0.3125,
+                offset.x + 0.6875,
+                1.0,
+                offset.z + 0.6875,
+            ))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::BAMBOO_TOP_LARGE), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(
+                offset.x + 0.1875,
+                0.0,
+                offset.z + 0.1875,
+                offset.x + 0.8125,
+                1.0,
+                offset.z + 0.8125,
+            ))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::BAMBOO_FINAL_LARGE), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(
+                offset.x + 0.1875,
+                0.0,
+                offset.z + 0.1875,
+                offset.x + 0.8125,
+                1.0,
+                offset.z + 0.8125,
+            ))
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::BAMBOO_FINAL_LARGE), pos),
             Some(Aabb::new(
                 offset.x + 0.40625,
                 0.0,
