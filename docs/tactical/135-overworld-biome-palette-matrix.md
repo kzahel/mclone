@@ -29,12 +29,12 @@ Java-shaped `BROWN_MUSHROOM_TAIGA` / `RED_MUSHROOM_TAIGA` and counted
 giant-taiga mushroom table wiring, with Java-shaped small-mushroom
 survival/light/substrate gating, and deterministic low-visibility fixtures for
 plains/taiga/mushroom-field small mushrooms plus savanna/sunflower-plains
-exposed default spring water/lava placements, plus Java-shaped jungle-family
-`PATCH_MELON` / `VINES` table slots, directional vine state/rendering, jungle
-tree cocoa, and normal/mega jungle tree trunk/leaf vine decorators,
-mega-jungle 2x2 trunk/branch/foliage placer shape, Java-shaped jungle-bush
-foliage rows, plus bamboo top leaf block states and multipart stem/leaf
-rendering,
+exposed default spring water/lava placements, swamp/stone-shore visible
+pumpkins on grass, plus Java-shaped jungle-family `PATCH_MELON` / `VINES`
+table slots, directional vine state/rendering, jungle tree cocoa, and
+normal/mega jungle tree trunk/leaf vine decorators, mega-jungle 2x2
+trunk/branch/foliage placer shape, Java-shaped jungle-bush foliage rows, plus
+bamboo top leaf block states and multipart stem/leaf rendering,
 plus Java-shaped `FOREST_FLOWER_VEGETATION`, `FOREST_FLOWER_VEGETATION_COMMON`,
 `PATCH_GRASS_FOREST`, `FLOWER_WARM`, `PATCH_TALL_GRASS`,
 `PATCH_GRASS_SAVANNA`, shattered-savanna `PATCH_GRASS_NORMAL`, badlands
@@ -154,7 +154,7 @@ notes.
 | 3 | `minecraft:mountains` | mountains | grass/stone/gravel mountain surface and sparse oak/spruce tree family checked; normal mushroom, default extra, and spring table slots wired; forest-rock/emerald/infested-stone gap | seed `33`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 4 | `minecraft:forest` | forest | forest grass tint/surface and oak/birch tree family checked; `FOREST_FLOWER_VEGETATION`, default flowers, count-2 forest grass, normal mushroom, default extra, and spring table slots wired; bee-side-effects gap | seed `0`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 5 | `minecraft:taiga` | taiga | spruce trees, ferns, and sweet berry bushes checked; taiga/normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at chunk `(-1,0)` | seed `233`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, mushroom blocks, sugar cane, and lily pads; small/normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; seagrass/visible-pumpkin gap | seed `18918`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset plus blue orchids, mushroom blocks, sugar cane, and lily pads; small/normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `211` chunk `(-2,1)`; seagrass gap | seed `18918`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 7 | `minecraft:river` | river | river water plus `SEAGRASS_RIVER` seagrass/tall-seagrass water plants checked; native water-tree/default-vegetation subset present with normal mushroom, default extra, and spring table slots wired; banks/visible-pumpkin gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice plus packed/blue iceberg and blue-ice spread coverage checked; structures/exact iceberg gap | seed `779`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired, visible-pumpkin gap | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -171,7 +171,7 @@ notes.
 | 22 | `minecraft:jungle_hills` | jungle | jungle hill surface/tint and jungle log/leaves tree family checked; normal/mega jungle tree vine decorators, mega-jungle 2x2 trunk/branch/foliage shape, jungle-bush foliage rows, and normal jungle cocoa decorator wired; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact tree-count gap | seed `146`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface and lower-density jungle log/leaves tree family checked; normal jungle cocoa/directional-vine decorator path and jungle-bush foliage rows wired; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact low-density tree-count gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 24 | `minecraft:deep_ocean` | ocean-default | deep water checked; seagrass/kelp water plants checked | seed `4`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 25 | `minecraft:stone_shore` | mountains | stone shore plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired, steep coast/structure-context/visible-pumpkin gap | seed `74739`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 25 | `minecraft:stone_shore` | mountains | stone shore plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `74739` chunk `(3,5)`; steep coast/structure-context gap | seed `74739`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired, visible-pumpkin gap | seed `5006`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 27 | `minecraft:birch_forest` | birch | birch tint/grass surface and birch log/leaves tree family checked; normal mushroom, default extra, and spring table slots wired | seed `10`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 28 | `minecraft:birch_forest_hills` | birch | birch hill surface/tint and birch log/leaves tree family checked; normal mushroom, default extra, and spring table slots wired | seed `30`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -371,7 +371,9 @@ Landed:
   blocks; jungle seed `61` chunk `(1,2)` requires visible cocoa, directional
   vine states, and a jungle-log/oak-leaf bush-skirt shape; savanna seed `62`
   chunk `(3,1)` and sunflower-plains seed `43` chunk `(-1,1)` require exposed
-  scheduled spring positions that still contain water and lava blocks.
+  scheduled spring positions that still contain water and lava blocks; swamp
+  seed `211` chunk `(-2,1)` and stone-shore seed `74739` chunk `(3,5)` require
+  visible pumpkins on grass.
 
 Documented gaps from this slice:
 
@@ -380,9 +382,10 @@ Documented gaps from this slice:
   `PATCH_SUGAR_CANE` / `PATCH_PUMPKIN` table slots for the current main land
   builders and still has high-signal sugar-cane coverage for
   desert/badlands/swamp plus river/frozen-river/beach/shore rows. Visible
-  pumpkin remains fixture-checked only opportunistically later because the
-  vanilla patch survives on grass blocks, so interior sand/terracotta palette
-  rows usually do not emit pumpkin blocks.
+  pumpkin fixtures have landed for swamp and stone shore. River, beach,
+  desert, badlands, snowy, and other boundary rows remain fixture-checked later
+  because the vanilla patch survives on grass blocks, so interior sand/terracotta
+  palette rows usually do not emit pumpkin blocks.
 - Java default springs now have table-slot coverage for the current land,
   river, beach/shore, desert/badlands, swamp, mushroom-field, and fallback land
   builders, plus deterministic exposed water/lava spring block fixtures for
@@ -441,16 +444,18 @@ Documented gaps from this slice:
   boundary work.
 - Java beach, snowy beach, and stone shore now have deterministic default
   sugar-cane extra coverage, plus the shared default flower/grass, normal
-  mushroom, and spring table slots. Exact parity is still incomplete: visible
-  pumpkin fixtures, exact normal mushroom visibility/counts, full light-engine
-  parity, buried treasure, shipwrecks, mineshafts, steep shore/coast
-  boundaries, and exact decorated mismatch buckets remain later `103`,
-  structure, or boundary work.
+  mushroom, and spring table slots. Stone shore also has a visible pumpkin
+  fixture. Exact parity is still incomplete: beach/snowy-beach visible pumpkin
+  fixtures, exact normal mushroom visibility/counts, full light-engine parity,
+  buried treasure, shipwrecks, mineshafts, steep shore/coast boundaries, and
+  exact decorated mismatch buckets remain later `103`, structure, or boundary
+  work.
 - Java swamp and swamp hills now have high-signal water-lily, blue-orchid,
   small/normal-mushroom, and sugar-cane coverage, and the `PATCH_PUMPKIN` table
-  slot is wired. Exact parity is still incomplete: swamp-hills fossil ordering,
-  swamp seagrass/extras, visible pumpkin fixtures, and exact decorated counts
-  remain later `103` work.
+  slot is wired. Base swamp also has a visible pumpkin fixture. Exact parity is
+  still incomplete: swamp-hills fossil ordering, swamp/swamp-hills seagrass and
+  extras, swamp-hills visible pumpkin fixture coverage, and exact decorated
+  counts remain later `103` work.
 - Java mushroom fields and mushroom-field shore now have high-signal huge
   mushroom coverage, plus taiga-style/normal mushroom, default-extra, and
   spring table slots. Base mushroom fields also has visible small-mushroom
@@ -550,8 +555,8 @@ slice:
    them with `103` exact decorated parity because they are usually non-visible
    in current palette fixtures.
 2. Add row-specific visible fixtures for already-wired low-visibility slots:
-   pumpkin on grass-boundary rows and remaining small-mushroom rows beyond the
-   initial plains/taiga/mushroom-field fixtures.
+   remaining grass-boundary pumpkin rows beyond swamp/stone-shore and remaining
+   small-mushroom rows beyond the initial plains/taiga/mushroom-field fixtures.
 3. Pick one missing high-signal family outside the broad table slots: eroded
    badlands pillar-shape parity, or exact jungle tree selector/count visibility
    buckets if staying in jungle rows.

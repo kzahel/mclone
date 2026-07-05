@@ -51,7 +51,7 @@ mod tests {
         GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
         LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY,
         LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY,
-        PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, RED_MUSHROOM,
+        PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM,
         RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
         SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
         SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
@@ -100,6 +100,9 @@ mod tests {
         },
         JungleBushShape {
             min_matches: usize,
+        },
+        VisiblePumpkins {
+            min_count: usize,
         },
         DefaultSpringVisibleFluids {
             min_water_blocks: usize,
@@ -1034,6 +1037,20 @@ mod tests {
             chunk_z: 2,
             biome_key: "minecraft:jungle",
             expectation: LowVisibilityFeatureExpectation::JungleBushShape { min_matches: 1 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 211,
+            chunk_x: -2,
+            chunk_z: 1,
+            biome_key: "minecraft:swamp",
+            expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 74_739,
+            chunk_x: 3,
+            chunk_z: 5,
+            biome_key: "minecraft:stone_shore",
+            expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
         },
         LowVisibilityFeatureCase {
             seed: 62,
@@ -2221,6 +2238,18 @@ mod tests {
                         actual
                     );
                 }
+                LowVisibilityFeatureExpectation::VisiblePumpkins { min_count } => {
+                    let actual = pumpkins_on_grass_count(&chunk);
+                    assert!(
+                        actual >= min_count,
+                        "seed {} chunk ({}, {}) expected at least {} visible pumpkins on grass, found {}",
+                        case.seed,
+                        case.chunk_x,
+                        case.chunk_z,
+                        min_count,
+                        actual
+                    );
+                }
                 LowVisibilityFeatureExpectation::DefaultSpringVisibleFluids {
                     min_water_blocks,
                     min_lava_blocks,
@@ -3219,6 +3248,22 @@ mod tests {
             block_at_world_position(chunk, tick.x + dx, tick.y + dy, tick.z + dz)
                 .is_some_and(is_air_like)
         })
+    }
+
+    fn pumpkins_on_grass_count(chunk: &GeneratedChunk) -> usize {
+        let mut count = 0;
+        for y in chunk.min_y + 1..chunk.min_y + chunk.height {
+            for local_z in 0..GeneratedChunk::WIDTH {
+                for local_x in 0..GeneratedChunk::WIDTH {
+                    if chunk.block_at_y(local_x, y, local_z).raw() == PUMPKIN
+                        && chunk.block_at_y(local_x, y - 1, local_z).raw() == GRASS_BLOCK
+                    {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
     }
 
     fn jungle_bush_shape_count(chunk: &GeneratedChunk) -> usize {
