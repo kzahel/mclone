@@ -507,6 +507,14 @@ impl ChunkApp {
     }
 
     fn finish_pending_session_start(&mut self) {
+        if self.driver.pending_session_start_needs_teardown() {
+            if let Err(err) = self.teardown_world() {
+                log::error!(
+                    "failed to tear down world before starting replacement session: {err:#}"
+                );
+                return;
+            }
+        }
         let device = self.surface.as_ref().map(|surface| &surface.device);
         let assets = &self.assets;
         let update = self.driver.finish_pending_session_start(
@@ -543,13 +551,16 @@ impl ChunkApp {
         if let Some(host_action) = result.host_action {
             match host_action {
                 FlatClientHostAction::QuitToTitle => {
-                    if let Err(err) = self.teardown_world() {
-                        log::error!("failed to tear down world: {err:#}");
-                        self.schedule_next_redraw(event_loop);
-                        return;
+                    let transition = self.driver.quit_to_title_transition_effects();
+                    if transition.teardown_world {
+                        if let Err(err) = self.teardown_world() {
+                            log::error!("failed to tear down world: {err:#}");
+                            self.schedule_next_redraw(event_loop);
+                            return;
+                        }
                     }
-                    self.driver.clear_session();
-                    self.driver.apply_quit_to_title_ui();
+                    self.driver
+                        .apply_flat_client_session_transition_effects(transition);
                 }
                 FlatClientHostAction::Quit => {
                     event_loop.exit();
@@ -1996,9 +2007,12 @@ mod tests {
             .unwrap();
         wait_for_client_block_state(&mut app, target, AIR_BLOCK_STATE_ID);
 
-        app.teardown_world().unwrap();
-        app.driver.clear_session();
-        app.driver.apply_quit_to_title_ui();
+        let transition = app.driver.quit_to_title_transition_effects();
+        if transition.teardown_world {
+            app.teardown_world().unwrap();
+        }
+        app.driver
+            .apply_flat_client_session_transition_effects(transition);
         assert_eq!(app.driver.ui_screen(), Some(GameScreen::Title));
         assert!(app.driver.runtime.is_none());
 
@@ -2077,9 +2091,12 @@ mod tests {
         assert!(world_dir.join("world.json").is_file());
         assert!(world_dir.join("world.sqlite3").is_file());
 
-        app.teardown_world().unwrap();
-        app.driver.clear_session();
-        app.driver.apply_quit_to_title_ui();
+        let transition = app.driver.quit_to_title_transition_effects();
+        if transition.teardown_world {
+            app.teardown_world().unwrap();
+        }
+        app.driver
+            .apply_flat_client_session_transition_effects(transition);
         assert_eq!(app.driver.ui_screen(), Some(GameScreen::Title));
         assert!(app.driver.runtime.is_none());
 

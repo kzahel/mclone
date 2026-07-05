@@ -46,6 +46,10 @@ impl<P> GameSessionCoordinator<P> {
         self.pending_start.take()
     }
 
+    pub fn pending_start(&self) -> Option<&PendingSessionStart<P>> {
+        self.pending_start.as_ref()
+    }
+
     pub fn complete_start(&mut self, session: ActiveSessionDescriptor) {
         self.state = GameSessionState::Active { session };
         self.pending_start = None;

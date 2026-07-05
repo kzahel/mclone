@@ -36,6 +36,13 @@ pub struct FlatClientSessionUiEffects {
     pub screen: Option<GameScreen>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FlatClientSessionTransitionEffects {
+    pub teardown_world: bool,
+    pub clear_session: bool,
+    pub ui: FlatClientSessionUiEffects,
+}
+
 pub fn flat_client_session_effects_for_action(
     action: GameUiAction,
     context: FlatClientSessionActionContext<'_>,
@@ -125,6 +132,35 @@ pub fn flat_client_effective_status_overlay(
 
 pub fn flat_client_should_clear_inactive_session_status(state: &GameSessionState) -> bool {
     !matches!(state, GameSessionState::Active { .. })
+}
+
+pub fn flat_client_start_session_transition(
+    state: &GameSessionState,
+) -> FlatClientSessionTransitionEffects {
+    FlatClientSessionTransitionEffects {
+        teardown_world: flat_client_session_has_teardownable_runtime(state),
+        ..FlatClientSessionTransitionEffects::default()
+    }
+}
+
+pub fn flat_client_quit_to_title_transition(
+    state: &GameSessionState,
+) -> FlatClientSessionTransitionEffects {
+    FlatClientSessionTransitionEffects {
+        teardown_world: flat_client_session_has_teardownable_runtime(state),
+        clear_session: true,
+        ui: FlatClientSessionUiEffects {
+            screen: Some(GameScreen::Title),
+            ..FlatClientSessionUiEffects::default()
+        },
+    }
+}
+
+fn flat_client_session_has_teardownable_runtime(state: &GameSessionState) -> bool {
+    matches!(
+        state,
+        GameSessionState::Active { .. } | GameSessionState::Starting { .. }
+    )
 }
 
 #[cfg(test)]
@@ -244,5 +280,47 @@ mod tests {
                 session: ActiveSessionDescriptor::new_seed_local_world(1)
             }
         ));
+    }
+
+    #[test]
+    fn start_transition_tears_down_active_or_starting_sessions_only() {
+        assert!(
+            flat_client_start_session_transition(&GameSessionState::Active {
+                session: ActiveSessionDescriptor::new_seed_local_world(1)
+            })
+            .teardown_world
+        );
+        assert!(
+            flat_client_start_session_transition(&GameSessionState::Starting {
+                request: SessionStartRequest::new_seed_local_world(2)
+            })
+            .teardown_world
+        );
+        assert!(
+            !flat_client_start_session_transition(&GameSessionState::Failed {
+                request: SessionStartRequest::new_seed_local_world(3),
+                error: SessionFailure::new("failed")
+            })
+            .teardown_world
+        );
+        assert!(!flat_client_start_session_transition(&GameSessionState::NoSession).teardown_world);
+    }
+
+    #[test]
+    fn quit_to_title_transition_clears_session_and_opens_title() {
+        let transition = flat_client_quit_to_title_transition(&GameSessionState::Active {
+            session: ActiveSessionDescriptor::new_seed_local_world(1),
+        });
+        assert!(transition.teardown_world);
+        assert!(transition.clear_session);
+        assert_eq!(transition.ui.screen, Some(GameScreen::Title));
+
+        let transition = flat_client_quit_to_title_transition(&GameSessionState::Failed {
+            request: SessionStartRequest::new_seed_local_world(2),
+            error: SessionFailure::new("failed"),
+        });
+        assert!(!transition.teardown_world);
+        assert!(transition.clear_session);
+        assert_eq!(transition.ui.screen, Some(GameScreen::Title));
     }
 }

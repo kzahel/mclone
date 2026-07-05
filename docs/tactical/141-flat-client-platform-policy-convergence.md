@@ -26,7 +26,11 @@ quit actions, while desktop and web execute those effects through their
 platform-local startup/runtime adapters. Slice 4b landed on 2026-07-05:
 request-to-UI restoration, session status overlay projection, and inactive
 status clear policy now also live in `flat_client_session`, with desktop and
-web adapters applying the shared effects to their local UI hosts.
+web adapters applying the shared effects to their local UI hosts. Slice 4c
+landed on 2026-07-05: teardown-before-start and quit-to-title transition
+policy now live in `flat_client_session`, with desktop and web adapters
+executing the resulting runtime shutdown/session-clear/UI effects through
+their platform-local runtime hosts.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -495,7 +499,7 @@ Results on 2026-07-05:
 
 ### Slice 4: Session Replacement And Startup Policy
 
-Status: first two passes landed 2026-07-05.
+Status: first three passes landed 2026-07-05.
 
 Move the remaining shared session action policy out of app-local match arms:
 
@@ -571,9 +575,38 @@ Validation note: the first `pnpm native:web:smoke` run failed in the existing
 shared-topology stress subprobe with `timed out waiting for shared runner pool
 overflow and fallback`; the immediate rerun passed with the same code.
 
+Recorded Slice 4c result:
+
+- Added shared `FlatClientSessionTransitionEffects` for session-start and
+  quit-to-title transitions.
+- Centralized the teardown-before-start rule: replacing an active or starting
+  session now emits a shared teardown effect, while inactive or failed sessions
+  do not.
+- Centralized quit-to-title state transition policy: active/starting sessions
+  request teardown, all sessions clear shared session state, and the UI returns
+  to the title screen through shared effects.
+- Updated desktop `FlatClientDriver` and `McloneApp` to compute and apply those
+  transition effects while keeping `WindowSceneRuntime` teardown and native
+  startup payload construction platform-local.
+- Updated native web `WebChunkRenderSession` to apply the same transition
+  effects while keeping browser worker shutdown, IndexedDB startup, and
+  JavaScript async promise plumbing web-local.
+
+Validation after Slice 4c:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_session
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client ui_action_routing
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_
+pnpm native:web:typecheck
+pnpm native:web:catalog-smoke
+pnpm native:web:smoke
+git diff --check
+```
+
 Remaining Slice 4 work:
 
-- centralize teardown-before-start and quit-to-title state transition policy;
 - centralize loading/startup overlay projection;
 - decide whether `flat_client_session` stays as a helper module or folds into a
   broader flat-client controller with `flat_client_catalog`.

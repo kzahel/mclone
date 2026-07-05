@@ -12,9 +12,10 @@ use mclone_app_runtime::flat_client_catalog::{
 };
 use mclone_app_runtime::flat_client_session::{
     FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
-    FlatClientSessionUiEffects, flat_client_failed_start_ui_effects,
+    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
+    flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
     flat_client_session_effects_for_action, flat_client_session_status_overlay,
-    flat_client_should_clear_inactive_session_status,
+    flat_client_should_clear_inactive_session_status, flat_client_start_session_transition,
 };
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
@@ -162,6 +163,7 @@ pub(crate) struct FlatClientPendingSessionStart {
     pub(crate) arm_mouse_lock: bool,
     pub(crate) show_title_on_failure: bool,
     pub(crate) descriptor: Option<ActiveSessionDescriptor>,
+    pub(crate) transition: FlatClientSessionTransitionEffects,
 }
 
 #[derive(Debug)]
@@ -791,8 +793,8 @@ impl FlatClientDriver {
         ));
     }
 
-    pub(crate) fn apply_quit_to_title_ui(&mut self) {
-        self.ui.apply_action(GameUiAction::QuitToTitle);
+    pub(crate) fn quit_to_title_transition_effects(&self) -> FlatClientSessionTransitionEffects {
+        flat_client_quit_to_title_transition(self.session.state())
     }
 
     pub(crate) fn session_status_overlay(&self) -> StatusOverlay {
@@ -811,26 +813,32 @@ impl FlatClientDriver {
         show_title_on_failure: bool,
     ) {
         let scene = self.scene.clone();
+        let request = session_start_request_for_scene(&scene);
+        let transition = flat_client_start_session_transition(self.session.state());
         self.session.request_start(
-            session_start_request_for_scene(&scene),
+            request,
             FlatClientPendingSessionStart {
                 scene,
                 arm_mouse_lock,
                 show_title_on_failure,
                 descriptor: None,
+                transition,
             },
         );
     }
 
     pub(crate) fn request_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
         let scene = self.local_world_scene(seed);
+        let request = SessionStartRequest::new_seed_local_world(seed);
+        let transition = flat_client_start_session_transition(self.session.state());
         self.session.request_start(
-            SessionStartRequest::new_seed_local_world(seed),
+            request,
             FlatClientPendingSessionStart {
                 scene,
                 arm_mouse_lock,
                 show_title_on_failure: false,
                 descriptor: None,
+                transition,
             },
         );
         self.clear_ui_input();
@@ -843,6 +851,7 @@ impl FlatClientDriver {
         scene: SceneOptions,
         arm_mouse_lock: bool,
     ) {
+        let transition = flat_client_start_session_transition(self.session.state());
         self.session.request_start(
             request,
             FlatClientPendingSessionStart {
@@ -850,6 +859,7 @@ impl FlatClientDriver {
                 arm_mouse_lock,
                 show_title_on_failure: false,
                 descriptor: Some(descriptor),
+                transition,
             },
         );
         self.clear_ui_input();
@@ -1007,21 +1017,34 @@ impl FlatClientDriver {
         }
     }
 
+    pub(crate) fn apply_flat_client_session_transition_effects(
+        &mut self,
+        effects: FlatClientSessionTransitionEffects,
+    ) {
+        if effects.clear_session {
+            self.session.clear();
+        }
+        self.apply_flat_client_session_ui_effects(effects.ui);
+    }
+
     pub(crate) fn request_remote_session_start(
         &mut self,
         remote_addr: String,
         arm_mouse_lock: bool,
     ) {
         self.set_join_remote_addr(remote_addr.clone());
+        let request = SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+        };
+        let transition = flat_client_start_session_transition(self.session.state());
         self.session.request_start(
-            SessionStartRequest::JoinRemote {
-                endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-            },
+            request,
             FlatClientPendingSessionStart {
                 scene: self.remote_session_scene(remote_addr),
                 arm_mouse_lock,
                 show_title_on_failure: false,
                 descriptor: None,
+                transition,
             },
         );
         self.clear_ui_input();
@@ -1031,10 +1054,6 @@ impl FlatClientDriver {
         if flat_client_should_clear_inactive_session_status(self.session.state()) {
             self.session.clear();
         }
-    }
-
-    pub(crate) fn clear_session(&mut self) {
-        self.session.clear();
     }
 
     pub(crate) fn finish_pending_session_start(
@@ -1085,6 +1104,12 @@ impl FlatClientDriver {
                 }
             }
         }
+    }
+
+    pub(crate) fn pending_session_start_needs_teardown(&self) -> bool {
+        self.session
+            .pending_start()
+            .is_some_and(|pending| pending.payload.transition.teardown_world)
     }
 
     pub(crate) fn advance_local_world_startup(
