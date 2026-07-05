@@ -108,6 +108,125 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-05 - Standalone Quest 3 RD5 Chunk-View Churn Attribution
+
+Benchmarked code: Android XR release APK built from `f5f90f83` plus doc-only
+working-tree edits.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Lane | RD5 chunk-view churn, center alternates by `16` chunks every `3s` |
+| Budgets | render compile workers `2`, completed-result accept `2`, section upload `16`, section accept `64` |
+
+Local integrated command:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-20260705-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-20260705-logcat.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Local integrated summary:
+
+| Mode | Settle | FPS | Runtime skipped | App avg | App p50 | App p95 | App p99 | App max | Headroom avg | App over-period | Over 2x |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| local integrated | `32.259s` | `71.90` | `0` | `7.032ms` | `6.180ms` | `12.631ms` | `14.266ms` | `21.738ms` | `+6.857ms` | `53 / 3236` (`1.6%`) | `1` |
+
+Local integrated max buckets:
+
+| Bucket | Value |
+|---|---:|
+| Runtime upload / sync / GPU upload | `11.594 / 6.475 / 9.977ms` |
+| Runtime poll / apply / dirty / client apply | `3.761 / 3.750 / 1.869 / 3.742ms` |
+| Update queue depth / bytes / oldest age | `283` / `7,497,788` / `167.287ms` |
+| Update-pump stalls | `true`, count `1` |
+| Server tick / scheduler tick | `42.565 / 42.475ms` |
+| Scheduler pending publications | `124` |
+| Scheduler pending worldgen-publication chunks | `124` |
+| Scheduler pending light publications | `8` |
+| Worldgen mailbox jobs / light mailbox statuses | `1` / `23` |
+| Upload removed sections queued | `976` |
+| Drawn sections / drawn indices | `159` / `635,196` |
+
+Interpretation:
+
+- RD5 local integrated chunk-view churn is mostly well paced: zero runtime
+  skipped frames, strong average headroom, `app_work_p95` under the 72 Hz
+  period, and only one frame over `2x` period.
+- It is not free. The churn lane still accumulates client update queue age
+  (`167ms`), hits one update-pump stall, and shows active upload/accept
+  backpressure. This is the guardrail evidence that prevents treating the
+  desktop publication prototype as automatically safe for Quest.
+- The new scheduler fields are live on Quest local integrated: the same
+  one-feature-job publication backlog (`124` chunks) appears, with light
+  publication and mailbox pressure visible.
+
+Remote-dedicated contrast attempt:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build \
+  --skip-assets \
+  --adb-reverse \
+  --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-remote-20260705-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-remote-20260705-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-churn-rd5-remote-20260705-server.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Do **not** use this remote run as a performance comparison yet. The app logged
+`remote dedicated session still ignores SendOnly command policy`, the churn
+markers were irregular, and the sample captured a `5728.701ms` app-work frame
+with `5718.639ms` attributed to locomotion/chunk-view command handling. The
+remote summary also reported all server/scheduler/runtime-update counters as
+zero (`MCLONE_ANDROID_XR_PERF_QUEUE_MAX` and `RUNTIME_MAX`), so the current
+remote lane does not expose the accounting needed to compare against local
+integrated play. Fix the remote session actor / diagnostics path from tactical
+`133` before using remote RD5 churn as the "server costs moved off headset"
+baseline.
+
 ### 2026-07-04 - Standalone Quest 3 RD5 Settled Orbit Control
 
 Benchmarked code: current local worktree after `cce964fd` plus uncommitted

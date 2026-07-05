@@ -46,6 +46,41 @@ throughput. `119` evidence already shows RD7 settled orbit near-clean
 dirty diffing, so RD7's negative headroom must not be used as a reason to keep
 desktop throughput throttled.
 
+## Stage Ownership And Interpretation
+
+Do not read the publication prototype as the whole performance story. It proves
+a desktop local-integrated bottleneck, while the remaining question is whether
+opening that bottleneck is safe under the client/render pacing budgets on Quest
+and under remote/multiplayer ownership.
+
+| Stage | Local integrated play | Remote/multiplayer play | Current accounting |
+|---|---|---|---|
+| Terrain/features generation | server/worldgen work on the same device as client/render | host/server pays | mailbox pending counts; add busy/idle or per-job CPU time only if the new counters do not explain the waterfall |
+| Light compute/status | server/light pipeline on the same device | host/server pays | light mailbox/status counts plus scheduler publication counters |
+| Snapshot publication / ready events / save enqueue | server runner/scheduler thread on the same device | host/server pays | `poll_scheduler_publish_completed_ms`, feature/light publish counters, pending publication jobs/chunks/statuses |
+| Store/persistence | server side, background write/cache paths on the same device | host/server pays | current records show queue/save side effects indirectly; add persistence timing only if it appears in the waterfall |
+| Network/update receive | local encoded queue, no real network | client network/decode/apply cost | update queue depth/bytes/oldest-applied age and apply timing |
+| Client apply / dirty marking | client device | client device | update apply, dirty mark, client apply timing |
+| Mesh prepare / compile / upload | client device | client device | pending compile/upload counters and frame timing; Candidate B owns scan/admission attribution |
+| Render / XR frame pacing | client device | client device | desktop frame-budget probe; Quest app-work/headroom/dropped-frame lanes |
+
+Backpressure is still the right shape: server publication can stream ahead into
+bounded queues while the client spreads apply, mesh, upload, and render work
+across display frames. But backpressure does not make server work free in local
+integrated Quest mode. The headset still shares CPU between server generation,
+light, publication, client apply, mesh, upload, and render. In remote play, most
+server-side costs leave the headset, so the key client questions become
+network/decode/apply queue age, mesh/upload tail behavior, and render headroom.
+
+The July 5 measurement pass confirmed the waterfall shape: desktop RD10/RD15
+full-view readiness still tracks the `~19` chunks/sec publication wall with an
+empty client update queue, while Quest RD5 local-integrated chunk-view churn has
+good average headroom but visible update queue age, upload/accept backpressure,
+and the same one-job publication backlog. A remote-dedicated contrast was
+attempted but is not interpretable yet because the current remote session path
+still ignores `SendOnly` command policy and hides the server/scheduler/runtime
+diagnostic counters.
+
 ## What Actually Limits Desktop (Measured)
 
 ### The server publication valve (primary; prototype-validated)
@@ -364,14 +399,32 @@ instrumentation to watch it:
   startup-streaming JSON: pending publications, mailbox pending counts, pending
   compile jobs, `server_update_queue_depth`, update queue bytes/oldest-applied
   age, and render compile/upload activity.
+- [x] Capture directional desktop waterfall baselines with publication counters
+  (2026-07-05, dirty/current-state): RD10 full-view `27.553s`, quiescent
+  `32.834s`; RD15 full-view `57.190s`, quiescent `64.253s`; both had
+  `server_update_queue_depth=0`, max pending publication chunks `125`, and
+  zero 60 Hz over-budget frames.
+- [x] Capture Quest RD5 local-integrated chunk-view churn with the new counters
+  (2026-07-05): `skipped_delta=0`, `app_work_avg/p95=7.032/12.631ms`,
+  headroom avg `+6.857ms`, but update queue depth/age reached `283` /
+  `167.287ms`, update pump stalled once, runtime upload/GPU-upload max reached
+  `11.594/9.977ms`, and pending worldgen-publication chunks reached `124`.
+- [x] Attempt remote-dedicated RD5 chunk-view churn contrast. Result is a probe
+  bug / architecture gap, not a baseline: remote still ignores `SendOnly`
+  command policy, the sample caught a `5.7s` chunk-view command stall, and
+  server/scheduler/runtime counters reported zero in the client summary.
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
 - [ ] Harden the loading-settle idle predicate against the startup false-idle
   window (required before any idle-sensitive sweep reruns).
 - [ ] Add the Meta dropped-frame before/after delta to the Quest perf summary.
-- [ ] Capture clean-commit baselines: RD15 startup-streaming (`9000` frames);
-  recapture Quest RD5/RD7 settled orbit clean.
+- [ ] Capture clean-commit baselines: repeat RD10/RD15 startup-streaming from a
+  clean tree, and recapture Quest RD5/RD7 settled orbit clean.
+- [ ] Fix remote-dedicated churn accounting before using remote play as the
+  "server costs moved off headset" comparison: remote `SendOnly` must not block
+  the XR frame loop, and the client summary needs network/update/apply counters
+  even when server/scheduler counters live on the host.
 - [ ] Implement Candidate A behind the throughput profile and run the full
   promotion loop, including the Quest streaming check.
 
@@ -382,17 +435,32 @@ inference:
 
 - Is desktop full-view readiness still dominated by scheduler publication after
   separating feature publish, light publish, update encode/send, and
-  job-admission wait time?
+  job-admission wait time? Current answer: yes for the coarse waterfall. RD10
+  and RD15 both scale at about `19` target chunks/sec, with empty client update
+  queues and max pending publication chunks near one `128`-target job.
 - How much of `poll_scheduler_publish_completed_ms` is actual feature/light
   publication work versus update encode/send and downstream client apply work?
+  Current answer: total publish time is small per frame (`1.6ms` max desktop),
+  but elapsed wall time is capped by the fixed one-feature/one-light drain, not
+  by client apply. Subphase timers are only needed if Candidate A exposes
+  server tick spikes after raising the drain.
 - On Quest streaming, does a larger publication drain remain invisible until
   downstream render work, or does it create measurable server runner spikes,
   update queue depth/age, client accept/store cost, dirty seed/prepare cost, or
-  upload cost?
+  upload cost? Current answer before changing the drain: RD5 local integrated
+  already shows update queue age (`167ms`), one update-pump stall, upload/accept
+  backpressure, and server/scheduler tick maxima around `42ms` during churn.
+  That does not forbid Candidate A, but it means Candidate A must be
+  elapsed-budgeted and measured on this lane.
 - Are the downstream client budgets actually smoothing 20 Hz server publication
   into 72 Hz render work, or do update bursts leak through as frame tails?
+  Current answer: mostly smoothed at RD5 local integrated (`skipped_delta=0`,
+  `app_work_p95=12.631ms`), but queue age and one `2x` frame show that bursts
+  still leak into tail risk under churn.
 - Does job-admission overlap make worldgen itself the next limit, or does
   pending-publication memory/backlog become the practical bound first?
+  Current answer: unknown until Candidate A or an equivalent prototype exposes
+  generation-bound rates with a bounded pending-publication queue.
 
 ## Non-Goals
 

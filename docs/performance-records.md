@@ -90,9 +90,68 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-05 - Desktop Startup-Streaming Waterfall With Publication Counters
+
+Commit/reporting note: RD10 reported `2ff3273e` with `git_dirty=true` while
+concurrent source changes were still uncommitted; those source changes were
+then committed as `f5f90f83` before RD15. RD15 reported `f5f90f83` with
+`git_dirty=true` from doc-only edits. Treat this as directional current-state
+evidence; rerun RD10/RD15 from a clean tree before using the numbers as gates.
+
+Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
+
+Commands:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf --render-distance 10 --startup-streaming-frames 6000 \
+  --target-hz 60 --debug-passive-showcase false \
+  > /tmp/mclone-startup-waterfall-rd10-20260705.json
+
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --startup-streaming-perf --render-distance 15 --startup-streaming-frames 9000 \
+  --target-hz 60 --debug-passive-showcase false \
+  > /tmp/mclone-startup-waterfall-rd15-20260705.json
+```
+
+Summary:
+
+| RD | Target chunks | Playable | Full-view ready | Render quiescent | Frame avg/p95/p99/max | Over budget | Update queue max | Oldest applied age max | Pending publication chunks max |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `10` | `529` | `1.076s` | `27.553s` | `32.834s` | `5.344 / 6.537 / 7.350 / 13.156ms` | `0 / 6000` | `0` | `24.387ms` | `125` |
+| `15` | `1089` | `1.094s` | `57.190s` | `64.253s` | `7.721 / 9.946 / 11.003 / 13.966ms` | `0 / 9000` | `0` | `31.355ms` | `125` |
+
+Stage totals:
+
+| RD | Scheduler publish total/max | Apply/dirty/client apply total | Remesh total | Upload total | Render total | Completed sections | Uploaded sections |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| `10` | `739.283ms` / `1.582ms` | `50.613 / 15.091 / 35.136ms` | `625.207ms` | `221.743ms` | `3850.108ms` | `7747` | `2779` |
+| `15` | `1435.515ms` / `1.313ms` | `102.425 / 35.990 / 65.862ms` | `1526.454ms` | `403.384ms` | `10279.895ms` | `16307` | `5683` |
+
+Publication/queue counters:
+
+| RD | Feature chunks published | Light statuses published | Snapshot-ready events | Max pending light publications | Max worldgen mailbox jobs | Max light mailbox statuses |
+|---:|---:|---:|---:|---:|---:|---:|
+| `10` | `1574` | `1597` | `1382` | `9` | `1` | `11` |
+| `15` | `3173` | `3222` | `2863` | `9` | `1` | `11` |
+
+Interpretation:
+
+- Desktop full-view readiness still scales like the current publication valve:
+  `529 / 27.55s` and `1089 / 57.19s` are both about `19` target chunks/sec.
+- The client update queue did not back up in either run (`max depth 0`), and
+  apply/dirty/client-apply totals were small relative to the paced frame
+  window. The first visible wall is server-side readiness/publication, not
+  client receive/apply.
+- Frame pacing remained clean at 60 Hz in both runs. This is desktop evidence
+  only; it does not prove a larger publish drain is safe on Quest.
+- The pending-publication max stays at about one `128`-target feature job, which
+  matches the current job serialization model. Candidate A still needs both an
+  elapsed-budget publication drain and bounded job-admission overlap.
+
 ### 2026-07-05 - Publication Cost Instrumentation Smoke
 
-Commit: pending at capture time.
+Commit: captured before commit, then landed as `2ff3273e`.
 
 Host: Apple M4 Pro Mac, Darwin `25.5.0` arm64.
 
