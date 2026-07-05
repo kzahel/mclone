@@ -18,10 +18,13 @@ pub struct FrameAccountingConfig {
     pub target_period_ms: Option<f64>,
     pub percentile_method: PercentileMethod,
     pub worst_frame_capacity: usize,
+    pub conservation_tolerance_ms: f64,
+    pub debug_assert_conservation: bool,
 }
 
 impl FrameAccountingConfig {
     pub const DEFAULT_WORST_FRAME_CAPACITY: usize = 8;
+    pub const DEFAULT_CONSERVATION_TOLERANCE_MS: f64 = 0.25;
 
     pub fn from_target_hz(target_hz: f64) -> Self {
         let target_hz = finite_positive(target_hz);
@@ -30,6 +33,8 @@ impl FrameAccountingConfig {
             target_period_ms: target_hz.map(|hz| 1000.0 / hz),
             percentile_method: PercentileMethod::NearestRank,
             worst_frame_capacity: Self::DEFAULT_WORST_FRAME_CAPACITY,
+            conservation_tolerance_ms: Self::DEFAULT_CONSERVATION_TOLERANCE_MS,
+            debug_assert_conservation: true,
         }
     }
 
@@ -40,6 +45,8 @@ impl FrameAccountingConfig {
             target_period_ms,
             percentile_method: PercentileMethod::NearestRank,
             worst_frame_capacity: Self::DEFAULT_WORST_FRAME_CAPACITY,
+            conservation_tolerance_ms: Self::DEFAULT_CONSERVATION_TOLERANCE_MS,
+            debug_assert_conservation: true,
         }
     }
 
@@ -49,6 +56,8 @@ impl FrameAccountingConfig {
             target_period_ms: None,
             percentile_method: PercentileMethod::NearestRank,
             worst_frame_capacity: Self::DEFAULT_WORST_FRAME_CAPACITY,
+            conservation_tolerance_ms: Self::DEFAULT_CONSERVATION_TOLERANCE_MS,
+            debug_assert_conservation: true,
         }
     }
 
@@ -59,6 +68,17 @@ impl FrameAccountingConfig {
 
     pub fn with_worst_frame_capacity(mut self, capacity: usize) -> Self {
         self.worst_frame_capacity = capacity;
+        self
+    }
+
+    pub fn with_conservation_tolerance_ms(mut self, tolerance_ms: f64) -> Self {
+        self.conservation_tolerance_ms =
+            finite_positive(tolerance_ms).unwrap_or(Self::DEFAULT_CONSERVATION_TOLERANCE_MS);
+        self
+    }
+
+    pub fn with_debug_conservation_assertions(mut self, enabled: bool) -> Self {
+        self.debug_assert_conservation = enabled;
         self
     }
 }
@@ -293,6 +313,48 @@ impl HeadroomSummary {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConservationViolationCounts {
+    pub stage_spans_over_frame_wall: u64,
+    pub app_wait_mismatch: u64,
+    pub frame_thread_cpu_over_app_work: u64,
+    pub stage_thread_cpu_over_wall: u64,
+    pub non_monotonic_frame_index: u64,
+}
+
+impl ConservationViolationCounts {
+    pub const fn is_empty(self) -> bool {
+        self.total() == 0
+    }
+
+    pub const fn total(self) -> u64 {
+        self.stage_spans_over_frame_wall
+            + self.app_wait_mismatch
+            + self.frame_thread_cpu_over_app_work
+            + self.stage_thread_cpu_over_wall
+            + self.non_monotonic_frame_index
+    }
+
+    fn add_assign(&mut self, other: Self) {
+        self.stage_spans_over_frame_wall = self
+            .stage_spans_over_frame_wall
+            .saturating_add(other.stage_spans_over_frame_wall);
+        self.app_wait_mismatch = self
+            .app_wait_mismatch
+            .saturating_add(other.app_wait_mismatch);
+        self.frame_thread_cpu_over_app_work = self
+            .frame_thread_cpu_over_app_work
+            .saturating_add(other.frame_thread_cpu_over_app_work);
+        self.stage_thread_cpu_over_wall = self
+            .stage_thread_cpu_over_wall
+            .saturating_add(other.stage_thread_cpu_over_wall);
+        self.non_monotonic_frame_index = self
+            .non_monotonic_frame_index
+            .saturating_add(other.non_monotonic_frame_index);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorstFrameDetail {
@@ -344,6 +406,7 @@ pub struct FrameSummaryReport {
     pub over_budget: OverBudgetTiers,
     pub app_over_period_frames: u64,
     pub app_over_period_pct: f64,
+    pub conservation_violations: ConservationViolationCounts,
     pub worst_frames: Vec<WorstFrameDetail>,
     pub latest_stage_spans: Vec<StageSpan>,
 }
@@ -352,6 +415,8 @@ pub struct FrameSummaryReport {
 pub struct FrameAccumulator {
     config: FrameAccountingConfig,
     observations: Vec<FrameObservation>,
+    conservation_violations: ConservationViolationCounts,
+    last_frame_index: Option<u64>,
 }
 
 impl FrameAccumulator {
@@ -359,10 +424,21 @@ impl FrameAccumulator {
         Self {
             config,
             observations: Vec::new(),
+            conservation_violations: ConservationViolationCounts::default(),
+            last_frame_index: None,
         }
     }
 
     pub fn record_frame(&mut self, observation: FrameObservation) {
+        let violations = self.conservation_violations_for(&observation);
+        if self.config.debug_assert_conservation {
+            debug_assert!(
+                violations.is_empty(),
+                "frame accounting conservation violation: {violations:?}"
+            );
+        }
+        self.conservation_violations.add_assign(violations);
+        self.last_frame_index = Some(observation.frame_index);
         self.observations.push(observation);
     }
 
@@ -447,9 +523,59 @@ impl FrameAccumulator {
             over_budget,
             app_over_period_frames,
             app_over_period_pct: percent(app_over_period_frames, frames),
+            conservation_violations: self.conservation_violations,
             worst_frames: self.worst_frames(),
             latest_stage_spans,
         }
+    }
+
+    fn conservation_violations_for(
+        &self,
+        observation: &FrameObservation,
+    ) -> ConservationViolationCounts {
+        let tolerance_ms = sanitize_ms(self.config.conservation_tolerance_ms);
+        let mut violations = ConservationViolationCounts::default();
+        if let Some(last_frame_index) = self.last_frame_index
+            && observation.frame_index <= last_frame_index
+        {
+            violations.non_monotonic_frame_index = 1;
+        }
+
+        let stage_elapsed_ms = observation
+            .stage_spans
+            .iter()
+            .map(|span| span.elapsed_ms)
+            .sum::<f64>();
+        if exceeds_with_tolerance(stage_elapsed_ms, observation.frame_wall_ms, tolerance_ms) {
+            violations.stage_spans_over_frame_wall = 1;
+        }
+
+        if observation.app_work_ms.is_some() && observation.wait_ms > 0.0 {
+            let app_wait_ms = observation.computed_app_work_ms() + observation.wait_ms;
+            if differs_by_more_than(app_wait_ms, observation.frame_wall_ms, tolerance_ms) {
+                violations.app_wait_mismatch = 1;
+            }
+        }
+
+        if let Some(thread_cpu_ms) = observation.thread_cpu_ms
+            && exceeds_with_tolerance(
+                thread_cpu_ms,
+                observation.computed_app_work_ms(),
+                tolerance_ms,
+            )
+        {
+            violations.frame_thread_cpu_over_app_work = 1;
+        }
+
+        for span in &observation.stage_spans {
+            if let Some(thread_cpu_ms) = span.thread_cpu_ms
+                && exceeds_with_tolerance(thread_cpu_ms, span.elapsed_ms, tolerance_ms)
+            {
+                violations.stage_thread_cpu_over_wall =
+                    violations.stage_thread_cpu_over_wall.saturating_add(1);
+            }
+        }
+        violations
     }
 
     fn worst_frames(&self) -> Vec<WorstFrameDetail> {
@@ -525,6 +651,14 @@ fn sanitize_ms(ms: f64) -> f64 {
     if ms.is_finite() { ms.max(0.0) } else { 0.0 }
 }
 
+fn exceeds_with_tolerance(value: f64, limit: f64, tolerance: f64) -> bool {
+    sanitize_ms(value) > sanitize_ms(limit) + sanitize_ms(tolerance)
+}
+
+fn differs_by_more_than(left: f64, right: f64, tolerance: f64) -> bool {
+    (sanitize_ms(left) - sanitize_ms(right)).abs() > sanitize_ms(tolerance)
+}
+
 fn percent(numerator: u64, denominator: u64) -> f64 {
     if denominator == 0 {
         0.0
@@ -588,10 +722,55 @@ mod tests {
         assert_eq!(report.app_work.max_ms, 25.0);
         assert_eq!(report.blocked.max_ms, 6.0);
         assert_eq!(report.headroom.min_ms, -15.0);
+        assert_eq!(report.conservation_violations.total(), 0);
         assert_eq!(report.worst_frames.len(), 2);
         assert_eq!(report.worst_frames[0].frame_index, 4);
         assert_eq!(report.worst_frames[0].rank, 1);
         assert!(report.worst_frames[0].over_4x_budget);
+    }
+
+    #[test]
+    fn frame_summary_counts_conservation_violations_when_assertions_are_disabled() {
+        let mut accumulator = FrameAccumulator::new(
+            FrameAccountingConfig::from_target_period_ms(10.0)
+                .with_conservation_tolerance_ms(0.01)
+                .with_debug_conservation_assertions(false),
+        );
+        accumulator.record_frame(FrameObservation::new(2, 10.0));
+        accumulator.record_frame(
+            FrameObservation::new(2, 10.0)
+                .with_wait_ms(4.0)
+                .with_app_work_ms(9.0)
+                .with_thread_cpu_ms(Some(10.0))
+                .with_stage_span(
+                    StageSpan::new(StageId::DrawEncode, 8.0).with_thread_cpu_ms(Some(9.0)),
+                )
+                .with_stage_span(StageSpan::new(StageId::GpuUpload, 5.0)),
+        );
+
+        let violations = accumulator.summary_report().conservation_violations;
+        assert_eq!(violations.stage_spans_over_frame_wall, 1);
+        assert_eq!(violations.app_wait_mismatch, 1);
+        assert_eq!(violations.frame_thread_cpu_over_app_work, 1);
+        assert_eq!(violations.stage_thread_cpu_over_wall, 1);
+        assert_eq!(violations.non_monotonic_frame_index, 1);
+        assert_eq!(violations.total(), 5);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn frame_summary_debug_asserts_conservation_violations_by_default() {
+        let result = std::panic::catch_unwind(|| {
+            let mut accumulator = FrameAccumulator::new(
+                FrameAccountingConfig::from_target_period_ms(10.0)
+                    .with_conservation_tolerance_ms(0.01),
+            );
+            accumulator.record_frame(
+                FrameObservation::new(1, 10.0)
+                    .with_stage_span(StageSpan::new(StageId::DrawEncode, 11.0)),
+            );
+        });
+        assert!(result.is_err());
     }
 
     #[test]

@@ -38,7 +38,8 @@ mod android {
     };
     use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
     use mclone_app_runtime::startup_args::{
-        RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_string_arg,
+        RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_bool_arg,
+        parse_string_arg,
     };
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
@@ -271,6 +272,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        frame_accounting_enabled: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
         terrain_multiview_perf: bool,
@@ -303,6 +305,7 @@ mod android {
                 perf_settled_stationary: false,
                 perf_frozen_render: false,
                 perf_metrics: false,
+                frame_accounting_enabled: true,
                 multiview_proof: false,
                 terrain_multiview_proof: false,
                 terrain_multiview_perf: false,
@@ -562,6 +565,12 @@ mod android {
                 }
                 "--perf-metrics" => {
                     options.perf_metrics = true;
+                }
+                "--frame-accounting" => {
+                    options.frame_accounting_enabled = parse_bool_arg(
+                        "--frame-accounting",
+                        Some(parse_next_string(&mut argv, "--frame-accounting")?),
+                    )?;
                 }
                 "--multiview-proof" => {
                     options.multiview_proof = true;
@@ -1108,6 +1117,10 @@ mod android {
             startup_options.perf_metrics
         );
         log::info!(
+            "Android XR frame accounting: {}",
+            startup_options.frame_accounting_enabled
+        );
+        log::info!(
             "Android XR multiview proof: {}",
             startup_options.multiview_proof
         );
@@ -1207,6 +1220,7 @@ mod android {
             startup_options.perf_settled_stationary,
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
+            startup_options.frame_accounting_enabled,
             startup_options.multiview_proof,
             startup_options.terrain_multiview_proof,
             startup_options.terrain_multiview_perf,
@@ -1243,6 +1257,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        frame_accounting_enabled: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
         terrain_multiview_perf: bool,
@@ -1679,6 +1694,7 @@ mod android {
                 perf_settled_stationary,
                 perf_frozen_render,
                 perf_metrics,
+                frame_accounting_enabled,
                 [scene_options.chunk_x, scene_options.chunk_z],
                 startup_view_pose,
                 scene_options.render_distance,
@@ -1794,6 +1810,7 @@ mod android {
             perf_settled_stationary,
             perf_frozen_render,
             perf_metrics,
+            frame_accounting_enabled,
             [scene_options.chunk_x, scene_options.chunk_z],
             startup_view_pose,
             scene_options.render_distance,
@@ -2994,6 +3011,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        frame_accounting_enabled: bool,
         startup_center: [i32; 2],
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_distance: u32,
@@ -3018,6 +3036,7 @@ mod android {
             perf_chunk_view_churn,
             perf_settled_stationary,
             perf_frozen_render,
+            frame_accounting_enabled,
             startup_center,
             render_distance,
             render_compile_worker_count,
@@ -3574,12 +3593,6 @@ mod android {
     #[derive(Clone, Copy, Debug)]
     struct AndroidXrWorstFrameSnapshot {
         sample_frame: u64,
-        frame_wall_ms: f64,
-        wait_frame_ms: f64,
-        app_work_ms: f64,
-        thread_cpu_ms: f64,
-        thread_cpu_valid: bool,
-        blocked_ms: f64,
         timing: AndroidXrFrameTiming,
         summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
     }
@@ -3591,6 +3604,7 @@ mod android {
         chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         settled_stationary: bool,
         frozen_render: bool,
+        frame_accounting_enabled: bool,
         chunk_view_churn_base_center: [i32; 2],
         render_distance: u32,
         render_compile_worker_count: usize,
@@ -3619,6 +3633,7 @@ mod android {
             chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
             settled_stationary: bool,
             frozen_render: bool,
+            frame_accounting_enabled: bool,
             chunk_view_churn_base_center: [i32; 2],
             render_distance: u32,
             render_compile_worker_count: usize,
@@ -3644,6 +3659,7 @@ mod android {
                 chunk_view_churn,
                 settled_stationary,
                 frozen_render,
+                frame_accounting_enabled,
                 chunk_view_churn_base_center,
                 render_distance,
                 render_compile_worker_count,
@@ -3767,10 +3783,11 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} frame_accounting_enabled={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_path.label(),
+                self.frame_accounting_enabled,
                 format_optional_usize(self.render_section_upload_budget),
                 format_optional_usize(self.render_section_accept_budget),
                 format_optional_usize(self.render_completed_result_accept_budget),
@@ -3804,11 +3821,9 @@ mod android {
                 requested: Duration::from_secs(seconds),
                 started: Instant::now(),
                 start_stats: frame_stats,
-                frame_accounting: FrameAccumulator::new(
-                    FrameAccountingConfig::from_target_hz(self.target_hz)
-                        .with_percentile_method(PercentileMethod::NearestRank)
-                        .with_worst_frame_capacity(ANDROID_XR_PERF_WORST_FRAME_COUNT),
-                ),
+                frame_accounting: self
+                    .frame_accounting_enabled
+                    .then(|| android_xr_frame_accounting_accumulator(self.target_hz)),
                 max_wait_begin_ms: 0.0,
                 max_wait_frame_ms: 0.0,
                 max_begin_frame_ms: 0.0,
@@ -3823,6 +3838,7 @@ mod android {
                 skip_actors: self.skip_actors,
                 display_refresh: self.display_refresh.clone(),
                 target_hz: self.target_hz,
+                frame_accounting_enabled: self.frame_accounting_enabled,
                 render_path: self.render_path,
                 render_section_upload_budget: self.render_section_upload_budget,
                 render_section_accept_budget: self.render_section_accept_budget,
@@ -3933,7 +3949,7 @@ mod android {
         requested: Duration,
         started: Instant,
         start_stats: XrFrameStats,
-        frame_accounting: FrameAccumulator,
+        frame_accounting: Option<FrameAccumulator>,
         max_wait_begin_ms: f64,
         max_wait_frame_ms: f64,
         max_begin_frame_ms: f64,
@@ -3948,6 +3964,7 @@ mod android {
         skip_actors: bool,
         display_refresh: XrDisplayRefreshSnapshot,
         target_hz: f64,
+        frame_accounting_enabled: bool,
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
@@ -3978,38 +3995,16 @@ mod android {
             timing: AndroidXrFrameTiming,
             rendered: Option<AndroidXrRenderedFrame>,
         ) {
-            let sample_frame = self.frame_accounting.len() as u64 + 1;
-            let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
-            let thread_cpu_ms = timing.thread_cpu_valid.then_some(timing.thread_cpu_ms);
-            self.frame_accounting.record_frame(
-                FrameObservation::new(sample_frame, timing.frame_wall_ms)
-                    .with_wait_ms(timing.wait_frame_ms)
-                    .with_app_work_ms(app_work_ms)
-                    .with_thread_cpu_ms(thread_cpu_ms)
-                    .with_rendered(rendered.is_some())
-                    .with_stage_span(StageSpan::new(
-                        StageId::GpuExecutionPresentationWait,
-                        timing.wait_frame_ms,
-                    ))
-                    .with_stage_span(StageSpan::new(
-                        StageId::InputPoseEvents,
-                        timing.controller_poll_ms,
-                    ))
-                    .with_stage_span(StageSpan::new(
-                        StageId::DrawEncode,
-                        timing.render_mclone_frame_ms,
-                    )),
-            );
+            let sample_frame = self.frame_details.len() as u64 + 1;
+            if let Some(frame_accounting) = self.frame_accounting.as_mut() {
+                frame_accounting.record_frame(android_xr_frame_observation(
+                    sample_frame,
+                    timing,
+                    rendered.is_some(),
+                ));
+            }
             self.frame_details.push(AndroidXrWorstFrameSnapshot {
                 sample_frame,
-                frame_wall_ms: timing.frame_wall_ms,
-                wait_frame_ms: timing.wait_frame_ms,
-                app_work_ms,
-                thread_cpu_ms: thread_cpu_ms.unwrap_or(0.0),
-                thread_cpu_valid: timing.thread_cpu_valid,
-                blocked_ms: thread_cpu_ms
-                    .map(|thread_cpu_ms| (app_work_ms - thread_cpu_ms).max(0.0))
-                    .unwrap_or(0.0),
                 timing,
                 summary: rendered.as_ref().map(|rendered| rendered.summary),
             });
@@ -4043,8 +4038,23 @@ mod android {
             }
         }
 
+        fn frame_accounting_report(&self) -> FrameSummaryReport {
+            if let Some(frame_accounting) = self.frame_accounting.as_ref() {
+                return frame_accounting.summary_report();
+            }
+            let mut frame_accounting = android_xr_frame_accounting_accumulator(self.target_hz);
+            for detail in &self.frame_details {
+                frame_accounting.record_frame(android_xr_frame_observation(
+                    detail.sample_frame,
+                    detail.timing,
+                    detail.summary.is_some(),
+                ));
+            }
+            frame_accounting.summary_report()
+        }
+
         fn log_summary(&mut self, frame_stats: XrFrameStats) {
-            let frame_accounting = self.frame_accounting.summary_report();
+            let frame_accounting = self.frame_accounting_report();
             let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = frame_accounting.frames;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
@@ -4092,10 +4102,12 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} {}={} {}={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} frame_accounting_enabled={} conservation_violations={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} {}={} {}={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
+                self.frame_accounting_enabled,
+                frame_accounting.conservation_violations.total(),
                 format_optional_usize(self.render_section_upload_budget),
                 format_optional_usize(self.render_section_accept_budget),
                 format_optional_usize(self.render_completed_result_accept_budget),
@@ -4938,6 +4950,40 @@ mod android {
                 );
             }
         }
+    }
+
+    fn android_xr_frame_accounting_accumulator(target_hz: f64) -> FrameAccumulator {
+        FrameAccumulator::new(
+            FrameAccountingConfig::from_target_hz(target_hz)
+                .with_percentile_method(PercentileMethod::NearestRank)
+                .with_worst_frame_capacity(ANDROID_XR_PERF_WORST_FRAME_COUNT),
+        )
+    }
+
+    fn android_xr_frame_observation(
+        sample_frame: u64,
+        timing: AndroidXrFrameTiming,
+        rendered: bool,
+    ) -> FrameObservation {
+        let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
+        let thread_cpu_ms = timing.thread_cpu_valid.then_some(timing.thread_cpu_ms);
+        FrameObservation::new(sample_frame, timing.frame_wall_ms)
+            .with_wait_ms(timing.wait_frame_ms)
+            .with_app_work_ms(app_work_ms)
+            .with_thread_cpu_ms(thread_cpu_ms)
+            .with_rendered(rendered)
+            .with_stage_span(StageSpan::new(
+                StageId::GpuExecutionPresentationWait,
+                timing.wait_frame_ms,
+            ))
+            .with_stage_span(StageSpan::new(
+                StageId::InputPoseEvents,
+                timing.controller_poll_ms,
+            ))
+            .with_stage_span(StageSpan::new(
+                StageId::DrawEncode,
+                timing.render_mclone_frame_ms,
+            ))
     }
 
     fn perf_budget_ms(target_hz: f64) -> f64 {

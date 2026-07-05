@@ -324,6 +324,14 @@ anything above moves behind an opt-in flag. Expensive sources follow the
 existing perf-metrics probe pattern — warm up, sample a window, disable —
 rather than running continuously.
 
+Slice 4 adopted the provisional CPU calibration tolerance and overhead
+ceiling unchanged on 2026-07-05: CPU busy-spin attribution must land within
+`max(10%, 0.3 ms)`, and the always-on set must stay within `<= 0.2 ms`
+added app-work p95 on the Quest RD5 guardrail lane. The recorded RD5 A/B on
+`kmacbook` with Quest 3 measured `15.706 ms` app-work p95 with accounting on
+versus `15.777 ms` with accounting off, with zero conservation violations, so
+no source was demoted to opt-in.
+
 ## Validating The Instrumentation
 
 Wrong measurements are worse than missing ones: they redirect optimization
@@ -342,8 +350,8 @@ mechanism:
    never assertions to loosen without a recorded reason — double counting and
    missed span exits are the classic failure modes these catch.
 3. **Calibration lanes.** A headless lane injects a busy-spin of known K ms
-   into a chosen stage and asserts the report attributes K within a recorded
-   tolerance to that stage under the correct critical-path label. A GPU
+   into a chosen stage and asserts the report attributes K within
+   `max(10%, 0.3 ms)` to that stage under the correct critical-path label. A GPU
    calibration draws N known fullscreen quads and asserts GPU pass time
    scales with N and stays within wall-clock bounds. These run in the
    standard smoke set.

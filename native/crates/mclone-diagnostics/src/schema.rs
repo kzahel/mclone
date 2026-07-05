@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{FrameSummaryReport, QueuePanelReport, StageSpan, WorstFrameDetail};
 
-pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 1;
+pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

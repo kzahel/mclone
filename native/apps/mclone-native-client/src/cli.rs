@@ -93,6 +93,7 @@ pub(crate) struct FrameBudgetProbeOptions {
     pub(crate) path_radius_chunks: i32,
     pub(crate) target_hz: f64,
     pub(crate) movement_speed: f32,
+    pub(crate) frame_accounting_enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -328,6 +329,7 @@ impl Default for FrameBudgetProbeOptions {
             path_radius_chunks: DEFAULT_MOVEMENT_PERF_PATH_RADIUS,
             target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
             movement_speed: SPECTATOR_BASE_SPEED,
+            frame_accounting_enabled: true,
         }
     }
 }
@@ -508,6 +510,7 @@ impl Cli {
         let mut loading_settle_distances = default_loading_settle_distances();
         let mut target_hz = DEFAULT_FRAME_BUDGET_TARGET_HZ;
         let mut movement_speed = SPECTATOR_BASE_SPEED;
+        let mut frame_accounting_enabled = true;
         let mut path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
         let mut xr_clear_smoke = false;
         let mut xr_mclone_smoke = false;
@@ -898,6 +901,9 @@ impl Cli {
                     }
                     target_hz = parse_target_hz_arg("--target-hz", args.next())?;
                 }
+                "--frame-accounting" => {
+                    frame_accounting_enabled = parse_bool_arg("--frame-accounting", args.next())?;
+                }
                 "--loading-settle-distances" | "--settle-distances" => {
                     loading_settle_perf = true;
                     loading_settle_distances =
@@ -1165,6 +1171,7 @@ impl Cli {
                     path_radius_chunks: path_radius,
                     target_hz,
                     movement_speed,
+                    frame_accounting_enabled,
                 },
             }),
             None if startup_streaming_perf => Ok(Self::StartupStreamingPerf {
@@ -1607,8 +1614,8 @@ fn print_help() {
            mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-           mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
-           mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--frame-accounting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--frame-accounting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --startup-streaming-perf [--startup-streaming-persisted-world] [--width 1280] [--height 720] [--seed 12345] [--render-distance 20] [--render-compile-workers 1] [--startup-streaming-frames 2400] [--target-hz 120] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\

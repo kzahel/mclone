@@ -401,6 +401,7 @@ pub(crate) struct FrameBudgetProbeReport {
     initial_face_count: u32,
     initial_index_count: u32,
     headless: mclone_render::headless::HeadlessFrameLoopReport,
+    frame_accounting: Option<FrameSummaryReport>,
     frames: Vec<FrameBudgetProbeFrameReport>,
 }
 
@@ -745,6 +746,7 @@ struct FrameBudgetProbeState {
     gui: GuiRenderer,
     ui: GameUiHost,
     render_stats: RenderStreamStats,
+    frame_accounting: Option<FrameAccumulator>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -935,6 +937,26 @@ impl FrameBudgetProbeReport {
         if self.initial_section_count == 0 || self.initial_index_count == 0 {
             bail!("frame-budget probe initial scene produced no render sections");
         }
+        if self.options.frame_accounting_enabled {
+            let Some(frame_accounting) = self.frame_accounting.as_ref() else {
+                bail!("frame-budget probe did not record enabled frame accounting");
+            };
+            if frame_accounting.frames != self.options.frames as u64 {
+                bail!(
+                    "frame-budget probe accounting recorded {} frames, expected {}",
+                    frame_accounting.frames,
+                    self.options.frames
+                );
+            }
+            if !frame_accounting.conservation_violations.is_empty() {
+                bail!(
+                    "frame-budget probe accounting conservation violations: {:?}",
+                    frame_accounting.conservation_violations
+                );
+            }
+        } else if self.frame_accounting.is_some() {
+            bail!("frame-budget probe recorded frame accounting while disabled");
+        }
         Ok(())
     }
 
@@ -984,6 +1006,18 @@ impl FrameBudgetProbeReport {
         println!("  \"height\": {},", self.options.height);
         println!("  \"target_hz\": {:.3},", self.options.target_hz);
         println!("  \"target_frame_ms\": {:.3},", target_frame_ms);
+        println!(
+            "  \"frame_accounting_enabled\": {},",
+            self.options.frame_accounting_enabled
+        );
+        println!(
+            "  \"frame_accounting_observed_frames\": {},",
+            frame_accounting_observed_frames(self.frame_accounting.as_ref())
+        );
+        println!(
+            "  \"frame_accounting_conservation_violations\": {},",
+            frame_accounting_total_violations(self.frame_accounting.as_ref())
+        );
         println!(
             "  \"movement_speed_blocks_per_sec\": {:.3},",
             self.options.movement_speed
@@ -2150,10 +2184,7 @@ fn headless_frame_accounting_report(
     frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
     target_frame_ms: f64,
 ) -> FrameSummaryReport {
-    let mut accumulator = FrameAccumulator::new(
-        FrameAccountingConfig::from_target_period_ms(target_frame_ms)
-            .with_percentile_method(PercentileMethod::InclusiveCeil),
-    );
+    let mut accumulator = FrameAccumulator::new(headless_frame_accounting_config(target_frame_ms));
     for (index, frame) in frames.iter().enumerate() {
         accumulator.record_frame(
             FrameObservation::new(index as u64, frame.frame_ms)
@@ -2168,6 +2199,37 @@ fn headless_frame_accounting_report(
         );
     }
     accumulator.summary_report()
+}
+
+fn headless_frame_accounting_config(target_frame_ms: f64) -> FrameAccountingConfig {
+    FrameAccountingConfig::from_target_period_ms(target_frame_ms)
+        .with_percentile_method(PercentileMethod::InclusiveCeil)
+}
+
+fn record_frame_budget_probe_accounting(
+    accumulator: &mut FrameAccumulator,
+    frame_index: u64,
+    frame_ms: f64,
+    report: &FrameBudgetProbeFrameReport,
+) {
+    accumulator.record_frame(
+        FrameObservation::new(frame_index, frame_ms)
+            .with_stage_span(StageSpan::new(StageId::HostSessionCommands, report.poll_ms))
+            .with_stage_span(StageSpan::new(
+                StageId::RenderSectionAdmission,
+                report.remesh_ms,
+            ))
+            .with_stage_span(StageSpan::new(StageId::GpuUpload, report.upload_ms))
+            .with_stage_span(StageSpan::new(StageId::DrawEncode, report.render_ms)),
+    );
+}
+
+fn frame_accounting_total_violations(summary: Option<&FrameSummaryReport>) -> u64 {
+    summary.map_or(0, |summary| summary.conservation_violations.total())
+}
+
+fn frame_accounting_observed_frames(summary: Option<&FrameSummaryReport>) -> u64 {
+    summary.map_or(0, |summary| summary.frames)
 }
 
 fn print_frame_accounting_json_field(summary: &FrameSummaryReport, trailing_comma: bool) {
@@ -2637,6 +2699,7 @@ pub(crate) fn run_startup_streaming_perf(
                 gui,
                 ui,
                 render_stats,
+                frame_accounting: None,
             })
         },
         |index, frame, state| {
@@ -3028,6 +3091,11 @@ pub(crate) fn run_frame_budget_probe(
                 gui,
                 ui,
                 render_stats,
+                frame_accounting: options.frame_accounting_enabled.then(|| {
+                    FrameAccumulator::new(headless_frame_accounting_config(target_frame_ms(
+                        options.target_hz,
+                    )))
+                }),
             })
         },
         |index, frame, state| {
@@ -3219,11 +3287,25 @@ pub(crate) fn run_frame_budget_probe(
             report.inflight_render_sections = stats.inflight_render_sections;
             report.drawn_sections = state.render_stats.drawn_section_count;
             report.drawn_indices = state.render_stats.drawn_index_count;
+            if let Some(accounting) = state.frame_accounting.as_mut() {
+                let accounting_frame_ms = elapsed_ms(frame_start.elapsed());
+                let accounting_frame = accounting.len() as u64 + 1;
+                record_frame_budget_probe_accounting(
+                    accounting,
+                    accounting_frame,
+                    accounting_frame_ms,
+                    &report,
+                );
+            }
             frame_reports.push(report);
             Ok(())
         },
     )?;
 
+    let frame_accounting = _state
+        .frame_accounting
+        .as_ref()
+        .map(FrameAccumulator::summary_report);
     Ok(FrameBudgetProbeReport {
         options: options.clone(),
         runtime_setup_ms,
@@ -3234,6 +3316,7 @@ pub(crate) fn run_frame_budget_probe(
         initial_face_count,
         initial_index_count,
         headless,
+        frame_accounting,
         frames: frame_reports,
     })
 }

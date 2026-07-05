@@ -168,7 +168,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 | 1: `mclone-diagnostics` accounting core | 1 (owner exists) | Mac; Windows test lands at checkpoint A | landed 2026-07-05 |
 | 2: desktop flat and benchmark adoption | 1 desktop, 2 partial | Mac; then Windows checkpoint A | landed 2026-07-05 |
 | 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | landed 2026-07-05 |
-| 4: calibration, invariants, meter overhead | 7 | Mac with Quest | open |
+| 4: calibration, invariants, meter overhead | 7 | Mac with Quest | landed 2026-07-05 |
 | 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | open |
 | 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | open |
 | 7: debug overlay through the shared facade | 8 | Mac | open |
@@ -938,7 +938,108 @@ git diff --check
 
 Plus the desktop and Quest RD5 overhead A/B lanes recorded in this section.
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Implementation:
+
+- `mclone-diagnostics` now surfaces `conservationViolations` in the
+  `FrameSummaryReport` schema (schema version 2). `FrameAccumulator` checks
+  each recorded observation for stage-span overcount, explicit
+  `app_work + wait` mismatch, frame and span thread-CPU over wall/app work,
+  and non-monotonic frame indexes. Debug builds assert by default; release
+  builds count violations into the report.
+- Added the native `accounting_smoke` binary and `pnpm
+  native:accounting:smoke`. The smoke busy-spins a default 6.0 ms in
+  `draw-encode`, asserts attribution to the `current-frame-critical` label
+  within the adopted tolerance, and emits the shared frame-pipeline report.
+  `--break-attribution` was verified once and failed with
+  `accounting smoke did not attribute the spin to draw-encode`.
+- Added `--frame-accounting true|false` to the desktop frame-budget probe
+  and Android XR perf startup argv. Desktop uses the flag to include/exclude
+  the per-frame accumulator work inside the measured headless frame loop.
+  Android XR skips per-frame accumulation when disabled, then rebuilds the
+  same shared report from retained raw timing details at summary time so
+  existing perf markers remain compatible and no app-local summary math is
+  reintroduced.
+
+Adopted tolerance and ceiling:
+
+- CPU calibration tolerance remains the provisional `max(10%, 0.3 ms)`.
+  Final smoke: target `6.000 ms`, attributed thread CPU `6.000 ms`, error
+  `0.000 ms`, tolerance `0.600 ms`, conservation violations `0`.
+- Always-on overhead ceiling remains the provisional Quest RD5 guardrail:
+  `<= 0.2 ms` added app-work p95. The measured mean delta was `-0.071 ms`
+  (`15.706 ms` accounting-on vs `15.777 ms` accounting-off), so no source
+  moved behind an opt-in flag.
+
+Host and raw outputs:
+
+- Host: `kmacbook`, macOS 26.5.1 build 25F80, arm64.
+- Quest device: `2G0YC1ZF93041Z`, model `Quest_3`, product/device `eureka`.
+- Raw desktop A/B JSON:
+  `/tmp/mclone-144-slice4-desktop-accounting-on-1.json`,
+  `/tmp/mclone-144-slice4-desktop-accounting-off-1.json`,
+  `/tmp/mclone-144-slice4-desktop-accounting-on-2.json`,
+  `/tmp/mclone-144-slice4-desktop-accounting-off-2.json`.
+- Raw Quest RD5 A/B summaries/logcats:
+  `/tmp/mclone-144-slice4-rd5-accounting-on-1-summary.txt`,
+  `/tmp/mclone-144-slice4-rd5-accounting-on-1-logcat.txt`,
+  `/tmp/mclone-144-slice4-rd5-accounting-off-1-summary.txt`,
+  `/tmp/mclone-144-slice4-rd5-accounting-off-1-logcat.txt`,
+  `/tmp/mclone-144-slice4-rd5-accounting-on-2-summary.txt`,
+  `/tmp/mclone-144-slice4-rd5-accounting-on-2-logcat.txt`,
+  `/tmp/mclone-144-slice4-rd5-accounting-off-2-summary.txt`,
+  `/tmp/mclone-144-slice4-rd5-accounting-off-2-logcat.txt`.
+
+Desktop frame-budget overhead A/B, release, 240 frames, 120 Hz target:
+
+| run | accounting | acct frames | violations | avg | p95 | p99 | max | over |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | on | 240 | 0 | 2.099 | 2.470 | 2.742 | 18.749 | 1 |
+| 1 | off | 0 | 0 | 2.116 | 2.502 | 3.236 | 18.918 | 1 |
+| 2 | on | 240 | 0 | 2.143 | 2.530 | 3.103 | 20.912 | 1 |
+| 2 | off | 0 | 0 | 2.137 | 2.668 | 3.625 | 20.884 | 1 |
+
+Quest RD5 orbit overhead A/B, release APK, 45 second sample, perf metrics on:
+
+| run | accounting | violations | fps | frame avg | frame p95 | frame p99 | frame max | app avg | app p95 | app p99 | app max | head p05 | app over | app GPU | dropped |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | on | 0 | 70.24 | 14.157 | 16.474 | 24.191 | 28.098 | 13.751 | 15.579 | 18.793 | 24.486 | -1.690 | 1117 | 3.325 | 16 |
+| 1 | off | 0 | 70.22 | 14.159 | 16.590 | 20.856 | 31.044 | 13.773 | 15.850 | 18.675 | 20.876 | -1.961 | 1184 | 3.400 | 16 |
+| 2 | on | 0 | 70.29 | 14.145 | 16.429 | 19.934 | 26.790 | 13.784 | 15.833 | 19.098 | 21.134 | -1.944 | 1237 | 3.393 | 18 |
+| 2 | off | 0 | 70.17 | 14.169 | 16.345 | 20.946 | 27.710 | 13.669 | 15.703 | 18.705 | 21.624 | -1.814 | 1135 | 3.762 | 19 |
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`: PASS.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics`: PASS
+  (`10` tests).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_`:
+  PASS (`57` filtered CLI tests).
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --bins`:
+  PASS.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`:
+  PASS with the existing non-Android dead-code warnings for the legacy remote
+  address helpers.
+- `pnpm native:accounting:smoke`: PASS; final output
+  `/tmp/mclone-144-slice4-accounting-smoke-final.json`.
+- `pnpm native:frame-budget:smoke`: PASS; final output
+  `/tmp/mclone-144-slice4-frame-budget-smoke-final.json`, 60 accounting
+  frames, zero conservation violations.
+- `pnpm native:android-xr:apk`: PASS after final Android changes.
+- Quest RD5 on/off A/B commands above: PASS, four runs.
+- `git diff --check`: PASS.
+
+Tripwires:
+
+- Accounting math outside `mclone-diagnostics`: 0 hits.
+- Clock reads inside `mclone-diagnostics` core outside `clock.rs`: 0 hits.
+- GPU timestamp sites before Slice 6: 0 hits.
+
+Next step: Slice 5, queue-age, admission-tail split, and peer-thread
+accounting from the Mac with the Quest attached. Windows checkpoint A remains
+deferrable to checkpoint B, but must still complete before this tactical
+closes.
 
 ## Slice 5: Queue-Age, Admission-Tail Split, And Peer Threads
 

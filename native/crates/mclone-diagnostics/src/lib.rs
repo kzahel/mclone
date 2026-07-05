@@ -8,9 +8,9 @@ mod schema;
 mod stage;
 
 pub use frame::{
-    FrameAccountingConfig, FrameAccumulator, FrameObservation, FrameSummaryReport, HeadroomSummary,
-    OverBudgetTiers, PercentileMethod, PercentileRing, PercentileSummary, WorstFrameDetail,
-    percentile_sorted_ms,
+    ConservationViolationCounts, FrameAccountingConfig, FrameAccumulator, FrameObservation,
+    FrameSummaryReport, HeadroomSummary, OverBudgetTiers, PercentileMethod, PercentileRing,
+    PercentileSummary, WorstFrameDetail, percentile_sorted_ms,
 };
 pub use queue::{QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport};
 pub use schema::{FRAME_PIPELINE_SCHEMA_VERSION, FramePipelineReport};

@@ -1825,6 +1825,8 @@ mod tests {
             "48".to_owned(),
             "--path-radius".to_owned(),
             "5".to_owned(),
+            "--frame-accounting".to_owned(),
+            "false".to_owned(),
             "--render-distance".to_owned(),
             "2".to_owned(),
             "--width".to_owned(),
@@ -1862,6 +1864,8 @@ mod tests {
             "120".to_owned(),
             "--path-radius".to_owned(),
             "5".to_owned(),
+            "--frame-accounting".to_owned(),
+            "false".to_owned(),
             "--render-distance".to_owned(),
             "2".to_owned(),
             "--width".to_owned(),
@@ -1887,6 +1891,7 @@ mod tests {
                     path_radius_chunks: 5,
                     target_hz: 120.0,
                     movement_speed: SPECTATOR_BASE_SPEED,
+                    frame_accounting_enabled: false,
                 },
             }
         );
@@ -1944,6 +1949,7 @@ mod tests {
                     path_radius_chunks: 5,
                     target_hz: 120.0,
                     movement_speed: 48.0,
+                    frame_accounting_enabled: true,
                 },
             }
         );
