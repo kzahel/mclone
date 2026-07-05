@@ -7,9 +7,10 @@ use crate::block::{
     DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
     DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE, GRANITE, GRASS,
     GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, LILAC_LOWER,
-    LILY_OF_THE_VALLEY, LILY_PAD, MELON, MYCELIUM, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN,
-    RED_MUSHROOM, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId, SAND, SNOW_BLOCK,
-    SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TERRACOTTA, TUFF, WATER,
+    LILY_OF_THE_VALLEY, LILY_PAD, MELON, MOSSY_COBBLESTONE, MYCELIUM, PACKED_ICE, PEONY_LOWER,
+    PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, RawBlockId,
+    SAND, SNOW_BLOCK, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TERRACOTTA,
+    TUFF, WATER,
 };
 use crate::placement::{
     ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
@@ -17,13 +18,13 @@ use crate::placement::{
 };
 
 use super::{
-    BambooConfiguration, BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecorationStep,
-    DiskConfiguration, DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration,
-    HugeMushroomConfiguration, LakeConfiguration, OreConfiguration, PlacedFeature,
-    RandomBooleanFeatureConfiguration, RandomFeatureConfiguration, RandomPatchConfiguration,
-    RandomPatchStateProvider, SeagrassConfiguration, SimpleRandomFeatureConfiguration,
-    SmallDripstoneConfiguration, SpringConfiguration, TreeConfiguration, WeightedBlockState,
-    WeightedConfiguredFeature,
+    BambooConfiguration, BasicTreeConfiguration, BlockStateConfiguration, ConfiguredFeature,
+    CoralShape, DecorationStep, DiskConfiguration, DripstoneClusterConfiguration, FloatProvider,
+    GlowLichenConfiguration, HugeMushroomConfiguration, LakeConfiguration, OreConfiguration,
+    PlacedFeature, RandomBooleanFeatureConfiguration, RandomFeatureConfiguration,
+    RandomPatchConfiguration, RandomPatchStateProvider, SeagrassConfiguration,
+    SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
+    TreeConfiguration, WeightedBlockState, WeightedConfiguredFeature,
 };
 
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
@@ -838,6 +839,7 @@ fn taiga_features() -> Vec<PlacedFeature> {
 
 fn giant_taiga_features(giant_spruce: bool) -> Vec<PlacedFeature> {
     let mut features = vec![
+        forest_rock_feature(),
         large_fern_patch_feature(),
         glow_lichen_feature(),
         giant_taiga_tree_feature(giant_spruce),
@@ -957,6 +959,20 @@ fn mountain_features() -> Vec<PlacedFeature> {
     add_default_extra_vegetation(&mut features);
     add_default_springs(&mut features);
     features
+}
+
+fn forest_rock_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::LocalModifications,
+        ConfiguredFeature::block_blob(BlockStateConfiguration::new(MOSSY_COBBLESTONE)),
+        vec![
+            ConfiguredDecorator::Count(CountConfiguration::from_provider(IntProvider::uniform(
+                0, 2,
+            ))),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+        ],
+    )
 }
 
 fn desert_features() -> Vec<PlacedFeature> {

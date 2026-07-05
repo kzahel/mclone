@@ -50,11 +50,11 @@ mod tests {
         DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK,
         GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
         LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY,
-        LILY_PAD, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY,
-        PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM,
-        RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId,
-        SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK,
-        SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
+        LILY_PAD, MOSSY_COBBLESTONE, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP,
+        OXEYE_DAISY, PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN,
+        RED_MUSHROOM, RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER,
+        RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW,
+        SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
         SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK,
         VINE_EAST, VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_air_like,
         is_water,
@@ -102,6 +102,9 @@ mod tests {
             min_matches: usize,
         },
         VisiblePumpkins {
+            min_count: usize,
+        },
+        ForestRockBoulders {
             min_count: usize,
         },
         DefaultSpringVisibleFluids {
@@ -1020,6 +1023,13 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:mushroom_fields",
             expectation: LowVisibilityFeatureExpectation::VisibleSmallMushrooms { min_count: 2 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 132,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:giant_tree_taiga",
+            expectation: LowVisibilityFeatureExpectation::ForestRockBoulders { min_count: 8 },
         },
         LowVisibilityFeatureCase {
             seed: 61,
@@ -2318,6 +2328,18 @@ mod tests {
                     assert!(
                         actual >= min_count,
                         "seed {} chunk ({}, {}) expected at least {} visible pumpkins on grass, found {}",
+                        case.seed,
+                        case.chunk_x,
+                        case.chunk_z,
+                        min_count,
+                        actual
+                    );
+                }
+                LowVisibilityFeatureExpectation::ForestRockBoulders { min_count } => {
+                    let actual = chunk.block_count(MOSSY_COBBLESTONE);
+                    assert!(
+                        actual >= min_count,
+                        "seed {} chunk ({}, {}) expected at least {} mossy cobblestone forest-rock boulder blocks, found {}",
                         case.seed,
                         case.chunk_x,
                         case.chunk_z,

@@ -52,6 +52,17 @@ impl LakeConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BlockStateConfiguration {
+    pub state: RawBlockId,
+}
+
+impl BlockStateConfiguration {
+    pub const fn new(state: RawBlockId) -> Self {
+        Self { state }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiskConfiguration {
     pub state: RawBlockId,
     pub radius: IntProvider,
@@ -1085,6 +1096,7 @@ pub enum ConfiguredFeature {
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
     Flower(RandomPatchConfiguration),
+    BlockBlob(BlockStateConfiguration),
     Disk(DiskConfiguration),
     Iceberg(RawBlockId),
     BlueIce,
@@ -1133,6 +1145,10 @@ impl ConfiguredFeature {
 
     pub const fn flower(config: RandomPatchConfiguration) -> Self {
         Self::Flower(config)
+    }
+
+    pub const fn block_blob(config: BlockStateConfiguration) -> Self {
+        Self::BlockBlob(config)
     }
 
     pub const fn disk(config: DiskConfiguration) -> Self {

@@ -181,6 +181,7 @@ pub const COCOA_AGE2_WEST: RawBlockId = 174;
 pub const BAMBOO_TOP_SMALL: RawBlockId = 175;
 pub const BAMBOO_TOP_LARGE: RawBlockId = 176;
 pub const BAMBOO_FINAL_LARGE: RawBlockId = 177;
+pub const MOSSY_COBBLESTONE: RawBlockId = 178;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -288,6 +289,7 @@ impl GeneratedBlockId {
     pub const BAMBOO_TOP_SMALL: Self = Self(BAMBOO_TOP_SMALL);
     pub const BAMBOO_TOP_LARGE: Self = Self(BAMBOO_TOP_LARGE);
     pub const BAMBOO_FINAL_LARGE: Self = Self(BAMBOO_FINAL_LARGE);
+    pub const MOSSY_COBBLESTONE: Self = Self(MOSSY_COBBLESTONE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -679,6 +681,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         FIRE_CORAL_BLOCK => "minecraft:fire_coral_block",
         HORN_CORAL_BLOCK => "minecraft:horn_coral_block",
         SEA_PICKLE_1 | SEA_PICKLE_2 | SEA_PICKLE_3 | SEA_PICKLE_4 => "minecraft:sea_pickle",
+        MOSSY_COBBLESTONE => "minecraft:mossy_cobblestone",
         _ => "minecraft:unknown",
     }
 }
@@ -723,6 +726,7 @@ mod tests {
         assert_eq!(block_light_opacity(CACTUS), 15);
         assert_eq!(block_light_opacity(PUMPKIN), 15);
         assert_eq!(block_light_opacity(MELON), 15);
+        assert_eq!(block_light_opacity(MOSSY_COBBLESTONE), 15);
         assert_eq!(block_light_opacity(VINE), 0);
         assert_eq!(block_light_opacity(VINE_NORTH), 0);
         assert_eq!(block_light_opacity(VINE_WEST), 0);

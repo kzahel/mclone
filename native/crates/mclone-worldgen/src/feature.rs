@@ -4,6 +4,7 @@ use crate::placement::{BlockPos, HeightmapType};
 use crate::prng::RandomSource;
 
 mod bamboo;
+mod blob;
 mod configured;
 mod context;
 mod disk;
@@ -24,9 +25,9 @@ mod tree;
 mod vines;
 
 pub use configured::{
-    BambooConfiguration, BasicTreeConfiguration, ConfiguredFeature, CoralShape,
-    DecoratedFeatureConfiguration, DiskConfiguration, DripstoneClusterConfiguration, FloatProvider,
-    FoliagePlacerConfiguration, GlowLichenConfiguration, HugeMushroomConfiguration,
+    BambooConfiguration, BasicTreeConfiguration, BlockStateConfiguration, ConfiguredFeature,
+    CoralShape, DecoratedFeatureConfiguration, DiskConfiguration, DripstoneClusterConfiguration,
+    FloatProvider, FoliagePlacerConfiguration, GlowLichenConfiguration, HugeMushroomConfiguration,
     HugeMushroomKind, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
     RandomBooleanFeatureConfiguration, RandomFeatureConfiguration, RandomPatchConfiguration,
     RandomPatchStateProvider, SeagrassConfiguration, SimpleBlockConfiguration,
@@ -149,6 +150,7 @@ impl ConfiguredFeature {
             Self::SimpleBlock(config) => patch::place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => patch::place_random_patch(world, random, origin, *config),
             Self::Flower(config) => patch::place_flower(world, random, origin, *config),
+            Self::BlockBlob(config) => blob::place_block_blob(world, random, origin, *config),
             Self::Disk(config) => disk::place_disk(world, random, origin, *config),
             Self::Iceberg(state) => ice::place_iceberg(world, random, origin, *state),
             Self::BlueIce => ice::place_blue_ice(world, random, origin),
@@ -303,13 +305,13 @@ mod tests {
         DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS,
         GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, IRON_ORE, JUNGLE_LEAVES, JUNGLE_LOG, KELP,
         KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER,
-        LILY_OF_THE_VALLEY, LILY_PAD, MELON, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
-        PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
-        RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SEA_PICKLE_1, SEA_PICKLE_2,
-        SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE,
-        SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TALL_GRASS_UPPER, TALL_SEAGRASS_LOWER,
-        TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, TUFF, VINE_EAST, VINE_NORTH, VINE_SOUTH,
-        VINE_UP, VINE_WEST, WATER,
+        LILY_OF_THE_VALLEY, LILY_PAD, MELON, MOSSY_COBBLESTONE, MUSHROOM_STEM, MYCELIUM,
+        OAK_LEAVES, OAK_LOG, PACKED_ICE, PEONY_LOWER, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM,
+        RED_MUSHROOM_BLOCK, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND,
+        SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES,
+        STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TALL_GRASS_UPPER,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, TUFF, VINE_EAST,
+        VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -533,6 +535,25 @@ mod tests {
 
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(4, 3, 5)));
         assert_eq!(chunk.get_block_at_y(4, 3, 5), DANDELION);
+    }
+
+    #[test]
+    fn block_blob_feature_places_mossy_cobble_on_surface_support() {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        for x in 0..CHUNK_WIDTH {
+            for z in 0..CHUNK_WIDTH {
+                for y in 0..5 {
+                    chunk.set_block_at_y(x, y, z, STONE);
+                }
+                chunk.set_block_at_y(x, 5, z, GRASS_BLOCK);
+            }
+        }
+        let mut random = WorldgenRandom::new(0);
+        let feature =
+            ConfiguredFeature::block_blob(BlockStateConfiguration::new(MOSSY_COBBLESTONE));
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 10, 8)));
+        assert!(count_blocks(&chunk, MOSSY_COBBLESTONE) > 0);
     }
 
     #[test]
@@ -1702,6 +1723,19 @@ mod tests {
     }
 
     #[test]
+    fn giant_taiga_feature_tables_include_java_forest_rock_boulders() {
+        for biome_id in [32, 33, 160, 161] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert!(has_forest_rock_feature(&features));
+        }
+
+        for biome_id in [3, 20, 34, 131, 162] {
+            let features = overworld_features_for_biome(get_layered_biome_by_id(biome_id));
+            assert!(!has_forest_rock_feature(&features));
+        }
+    }
+
+    #[test]
     fn river_and_beach_feature_tables_include_java_default_vegetation_subset() {
         let river = overworld_features_for_biome(get_layered_biome_by_id(7));
         let frozen_river = overworld_features_for_biome(get_layered_biome_by_id(11));
@@ -2581,6 +2615,26 @@ mod tests {
                         need_water: false,
                         place_on: &[],
                     }) if patch_state == state
+                )
+        })
+    }
+
+    fn has_forest_rock_feature(features: &[PlacedFeature]) -> bool {
+        features.iter().any(|feature| {
+            feature.step == DecorationStep::LocalModifications
+                && feature.decorators
+                    == vec![
+                        ConfiguredDecorator::Count(CountConfiguration::from_provider(
+                            IntProvider::uniform(0, 2),
+                        )),
+                        ConfiguredDecorator::square(),
+                        ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                    ]
+                && matches!(
+                    feature.feature,
+                    ConfiguredFeature::BlockBlob(BlockStateConfiguration {
+                        state: MOSSY_COBBLESTONE,
+                    })
                 )
         })
     }

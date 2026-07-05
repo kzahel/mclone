@@ -638,6 +638,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (175, "minecraft:bamboo", BAMBOO_TOP_SMALL),
     (176, "minecraft:bamboo", BAMBOO_TOP_LARGE),
     (177, "minecraft:bamboo", BAMBOO_FINAL_LARGE),
+    (178, "minecraft:mossy_cobblestone", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -656,7 +657,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 178);
+        assert_eq!(registry.len(), 179);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -704,6 +705,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:bricks"),
             Some(BlockStateId(91))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:mossy_cobblestone"),
+            Some(BlockStateId(178))
         );
         assert_eq!(
             registry.by_id(BlockStateId(41)).unwrap().canonical_key(),
