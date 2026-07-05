@@ -4,9 +4,24 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
+use mclone_app_runtime::client_experience::{
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
+    ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
+    ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
+    ClientExperienceSettingEffect, ClientExperienceSettingsEffects,
+    ClientExperienceSettingsProfile, ClientExperienceSettingsState,
+    client_experience_should_apply_ui_projection,
+};
 use mclone_app_runtime::far_lod::{
     FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
     MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+};
+use mclone_app_runtime::flat_client_catalog::FlatClientCatalogEffects;
+use mclone_app_runtime::flat_client_session::{
+    FlatClientSessionEffects, FlatClientSessionHostAction, FlatClientSessionProjection,
+    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
+    flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
+    flat_client_session_projection, flat_client_should_clear_inactive_session_status,
 };
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
@@ -21,7 +36,8 @@ use mclone_app_runtime::local_single_view::{
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, SessionFailure,
+    SessionStartRequest,
 };
 use mclone_app_runtime::{
     GameplayCommandUpdatePolicy, RuntimePollDiagnostics, TraversalReadySectionCache,
@@ -979,6 +995,17 @@ struct XrLocalStartup {
     startup_view_pose: Option<XrStartupViewPose>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct XrPendingSessionStart {
+    scene: XrSceneOptions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum XrSessionStartOutcome {
+    LocalStartupQueued,
+    Started(ActiveSessionDescriptor),
+}
+
 #[derive(Debug)]
 pub enum XrLocalOnlyRemoteSession {}
 
@@ -1001,9 +1028,12 @@ where
 {
     scene: XrSceneOptions,
     color_format: wgpu::TextureFormat,
+    mesh_assets: TexturedMeshAssets,
     runtime: Option<NativeSingleViewSessionRuntime<S>>,
     local_startup: Option<XrLocalStartup>,
+    session: GameSessionCoordinator<XrPendingSessionStart>,
     session_runtime_factory: Option<XrSessionRuntimeFactory<S>>,
+    client_experience: ClientExperienceController,
     camera: EngineCameraController,
     interaction: ClientInteractionController,
     initial_alignment_mode: XrViewAlignmentMode,
@@ -1020,7 +1050,7 @@ where
     world_gui_overlay_renderer: WorldGuiRenderer,
     ui: GameUiHost,
     menu_overlay_cache: XrMenuPanelOverlayCache,
-    session_status: StatusOverlay,
+    status_overlay: StatusOverlay,
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
     underwater_effects: XrUnderwaterEffectStates,
@@ -1155,13 +1185,16 @@ where
             .context("upload initial XR GUI atlas")?;
         let pump = LocalSingleViewStartupPump::with_mesh_assets(
             local_single_view_options(scene),
-            mesh_assets,
+            mesh_assets.clone(),
         )
         .context("create initial XR local world startup pump")?;
         let ui = xr_game_ui_for_session(None, scene.seed);
+        let mut session = GameSessionCoordinator::new();
+        session.begin_start(request.clone());
         Ok(Self {
             scene,
             color_format,
+            mesh_assets,
             runtime: None,
             local_startup: Some(XrLocalStartup {
                 request: request.clone(),
@@ -1170,7 +1203,9 @@ where
                 camera: camera.clone(),
                 startup_view_pose,
             }),
+            session,
             session_runtime_factory: None,
+            client_experience: ClientExperienceController::new(xr_client_experience_profile()),
             camera,
             interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
@@ -1198,7 +1233,7 @@ where
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
-            session_status: StatusOverlay::new(request.starting_message(), true),
+            status_overlay: StatusOverlay::hidden(),
             sky: SkyRenderer::new_with_color_profile(
                 device,
                 color_format,
@@ -1264,21 +1299,28 @@ where
             scene.movement_speed_multiplier,
             startup_view_pose,
         )?;
-        let ui = xr_game_ui_for_session(started.runtime.active_session(), scene.seed);
+        let active_session = started
+            .runtime
+            .active_session()
+            .cloned()
+            .context("XR runtime did not expose an active session")?;
+        let ui = xr_game_ui_for_session(Some(&active_session), scene.seed);
+        let mut session = GameSessionCoordinator::new();
+        session.complete_start(active_session);
+        let mesh_assets = started.runtime.mesh_assets().clone();
         let mut world_gui_renderer = WorldGuiRenderer::new(device, color_format);
         world_gui_renderer
-            .upload_texture_atlas(
-                device,
-                queue,
-                started.runtime.mesh_assets().atlas.as_upload(),
-            )
+            .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
             .context("upload XR GUI atlas")?;
         let mut state = Self {
             scene,
             color_format,
+            mesh_assets,
             runtime: Some(started.runtime),
             local_startup: None,
+            session,
             session_runtime_factory: None,
+            client_experience: ClientExperienceController::new(xr_client_experience_profile()),
             camera: started.camera,
             interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
@@ -1306,7 +1348,7 @@ where
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
-            session_status: StatusOverlay::hidden(),
+            status_overlay: StatusOverlay::hidden(),
             sky: SkyRenderer::new_with_color_profile(
                 device,
                 color_format,
@@ -2557,17 +2599,14 @@ where
         };
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         let ui_state = self.current_ui_render_state();
-        let progress = self
-            .local_startup
-            .as_ref()
-            .and_then(|startup| startup.pump.progress_overlay());
+        let session_projection = self.session_projection();
         let panel_draw = prepare_xr_menu_panel_draw(
             &mut self.ui,
             &mut self.menu_overlay_cache,
             gui_scale,
             ui_state,
-            progress.as_ref(),
-            &self.session_status,
+            session_projection.loading_progress_overlay.as_ref(),
+            &session_projection.status_overlay,
         );
         let controller_ray_lines = self
             .xr_menu_controller_ray_lines(panel)
@@ -3235,26 +3274,14 @@ where
         }
     }
 
-    pub fn replace_session_for_request(
+    pub fn start_session_for_request(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         request: SessionStartRequest,
-    ) -> Result<()> {
-        let scene = match &request {
-            SessionStartRequest::CreateLocalWorld { options } => {
-                self.local_world_options(options.seed)
-            }
-            SessionStartRequest::OpenLocalWorld { .. } => {
-                bail!("XR local world catalog open is not implemented yet")
-            }
-            SessionStartRequest::JoinRemote { .. } => self.remote_session_options(),
-            SessionStartRequest::Unknown => bail!("unsupported unknown XR replacement session"),
-        };
-        if matches!(request, SessionStartRequest::CreateLocalWorld { .. }) {
-            return self.begin_local_replacement_start(request, scene);
-        }
-        self.start_replacement_session(device, queue, request, scene)
+    ) -> Result<bool> {
+        self.request_session_start(request)?;
+        self.start_pending_session(device, queue)
     }
 
     fn render_views(&mut self, views: &[xr::View]) -> Result<[ChunkRenderView; 2]> {
@@ -4061,17 +4088,14 @@ where
         );
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         let ui_state = self.current_ui_render_state();
-        let progress = self
-            .local_startup
-            .as_ref()
-            .and_then(|startup| startup.pump.progress_overlay());
+        let session_projection = self.session_projection();
         let panel_draw = prepare_xr_menu_panel_draw(
             &mut self.ui,
             &mut self.menu_overlay_cache,
             gui_scale,
             ui_state,
-            progress.as_ref(),
-            &self.session_status,
+            session_projection.loading_progress_overlay.as_ref(),
+            &session_projection.status_overlay,
         );
         let ui_active = self.ui.is_active();
         let mut summary_ui_draw = panel_draw.panel_draw.clone();
@@ -4469,7 +4493,7 @@ where
             },
         );
         GameUiRenderState {
-            world_catalog: Default::default(),
+            world_catalog: self.client_experience.catalog().ui_state(),
             render_distance: (render_distance as i32).clamp(1, MAX_XR_RENDER_DISTANCE as i32),
             min_render_distance: 1,
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
@@ -4500,6 +4524,44 @@ where
             touch_controls_mode: None,
             touch_settings: None,
             block_palette,
+        }
+    }
+
+    fn client_experience_settings_state(&self) -> ClientExperienceSettingsState {
+        ClientExperienceSettingsState::from(self.current_ui_render_state())
+    }
+
+    fn session_projection(&self) -> FlatClientSessionProjection {
+        flat_client_session_projection(
+            self.session.status(),
+            self.status_overlay.clone(),
+            self.startup_progress_overlay(),
+        )
+    }
+
+    fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.local_startup
+            .as_ref()
+            .and_then(|startup| startup.pump.progress_overlay())
+    }
+
+    fn active_remote_addr(&self) -> Option<String> {
+        match self.session.state() {
+            GameSessionState::Active {
+                session: ActiveSessionDescriptor::Remote { endpoint },
+            } => Some(endpoint.address.clone()),
+            GameSessionState::NoSession
+            | GameSessionState::Starting { .. }
+            | GameSessionState::Active {
+                session: ActiveSessionDescriptor::LocalWorld { .. },
+            }
+            | GameSessionState::Failed { .. } => None,
+        }
+    }
+
+    fn clear_inactive_session_status(&mut self) {
+        if flat_client_should_clear_inactive_session_status(self.session.state()) {
+            self.status_overlay = StatusOverlay::hidden();
         }
     }
 
@@ -4854,18 +4916,89 @@ where
         scene
     }
 
-    fn begin_local_replacement_start(
+    fn request_session_start(&mut self, request: SessionStartRequest) -> Result<()> {
+        let scene = self.scene_for_session_request(&request)?;
+        self.status_overlay = StatusOverlay::hidden();
+        self.session
+            .request_start(request, XrPendingSessionStart { scene });
+        Ok(())
+    }
+
+    fn scene_for_session_request(&self, request: &SessionStartRequest) -> Result<XrSceneOptions> {
+        match request {
+            SessionStartRequest::CreateLocalWorld { options } => {
+                Ok(self.local_world_options(options.seed))
+            }
+            SessionStartRequest::OpenLocalWorld { .. } => {
+                bail!("XR local world catalog open is not implemented yet")
+            }
+            SessionStartRequest::JoinRemote { .. } => Ok(self.remote_session_options()),
+            SessionStartRequest::Unknown => bail!("unsupported unknown XR session start"),
+        }
+    }
+
+    fn start_pending_session(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        let Some(pending) = self.session.take_pending_start() else {
+            return Ok(false);
+        };
+        let request = pending.request.clone();
+        match self.start_pending_session_payload(device, queue, pending) {
+            Ok(XrSessionStartOutcome::LocalStartupQueued) => Ok(false),
+            Ok(XrSessionStartOutcome::Started(descriptor)) => {
+                self.session.complete_start(descriptor.clone());
+                self.status_overlay = StatusOverlay::hidden();
+                self.apply_started_session_ui(&descriptor);
+                Ok(true)
+            }
+            Err(error) => {
+                log::error!("failed to start XR session {request:?}: {error:#}");
+                self.session
+                    .fail_start(SessionFailure::new(request.default_failure_message()));
+                self.apply_xr_session_ui_effects(flat_client_failed_start_ui_effects(
+                    &request, false,
+                ));
+                self.menu_panel_anchor = XrUiPanelAnchor::Head;
+                self.menu_panel_recenter_pending = true;
+                Err(error)
+            }
+        }
+    }
+
+    fn start_pending_session_payload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pending: mclone_app_runtime::session::PendingSessionStart<XrPendingSessionStart>,
+    ) -> Result<XrSessionStartOutcome> {
+        let request = pending.request;
+        let scene = pending.payload.scene;
+        match request {
+            request @ SessionStartRequest::CreateLocalWorld { .. } => {
+                self.begin_local_session_start(request, scene)?;
+                Ok(XrSessionStartOutcome::LocalStartupQueued)
+            }
+            SessionStartRequest::OpenLocalWorld { .. } => {
+                bail!("XR local world catalog open is not implemented yet")
+            }
+            request @ SessionStartRequest::JoinRemote { .. } => {
+                let descriptor = self.start_replacement_session(device, queue, request, scene)?;
+                Ok(XrSessionStartOutcome::Started(descriptor))
+            }
+            SessionStartRequest::Unknown => bail!("unsupported unknown XR session start"),
+        }
+    }
+
+    fn begin_local_session_start(
         &mut self,
         request: SessionStartRequest,
         scene: XrSceneOptions,
     ) -> Result<()> {
         let scene = scene.validated()?;
-        let mesh_assets = self
-            .runtime
-            .as_ref()
-            .context("cannot replace XR local world before initial runtime is active")?
-            .mesh_assets()
-            .clone();
+        let mesh_assets = self.mesh_assets.clone();
         let pump = LocalSingleViewStartupPump::with_mesh_assets(
             local_single_view_options(scene),
             mesh_assets,
@@ -4880,7 +5013,7 @@ where
             camera,
             startup_view_pose: None,
         });
-        self.session_status = StatusOverlay::new(request.starting_message(), true);
+        self.status_overlay = StatusOverlay::hidden();
         self.ui.clear_input();
         self.menu_pointer_down = false;
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
@@ -4935,21 +5068,18 @@ where
             .local_startup
             .take()
             .expect("startup must exist after playable step");
-        let failure_message = startup.request.default_failure_message();
-        let failure_seed = match &startup.request {
-            SessionStartRequest::CreateLocalWorld { options } => Some(options.seed),
-            SessionStartRequest::OpenLocalWorld { .. }
-            | SessionStartRequest::JoinRemote { .. }
-            | SessionStartRequest::Unknown => None,
-        };
+        let failed_request = startup.request.clone();
         match self.complete_local_startup(device, queue, startup, step) {
             Ok(()) => Ok(true),
             Err(error) => {
                 log::error!("failed to complete XR local world startup: {error:#}");
-                self.session_status = StatusOverlay::new(failure_message, false);
-                if let Some(seed) = failure_seed {
-                    self.ui.set_new_world_seed(seed);
-                }
+                self.session.fail_start(SessionFailure::new(
+                    failed_request.default_failure_message(),
+                ));
+                self.apply_xr_session_ui_effects(flat_client_failed_start_ui_effects(
+                    &failed_request,
+                    false,
+                ));
                 self.menu_panel_anchor = XrUiPanelAnchor::Head;
                 self.menu_panel_recenter_pending = true;
                 Ok(false)
@@ -5027,6 +5157,7 @@ where
         let index_count = draw.index_count();
         let face_count = quad_face_count_from_indices(index_count);
         self.scene = scene;
+        self.mesh_assets = runtime.mesh_assets().clone();
         self.runtime = Some(runtime);
         self.camera = camera;
         self.draw = draw;
@@ -5040,11 +5171,11 @@ where
         self.sync_player_appearance()
             .context("sync XR local startup player appearance")?;
         self.clear_transient_world_state();
-        self.session_status = StatusOverlay::hidden();
+        self.session.complete_start(descriptor.clone());
+        self.status_overlay = StatusOverlay::hidden();
+        self.apply_started_session_ui(&descriptor);
         match descriptor {
             ActiveSessionDescriptor::LocalWorld { seed, .. } => {
-                self.ui.set_new_world_seed(seed);
-                self.ui.apply_action(GameUiAction::CreateWorld(seed));
                 log::info!(
                     "XR local world playable seed={} polls={} poll_ms={:.3} sections={} target_ready={}/{}",
                     seed,
@@ -5096,10 +5227,13 @@ where
             "failed to start XR local world {:?}: {error:#}",
             startup.request
         );
-        self.session_status = StatusOverlay::new(startup.request.default_failure_message(), false);
-        if let SessionStartRequest::CreateLocalWorld { options } = startup.request {
-            self.ui.set_new_world_seed(options.seed);
-        }
+        self.session.fail_start(SessionFailure::new(
+            startup.request.default_failure_message(),
+        ));
+        self.apply_xr_session_ui_effects(flat_client_failed_start_ui_effects(
+            &startup.request,
+            false,
+        ));
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = true;
     }
@@ -5129,27 +5263,37 @@ where
         self.section_uploads.clear();
     }
 
+    fn teardown_world(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<()> {
+        self.local_startup = None;
+        if self.runtime.take().is_some() {
+            self.draw = TexturedSectionDrawResources::new(
+                device,
+                queue,
+                self.color_format,
+                &[],
+                self.mesh_assets.atlas.as_upload(),
+            )
+            .context("reset XR terrain draw resources during session teardown")?;
+        }
+        self.render_stats = RenderStreamStats::default();
+        self.clear_transient_world_state();
+        Ok(())
+    }
+
     fn start_replacement_session(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         request: SessionStartRequest,
         scene: XrSceneOptions,
-    ) -> Result<()> {
-        self.session_status = StatusOverlay::new(request.starting_message(), true);
+    ) -> Result<ActiveSessionDescriptor> {
         let descriptor = request.active_descriptor().with_context(|| {
-            format!("XR replacement request did not describe an active session: {request:?}")
+            format!("XR session start request did not describe an active session: {request:?}")
         })?;
-        let mesh_assets = self
-            .runtime
-            .as_ref()
-            .context("cannot replace XR session before initial runtime is active")?
-            .mesh_assets()
-            .clone();
+        let mesh_assets = self.mesh_assets.clone();
         let Some(factory) = self.session_runtime_factory.as_mut() else {
             let error = anyhow!("XR session runtime factory is not installed");
             log::error!("{error:#}");
-            self.session_status = StatusOverlay::new(request.default_failure_message(), false);
             return Err(error);
         };
         let scene = scene.validated()?;
@@ -5157,7 +5301,6 @@ where
             Ok(runtime) => runtime,
             Err(error) => {
                 log::error!("failed to start XR session {request:?}: {error:#}");
-                self.session_status = StatusOverlay::new(request.default_failure_message(), false);
                 return Err(error);
             }
         };
@@ -5173,32 +5316,29 @@ where
             Ok(started) => started,
             Err(error) => {
                 log::error!("failed to warm XR session {request:?}: {error:#}");
-                self.session_status = StatusOverlay::new(request.default_failure_message(), false);
                 return Err(error);
             }
         };
 
         self.scene = scene;
+        self.mesh_assets = started.runtime.mesh_assets().clone();
         self.runtime = Some(started.runtime);
         self.camera = started.camera;
         self.draw = started.draw;
         self.render_stats = started.render_stats;
         self.sync_player_appearance()
-            .context("sync XR replacement player appearance")?;
+            .context("sync XR session start player appearance")?;
         self.clear_transient_world_state();
         self.clear_menu_input_state();
-        self.session_status = StatusOverlay::hidden();
-        match descriptor {
+        match &descriptor {
             ActiveSessionDescriptor::LocalWorld { seed, .. } => {
-                self.ui.set_new_world_seed(seed);
                 log::info!("XR created local world seed={seed}");
             }
             ActiveSessionDescriptor::Remote { endpoint } => {
-                self.ui.set_join_remote_addr(endpoint.address.clone());
                 log::info!("XR joined remote session {}", endpoint.address);
             }
         }
-        Ok(())
+        Ok(descriptor)
     }
 
     fn apply_xr_ui_action(
@@ -5210,238 +5350,315 @@ where
         if self.local_startup.is_some() {
             return Ok(false);
         }
-        let mut scene_replaced = false;
-        match action {
-            GameUiAction::ToggleSectionOcclusion => {
-                self.render_options.section_occlusion_culling =
-                    !self.render_options.section_occlusion_culling;
-                log::info!(
-                    "XR section occlusion culling {}",
-                    if self.render_options.section_occlusion_culling {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::ToggleFullbright => {
-                self.render_options.force_fullbright = !self.render_options.force_fullbright;
-                log::info!(
-                    "XR fullbright {}",
-                    if self.render_options.force_fullbright {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::ToggleFarLod => {
-                self.scene.far_lod.enabled = !self.scene.far_lod.enabled;
-                if let Some(runtime) = &mut self.runtime {
-                    runtime.clear_far_lod();
-                }
-                log::info!(
-                    "XR far LOD {}",
-                    if self.scene.far_lod.enabled {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::SetFarLodRange(range_chunks) => {
-                let range_chunks = u32::try_from(range_chunks)
-                    .unwrap_or(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
-                    .clamp(
-                        MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-                        MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-                    );
-                self.scene.far_lod = self.scene.far_lod.with_extra_radius_chunks(range_chunks);
-                if let Some(runtime) = &mut self.runtime {
-                    runtime.clear_far_lod();
-                }
-                log::info!(
-                    "XR far LOD range set to {} chunks beyond render distance",
-                    self.scene.far_lod.extra_radius_chunks
-                );
-            }
-            GameUiAction::TogglePlayerCollisionBox => {
-                self.player_collision_box_visible = !self.player_collision_box_visible;
-                log::info!(
-                    "XR player collision box debug {}",
-                    if self.player_collision_box_visible {
-                        "visible"
-                    } else {
-                        "hidden"
-                    }
-                );
-            }
-            GameUiAction::ToggleCrosshair => {}
-            GameUiAction::ToggleFirstPersonPlayer => {
-                let visible = !self.camera.first_person_player_visible();
-                self.camera.set_first_person_player_visible(visible);
-                log::info!(
-                    "XR first-person player body {}",
-                    if visible { "visible" } else { "hidden" }
-                );
-            }
-            GameUiAction::SetRenderDistance(render_distance) => {
-                let render_distance =
-                    render_distance.clamp(1, MAX_XR_RENDER_DISTANCE as i32) as u32;
-                if let Some(runtime) = &mut self.runtime {
-                    if runtime
-                        .set_render_distance(render_distance)
-                        .context("set XR render distance from menu")?
-                    {
-                        log::info!(
-                            "XR render distance set to {} (chunk tracking radius {})",
-                            render_distance,
-                            runtime.chunk_tracking_radius()
-                        );
-                    }
-                }
-                self.scene.render_distance = render_distance;
-            }
-            GameUiAction::SetMovementMode(movement_mode) => {
-                self.camera
-                    .set_movement_mode(engine_movement_mode(movement_mode));
-                let movement_mode = self.camera.movement_mode();
-                log::info!("XR player movement mode {}", movement_mode.label());
-            }
-            GameUiAction::SetXrTurnMode(turn_mode) => {
-                self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
-                log::info!("XR turn mode {}", turn_mode.label());
-            }
-            GameUiAction::SetFlySpeed(multiplier) => {
-                self.camera.set_fly_speed_multiplier(f64::from(multiplier));
-                log::info!(
-                    "XR fly speed set to {:.1}x ({:.0} blocks/s)",
-                    self.camera.fly_speed_multiplier(),
-                    self.camera.speed_blocks_per_second()
-                );
-            }
-            GameUiAction::SetMovementSpeed(multiplier) => {
-                self.camera
-                    .set_movement_speed_multiplier(f64::from(multiplier));
-                self.scene.movement_speed_multiplier =
-                    self.camera.movement_speed_multiplier() as f32;
-                log::info!(
-                    "XR movement speed multiplier set to {:.1}x",
-                    self.camera.movement_speed_multiplier()
-                );
-            }
-            GameUiAction::SetPlayerModel(model) => {
-                self.player_model = model;
-                log::info!("XR player model set to {}", model.label());
-                if let Err(error) = self.sync_player_appearance() {
-                    log::warn!("failed to sync XR player appearance: {error:#}");
-                }
-            }
-            GameUiAction::Quit => {
-                log::info!("XR menu quit action ignored by shared scene");
-            }
-            GameUiAction::OpenNewWorld => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                self.session_status = StatusOverlay::hidden();
-            }
-            GameUiAction::OpenWorldCreate => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                self.session_status = StatusOverlay::hidden();
-            }
-            GameUiAction::OpenWorldList
-            | GameUiAction::SelectWorld(_)
-            | GameUiAction::ConfirmDeleteWorld(_)
-            | GameUiAction::CancelDeleteWorld => {
-                self.session_status = StatusOverlay::hidden();
-            }
-            GameUiAction::OpenWorld(_)
-            | GameUiAction::CreateCatalogWorld
-            | GameUiAction::DeleteWorld(_) => {
-                log::warn!("persistent world catalog action is not wired to XR scene yet");
-            }
-            GameUiAction::OpenJoinRemote => {
-                let remote_addr = self
-                    .runtime
-                    .as_ref()
-                    .and_then(|runtime| runtime.active_session())
-                    .and_then(|session| match session {
-                        ActiveSessionDescriptor::Remote { endpoint } => {
-                            Some(endpoint.address.clone())
-                        }
-                        ActiveSessionDescriptor::LocalWorld { .. } => None,
-                    })
-                    .unwrap_or_else(|| normalized_xr_remote_addr(self.ui.join_remote_addr()));
-                self.ui.set_join_remote_addr(remote_addr);
-                self.session_status = StatusOverlay::hidden();
-            }
-            GameUiAction::RerollSeed => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                self.session_status = StatusOverlay::hidden();
-                log::info!("XR new-world seed rerolled to {seed}");
-            }
-            GameUiAction::CreateWorld(seed) => {
-                let request = SessionStartRequest::new_seed_local_world(seed);
-                if self
-                    .replace_session_for_request(device, queue, request)
-                    .is_err()
-                {
-                    self.ui.set_new_world_seed(seed);
-                    return Ok(false);
-                }
-                return Ok(false);
-            }
-            GameUiAction::JoinRemote => {
-                let remote_addr = normalized_xr_remote_addr(self.ui.join_remote_addr());
-                self.ui.set_join_remote_addr(remote_addr.clone());
-                let request = SessionStartRequest::JoinRemote {
-                    endpoint: RemoteSessionEndpoint::new(remote_addr),
-                };
-                if self
-                    .replace_session_for_request(device, queue, request)
-                    .is_err()
-                {
-                    return Ok(false);
-                }
-                scene_replaced = true;
-            }
-            GameUiAction::AssignHotbarBlock { slot, block_state } => {
-                let changed = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))?;
-                log::info!(
-                    "XR debug hotbar slot {} assigned block_state={} changed={}",
-                    slot + 1,
-                    block_state,
-                    changed
-                );
-            }
-            GameUiAction::CycleFramePacing
-            | GameUiAction::CycleFpsCap
-            | GameUiAction::SetTouchLookSensitivity(_)
-            | GameUiAction::SetTouchControlsMode(_)
-            | GameUiAction::SetServerSimulationCadence(_) => {}
-            GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
-                self.session_status = StatusOverlay::hidden();
-            }
-            GameUiAction::StartWorld
-            | GameUiAction::Resume
-            | GameUiAction::OpenHelp(_)
-            | GameUiAction::CloseHelp(_)
-            | GameUiAction::OpenOptions(_)
-            | GameUiAction::OpenServerSettings(_)
-            | GameUiAction::BackToPause => {}
-            GameUiAction::OpenBlockPalette => {
-                self.menu_panel_anchor = XrUiPanelAnchor::LeftHand;
-                self.menu_panel_pose = None;
-                self.menu_panel_recenter_pending = true;
-            }
+        let settings_state = self.client_experience_settings_state();
+        self.client_experience.set_settings_state(settings_state);
+
+        let active_remote_addr = self.active_remote_addr();
+        let current_join_remote_addr = normalized_xr_remote_addr(self.ui.join_remote_addr());
+        let new_world_seed = if matches!(action, GameUiAction::OpenWorldCreate) {
+            self.next_new_world_seed()
+        } else {
+            self.ui.new_world_seed()
+        };
+        let next_new_world_seed = matches!(
+            action,
+            GameUiAction::OpenNewWorld | GameUiAction::RerollSeed
+        )
+        .then(|| self.next_new_world_seed());
+        let effects = self.client_experience.apply_ui_action(
+            action,
+            ClientExperienceActionContext {
+                new_world_seed,
+                next_new_world_seed,
+                current_join_remote_addr: &current_join_remote_addr,
+                fallback_remote_addr: active_remote_addr.as_deref(),
+            },
+        );
+        let apply_ui_action =
+            client_experience_should_apply_ui_projection(action) && effects.projection.is_empty();
+        let scene_replaced = self.apply_client_experience_effects(effects, device, queue)?;
+        if apply_ui_action {
+            self.apply_xr_projection_action(action);
         }
-        self.ui.apply_action(action);
         if !self.ui.is_active() {
             self.clear_menu_input_state();
         }
         Ok(scene_replaced)
+    }
+
+    fn apply_client_experience_effects(
+        &mut self,
+        effects: ClientExperienceEffects,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        self.apply_xr_catalog_effects(effects.catalog);
+        let scene_replaced = self.apply_xr_session_effects(effects.session, device, queue)?;
+        if !self.apply_xr_settings_effects(effects.settings)? {
+            return Ok(scene_replaced);
+        }
+        for effect in effects.gameplay {
+            match effect {
+                ClientExperienceGameplayEffect::AssignHotbarBlock { slot, block_state } => {
+                    let changed = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))?;
+                    log::info!(
+                        "XR debug hotbar slot {} assigned block_state={} changed={}",
+                        slot + 1,
+                        block_state,
+                        changed
+                    );
+                }
+            }
+        }
+        for effect in effects.projection {
+            match effect {
+                ClientExperienceProjectionEffect::ApplyUiAction(action) => {
+                    self.apply_xr_projection_action(action);
+                }
+            }
+        }
+        Ok(scene_replaced)
+    }
+
+    fn apply_xr_catalog_effects(&mut self, effects: FlatClientCatalogEffects) {
+        if !effects.catalog_requests.is_empty() || !effects.session_starts.is_empty() {
+            log::warn!("persistent world catalog action is not wired to XR scene yet");
+        }
+    }
+
+    fn apply_xr_session_effects(
+        &mut self,
+        effects: FlatClientSessionEffects,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        if let Some(seed) = effects.new_world_seed {
+            self.ui.set_new_world_seed(seed);
+        }
+        if let Some(addr) = effects.join_remote_addr {
+            self.ui
+                .set_join_remote_addr(normalized_xr_remote_addr(&addr));
+        }
+        if effects.clear_inactive_session_status {
+            self.clear_inactive_session_status();
+        }
+
+        let mut scene_replaced = false;
+        if let Some(request) = effects.session_start {
+            scene_replaced = self.start_session_for_request(device, queue, request)?;
+        }
+        if let Some(host_action) = effects.host_action {
+            match host_action {
+                FlatClientSessionHostAction::QuitToTitle => {
+                    let transition = flat_client_quit_to_title_transition(self.session.state());
+                    self.apply_xr_session_transition_effects(transition, device, queue)?;
+                }
+                FlatClientSessionHostAction::Quit => {
+                    log::info!("XR menu quit action ignored by shared scene");
+                }
+            }
+        }
+        Ok(scene_replaced)
+    }
+
+    fn apply_xr_session_transition_effects(
+        &mut self,
+        effects: FlatClientSessionTransitionEffects,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        if effects.teardown_world {
+            self.teardown_world(device, queue)?;
+        }
+        if effects.clear_session {
+            self.session.clear();
+        }
+        self.status_overlay = StatusOverlay::hidden();
+        self.apply_xr_session_ui_effects(effects.ui);
+        Ok(())
+    }
+
+    fn apply_xr_settings_effects(
+        &mut self,
+        effects: ClientExperienceSettingsEffects,
+    ) -> Result<bool> {
+        let has_setting_effects = !effects.setting_effects.is_empty();
+        let has_unavailable =
+            !effects.capability_projection.is_empty() || !effects.rejections.is_empty();
+        for effect in effects.setting_effects {
+            match effect {
+                ClientExperienceSettingEffect::SetSectionOcclusionCulling(enabled) => {
+                    self.render_options.section_occlusion_culling = enabled;
+                    log::info!(
+                        "XR section occlusion culling {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetFullbright(enabled) => {
+                    self.render_options.force_fullbright = enabled;
+                    log::info!(
+                        "XR fullbright {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetFarLod {
+                    enabled,
+                    extra_radius_chunks,
+                } => {
+                    self.scene.far_lod = self
+                        .scene
+                        .far_lod
+                        .with_extra_radius_chunks(extra_radius_chunks);
+                    self.scene.far_lod.enabled = enabled;
+                    log::info!(
+                        "XR far LOD {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    );
+                    log::info!(
+                        "XR far LOD range set to {} chunks beyond render distance",
+                        self.scene.far_lod.extra_radius_chunks
+                    );
+                }
+                ClientExperienceSettingEffect::ClearFarLod => {
+                    if let Some(runtime) = &mut self.runtime {
+                        runtime.clear_far_lod();
+                    }
+                }
+                ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
+                    self.player_collision_box_visible = visible;
+                    log::info!(
+                        "XR player collision box debug {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetFirstPersonPlayerVisible(visible) => {
+                    self.camera.set_first_person_player_visible(visible);
+                    log::info!(
+                        "XR first-person player body {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetCrosshairVisible(_) => {}
+                ClientExperienceSettingEffect::SetPlayerModel(model) => {
+                    self.player_model = model;
+                    log::info!("XR player model set to {}", model.label());
+                }
+                ClientExperienceSettingEffect::SyncPlayerAppearance => {
+                    if let Err(error) = self.sync_player_appearance() {
+                        log::warn!("failed to sync XR player appearance: {error:#}");
+                    }
+                }
+                ClientExperienceSettingEffect::SetMovementMode(movement_mode) => {
+                    self.camera
+                        .set_movement_mode(engine_movement_mode(movement_mode));
+                    let movement_mode = self.camera.movement_mode();
+                    log::info!("XR player movement mode {}", movement_mode.label());
+                }
+                ClientExperienceSettingEffect::SetXrTurnMode(turn_mode) => {
+                    self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
+                    log::info!("XR turn mode {}", turn_mode.label());
+                }
+                ClientExperienceSettingEffect::CycleFramePacing => {
+                    log::info!("XR frame pacing cycle ignored by scene host");
+                }
+                ClientExperienceSettingEffect::CycleFpsCap => {
+                    log::info!("XR FPS cap cycle ignored by scene host");
+                }
+                ClientExperienceSettingEffect::SetRenderDistance(render_distance) => {
+                    if let Some(runtime) = &mut self.runtime {
+                        if runtime
+                            .set_render_distance(render_distance)
+                            .context("set XR render distance from menu")?
+                        {
+                            log::info!(
+                                "XR render distance set to {} (chunk tracking radius {})",
+                                render_distance,
+                                runtime.chunk_tracking_radius()
+                            );
+                        }
+                    }
+                    self.scene.render_distance = render_distance;
+                }
+                ClientExperienceSettingEffect::SetFlySpeedMultiplier(multiplier) => {
+                    self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                    log::info!(
+                        "XR fly speed set to {:.1}x ({:.0} blocks/s)",
+                        self.camera.fly_speed_multiplier(),
+                        self.camera.speed_blocks_per_second()
+                    );
+                }
+                ClientExperienceSettingEffect::SetMovementSpeedMultiplier(multiplier) => {
+                    self.camera
+                        .set_movement_speed_multiplier(f64::from(multiplier));
+                    self.scene.movement_speed_multiplier =
+                        self.camera.movement_speed_multiplier() as f32;
+                    log::info!(
+                        "XR movement speed multiplier set to {:.1}x",
+                        self.camera.movement_speed_multiplier()
+                    );
+                }
+                ClientExperienceSettingEffect::SetTouchLookSensitivity(_) => {}
+                ClientExperienceSettingEffect::SetTouchControlsMode(_) => {}
+                ClientExperienceSettingEffect::SetServerSimulationCadence(_) => {}
+            }
+        }
+        self.apply_client_experience_capability_projection(effects.capability_projection);
+        for rejection in effects.rejections {
+            log::error!("{}", rejection.message);
+            self.status_overlay = StatusOverlay::new(rejection.message, false);
+            return Ok(false);
+        }
+        if has_setting_effects && !has_unavailable {
+            self.status_overlay = StatusOverlay::hidden();
+        }
+        Ok(true)
+    }
+
+    fn apply_client_experience_capability_projection(
+        &mut self,
+        projection: ClientExperienceCapabilityProjection,
+    ) {
+        if let Some(unavailable) = projection.first_unavailable() {
+            if let Some(message) = unavailable.status.message() {
+                log::warn!("{message}");
+                self.status_overlay = StatusOverlay::new(message, unavailable.status.ok());
+            }
+        }
+    }
+
+    fn apply_xr_session_ui_effects(&mut self, effects: FlatClientSessionUiEffects) {
+        if let Some(seed) = effects.new_world_seed {
+            self.ui.set_new_world_seed(seed);
+        }
+        if let Some(addr) = effects.join_remote_addr {
+            self.ui
+                .set_join_remote_addr(normalized_xr_remote_addr(&addr));
+        }
+        if let Some(screen) = effects.screen {
+            self.ui.set_screen(Some(screen));
+        }
+    }
+
+    fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
+        match descriptor {
+            ActiveSessionDescriptor::LocalWorld { seed, .. } => {
+                self.ui.set_new_world_seed(*seed);
+                self.ui.apply_action(GameUiAction::CreateWorld(*seed));
+            }
+            ActiveSessionDescriptor::Remote { endpoint } => {
+                self.ui.set_join_remote_addr(endpoint.address.clone());
+                self.ui.apply_action(GameUiAction::JoinRemote);
+            }
+        }
+    }
+
+    fn apply_xr_projection_action(&mut self, action: GameUiAction) {
+        if matches!(action, GameUiAction::OpenBlockPalette) {
+            self.menu_panel_anchor = XrUiPanelAnchor::LeftHand;
+            self.menu_panel_pose = None;
+            self.menu_panel_recenter_pending = true;
+        }
+        self.ui.apply_action(action);
     }
 
     fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
@@ -5812,6 +6029,17 @@ fn normalized_xr_remote_addr(addr: &str) -> String {
     } else {
         addr.to_owned()
     }
+}
+
+fn xr_client_experience_profile() -> ClientExperienceProfile {
+    let mut settings = ClientExperienceSettingsProfile::all_supported();
+    settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    ClientExperienceProfile::new(settings)
 }
 
 fn initial_xr_seed_reroll_state(seed: i64) -> u64 {
@@ -6948,6 +7176,7 @@ fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_app_runtime::session::RemoteSessionEndpoint;
     use mclone_render_session::{
         ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
     };

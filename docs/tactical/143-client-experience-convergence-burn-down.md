@@ -78,7 +78,7 @@ rg -n "already exists|was not found|cannot delete" \
 | 1: facade + `GameUiAction` classification | V1 (shared side), V2 (policy) | landed 2026-07-05 |
 | 2: desktop and web adopt the facade | V1/V2 on flat lanes | landed 2026-07-05 |
 | 3: TypeScript catalog demotion | V3 | landed 2026-07-05 |
-| 4: XR session-machine merge | V4 | open |
+| 4: XR session-machine merge | V4 | landed 2026-07-05 |
 | 5: emulated-XR profile test | display-neutrality gate | open |
 | 6: flat Android adopts the facade | V1/V2 on Android | open |
 | 7: XR catalog CRUD via shared controller | last V2 no-ops | open |
@@ -745,6 +745,93 @@ production refactor work.
   - `pnpm native:movement:smoke`: PASS.
 
 Next step after this preflight hardening commit: start Slice 4.
+
+Recorded result: landed 2026-07-05.
+
+- Implementation:
+  - `mclone-xr-scene` now owns a `GameSessionCoordinator` instead of the
+    deleted private replacement/status machine.
+  - XR menu actions route through `app-runtime::client_experience` and consume
+    shared session effects, settings effects, capability projection, and
+    `flat_client_session` status/startup projection.
+  - XR runtime factory payloads remain host-local: desktop still maps through
+    `SceneOptions` and TCP `RemoteServerSession`; Android XR still maps through
+    its Android-owned session adapter.
+  - `SetXrTurnMode` now flows through the shared capability-gated settings
+    action and remains functional in XR.
+  - Catalog CRUD remains intentionally unwired for XR; the scene logs catalog
+    effects and Slice 7 owns the persistent catalog work.
+- Exit criteria:
+  - `rg -n "replace_session_for_request" native/crates/mclone-xr-scene/src`:
+    PASS, no hits.
+  - `rg -n "GameSessionCoordinator" native/crates/mclone-xr-scene/src`: PASS,
+    coordinator imports and state ownership are present.
+  - The old XR `session_status` field and local start/failure transition rules
+    are gone. Status text, startup progress, failed-start UI restoration, and
+    inactive-status clearing come from shared session projection/effects.
+- Core validation:
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`: PASS.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`: PASS,
+    59 unit tests and doc tests passed.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`: PASS,
+    109 unit tests and doc tests passed.
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`:
+    PASS.
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`:
+    PASS.
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`:
+    PASS.
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`:
+    PASS with existing host-cfg warnings for unused Android helper constants.
+  - `pnpm native:policy:wasm-check`: PASS with the existing `mclone-server`
+    dead-code warning for
+    `PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks`.
+  - `git diff --check`: PASS.
+- Desktop flat/headless validation:
+  - `pnpm native:desktop-offscreen:smoke`: PASS. Screenshot
+    `/tmp/mclone-desktop-offscreen.png` inspected; terrain, lighting, foliage,
+    water, and actor rendering were nonblank and correctly framed.
+  - `pnpm native:movement:smoke`: PASS. The smoke reported bounded
+    loaded/client-visible chunk counts from 182 to 194.
+  - `pnpm native:timedemo:smoke`: PASS, 60-frame timedemo completed.
+- Desktop OpenXR / WiVRn validation:
+  - `pnpm native:xr:mac:wivrn:check`: PASS.
+  - `pnpm native:xr:mac:wivrn:smoke`: PASS. The Quest 3 reached OpenXR
+    `FOCUSED` through WiVRn and submitted frames.
+  - `pnpm native:xr:mac:wivrn:mclone`: PASS. The smoke reached OpenXR
+    `FOCUSED`, submitted 120 frames, and reported drawn terrain plus both
+    actors.
+- Flat Android validation:
+  - `pnpm native:android:apk`: PASS.
+  - `pnpm native:android:apk:avd`: PASS.
+  - `pnpm native:android:avd-smoke -- --skip-build`: PASS. Screenshot
+    `/tmp/mclone-android-avd-chunk.png` inspected; terrain and touch HUD were
+    nonblank and correctly framed.
+  - `pnpm native:android:avd-touch-smoke -- --skip-build`: PASS. Screenshot
+    `/tmp/mclone-android-avd-touch.png` inspected; the scripted swipe changed
+    the view and the render stayed coherent.
+  - `pnpm native:android:avd-session-smoke -- --skip-build`: PASS. Screenshot
+    `/tmp/mclone-android-avd-session.png` inspected; the shared title-flow
+    New World smoke loaded the replacement world.
+- Android XR / Quest validation:
+  - `pnpm native:android-xr:apk`: PASS.
+  - `pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time`:
+    PASS on attached Quest 3 `2G0YC1ZF93041Z`; package launch validation
+    passed.
+  - `MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke`:
+    PASS. Debug APK built, installed, launched with `--session-smoke
+    new-world`, and package launch validation passed.
+- Dispatch tripwires:
+  - `rg -n "fn apply_ui_action|fn apply_web_ui_action|fn apply_xr_ui_action" ...`:
+    unchanged at 5 dispatch functions.
+  - `rg -n "GameUiAction::[A-Za-z]+(\(_\))? => \{\}" native/apps native/crates/mclone-xr-scene/src`:
+    4 remaining inert arms, all in flat Android; XR has none.
+  - `rg -n "already exists|was not found|cannot delete" native/apps/mclone-web-client/www`:
+    unchanged at 3 smoke-harness assertion strings and 0 web catalog-policy
+    hits.
+- Platform parity was updated to mark desktop XR and Android XR as consumers of
+  the shared facade/session policy while leaving flat Android facade adoption
+  and XR catalog CRUD to later slices.
 
 ## Slice 5: Emulated-XR Desktop Profile Test
 

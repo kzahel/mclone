@@ -3065,7 +3065,7 @@ mod android {
                     ANDROID_XR_SESSION_SMOKE_SEED
                 );
                 terrain
-                    .replace_session_for_request(
+                    .start_session_for_request(
                         &graphics.device,
                         &graphics.queue,
                         SessionStartRequest::new_seed_local_world(ANDROID_XR_SESSION_SMOKE_SEED),
