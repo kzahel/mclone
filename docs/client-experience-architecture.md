@@ -835,10 +835,18 @@ Decided in this revision (2026-07-05):
 | `SetServerSimulationCadence` | capability-gated | Settings controller validates cadence and emits local-server cadence effect. |
 | `Quit` | host-effect action | Session helper emits process-quit host effect. |
 
-Still open:
+Slice 5 recorded the emulated-XR facts needed for the menu/session gate:
 
-- Which additional profile facts the emulated-XR test needs beyond ray/pose
-  and panel placement (comfort fades? snap-turn increments?).
+- a synthetic stereo view pair/head pose used to place the XR world panel;
+- an identity stage-to-world transform for deterministic desktop/offscreen
+  tests;
+- a right-hand controller aim ray plus trigger press/release hysteresis;
+- persistent catalog capabilities and injected list/create/open completions;
+- a deterministic New World seed supplied by the test adapter.
+
+The gate did not need comfort fades, snap-turn increments, swapchains, stereo
+render targets, or a headset. Those remain covered by XR-specific unit tests
+and device smokes.
 
 ## Acceptance Criteria
 

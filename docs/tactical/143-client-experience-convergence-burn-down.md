@@ -80,7 +80,7 @@ rg -n "already exists|was not found|cannot delete" \
 | 3: TypeScript catalog demotion | V3 | landed 2026-07-05 |
 | 4: XR session-machine merge | V4 | landed 2026-07-05 |
 | 4a: neutral shared session-policy naming | naming guardrail | landed 2026-07-05 |
-| 5: emulated-XR profile test | display-neutrality gate | open |
+| 5: emulated-XR profile test | display-neutrality gate | landed 2026-07-05 |
 | 6: flat Android adopts the facade | V1/V2 on Android | open |
 | 7: XR catalog CRUD via shared controller | last V2 no-ops | open |
 
@@ -949,7 +949,50 @@ pnpm native:desktop-offscreen:smoke
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+- Implementation:
+  - Added
+    `emulated_xr_desktop_profile_drives_catalog_session_flow_through_facade`
+    in `mclone-xr-scene`.
+  - The test uses no OpenXR session, headset, GPU device, window, or
+    filesystem. It injects a deterministic stereo view pair, head-anchored XR
+    world panel, identity stage-to-world transform, right-hand controller ray
+    plus trigger press/release, persistent catalog capabilities, fake
+    list/create/open completions, and a fixed New World seed.
+  - The flow clicks real v2 UI widgets through `xr_menu_*` controller-ray
+    helpers: `Title -> Singleplayer -> WorldList -> Existing World -> Open`,
+    then `Title -> Singleplayer -> WorldList -> Create -> WorldCreate ->
+    Create World`.
+  - Resulting UI actions route through `ClientExperienceController`; catalog
+    completions produce shared persistent-world session starts for both open
+    and create.
+  - The architecture doc records that comfort fades, snap-turn increments,
+    swapchains, stereo render targets, and headset/device facts were not
+    needed for this menu/session display-neutrality gate.
+- Exit criteria:
+  - The test exists in the standard `cargo test -p mclone-xr-scene` suite and
+    runs without a headset or display.
+  - The gate fails if XR panel/ray projection, v2 menu action emission, facade
+    routing, catalog create/open completion policy, or session-start effect
+    production breaks.
+- Validation:
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`: PASS.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`:
+    PASS, 109 unit tests and doc tests passed.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`: PASS,
+    60 unit tests and doc tests passed.
+  - `pnpm native:desktop-offscreen:smoke`: PASS. Screenshot
+    `/tmp/mclone-desktop-offscreen.png` inspected; terrain, lighting, foliage,
+    water, and actor rendering were nonblank and correctly framed.
+  - `git diff --check`: PASS.
+- Dispatch tripwires:
+  - `rg -n "fn apply_ui_action|fn apply_web_ui_action|fn apply_xr_ui_action" ...`:
+    unchanged at 5 dispatch functions.
+  - `rg -n "GameUiAction::[A-Za-z]+(\(_\))? => \{\}" native/apps native/crates/mclone-xr-scene/src`:
+    unchanged at 4 remaining inert arms, all in flat Android.
+  - `rg -n "already exists|was not found|cannot delete" native/apps/mclone-web-client/www`:
+    unchanged at 3 smoke-harness assertion strings.
 
 ## Slice 6: Flat Android Adopts The Facade
 

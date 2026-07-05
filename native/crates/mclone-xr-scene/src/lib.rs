@@ -7177,6 +7177,10 @@ fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
 mod tests {
     use super::*;
     use mclone_app_runtime::session::RemoteSessionEndpoint;
+    use mclone_app_runtime::world_catalog::{
+        LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities, WorldCatalogRequest,
+        WorldCatalogResponse,
+    };
     use mclone_render_session::{
         ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
     };
@@ -8062,6 +8066,382 @@ mod tests {
         assert!(xr_menu_pointer_trigger_down(0.56, false));
         assert!(xr_menu_pointer_trigger_down(0.4, true));
         assert!(!xr_menu_pointer_trigger_down(0.3, true));
+    }
+
+    #[test]
+    fn emulated_xr_desktop_profile_drives_catalog_session_flow_through_facade() {
+        let mut harness = EmulatedXrDesktopProfileHarness::new();
+
+        assert_eq!(harness.ui.screen(), Some(GameScreen::Title));
+        assert_eq!(
+            harness.click_widget("Singleplayer"),
+            GameUiAction::OpenWorldList
+        );
+        harness.route_emulated_ui_action(GameUiAction::OpenWorldList);
+        assert_eq!(harness.ui.screen(), Some(GameScreen::WorldList));
+        assert!(harness.has_widget("Existing World"));
+
+        assert_eq!(
+            harness.click_widget("Existing World"),
+            GameUiAction::SelectWorld(harness.existing_ui_id())
+        );
+        harness.route_emulated_ui_action(GameUiAction::SelectWorld(harness.existing_ui_id()));
+        assert_eq!(
+            harness.click_widget("Open"),
+            GameUiAction::OpenWorld(harness.existing_ui_id())
+        );
+        harness.route_emulated_ui_action(GameUiAction::OpenWorld(harness.existing_ui_id()));
+        assert_eq!(
+            harness.started_sessions.pop(),
+            Some(SessionStartRequest::open_local_world(
+                harness.existing_world_id.clone()
+            ))
+        );
+
+        harness.ui.set_screen(Some(GameScreen::Title));
+        assert_eq!(
+            harness.click_widget("Singleplayer"),
+            GameUiAction::OpenWorldList
+        );
+        harness.route_emulated_ui_action(GameUiAction::OpenWorldList);
+        assert_eq!(harness.ui.screen(), Some(GameScreen::WorldList));
+        assert_eq!(
+            harness.click_widget("Create"),
+            GameUiAction::OpenWorldCreate
+        );
+        harness.route_emulated_ui_action(GameUiAction::OpenWorldCreate);
+        assert_eq!(harness.ui.screen(), Some(GameScreen::WorldCreate));
+        assert_eq!(harness.ui.new_world_seed(), EMULATED_XR_CREATE_SEED);
+
+        assert_eq!(
+            harness.click_widget("Create World"),
+            GameUiAction::CreateCatalogWorld
+        );
+        harness.route_emulated_ui_action(GameUiAction::CreateCatalogWorld);
+
+        let created = harness
+            .started_sessions
+            .pop()
+            .expect("catalog create queued a session start");
+        match created {
+            SessionStartRequest::CreateLocalWorld { options } => {
+                assert_eq!(options.seed, EMULATED_XR_CREATE_SEED);
+                assert_eq!(options.display_name, "New World");
+                assert!(options.requested_id.is_some());
+            }
+            other => panic!("expected local world creation start, got {other:?}"),
+        }
+    }
+
+    const EMULATED_XR_CREATE_SEED: i64 = 24_680;
+
+    struct EmulatedXrDesktopProfileHarness {
+        profile: EmulatedXrDesktopProfileFacts,
+        ui: GameUiHost,
+        overlay_cache: XrMenuPanelOverlayCache,
+        client_experience: ClientExperienceController,
+        worlds: Vec<LocalWorldSummary>,
+        existing_world_id: LocalWorldId,
+        started_sessions: Vec<SessionStartRequest>,
+    }
+
+    impl EmulatedXrDesktopProfileHarness {
+        fn new() -> Self {
+            let profile = EmulatedXrDesktopProfileFacts::default();
+            let existing_world_id = LocalWorldId::new("existing-world").unwrap();
+            let existing =
+                LocalWorldSummary::new(existing_world_id.clone(), "Existing World", 98_765, 1_000)
+                    .unwrap();
+            let mut client_experience =
+                ClientExperienceController::new(xr_client_experience_profile());
+            client_experience
+                .catalog_mut()
+                .set_capabilities(WorldCatalogCapabilities::persistent_local());
+            Self {
+                profile,
+                ui: GameUiHost::new(),
+                overlay_cache: XrMenuPanelOverlayCache::default(),
+                client_experience,
+                worlds: vec![existing],
+                existing_world_id,
+                started_sessions: Vec::new(),
+            }
+        }
+
+        fn existing_ui_id(&self) -> mclone_ui::WorldCatalogUiWorldId {
+            self.client_experience
+                .catalog()
+                .ui_state()
+                .entries
+                .iter()
+                .flatten()
+                .find(|entry| entry.display_name.as_str() == "Existing World")
+                .expect("existing world catalog row")
+                .id
+        }
+
+        fn render_state(&self) -> GameUiRenderState {
+            GameUiRenderState {
+                world_catalog: self.client_experience.catalog().ui_state(),
+                xr_turn_mode: Some(GameXrTurnMode::Snap15),
+                crosshair_visible: None,
+                ..GameUiRenderState::default()
+            }
+        }
+
+        fn prepare_panel(&mut self) {
+            let render_state = self.render_state();
+            let draw = prepare_xr_menu_panel_draw(
+                &mut self.ui,
+                &mut self.overlay_cache,
+                self.profile.gui_scale,
+                render_state,
+                None,
+                &StatusOverlay::hidden(),
+            );
+            assert!(
+                !draw.panel_draw.commands().is_empty(),
+                "active XR panel should render visible UI commands"
+            );
+        }
+
+        fn has_widget(&mut self, label: &str) -> bool {
+            self.prepare_panel();
+            self.ui
+                .v2_debug_snapshot()
+                .expect("emulated XR panel has debug data")
+                .widgets
+                .iter()
+                .any(|widget| widget.label == label)
+        }
+
+        fn click_widget(&mut self, label: &str) -> GameUiAction {
+            self.prepare_panel();
+            let rect = {
+                let snapshot = self
+                    .ui
+                    .v2_debug_snapshot()
+                    .expect("emulated XR panel has debug data");
+                let widget = snapshot
+                    .widgets
+                    .iter()
+                    .find(|widget| widget.label == label)
+                    .unwrap_or_else(|| panic!("widget `{label}` not found in {snapshot:?}"));
+                assert!(widget.enabled, "widget `{label}` should be enabled");
+                widget.rect
+            };
+            self.click_gui_point(point_in(rect))
+                .unwrap_or_else(|| panic!("widget `{label}` did not emit an action"))
+        }
+
+        fn click_gui_point(&mut self, point: Point) -> Option<GameUiAction> {
+            let pressed = self
+                .profile
+                .controller_for_gui_point(point, XR_MENU_POINTER_TRIGGER_PRESS);
+            let press_hit = xr_menu_pointer_hit_from_controllers(
+                &[pressed],
+                self.profile.transform,
+                self.profile.panel,
+                self.profile.gui_scale,
+            )
+            .expect("pressed controller ray hits emulated XR panel");
+            assert_eq!(press_hit.hand, XrHand::Right);
+            assert!(xr_menu_pointer_trigger_down(press_hit.trigger, false));
+            assert_point_close(press_hit.point, point);
+            let rays = xr_menu_controller_ray_lines_from_controllers(
+                &[pressed],
+                self.profile.transform,
+                self.profile.panel,
+            );
+            assert_eq!(rays.len(), 1);
+            assert!(
+                (rays[0].end - self.profile.world_point_for_gui_point(point)).length() < 1.0e-5
+            );
+            assert!(self.ui.pointer_down(press_hit.point));
+
+            let released = self.profile.controller_for_gui_point(point, 0.0);
+            let release_hit = xr_menu_pointer_hit_from_controllers(
+                &[released],
+                self.profile.transform,
+                self.profile.panel,
+                self.profile.gui_scale,
+            )
+            .expect("released controller ray hits emulated XR panel");
+            assert!(!xr_menu_pointer_trigger_down(release_hit.trigger, true));
+            assert_point_close(release_hit.point, point);
+            let (_handled, action) = self.ui.pointer_up(release_hit.point);
+            action
+        }
+
+        fn route_emulated_ui_action(&mut self, action: GameUiAction) {
+            let new_world_seed = if matches!(action, GameUiAction::OpenWorldCreate) {
+                EMULATED_XR_CREATE_SEED
+            } else {
+                self.ui.new_world_seed()
+            };
+            let next_new_world_seed = matches!(
+                action,
+                GameUiAction::OpenNewWorld | GameUiAction::RerollSeed
+            )
+            .then_some(EMULATED_XR_CREATE_SEED + 1);
+            let effects = self.client_experience.apply_ui_action(
+                action,
+                ClientExperienceActionContext {
+                    new_world_seed,
+                    next_new_world_seed,
+                    current_join_remote_addr: self.ui.join_remote_addr(),
+                    fallback_remote_addr: Some(DEFAULT_JOIN_REMOTE_ADDR),
+                },
+            );
+            let apply_ui_action = client_experience_should_apply_ui_projection(action)
+                && effects.projection.is_empty();
+            self.apply_client_experience_effects(effects);
+            if apply_ui_action {
+                self.ui.apply_action(action);
+            }
+        }
+
+        fn apply_client_experience_effects(&mut self, effects: ClientExperienceEffects) {
+            self.apply_catalog_effects(effects.catalog);
+            self.apply_session_effects(effects.session);
+            assert!(
+                effects.settings.is_empty(),
+                "emulated XR menu/session flow should not emit settings effects"
+            );
+            assert!(
+                effects.gameplay.is_empty(),
+                "emulated XR menu/session flow should not emit gameplay effects"
+            );
+            for effect in effects.projection {
+                match effect {
+                    ClientExperienceProjectionEffect::ApplyUiAction(action) => {
+                        self.ui.apply_action(action);
+                    }
+                }
+            }
+        }
+
+        fn apply_session_effects(&mut self, effects: ClientSessionEffects) {
+            if let Some(seed) = effects.new_world_seed {
+                self.ui.set_new_world_seed(seed);
+            }
+            if let Some(addr) = effects.join_remote_addr {
+                self.ui.set_join_remote_addr(addr);
+            }
+            assert!(
+                effects.session_start.is_none(),
+                "catalog create/open should own persistent-world session starts"
+            );
+            assert!(
+                effects.host_action.is_none(),
+                "emulated XR flow should not emit host process actions"
+            );
+        }
+
+        fn apply_catalog_effects(&mut self, effects: FlatClientCatalogEffects) {
+            for start in effects.session_starts {
+                self.started_sessions.push(start.request);
+            }
+            for request in effects.catalog_requests {
+                let response = self.catalog_response(request.request);
+                let effects = self
+                    .client_experience
+                    .catalog_mut()
+                    .apply_catalog_response(request.id, response);
+                self.apply_catalog_effects(effects);
+            }
+        }
+
+        fn catalog_response(&mut self, request: WorldCatalogRequest) -> WorldCatalogResponse {
+            match request {
+                WorldCatalogRequest::ListWorlds => WorldCatalogResponse::WorldList {
+                    capabilities: WorldCatalogCapabilities::persistent_local(),
+                    worlds: self.worlds.clone(),
+                },
+                WorldCatalogRequest::CreateWorld { options } => {
+                    let id = options.requested_id.clone().unwrap_or_else(|| {
+                        LocalWorldId::available_from_display_name(
+                            &options.display_name,
+                            self.worlds.iter().map(|world| &world.id),
+                        )
+                    });
+                    let summary = LocalWorldSummary::new(
+                        id,
+                        options.display_name.clone(),
+                        options.seed,
+                        2_000 + self.worlds.len() as u64,
+                    )
+                    .unwrap();
+                    self.worlds.push(summary.clone());
+                    WorldCatalogResponse::WorldCreated { summary }
+                }
+                WorldCatalogRequest::OpenWorld { id } => {
+                    let summary = self
+                        .worlds
+                        .iter()
+                        .find(|world| world.id == id)
+                        .unwrap_or_else(|| panic!("emulated catalog missing world `{id}`"))
+                        .clone();
+                    WorldCatalogResponse::WorldOpened { summary }
+                }
+                WorldCatalogRequest::DeleteWorld { .. } => {
+                    panic!("emulated XR Slice 5 flow does not delete worlds")
+                }
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct EmulatedXrDesktopProfileFacts {
+        panel: WorldGuiPanel,
+        transform: XrStageToWorld,
+        gui_scale: GuiScale,
+    }
+
+    impl Default for EmulatedXrDesktopProfileFacts {
+        fn default() -> Self {
+            let render_views = [
+                test_render_view(Vec3::new(-0.03, 64.0, 0.0)),
+                test_render_view(Vec3::new(0.03, 64.0, 0.0)),
+            ];
+            let panel = xr_menu_panel_from_render_views(render_views);
+            assert!(
+                (panel.center - Vec3::new(0.0, 64.0, -XR_MENU_PANEL_DISTANCE_BLOCKS)).length()
+                    < 1.0e-6
+            );
+            Self {
+                panel,
+                transform: test_stage_to_world(),
+                gui_scale: GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]),
+            }
+        }
+    }
+
+    impl EmulatedXrDesktopProfileFacts {
+        fn world_point_for_gui_point(self, point: Point) -> Vec3 {
+            let x = point.x / self.gui_scale.width * self.panel.width - self.panel.width * 0.5;
+            let y = self.panel.height * 0.5 - point.y / self.gui_scale.height * self.panel.height;
+            self.panel.center + self.panel.right * x + self.panel.up * y
+        }
+
+        fn controller_for_gui_point(self, point: Point, trigger: f32) -> XrControllerSnapshot {
+            let target = self.world_point_for_gui_point(point);
+            let normal = self.panel.right.cross(self.panel.up).normalize();
+            let origin = target + normal * 0.75;
+            let mut controller = test_controller(XrHand::Right, Vec2::ZERO, false);
+            controller.aim_position = Some(origin);
+            controller.aim_direction = Some((target - origin).normalize());
+            controller.grip_position = Some(origin + Vec3::new(0.0, -0.12, 0.0));
+            controller.trigger = trigger;
+            controller
+        }
+    }
+
+    fn assert_point_close(actual: Point, expected: Point) {
+        assert!(
+            (actual.x - expected.x).abs() < 1.0e-4 && (actual.y - expected.y).abs() < 1.0e-4,
+            "expected point {actual:?} to be close to {expected:?}"
+        );
     }
 
     #[test]
