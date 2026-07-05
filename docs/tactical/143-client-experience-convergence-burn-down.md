@@ -552,6 +552,19 @@ native/apps/mclone-web-client/www/mclone-web-smoke.js:593:      "was not found",
 Why: closes V4, the largest and fastest-compounding fork. This is the
 flagship slice and the proof the core is not flat-shaped.
 
+Preflight:
+
+- before changing production code for this slice, run the current tree through
+  [`../platform-sanity-checklist.md`](../platform-sanity-checklist.md) and
+  record the result in this section;
+- the required baseline lanes are core/shared, desktop flat/headless, desktop
+  OpenXR, flat Android, and Android XR / Quest;
+- a later Slice 4 failure is not attributable to the refactor unless this
+  preflight proved that lane was passing beforehand;
+- if a lane is blocked by missing hardware, runtime, SDK, authorization, or
+  platform-incompatible command, record the exact blocker instead of omitting
+  the lane.
+
 Deliverables:
 
 - `mclone-xr-scene` replaces `replace_session_for_request` and its private
@@ -597,10 +610,77 @@ pnpm native:policy:wasm-check
 git diff --check
 ```
 
-Plus the device lanes per
-[`../platforms.md`](../platforms.md#validation-policy): one desktop-XR or
-headset smoke is required before this slice is called fully validated, since
-it changes session replacement behavior on XR.
+Plus the device lanes from the recorded preflight matrix in
+[`../platform-sanity-checklist.md`](../platform-sanity-checklist.md): desktop
+flat/headless, desktop OpenXR, flat Android, and Android XR / Quest must be
+passing before this slice is called fully validated, since it changes shared
+session replacement behavior and XR execution.
+
+Preflight baseline: recorded 2026-07-05 before Slice 4 production changes.
+No XR session-machine refactor code had been written.
+
+- Core/shared:
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`: PASS.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`:
+    PASS, 109 unit tests and doc tests passed.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`:
+    PASS, 59 unit tests and doc tests passed.
+  - `pnpm native:policy:wasm-check`: PASS with existing
+    `mclone-server` dead-code warning for
+    `PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks`.
+  - `git diff --check`: PASS.
+- Desktop flat/headless:
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`:
+    PASS.
+  - `pnpm native:desktop-offscreen:smoke`: PASS. Screenshot
+    `/tmp/mclone-desktop-offscreen.png` inspected; terrain, lighting, foliage,
+    water, and actor rendering were nonblank and correctly framed.
+  - `pnpm native:movement:smoke`: FAIL before Slice 4 changes:
+    `movement step 0 loaded_chunks=182 expected 169`.
+  - `pnpm native:timedemo:smoke`: PASS, 60-frame timedemo completed.
+- Desktop OpenXR:
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`:
+    PASS.
+  - `pnpm native:xr:mac:wivrn:check`: PASS; local WiVRn OpenXR runtime JSON
+    found and XR feature compile checked.
+  - `pnpm native:xr:mac:wivrn:smoke`: BLOCKED before app launch:
+    WiVRn USB connection did not become established. Host log
+    `/var/folders/qw/pzqy9tp52_s5f51778j6j8tr0000gn/T/mclone-xr/wivrn-host-20260705_122830.log`
+    stopped at `Waiting for initial headset connection on TCP port 9757`.
+  - `pnpm native:xr:mac:wivrn:mclone`: BLOCKED by the same WiVRn USB
+    connection prerequisite; not run after the shorter smoke failed before app
+    launch.
+- Flat Android:
+  - `pnpm native:android:apk`: PASS.
+  - `pnpm native:android:apk:avd`: PASS.
+  - `pnpm native:android:avd-smoke -- --skip-build`: BLOCKED at emulator
+    startup before app install. Emulator reported insufficient host disk space
+    for AVD `jstorrent-tablet`; `df -h` showed about 820 MiB free on
+    `/System/Volumes/Data`.
+  - `pnpm native:android:avd-touch-smoke -- --skip-build`: BLOCKED by the same
+    AVD disk-space prerequisite.
+  - `pnpm native:android:avd-session-smoke -- --skip-build`: BLOCKED by the
+    same AVD disk-space prerequisite.
+- Android XR / Quest:
+  - `pnpm native:android-xr:apk`: PASS.
+  - `pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time`:
+    PASS with attached Quest 3 `2G0YC1ZF93041Z`; release APK installed,
+    assets staged, package launch validation passed.
+  - `MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke`:
+    PASS after rerun outside the sandbox so Gradle could use `~/.gradle`.
+    Debug APK built, installed, launched with `--session-smoke new-world`, and
+    package launch validation passed.
+- Notes:
+  - The documented Android XR command form with an extra `--` after
+    `native:android-xr:validate` failed with `unknown option: --`; this
+    preflight updates [`../platforms.md`](../platforms.md) and
+    [`../platform-sanity-checklist.md`](../platform-sanity-checklist.md) to use
+    the working argument form.
+  - Optional web broadening was attempted after the required lanes. A
+    sequential `pnpm native:web:build` produced only the existing
+    `mclone-server` warning and then no result for several minutes while
+    compiling `mclone-app-runtime` for wasm, so it was interrupted and is not
+    counted as part of this Slice 4 required preflight.
 
 Recorded result: (pending)
 

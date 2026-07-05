@@ -198,6 +198,12 @@ other true platform concerns.
 Every supported platform lane has an executable gate. Use `/tmp` for screenshots
 and logs.
 
+For broad pre/post-refactor sweeps across desktop flat, headless, desktop XR,
+flat Android, Android XR, and web, use
+[`platform-sanity-checklist.md`](platform-sanity-checklist.md). That checklist
+is the in-depth runbook for proving the lanes are currently drivable before
+attributing later failures to a refactor.
+
 Recommended default gates:
 
 ```bash
@@ -231,10 +237,10 @@ pnpm native:android:avd-session-smoke -- --skip-build
 
 # Android XR / Quest, attached authorized Quest required
 pnpm native:android-xr:apk
-pnpm native:android-xr:validate -- --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
-MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build --adb-reverse --start-server --view-pose 0,120,-96,180
-pnpm native:android-xr:validate -- --debug --skip-build --start-server --server-listen 0.0.0.0:25565 --remote-addr HOST:25565 --view-pose 0,120,-96,180
+MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate --debug --skip-build --adb-reverse --start-server --view-pose 0,120,-96,180
+pnpm native:android-xr:validate --debug --skip-build --start-server --server-listen 0.0.0.0:25565 --remote-addr HOST:25565 --view-pose 0,120,-96,180
 
 # Web/WASM
 pnpm native:web:smoke
