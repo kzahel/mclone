@@ -43,21 +43,29 @@ mod tests {
     use crate::block::{
         ACACIA_LEAVES, ACACIA_LOG, ALLIUM, AZURE_BLUET, BAMBOO, BAMBOO_FINAL_LARGE,
         BAMBOO_TOP_LARGE, BAMBOO_TOP_SMALL, BIRCH_LEAVES, BIRCH_LOG, BLUE_ICE, BLUE_ORCHID,
-        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY,
-        COARSE_DIRT, COCOA_AGE0_EAST, COCOA_AGE0_NORTH, COCOA_AGE0_SOUTH, COCOA_AGE0_WEST,
-        COCOA_AGE1_EAST, COCOA_AGE1_NORTH, COCOA_AGE1_SOUTH, COCOA_AGE1_WEST, COCOA_AGE2_EAST,
-        COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST, CORNFLOWER, DANDELION,
-        DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK,
-        GRAVEL, HORN_CORAL_BLOCK, ICE, JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT,
-        LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY,
-        LILY_PAD, MOSSY_COBBLESTONE, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP,
-        OXEYE_DAISY, PACKED_ICE, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN,
-        RED_MUSHROOM, RED_MUSHROOM_BLOCK, RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER,
-        RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW,
-        SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER,
-        SWEET_BERRY_BUSH, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK,
-        VINE_EAST, VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_air_like,
-        is_water,
+        BRAIN_CORAL, BRAIN_CORAL_BLOCK, BRAIN_CORAL_FAN, BRAIN_CORAL_WALL_FAN_EAST,
+        BRAIN_CORAL_WALL_FAN_NORTH, BRAIN_CORAL_WALL_FAN_SOUTH, BRAIN_CORAL_WALL_FAN_WEST,
+        BROWN_MUSHROOM, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL, BUBBLE_CORAL_BLOCK, BUBBLE_CORAL_FAN,
+        BUBBLE_CORAL_WALL_FAN_EAST, BUBBLE_CORAL_WALL_FAN_NORTH, BUBBLE_CORAL_WALL_FAN_SOUTH,
+        BUBBLE_CORAL_WALL_FAN_WEST, CACTUS, CLAY, COARSE_DIRT, COCOA_AGE0_EAST, COCOA_AGE0_NORTH,
+        COCOA_AGE0_SOUTH, COCOA_AGE0_WEST, COCOA_AGE1_EAST, COCOA_AGE1_NORTH, COCOA_AGE1_SOUTH,
+        COCOA_AGE1_WEST, COCOA_AGE2_EAST, COCOA_AGE2_NORTH, COCOA_AGE2_SOUTH, COCOA_AGE2_WEST,
+        CORNFLOWER, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL,
+        FIRE_CORAL_BLOCK, FIRE_CORAL_FAN, FIRE_CORAL_WALL_FAN_EAST, FIRE_CORAL_WALL_FAN_NORTH,
+        FIRE_CORAL_WALL_FAN_SOUTH, FIRE_CORAL_WALL_FAN_WEST, GRASS, GRASS_BLOCK, GRAVEL,
+        HORN_CORAL, HORN_CORAL_BLOCK, HORN_CORAL_FAN, HORN_CORAL_WALL_FAN_EAST,
+        HORN_CORAL_WALL_FAN_NORTH, HORN_CORAL_WALL_FAN_SOUTH, HORN_CORAL_WALL_FAN_WEST, ICE,
+        JUNGLE_LEAVES, JUNGLE_LOG, KELP, KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA,
+        LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD, MOSSY_COBBLESTONE, MUSHROOM_STEM,
+        MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TULIP, OXEYE_DAISY, PACKED_ICE, PEONY_LOWER,
+        PEONY_UPPER, PINK_TULIP, PODZOL, POPPY, PUMPKIN, RED_MUSHROOM, RED_MUSHROOM_BLOCK,
+        RED_SAND, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, RawBlockId, SAND, SEA_PICKLE_1,
+        SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
+        SPRUCE_LOG, STONE, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL, TUBE_CORAL_BLOCK,
+        TUBE_CORAL_FAN, TUBE_CORAL_WALL_FAN_EAST, TUBE_CORAL_WALL_FAN_NORTH,
+        TUBE_CORAL_WALL_FAN_SOUTH, TUBE_CORAL_WALL_FAN_WEST, VINE_EAST, VINE_NORTH, VINE_SOUTH,
+        VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -220,7 +228,9 @@ mod tests {
                 Self::DefaultExtraSugarCane => "default extra sugar cane",
                 Self::RiverSeagrass => "river seagrass water plants",
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
-                Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
+                Self::WarmOceanCoralSeaPickles => {
+                    "warm ocean coral blocks, live sidecars, and sea pickles"
+                }
                 Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
                 Self::MushroomFieldHugeMushrooms => "mushroom field huge mushrooms",
                 Self::BirchTrees => "birch log/leaves trees",
@@ -299,6 +309,36 @@ mod tests {
                     BUBBLE_CORAL_BLOCK,
                     FIRE_CORAL_BLOCK,
                     HORN_CORAL_BLOCK,
+                    TUBE_CORAL,
+                    BRAIN_CORAL,
+                    BUBBLE_CORAL,
+                    FIRE_CORAL,
+                    HORN_CORAL,
+                    TUBE_CORAL_FAN,
+                    BRAIN_CORAL_FAN,
+                    BUBBLE_CORAL_FAN,
+                    FIRE_CORAL_FAN,
+                    HORN_CORAL_FAN,
+                    TUBE_CORAL_WALL_FAN_NORTH,
+                    TUBE_CORAL_WALL_FAN_EAST,
+                    TUBE_CORAL_WALL_FAN_SOUTH,
+                    TUBE_CORAL_WALL_FAN_WEST,
+                    BRAIN_CORAL_WALL_FAN_NORTH,
+                    BRAIN_CORAL_WALL_FAN_EAST,
+                    BRAIN_CORAL_WALL_FAN_SOUTH,
+                    BRAIN_CORAL_WALL_FAN_WEST,
+                    BUBBLE_CORAL_WALL_FAN_NORTH,
+                    BUBBLE_CORAL_WALL_FAN_EAST,
+                    BUBBLE_CORAL_WALL_FAN_SOUTH,
+                    BUBBLE_CORAL_WALL_FAN_WEST,
+                    FIRE_CORAL_WALL_FAN_NORTH,
+                    FIRE_CORAL_WALL_FAN_EAST,
+                    FIRE_CORAL_WALL_FAN_SOUTH,
+                    FIRE_CORAL_WALL_FAN_WEST,
+                    HORN_CORAL_WALL_FAN_NORTH,
+                    HORN_CORAL_WALL_FAN_EAST,
+                    HORN_CORAL_WALL_FAN_SOUTH,
+                    HORN_CORAL_WALL_FAN_WEST,
                     SEA_PICKLE_1,
                     SEA_PICKLE_2,
                     SEA_PICKLE_3,
@@ -412,7 +452,7 @@ mod tests {
                     chunk.block_count(PACKED_ICE) > 0 && chunk.block_count(BLUE_ICE) > 0
                 }
                 Self::WarmOceanCoralSeaPickles => {
-                    [
+                    let has_coral_block = [
                         TUBE_CORAL_BLOCK,
                         BRAIN_CORAL_BLOCK,
                         BUBBLE_CORAL_BLOCK,
@@ -420,10 +460,58 @@ mod tests {
                         HORN_CORAL_BLOCK,
                     ]
                     .iter()
-                    .any(|block| chunk.block_count(*block) > 0)
-                        && [SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4]
-                            .iter()
-                            .any(|block| chunk.block_count(*block) > 0)
+                    .any(|block| chunk.block_count(*block) > 0);
+                    let has_coral_plant = [
+                        TUBE_CORAL,
+                        BRAIN_CORAL,
+                        BUBBLE_CORAL,
+                        FIRE_CORAL,
+                        HORN_CORAL,
+                    ]
+                    .iter()
+                    .any(|block| chunk.block_count(*block) > 0);
+                    let has_coral_fan = [
+                        TUBE_CORAL_FAN,
+                        BRAIN_CORAL_FAN,
+                        BUBBLE_CORAL_FAN,
+                        FIRE_CORAL_FAN,
+                        HORN_CORAL_FAN,
+                    ]
+                    .iter()
+                    .any(|block| chunk.block_count(*block) > 0);
+                    let has_wall_fan = [
+                        TUBE_CORAL_WALL_FAN_NORTH,
+                        TUBE_CORAL_WALL_FAN_EAST,
+                        TUBE_CORAL_WALL_FAN_SOUTH,
+                        TUBE_CORAL_WALL_FAN_WEST,
+                        BRAIN_CORAL_WALL_FAN_NORTH,
+                        BRAIN_CORAL_WALL_FAN_EAST,
+                        BRAIN_CORAL_WALL_FAN_SOUTH,
+                        BRAIN_CORAL_WALL_FAN_WEST,
+                        BUBBLE_CORAL_WALL_FAN_NORTH,
+                        BUBBLE_CORAL_WALL_FAN_EAST,
+                        BUBBLE_CORAL_WALL_FAN_SOUTH,
+                        BUBBLE_CORAL_WALL_FAN_WEST,
+                        FIRE_CORAL_WALL_FAN_NORTH,
+                        FIRE_CORAL_WALL_FAN_EAST,
+                        FIRE_CORAL_WALL_FAN_SOUTH,
+                        FIRE_CORAL_WALL_FAN_WEST,
+                        HORN_CORAL_WALL_FAN_NORTH,
+                        HORN_CORAL_WALL_FAN_EAST,
+                        HORN_CORAL_WALL_FAN_SOUTH,
+                        HORN_CORAL_WALL_FAN_WEST,
+                    ]
+                    .iter()
+                    .any(|block| chunk.block_count(*block) > 0);
+                    let has_sea_pickle = [SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4]
+                        .iter()
+                        .any(|block| chunk.block_count(*block) > 0);
+
+                    has_coral_block
+                        && has_coral_plant
+                        && has_coral_fan
+                        && has_wall_fan
+                        && has_sea_pickle
                 }
                 Self::DarkForestCanopyMushrooms => {
                     [DARK_OAK_LOG, DARK_OAK_LEAVES]
@@ -634,8 +722,8 @@ mod tests {
         },
         PaletteMatrixCase {
             seed: 2696,
-            chunk_x: 0,
-            chunk_z: 0,
+            chunk_x: -14,
+            chunk_z: -14,
             biome_key: "minecraft:warm_ocean",
             surface_family: SurfaceFamily::Water,
             feature_family: Some(FeatureFamily::WarmOceanCoralSeaPickles),

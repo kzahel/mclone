@@ -182,6 +182,36 @@ pub const BAMBOO_TOP_SMALL: RawBlockId = 175;
 pub const BAMBOO_TOP_LARGE: RawBlockId = 176;
 pub const BAMBOO_FINAL_LARGE: RawBlockId = 177;
 pub const MOSSY_COBBLESTONE: RawBlockId = 178;
+pub const TUBE_CORAL: RawBlockId = 179;
+pub const BRAIN_CORAL: RawBlockId = 180;
+pub const BUBBLE_CORAL: RawBlockId = 181;
+pub const FIRE_CORAL: RawBlockId = 182;
+pub const HORN_CORAL: RawBlockId = 183;
+pub const TUBE_CORAL_FAN: RawBlockId = 184;
+pub const BRAIN_CORAL_FAN: RawBlockId = 185;
+pub const BUBBLE_CORAL_FAN: RawBlockId = 186;
+pub const FIRE_CORAL_FAN: RawBlockId = 187;
+pub const HORN_CORAL_FAN: RawBlockId = 188;
+pub const TUBE_CORAL_WALL_FAN_NORTH: RawBlockId = 189;
+pub const TUBE_CORAL_WALL_FAN_EAST: RawBlockId = 190;
+pub const TUBE_CORAL_WALL_FAN_SOUTH: RawBlockId = 191;
+pub const TUBE_CORAL_WALL_FAN_WEST: RawBlockId = 192;
+pub const BRAIN_CORAL_WALL_FAN_NORTH: RawBlockId = 193;
+pub const BRAIN_CORAL_WALL_FAN_EAST: RawBlockId = 194;
+pub const BRAIN_CORAL_WALL_FAN_SOUTH: RawBlockId = 195;
+pub const BRAIN_CORAL_WALL_FAN_WEST: RawBlockId = 196;
+pub const BUBBLE_CORAL_WALL_FAN_NORTH: RawBlockId = 197;
+pub const BUBBLE_CORAL_WALL_FAN_EAST: RawBlockId = 198;
+pub const BUBBLE_CORAL_WALL_FAN_SOUTH: RawBlockId = 199;
+pub const BUBBLE_CORAL_WALL_FAN_WEST: RawBlockId = 200;
+pub const FIRE_CORAL_WALL_FAN_NORTH: RawBlockId = 201;
+pub const FIRE_CORAL_WALL_FAN_EAST: RawBlockId = 202;
+pub const FIRE_CORAL_WALL_FAN_SOUTH: RawBlockId = 203;
+pub const FIRE_CORAL_WALL_FAN_WEST: RawBlockId = 204;
+pub const HORN_CORAL_WALL_FAN_NORTH: RawBlockId = 205;
+pub const HORN_CORAL_WALL_FAN_EAST: RawBlockId = 206;
+pub const HORN_CORAL_WALL_FAN_SOUTH: RawBlockId = 207;
+pub const HORN_CORAL_WALL_FAN_WEST: RawBlockId = 208;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -290,6 +320,36 @@ impl GeneratedBlockId {
     pub const BAMBOO_TOP_LARGE: Self = Self(BAMBOO_TOP_LARGE);
     pub const BAMBOO_FINAL_LARGE: Self = Self(BAMBOO_FINAL_LARGE);
     pub const MOSSY_COBBLESTONE: Self = Self(MOSSY_COBBLESTONE);
+    pub const TUBE_CORAL: Self = Self(TUBE_CORAL);
+    pub const BRAIN_CORAL: Self = Self(BRAIN_CORAL);
+    pub const BUBBLE_CORAL: Self = Self(BUBBLE_CORAL);
+    pub const FIRE_CORAL: Self = Self(FIRE_CORAL);
+    pub const HORN_CORAL: Self = Self(HORN_CORAL);
+    pub const TUBE_CORAL_FAN: Self = Self(TUBE_CORAL_FAN);
+    pub const BRAIN_CORAL_FAN: Self = Self(BRAIN_CORAL_FAN);
+    pub const BUBBLE_CORAL_FAN: Self = Self(BUBBLE_CORAL_FAN);
+    pub const FIRE_CORAL_FAN: Self = Self(FIRE_CORAL_FAN);
+    pub const HORN_CORAL_FAN: Self = Self(HORN_CORAL_FAN);
+    pub const TUBE_CORAL_WALL_FAN_NORTH: Self = Self(TUBE_CORAL_WALL_FAN_NORTH);
+    pub const TUBE_CORAL_WALL_FAN_EAST: Self = Self(TUBE_CORAL_WALL_FAN_EAST);
+    pub const TUBE_CORAL_WALL_FAN_SOUTH: Self = Self(TUBE_CORAL_WALL_FAN_SOUTH);
+    pub const TUBE_CORAL_WALL_FAN_WEST: Self = Self(TUBE_CORAL_WALL_FAN_WEST);
+    pub const BRAIN_CORAL_WALL_FAN_NORTH: Self = Self(BRAIN_CORAL_WALL_FAN_NORTH);
+    pub const BRAIN_CORAL_WALL_FAN_EAST: Self = Self(BRAIN_CORAL_WALL_FAN_EAST);
+    pub const BRAIN_CORAL_WALL_FAN_SOUTH: Self = Self(BRAIN_CORAL_WALL_FAN_SOUTH);
+    pub const BRAIN_CORAL_WALL_FAN_WEST: Self = Self(BRAIN_CORAL_WALL_FAN_WEST);
+    pub const BUBBLE_CORAL_WALL_FAN_NORTH: Self = Self(BUBBLE_CORAL_WALL_FAN_NORTH);
+    pub const BUBBLE_CORAL_WALL_FAN_EAST: Self = Self(BUBBLE_CORAL_WALL_FAN_EAST);
+    pub const BUBBLE_CORAL_WALL_FAN_SOUTH: Self = Self(BUBBLE_CORAL_WALL_FAN_SOUTH);
+    pub const BUBBLE_CORAL_WALL_FAN_WEST: Self = Self(BUBBLE_CORAL_WALL_FAN_WEST);
+    pub const FIRE_CORAL_WALL_FAN_NORTH: Self = Self(FIRE_CORAL_WALL_FAN_NORTH);
+    pub const FIRE_CORAL_WALL_FAN_EAST: Self = Self(FIRE_CORAL_WALL_FAN_EAST);
+    pub const FIRE_CORAL_WALL_FAN_SOUTH: Self = Self(FIRE_CORAL_WALL_FAN_SOUTH);
+    pub const FIRE_CORAL_WALL_FAN_WEST: Self = Self(FIRE_CORAL_WALL_FAN_WEST);
+    pub const HORN_CORAL_WALL_FAN_NORTH: Self = Self(HORN_CORAL_WALL_FAN_NORTH);
+    pub const HORN_CORAL_WALL_FAN_EAST: Self = Self(HORN_CORAL_WALL_FAN_EAST);
+    pub const HORN_CORAL_WALL_FAN_SOUTH: Self = Self(HORN_CORAL_WALL_FAN_SOUTH);
+    pub const HORN_CORAL_WALL_FAN_WEST: Self = Self(HORN_CORAL_WALL_FAN_WEST);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -320,7 +380,13 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
     if has_fluid(block_id) {
         return false;
     }
-    if is_vine(block_id) || is_cocoa(block_id) || is_bamboo(block_id) {
+    if is_vine(block_id)
+        || is_cocoa(block_id)
+        || is_bamboo(block_id)
+        || is_coral_plant(block_id)
+        || is_coral_fan(block_id)
+        || is_coral_wall_fan(block_id)
+    {
         return false;
     }
 
@@ -420,6 +486,50 @@ pub const fn is_coral_block(block_id: RawBlockId) -> bool {
     )
 }
 
+pub const fn is_coral_plant(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        TUBE_CORAL | BRAIN_CORAL | BUBBLE_CORAL | FIRE_CORAL | HORN_CORAL
+    )
+}
+
+pub const fn is_coral_fan(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        TUBE_CORAL_FAN | BRAIN_CORAL_FAN | BUBBLE_CORAL_FAN | FIRE_CORAL_FAN | HORN_CORAL_FAN
+    )
+}
+
+pub const fn is_coral_wall_fan(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        TUBE_CORAL_WALL_FAN_NORTH
+            | TUBE_CORAL_WALL_FAN_EAST
+            | TUBE_CORAL_WALL_FAN_SOUTH
+            | TUBE_CORAL_WALL_FAN_WEST
+            | BRAIN_CORAL_WALL_FAN_NORTH
+            | BRAIN_CORAL_WALL_FAN_EAST
+            | BRAIN_CORAL_WALL_FAN_SOUTH
+            | BRAIN_CORAL_WALL_FAN_WEST
+            | BUBBLE_CORAL_WALL_FAN_NORTH
+            | BUBBLE_CORAL_WALL_FAN_EAST
+            | BUBBLE_CORAL_WALL_FAN_SOUTH
+            | BUBBLE_CORAL_WALL_FAN_WEST
+            | FIRE_CORAL_WALL_FAN_NORTH
+            | FIRE_CORAL_WALL_FAN_EAST
+            | FIRE_CORAL_WALL_FAN_SOUTH
+            | FIRE_CORAL_WALL_FAN_WEST
+            | HORN_CORAL_WALL_FAN_NORTH
+            | HORN_CORAL_WALL_FAN_EAST
+            | HORN_CORAL_WALL_FAN_SOUTH
+            | HORN_CORAL_WALL_FAN_WEST
+    )
+}
+
+pub const fn is_coral_plant_or_fan(block_id: RawBlockId) -> bool {
+    is_coral_plant(block_id) || is_coral_fan(block_id)
+}
+
 pub const fn is_sea_pickle(block_id: RawBlockId) -> bool {
     matches!(
         block_id,
@@ -471,6 +581,21 @@ pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
         | COCOA_AGE1_EAST | COCOA_AGE1_SOUTH | COCOA_AGE1_WEST | COCOA_AGE2_NORTH
         | COCOA_AGE2_EAST | COCOA_AGE2_SOUTH | COCOA_AGE2_WEST => COCOA_AGE0_NORTH,
         BAMBOO_TOP_SMALL | BAMBOO_TOP_LARGE | BAMBOO_FINAL_LARGE => BAMBOO,
+        TUBE_CORAL_WALL_FAN_EAST | TUBE_CORAL_WALL_FAN_SOUTH | TUBE_CORAL_WALL_FAN_WEST => {
+            TUBE_CORAL_WALL_FAN_NORTH
+        }
+        BRAIN_CORAL_WALL_FAN_EAST | BRAIN_CORAL_WALL_FAN_SOUTH | BRAIN_CORAL_WALL_FAN_WEST => {
+            BRAIN_CORAL_WALL_FAN_NORTH
+        }
+        BUBBLE_CORAL_WALL_FAN_EAST | BUBBLE_CORAL_WALL_FAN_SOUTH | BUBBLE_CORAL_WALL_FAN_WEST => {
+            BUBBLE_CORAL_WALL_FAN_NORTH
+        }
+        FIRE_CORAL_WALL_FAN_EAST | FIRE_CORAL_WALL_FAN_SOUTH | FIRE_CORAL_WALL_FAN_WEST => {
+            FIRE_CORAL_WALL_FAN_NORTH
+        }
+        HORN_CORAL_WALL_FAN_EAST | HORN_CORAL_WALL_FAN_SOUTH | HORN_CORAL_WALL_FAN_WEST => {
+            HORN_CORAL_WALL_FAN_NORTH
+        }
         _ => block_id,
     }
 }
@@ -680,6 +805,36 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         BUBBLE_CORAL_BLOCK => "minecraft:bubble_coral_block",
         FIRE_CORAL_BLOCK => "minecraft:fire_coral_block",
         HORN_CORAL_BLOCK => "minecraft:horn_coral_block",
+        TUBE_CORAL => "minecraft:tube_coral",
+        BRAIN_CORAL => "minecraft:brain_coral",
+        BUBBLE_CORAL => "minecraft:bubble_coral",
+        FIRE_CORAL => "minecraft:fire_coral",
+        HORN_CORAL => "minecraft:horn_coral",
+        TUBE_CORAL_FAN => "minecraft:tube_coral_fan",
+        BRAIN_CORAL_FAN => "minecraft:brain_coral_fan",
+        BUBBLE_CORAL_FAN => "minecraft:bubble_coral_fan",
+        FIRE_CORAL_FAN => "minecraft:fire_coral_fan",
+        HORN_CORAL_FAN => "minecraft:horn_coral_fan",
+        TUBE_CORAL_WALL_FAN_NORTH
+        | TUBE_CORAL_WALL_FAN_EAST
+        | TUBE_CORAL_WALL_FAN_SOUTH
+        | TUBE_CORAL_WALL_FAN_WEST => "minecraft:tube_coral_wall_fan",
+        BRAIN_CORAL_WALL_FAN_NORTH
+        | BRAIN_CORAL_WALL_FAN_EAST
+        | BRAIN_CORAL_WALL_FAN_SOUTH
+        | BRAIN_CORAL_WALL_FAN_WEST => "minecraft:brain_coral_wall_fan",
+        BUBBLE_CORAL_WALL_FAN_NORTH
+        | BUBBLE_CORAL_WALL_FAN_EAST
+        | BUBBLE_CORAL_WALL_FAN_SOUTH
+        | BUBBLE_CORAL_WALL_FAN_WEST => "minecraft:bubble_coral_wall_fan",
+        FIRE_CORAL_WALL_FAN_NORTH
+        | FIRE_CORAL_WALL_FAN_EAST
+        | FIRE_CORAL_WALL_FAN_SOUTH
+        | FIRE_CORAL_WALL_FAN_WEST => "minecraft:fire_coral_wall_fan",
+        HORN_CORAL_WALL_FAN_NORTH
+        | HORN_CORAL_WALL_FAN_EAST
+        | HORN_CORAL_WALL_FAN_SOUTH
+        | HORN_CORAL_WALL_FAN_WEST => "minecraft:horn_coral_wall_fan",
         SEA_PICKLE_1 | SEA_PICKLE_2 | SEA_PICKLE_3 | SEA_PICKLE_4 => "minecraft:sea_pickle",
         MOSSY_COBBLESTONE => "minecraft:mossy_cobblestone",
         _ => "minecraft:unknown",
@@ -738,6 +893,9 @@ mod tests {
         assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
         assert_eq!(block_light_opacity(KELP), 0);
         assert_eq!(block_light_opacity(KELP_PLANT), 0);
+        assert_eq!(block_light_opacity(TUBE_CORAL), 0);
+        assert_eq!(block_light_opacity(HORN_CORAL_FAN), 0);
+        assert_eq!(block_light_opacity(BRAIN_CORAL_WALL_FAN_WEST), 0);
         assert_eq!(block_light_opacity(BAMBOO), 0);
         assert_eq!(block_light_opacity(BAMBOO_TOP_SMALL), 0);
         assert_eq!(block_light_opacity(BAMBOO_TOP_LARGE), 0);
@@ -788,6 +946,14 @@ mod tests {
         assert_eq!(base_block_id(BAMBOO_TOP_SMALL), BAMBOO);
         assert_eq!(base_block_id(BAMBOO_TOP_LARGE), BAMBOO);
         assert_eq!(base_block_id(BAMBOO_FINAL_LARGE), BAMBOO);
+        assert_eq!(
+            base_block_id(TUBE_CORAL_WALL_FAN_EAST),
+            TUBE_CORAL_WALL_FAN_NORTH
+        );
+        assert_eq!(
+            base_block_id(HORN_CORAL_WALL_FAN_WEST),
+            HORN_CORAL_WALL_FAN_NORTH
+        );
         assert_eq!(block_name(TORCH), "minecraft:torch");
         assert_eq!(block_name(WALL_TORCH_WEST), "minecraft:wall_torch");
         assert_eq!(block_name(CACTUS), "minecraft:cactus");
@@ -807,6 +973,12 @@ mod tests {
         assert_eq!(block_name(TALL_GRASS_UPPER), "minecraft:tall_grass");
         assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
         assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
+        assert_eq!(block_name(TUBE_CORAL), "minecraft:tube_coral");
+        assert_eq!(block_name(FIRE_CORAL_FAN), "minecraft:fire_coral_fan");
+        assert_eq!(
+            block_name(BRAIN_CORAL_WALL_FAN_SOUTH),
+            "minecraft:brain_coral_wall_fan"
+        );
         assert_eq!(block_name(SEA_PICKLE_4), "minecraft:sea_pickle");
         assert_eq!(block_name(DARK_OAK_LOG), "minecraft:dark_oak_log");
         assert_eq!(block_name(DARK_OAK_LEAVES), "minecraft:dark_oak_leaves");

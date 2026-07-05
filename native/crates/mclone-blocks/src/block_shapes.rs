@@ -91,6 +91,28 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         terrain_id::SEA_PICKLE_2 => Some(sea_pickle_shape(2)),
         terrain_id::SEA_PICKLE_3 => Some(sea_pickle_shape(3)),
         terrain_id::SEA_PICKLE_4 => Some(sea_pickle_shape(4)),
+        id if is_coral_plant(id) => Some(coral_plant_shape()),
+        id if is_coral_fan(id) => Some(coral_fan_shape()),
+        terrain_id::TUBE_CORAL_WALL_FAN_NORTH
+        | terrain_id::BRAIN_CORAL_WALL_FAN_NORTH
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_NORTH
+        | terrain_id::FIRE_CORAL_WALL_FAN_NORTH
+        | terrain_id::HORN_CORAL_WALL_FAN_NORTH => Some(coral_wall_fan_north_shape()),
+        terrain_id::TUBE_CORAL_WALL_FAN_EAST
+        | terrain_id::BRAIN_CORAL_WALL_FAN_EAST
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_EAST
+        | terrain_id::FIRE_CORAL_WALL_FAN_EAST
+        | terrain_id::HORN_CORAL_WALL_FAN_EAST => Some(coral_wall_fan_east_shape()),
+        terrain_id::TUBE_CORAL_WALL_FAN_SOUTH
+        | terrain_id::BRAIN_CORAL_WALL_FAN_SOUTH
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_SOUTH
+        | terrain_id::FIRE_CORAL_WALL_FAN_SOUTH
+        | terrain_id::HORN_CORAL_WALL_FAN_SOUTH => Some(coral_wall_fan_south_shape()),
+        terrain_id::TUBE_CORAL_WALL_FAN_WEST
+        | terrain_id::BRAIN_CORAL_WALL_FAN_WEST
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_WEST
+        | terrain_id::FIRE_CORAL_WALL_FAN_WEST
+        | terrain_id::HORN_CORAL_WALL_FAN_WEST => Some(coral_wall_fan_west_shape()),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         terrain_id::TORCH => Some(torch_shape()),
         terrain_id::WALL_TORCH_NORTH => Some(wall_torch_north_shape()),
@@ -148,6 +170,36 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::SEA_PICKLE_2
         | terrain_id::SEA_PICKLE_3
         | terrain_id::SEA_PICKLE_4
+        | terrain_id::TUBE_CORAL
+        | terrain_id::BRAIN_CORAL
+        | terrain_id::BUBBLE_CORAL
+        | terrain_id::FIRE_CORAL
+        | terrain_id::HORN_CORAL
+        | terrain_id::TUBE_CORAL_FAN
+        | terrain_id::BRAIN_CORAL_FAN
+        | terrain_id::BUBBLE_CORAL_FAN
+        | terrain_id::FIRE_CORAL_FAN
+        | terrain_id::HORN_CORAL_FAN
+        | terrain_id::TUBE_CORAL_WALL_FAN_NORTH
+        | terrain_id::TUBE_CORAL_WALL_FAN_EAST
+        | terrain_id::TUBE_CORAL_WALL_FAN_SOUTH
+        | terrain_id::TUBE_CORAL_WALL_FAN_WEST
+        | terrain_id::BRAIN_CORAL_WALL_FAN_NORTH
+        | terrain_id::BRAIN_CORAL_WALL_FAN_EAST
+        | terrain_id::BRAIN_CORAL_WALL_FAN_SOUTH
+        | terrain_id::BRAIN_CORAL_WALL_FAN_WEST
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_NORTH
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_EAST
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_SOUTH
+        | terrain_id::BUBBLE_CORAL_WALL_FAN_WEST
+        | terrain_id::FIRE_CORAL_WALL_FAN_NORTH
+        | terrain_id::FIRE_CORAL_WALL_FAN_EAST
+        | terrain_id::FIRE_CORAL_WALL_FAN_SOUTH
+        | terrain_id::FIRE_CORAL_WALL_FAN_WEST
+        | terrain_id::HORN_CORAL_WALL_FAN_NORTH
+        | terrain_id::HORN_CORAL_WALL_FAN_EAST
+        | terrain_id::HORN_CORAL_WALL_FAN_SOUTH
+        | terrain_id::HORN_CORAL_WALL_FAN_WEST
         | terrain_id::TORCH
         | terrain_id::WALL_TORCH_NORTH
         | terrain_id::WALL_TORCH_EAST
@@ -253,6 +305,28 @@ fn is_large_bamboo(id: u32) -> bool {
     matches!(
         id,
         terrain_id::BAMBOO_TOP_LARGE | terrain_id::BAMBOO_FINAL_LARGE
+    )
+}
+
+fn is_coral_plant(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::TUBE_CORAL
+            | terrain_id::BRAIN_CORAL
+            | terrain_id::BUBBLE_CORAL
+            | terrain_id::FIRE_CORAL
+            | terrain_id::HORN_CORAL
+    )
+}
+
+fn is_coral_fan(id: u32) -> bool {
+    matches!(
+        id,
+        terrain_id::TUBE_CORAL_FAN
+            | terrain_id::BRAIN_CORAL_FAN
+            | terrain_id::BUBBLE_CORAL_FAN
+            | terrain_id::FIRE_CORAL_FAN
+            | terrain_id::HORN_CORAL_FAN
     )
 }
 
@@ -380,6 +454,44 @@ fn sea_pickle_shape(pickles: u32) -> LocalShape {
             14.0 / 16.0,
         ),
     }
+}
+
+fn coral_plant_shape() -> LocalShape {
+    local_box(
+        2.0 / 16.0,
+        0.0,
+        2.0 / 16.0,
+        14.0 / 16.0,
+        15.0 / 16.0,
+        14.0 / 16.0,
+    )
+}
+
+fn coral_fan_shape() -> LocalShape {
+    local_box(
+        2.0 / 16.0,
+        0.0,
+        2.0 / 16.0,
+        14.0 / 16.0,
+        4.0 / 16.0,
+        14.0 / 16.0,
+    )
+}
+
+fn coral_wall_fan_north_shape() -> LocalShape {
+    local_box(0.0, 4.0 / 16.0, 5.0 / 16.0, 1.0, 12.0 / 16.0, 1.0)
+}
+
+fn coral_wall_fan_south_shape() -> LocalShape {
+    local_box(0.0, 4.0 / 16.0, 0.0, 1.0, 12.0 / 16.0, 11.0 / 16.0)
+}
+
+fn coral_wall_fan_west_shape() -> LocalShape {
+    local_box(5.0 / 16.0, 4.0 / 16.0, 0.0, 1.0, 12.0 / 16.0, 1.0)
+}
+
+fn coral_wall_fan_east_shape() -> LocalShape {
+    local_box(0.0, 4.0 / 16.0, 0.0, 11.0 / 16.0, 12.0 / 16.0, 1.0)
 }
 
 fn torch_shape() -> LocalShape {
@@ -546,6 +658,36 @@ mod tests {
             terrain_id::SEA_PICKLE_2,
             terrain_id::SEA_PICKLE_3,
             terrain_id::SEA_PICKLE_4,
+            terrain_id::TUBE_CORAL,
+            terrain_id::BRAIN_CORAL,
+            terrain_id::BUBBLE_CORAL,
+            terrain_id::FIRE_CORAL,
+            terrain_id::HORN_CORAL,
+            terrain_id::TUBE_CORAL_FAN,
+            terrain_id::BRAIN_CORAL_FAN,
+            terrain_id::BUBBLE_CORAL_FAN,
+            terrain_id::FIRE_CORAL_FAN,
+            terrain_id::HORN_CORAL_FAN,
+            terrain_id::TUBE_CORAL_WALL_FAN_NORTH,
+            terrain_id::TUBE_CORAL_WALL_FAN_EAST,
+            terrain_id::TUBE_CORAL_WALL_FAN_SOUTH,
+            terrain_id::TUBE_CORAL_WALL_FAN_WEST,
+            terrain_id::BRAIN_CORAL_WALL_FAN_NORTH,
+            terrain_id::BRAIN_CORAL_WALL_FAN_EAST,
+            terrain_id::BRAIN_CORAL_WALL_FAN_SOUTH,
+            terrain_id::BRAIN_CORAL_WALL_FAN_WEST,
+            terrain_id::BUBBLE_CORAL_WALL_FAN_NORTH,
+            terrain_id::BUBBLE_CORAL_WALL_FAN_EAST,
+            terrain_id::BUBBLE_CORAL_WALL_FAN_SOUTH,
+            terrain_id::BUBBLE_CORAL_WALL_FAN_WEST,
+            terrain_id::FIRE_CORAL_WALL_FAN_NORTH,
+            terrain_id::FIRE_CORAL_WALL_FAN_EAST,
+            terrain_id::FIRE_CORAL_WALL_FAN_SOUTH,
+            terrain_id::FIRE_CORAL_WALL_FAN_WEST,
+            terrain_id::HORN_CORAL_WALL_FAN_NORTH,
+            terrain_id::HORN_CORAL_WALL_FAN_EAST,
+            terrain_id::HORN_CORAL_WALL_FAN_SOUTH,
+            terrain_id::HORN_CORAL_WALL_FAN_WEST,
             terrain_id::TORCH,
             terrain_id::WALL_TORCH_NORTH,
             terrain_id::WALL_TORCH_EAST,
@@ -697,6 +839,24 @@ mod tests {
             shape_for(state(terrain_id::SEA_PICKLE_4), ShapeUse::Outline)
                 .map(|shape| shape.world_aabb(pos)),
             Some(Aabb::new(0.125, 0.0, 0.125, 0.875, 0.4375, 0.875))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::TUBE_CORAL), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.125, 0.0, 0.125, 0.875, 0.9375, 0.875))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::HORN_CORAL_FAN), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.125, 0.0, 0.125, 0.875, 0.25, 0.875))
+        );
+        assert_eq!(
+            shape_for(
+                state(terrain_id::BRAIN_CORAL_WALL_FAN_EAST),
+                ShapeUse::Outline,
+            )
+            .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(0.0, 0.25, 0.0, 0.6875, 0.75, 1.0))
         );
         assert_eq!(
             shape_for(state(terrain_id::CACTUS), ShapeUse::Outline)

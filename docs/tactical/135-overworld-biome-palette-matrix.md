@@ -4,8 +4,9 @@ Status: active parent; 68 overworld matrix rows, 66 emitted-row
 biome/tint/visible-surface probes, all overworld tint IDs, twenty-four
 supported feature-family groups, and all 66 emitted rows F-checked, including
 cactus/sugar-cane extras, swamp/swamp-hills lily pads, blue orchids, sugar
-cane, and small mushrooms, ocean water plants, warm-ocean coral/sea-pickle,
-river seagrass, frozen-river/beach/shore sugar cane, frozen-ocean blue ice,
+cane, and small mushrooms, ocean water plants, warm-ocean coral blocks, live
+plant/fan sidecars, and sea pickles, river seagrass,
+frozen-river/beach/shore sugar cane, frozen-ocean blue ice,
 ice-spikes packed ice,
 dark-forest canopy/mushroom,
 mushroom-field/shore huge mushrooms, birch and tall-birch trees, savanna acacia,
@@ -187,7 +188,7 @@ notes.
 | 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `28`, chunk `(-2,-8)` | `[x] B [x] T [x] S [x] F` |
 | 38 | `minecraft:wooded_badlands_plateau` | badlands | wooded plateau terracotta/red sand plus Java `TREES_BADLANDS` oak, `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `4764`, chunk `(6,-3)` | `[x] B [x] T [x] S [x] F` |
 | 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand plus Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `947`, chunk `(-6,-2)` | `[x] B [x] T [x] S [x] F` |
-| 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water/sand, seagrass plus coral blocks/sea pickles checked; coral plants/fans gap | seed `2696`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water/sand, seagrass plus coral blocks, live coral plants/floor fans/wall fans, and sea pickles checked | seed `2696`, chunk `(-14,-14)` | `[x] B [x] T [x] S [x] F` |
 | 45 | `minecraft:lukewarm_ocean` | ocean-lukewarm | bright water/sand, seagrass/kelp water plants checked | seed `6`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 46 | `minecraft:cold_ocean` | ocean-cold | cold water checked; gravel/grass seafloor, seagrass/kelp checked | seed `5`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 47 | `minecraft:deep_warm_ocean` | ocean-warm | tint checked; Java 1.17 final ocean mixer appears not to emit this registered ID | no B/S fixture | `[ ] B [x] T [ ] S [ ] F` |
@@ -252,7 +253,8 @@ Landed:
 - The same worldgen probe now asserts currently supported visible feature
   families for plains, desert, ordinary forest, swamp, base taiga, snowy
   tundra, base snowy taiga, badlands, ice-spikes packed ice, and ocean water
-  plants, warm-ocean coral blocks and sea pickles, dark-forest dark oak and
+  plants, warm-ocean coral blocks, live coral plant/floor-fan/wall-fan
+  sidecars, and sea pickles, dark-forest dark oak and
   huge mushroom block families, mushroom-field/shore huge mushrooms, birch
   log/leaves trees, savanna acacia trees, jungle log/leaves trees, and
   bamboo-jungle bamboo plus jungle log/leaves vegetation, flower-forest dense
@@ -271,8 +273,9 @@ Landed:
   frozen river, beach, stone shore, and snowy beach require default sugar-cane
   extra coverage; frozen-ocean rows require packed ice plus blue ice from the
   iceberg/blue-ice feature table;
-  the warm-ocean row requires at least one live coral block and one sea pickle
-  state; dark forest rows require both dark oak logs/leaves and huge mushroom
+  the warm-ocean row requires at least one live coral block, one live coral
+  plant, one floor coral fan, one wall coral fan, and one sea pickle state;
+  dark forest rows require both dark oak logs/leaves and huge mushroom
   cap/stem blocks; mushroom field rows require a huge mushroom cap plus stem;
   birch rows require birch logs and leaves; savanna rows require acacia logs and
   leaves; jungle rows require jungle logs and leaves; bamboo jungle rows require
@@ -431,11 +434,11 @@ Documented gaps from this slice:
   visibility/count parity and full light-engine parity are not checked here,
   and exact decorated mismatch buckets remain later `103` work.
 - Java normal/cold/lukewarm ocean water-plant tables are represented by broad
-  seagrass/kelp checks, and warm ocean now has seagrass, live coral blocks, and
-  sea pickles. Native still omits the `SEAGRASS_SIMPLE` carving-mask decorator
-  path, coral plants, coral fans/wall fans, exact coral mismatch parity, and
-  full waterlogged/fluid-state modeling for water plants in the raw generated
-  block lane.
+  seagrass/kelp checks, and warm ocean now has seagrass, live coral blocks,
+  live coral plant/floor-fan/wall-fan sidecars, and sea pickles. Native still
+  omits the `SEAGRASS_SIMPLE` carving-mask decorator path, exact coral mismatch
+  parity, and full waterlogged/fluid-state modeling for water plants in the raw
+  generated block lane.
 - Java frozen-ocean and deep-frozen-ocean now have high-signal
   `ICEBERG_PACKED`, `ICEBERG_BLUE`, and `BLUE_ICE` coverage with deterministic
   blue-ice fixtures. Exact parity is still incomplete: ocean ruins, monuments,
@@ -568,7 +571,6 @@ slice:
 2. Add row-specific visible fixtures for already-wired low-visibility slots:
    remaining grass-boundary pumpkin rows beyond swamp/stone-shore and remaining
    small-mushroom rows beyond the initial plains/taiga/mushroom-field fixtures.
-3. Pick one missing high-signal family outside the broad table slots:
-   warm-ocean coral plants/fans, remaining grass-boundary pumpkin fixtures, or
-   exact jungle tree selector/count visibility buckets if staying in jungle
-   rows.
+3. Pick one missing high-signal family outside the broad table slots: remaining
+   grass-boundary pumpkin fixtures, or exact jungle tree selector/count
+   visibility buckets if staying in jungle rows.

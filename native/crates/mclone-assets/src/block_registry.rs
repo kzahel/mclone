@@ -60,10 +60,30 @@ impl BlockStateRecord {
         if asset.variants_for_key(&variant_key).is_some() {
             return Some(variant_key);
         }
+        if let Some(variant_key) = self.model_variant_key_without_ignored_properties(asset) {
+            return Some(variant_key);
+        }
         if self.can_use_empty_model_variant(asset) {
             return Some(String::new());
         }
         None
+    }
+
+    fn model_variant_key_without_ignored_properties(
+        &self,
+        asset: &BlockStateAsset,
+    ) -> Option<String> {
+        let mut filtered = self.properties.clone();
+        filtered.retain(|property, _| !self.property_ignored_by_model_variant(property));
+        if filtered.len() == self.properties.len() {
+            return None;
+        }
+        let variant_key = filtered
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        asset.variants_for_key(&variant_key).map(|_| variant_key)
     }
 
     fn can_use_empty_model_variant(&self, asset: &BlockStateAsset) -> bool {
@@ -71,10 +91,10 @@ impl BlockStateRecord {
             && self.block.namespace() == "minecraft"
             && asset.variant_keys.len() == 1
             && asset.variants_for_key("").is_some()
-            && self
-                .properties
-                .keys()
-                .all(|property| self.property_uses_empty_model_variant(property))
+            && self.properties.keys().all(|property| {
+                self.property_uses_empty_model_variant(property)
+                    || self.property_ignored_by_model_variant(property)
+            })
     }
 
     fn property_uses_empty_model_variant(&self, property: &str) -> bool {
@@ -82,6 +102,28 @@ impl BlockStateRecord {
             (self.block.path(), property),
             ("water" | "lava", "level") | ("cactus" | "sugar_cane" | "kelp", "age")
         )
+    }
+
+    fn property_ignored_by_model_variant(&self, property: &str) -> bool {
+        property == "waterlogged"
+            && matches!(
+                self.block.path(),
+                "tube_coral"
+                    | "brain_coral"
+                    | "bubble_coral"
+                    | "fire_coral"
+                    | "horn_coral"
+                    | "tube_coral_fan"
+                    | "brain_coral_fan"
+                    | "bubble_coral_fan"
+                    | "fire_coral_fan"
+                    | "horn_coral_fan"
+                    | "tube_coral_wall_fan"
+                    | "brain_coral_wall_fan"
+                    | "bubble_coral_wall_fan"
+                    | "fire_coral_wall_fan"
+                    | "horn_coral_wall_fan"
+            )
     }
 }
 
@@ -400,6 +442,15 @@ const PICKLES_1_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "1"), ("waterl
 const PICKLES_2_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "2"), ("waterlogged", "true")];
 const PICKLES_3_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "3"), ("waterlogged", "true")];
 const PICKLES_4_WATERLOGGED_TRUE: &[(&str, &str)] = &[("pickles", "4"), ("waterlogged", "true")];
+const WATERLOGGED_TRUE: &[(&str, &str)] = &[("waterlogged", "true")];
+const FACING_NORTH_WATERLOGGED_TRUE: &[(&str, &str)] =
+    &[("facing", "north"), ("waterlogged", "true")];
+const FACING_EAST_WATERLOGGED_TRUE: &[(&str, &str)] =
+    &[("facing", "east"), ("waterlogged", "true")];
+const FACING_SOUTH_WATERLOGGED_TRUE: &[(&str, &str)] =
+    &[("facing", "south"), ("waterlogged", "true")];
+const FACING_WEST_WATERLOGGED_TRUE: &[(&str, &str)] =
+    &[("facing", "west"), ("waterlogged", "true")];
 const VINE_UP: &[(&str, &str)] = &[
     ("up", "true"),
     ("north", "false"),
@@ -639,6 +690,116 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (176, "minecraft:bamboo", BAMBOO_TOP_LARGE),
     (177, "minecraft:bamboo", BAMBOO_FINAL_LARGE),
     (178, "minecraft:mossy_cobblestone", EMPTY_PROPS),
+    (179, "minecraft:tube_coral", WATERLOGGED_TRUE),
+    (180, "minecraft:brain_coral", WATERLOGGED_TRUE),
+    (181, "minecraft:bubble_coral", WATERLOGGED_TRUE),
+    (182, "minecraft:fire_coral", WATERLOGGED_TRUE),
+    (183, "minecraft:horn_coral", WATERLOGGED_TRUE),
+    (184, "minecraft:tube_coral_fan", WATERLOGGED_TRUE),
+    (185, "minecraft:brain_coral_fan", WATERLOGGED_TRUE),
+    (186, "minecraft:bubble_coral_fan", WATERLOGGED_TRUE),
+    (187, "minecraft:fire_coral_fan", WATERLOGGED_TRUE),
+    (188, "minecraft:horn_coral_fan", WATERLOGGED_TRUE),
+    (
+        189,
+        "minecraft:tube_coral_wall_fan",
+        FACING_NORTH_WATERLOGGED_TRUE,
+    ),
+    (
+        190,
+        "minecraft:tube_coral_wall_fan",
+        FACING_EAST_WATERLOGGED_TRUE,
+    ),
+    (
+        191,
+        "minecraft:tube_coral_wall_fan",
+        FACING_SOUTH_WATERLOGGED_TRUE,
+    ),
+    (
+        192,
+        "minecraft:tube_coral_wall_fan",
+        FACING_WEST_WATERLOGGED_TRUE,
+    ),
+    (
+        193,
+        "minecraft:brain_coral_wall_fan",
+        FACING_NORTH_WATERLOGGED_TRUE,
+    ),
+    (
+        194,
+        "minecraft:brain_coral_wall_fan",
+        FACING_EAST_WATERLOGGED_TRUE,
+    ),
+    (
+        195,
+        "minecraft:brain_coral_wall_fan",
+        FACING_SOUTH_WATERLOGGED_TRUE,
+    ),
+    (
+        196,
+        "minecraft:brain_coral_wall_fan",
+        FACING_WEST_WATERLOGGED_TRUE,
+    ),
+    (
+        197,
+        "minecraft:bubble_coral_wall_fan",
+        FACING_NORTH_WATERLOGGED_TRUE,
+    ),
+    (
+        198,
+        "minecraft:bubble_coral_wall_fan",
+        FACING_EAST_WATERLOGGED_TRUE,
+    ),
+    (
+        199,
+        "minecraft:bubble_coral_wall_fan",
+        FACING_SOUTH_WATERLOGGED_TRUE,
+    ),
+    (
+        200,
+        "minecraft:bubble_coral_wall_fan",
+        FACING_WEST_WATERLOGGED_TRUE,
+    ),
+    (
+        201,
+        "minecraft:fire_coral_wall_fan",
+        FACING_NORTH_WATERLOGGED_TRUE,
+    ),
+    (
+        202,
+        "minecraft:fire_coral_wall_fan",
+        FACING_EAST_WATERLOGGED_TRUE,
+    ),
+    (
+        203,
+        "minecraft:fire_coral_wall_fan",
+        FACING_SOUTH_WATERLOGGED_TRUE,
+    ),
+    (
+        204,
+        "minecraft:fire_coral_wall_fan",
+        FACING_WEST_WATERLOGGED_TRUE,
+    ),
+    (
+        205,
+        "minecraft:horn_coral_wall_fan",
+        FACING_NORTH_WATERLOGGED_TRUE,
+    ),
+    (
+        206,
+        "minecraft:horn_coral_wall_fan",
+        FACING_EAST_WATERLOGGED_TRUE,
+    ),
+    (
+        207,
+        "minecraft:horn_coral_wall_fan",
+        FACING_SOUTH_WATERLOGGED_TRUE,
+    ),
+    (
+        208,
+        "minecraft:horn_coral_wall_fan",
+        FACING_WEST_WATERLOGGED_TRUE,
+    ),
 ];
 
 #[cfg(test)]
@@ -657,7 +818,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 179);
+        assert_eq!(registry.len(), 209);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -709,6 +870,34 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:mossy_cobblestone"),
             Some(BlockStateId(178))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:tube_coral[waterlogged=true]"),
+            Some(BlockStateId(179))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:horn_coral[waterlogged=true]"),
+            Some(BlockStateId(183))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:tube_coral_fan[waterlogged=true]"),
+            Some(BlockStateId(184))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:fire_coral_fan[waterlogged=true]"),
+            Some(BlockStateId(187))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:tube_coral_wall_fan[facing=north,waterlogged=true]"),
+            Some(BlockStateId(189))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:brain_coral_wall_fan[facing=east,waterlogged=true]"),
+            Some(BlockStateId(194))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(208)).unwrap().canonical_key(),
+            "minecraft:horn_coral_wall_fan[facing=west,waterlogged=true]"
         );
         assert_eq!(
             registry.by_id(BlockStateId(41)).unwrap().canonical_key(),

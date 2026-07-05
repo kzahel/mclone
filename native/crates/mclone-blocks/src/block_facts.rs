@@ -103,6 +103,37 @@ pub mod terrain_id {
     pub const BAMBOO_TOP_SMALL: u32 = 175;
     pub const BAMBOO_TOP_LARGE: u32 = 176;
     pub const BAMBOO_FINAL_LARGE: u32 = 177;
+    pub const MOSSY_COBBLESTONE: u32 = 178;
+    pub const TUBE_CORAL: u32 = 179;
+    pub const BRAIN_CORAL: u32 = 180;
+    pub const BUBBLE_CORAL: u32 = 181;
+    pub const FIRE_CORAL: u32 = 182;
+    pub const HORN_CORAL: u32 = 183;
+    pub const TUBE_CORAL_FAN: u32 = 184;
+    pub const BRAIN_CORAL_FAN: u32 = 185;
+    pub const BUBBLE_CORAL_FAN: u32 = 186;
+    pub const FIRE_CORAL_FAN: u32 = 187;
+    pub const HORN_CORAL_FAN: u32 = 188;
+    pub const TUBE_CORAL_WALL_FAN_NORTH: u32 = 189;
+    pub const TUBE_CORAL_WALL_FAN_EAST: u32 = 190;
+    pub const TUBE_CORAL_WALL_FAN_SOUTH: u32 = 191;
+    pub const TUBE_CORAL_WALL_FAN_WEST: u32 = 192;
+    pub const BRAIN_CORAL_WALL_FAN_NORTH: u32 = 193;
+    pub const BRAIN_CORAL_WALL_FAN_EAST: u32 = 194;
+    pub const BRAIN_CORAL_WALL_FAN_SOUTH: u32 = 195;
+    pub const BRAIN_CORAL_WALL_FAN_WEST: u32 = 196;
+    pub const BUBBLE_CORAL_WALL_FAN_NORTH: u32 = 197;
+    pub const BUBBLE_CORAL_WALL_FAN_EAST: u32 = 198;
+    pub const BUBBLE_CORAL_WALL_FAN_SOUTH: u32 = 199;
+    pub const BUBBLE_CORAL_WALL_FAN_WEST: u32 = 200;
+    pub const FIRE_CORAL_WALL_FAN_NORTH: u32 = 201;
+    pub const FIRE_CORAL_WALL_FAN_EAST: u32 = 202;
+    pub const FIRE_CORAL_WALL_FAN_SOUTH: u32 = 203;
+    pub const FIRE_CORAL_WALL_FAN_WEST: u32 = 204;
+    pub const HORN_CORAL_WALL_FAN_NORTH: u32 = 205;
+    pub const HORN_CORAL_WALL_FAN_EAST: u32 = 206;
+    pub const HORN_CORAL_WALL_FAN_SOUTH: u32 = 207;
+    pub const HORN_CORAL_WALL_FAN_WEST: u32 = 208;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

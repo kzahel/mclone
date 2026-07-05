@@ -1,8 +1,16 @@
 use crate::block::{
-    BRAIN_CORAL_BLOCK, BUBBLE_CORAL_BLOCK, FIRE_CORAL_BLOCK, HORN_CORAL_BLOCK, KELP, KELP_PLANT,
-    MAGMA_BLOCK, RawBlockId, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS,
-    TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, is_coral_block, is_water,
-    material_blocks_motion,
+    BRAIN_CORAL, BRAIN_CORAL_BLOCK, BRAIN_CORAL_FAN, BRAIN_CORAL_WALL_FAN_EAST,
+    BRAIN_CORAL_WALL_FAN_NORTH, BRAIN_CORAL_WALL_FAN_SOUTH, BRAIN_CORAL_WALL_FAN_WEST,
+    BUBBLE_CORAL, BUBBLE_CORAL_BLOCK, BUBBLE_CORAL_FAN, BUBBLE_CORAL_WALL_FAN_EAST,
+    BUBBLE_CORAL_WALL_FAN_NORTH, BUBBLE_CORAL_WALL_FAN_SOUTH, BUBBLE_CORAL_WALL_FAN_WEST,
+    FIRE_CORAL, FIRE_CORAL_BLOCK, FIRE_CORAL_FAN, FIRE_CORAL_WALL_FAN_EAST,
+    FIRE_CORAL_WALL_FAN_NORTH, FIRE_CORAL_WALL_FAN_SOUTH, FIRE_CORAL_WALL_FAN_WEST, HORN_CORAL,
+    HORN_CORAL_BLOCK, HORN_CORAL_FAN, HORN_CORAL_WALL_FAN_EAST, HORN_CORAL_WALL_FAN_NORTH,
+    HORN_CORAL_WALL_FAN_SOUTH, HORN_CORAL_WALL_FAN_WEST, KELP, KELP_PLANT, MAGMA_BLOCK, RawBlockId,
+    SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, TALL_SEAGRASS_LOWER,
+    TALL_SEAGRASS_UPPER, TUBE_CORAL, TUBE_CORAL_BLOCK, TUBE_CORAL_FAN, TUBE_CORAL_WALL_FAN_EAST,
+    TUBE_CORAL_WALL_FAN_NORTH, TUBE_CORAL_WALL_FAN_SOUTH, TUBE_CORAL_WALL_FAN_WEST, is_coral_block,
+    is_coral_plant_or_fan, is_water, material_blocks_motion,
 };
 use crate::placement::{BlockPos, CountConfiguration, HeightmapType};
 use crate::prng::RandomSource;
@@ -15,6 +23,27 @@ const CORAL_BLOCKS: [RawBlockId; 5] = [
     BUBBLE_CORAL_BLOCK,
     FIRE_CORAL_BLOCK,
     HORN_CORAL_BLOCK,
+];
+
+const CORAL_FANS: [RawBlockId; 5] = [
+    TUBE_CORAL_FAN,
+    BRAIN_CORAL_FAN,
+    BUBBLE_CORAL_FAN,
+    FIRE_CORAL_FAN,
+    HORN_CORAL_FAN,
+];
+
+const CORALS: [RawBlockId; 10] = [
+    TUBE_CORAL,
+    BRAIN_CORAL,
+    BUBBLE_CORAL,
+    FIRE_CORAL,
+    HORN_CORAL,
+    TUBE_CORAL_FAN,
+    BRAIN_CORAL_FAN,
+    BUBBLE_CORAL_FAN,
+    FIRE_CORAL_FAN,
+    HORN_CORAL_FAN,
 ];
 
 const HORIZONTAL_DIRECTIONS: [Direction; 4] = [
@@ -279,7 +308,7 @@ fn place_coral_block<W: FeatureWorld>(
     let above = offset_pos(pos, Direction::Up);
     let can_replace = world
         .block_at_world(pos)
-        .is_some_and(|block| is_water(block) || is_coral_block(block));
+        .is_some_and(|block| is_water(block) || is_coral_plant_or_fan(block));
     if !can_replace || !is_water_at(world, above) {
         return false;
     }
@@ -289,7 +318,8 @@ fn place_coral_block<W: FeatureWorld>(
     }
 
     if random.next_float() < 0.25 {
-        let _skipped_coral_plant = random_coral_block(random);
+        let state = random_coral(random);
+        world.set_block_world(above, state);
     } else if random.next_float() < 0.05 {
         let state = random_sea_pickle(random);
         world.set_block_world(above, state);
@@ -299,7 +329,8 @@ fn place_coral_block<W: FeatureWorld>(
         if random.next_float() < 0.2 {
             let side = offset_pos(pos, direction);
             if is_water_at(world, side) {
-                let _skipped_wall_coral = random_coral_block(random);
+                let state = random_coral_wall_fan(random, direction);
+                world.set_block_world(side, state);
             }
         }
     }
@@ -336,6 +367,40 @@ fn can_survive_sea_pickle_at<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> b
 
 fn random_coral_block(random: &mut impl RandomSource) -> RawBlockId {
     CORAL_BLOCKS[random.next_int_bound(CORAL_BLOCKS.len() as i32) as usize]
+}
+
+fn random_coral(random: &mut impl RandomSource) -> RawBlockId {
+    CORALS[random.next_int_bound(CORALS.len() as i32) as usize]
+}
+
+fn random_coral_fan(random: &mut impl RandomSource) -> RawBlockId {
+    CORAL_FANS[random.next_int_bound(CORAL_FANS.len() as i32) as usize]
+}
+
+fn random_coral_wall_fan(random: &mut impl RandomSource, direction: Direction) -> RawBlockId {
+    match (random_coral_fan(random), direction) {
+        (TUBE_CORAL_FAN, Direction::North) => TUBE_CORAL_WALL_FAN_NORTH,
+        (TUBE_CORAL_FAN, Direction::South) => TUBE_CORAL_WALL_FAN_SOUTH,
+        (TUBE_CORAL_FAN, Direction::West) => TUBE_CORAL_WALL_FAN_WEST,
+        (TUBE_CORAL_FAN, Direction::East) => TUBE_CORAL_WALL_FAN_EAST,
+        (BRAIN_CORAL_FAN, Direction::North) => BRAIN_CORAL_WALL_FAN_NORTH,
+        (BRAIN_CORAL_FAN, Direction::South) => BRAIN_CORAL_WALL_FAN_SOUTH,
+        (BRAIN_CORAL_FAN, Direction::West) => BRAIN_CORAL_WALL_FAN_WEST,
+        (BRAIN_CORAL_FAN, Direction::East) => BRAIN_CORAL_WALL_FAN_EAST,
+        (BUBBLE_CORAL_FAN, Direction::North) => BUBBLE_CORAL_WALL_FAN_NORTH,
+        (BUBBLE_CORAL_FAN, Direction::South) => BUBBLE_CORAL_WALL_FAN_SOUTH,
+        (BUBBLE_CORAL_FAN, Direction::West) => BUBBLE_CORAL_WALL_FAN_WEST,
+        (BUBBLE_CORAL_FAN, Direction::East) => BUBBLE_CORAL_WALL_FAN_EAST,
+        (FIRE_CORAL_FAN, Direction::North) => FIRE_CORAL_WALL_FAN_NORTH,
+        (FIRE_CORAL_FAN, Direction::South) => FIRE_CORAL_WALL_FAN_SOUTH,
+        (FIRE_CORAL_FAN, Direction::West) => FIRE_CORAL_WALL_FAN_WEST,
+        (FIRE_CORAL_FAN, Direction::East) => FIRE_CORAL_WALL_FAN_EAST,
+        (HORN_CORAL_FAN, Direction::North) => HORN_CORAL_WALL_FAN_NORTH,
+        (HORN_CORAL_FAN, Direction::South) => HORN_CORAL_WALL_FAN_SOUTH,
+        (HORN_CORAL_FAN, Direction::West) => HORN_CORAL_WALL_FAN_WEST,
+        (HORN_CORAL_FAN, Direction::East) => HORN_CORAL_WALL_FAN_EAST,
+        _ => unreachable!("wall coral fan placement only uses horizontal directions"),
+    }
 }
 
 fn random_sea_pickle(random: &mut impl RandomSource) -> RawBlockId {

@@ -310,8 +310,9 @@ mod tests {
         RED_MUSHROOM_BLOCK, RED_SAND, REDSTONE_ORE, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND,
         SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES,
         STONE, SUGAR_CANE, SUNFLOWER_LOWER, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, TALL_GRASS_UPPER,
-        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, TUFF, VINE_EAST,
-        VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER,
+        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL, TUBE_CORAL_BLOCK,
+        TUBE_CORAL_WALL_FAN_NORTH, TUFF, VINE_EAST, VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST,
+        WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -460,6 +461,57 @@ mod tests {
 
         fn next_gaussian(&mut self) -> f64 {
             panic!("next_gaussian should not be used by this test random")
+        }
+    }
+
+    struct ScriptedRandom {
+        ints: Vec<i32>,
+        floats: Vec<f32>,
+    }
+
+    impl ScriptedRandom {
+        fn new(ints: Vec<i32>, floats: Vec<f32>) -> Self {
+            Self {
+                ints: ints.into_iter().rev().collect(),
+                floats: floats.into_iter().rev().collect(),
+            }
+        }
+    }
+
+    impl RandomSource for ScriptedRandom {
+        fn set_seed(&mut self, _seed: i64) {}
+
+        fn next_int(&mut self) -> i32 {
+            0
+        }
+
+        fn next_int_bound(&mut self, bound: i32) -> i32 {
+            let value = self.ints.pop().unwrap_or(0);
+            assert!(
+                (0..bound).contains(&value),
+                "scripted random value {value} outside bound {bound}"
+            );
+            value
+        }
+
+        fn next_long(&mut self) -> i64 {
+            0
+        }
+
+        fn next_boolean(&mut self) -> bool {
+            false
+        }
+
+        fn next_float(&mut self) -> f32 {
+            self.floats.pop().unwrap_or(1.0)
+        }
+
+        fn next_double(&mut self) -> f64 {
+            0.0
+        }
+
+        fn next_gaussian(&mut self) -> f64 {
+            0.0
         }
     }
 
@@ -968,6 +1020,30 @@ mod tests {
                 "{shape:?}"
             );
         }
+    }
+
+    #[test]
+    fn coral_feature_places_java_sidecar_plants_and_wall_fans() {
+        let mut chunk = flat_ocean_chunk();
+        let mut random = ScriptedRandom::new(
+            vec![
+                0, // coral block type
+                0, // tree height: one trunk block
+                0, // coral plant type
+                0, // north wall-fan type
+            ],
+            vec![
+                0.0, // place a coral plant above the trunk block
+                0.0, // place a wall fan north of the trunk block
+                1.0, 1.0, 1.0,
+            ],
+        );
+        let feature = ConfiguredFeature::coral(CoralShape::Tree);
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 2, 8)));
+        assert!(count_blocks(&chunk, TUBE_CORAL_BLOCK) > 0);
+        assert_eq!(chunk.get_block_at_y(8, 3, 8), TUBE_CORAL);
+        assert_eq!(chunk.get_block_at_y(8, 2, 7), TUBE_CORAL_WALL_FAN_NORTH);
     }
 
     #[test]
