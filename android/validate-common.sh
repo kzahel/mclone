@@ -615,7 +615,8 @@ mclone_run_session_smoke() {
         new-world)
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title New World"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title Singleplayer"
+            mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
             ;;
         join-remote)
@@ -741,11 +742,10 @@ mclone_install_launch_smoke() {
         && ! grep -E "Mclone Android rendered .* frame" "$log_path" >/dev/null 2>&1; then
         mclone_die "no Mclone rendered-frame marker found in $log_path"
     fi
-    mclone_check_session_smoke_log "$log_path"
-
     mclone_capture_screenshot "$serial" "$screenshot_path"
     mclone_note "Screenshot: $screenshot_path"
     mclone_note "Logcat: $log_path"
+    mclone_check_session_smoke_log "$log_path"
     mclone_note "Android smoke validation passed"
 }
 

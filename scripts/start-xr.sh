@@ -79,6 +79,73 @@ has_wivrn_established_connection() {
     lsof -nP -iTCP:9757 2>/dev/null | grep -q ESTABLISHED
 }
 
+android_unset_marker="__mclone_unset__"
+wivrn_headset_settings_saved=0
+wivrn_previous_stay_on=""
+wivrn_previous_skip_launch_check=""
+wivrn_previous_require_controllers=""
+wivrn_quest_package=""
+
+read_android_setting() {
+    local namespace="$1"
+    local name="$2"
+    local value
+
+    value="$(adb shell settings get "${namespace}" "${name}" 2>/dev/null | tr -d '\r' || true)"
+    if [ -z "${value}" ] || [ "${value}" = "null" ]; then
+        printf '%s\n' "${android_unset_marker}"
+    else
+        printf '%s\n' "${value}"
+    fi
+}
+
+restore_android_setting() {
+    local namespace="$1"
+    local name="$2"
+    local value="$3"
+
+    if [ "${value}" = "${android_unset_marker}" ]; then
+        adb shell settings delete "${namespace}" "${name}" >/dev/null 2>&1 || true
+    else
+        adb shell settings put "${namespace}" "${name}" "${value}" >/dev/null 2>&1 || true
+    fi
+}
+
+save_wivrn_headset_settings() {
+    wivrn_previous_stay_on="$(read_android_setting global stay_on_while_plugged_in)"
+    wivrn_previous_skip_launch_check="$(read_android_setting secure skip_launch_check_requires_controllers_enabled)"
+    wivrn_previous_require_controllers="$(read_android_setting global require_controllers_for_vr_apps)"
+    wivrn_headset_settings_saved=1
+}
+
+wake_headset_for_wivrn_usb() {
+    if [ "${wivrn_headset_settings_saved}" -ne 1 ]; then
+        save_wivrn_headset_settings
+    fi
+    adb shell setprop debug.oculus.disableProximity 1 >/dev/null 2>&1 || true
+    adb shell settings put global stay_on_while_plugged_in 3 >/dev/null 2>&1 || true
+    adb shell settings put secure skip_launch_check_requires_controllers_enabled 1 >/dev/null 2>&1 || true
+    adb shell settings put global require_controllers_for_vr_apps 0 >/dev/null 2>&1 || true
+    adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+    adb shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
+}
+
+restore_wivrn_headset_settings() {
+    if [ "${wivrn_headset_settings_saved}" -ne 1 ]; then
+        return
+    fi
+
+    if [ -n "${wivrn_quest_package}" ]; then
+        adb shell am force-stop "${wivrn_quest_package}" >/dev/null 2>&1 || true
+    fi
+    restore_android_setting global stay_on_while_plugged_in "${wivrn_previous_stay_on}"
+    restore_android_setting secure skip_launch_check_requires_controllers_enabled "${wivrn_previous_skip_launch_check}"
+    restore_android_setting global require_controllers_for_vr_apps "${wivrn_previous_require_controllers}"
+    adb shell setprop debug.oculus.disableProximity 0 >/dev/null 2>&1 || true
+    adb shell am broadcast -a com.oculus.vrpowermanager.prox_open --ei timeout 0 >/dev/null 2>&1 || true
+    adb shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
+}
+
 wait_for_wivrn_host_port() {
     local pid="$1"
     local log_path="$2"
@@ -138,6 +205,9 @@ start_wivrn_usb_stack() {
     fi
 
     adb get-state >/dev/null
+    wivrn_quest_package="${quest_package}"
+    echo "Preparing Quest power/proximity state for WiVRn USB smoke"
+    wake_headset_for_wivrn_usb
 
     echo "Stopping Quest WiVRn client if it is already running: ${quest_package}"
     adb shell am force-stop "${quest_package}" >/dev/null 2>&1 || true
@@ -175,6 +245,7 @@ start_wivrn_usb_stack() {
     adb shell am start -W -a android.intent.action.VIEW -d "${quest_uri}" "${quest_package}" >/dev/null
 
     wait_for_wivrn_usb_connection "${wivrn_host_log}"
+    sleep "${WIVRN_POST_CONNECT_SETTLE_SECONDS:-2}"
 }
 
 cleanup() {
@@ -184,6 +255,7 @@ cleanup() {
         kill "${wivrn_host_pid}" >/dev/null 2>&1 || true
         wait "${wivrn_host_pid}" >/dev/null 2>&1 || true
     fi
+    restore_wivrn_headset_settings
 
     return "${status}"
 }
@@ -366,11 +438,11 @@ fi
 
 cargo_check_cmd=(cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
 cargo_build_cmd=(cargo build --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
-cargo_run_cmd=(cargo run --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
+cargo_run_cmd=(cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client --features xr)
 if [ "${release}" -eq 1 ]; then
     cargo_check_cmd=(cargo check --release --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
     cargo_build_cmd=(cargo build --release --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
-    cargo_run_cmd=(cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
+    cargo_run_cmd=(cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client --features xr)
 fi
 if [ "${smoke}" = "mclone" ]; then
     app_args=(--xr-mclone-smoke --frames "${frames}" "${mclone_args[@]}")

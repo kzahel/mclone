@@ -61,8 +61,9 @@ mod android {
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
         GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameUiAction,
         GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
-        TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats, touch_action_button_rects,
-        touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
+        TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats, WorldCatalogUiState,
+        WorldCatalogUiText, touch_action_button_rects, touch_hotbar_slot_rects,
+        touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -1318,10 +1319,20 @@ mod android {
                 | GameUiAction::CancelDeleteWorld => {
                     self.session_status = StatusOverlay::hidden();
                 }
-                GameUiAction::OpenWorld(_)
-                | GameUiAction::CreateCatalogWorld
-                | GameUiAction::DeleteWorld(_) => {
+                GameUiAction::OpenWorld(_) | GameUiAction::DeleteWorld(_) => {
                     log::warn!("persistent world catalog action is not wired to Android yet");
+                }
+                GameUiAction::CreateCatalogWorld => {
+                    let seed = self.ui.new_world_seed();
+                    let request = SessionStartRequest::new_seed_local_world(seed);
+                    let options = self.local_world_options(seed);
+                    if self
+                        .start_replacement_session(device, queue, format, request, options)
+                        .is_err()
+                    {
+                        self.ui.set_new_world_seed(seed);
+                        return Ok(result);
+                    }
                 }
                 GameUiAction::OpenJoinRemote => {
                     let remote_addr = self.scene_options.remote_addr.clone().unwrap_or_else(|| {
@@ -1400,7 +1411,11 @@ mod android {
 
         fn current_ui_render_state(&self) -> GameUiRenderState {
             let mut state = GameUiRenderState {
-                world_catalog: Default::default(),
+                world_catalog: WorldCatalogUiState {
+                    create_supported: true,
+                    create_display_name: WorldCatalogUiText::new("New World"),
+                    ..Default::default()
+                },
                 render_distance: (self.scene.render_distance() as i32)
                     .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE),
                 min_render_distance: ANDROID_MIN_RENDER_DISTANCE,

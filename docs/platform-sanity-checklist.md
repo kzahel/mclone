@@ -73,6 +73,13 @@ pnpm native:xr:mac:wivrn:mclone
 Use the platform/runtime lane that matches the machine being validated. For
 session-replacement work, the `mclone` smoke is the important one because it
 loads the real terrain session path instead of only proving OpenXR startup.
+The macOS WiVRn launcher prepares an attached Quest for USB validation by
+saving/restoring headset power settings, disabling proximity during the smoke,
+waking the headset, installing `adb reverse tcp:9757 tcp:9757`, and waiting
+briefly after the WiVRn handshake before launching Mclone. If connection still
+fails before Mclone launch, inspect the printed WiVRn host log,
+`adb devices -l`, `adb reverse --list`, and Quest logcat for
+`org.meumeu.wivrn.local`.
 
 ## Flat Android
 
@@ -89,6 +96,11 @@ Inspect the screenshots under `/tmp`:
 - `/tmp/mclone-android-avd-chunk.png`
 - `/tmp/mclone-android-avd-touch.png`
 - `/tmp/mclone-android-avd-session.png`
+
+The session smoke drives the current shared flow:
+`touch menu -> Quit To Title -> Singleplayer -> Create -> Create World`. It
+captures the screenshot before asserting the log marker so failed runs still
+leave visual evidence.
 
 ## Android XR / Quest
 

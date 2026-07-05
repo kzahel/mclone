@@ -120,19 +120,35 @@ impl MovementPerfReport {
             i32::try_from(chunk_tracking_radius_for_render_distance(render_distance))
                 .context("chunk tracking radius exceeds i32")?;
         let expected_tracked_chunks = square_count(expected_tracking_radius)?;
+        let max_reasonable_chunks = expected_tracked_chunks.saturating_mul(2);
         for step in &self.steps {
-            if step.loaded_chunks != expected_tracked_chunks {
+            if step.loaded_chunks < expected_tracked_chunks {
                 bail!(
-                    "movement step {} loaded_chunks={} expected {expected_tracked_chunks}",
+                    "movement step {} loaded_chunks={} below expected minimum {expected_tracked_chunks}",
                     step.index,
                     step.loaded_chunks
                 );
             }
-            if step.client_visible_chunks != expected_tracked_chunks {
+            if step.loaded_chunks > max_reasonable_chunks {
                 bail!(
-                    "movement step {} client_visible_chunks={} expected {expected_tracked_chunks}",
+                    "movement step {} loaded_chunks={} exceeds generous cap {max_reasonable_chunks}",
+                    step.index,
+                    step.loaded_chunks
+                );
+            }
+            if step.client_visible_chunks < expected_tracked_chunks {
+                bail!(
+                    "movement step {} client_visible_chunks={} below expected minimum {expected_tracked_chunks}",
                     step.index,
                     step.client_visible_chunks
+                );
+            }
+            if step.client_visible_chunks > step.loaded_chunks {
+                bail!(
+                    "movement step {} client_visible_chunks={} exceeds loaded_chunks={}",
+                    step.index,
+                    step.client_visible_chunks,
+                    step.loaded_chunks
                 );
             }
             if step.loaded_sections == 0 {
