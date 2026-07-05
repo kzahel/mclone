@@ -19,7 +19,11 @@ Create/Open/Delete through controller request/completion effects while keeping
 IndexedDB promises and worker startup in the browser adapter. Slice 3 follow-up
 landed on 2026-07-05: the web adapter now refreshes committed catalog render
 state after catalog actions/responses, and `pnpm native:web:catalog-smoke`
-covers menu-driven create/open/delete plus IndexedDB delete cleanup.
+covers menu-driven create/open/delete plus IndexedDB delete cleanup. Slice 4a
+landed on 2026-07-05: `mclone-app-runtime::flat_client_session` now owns the
+shared effect policy for seed/new-world, join-remote, start, back-to-title, and
+quit actions, while desktop and web execute those effects through their
+platform-local startup/runtime adapters.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -488,6 +492,8 @@ Results on 2026-07-05:
 
 ### Slice 4: Session Replacement And Startup Policy
 
+Status: first pass landed 2026-07-05.
+
 Move the remaining shared session action policy out of app-local match arms:
 
 - local create/open and remote join action handling;
@@ -500,6 +506,44 @@ Move the remaining shared session action policy out of app-local match arms:
 This should build on tactical
 [`095-shared-session-coordinator.md`](095-shared-session-coordinator.md) rather
 than replacing it.
+
+Recorded Slice 4a result:
+
+- Added `mclone_app_runtime::flat_client_session` with
+  `flat_client_session_effects_for_action`, `FlatClientSessionActionContext`,
+  `FlatClientSessionEffects`, and host-action effects for Quit/Quit To Title.
+- Centralized shared `GameUiAction` policy for `OpenNewWorld`, `RerollSeed`,
+  `OpenJoinRemote`, `CreateWorld`, `JoinRemote`, `BackToTitle`,
+  `QuitToTitle`, and `Quit`.
+- Updated desktop `FlatClientDriver` to execute those shared effects while
+  keeping native-only responsibilities local: seed generation, default/CLI
+  remote endpoint fallback, mouse-lock arming, `SceneOptions` construction, and
+  startup pump payloads.
+- Updated native web `WebChunkRenderSession` to execute the same shared effects
+  while preserving browser-only responsibilities: IndexedDB/catalog promises,
+  JavaScript event reports, async worker startup, and runtime shutdown.
+- Kept UI-close timing in adapters for now. Desktop still defers
+  `CreateWorld`/`JoinRemote` UI application while it queues native startup;
+  web still lets the existing UI event report drive JS-side async restart.
+
+Validation after Slice 4a:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_session
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client ui_action_routing
+pnpm native:web:typecheck
+pnpm native:web:catalog-smoke
+pnpm native:web:smoke
+```
+
+Remaining Slice 4 work:
+
+- move failure-status UI restoration into shared effects;
+- centralize teardown-before-start and quit-to-title state transition policy;
+- centralize loading/startup overlay projection;
+- decide whether `flat_client_session` stays as a helper module or folds into a
+  broader flat-client controller with `flat_client_catalog`.
 
 ### Slice 5: Broader Flat UI Policy Pass
 

@@ -11,6 +11,10 @@ use mclone_app_runtime::flat_client_catalog::{
     FlatClientCatalogActionContext, FlatClientCatalogController, FlatClientCatalogEffects,
     FlatClientCatalogRequest, FlatClientCatalogSessionStart,
 };
+use mclone_app_runtime::flat_client_session::{
+    FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
+    flat_client_session_effects_for_action,
+};
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
     SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
@@ -3151,6 +3155,30 @@ impl WebChunkRenderSession {
         self.ui_event_result_to_js_value(handled, action, effects)
     }
 
+    fn apply_flat_client_session_effects(&mut self, effects: FlatClientSessionEffects) {
+        if let Some(seed) = effects.new_world_seed {
+            self.ui.set_new_world_seed(seed);
+        }
+        if let Some(addr) = effects.join_remote_addr {
+            self.ui.set_join_remote_addr(addr);
+        }
+        if effects.clear_inactive_session_status
+            && !matches!(self.session.state(), GameSessionState::Active { .. })
+        {
+            self.session.clear();
+        }
+        if let Some(request) = effects.session_start {
+            self.session.begin_start(request);
+            self.status_overlay = StatusOverlay::hidden();
+        }
+        if let Some(host_action) = effects.host_action {
+            match host_action {
+                FlatClientSessionHostAction::QuitToTitle => {}
+                FlatClientSessionHostAction::Quit => self.runtime.request_shutdown(),
+            }
+        }
+    }
+
     fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
         let mut effects = FlatClientCatalogEffects::default();
         let mut apply_ui_action = true;
@@ -3208,19 +3236,22 @@ impl WebChunkRenderSession {
                     let _ = self.runtime.send_gameplay_command_deferred(command);
                 }
             }
-            GameUiAction::CreateWorld(seed) => {
-                self.session
-                    .begin_start(SessionStartRequest::new_seed_local_world(seed));
-                self.status_overlay = StatusOverlay::hidden();
-            }
-            GameUiAction::JoinRemote => {
-                self.session.begin_start(SessionStartRequest::JoinRemote {
-                    endpoint: RemoteSessionEndpoint::new(self.ui.join_remote_addr().to_owned()),
-                });
-                self.status_overlay = StatusOverlay::hidden();
-            }
-            GameUiAction::Quit => {
-                self.runtime.request_shutdown();
+            GameUiAction::OpenNewWorld
+            | GameUiAction::RerollSeed
+            | GameUiAction::OpenJoinRemote
+            | GameUiAction::CreateWorld(_)
+            | GameUiAction::JoinRemote
+            | GameUiAction::BackToTitle
+            | GameUiAction::QuitToTitle
+            | GameUiAction::Quit => {
+                self.apply_flat_client_session_effects(flat_client_session_effects_for_action(
+                    action,
+                    FlatClientSessionActionContext {
+                        next_new_world_seed: None,
+                        current_join_remote_addr: self.ui.join_remote_addr(),
+                        fallback_remote_addr: None,
+                    },
+                ))
             }
             GameUiAction::OpenWorldList
             | GameUiAction::OpenWorldCreate
@@ -3254,15 +3285,10 @@ impl WebChunkRenderSession {
             | GameUiAction::OpenBlockPalette
             | GameUiAction::OpenHelp(_)
             | GameUiAction::CloseHelp(_)
-            | GameUiAction::OpenNewWorld
-            | GameUiAction::OpenJoinRemote
             | GameUiAction::OpenServerSettings(_)
-            | GameUiAction::RerollSeed
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
-            | GameUiAction::BackToTitle
             | GameUiAction::BackToPause
-            | GameUiAction::QuitToTitle
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetServerSimulationCadence(_)

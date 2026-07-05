@@ -2,6 +2,7 @@
 
 pub mod far_lod;
 pub mod flat_client_catalog;
+pub mod flat_client_session;
 pub mod frame_render;
 pub mod host_mode;
 #[cfg(not(target_arch = "wasm32"))]

@@ -10,6 +10,10 @@ use mclone_app_runtime::flat_client_catalog::{
     FlatClientCatalogActionContext, FlatClientCatalogController, FlatClientCatalogEffects,
     FlatClientCatalogRequest,
 };
+use mclone_app_runtime::flat_client_session::{
+    FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
+    flat_client_session_effects_for_action,
+};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
@@ -960,6 +964,48 @@ impl FlatClientDriver {
         self.apply_world_catalog_effects(effects, arm_mouse_lock)
     }
 
+    fn apply_flat_client_session_effects(
+        &mut self,
+        effects: FlatClientSessionEffects,
+        arm_mouse_lock: bool,
+        result: &mut FlatClientUiActionResult,
+    ) {
+        if let Some(seed) = effects.new_world_seed {
+            self.ui.set_new_world_seed(seed);
+        }
+        if let Some(addr) = effects.join_remote_addr {
+            self.ui.set_join_remote_addr(addr);
+        }
+        if effects.clear_inactive_session_status {
+            self.clear_inactive_session_status();
+        }
+        if let Some(request) = effects.session_start {
+            match request {
+                SessionStartRequest::CreateLocalWorld { options } => {
+                    self.request_local_world_start(options.seed, arm_mouse_lock);
+                    result.session_start_queued = true;
+                    result.mouse_lock_requested = Some(false);
+                }
+                SessionStartRequest::JoinRemote { endpoint } => {
+                    self.request_remote_session_start(endpoint.address, arm_mouse_lock);
+                    result.session_start_queued = true;
+                    result.mouse_lock_requested = Some(false);
+                }
+                SessionStartRequest::OpenLocalWorld { .. } | SessionStartRequest::Unknown => {
+                    log::warn!(
+                        "shared flat session policy emitted unsupported desktop start: {request:?}"
+                    );
+                }
+            }
+        }
+        if let Some(host_action) = effects.host_action {
+            result.host_action = Some(match host_action {
+                FlatClientSessionHostAction::QuitToTitle => FlatClientHostAction::QuitToTitle,
+                FlatClientSessionHostAction::Quit => FlatClientHostAction::Quit,
+            });
+        }
+    }
+
     pub(crate) fn request_remote_session_start(
         &mut self,
         remote_addr: String,
@@ -1316,11 +1362,6 @@ impl FlatClientDriver {
                     log::error!("failed to assign debug hotbar slot: {err:#}");
                 }
             }
-            GameUiAction::OpenNewWorld => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                self.clear_inactive_session_status();
-            }
             GameUiAction::OpenWorldCreate => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
@@ -1398,45 +1439,49 @@ impl FlatClientDriver {
                 );
                 self.apply_world_catalog_effects(effects, context.from_pointer_click);
             }
-            GameUiAction::OpenJoinRemote => {
-                let remote_addr = context
+            GameUiAction::OpenNewWorld
+            | GameUiAction::RerollSeed
+            | GameUiAction::OpenJoinRemote
+            | GameUiAction::CreateWorld(_)
+            | GameUiAction::JoinRemote
+            | GameUiAction::QuitToTitle
+            | GameUiAction::Quit
+            | GameUiAction::BackToTitle => {
+                let next_seed = matches!(
+                    action,
+                    GameUiAction::OpenNewWorld | GameUiAction::RerollSeed
+                )
+                .then(|| self.next_new_world_seed());
+                let fallback_remote_addr = context
                     .fallback_remote_addr
-                    .unwrap_or(DEFAULT_JOIN_REMOTE_ADDR)
-                    .to_owned();
-                self.ui.set_join_remote_addr(remote_addr);
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::RerollSeed => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                self.clear_inactive_session_status();
-                log::info!("new-world seed rerolled to {seed}");
-            }
-            GameUiAction::CreateWorld(seed) => {
-                self.request_local_world_start(seed, context.from_pointer_click);
-                result.session_start_queued = true;
-                result.mouse_lock_requested = Some(false);
-                apply_ui_action = false;
-            }
-            GameUiAction::JoinRemote => {
-                self.request_remote_session_start(
-                    self.ui.join_remote_addr().to_owned(),
-                    context.from_pointer_click,
+                    .or(Some(DEFAULT_JOIN_REMOTE_ADDR));
+                let effects = flat_client_session_effects_for_action(
+                    action,
+                    FlatClientSessionActionContext {
+                        next_new_world_seed: next_seed,
+                        current_join_remote_addr: self.ui.join_remote_addr(),
+                        fallback_remote_addr,
+                    },
                 );
-                result.session_start_queued = true;
-                result.mouse_lock_requested = Some(false);
-                apply_ui_action = false;
-            }
-            GameUiAction::QuitToTitle => {
-                result.host_action = Some(FlatClientHostAction::QuitToTitle);
-                apply_ui_action = false;
-            }
-            GameUiAction::Quit => {
-                result.host_action = Some(FlatClientHostAction::Quit);
-                apply_ui_action = false;
-            }
-            GameUiAction::BackToTitle => {
-                self.clear_inactive_session_status();
+                if matches!(action, GameUiAction::RerollSeed) {
+                    if let Some(seed) = effects.new_world_seed {
+                        log::info!("new-world seed rerolled to {seed}");
+                    }
+                }
+                self.apply_flat_client_session_effects(
+                    effects,
+                    context.from_pointer_click,
+                    &mut result,
+                );
+                if matches!(
+                    action,
+                    GameUiAction::CreateWorld(_)
+                        | GameUiAction::JoinRemote
+                        | GameUiAction::QuitToTitle
+                        | GameUiAction::Quit
+                ) {
+                    apply_ui_action = false;
+                }
             }
             GameUiAction::StartWorld
             | GameUiAction::Resume
