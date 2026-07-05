@@ -12,7 +12,9 @@ use mclone_app_runtime::flat_client_catalog::{
 };
 use mclone_app_runtime::flat_client_session::{
     FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
-    flat_client_session_effects_for_action,
+    FlatClientSessionUiEffects, flat_client_failed_start_ui_effects,
+    flat_client_session_effects_for_action, flat_client_session_status_overlay,
+    flat_client_should_clear_inactive_session_status,
 };
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
@@ -783,19 +785,10 @@ impl FlatClientDriver {
         request: &SessionStartRequest,
         show_title_on_failure: bool,
     ) {
-        match request {
-            SessionStartRequest::CreateLocalWorld { options } => {
-                self.ui.set_new_world_seed(options.seed);
-            }
-            SessionStartRequest::OpenLocalWorld { .. } => {}
-            SessionStartRequest::JoinRemote { endpoint } => {
-                self.ui.set_join_remote_addr(endpoint.address.clone());
-            }
-            SessionStartRequest::Unknown => {}
-        }
-        if show_title_on_failure {
-            self.ui.set_screen(Some(GameScreen::Title));
-        }
+        self.apply_flat_client_session_ui_effects(flat_client_failed_start_ui_effects(
+            request,
+            show_title_on_failure,
+        ));
     }
 
     pub(crate) fn apply_quit_to_title_ui(&mut self) {
@@ -803,11 +796,7 @@ impl FlatClientDriver {
     }
 
     pub(crate) fn session_status_overlay(&self) -> StatusOverlay {
-        self.session
-            .status()
-            .map_or_else(StatusOverlay::hidden, |status| {
-                StatusOverlay::new(status.message, status.ok)
-            })
+        flat_client_session_status_overlay(self.session.status())
     }
 
     pub(crate) fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
@@ -1006,6 +995,18 @@ impl FlatClientDriver {
         }
     }
 
+    fn apply_flat_client_session_ui_effects(&mut self, effects: FlatClientSessionUiEffects) {
+        if let Some(seed) = effects.new_world_seed {
+            self.ui.set_new_world_seed(seed);
+        }
+        if let Some(addr) = effects.join_remote_addr {
+            self.ui.set_join_remote_addr(addr);
+        }
+        if let Some(screen) = effects.screen {
+            self.ui.set_screen(Some(screen));
+        }
+    }
+
     pub(crate) fn request_remote_session_start(
         &mut self,
         remote_addr: String,
@@ -1027,7 +1028,7 @@ impl FlatClientDriver {
     }
 
     pub(crate) fn clear_inactive_session_status(&mut self) {
-        if !matches!(self.session.state(), GameSessionState::Active { .. }) {
+        if flat_client_should_clear_inactive_session_status(self.session.state()) {
             self.session.clear();
         }
     }

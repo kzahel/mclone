@@ -34,7 +34,9 @@ and the rule that keeps new features from re-forking.
 > adapter, then added `native:web:catalog-smoke` coverage for the menu flow and
 > delete cleanup. Refreshed again after tactical 141 Slice 4a moved shared
 > flat-client seed/new-world, join, start, back-to-title, and quit action
-> effects into `app-runtime::flat_client_session` for desktop and web adapters.
+> effects into `app-runtime::flat_client_session` for desktop and web adapters;
+> Slice 4b added shared request-to-UI restoration, status overlay projection,
+> and inactive-status clear policy for those adapters.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -170,7 +172,7 @@ use (and should) · — n/a.
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
-| `app-runtime::flat_client_session` (flat session UI action policy) | ✅ (desktop adapter executes shared seed/join/start/quit effects; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects; JS async worker startup remains host-local) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_session`; `cargo test -p mclone-native-client ui_action_routing`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; tactical 141 Slice 4a |
+| `app-runtime::flat_client_session` (flat session UI action policy) | ✅ (desktop adapter executes shared seed/join/start/quit effects plus status/restoration projection; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects plus status/restoration projection; JS async worker startup remains host-local) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_session`; `cargo test -p mclone-native-client ui_action_routing`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; tactical 141 Slice 4b |
 | `app-runtime::flat_client_catalog` (world catalog UI/action policy) | ✅ (desktop adapter executes native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; focused catalog smoke covers create/open/delete) | ✗ | ✗ | `cargo test -p mclone-app-runtime flat_client_catalog`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; tactical 141 Slice 3 |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |

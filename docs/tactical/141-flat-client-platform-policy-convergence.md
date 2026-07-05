@@ -23,7 +23,10 @@ covers menu-driven create/open/delete plus IndexedDB delete cleanup. Slice 4a
 landed on 2026-07-05: `mclone-app-runtime::flat_client_session` now owns the
 shared effect policy for seed/new-world, join-remote, start, back-to-title, and
 quit actions, while desktop and web execute those effects through their
-platform-local startup/runtime adapters.
+platform-local startup/runtime adapters. Slice 4b landed on 2026-07-05:
+request-to-UI restoration, session status overlay projection, and inactive
+status clear policy now also live in `flat_client_session`, with desktop and
+web adapters applying the shared effects to their local UI hosts.
 
 Workstream: documentation cleanup plus native Rust shared architecture. The
 target remains shared implementation, desktop validation first. App crates own
@@ -492,7 +495,7 @@ Results on 2026-07-05:
 
 ### Slice 4: Session Replacement And Startup Policy
 
-Status: first pass landed 2026-07-05.
+Status: first two passes landed 2026-07-05.
 
 Move the remaining shared session action policy out of app-local match arms:
 
@@ -537,9 +540,39 @@ pnpm native:web:catalog-smoke
 pnpm native:web:smoke
 ```
 
+Recorded Slice 4b result:
+
+- Added shared request-to-UI restoration effects for `CreateLocalWorld` seed
+  fields and `JoinRemote` endpoint fields.
+- Added shared failed-start UI effects, including the desktop/offscreen
+  title-screen fallback flag without moving platform-local teardown or startup
+  factories into app-runtime.
+- Added shared session-status overlay projection so desktop and web no longer
+  independently convert `SessionStatus` to `StatusOverlay`.
+- Added shared inactive-status clear policy so `BackToTitle`, `OpenNewWorld`,
+  and `OpenJoinRemote` keep active sessions but clear stale failed/starting
+  status consistently.
+- Updated desktop and web adapters to apply those shared UI/status effects
+  while keeping runtime reset, camera reset, worker shutdown, and native startup
+  pump ownership platform-local.
+
+Validation after Slice 4b:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime flat_client_session
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client ui_action_routing
+pnpm native:web:typecheck
+pnpm native:web:catalog-smoke
+pnpm native:web:smoke
+```
+
+Validation note: the first `pnpm native:web:smoke` run failed in the existing
+shared-topology stress subprobe with `timed out waiting for shared runner pool
+overflow and fallback`; the immediate rerun passed with the same code.
+
 Remaining Slice 4 work:
 
-- move failure-status UI restoration into shared effects;
 - centralize teardown-before-start and quit-to-title state transition policy;
 - centralize loading/startup overlay projection;
 - decide whether `flat_client_session` stays as a helper module or folds into a

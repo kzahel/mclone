@@ -1,5 +1,5 @@
-use crate::session::{RemoteSessionEndpoint, SessionStartRequest};
-use mclone_ui::GameUiAction;
+use crate::session::{GameSessionState, RemoteSessionEndpoint, SessionStartRequest, SessionStatus};
+use mclone_ui::{GameScreen, GameUiAction, StatusOverlay};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FlatClientSessionActionContext<'a> {
@@ -27,6 +27,13 @@ impl FlatClientSessionEffects {
 pub enum FlatClientSessionHostAction {
     QuitToTitle,
     Quit,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FlatClientSessionUiEffects {
+    pub new_world_seed: Option<i64>,
+    pub join_remote_addr: Option<String>,
+    pub screen: Option<GameScreen>,
 }
 
 pub fn flat_client_session_effects_for_action(
@@ -75,9 +82,55 @@ pub fn flat_client_session_effects_for_action(
     }
 }
 
+pub fn flat_client_session_ui_effects_for_request(
+    request: &SessionStartRequest,
+) -> FlatClientSessionUiEffects {
+    match request {
+        SessionStartRequest::CreateLocalWorld { options } => FlatClientSessionUiEffects {
+            new_world_seed: Some(options.seed),
+            ..FlatClientSessionUiEffects::default()
+        },
+        SessionStartRequest::OpenLocalWorld { .. } => FlatClientSessionUiEffects::default(),
+        SessionStartRequest::JoinRemote { endpoint } => FlatClientSessionUiEffects {
+            join_remote_addr: Some(endpoint.address.clone()),
+            ..FlatClientSessionUiEffects::default()
+        },
+        SessionStartRequest::Unknown => FlatClientSessionUiEffects::default(),
+    }
+}
+
+pub fn flat_client_failed_start_ui_effects(
+    request: &SessionStartRequest,
+    show_title_on_failure: bool,
+) -> FlatClientSessionUiEffects {
+    let mut effects = flat_client_session_ui_effects_for_request(request);
+    if show_title_on_failure {
+        effects.screen = Some(GameScreen::Title);
+    }
+    effects
+}
+
+pub fn flat_client_session_status_overlay(status: Option<SessionStatus>) -> StatusOverlay {
+    flat_client_effective_status_overlay(status, StatusOverlay::hidden())
+}
+
+pub fn flat_client_effective_status_overlay(
+    status: Option<SessionStatus>,
+    fallback: StatusOverlay,
+) -> StatusOverlay {
+    status.map_or(fallback, |status| {
+        StatusOverlay::new(status.message, status.ok)
+    })
+}
+
+pub fn flat_client_should_clear_inactive_session_status(state: &GameSessionState) -> bool {
+    !matches!(state, GameSessionState::Active { .. })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::{ActiveSessionDescriptor, SessionFailure, SessionStatus};
 
     fn context() -> FlatClientSessionActionContext<'static> {
         FlatClientSessionActionContext {
@@ -136,5 +189,60 @@ mod tests {
             flat_client_session_effects_for_action(GameUiAction::Quit, context()).host_action,
             Some(FlatClientSessionHostAction::Quit)
         );
+    }
+
+    #[test]
+    fn failed_start_restores_request_fields_and_optional_title_screen() {
+        let effects = flat_client_failed_start_ui_effects(
+            &SessionStartRequest::new_seed_local_world(3456),
+            true,
+        );
+        assert_eq!(effects.new_world_seed, Some(3456));
+        assert_eq!(effects.join_remote_addr, None);
+        assert_eq!(effects.screen, Some(GameScreen::Title));
+
+        let effects = flat_client_failed_start_ui_effects(
+            &SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new("example.test:25565"),
+            },
+            false,
+        );
+        assert_eq!(effects.new_world_seed, None);
+        assert_eq!(
+            effects.join_remote_addr.as_deref(),
+            Some("example.test:25565")
+        );
+        assert_eq!(effects.screen, None);
+    }
+
+    #[test]
+    fn status_overlay_prefers_session_status_over_fallback() {
+        let fallback = StatusOverlay::new("browser status", true);
+        let overlay = flat_client_effective_status_overlay(None, fallback.clone());
+        assert_eq!(overlay, fallback);
+
+        let overlay = flat_client_effective_status_overlay(
+            Some(SessionStatus {
+                message: "Connecting...".to_owned(),
+                ok: true,
+            }),
+            fallback,
+        );
+        assert_eq!(overlay, StatusOverlay::new("Connecting...", true));
+    }
+
+    #[test]
+    fn inactive_status_clear_policy_keeps_active_sessions() {
+        assert!(flat_client_should_clear_inactive_session_status(
+            &GameSessionState::Failed {
+                request: SessionStartRequest::new_seed_local_world(1),
+                error: SessionFailure::new("failed")
+            }
+        ));
+        assert!(!flat_client_should_clear_inactive_session_status(
+            &GameSessionState::Active {
+                session: ActiveSessionDescriptor::new_seed_local_world(1)
+            }
+        ));
     }
 }

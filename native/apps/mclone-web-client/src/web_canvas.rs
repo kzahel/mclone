@@ -13,7 +13,9 @@ use mclone_app_runtime::flat_client_catalog::{
 };
 use mclone_app_runtime::flat_client_session::{
     FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
-    flat_client_session_effects_for_action,
+    FlatClientSessionUiEffects, flat_client_effective_status_overlay,
+    flat_client_failed_start_ui_effects, flat_client_session_effects_for_action,
+    flat_client_session_ui_effects_for_request, flat_client_should_clear_inactive_session_status,
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -3163,7 +3165,7 @@ impl WebChunkRenderSession {
             self.ui.set_join_remote_addr(addr);
         }
         if effects.clear_inactive_session_status
-            && !matches!(self.session.state(), GameSessionState::Active { .. })
+            && flat_client_should_clear_inactive_session_status(self.session.state())
         {
             self.session.clear();
         }
@@ -3176,6 +3178,18 @@ impl WebChunkRenderSession {
                 FlatClientSessionHostAction::QuitToTitle => {}
                 FlatClientSessionHostAction::Quit => self.runtime.request_shutdown(),
             }
+        }
+    }
+
+    fn apply_flat_client_session_ui_effects(&mut self, effects: FlatClientSessionUiEffects) {
+        if let Some(seed) = effects.new_world_seed {
+            self.ui.set_new_world_seed(seed);
+        }
+        if let Some(addr) = effects.join_remote_addr {
+            self.ui.set_join_remote_addr(addr);
+        }
+        if let Some(screen) = effects.screen {
+            self.ui.set_screen(Some(screen));
         }
     }
 
@@ -3751,10 +3765,7 @@ impl WebChunkRenderSession {
     }
 
     fn effective_status_overlay(&self) -> StatusOverlay {
-        self.session.status().map_or_else(
-            || self.status_overlay.clone(),
-            |status| StatusOverlay::new(status.message, status.ok),
-        )
+        flat_client_effective_status_overlay(self.session.status(), self.status_overlay.clone())
     }
 
     fn resolved_flat_input_for_hud(&self) -> mclone_input::ResolvedFlatInput {
@@ -3802,21 +3813,17 @@ impl WebChunkRenderSession {
         web_sys::console::error_1(
             &format!("failed to start web session {request:?}: {error}").into(),
         );
+        self.apply_flat_client_session_ui_effects(flat_client_failed_start_ui_effects(
+            &request, false,
+        ));
         self.session
             .fail_start(SessionFailure::new(request.default_failure_message()));
     }
 
     fn reset_runtime_view_state(&mut self, request: &SessionStartRequest) {
-        match request {
-            SessionStartRequest::CreateLocalWorld { options } => {
-                self.ui.set_new_world_seed(options.seed);
-            }
-            SessionStartRequest::OpenLocalWorld { .. } => {}
-            SessionStartRequest::JoinRemote { endpoint } => {
-                self.ui.set_join_remote_addr(endpoint.address.clone());
-            }
-            SessionStartRequest::Unknown => {}
-        }
+        self.apply_flat_client_session_ui_effects(flat_client_session_ui_effects_for_request(
+            request,
+        ));
         self.status_overlay = StatusOverlay::hidden();
         let movement_speed_multiplier = self.camera.movement_speed_multiplier();
         self.camera = EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER);
