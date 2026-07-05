@@ -1276,6 +1276,15 @@ mod tests {
         expected: String,
     }
 
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct SurfaceTopSignal {
+        min_top_y: i32,
+        max_top_y: i32,
+        columns_above_80: usize,
+        columns_above_100: usize,
+        badlands_top_columns: usize,
+    }
+
     #[derive(Clone, Debug)]
     struct RepeatingPatternBiomeSource {
         width: usize,
@@ -1346,6 +1355,13 @@ mod tests {
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks--320-99-surface-only.json"
         ))
         .expect("valid badlands surface chunk oracle fixture")
+    }
+
+    fn eroded_badlands_pillar_surface_fixture() -> TerrainChunkOracleFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-868-chunks-8--6-surface-only.json"
+        ))
+        .expect("valid eroded badlands pillar surface chunk oracle fixture")
     }
 
     fn full_chunk_fixture() -> FullChunkOracleFixture {
@@ -1754,6 +1770,53 @@ mod tests {
         }
     }
 
+    fn surface_top_signal(oracle: &TerrainChunkOracleFixture) -> SurfaceTopSignal {
+        assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
+        let mut signal = SurfaceTopSignal {
+            min_top_y: i32::MAX,
+            ..SurfaceTopSignal::default()
+        };
+        for local_z in 0..GeneratedChunk::WIDTH {
+            for local_x in 0..GeneratedChunk::WIDTH {
+                for y in (oracle.min_y..oracle.min_y + oracle.height).rev() {
+                    let block_name = surface_fixture_block_name_at(oracle, local_x, y, local_z);
+                    if block_name == "minecraft:air" {
+                        continue;
+                    }
+
+                    signal.min_top_y = signal.min_top_y.min(y);
+                    signal.max_top_y = signal.max_top_y.max(y);
+                    if y > 80 {
+                        signal.columns_above_80 += 1;
+                    }
+                    if y > 100 {
+                        signal.columns_above_100 += 1;
+                    }
+                    if is_badlands_surface_block_name(block_name) {
+                        signal.badlands_top_columns += 1;
+                    }
+                    break;
+                }
+            }
+        }
+        signal
+    }
+
+    fn surface_fixture_block_name_at(
+        oracle: &TerrainChunkOracleFixture,
+        local_x: i32,
+        y: i32,
+        local_z: i32,
+    ) -> &str {
+        let index = ((y - oracle.min_y) as usize) << 8 | (local_z as usize) << 4 | local_x as usize;
+        let palette_index = oracle.blocks[index] as usize;
+        &oracle.palette[palette_index]
+    }
+
+    fn is_badlands_surface_block_name(block_name: &str) -> bool {
+        block_name == "minecraft:red_sand" || block_name.ends_with("terracotta")
+    }
+
     fn compare_generated_chunk_to_full_fixture(
         actual: &GeneratedChunk,
         expected: &FullChunkEntryFixture,
@@ -1873,7 +1936,6 @@ mod tests {
             oracle.generator_class,
             "net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator"
         );
-        assert_eq!(oracle.seed, "12345");
         assert_eq!(oracle.min_y, 0);
         assert_eq!(oracle.height, 256);
         assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
@@ -2070,6 +2132,19 @@ mod tests {
         let oracle = badlands_surface_fixture();
         assert_eq!(oracle.chunk_x, -320);
         assert_eq!(oracle.chunk_z, 99);
+        assert_surface_chunk_matches_java_oracle(oracle);
+    }
+
+    #[test]
+    fn build_eroded_badlands_pillar_surface_and_bedrock_matches_java_oracle() {
+        let oracle = eroded_badlands_pillar_surface_fixture();
+        assert_eq!(oracle.seed, "868");
+        assert_eq!(oracle.chunk_x, 8);
+        assert_eq!(oracle.chunk_z, -6);
+        let signal = surface_top_signal(&oracle);
+        assert_eq!(signal.max_top_y, 122);
+        assert!(signal.columns_above_100 >= 70, "{signal:?}");
+        assert_eq!(signal.badlands_top_columns, 256);
         assert_surface_chunk_matches_java_oracle(oracle);
     }
 

@@ -523,13 +523,14 @@ fn apply_badlands_surface(
     let mut top_placed = false;
     let mut stone_depth = 0;
 
-    for y in (min_surface_level..=height.max(pillar_height as i32 + 1)).rev() {
+    let pillar_height_int = pillar_height as i32;
+    for y in (min_surface_level..=height.max(pillar_height_int + 1)).rev() {
         if !eroded && stone_depth >= MAX_CLAY_DEPTH {
             break;
         }
 
         let mut block_id = get_block_at_y_or_air(chunk, local_x, y, local_z);
-        if eroded && block_id == AIR && (y as f64) < pillar_height {
+        if eroded && block_id == AIR && y < pillar_height_int {
             set_block_at_y_if_inside(chunk, local_x, y, local_z, STONE);
             block_id = STONE;
         }
