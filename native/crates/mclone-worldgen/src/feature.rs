@@ -376,6 +376,37 @@ mod tests {
             .count()
     }
 
+    fn has_two_by_two_log_square_at(
+        chunk: &MutableChunkBlockBuffer,
+        base: BlockPos,
+        log: RawBlockId,
+    ) -> bool {
+        chunk.get_block_at_y(base.x, base.y, base.z) == log
+            && chunk.get_block_at_y(base.x + 1, base.y, base.z) == log
+            && chunk.get_block_at_y(base.x, base.y, base.z + 1) == log
+            && chunk.get_block_at_y(base.x + 1, base.y, base.z + 1) == log
+    }
+
+    fn count_logs_outside_two_by_two_column(
+        chunk: &MutableChunkBlockBuffer,
+        base: BlockPos,
+        log: RawBlockId,
+    ) -> usize {
+        let mut count = 0;
+        for y in chunk.min_y..chunk.min_y + chunk.height {
+            for z in 0..CHUNK_WIDTH {
+                for x in 0..CHUNK_WIDTH {
+                    let in_trunk_column =
+                        (base.x..=base.x + 1).contains(&x) && (base.z..=base.z + 1).contains(&z);
+                    if !in_trunk_column && chunk.get_block_at_y(x, y, z) == log {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
+    }
+
     struct BooleanRandom {
         value: bool,
     }
@@ -1222,6 +1253,32 @@ mod tests {
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
         assert!(count_blocks(&chunk, JUNGLE_LOG) > 0);
         assert!(count_blocks(&chunk, JUNGLE_LEAVES) > 0);
+    }
+
+    #[test]
+    fn mega_jungle_tree_uses_java_two_by_two_trunk_branches_and_foliage() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(6);
+        let config = TreeConfiguration::mega_jungle();
+        let feature = ConfiguredFeature::tree(config);
+        let base = BlockPos::new(6, 3, 6);
+
+        assert_eq!(
+            config.trunk_placer,
+            TrunkPlacerConfiguration::mega_jungle(10, 2, 19)
+        );
+        assert_eq!(
+            config.foliage_placer,
+            FoliagePlacerConfiguration::MegaJungle {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(0),
+                height: 2,
+            }
+        );
+        assert!(feature.place(&mut chunk, &mut random, base));
+        assert!(has_two_by_two_log_square_at(&chunk, base, JUNGLE_LOG));
+        assert!(count_logs_outside_two_by_two_column(&chunk, base, JUNGLE_LOG) >= 5);
+        assert!(count_blocks(&chunk, JUNGLE_LEAVES) >= 120);
     }
 
     #[test]

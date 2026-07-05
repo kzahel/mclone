@@ -1015,9 +1015,9 @@ mod tests {
             expectation: LowVisibilityFeatureExpectation::VisibleSmallMushrooms { min_count: 2 },
         },
         LowVisibilityFeatureCase {
-            seed: 71,
-            chunk_x: 0,
-            chunk_z: 0,
+            seed: 61,
+            chunk_x: 1,
+            chunk_z: 2,
             biome_key: "minecraft:jungle",
             expectation: LowVisibilityFeatureExpectation::JungleCocoaVines {
                 min_cocoa: 1,

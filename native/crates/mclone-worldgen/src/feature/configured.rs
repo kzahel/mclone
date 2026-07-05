@@ -400,6 +400,7 @@ pub enum TrunkPlacerConfiguration {
     Forking(StraightTrunkPlacerConfiguration),
     DarkOak(StraightTrunkPlacerConfiguration),
     Giant(StraightTrunkPlacerConfiguration),
+    MegaJungle(StraightTrunkPlacerConfiguration),
 }
 
 impl TrunkPlacerConfiguration {
@@ -443,13 +444,22 @@ impl TrunkPlacerConfiguration {
         ))
     }
 
+    pub const fn mega_jungle(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
+        Self::MegaJungle(StraightTrunkPlacerConfiguration::new(
+            base_height,
+            height_rand_a,
+            height_rand_b,
+        ))
+    }
+
     pub(super) fn tree_height(self, random: &mut impl RandomSource) -> i32 {
         match self {
             Self::Straight(config)
             | Self::Fancy(config)
             | Self::Forking(config)
             | Self::DarkOak(config)
-            | Self::Giant(config) => config.tree_height(random),
+            | Self::Giant(config)
+            | Self::MegaJungle(config) => config.tree_height(random),
         }
     }
 }
@@ -481,6 +491,11 @@ pub enum FoliagePlacerConfiguration {
         offset: IntProvider,
         crown_height: IntProvider,
     },
+    MegaJungle {
+        radius: IntProvider,
+        offset: IntProvider,
+        height: i32,
+    },
     Acacia {
         radius: IntProvider,
         offset: IntProvider,
@@ -504,6 +519,7 @@ impl FoliagePlacerConfiguration {
             Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
             Self::Pine { height, .. } => height.sample(random),
             Self::MegaPine { crown_height, .. } => crown_height.sample(random),
+            Self::MegaJungle { height, .. } => height,
             Self::Acacia { .. } => 0,
             Self::DarkOak { .. } => 4,
         }
@@ -517,6 +533,7 @@ impl FoliagePlacerConfiguration {
                 radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
             }
             Self::MegaPine { radius, .. } => radius.sample(random),
+            Self::MegaJungle { radius, .. } => radius.sample(random),
             Self::Acacia { radius, .. } => radius.sample(random),
             Self::DarkOak { radius, .. } => radius.sample(random),
         }
@@ -529,6 +546,7 @@ impl FoliagePlacerConfiguration {
             | Self::Spruce { offset, .. }
             | Self::Pine { offset, .. }
             | Self::MegaPine { offset, .. }
+            | Self::MegaJungle { offset, .. }
             | Self::Acacia { offset, .. }
             | Self::DarkOak { offset, .. } => offset.sample(random),
         }
@@ -811,11 +829,11 @@ impl TreeConfiguration {
         Self::new(
             JUNGLE_LOG,
             JUNGLE_LEAVES,
-            TrunkPlacerConfiguration::straight(10, 2, 19),
-            FoliagePlacerConfiguration::Blob {
+            TrunkPlacerConfiguration::mega_jungle(10, 2, 19),
+            FoliagePlacerConfiguration::MegaJungle {
                 radius: IntProvider::constant(2),
                 offset: IntProvider::constant(0),
-                height: 3,
+                height: 2,
             },
             TwoLayersFeatureSize::new(1, 1, 2),
         )

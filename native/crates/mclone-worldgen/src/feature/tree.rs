@@ -232,6 +232,9 @@ fn place_trunk<W: FeatureWorld>(
         TrunkPlacerConfiguration::Giant(_) => {
             place_giant_trunk(world, random, base, height, config, placement)
         }
+        TrunkPlacerConfiguration::MegaJungle(_) => {
+            place_mega_jungle_trunk(world, random, base, height, config, placement)
+        }
     }
 }
 
@@ -600,6 +603,49 @@ fn place_giant_trunk<W: FeatureWorld>(
     )]
 }
 
+fn place_mega_jungle_trunk<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    base: BlockPos,
+    height: i32,
+    config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
+) -> Vec<FoliageAttachment> {
+    let mut attachments = place_giant_trunk(world, random, base, height, config, placement);
+
+    let mut branch_y = height - 2 - random.next_int_bound(4);
+    while branch_y > height / 2 {
+        let angle = random.next_float() * std::f32::consts::PI * 2.0;
+        let mut branch_x = 0;
+        let mut branch_z = 0;
+
+        for branch_step in 0..5 {
+            branch_x = (1.5 + angle.cos() * branch_step as f32) as i32;
+            branch_z = (1.5 + angle.sin() * branch_step as f32) as i32;
+            place_log(
+                world,
+                random,
+                BlockPos::new(
+                    base.x + branch_x,
+                    base.y + branch_y - 3 + branch_step / 2,
+                    base.z + branch_z,
+                ),
+                config,
+                placement,
+            );
+        }
+
+        attachments.push(FoliageAttachment::new(
+            BlockPos::new(base.x + branch_x, base.y + branch_y, base.z + branch_z),
+            -2,
+            false,
+        ));
+        branch_y -= 2 + random.next_int_bound(4);
+    }
+
+    attachments
+}
+
 fn create_foliage<W: FeatureWorld>(
     world: &mut W,
     random: &mut impl RandomSource,
@@ -679,6 +725,19 @@ fn create_foliage<W: FeatureWorld>(
                     world, random, config, attachment, radius, y_offset, placement,
                 );
                 previous_radius = base_radius;
+            }
+        }
+        FoliagePlacerConfiguration::MegaJungle { .. } => {
+            let leaf_height = if attachment.double_trunk {
+                foliage_height
+            } else {
+                1 + random.next_int_bound(2)
+            };
+            for y_offset in ((offset - leaf_height)..=offset).rev() {
+                let radius = foliage_radius + attachment.radius_offset + 1 - y_offset;
+                place_leaves_row(
+                    world, random, config, attachment, radius, y_offset, placement,
+                );
             }
         }
         FoliagePlacerConfiguration::Acacia { .. } => {
@@ -825,6 +884,13 @@ fn place_leaves_row<W: FeatureWorld>(
                         continue;
                     }
                 }
+                FoliagePlacerConfiguration::MegaJungle { .. } => {
+                    let (abs_x, abs_z) =
+                        signed_leaf_offsets_abs(x_offset, z_offset, attachment.double_trunk);
+                    if should_skip_mega_jungle_leaf(abs_x, abs_z, radius) {
+                        continue;
+                    }
+                }
                 FoliagePlacerConfiguration::Acacia { .. } => {
                     if should_skip_acacia_leaf(
                         x_offset,
@@ -879,6 +945,10 @@ fn should_skip_conifer_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
 }
 
 fn should_skip_mega_pine_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
+    abs_x + abs_z >= 7 || abs_x * abs_x + abs_z * abs_z > radius * radius
+}
+
+fn should_skip_mega_jungle_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
     abs_x + abs_z >= 7 || abs_x * abs_x + abs_z * abs_z > radius * radius
 }
 
