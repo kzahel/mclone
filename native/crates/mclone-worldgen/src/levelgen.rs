@@ -1172,6 +1172,13 @@ mod tests {
             expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
         },
         LowVisibilityFeatureCase {
+            seed: 2805,
+            chunk_x: 14,
+            chunk_z: 6,
+            biome_key: "minecraft:snowy_beach",
+            expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
+        },
+        LowVisibilityFeatureCase {
             seed: 3407,
             chunk_x: 7,
             chunk_z: -2,
@@ -1200,6 +1207,13 @@ mod tests {
             expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
         },
         LowVisibilityFeatureCase {
+            seed: 5012,
+            chunk_x: 13,
+            chunk_z: -10,
+            biome_key: "minecraft:desert_lakes",
+            expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
+        },
+        LowVisibilityFeatureCase {
             seed: 2336,
             chunk_x: -5,
             chunk_z: -7,
@@ -1218,6 +1232,27 @@ mod tests {
             chunk_x: -5,
             chunk_z: 6,
             biome_key: "minecraft:badlands_plateau",
+            expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 85_720,
+            chunk_x: 11,
+            chunk_z: 5,
+            biome_key: "minecraft:eroded_badlands",
+            expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 13_518,
+            chunk_x: 10,
+            chunk_z: -3,
+            biome_key: "minecraft:modified_wooded_badlands_plateau",
+            expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
+        },
+        LowVisibilityFeatureCase {
+            seed: 168_856,
+            chunk_x: 4,
+            chunk_z: 10,
+            biome_key: "minecraft:modified_badlands_plateau",
             expectation: LowVisibilityFeatureExpectation::VisiblePumpkins { min_count: 1 },
         },
         LowVisibilityFeatureCase {

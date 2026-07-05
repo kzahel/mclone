@@ -32,7 +32,8 @@ survival/light/substrate gating, and deterministic low-visibility fixtures for
 plains/taiga/mushroom-field small mushrooms plus savanna/sunflower-plains
 exposed default spring water/lava placements, visible pumpkins on grass across
 swamp/stone-shore, river/beach, desert/badlands, swamp-hills, and
-sunflower-plains fixture rows, giant-taiga forest-rock mossy boulders, plus Java-shaped jungle-family `PATCH_MELON` / `VINES`
+sunflower-plains fixture rows including sparse snowy-beach/desert-lakes/modified-badlands
+boundary cases, giant-taiga forest-rock mossy boulders, plus Java-shaped jungle-family `PATCH_MELON` / `VINES`
 table slots, directional vine state/rendering, jungle tree cocoa, and
 normal/mega jungle tree trunk/leaf vine decorators, mega-jungle 2x2
 trunk/branch/foliage placer shape, Java-shaped jungle-bush foliage rows, plus
@@ -175,7 +176,7 @@ notes.
 | 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface and lower-density jungle log/leaves tree family checked; normal jungle cocoa/directional-vine decorator path and jungle-bush foliage rows wired; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact low-density tree-count gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 24 | `minecraft:deep_ocean` | ocean-default | deep water checked; seagrass/kelp water plants checked | seed `4`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 25 | `minecraft:stone_shore` | mountains | stone shore plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `74739` chunk `(3,5)`; steep coast/structure-context gap | seed `74739`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired, visible-pumpkin gap | seed `5006`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `2805` chunk `(14,6)` | seed `5006`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 27 | `minecraft:birch_forest` | birch | birch tint/grass surface and birch log/leaves tree family checked; normal mushroom, default extra, and spring table slots wired | seed `10`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 28 | `minecraft:birch_forest_hills` | birch | birch hill surface/tint and birch log/leaves tree family checked; normal mushroom, default extra, and spring table slots wired | seed `30`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier, dark oak canopy, and huge mushroom family checked; forest-flower vegetation, glow lichen, count-2 forest grass, normal mushroom, default extra, and spring table slots wired | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -197,7 +198,7 @@ notes.
 | 49 | `minecraft:deep_cold_ocean` | ocean-cold | deep cold water, seagrass/kelp water plants checked | seed `13`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 50 | `minecraft:deep_frozen_ocean` | ocean-frozen-deep | deep frozen water/ice plus packed/blue iceberg and blue-ice spread coverage checked; monuments/structures/exact iceberg gap | seed `1679`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 129 | `minecraft:sunflower_plains` | plains | plains tint/surface and sunflower patches checked; Java-order sugar-cane, normal mushroom, pumpkin, and spring table slots wired; exposed default spring water/lava fixture at seed `43` chunk `(-1,1)`; visible pumpkin fixture at seed `25` chunk `(-8,-2)` | seed `43`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 130 | `minecraft:desert_lakes` | desert | desert surface plus dead bush and cactus/sugar-cane family checked; `PATCH_PUMPKIN` and spring table slots wired but visible pumpkin remains grass-survival/boundary gap; lake/fossil gap | seed `98`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 130 | `minecraft:desert_lakes` | desert | desert surface plus dead bush and cactus/sugar-cane family checked; `PATCH_PUMPKIN` visible pumpkin fixture at seed `5012` chunk `(13,-10)`; spring table slots wired; lake/fossil gap | seed `98`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 131 | `minecraft:gravelly_mountains` | mountains | gravelly mountain surface plus sparse oak/spruce tree family checked; normal mushroom, default extra, and spring table slots wired; emerald/infested-stone gap | seed `250`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 132 | `minecraft:flower_forest` | forest | forest grass/tint, dense small flowers, and common tall flowers checked; Java default grass, normal mushroom, default extra, and spring table slots wired | seed `135`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass plus spruce/fern and sweet berry bushes checked; taiga/normal mushroom, default extra, and spring table slots wired | seed `6126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -214,9 +215,9 @@ notes.
 | 162 | `minecraft:modified_gravelly_mountains` | mountains | modified gravelly mountain surface plus sparse oak/spruce tree family checked; normal mushroom, default extra, and spring table slots wired; emerald/infested-stone gap | seed `1831`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface and acacia tree family checked; default flowers, count-5 shattered grass, normal mushroom, default extra, and spring table slots wired | seed `68`, chunk `(-6,0)` | `[x] B [x] T [x] S [x] F` |
 | 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau surface and acacia tree family checked; default flowers, count-5 shattered grass, normal mushroom, default extra, and spring table slots wired | seed `153`, chunk `(-8,-2)` | `[x] B [x] T [x] S [x] F` |
-| 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface plus exact Java tall-pillar surface oracle at chunk `(8,-6)`; Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `868`, chunk `(7,-8)`; pillar oracle chunk `(8,-6)` | `[x] B [x] T [x] S [x] F` |
-| 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | modified wooded plateau surface plus Java `TREES_BADLANDS` oak, `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `12115`, chunk `(0,-1)` | `[x] B [x] T [x] S [x] F` |
-| 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau plus Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin remains grass-survival/boundary gap | seed `1150`, chunk `(-7,1)` | `[x] B [x] T [x] S [x] F` |
+| 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface plus exact Java tall-pillar surface oracle at chunk `(8,-6)`; Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `85720` chunk `(11,5)` | seed `868`, chunk `(7,-8)`; pillar oracle chunk `(8,-6)` | `[x] B [x] T [x] S [x] F` |
+| 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | modified wooded plateau surface plus Java `TREES_BADLANDS` oak, `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `13518` chunk `(10,-3)` | seed `12115`, chunk `(0,-1)` | `[x] B [x] T [x] S [x] F` |
+| 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau plus Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `168856` chunk `(4,10)` | seed `1150`, chunk `(-7,1)` | `[x] B [x] T [x] S [x] F` |
 | 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, mega-jungle 2x2 trunk/branch/foliage, jungle-bush foliage rows, and vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact tree-count gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, mega-jungle 2x2 trunk/branch/foliage, jungle-bush foliage rows, and vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact tree-count gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 
@@ -385,9 +386,12 @@ Landed:
   sunflower-plains seed `25` chunk `(-8,-2)`, desert seed `327` chunk
   `(-6,6)`, desert-hills seed `2768` chunk `(-5,-7)`, badlands seed `2336`
   chunk `(-5,-7)`, wooded-badlands-plateau seed `1248` chunk `(-6,8)`, and
-  badlands-plateau seed `653` chunk `(-5,6)` require visible pumpkins on
-  grass; giant-tree-taiga seed `132` chunk `(0,0)` requires visible mossy
-  cobblestone from Java `FOREST_ROCK` block blobs.
+  badlands-plateau seed `653` chunk `(-5,6)`, snowy-beach seed `2805` chunk
+  `(14,6)`, desert-lakes seed `5012` chunk `(13,-10)`, eroded-badlands seed
+  `85720` chunk `(11,5)`, modified-wooded-badlands-plateau seed `13518`
+  chunk `(10,-3)`, and modified-badlands-plateau seed `168856` chunk `(4,10)`
+  require visible pumpkins on grass; giant-tree-taiga seed `132` chunk `(0,0)`
+  requires visible mossy cobblestone from Java `FOREST_ROCK` block blobs.
 - `mclone-worldgen::levelgen::tests::build_eroded_badlands_pillar_surface_and_bedrock_matches_java_oracle`
   pins the Java `ErodedBadlandsSurfaceBuilder` pillar path, including its
   `(int)pillarHeight` fill cutoff, with a tall-pillar surface fixture: seed
@@ -402,10 +406,10 @@ Documented gaps from this slice:
   builders and still has high-signal sugar-cane coverage for
   desert/badlands/swamp plus river/frozen-river/beach/shore rows. Visible
   pumpkin fixtures have landed for swamp, stone shore, river, frozen river,
-  beach, swamp hills, sunflower plains, desert, desert hills, base badlands,
-  wooded badlands plateau, and badlands plateau. Snowy beach, desert lakes,
+  beach, snowy beach, swamp hills, sunflower plains, desert, desert hills,
+  desert lakes, base badlands, wooded badlands plateau, badlands plateau,
   eroded badlands, modified wooded badlands plateau, and modified badlands
-  plateau remain sparse grass-boundary fixture work because the vanilla patch
+  plateau. These fixtures are grass-boundary checks because the vanilla patch
   survives on grass blocks, so interior sand/terracotta palette rows usually do
   not emit pumpkin blocks.
 - Java default springs now have table-slot coverage for the current land,
@@ -468,9 +472,8 @@ Documented gaps from this slice:
 - Java beach, snowy beach, and stone shore now have deterministic default
   sugar-cane extra coverage, plus the shared default flower/grass, normal
   mushroom, and spring table slots. Beach and stone shore also have visible
-  pumpkin fixtures. Exact parity is still incomplete: snowy-beach visible
-  pumpkin fixture coverage, exact normal mushroom visibility/counts, full
-  light-engine parity,
+  pumpkin fixtures. Exact parity is still incomplete: exact normal mushroom
+  visibility/counts, full light-engine parity,
   buried treasure, shipwrecks, mineshafts, steep shore/coast boundaries, and
   exact decorated mismatch buckets remain later `103`, structure, or boundary
   work.
@@ -516,17 +519,16 @@ Documented gaps from this slice:
   cover non-wooded badlands dead-bush plus cactus/sugar-cane visibility and
   wooded badlands oak plus badlands-extra visibility across the base, plateau,
   eroded, and modified variants. Base badlands, wooded badlands plateau, and
-  badlands plateau now also have visible pumpkin fixtures. Eroded badlands now
-  also has an exact surface-stage Java oracle for tall pillar columns. Exact
-  parity is still incomplete: mineshaft/structure context, visible pumpkin
-  fixtures for eroded/modified badlands variants, and exact decorated mismatch
-  buckets remain later `103` work.
+  badlands plateau, eroded badlands, modified wooded badlands plateau, and
+  modified badlands plateau now also have visible pumpkin fixtures. Eroded
+  badlands now also has an exact surface-stage Java oracle for tall pillar
+  columns. Exact parity is still incomplete: mineshaft/structure context and
+  exact decorated mismatch buckets remain later `103` work.
 - Java desert rows now have high-signal dead-bush plus cactus/sugar-cane family
   coverage across desert, desert hills, and desert lakes. Desert and desert
-  hills now also have visible pumpkin fixtures. Exact parity is still
-  incomplete: desert-lakes visible pumpkin/grass-boundary placement, desert
-  wells, fossils/lake behavior, villages/outposts/pyramids, and exact decorated
-  mismatch buckets remain later `103` work.
+  hills and desert lakes now also have visible pumpkin fixtures. Exact parity is
+  still incomplete: desert wells, fossils/lake behavior, villages/outposts/pyramids,
+  and exact decorated mismatch buckets remain later `103` work.
 - Java giant taiga now has high-signal mega spruce / mega pine tree coverage,
   including the giant 2x2 trunk, mega-pine foliage family, podzol
   alter-ground, giant tree vs giant spruce selector weights, counted
@@ -585,9 +587,8 @@ slice:
    them with `103` exact decorated parity because they are usually non-visible
    in current palette fixtures.
 2. Add row-specific visible fixtures for already-wired low-visibility slots:
-   the remaining sparse grass-boundary pumpkin rows (`snowy_beach`,
-   `desert_lakes`, `eroded_badlands`, `modified_wooded_badlands_plateau`,
-   `modified_badlands_plateau`) and remaining small-mushroom rows beyond the
-   initial plains/taiga/mushroom-field fixtures.
+   remaining small-mushroom rows beyond the initial plains/taiga/mushroom-field
+   fixtures, with mushroom-field-shore/default-extra visibility left as
+   broader `103` exact-decorated follow-up if it needs pumpkin coverage too.
 3. Pick one missing high-signal family outside the broad table slots: exact
    jungle tree selector/count visibility buckets if staying in jungle rows.
