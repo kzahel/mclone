@@ -52,7 +52,11 @@ features from re-forking.
 > Slice 6 made flat Android consume the facade with transient create-only
 > catalog capabilities and Slice 7 routed desktop XR / Android XR persistent
 > catalog list/create/open/delete through the shared controller, using native
-> and app-private storage adapters respectively.
+> and app-private storage adapters respectively. Refreshed again after closeout
+> review found the XR underwater/screen-effect cells were stale: desktop XR and
+> Android XR both use the shared `mclone-xr-scene` multiview underwater path,
+> and user device validation says it works pretty well; flat Android and
+> web/WASM still need app-lane wiring.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -125,7 +129,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
 | Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
 | Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Underwater camera FX / screen effects | ✅ | ✅ | ✗ (XR treatment TBD) | ✗ (wiring pending) | ✗ (XR treatment TBD) | ✗ (inline render fork) |
+| Underwater camera FX / screen effects | ✅ | ✅ | ✅ (multiview path + user device validation) | ✗ (wiring pending) | ✅ (multiview path + user device validation) | ✗ (inline render fork) |
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ◐ (debug/UI screenshots; no real HUD host) | ✗ | ✗ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ◐ (screenshot scenarios; no real input host) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
@@ -160,11 +164,12 @@ Reading the matrix:
   shared touch player camera/movement path, but still lacks interaction,
   actors, HUD/hotbar, underwater FX wiring, and an in-app connect flow.
 - **underwater camera effects** are not desktop-only by architecture. The shared
-  renderer/app-runtime path exists, but only the desktop native app, current
-  offscreen/headless screenshots, and perf paths compute and pass the
-  camera-water overlay/fog. Flat Android, web, and XR still need app-lane
-  wiring; XR may need a stereo-comfort-specific treatment instead of copying the
-  flat screen overlay verbatim.
+  renderer/app-runtime path exists, desktop native and current
+  offscreen/headless screenshots compute and pass the camera-water overlay/fog,
+  and `mclone-xr-scene` now computes per-view/midpoint underwater overlays and
+  renders the effect through the stereo/multiview path for desktop XR and
+  Android XR. User device validation says the XR treatment works pretty well.
+  Flat Android and web still need app-lane wiring.
 - **basic audio** exists through `mclone-audio` on native desktop, desktop XR,
   flat Android, and Android XR. It is still a foundation slice: landing sounds
   only, no web audio yet, no automated audible validation, and no step/break/
