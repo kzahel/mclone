@@ -20,6 +20,7 @@ mod perf_metrics;
 #[cfg(target_os = "android")]
 mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
+    use std::path::PathBuf;
     use std::sync::Once;
     use std::thread;
     use std::time::{Duration, Instant};
@@ -186,6 +187,19 @@ mod android {
             "Android XR {ANDROID_ASSET_ROOT_ENV} configured from app data path: {}",
             path.display()
         );
+    }
+
+    fn android_xr_world_root(app: &AndroidApp) -> Option<PathBuf> {
+        let root = app
+            .internal_data_path()
+            .or_else(|| app.external_data_path())
+            .map(|path| path.join("worlds"));
+        if let Some(root) = &root {
+            log::info!("Android XR world catalog root: {}", root.display());
+        } else {
+            log::warn!("Android XR could not resolve an app data path for persistent worlds");
+        }
+        root
     }
 
     struct AndroidXrRuntimeAssets {
@@ -797,6 +811,8 @@ mod android {
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
             skip_actors: false,
+            world_root: None,
+            world_dir: None,
         }
     }
 
@@ -1005,14 +1021,17 @@ mod android {
                 log::info!("Android XR startup view pose from {XR_VIEW_POSE_PROPERTY}: <default>");
             }
         }
-        let startup_options = match parse_android_xr_startup_options(startup_argv.as_deref()) {
+        let mut startup_options = match parse_android_xr_startup_options(startup_argv.as_deref()) {
             Ok(options) => options,
             Err(error) => {
                 report_android_xr_failure(&app, &error);
                 return;
             }
         };
-        let scene_options = startup_options.scene;
+        if startup_options.scene.world_root.is_none() {
+            startup_options.scene.world_root = android_xr_world_root(&app);
+        }
+        let scene_options = startup_options.scene.clone();
         let startup_view_pose =
             match parse_android_xr_startup_view_pose(startup_view_pose_property.as_deref()) {
                 Ok(value) => value,
@@ -1536,7 +1555,7 @@ mod android {
                 &graphics.queue,
                 runtime_assets,
                 startup_view_pose,
-                scene_options,
+                scene_options.clone(),
                 render_options,
                 remote_addr,
             )
@@ -1560,7 +1579,7 @@ mod android {
                 &graphics.queue,
                 runtime_assets,
                 startup_view_pose,
-                scene_options,
+                scene_options.clone(),
                 render_options,
                 remote_addr,
             )
@@ -1618,7 +1637,7 @@ mod android {
                 &graphics.queue,
                 runtime_assets,
                 startup_view_pose,
-                scene_options,
+                scene_options.clone(),
                 render_options,
                 remote_addr,
             )
@@ -1718,7 +1737,7 @@ mod android {
             &graphics.queue,
             runtime_assets,
             startup_view_pose,
-            scene_options,
+            scene_options.clone(),
             render_options,
             remote_addr,
         )
@@ -1803,7 +1822,7 @@ mod android {
             let session = AndroidXrRemoteServerSession::connect(remote_addr.as_str())?;
             let runtime = AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
                 RemoteSessionEndpoint::new(remote_addr.clone()),
-                android_xr_host_options(scene_options),
+                android_xr_host_options(&scene_options),
                 session,
                 mesh_assets,
             )
@@ -1816,7 +1835,7 @@ mod android {
                 device,
                 queue,
                 XR_COLOR_FORMAT,
-                scene_options,
+                scene_options.clone(),
                 runtime,
                 render_options,
                 actor_assets.atlas.clone(),
@@ -1862,19 +1881,23 @@ mod android {
                 let mut scene_options = scene_options;
                 scene_options.seed = options.seed;
                 AndroidXrSceneRuntime::local_with_mesh_assets(
-                    android_xr_local_options(scene_options),
+                    android_xr_local_options(&scene_options),
                     mesh_assets,
                 )
                 .context("failed to initialize Android XR replacement local runtime")
             }
             SessionStartRequest::OpenLocalWorld { .. } => {
-                bail!("Android XR local world catalog open is not implemented yet")
+                AndroidXrSceneRuntime::local_with_mesh_assets(
+                    android_xr_local_options(&scene_options),
+                    mesh_assets,
+                )
+                .context("failed to initialize Android XR replacement persistent local runtime")
             }
             SessionStartRequest::JoinRemote { endpoint } => {
                 let session = AndroidXrRemoteServerSession::connect(endpoint.address.as_str())?;
                 AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
                     endpoint.clone(),
-                    android_xr_host_options(scene_options),
+                    android_xr_host_options(&scene_options),
                     session,
                     mesh_assets,
                 )
@@ -1889,17 +1912,22 @@ mod android {
         }
     }
 
-    fn android_xr_local_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptions {
-        LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
-            .with_initial_spawn_center()
-            .with_day_time(scene.day_time_override)
-            .with_freeze_time(scene.freeze_time)
-            .with_debug_passive_showcase(scene.debug_passive_showcase)
-            .with_lighting_enabled(scene.lighting_enabled)
-            .with_render_compile_worker_count(scene.render_compile_worker_count)
+    fn android_xr_local_options(scene: &XrSceneOptions) -> LocalSingleViewSceneOptions {
+        let mut options =
+            LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
+                .with_initial_spawn_center()
+                .with_day_time(scene.day_time_override)
+                .with_freeze_time(scene.freeze_time)
+                .with_debug_passive_showcase(scene.debug_passive_showcase)
+                .with_lighting_enabled(scene.lighting_enabled)
+                .with_render_compile_worker_count(scene.render_compile_worker_count);
+        if let Some(world_dir) = &scene.world_dir {
+            options = options.with_persistent_world_dir(world_dir.clone());
+        }
+        options
     }
 
-    fn android_xr_host_options(scene: XrSceneOptions) -> SingleViewHostOptions {
+    fn android_xr_host_options(scene: &XrSceneOptions) -> SingleViewHostOptions {
         SingleViewHostOptions::new(scene.center(), scene.render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
     }

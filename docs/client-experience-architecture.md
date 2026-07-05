@@ -149,19 +149,21 @@ lane's dispatch should shrink into; the violation here is the duplicated
 
 ### V2. Silent inert arms for visible shared actions — in both directions
 
-- Far LOD works on desktop (`flat_client_driver.rs:1231-1259`) but is a silent
-  no-op on web (`web_canvas.rs:3231-3232`).
-- `SetXrTurnMode` works in XR (`mclone-xr-scene/src/lib.rs:5311`) but is a
+Resolved 2026-07-05 by tactical 143 Slices 2, 6, and 7. At the audit point,
+the representative issues were:
+
+- Far LOD worked on desktop (`flat_client_driver.rs:1231-1259`) but was a
+  silent no-op on web (`web_canvas.rs:3231-3232`).
+- `SetXrTurnMode` worked in XR (`mclone-xr-scene/src/lib.rs:5311`) but was a
   silent `=> {}` on desktop (`flat_client_driver.rs:1309`), web
   (`web_canvas.rs:3253`), and Android (`mclone-android-client/src/lib.rs:1276`).
-- Catalog CRUD is a `log::warn!` no-op on XR (`mclone-xr-scene/src/lib.rs:5362`)
-  and Android (`mclone-android-client/src/lib.rs:1324`).
+- Catalog CRUD was a `log::warn!` no-op on XR
+  (`mclone-xr-scene/src/lib.rs:5362`) and Android
+  (`mclone-android-client/src/lib.rs:1324`).
 
 These are representative, not exhaustive: the tripwire grep in
-[Enforcement](#enforcement) currently returns more (`ToggleCrosshair` inert in
-XR, `SetRenderDistance` inert on web, `SetTouchLookSensitivity` inert on
-desktop, among others). Migration slice 1's classification audit owns the full
-list.
+[Enforcement](#enforcement) is the durable gate. Migration slice 1's
+classification audit owns the full list.
 
 An action a profile cannot support must surface as a shared capability
 projection (hidden, disabled, or visibly unsupported), never as a silent empty
@@ -192,11 +194,12 @@ Rust, reachable from wasm before/after the raw storage operation.
 
 ### V4. XR forks the session state machine, not just the presentation
 
-`mclone-xr-scene` (8,217-line `lib.rs`) shares the session *vocabulary*
+At the audit point, `mclone-xr-scene` (8,217-line `lib.rs`) shared the session
+*vocabulary*
 (`SessionStartRequest`, `ActiveSessionDescriptor`, `StatusOverlay`,
-`GameUiAction`, `host_mode`) but none of the shared state machines. It does
-not reference `GameSessionCoordinator`, `FlatClientCatalogController`, or the
-client session policy effect helpers at all. Instead it owns:
+`GameUiAction`, `host_mode`) but none of the shared state machines. It did not
+reference `GameSessionCoordinator`, `FlatClientCatalogController`, or the client
+session policy effect helpers at all. Instead it owned:
 
 - a private session-replacement machine (`replace_session_for_request`,
   `lib.rs:3238`);
@@ -204,8 +207,8 @@ client session policy effect helpers at all. Instead it owns:
   fed from shared `starting_message()` but with its own transition rules);
 - its own full action dispatch (V1) and no catalog CRUD (V2).
 
-This is the largest single divergence in the tree and the one that compounds
-fastest: every session/catalog/status improvement now lands twice or drifts.
+This was the largest single divergence in the tree and the one that compounded
+fastest: every session/catalog/status improvement landed twice or drifted.
 Merging XR onto the shared session machine is the flagship migration slice
 and the proof that the core is not flat-shaped.
 
@@ -550,7 +553,7 @@ here.
    display-neutrality.
 6. **Flat Android adopts the facade** for menu/session/catalog policy, keeping
    activity, touch, storage-root, and packaging concerns in the app crate.
-   (Android's catalog arms are currently warn no-ops, V2.)
+   (Android's catalog arms were warn no-ops at the audit point, V2.)
 7. **XR catalog CRUD through the same controller**, projected onto world-space
    panels, replacing the XR warn no-ops (V2) — persistent worlds land in XR
    through the shared owner, never as an XR-local wiring pass.

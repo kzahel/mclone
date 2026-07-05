@@ -725,7 +725,7 @@ fn create_mclone_terrain_state(
     .context("initialize shared mclone XR terrain scene")?;
     state.set_audio_engine(audio);
     state.set_session_runtime_factory(|request, scene, mesh_assets| {
-        let desktop_scene = desktop_scene_options_for_xr_request(&request, scene);
+        let desktop_scene = desktop_scene_options_for_xr_request(&request, &scene);
         let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
         NativeSingleViewSessionRuntime::from_active_runtime(request, runtime)
     });
@@ -764,6 +764,8 @@ fn xr_scene_options_from_desktop_scene(
         underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
         debug_ui_screen: debug_ui_screen.map(xr_debug_ui_screen_from_desktop),
         skip_actors: false,
+        world_root: scene.world_root.clone(),
+        world_dir: scene.world_dir.clone(),
     }
     .validated()
 }
@@ -789,19 +791,24 @@ fn xr_underwater_mode_from_desktop(
 #[cfg(not(target_os = "android"))]
 fn desktop_scene_options_for_xr_request(
     request: &SessionStartRequest,
-    scene: XrSceneOptions,
+    scene: &XrSceneOptions,
 ) -> SceneOptions {
     let mut seed = scene.seed;
     let mut remote_addr = None;
+    let mut world_dir = scene.world_dir.clone();
     match request {
         SessionStartRequest::CreateLocalWorld { options } => {
             seed = options.seed;
+            if options.requested_id.is_none() {
+                world_dir = None;
+            }
         }
         SessionStartRequest::OpenLocalWorld { .. } => {
             remote_addr = None;
         }
         SessionStartRequest::JoinRemote { endpoint } => {
             remote_addr = Some(endpoint.address.clone());
+            world_dir = None;
         }
         SessionStartRequest::Unknown => {}
     }
@@ -819,6 +826,8 @@ fn desktop_scene_options_for_xr_request(
         first_person_player_visible: false,
         lighting_enabled: scene.lighting_enabled,
         far_lod: scene.far_lod,
+        world_root: scene.world_root.clone(),
+        world_dir,
         ..SceneOptions::default()
     }
 }

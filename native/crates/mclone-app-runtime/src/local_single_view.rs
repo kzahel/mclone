@@ -1362,10 +1362,19 @@ where
         let descriptor = request
             .active_descriptor()
             .context("native single-view session request did not describe an active session")?;
+        Ok(Self::from_active_runtime_with_descriptor(
+            descriptor, runtime,
+        ))
+    }
+
+    pub fn from_active_runtime_with_descriptor(
+        descriptor: ActiveSessionDescriptor,
+        runtime: NativeSingleViewSceneRuntime<S>,
+    ) -> Self {
         let mut session = GameSessionCoordinator::new();
         let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
         session.apply_start_result(&result);
-        Ok(Self { session, runtime })
+        Self { session, runtime }
     }
 
     pub fn session(&self) -> &GameSessionCoordinator<()> {

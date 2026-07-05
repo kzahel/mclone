@@ -82,7 +82,7 @@ rg -n "already exists|was not found|cannot delete" \
 | 4a: neutral shared session-policy naming | naming guardrail | landed 2026-07-05 |
 | 5: emulated-XR profile test | display-neutrality gate | landed 2026-07-05 |
 | 6: flat Android adopts the facade | V1/V2 on Android | landed 2026-07-05 |
-| 7: XR catalog CRUD via shared controller | last V2 no-ops | open |
+| 7: XR catalog CRUD via shared controller | last V2 no-ops | landed 2026-07-05 |
 
 V1-V4 are defined in
 [`../client-experience-architecture.md`](../client-experience-architecture.md#current-violations-burn-down).
@@ -1103,7 +1103,54 @@ git diff --check
 
 Plus one headset lane per [`../platforms.md`](../platforms.md#validation-policy).
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+- Implementation:
+  - `mclone-xr-scene` now owns a platform-provided `NativeWorldCatalog` adapter,
+    refreshes catalog UI state from it, and projects active persistent worlds
+    into the shared catalog controller state.
+  - XR list/create/open/delete actions route through
+    `ClientExperienceController` and `FlatClientCatalogController`; emitted
+    catalog requests are executed through the native catalog backend and fed back
+    with `apply_catalog_response` / `apply_catalog_error`.
+  - Catalog create/open session starts now carry the shared
+    `ActiveSessionDescriptor` into the XR local startup pump, so
+    `OpenLocalWorld` can complete as an active persistent session instead of
+    depending on seed-only request inference.
+  - `XrSceneOptions` carries `world_root` and `world_dir`. Desktop XR maps the
+    native client `SceneOptions` catalog root/direct world dir into those fields;
+    Android XR resolves an app-private `worlds` root from the activity data path.
+  - The old XR catalog warning/no-op path is deleted. The Android XR replacement
+    runtime factory also no longer has an inert `OpenLocalWorld` branch.
+  - The emulated-XR desktop profile test now drives world-space panel
+    list/open/create/delete through the facade and fake catalog completions.
+  - `NativeSingleViewSessionRuntime` gained a descriptor-aware constructor for
+    catalog-open requests whose descriptor comes from the catalog summary rather
+    than from the request enum.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`: pass
+  (60 tests).
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`: pass
+  (110 tests).
+- `pnpm native:policy:wasm-check`: pass; existing `mclone-server`
+  `with_unload_hysteresis_chunks` dead-code warning remains.
+- `pnpm native:xr:mac:wivrn:mclone -- --xr-debug-ui pause`: pass on Quest 3
+  through WiVRn. OpenXR reached `FOCUSED`, submitted 120 frames, and the XR
+  debug panel path composited in the headset lane.
+- `pnpm native:android-xr:apk`: pass; Android XR release APK built after the
+  app-private catalog-root wiring.
+- `git diff --check`: pass.
+
+Tripwires:
+
+- `rg -n "persistent world catalog action|local world catalog open is not implemented|not wired to XR scene|emulated XR Slice 5 flow" native/crates/mclone-xr-scene/src/lib.rs native/apps -g '!native/target'`: 0 hits.
+- dispatch-site grep remains 5 hits:
+  `mclone-android-client`, `mclone-xr-scene`, `mclone-web-client`,
+  `mclone-native-client/flat_client_driver`, and `mclone-native-client/app`.
+- inert-arm grep remains 0 hits.
+- web catalog policy-string grep remains at the 3 existing smoke assertion hits.
 
 ## Open Questions
 
