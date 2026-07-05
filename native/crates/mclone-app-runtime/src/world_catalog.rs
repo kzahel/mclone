@@ -374,6 +374,31 @@ pub fn validate_delete_inactive_world(
     Ok(())
 }
 
+pub fn validate_local_world_compatible(summary: &LocalWorldSummary) -> WorldCatalogResult<()> {
+    if summary.compatible {
+        return Ok(());
+    }
+
+    Err(WorldCatalogError::new(
+        WorldCatalogErrorKind::IncompatibleSchema,
+        format!(
+            "local world `{}` is not compatible with catalog schema {} and Minecraft target {}",
+            summary.id, LOCAL_WORLD_CATALOG_SCHEMA_VERSION, LOCAL_WORLD_TARGET_MINECRAFT_VERSION
+        ),
+    ))
+}
+
+pub fn sort_local_world_summaries(worlds: &mut [LocalWorldSummary]) {
+    worlds.sort_by(|a, b| {
+        let a_last_played = a.last_played_unix_millis.unwrap_or(a.created_unix_millis);
+        let b_last_played = b.last_played_unix_millis.unwrap_or(b.created_unix_millis);
+        b_last_played
+            .cmp(&a_last_played)
+            .then_with(|| a.display_name.cmp(&b.display_name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeWorldCatalog {
@@ -453,14 +478,7 @@ impl NativeWorldCatalog {
             worlds.push(self.read_summary(&id)?);
         }
 
-        worlds.sort_by(|a, b| {
-            let a_last_played = a.last_played_unix_millis.unwrap_or(a.created_unix_millis);
-            let b_last_played = b.last_played_unix_millis.unwrap_or(b.created_unix_millis);
-            b_last_played
-                .cmp(&a_last_played)
-                .then_with(|| a.display_name.cmp(&b.display_name))
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        sort_local_world_summaries(&mut worlds);
         Ok(worlds)
     }
 
@@ -583,17 +601,7 @@ impl NativeWorldCatalog {
 
     fn open_world_summary(&self, id: &LocalWorldId) -> WorldCatalogResult<NativeOpenedWorld> {
         let mut summary = self.read_summary(id)?;
-        if !summary.compatible {
-            return Err(WorldCatalogError::new(
-                WorldCatalogErrorKind::IncompatibleSchema,
-                format!(
-                    "local world `{}` is not compatible with catalog schema {} and Minecraft target {}",
-                    summary.id,
-                    LOCAL_WORLD_CATALOG_SCHEMA_VERSION,
-                    LOCAL_WORLD_TARGET_MINECRAFT_VERSION
-                ),
-            ));
-        }
+        validate_local_world_compatible(&summary)?;
         summary.last_played_unix_millis = Some(now_unix_millis());
         self.write_summary(&summary)?;
         Ok(NativeOpenedWorld {
@@ -781,16 +789,14 @@ fn invalid_world_id(value: &str, reason: impl Into<String>) -> WorldCatalogError
     WorldCatalogError::new(WorldCatalogErrorKind::InvalidWorldId, message)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn world_not_found(id: &LocalWorldId) -> WorldCatalogError {
+pub fn world_not_found(id: &LocalWorldId) -> WorldCatalogError {
     WorldCatalogError::new(
         WorldCatalogErrorKind::WorldNotFound,
         format!("local world `{id}` was not found"),
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn duplicate_world_id(id: &LocalWorldId) -> WorldCatalogError {
+pub fn duplicate_world_id(id: &LocalWorldId) -> WorldCatalogError {
     WorldCatalogError::new(
         WorldCatalogErrorKind::DuplicateWorldId,
         format!("local world `{id}` already exists"),

@@ -33,9 +33,11 @@ use mclone_app_runtime::startup_args::{
     RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState, StartupOptions, StartupSceneOptions,
 };
 use mclone_app_runtime::world_catalog::{
+    LOCAL_WORLD_CATALOG_SCHEMA_VERSION, LOCAL_WORLD_TARGET_MINECRAFT_VERSION,
     LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
     WorldCatalogError, WorldCatalogErrorKind, WorldCatalogRequest, WorldCatalogRequestId,
-    WorldCatalogResponse,
+    WorldCatalogResponse, duplicate_world_id, sort_local_world_summaries,
+    validate_delete_inactive_world, validate_local_world_compatible, world_not_found,
 };
 use mclone_app_runtime::{
     debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
@@ -110,6 +112,7 @@ const WEB_FIXED_FPS_CAP: u32 = 60;
 const WEB_QUERY_WORLD_STORAGE: &str = "worldStorage";
 const WEB_QUERY_WORLD_ID: &str = "worldId";
 const WEB_QUERY_CLEAR_WORLD_STORAGE: &str = "clearWorldStorage";
+const WEB_WORLD_BACKEND_LABEL: &str = "web-indexeddb";
 const WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT: f32 = 2.4;
 const WEB_TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.5;
 const WEB_TOUCH_LOOK_SENSITIVITY_MAX: f32 = 5.0;
@@ -3062,6 +3065,76 @@ fn shutdown_report_to_js(runner_kind: ServerRunnerKind) -> Result<JsValue, JsVal
     Ok(object.into())
 }
 
+#[wasm_bindgen(js_name = mclone_web_catalog_validate_world_id)]
+pub fn mclone_web_catalog_validate_world_id(id: String) -> Result<String, JsValue> {
+    LocalWorldId::new(id)
+        .map(LocalWorldId::into_string)
+        .map_err(|error| JsValue::from(error.message))
+}
+
+#[wasm_bindgen(js_name = mclone_web_catalog_prepare_world_list)]
+pub fn mclone_web_catalog_prepare_world_list(records: JsValue) -> Result<JsValue, JsValue> {
+    let mut worlds = decode_web_local_world_summaries(&records).map_err(JsValue::from)?;
+    sort_local_world_summaries(&mut worlds);
+    encode_web_local_world_summaries(&worlds).map_err(JsValue::from)
+}
+
+#[wasm_bindgen(js_name = mclone_web_catalog_prepare_create_world)]
+pub fn mclone_web_catalog_prepare_create_world(
+    options: JsValue,
+    existing_records: JsValue,
+    now_unix_millis: f64,
+) -> Result<JsValue, JsValue> {
+    let options = decode_web_local_world_create_options(&options).map_err(JsValue::from)?;
+    let existing = decode_web_local_world_summaries(&existing_records).map_err(JsValue::from)?;
+    let id = options
+        .resolve_id(existing.iter().map(|world| &world.id))
+        .map_err(|error| JsValue::from(error.message))?;
+    if existing.iter().any(|world| world.id == id) {
+        return Err(JsValue::from(duplicate_world_id(&id).message));
+    }
+
+    let now = parse_web_unix_millis(now_unix_millis, "nowUnixMillis").map_err(JsValue::from)?;
+    let mut summary = LocalWorldSummary::new(id, options.display_name, options.seed, now)
+        .map_err(|error| JsValue::from(error.message))?;
+    summary.last_played_unix_millis = Some(now);
+    summary.backend_label = Some(WEB_WORLD_BACKEND_LABEL.to_owned());
+    encode_web_local_world_summary(&summary).map_err(JsValue::from)
+}
+
+#[wasm_bindgen(js_name = mclone_web_catalog_prepare_open_world)]
+pub fn mclone_web_catalog_prepare_open_world(
+    id: String,
+    record: JsValue,
+    now_unix_millis: f64,
+) -> Result<JsValue, JsValue> {
+    let id = LocalWorldId::new(id).map_err(|error| JsValue::from(error.message))?;
+    let mut summary =
+        decode_required_web_local_world_summary(&record, &id).map_err(JsValue::from)?;
+    validate_local_world_compatible(&summary).map_err(|error| JsValue::from(error.message))?;
+    summary.last_played_unix_millis =
+        Some(parse_web_unix_millis(now_unix_millis, "nowUnixMillis").map_err(JsValue::from)?);
+    encode_web_local_world_summary(&summary).map_err(JsValue::from)
+}
+
+#[wasm_bindgen(js_name = mclone_web_catalog_prepare_delete_world)]
+pub fn mclone_web_catalog_prepare_delete_world(
+    id: String,
+    active_world_id: String,
+    record: JsValue,
+) -> Result<JsValue, JsValue> {
+    let id = LocalWorldId::new(id).map_err(|error| JsValue::from(error.message))?;
+    let active_world = if active_world_id.is_empty() {
+        None
+    } else {
+        Some(LocalWorldId::new(active_world_id).map_err(|error| JsValue::from(error.message))?)
+    };
+    validate_delete_inactive_world(&id, active_world.as_ref())
+        .map_err(|error| JsValue::from(error.message))?;
+    let summary = decode_required_web_local_world_summary(&record, &id).map_err(JsValue::from)?;
+    encode_web_local_world_summary(&summary).map_err(JsValue::from)
+}
+
 impl WebChunkRenderSession {
     fn ui_status_to_js_value(&self) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
@@ -5348,7 +5421,11 @@ fn decode_world_catalog_response(
     match operation {
         "listWorlds" => Ok(WorldCatalogResponse::WorldList {
             capabilities: WorldCatalogCapabilities::persistent_local(),
-            worlds: decode_web_local_world_summaries(payload)?,
+            worlds: {
+                let mut worlds = decode_web_local_world_summaries(payload)?;
+                sort_local_world_summaries(&mut worlds);
+                worlds
+            },
         }),
         "createWorld" => Ok(WorldCatalogResponse::WorldCreated {
             summary: decode_web_local_world_summary(payload)?,
@@ -5366,6 +5443,23 @@ fn decode_world_catalog_response(
     }
 }
 
+fn decode_web_local_world_create_options(
+    value: &JsValue,
+) -> Result<LocalWorldCreateOptions, String> {
+    let mut options = LocalWorldCreateOptions::new(
+        js_string_property(value, "displayName")?,
+        js_i64_property(value, "seed")?,
+    )
+    .map_err(|error| error.message)?;
+    if let Some(requested_id) = js_optional_string_property(value, "requestedId")?
+        && !requested_id.is_empty()
+    {
+        options = options
+            .with_requested_id(LocalWorldId::new(requested_id).map_err(|error| error.message)?);
+    }
+    Ok(options)
+}
+
 fn decode_web_local_world_summaries(value: &JsValue) -> Result<Vec<LocalWorldSummary>, String> {
     if !js_sys::Array::is_array(value) {
         return Err("world catalog list response must be an array".to_owned());
@@ -5380,6 +5474,24 @@ fn decode_web_local_world_summaries(value: &JsValue) -> Result<Vec<LocalWorldSum
         .collect()
 }
 
+fn decode_required_web_local_world_summary(
+    value: &JsValue,
+    id: &LocalWorldId,
+) -> Result<LocalWorldSummary, String> {
+    if value.is_null() || value.is_undefined() {
+        return Err(world_not_found(id).message);
+    }
+    let summary = decode_web_local_world_summary(value)?;
+    if &summary.id != id {
+        return Err(WorldCatalogError::new(
+            WorldCatalogErrorKind::StorageFailure,
+            format!("local world record `{}` identified `{}`", id, summary.id),
+        )
+        .message);
+    }
+    Ok(summary)
+}
+
 fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, String> {
     let id = LocalWorldId::new(js_string_property(value, "id")?).map_err(|error| error.message)?;
     let mut summary = LocalWorldSummary::new(
@@ -5390,13 +5502,65 @@ fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, 
     )
     .map_err(|error| error.message)?;
     summary.last_played_unix_millis = js_optional_u64_property(value, "lastPlayedUnixMillis")?;
-    summary.storage_schema_version = js_u32_property(value, "storageSchemaVersion")?;
-    summary.target_minecraft_version = js_string_property(value, "targetMinecraftVersion")?;
+    summary.storage_schema_version =
+        js_optional_u32_property(value, "storageSchemaVersion")?.unwrap_or(0);
+    summary.target_minecraft_version =
+        js_optional_string_property(value, "targetMinecraftVersion")?
+            .unwrap_or_else(|| LOCAL_WORLD_TARGET_MINECRAFT_VERSION.to_owned());
     summary.mclone_version = js_optional_string_property(value, "mcloneVersion")?;
-    summary.backend_label = js_optional_string_property(value, "backendLabel")?;
-    summary.locked = js_bool_property(value, "locked")?;
-    summary.compatible = js_bool_property(value, "compatible")?;
+    summary.backend_label = js_optional_string_property(value, "backendLabel")?
+        .or_else(|| Some(WEB_WORLD_BACKEND_LABEL.to_owned()));
+    summary.locked = js_optional_bool_property(value, "locked")?.unwrap_or(false);
+    summary.compatible = summary.storage_schema_version == LOCAL_WORLD_CATALOG_SCHEMA_VERSION
+        && summary.target_minecraft_version == LOCAL_WORLD_TARGET_MINECRAFT_VERSION;
     Ok(summary)
+}
+
+fn encode_web_local_world_summaries(worlds: &[LocalWorldSummary]) -> Result<JsValue, String> {
+    let array = js_sys::Array::new();
+    for summary in worlds {
+        array.push(&encode_web_local_world_summary(summary)?);
+    }
+    Ok(array.into())
+}
+
+fn encode_web_local_world_summary(summary: &LocalWorldSummary) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    set_string(&object, "id", summary.id.as_str())?;
+    set_string(&object, "displayName", &summary.display_name)?;
+    set_number(&object, "seed", summary.seed as f64)?;
+    set_number(
+        &object,
+        "createdUnixMillis",
+        summary.created_unix_millis as f64,
+    )?;
+    set_optional_number(
+        &object,
+        "lastPlayedUnixMillis",
+        summary.last_played_unix_millis.map(|millis| millis as f64),
+    )?;
+    set_number(
+        &object,
+        "storageSchemaVersion",
+        f64::from(summary.storage_schema_version),
+    )?;
+    set_string(
+        &object,
+        "targetMinecraftVersion",
+        &summary.target_minecraft_version,
+    )?;
+    set_optional_string(&object, "mcloneVersion", summary.mclone_version.as_deref())?;
+    set_optional_string(&object, "backendLabel", summary.backend_label.as_deref())?;
+    set_bool(&object, "locked", summary.locked)?;
+    set_bool(&object, "compatible", summary.compatible)?;
+    Ok(object.into())
+}
+
+fn parse_web_unix_millis(value: f64, label: &str) -> Result<u64, String> {
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u64::MAX as f64 {
+        return Err(format!("{label} must be a non-negative integer timestamp"));
+    }
+    Ok(value as u64)
 }
 
 fn js_property(value: &JsValue, key: &str) -> Result<JsValue, String> {
@@ -5453,15 +5617,24 @@ fn js_optional_u64_property(value: &JsValue, key: &str) -> Result<Option<u64>, S
     Ok(Some(number as u64))
 }
 
-fn js_u32_property(value: &JsValue, key: &str) -> Result<u32, String> {
-    let number = js_u64_property(value, key)?;
-    u32::try_from(number).map_err(|_| format!("JS property {key} must fit u32"))
+fn js_optional_u32_property(value: &JsValue, key: &str) -> Result<Option<u32>, String> {
+    let Some(number) = js_optional_u64_property(value, key)? else {
+        return Ok(None);
+    };
+    u32::try_from(number)
+        .map(Some)
+        .map_err(|_| format!("JS property {key} must fit u32"))
 }
 
-fn js_bool_property(value: &JsValue, key: &str) -> Result<bool, String> {
-    js_property(value, key)?
+fn js_optional_bool_property(value: &JsValue, key: &str) -> Result<Option<bool>, String> {
+    let property = js_property(value, key)?;
+    if property.is_null() || property.is_undefined() {
+        return Ok(None);
+    }
+    property
         .as_bool()
-        .ok_or_else(|| format!("JS property {key} must be a boolean"))
+        .map(Some)
+        .ok_or_else(|| format!("JS property {key} must be a boolean or null"))
 }
 
 fn js_f64_property(value: &JsValue, key: &str) -> Result<f64, String> {
@@ -5929,8 +6102,30 @@ fn set_number(object: &js_sys::Object, key: &str, value: f64) -> Result<(), Stri
         .map_err(|_| format!("failed to set generated chunk report key {key}"))
 }
 
+fn set_optional_number(
+    object: &js_sys::Object,
+    key: &str,
+    value: Option<f64>,
+) -> Result<(), String> {
+    let value = value.map(JsValue::from_f64).unwrap_or(JsValue::NULL);
+    js_sys::Reflect::set(object, &JsValue::from_str(key), &value)
+        .map(|_| ())
+        .map_err(|_| format!("failed to set generated chunk report key {key}"))
+}
+
 fn set_string(object: &js_sys::Object, key: &str, value: &str) -> Result<(), String> {
     js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_str(value))
+        .map(|_| ())
+        .map_err(|_| format!("failed to set generated chunk report key {key}"))
+}
+
+fn set_optional_string(
+    object: &js_sys::Object,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), String> {
+    let value = value.map(JsValue::from_str).unwrap_or(JsValue::NULL);
+    js_sys::Reflect::set(object, &JsValue::from_str(key), &value)
         .map(|_| ())
         .map_err(|_| format!("failed to set generated chunk report key {key}"))
 }

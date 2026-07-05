@@ -24,11 +24,9 @@ import {
   listIndexedDbCatalogWorlds,
   openIndexedDbCatalogWorld,
   openWorldDb,
+  setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
-import type {
-  WebLocalWorldCreateOptions,
-  WebLocalWorldSummary,
-} from "./mclone-web-world-catalog.js";
+import type { WebLocalWorldSummary } from "./mclone-web-world-catalog.js";
 import type { WebChunkRenderSession, WebCompileTiming } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
@@ -371,11 +369,17 @@ class WebChunkApp {
     publishRuntimeState(runtime.state);
     const module = await import(BINDGEN_JS_URL.href) as WasmModule;
     await module.default(BINDGEN_WASM_URL.href);
+    setIndexedDbCatalogPolicy(module);
     this.module = module;
     const requiredExports = [
       "mclone_web_startup_options_from_query",
       "mclone_web_create_worker_chunk_render_session_with_startup",
       "mclone_web_create_remote_chunk_render_session_with_startup",
+      "mclone_web_catalog_validate_world_id",
+      "mclone_web_catalog_prepare_world_list",
+      "mclone_web_catalog_prepare_create_world",
+      "mclone_web_catalog_prepare_open_world",
+      "mclone_web_catalog_prepare_delete_world",
     ];
     for (const name of requiredExports) {
       if (typeof (module as Record<string, any>)[name] !== "function") {
@@ -1331,14 +1335,11 @@ class WebChunkApp {
         return listIndexedDbCatalogWorlds(db);
       case "createWorld": {
         const seed = Number(report.catalogWorldSeedText ?? report.catalogWorldSeed);
-        const options: WebLocalWorldCreateOptions = {
-          displayName: String(report.catalogDisplayName ?? "New World"),
+        const options = {
+          displayName: String(report.catalogDisplayName ?? ""),
           seed,
+          requestedId: report.catalogRequestedId ?? null,
         };
-        const requestedId = String(report.catalogRequestedId ?? "").trim();
-        if (requestedId.length > 0) {
-          options.requestedId = requestedId;
-        }
         return createIndexedDbCatalogWorld(db, options);
       }
       case "openWorld":

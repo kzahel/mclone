@@ -8,6 +8,7 @@ import {
   listIndexedDbCatalogWorlds,
   openIndexedDbCatalogWorld,
   openWorldDb,
+  setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
 
 /**
@@ -348,6 +349,7 @@ async function renderCanvas() {
   try {
     const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
     await module.default(BINDGEN_WASM_URL.href);
+    setIndexedDbCatalogPolicy(module);
     if (typeof module.mclone_web_create_worker_chunk_render_session !== "function") {
       return {
         ok: false,

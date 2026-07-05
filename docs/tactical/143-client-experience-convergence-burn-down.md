@@ -77,7 +77,7 @@ rg -n "already exists|was not found|cannot delete" \
 | 0: enforcement baseline | gates | landed 2026-07-05 |
 | 1: facade + `GameUiAction` classification | V1 (shared side), V2 (policy) | landed 2026-07-05 |
 | 2: desktop and web adopt the facade | V1/V2 on flat lanes | landed 2026-07-05 |
-| 3: TypeScript catalog demotion | V3 | open |
+| 3: TypeScript catalog demotion | V3 | landed 2026-07-05 |
 | 4: XR session-machine merge | V4 | open |
 | 5: emulated-XR profile test | display-neutrality gate | open |
 | 6: flat Android adopts the facade | V1/V2 on Android | open |
@@ -464,7 +464,88 @@ pnpm native:web:smoke
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Changes:
+
+- Added wasm catalog-policy helpers that route web catalog id validation, id
+  generation, summary normalization, compatibility projection, sort order,
+  duplicate detection, active-delete guard, and missing-world messages through
+  `mclone-app-runtime::world_catalog`.
+- `mclone-web-world-catalog.ts` now keeps IndexedDB mechanics only: opening
+  the DB, reading/writing raw records, clearing per-world stores, and
+  transaction/cursor handling. Its public helper functions call the Rust wasm
+  policy helpers before/after the raw IndexedDB operation.
+- Deleted the TypeScript copies of `LOCAL_WORLD_ID_MAX_LEN`,
+  `availableLocalWorldIdFromDisplayName`, the world-list sort comparator, and
+  the copied `already exists` / `was not found` / `cannot delete active local
+  world` strings.
+- `mclone-web-app.ts` and `mclone-web-smoke.js` install the loaded wasm module
+  as the catalog policy provider before executing IndexedDB catalog helpers.
+- Updated [`../topics/platform-parity.md`](../topics/platform-parity.md) for
+  web catalog policy demotion.
+
+Validation:
+
+```bash
+pnpm native:web:typecheck
+# PASS. Existing warning:
+# mclone-server: dead_code for PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks.
+
+pnpm native:web:build
+# PASS. Existing warning: same mclone-server dead_code warning.
+
+pnpm native:web:catalog-smoke
+# PASS, saved /tmp/mclone-native-web-catalog-ui-probe-canvas.png.
+# Screenshot inspected: coherent world-list UI with expected Rust-produced
+# delete status.
+# Existing warning: same mclone-server dead_code warning.
+
+pnpm native:web:smoke
+# PASS, saved /tmp/mclone-native-web-canvas.png.
+# Screenshot inspected: nonblank, correctly framed world render.
+# Direct IndexedDB catalog smoke passed duplicate, active-delete, and
+# missing-open rejection checks through Rust policy.
+# Existing warning: same mclone-server dead_code warning.
+
+git diff --check
+# PASS
+```
+
+Tripwires after Slice 3:
+
+- Dispatch sites: 5 total, unchanged from Slice 2.
+
+```text
+native/apps/mclone-web-client/src/web_canvas.rs:3301:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+native/crates/mclone-xr-scene/src/lib.rs:5204:    fn apply_xr_ui_action(
+native/apps/mclone-native-client/src/app.rs:534:    fn apply_ui_action(
+native/apps/mclone-android-client/src/lib.rs:1180:        fn apply_ui_action(
+native/apps/mclone-native-client/src/flat_client_driver.rs:1430:    pub(crate) fn apply_ui_action(
+```
+
+- Inert arms: 7 total, unchanged from Slice 2.
+  `mclone-native-client`: 0, `mclone-web-client`: 0,
+  `mclone-android-client`: 4, `mclone-xr-scene`: 3.
+
+```text
+native/crates/mclone-xr-scene/src/lib.rs:5279:            GameUiAction::ToggleCrosshair => {}
+native/crates/mclone-xr-scene/src/lib.rs:5423:            | GameUiAction::SetServerSimulationCadence(_) => {}
+native/crates/mclone-xr-scene/src/lib.rs:5433:            | GameUiAction::BackToPause => {}
+native/apps/mclone-android-client/src/lib.rs:1218:                GameUiAction::SetFarLodRange(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1276:                GameUiAction::SetXrTurnMode(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1367:                | GameUiAction::SetServerSimulationCadence(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1391:                | GameUiAction::BackToPause => {}
+```
+
+- TypeScript policy-string hits: 3 total, all smoke-harness assertion strings.
+  `mclone-web-world-catalog.ts`: 0.
+
+```text
+native/apps/mclone-web-client/www/mclone-web-smoke.js:576:      "already exists",
+native/apps/mclone-web-client/www/mclone-web-smoke.js:580:      "cannot delete active local world",
+native/apps/mclone-web-client/www/mclone-web-smoke.js:593:      "was not found",
+```
 
 ## Slice 4: XR Adopts The Shared Session Machine
 
