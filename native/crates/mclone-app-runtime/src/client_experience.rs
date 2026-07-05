@@ -85,6 +85,19 @@ impl ClientExperienceController {
                         new_world_seed: context.new_world_seed,
                     },
                 );
+                if matches!(action, GameUiAction::OpenWorldCreate) {
+                    effects.session.new_world_seed = Some(context.new_world_seed);
+                }
+                if matches!(
+                    action,
+                    GameUiAction::OpenWorldList
+                        | GameUiAction::OpenWorldCreate
+                        | GameUiAction::SelectWorld(_)
+                        | GameUiAction::ConfirmDeleteWorld(_)
+                        | GameUiAction::CancelDeleteWorld
+                ) {
+                    effects.session.clear_inactive_session_status = true;
+                }
             }
             GameUiAction::OpenNewWorld
             | GameUiAction::OpenJoinRemote
@@ -299,7 +312,23 @@ impl Default for ClientExperienceCapabilityStatus {
 }
 
 impl ClientExperienceCapabilityStatus {
+    pub const PROFILE_UNSUPPORTED: Self =
+        Self::Unsupported("This action is unavailable for this profile");
+
     pub const fn is_supported(self) -> bool {
+        matches!(self, Self::Supported)
+    }
+
+    pub const fn message(self) -> Option<&'static str> {
+        match self {
+            Self::Supported => None,
+            Self::Unsupported(message) | Self::Pending(message) | Self::Disabled(message) => {
+                Some(message)
+            }
+        }
+    }
+
+    pub const fn ok(self) -> bool {
         matches!(self, Self::Supported)
     }
 }
@@ -312,6 +341,10 @@ pub struct ClientExperienceCapabilityProjection {
 impl ClientExperienceCapabilityProjection {
     pub fn is_empty(&self) -> bool {
         self.actions.is_empty()
+    }
+
+    pub fn first_unavailable(&self) -> Option<ClientExperienceActionAvailability> {
+        self.actions.first().copied()
     }
 
     fn push(&mut self, kind: ClientExperienceActionKind, status: ClientExperienceCapabilityStatus) {
@@ -1032,6 +1065,18 @@ pub fn classify_game_ui_action(action: GameUiAction) -> ClientExperienceActionCl
     classify_client_experience_action_kind(client_experience_action_kind(action))
 }
 
+pub const fn client_experience_should_apply_ui_projection(action: GameUiAction) -> bool {
+    !matches!(
+        action,
+        GameUiAction::OpenWorld(_)
+            | GameUiAction::CreateCatalogWorld
+            | GameUiAction::CreateWorld(_)
+            | GameUiAction::JoinRemote
+            | GameUiAction::QuitToTitle
+            | GameUiAction::Quit
+    )
+}
+
 fn clamp_f32(value: f32, min: f32, max: f32) -> f32 {
     let min = finite_or(min, 0.0);
     let max = finite_or(max, min);
@@ -1137,7 +1182,9 @@ mod tests {
             effects.catalog.catalog_requests[0].request,
             WorldCatalogRequest::ListWorlds
         );
-        assert!(effects.session.is_empty());
+        assert!(effects.session.clear_inactive_session_status);
+        assert!(effects.session.session_start.is_none());
+        assert!(effects.session.host_action.is_none());
         assert!(effects.settings.is_empty());
     }
 

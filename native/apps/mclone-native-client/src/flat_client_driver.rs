@@ -3,19 +3,23 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use mclone_app_runtime::client_experience::{
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
+    ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
+    ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
+    ClientExperienceSettingEffect, ClientExperienceSettingsProfile, ClientExperienceSettingsState,
+    client_experience_should_apply_ui_projection,
+};
 use mclone_app_runtime::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
-use mclone_app_runtime::flat_client_catalog::{
-    FlatClientCatalogActionContext, FlatClientCatalogController, FlatClientCatalogEffects,
-    FlatClientCatalogRequest,
-};
+use mclone_app_runtime::flat_client_catalog::{FlatClientCatalogEffects, FlatClientCatalogRequest};
 use mclone_app_runtime::flat_client_session::{
-    FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
-    FlatClientSessionProjection, FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
+    FlatClientSessionEffects, FlatClientSessionHostAction, FlatClientSessionProjection,
+    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
     flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
-    flat_client_session_effects_for_action, flat_client_session_projection,
-    flat_client_should_clear_inactive_session_status, flat_client_start_session_transition,
+    flat_client_session_projection, flat_client_should_clear_inactive_session_status,
+    flat_client_start_session_transition,
 };
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
@@ -150,7 +154,8 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
     world_catalog: Option<NativeWorldCatalog>,
-    world_catalog_controller: FlatClientCatalogController,
+    client_experience: ClientExperienceController,
+    status_overlay: StatusOverlay,
     desktop_blink_debug: DesktopBlinkDebugState,
     desktop_blink_debug_worker: Option<NativeTeleportPreviewWorker>,
     underwater_effect: UnderwaterEffectState,
@@ -356,7 +361,8 @@ impl FlatClientDriver {
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
             world_catalog: scene.world_root.clone().map(NativeWorldCatalog::new),
-            world_catalog_controller: FlatClientCatalogController::new(),
+            client_experience: ClientExperienceController::new(desktop_client_experience_profile()),
+            status_overlay: StatusOverlay::hidden(),
             desktop_blink_debug: DesktopBlinkDebugState::default(),
             desktop_blink_debug_worker: None,
             underwater_effect: UnderwaterEffectState::new(),
@@ -696,13 +702,14 @@ impl FlatClientDriver {
     }
 
     fn world_catalog_ui_for_render(&self) -> WorldCatalogUiState {
-        self.world_catalog_controller
+        self.client_experience
+            .catalog()
             .ui_state_with_active_world(self.active_local_world_id())
     }
 
     fn refresh_world_catalog_ui(&mut self, status: WorldCatalogUiStatus) {
         let Some(catalog) = self.world_catalog.clone() else {
-            self.world_catalog_controller.set_worlds(
+            self.client_experience.catalog_mut().set_worlds(
                 WorldCatalogCapabilities::default(),
                 Vec::new(),
                 status,
@@ -712,12 +719,15 @@ impl FlatClientDriver {
 
         match catalog.list_worlds() {
             Ok(worlds) => {
-                self.world_catalog_controller
-                    .set_worlds(catalog.capabilities(), worlds, status);
+                self.client_experience.catalog_mut().set_worlds(
+                    catalog.capabilities(),
+                    worlds,
+                    status,
+                );
             }
             Err(error) => {
                 log::warn!("failed to refresh local world catalog: {error}");
-                self.world_catalog_controller.set_worlds(
+                self.client_experience.catalog_mut().set_worlds(
                     catalog.capabilities(),
                     Vec::new(),
                     WorldCatalogUiStatus::new(&error.message, false),
@@ -800,7 +810,7 @@ impl FlatClientDriver {
     pub(crate) fn session_projection(&self) -> FlatClientSessionProjection {
         flat_client_session_projection(
             self.session.status(),
-            StatusOverlay::hidden(),
+            self.status_overlay.clone(),
             self.startup_progress_overlay(),
         )
     }
@@ -905,7 +915,8 @@ impl FlatClientDriver {
             let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
             log::warn!("world catalog action failed: {error}");
             let effects = self
-                .world_catalog_controller
+                .client_experience
+                .catalog_mut()
                 .apply_catalog_error(request.id, error);
             return self.apply_world_catalog_effects(effects, arm_mouse_lock);
         };
@@ -919,7 +930,8 @@ impl FlatClientDriver {
                 Err(error) => {
                     log::warn!("world catalog list failed: {error}");
                     let effects = self
-                        .world_catalog_controller
+                        .client_experience
+                        .catalog_mut()
                         .apply_catalog_error(request.id, error);
                     return self.apply_world_catalog_effects(effects, arm_mouse_lock);
                 }
@@ -929,7 +941,8 @@ impl FlatClientDriver {
                 Err(error) => {
                     log::warn!("world catalog create failed: {error}");
                     let effects = self
-                        .world_catalog_controller
+                        .client_experience
+                        .catalog_mut()
                         .apply_catalog_error(request.id, error);
                     return self.apply_world_catalog_effects(effects, arm_mouse_lock);
                 }
@@ -941,7 +954,8 @@ impl FlatClientDriver {
                 Err(error) => {
                     log::warn!("world catalog open failed: {error}");
                     let effects = self
-                        .world_catalog_controller
+                        .client_experience
+                        .catalog_mut()
                         .apply_catalog_error(request.id, error);
                     return self.apply_world_catalog_effects(effects, arm_mouse_lock);
                 }
@@ -953,7 +967,8 @@ impl FlatClientDriver {
                     Err(error) => {
                         log::warn!("world catalog delete failed: {error}");
                         let effects = self
-                            .world_catalog_controller
+                            .client_experience
+                            .catalog_mut()
                             .apply_catalog_error(request.id, error);
                         return self.apply_world_catalog_effects(effects, arm_mouse_lock);
                     }
@@ -962,9 +977,62 @@ impl FlatClientDriver {
         };
 
         let effects = self
-            .world_catalog_controller
+            .client_experience
+            .catalog_mut()
             .apply_catalog_response(request.id, response);
         self.apply_world_catalog_effects(effects, arm_mouse_lock)
+    }
+
+    fn client_experience_settings_state(&self) -> ClientExperienceSettingsState {
+        ClientExperienceSettingsState::from(game_ui_render_state(FlatClientUiRenderOptions {
+            render_distance: self.current_render_distance(self.scene.render_distance) as i32,
+            render_options: self.render_options,
+            far_lod_enabled: self.scene.far_lod.enabled,
+            far_lod_range_chunks: self.scene.far_lod.extra_radius_chunks as i32,
+            frame_pacing: FramePacingUiState::default(),
+            movement_mode: game_movement_mode(self.camera.movement_mode()),
+            fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
+            movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
+            player_collision_box_visible: self.player_collision_box_visible,
+            first_person_player_visible: self.camera.first_person_player_visible(),
+            crosshair_visible: self.crosshair_visible,
+            player_model: self.player_model,
+            server_cadence: self.server_simulation_cadence(),
+        }))
+    }
+
+    fn apply_client_experience_effects(
+        &mut self,
+        effects: ClientExperienceEffects,
+        arm_mouse_lock: bool,
+        result: &mut FlatClientUiActionResult,
+    ) -> bool {
+        if self.apply_world_catalog_effects(effects.catalog, arm_mouse_lock) {
+            result.session_start_queued = true;
+            result.mouse_lock_requested = Some(false);
+        }
+        self.apply_flat_client_session_effects(effects.session, arm_mouse_lock, result);
+        if !self.apply_client_experience_settings_effects(effects.settings, result) {
+            return false;
+        }
+        for effect in effects.gameplay {
+            match effect {
+                ClientExperienceGameplayEffect::AssignHotbarBlock { slot, block_state } => {
+                    if let Err(err) = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))
+                    {
+                        log::error!("failed to assign debug hotbar slot: {err:#}");
+                    }
+                }
+            }
+        }
+        for effect in effects.projection {
+            match effect {
+                ClientExperienceProjectionEffect::ApplyUiAction(action) => {
+                    self.ui.apply_action(action);
+                }
+            }
+        }
+        true
     }
 
     fn apply_flat_client_session_effects(
@@ -1006,6 +1074,198 @@ impl FlatClientDriver {
                 FlatClientSessionHostAction::QuitToTitle => FlatClientHostAction::QuitToTitle,
                 FlatClientSessionHostAction::Quit => FlatClientHostAction::Quit,
             });
+        }
+    }
+
+    fn apply_client_experience_settings_effects(
+        &mut self,
+        effects: mclone_app_runtime::client_experience::ClientExperienceSettingsEffects,
+        result: &mut FlatClientUiActionResult,
+    ) -> bool {
+        let mut ok = true;
+        let has_setting_effects = !effects.setting_effects.is_empty();
+        let has_unavailable =
+            !effects.capability_projection.is_empty() || !effects.rejections.is_empty();
+        for effect in effects.setting_effects {
+            match effect {
+                ClientExperienceSettingEffect::SetSectionOcclusionCulling(enabled) => {
+                    self.render_options.section_occlusion_culling = enabled;
+                    log::info!(
+                        "section occlusion culling {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetFullbright(enabled) => {
+                    self.render_options.force_fullbright = enabled;
+                    log::info!(
+                        "fullbright {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetFarLod {
+                    enabled,
+                    extra_radius_chunks,
+                } => {
+                    self.scene.far_lod = self
+                        .scene
+                        .far_lod
+                        .with_extra_radius_chunks(extra_radius_chunks);
+                    self.scene.far_lod.enabled = enabled;
+                    log::info!(
+                        "far LOD {}",
+                        if self.scene.far_lod.enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                    log::info!(
+                        "far LOD range set to {} chunks beyond render distance",
+                        self.scene.far_lod.extra_radius_chunks
+                    );
+                }
+                ClientExperienceSettingEffect::ClearFarLod => {
+                    if let Some(runtime) = &mut self.runtime {
+                        runtime.clear_far_lod();
+                    }
+                }
+                ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
+                    self.player_collision_box_visible = visible;
+                    log::info!(
+                        "player collision box debug {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetFirstPersonPlayerVisible(visible) => {
+                    self.camera.set_first_person_player_visible(visible);
+                    self.scene.first_person_player_visible = visible;
+                    log::info!(
+                        "first-person player body {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetCrosshairVisible(visible) => {
+                    self.crosshair_visible = visible;
+                    log::info!("crosshair {}", if visible { "visible" } else { "hidden" });
+                }
+                ClientExperienceSettingEffect::SetPlayerModel(model) => {
+                    self.player_model = model;
+                    log::info!(
+                        "player model set to {} ({})",
+                        model.label(),
+                        actor_figure_id_for_player_model(model).as_str()
+                    );
+                }
+                ClientExperienceSettingEffect::SyncPlayerAppearance => {
+                    if let Err(err) = self.sync_player_appearance() {
+                        log::warn!("failed to sync player appearance to server: {err:#}");
+                    }
+                }
+                ClientExperienceSettingEffect::SetMovementMode(movement_mode) => {
+                    self.camera
+                        .set_movement_mode(engine_movement_mode(movement_mode));
+                    let movement_mode = self.camera.movement_mode();
+                    log::info!("player movement mode {}", movement_mode.label());
+                }
+                ClientExperienceSettingEffect::SetXrTurnMode(_) => {}
+                ClientExperienceSettingEffect::CycleFramePacing => {
+                    result.host_action = Some(FlatClientHostAction::CycleFramePacing);
+                }
+                ClientExperienceSettingEffect::CycleFpsCap => {
+                    result.host_action = Some(FlatClientHostAction::CycleFpsCap);
+                }
+                ClientExperienceSettingEffect::SetRenderDistance(render_distance_chunks) => {
+                    let render_distance =
+                        i32::try_from(render_distance_chunks).unwrap_or(MAX_RENDER_DISTANCE);
+                    self.scene.render_distance = render_distance;
+                    if let Some(runtime) = &mut self.runtime {
+                        match runtime.set_render_distance(render_distance_chunks) {
+                            Ok(true) => {
+                                log::info!(
+                                    "render distance set to {} (chunk tracking radius {})",
+                                    render_distance,
+                                    runtime.chunk_tracking_radius()
+                                );
+                            }
+                            Ok(false) => {}
+                            Err(err) => {
+                                log::error!(
+                                    "failed to set render distance to {render_distance}: {err:#}"
+                                );
+                                ok = false;
+                            }
+                        }
+                    } else {
+                        log::info!("new-world render distance set to {render_distance}");
+                    }
+                }
+                ClientExperienceSettingEffect::SetFlySpeedMultiplier(multiplier) => {
+                    self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                    log::info!(
+                        "fly speed set to {:.1}x ({:.0} blocks/s)",
+                        self.camera.fly_speed_multiplier(),
+                        self.camera.speed_blocks_per_second()
+                    );
+                }
+                ClientExperienceSettingEffect::SetMovementSpeedMultiplier(multiplier) => {
+                    self.camera
+                        .set_movement_speed_multiplier(f64::from(multiplier));
+                    let multiplier = self.camera.movement_speed_multiplier() as f32;
+                    self.scene.movement_speed_multiplier = multiplier;
+                    log::info!(
+                        "movement speed multiplier set to {:.1}x",
+                        self.camera.movement_speed_multiplier()
+                    );
+                }
+                ClientExperienceSettingEffect::SetTouchLookSensitivity(_) => {}
+                ClientExperienceSettingEffect::SetTouchControlsMode(mode) => {
+                    result.host_action = Some(FlatClientHostAction::SetTouchControlsMode(mode));
+                    log::info!("touch controls set to {}", touch_controls_mode_label(mode));
+                }
+                ClientExperienceSettingEffect::SetServerSimulationCadence(cadence) => {
+                    let config = simulation_cadence_config_from_game(cadence);
+                    if let Some(runtime) = &mut self.runtime {
+                        match runtime.set_simulation_cadence(config) {
+                            Ok(true) => {
+                                self.scene.simulation_cadence = config;
+                                log::info!("local server cadence set to {}", cadence.label());
+                            }
+                            Ok(false) => {
+                                self.scene.simulation_cadence = config;
+                            }
+                            Err(err) => {
+                                log::error!("failed to set local server cadence: {err:#}");
+                                ok = false;
+                            }
+                        }
+                    } else {
+                        self.scene.simulation_cadence = config;
+                        log::info!("local server cadence preset set to {}", cadence.label());
+                    }
+                }
+            }
+        }
+        self.apply_client_experience_capability_projection(effects.capability_projection);
+        for rejection in effects.rejections {
+            log::error!("{}", rejection.message);
+            self.status_overlay = StatusOverlay::new(rejection.message, false);
+            ok = false;
+        }
+        if has_setting_effects && !has_unavailable {
+            self.status_overlay = StatusOverlay::hidden();
+        }
+        ok
+    }
+
+    fn apply_client_experience_capability_projection(
+        &mut self,
+        projection: ClientExperienceCapabilityProjection,
+    ) {
+        if let Some(unavailable) = projection.first_unavailable() {
+            if let Some(message) = unavailable.status.message() {
+                log::warn!("{message}");
+                self.status_overlay = StatusOverlay::new(message, unavailable.status.ok());
+            }
         }
     }
 
@@ -1058,6 +1318,7 @@ impl FlatClientDriver {
         if flat_client_should_clear_inactive_session_status(self.session.state()) {
             self.session.clear();
         }
+        self.status_overlay = StatusOverlay::hidden();
     }
 
     pub(crate) fn finish_pending_session_start(
@@ -1203,325 +1464,33 @@ impl FlatClientDriver {
             return result;
         }
 
-        let mut apply_ui_action = true;
-        match action {
-            GameUiAction::ToggleSectionOcclusion => {
-                self.render_options.section_occlusion_culling =
-                    !self.render_options.section_occlusion_culling;
-                log::info!(
-                    "section occlusion culling {}",
-                    if self.render_options.section_occlusion_culling {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::ToggleFullbright => {
-                self.render_options.force_fullbright = !self.render_options.force_fullbright;
-                log::info!(
-                    "fullbright {}",
-                    if self.render_options.force_fullbright {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::ToggleFarLod => {
-                self.scene.far_lod.enabled = !self.scene.far_lod.enabled;
-                if let Some(runtime) = &mut self.runtime {
-                    runtime.clear_far_lod();
-                }
-                log::info!(
-                    "far LOD {}",
-                    if self.scene.far_lod.enabled {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::SetFarLodRange(range_chunks) => {
-                let range_chunks = u32::try_from(range_chunks)
-                    .unwrap_or(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
-                    .clamp(
-                        MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-                        MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-                    );
-                self.scene.far_lod = self.scene.far_lod.with_extra_radius_chunks(range_chunks);
-                if let Some(runtime) = &mut self.runtime {
-                    runtime.clear_far_lod();
-                }
-                log::info!(
-                    "far LOD range set to {} chunks beyond render distance",
-                    self.scene.far_lod.extra_radius_chunks
-                );
-            }
-            GameUiAction::TogglePlayerCollisionBox => {
-                self.player_collision_box_visible = !self.player_collision_box_visible;
-                log::info!(
-                    "player collision box debug {}",
-                    if self.player_collision_box_visible {
-                        "visible"
-                    } else {
-                        "hidden"
-                    }
-                );
-            }
-            GameUiAction::ToggleCrosshair => {
-                self.crosshair_visible = !self.crosshair_visible;
-                log::info!(
-                    "crosshair {}",
-                    if self.crosshair_visible {
-                        "visible"
-                    } else {
-                        "hidden"
-                    }
-                );
-            }
-            GameUiAction::ToggleFirstPersonPlayer => {
-                let visible = !self.camera.first_person_player_visible();
-                self.camera.set_first_person_player_visible(visible);
-                self.scene.first_person_player_visible = visible;
-                log::info!(
-                    "first-person player body {}",
-                    if visible { "visible" } else { "hidden" }
-                );
-            }
-            GameUiAction::SetPlayerModel(model) => {
-                self.player_model = model;
-                log::info!(
-                    "player model set to {} ({})",
-                    model.label(),
-                    actor_figure_id_for_player_model(model).as_str()
-                );
-                if let Err(err) = self.sync_player_appearance() {
-                    log::warn!("failed to sync player appearance to server: {err:#}");
-                }
-            }
-            GameUiAction::SetMovementMode(movement_mode) => {
-                self.camera
-                    .set_movement_mode(engine_movement_mode(movement_mode));
-                let movement_mode = self.camera.movement_mode();
-                log::info!("player movement mode {}", movement_mode.label());
-            }
-            GameUiAction::SetXrTurnMode(_) => {}
-            GameUiAction::SetFlySpeed(multiplier) => {
-                self.camera.set_fly_speed_multiplier(f64::from(multiplier));
-                log::info!(
-                    "fly speed set to {:.1}x ({:.0} blocks/s)",
-                    self.camera.fly_speed_multiplier(),
-                    self.camera.speed_blocks_per_second()
-                );
-            }
-            GameUiAction::SetMovementSpeed(multiplier) => {
-                self.camera
-                    .set_movement_speed_multiplier(f64::from(multiplier));
-                let multiplier = self.camera.movement_speed_multiplier() as f32;
-                self.scene.movement_speed_multiplier = multiplier;
-                log::info!(
-                    "movement speed multiplier set to {:.1}x",
-                    self.camera.movement_speed_multiplier()
-                );
-            }
-            GameUiAction::SetRenderDistance(render_distance) => {
-                let render_distance =
-                    render_distance.clamp(MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
-                self.scene.render_distance = render_distance;
-                let render_distance_chunks =
-                    u32::try_from(render_distance).expect("clamped render distance must fit u32");
-                if let Some(runtime) = &mut self.runtime {
-                    match runtime.set_render_distance(render_distance_chunks) {
-                        Ok(true) => {
-                            log::info!(
-                                "render distance set to {} (chunk tracking radius {})",
-                                render_distance,
-                                runtime.chunk_tracking_radius()
-                            );
-                        }
-                        Ok(false) => {}
-                        Err(err) => {
-                            log::error!(
-                                "failed to set render distance to {render_distance}: {err:#}"
-                            );
-                            return result;
-                        }
-                    }
-                } else {
-                    log::info!("new-world render distance set to {render_distance}");
-                }
-            }
-            GameUiAction::SetTouchControlsMode(mode) => {
-                result.host_action = Some(FlatClientHostAction::SetTouchControlsMode(mode));
-                log::info!("touch controls set to {}", touch_controls_mode_label(mode));
-            }
-            GameUiAction::SetServerSimulationCadence(cadence) => {
-                if !cadence.is_valid() {
-                    log::error!("invalid server cadence requested from UI: {cadence:?}");
-                    return result;
-                }
-                let config = simulation_cadence_config_from_game(cadence);
-                if let Some(runtime) = &mut self.runtime {
-                    match runtime.set_simulation_cadence(config) {
-                        Ok(true) => {
-                            self.scene.simulation_cadence = config;
-                            log::info!("local server cadence set to {}", cadence.label());
-                        }
-                        Ok(false) => {
-                            self.scene.simulation_cadence = config;
-                        }
-                        Err(err) => {
-                            log::error!("failed to set local server cadence: {err:#}");
-                            return result;
-                        }
-                    }
-                } else {
-                    self.scene.simulation_cadence = config;
-                    log::info!("local server cadence preset set to {}", cadence.label());
-                }
-            }
-            GameUiAction::CycleFramePacing => {
-                result.host_action = Some(FlatClientHostAction::CycleFramePacing);
-            }
-            GameUiAction::CycleFpsCap => {
-                result.host_action = Some(FlatClientHostAction::CycleFpsCap);
-            }
-            GameUiAction::AssignHotbarBlock { slot, block_state } => {
-                if let Err(err) = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state)) {
-                    log::error!("failed to assign debug hotbar slot: {err:#}");
-                }
-            }
-            GameUiAction::OpenWorldCreate => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                let effects = self.world_catalog_controller.apply_ui_action(
-                    action,
-                    FlatClientCatalogActionContext {
-                        new_world_seed: seed,
-                    },
-                );
-                self.apply_world_catalog_effects(effects, context.from_pointer_click);
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::OpenWorldList => {
-                let effects = self.world_catalog_controller.apply_ui_action(
-                    action,
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-                self.apply_world_catalog_effects(effects, context.from_pointer_click);
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::SelectWorld(id) => {
-                let effects = self.world_catalog_controller.apply_ui_action(
-                    GameUiAction::SelectWorld(id),
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-                self.apply_world_catalog_effects(effects, context.from_pointer_click);
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::ConfirmDeleteWorld(_) | GameUiAction::CancelDeleteWorld => {
-                let effects = self.world_catalog_controller.apply_ui_action(
-                    action,
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-                self.apply_world_catalog_effects(effects, context.from_pointer_click);
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::OpenWorld(id) => {
-                let effects = self.world_catalog_controller.apply_ui_action(
-                    GameUiAction::OpenWorld(id),
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-                if self.apply_world_catalog_effects(effects, context.from_pointer_click) {
-                    result.session_start_queued = true;
-                    result.mouse_lock_requested = Some(false);
-                }
-                apply_ui_action = false;
-            }
-            GameUiAction::CreateCatalogWorld => {
-                let effects = self.world_catalog_controller.apply_ui_action(
-                    GameUiAction::CreateCatalogWorld,
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-                if self.apply_world_catalog_effects(effects, context.from_pointer_click) {
-                    result.session_start_queued = true;
-                    result.mouse_lock_requested = Some(false);
-                }
-                apply_ui_action = false;
-            }
-            GameUiAction::DeleteWorld(id) => {
-                let effects = self.world_catalog_controller.apply_ui_action(
-                    GameUiAction::DeleteWorld(id),
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-                self.apply_world_catalog_effects(effects, context.from_pointer_click);
-            }
-            GameUiAction::OpenNewWorld
-            | GameUiAction::RerollSeed
-            | GameUiAction::OpenJoinRemote
-            | GameUiAction::CreateWorld(_)
-            | GameUiAction::JoinRemote
-            | GameUiAction::QuitToTitle
-            | GameUiAction::Quit
-            | GameUiAction::BackToTitle => {
-                let next_seed = matches!(
-                    action,
-                    GameUiAction::OpenNewWorld | GameUiAction::RerollSeed
-                )
-                .then(|| self.next_new_world_seed());
-                let fallback_remote_addr = context
+        self.client_experience
+            .set_settings_state(self.client_experience_settings_state());
+        let new_world_seed = if matches!(action, GameUiAction::OpenWorldCreate) {
+            self.next_new_world_seed()
+        } else {
+            self.ui.new_world_seed()
+        };
+        let next_new_world_seed = matches!(
+            action,
+            GameUiAction::OpenNewWorld | GameUiAction::RerollSeed
+        )
+        .then(|| self.next_new_world_seed());
+        let effects = self.client_experience.apply_ui_action(
+            action,
+            ClientExperienceActionContext {
+                new_world_seed,
+                next_new_world_seed,
+                current_join_remote_addr: self.ui.join_remote_addr(),
+                fallback_remote_addr: context
                     .fallback_remote_addr
-                    .or(Some(DEFAULT_JOIN_REMOTE_ADDR));
-                let effects = flat_client_session_effects_for_action(
-                    action,
-                    FlatClientSessionActionContext {
-                        next_new_world_seed: next_seed,
-                        current_join_remote_addr: self.ui.join_remote_addr(),
-                        fallback_remote_addr,
-                    },
-                );
-                if matches!(action, GameUiAction::RerollSeed) {
-                    if let Some(seed) = effects.new_world_seed {
-                        log::info!("new-world seed rerolled to {seed}");
-                    }
-                }
-                self.apply_flat_client_session_effects(
-                    effects,
-                    context.from_pointer_click,
-                    &mut result,
-                );
-                if matches!(
-                    action,
-                    GameUiAction::CreateWorld(_)
-                        | GameUiAction::JoinRemote
-                        | GameUiAction::QuitToTitle
-                        | GameUiAction::Quit
-                ) {
-                    apply_ui_action = false;
-                }
-            }
-            GameUiAction::StartWorld
-            | GameUiAction::Resume
-            | GameUiAction::OpenBlockPalette
-            | GameUiAction::OpenHelp(_)
-            | GameUiAction::CloseHelp(_)
-            | GameUiAction::OpenOptions(_)
-            | GameUiAction::OpenServerSettings(_)
-            | GameUiAction::BackToPause
-            | GameUiAction::SetTouchLookSensitivity(_) => {}
+                    .or(Some(DEFAULT_JOIN_REMOTE_ADDR)),
+            },
+        );
+        let apply_ui_action =
+            client_experience_should_apply_ui_projection(action) && effects.projection.is_empty();
+        if !self.apply_client_experience_effects(effects, context.from_pointer_click, &mut result) {
+            return result;
         }
 
         if apply_ui_action {
@@ -2520,6 +2489,14 @@ impl FlatClientDriver {
             runtime.clear_far_lod();
         }
     }
+}
+
+fn desktop_client_experience_profile() -> ClientExperienceProfile {
+    let mut settings = ClientExperienceSettingsProfile::all_supported();
+    settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    ClientExperienceProfile::new(settings)
 }
 
 pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUiRenderState {

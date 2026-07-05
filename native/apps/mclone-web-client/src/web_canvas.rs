@@ -7,17 +7,23 @@ use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
     WebIntegratedServerRunnerConfig, WebRuntime,
 };
+use mclone_app_runtime::client_experience::{
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
+    ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
+    ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
+    ClientExperienceSettingEffect, ClientExperienceSettingsEffects,
+    ClientExperienceSettingsProfile, ClientExperienceSettingsState,
+    client_experience_should_apply_ui_projection,
+};
 use mclone_app_runtime::flat_client_catalog::{
-    FlatClientCatalogActionContext, FlatClientCatalogController, FlatClientCatalogEffects,
-    FlatClientCatalogRequest, FlatClientCatalogSessionStart,
+    FlatClientCatalogEffects, FlatClientCatalogRequest, FlatClientCatalogSessionStart,
 };
 use mclone_app_runtime::flat_client_session::{
-    FlatClientSessionActionContext, FlatClientSessionEffects, FlatClientSessionHostAction,
-    FlatClientSessionProjection, FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
+    FlatClientSessionEffects, FlatClientSessionHostAction, FlatClientSessionProjection,
+    FlatClientSessionTransitionEffects, FlatClientSessionUiEffects,
     flat_client_failed_start_ui_effects, flat_client_quit_to_title_transition,
-    flat_client_session_effects_for_action, flat_client_session_projection,
-    flat_client_session_ui_effects_for_request, flat_client_should_clear_inactive_session_status,
-    flat_client_start_session_transition,
+    flat_client_session_projection, flat_client_session_ui_effects_for_request,
+    flat_client_should_clear_inactive_session_status, flat_client_start_session_transition,
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -2480,7 +2486,7 @@ pub struct WebChunkRenderSession {
     actors: ActorDrawResources,
     gui: GuiRenderer,
     ui: GameUiHost,
-    world_catalog: FlatClientCatalogController,
+    client_experience: ClientExperienceController,
     debug_overlay_visible: bool,
     status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
@@ -2731,7 +2737,8 @@ impl WebChunkRenderSession {
         let response =
             decode_world_catalog_response(&operation, &payload).map_err(JsValue::from)?;
         let effects = self
-            .world_catalog
+            .client_experience
+            .catalog_mut()
             .apply_catalog_response(request_id, response);
         self.commit_current_ui_world_catalog_state();
         self.catalog_effects_to_js_value(effects)
@@ -2745,7 +2752,7 @@ impl WebChunkRenderSession {
         message: String,
     ) -> Result<JsValue, JsValue> {
         let request_id = parse_world_catalog_request_id(&request_id).map_err(JsValue::from)?;
-        let effects = self.world_catalog.apply_catalog_error(
+        let effects = self.client_experience.catalog_mut().apply_catalog_error(
             request_id,
             WorldCatalogError::new(WorldCatalogErrorKind::StorageFailure, message),
         );
@@ -3098,7 +3105,8 @@ impl WebChunkRenderSession {
         }
         write_web_session_status_to_js_object(object, &self.session)?;
         let world_catalog = self
-            .world_catalog
+            .client_experience
+            .catalog()
             .ui_state_with_active_world(self.active_local_world_id());
         set_bool(object, "worldCatalogPersistent", world_catalog.persistent)?;
         set_bool(object, "worldCatalogLoading", world_catalog.loading)?;
@@ -3218,127 +3226,147 @@ impl WebChunkRenderSession {
     }
 
     fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
-        let mut effects = FlatClientCatalogEffects::default();
-        let mut apply_ui_action = true;
-        let mut refresh_world_catalog_render_state = false;
-        match action {
-            GameUiAction::ToggleSectionOcclusion => {
-                self.section_occlusion_culling = !self.section_occlusion_culling;
-            }
-            GameUiAction::ToggleFullbright => {
-                self.force_fullbright = !self.force_fullbright;
-            }
-            GameUiAction::ToggleFarLod => {}
-            GameUiAction::SetFarLodRange(_) => {}
-            GameUiAction::TogglePlayerCollisionBox => {
-                self.player_collision_box_visible = !self.player_collision_box_visible;
-            }
-            GameUiAction::ToggleCrosshair => {
-                self.crosshair_visible = !self.crosshair_visible;
-            }
-            GameUiAction::ToggleFirstPersonPlayer => {
-                let visible = !self.camera.first_person_player_visible();
-                self.camera.set_first_person_player_visible(visible);
-            }
-            GameUiAction::SetTouchLookSensitivity(look_sensitivity) => {
-                self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
-            }
-            GameUiAction::SetTouchControlsMode(mode) => {
-                self.input_preferences.touch_controls = mode;
-            }
-            GameUiAction::SetMovementMode(movement_mode) => {
-                self.camera
-                    .set_movement_mode(engine_movement_mode(movement_mode));
-            }
-            GameUiAction::SetXrTurnMode(_) => {}
-            GameUiAction::SetFlySpeed(multiplier) => {
-                self.camera.set_fly_speed_multiplier(f64::from(multiplier));
-            }
-            GameUiAction::SetMovementSpeed(multiplier) => {
-                self.camera
-                    .set_movement_speed_multiplier(f64::from(multiplier));
-            }
-            GameUiAction::SetPlayerModel(model) => {
-                self.player_model = model;
-                if let Err(error) = self.sync_player_appearance_deferred() {
-                    web_sys::console::warn_1(
-                        &format!("failed to sync browser player appearance: {error}").into(),
-                    );
-                }
-            }
-            GameUiAction::AssignHotbarBlock { slot, block_state } => {
-                if let Some(command) = self
-                    .interaction
-                    .set_debug_hotbar_slot(slot, Some(BlockStateId(block_state)))
-                {
-                    let _ = self.runtime.send_gameplay_command_deferred(command);
-                }
-            }
-            GameUiAction::OpenNewWorld
-            | GameUiAction::RerollSeed
-            | GameUiAction::OpenJoinRemote
-            | GameUiAction::CreateWorld(_)
-            | GameUiAction::JoinRemote
-            | GameUiAction::BackToTitle
-            | GameUiAction::QuitToTitle
-            | GameUiAction::Quit => {
-                self.apply_flat_client_session_effects(flat_client_session_effects_for_action(
-                    action,
-                    FlatClientSessionActionContext {
-                        next_new_world_seed: None,
-                        current_join_remote_addr: self.ui.join_remote_addr(),
-                        fallback_remote_addr: None,
-                    },
-                ))
-            }
-            GameUiAction::OpenWorldList
-            | GameUiAction::OpenWorldCreate
-            | GameUiAction::SelectWorld(_)
-            | GameUiAction::ConfirmDeleteWorld(_)
-            | GameUiAction::DeleteWorld(_)
-            | GameUiAction::CancelDeleteWorld => {
-                refresh_world_catalog_render_state = true;
-                let active_world = self.active_local_world_id().cloned();
-                self.world_catalog.set_active_world(active_world);
-                effects = self.world_catalog.apply_ui_action(
-                    action,
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-            }
-            GameUiAction::OpenWorld(_) | GameUiAction::CreateCatalogWorld => {
-                refresh_world_catalog_render_state = true;
-                let active_world = self.active_local_world_id().cloned();
-                self.world_catalog.set_active_world(active_world);
-                effects = self.world_catalog.apply_ui_action(
-                    action,
-                    FlatClientCatalogActionContext {
-                        new_world_seed: self.ui.new_world_seed(),
-                    },
-                );
-                apply_ui_action = false;
-            }
-            GameUiAction::StartWorld
-            | GameUiAction::OpenBlockPalette
-            | GameUiAction::OpenHelp(_)
-            | GameUiAction::CloseHelp(_)
-            | GameUiAction::OpenServerSettings(_)
-            | GameUiAction::Resume
-            | GameUiAction::OpenOptions(_)
-            | GameUiAction::BackToPause
-            | GameUiAction::CycleFramePacing
-            | GameUiAction::CycleFpsCap
-            | GameUiAction::SetServerSimulationCadence(_)
-            | GameUiAction::SetRenderDistance(_) => {}
-        }
+        self.client_experience
+            .set_settings_state(self.client_experience_settings_state());
+        let active_world = self.active_local_world_id().cloned();
+        self.client_experience
+            .catalog_mut()
+            .set_active_world(active_world);
+        let effects = self.client_experience.apply_ui_action(
+            action,
+            ClientExperienceActionContext {
+                new_world_seed: self.ui.new_world_seed(),
+                next_new_world_seed: None,
+                current_join_remote_addr: self.ui.join_remote_addr(),
+                fallback_remote_addr: None,
+            },
+        );
+        let catalog_effects = effects.catalog.clone();
+        let apply_ui_action =
+            client_experience_should_apply_ui_projection(action) && effects.projection.is_empty();
+        self.apply_client_experience_effects(effects);
         if apply_ui_action {
             self.ui.apply_action(action);
         }
-        if refresh_world_catalog_render_state {
+        if web_action_updates_world_catalog_render_state(action) {
             self.commit_current_ui_world_catalog_state();
         }
-        effects
+        catalog_effects
+    }
+
+    fn client_experience_settings_state(&self) -> ClientExperienceSettingsState {
+        let committed = self.ui.committed_render_state();
+        let render_distance = committed
+            .render_distance
+            .clamp(WEB_MIN_RENDER_DISTANCE, WEB_MAX_RENDER_DISTANCE);
+        let radius_chunks = u32::try_from(render_distance).unwrap_or(WEB_DEFAULT_RENDER_DISTANCE);
+        ClientExperienceSettingsState::from(self.ui_render_state(radius_chunks))
+    }
+
+    fn apply_client_experience_effects(&mut self, effects: ClientExperienceEffects) {
+        self.apply_flat_client_session_effects(effects.session);
+        self.apply_client_experience_settings_effects(effects.settings);
+        for effect in effects.gameplay {
+            match effect {
+                ClientExperienceGameplayEffect::AssignHotbarBlock { slot, block_state } => {
+                    if let Some(command) = self
+                        .interaction
+                        .set_debug_hotbar_slot(slot, Some(BlockStateId(block_state)))
+                    {
+                        let _ = self.runtime.send_gameplay_command_deferred(command);
+                    }
+                }
+            }
+        }
+        for effect in effects.projection {
+            match effect {
+                ClientExperienceProjectionEffect::ApplyUiAction(action) => {
+                    self.ui.apply_action(action);
+                }
+            }
+        }
+    }
+
+    fn apply_client_experience_settings_effects(
+        &mut self,
+        effects: ClientExperienceSettingsEffects,
+    ) {
+        let has_setting_effects = !effects.setting_effects.is_empty();
+        let has_unavailable =
+            !effects.capability_projection.is_empty() || !effects.rejections.is_empty();
+        for effect in effects.setting_effects {
+            match effect {
+                ClientExperienceSettingEffect::SetSectionOcclusionCulling(enabled) => {
+                    self.section_occlusion_culling = enabled;
+                }
+                ClientExperienceSettingEffect::SetFullbright(enabled) => {
+                    self.force_fullbright = enabled;
+                }
+                ClientExperienceSettingEffect::SetFarLod { .. }
+                | ClientExperienceSettingEffect::ClearFarLod
+                | ClientExperienceSettingEffect::SetXrTurnMode(_)
+                | ClientExperienceSettingEffect::CycleFramePacing
+                | ClientExperienceSettingEffect::CycleFpsCap
+                | ClientExperienceSettingEffect::SetServerSimulationCadence(_) => {}
+                ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
+                    self.player_collision_box_visible = visible;
+                }
+                ClientExperienceSettingEffect::SetFirstPersonPlayerVisible(visible) => {
+                    self.camera.set_first_person_player_visible(visible);
+                }
+                ClientExperienceSettingEffect::SetCrosshairVisible(visible) => {
+                    self.crosshair_visible = visible;
+                }
+                ClientExperienceSettingEffect::SetPlayerModel(model) => {
+                    self.player_model = model;
+                }
+                ClientExperienceSettingEffect::SyncPlayerAppearance => {
+                    if let Err(error) = self.sync_player_appearance_deferred() {
+                        web_sys::console::warn_1(
+                            &format!("failed to sync browser player appearance: {error}").into(),
+                        );
+                    }
+                }
+                ClientExperienceSettingEffect::SetMovementMode(movement_mode) => {
+                    self.camera
+                        .set_movement_mode(engine_movement_mode(movement_mode));
+                }
+                ClientExperienceSettingEffect::SetRenderDistance(_) => {}
+                ClientExperienceSettingEffect::SetFlySpeedMultiplier(multiplier) => {
+                    self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                }
+                ClientExperienceSettingEffect::SetMovementSpeedMultiplier(multiplier) => {
+                    self.camera
+                        .set_movement_speed_multiplier(f64::from(multiplier));
+                }
+                ClientExperienceSettingEffect::SetTouchLookSensitivity(look_sensitivity) => {
+                    self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
+                }
+                ClientExperienceSettingEffect::SetTouchControlsMode(mode) => {
+                    self.input_preferences.touch_controls = mode;
+                }
+            }
+        }
+        self.apply_client_experience_capability_projection(effects.capability_projection);
+        for rejection in effects.rejections {
+            web_sys::console::error_1(&rejection.message.into());
+            self.status_overlay = StatusOverlay::new(rejection.message, false);
+        }
+        if has_setting_effects && !has_unavailable {
+            self.status_overlay = StatusOverlay::hidden();
+        }
+    }
+
+    fn apply_client_experience_capability_projection(
+        &mut self,
+        projection: ClientExperienceCapabilityProjection,
+    ) {
+        if let Some(unavailable) = projection.first_unavailable() {
+            if let Some(message) = unavailable.status.message() {
+                web_sys::console::warn_1(&message.into());
+                self.status_overlay = StatusOverlay::new(message, unavailable.status.ok());
+            }
+        }
     }
 
     fn ui_event_result_to_js_value(
@@ -3425,7 +3453,9 @@ impl WebChunkRenderSession {
                 | GameUiAction::SetXrTurnMode(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
-                | GameUiAction::CycleFpsCap => {}
+                | GameUiAction::CycleFpsCap => {
+                    let _ = action;
+                }
             }
         }
         self.write_catalog_effects_to_js_object(&object, effects)?;
@@ -3538,7 +3568,8 @@ impl WebChunkRenderSession {
     fn ui_render_state(&self, radius_chunks: u32) -> GameUiRenderState {
         GameUiRenderState {
             world_catalog: self
-                .world_catalog
+                .client_experience
+                .catalog()
                 .ui_state_with_active_world(self.active_local_world_id()),
             render_distance: i32::try_from(radius_chunks)
                 .unwrap_or(i32::MAX)
@@ -3587,7 +3618,8 @@ impl WebChunkRenderSession {
     fn commit_current_ui_world_catalog_state(&mut self) {
         let mut state = self.ui.committed_render_state();
         state.world_catalog = self
-            .world_catalog
+            .client_experience
+            .catalog()
             .ui_state_with_active_world(self.active_local_world_id());
         self.ui.commit_render_state(state);
     }
@@ -3740,8 +3772,11 @@ impl WebChunkRenderSession {
         }
         ui.set_scale(GuiScale::from_pixels(context.width, context.height));
         let session = started_web_session_coordinator(session_request)?;
-        let mut world_catalog = FlatClientCatalogController::new();
-        world_catalog.set_capabilities(WorldCatalogCapabilities::persistent_local());
+        let mut client_experience =
+            ClientExperienceController::new(web_client_experience_profile());
+        client_experience
+            .catalog_mut()
+            .set_capabilities(WorldCatalogCapabilities::persistent_local());
         let mut camera = EngineCameraController::spawn_for_chunk(initial_center);
         camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
 
@@ -3759,7 +3794,7 @@ impl WebChunkRenderSession {
             actors,
             gui,
             ui,
-            world_catalog,
+            client_experience,
             debug_overlay_visible: false,
             status_overlay: StatusOverlay::hidden(),
             section_occlusion_culling: render_options.section_occlusion_culling,
@@ -3832,7 +3867,9 @@ impl WebChunkRenderSession {
             .apply_start_result(&Ok(StartedGameSession::new(descriptor, ())));
         self.reset_runtime_view_state(&request);
         let active_world = self.active_local_world_id().cloned();
-        self.world_catalog.set_active_world(active_world);
+        self.client_experience
+            .catalog_mut()
+            .set_active_world(active_world);
         self.sync_player_appearance_deferred()?;
         Ok(())
     }
@@ -5703,6 +5740,30 @@ fn write_active_session_to_js_object(
         }
     }
     Ok(())
+}
+
+fn web_client_experience_profile() -> ClientExperienceProfile {
+    let mut settings = ClientExperienceSettingsProfile::all_supported();
+    settings.far_lod = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    ClientExperienceProfile::new(settings)
+}
+
+fn web_action_updates_world_catalog_render_state(action: GameUiAction) -> bool {
+    matches!(
+        action,
+        GameUiAction::OpenWorldList
+            | GameUiAction::OpenWorldCreate
+            | GameUiAction::SelectWorld(_)
+            | GameUiAction::OpenWorld(_)
+            | GameUiAction::CreateCatalogWorld
+            | GameUiAction::ConfirmDeleteWorld(_)
+            | GameUiAction::DeleteWorld(_)
+            | GameUiAction::CancelDeleteWorld
+    )
 }
 
 fn clamp_touch_look_sensitivity(value: f32) -> f32 {

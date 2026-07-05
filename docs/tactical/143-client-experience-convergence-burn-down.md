@@ -76,7 +76,7 @@ rg -n "already exists|was not found|cannot delete" \
 |---|---|---|
 | 0: enforcement baseline | gates | landed 2026-07-05 |
 | 1: facade + `GameUiAction` classification | V1 (shared side), V2 (policy) | landed 2026-07-05 |
-| 2: desktop and web adopt the facade | V1/V2 on flat lanes | open |
+| 2: desktop and web adopt the facade | V1/V2 on flat lanes | landed 2026-07-05 |
 | 3: TypeScript catalog demotion | V3 | open |
 | 4: XR session-machine merge | V4 | open |
 | 5: emulated-XR profile test | display-neutrality gate | open |
@@ -330,7 +330,97 @@ pnpm native:web:catalog-smoke
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-05.
+
+Changes:
+
+- `flat_client_driver.rs` and `web_canvas.rs` now route `GameUiAction`
+  policy through `ClientExperienceController`.
+- Desktop/web app-local duplicated toggle/session/catalog dispatch bodies were
+  deleted. The app lanes execute facade effects, feed catalog/session
+  completions, and keep host effects in the adapters.
+- Desktop and web capability gaps now use profile projection. Web marks far
+  LOD, XR turn mode, frame pacing, FPS cap, and server simulation cadence
+  unsupported instead of leaving silent no-op arms.
+- Catalog navigation emits the shared inactive-session cleanup effect through
+  the facade so stale start status cleanup is not app-local policy.
+- Updated [`../topics/platform-parity.md`](../topics/platform-parity.md) for
+  `app-runtime::client_experience` adoption on desktop/offscreen and web.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+# PASS
+
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+# PASS, 109 lib tests plus bin/doc harnesses.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client ui_action_routing
+# PASS, 2 matched tests plus bin harness.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client catalog_
+# PASS, 8 matched tests plus bin harness.
+
+pnpm native:desktop-offscreen:smoke
+# PASS, saved /tmp/mclone-desktop-offscreen.png.
+# Screenshot inspected: nonblank, correctly framed world render.
+
+pnpm native:web:typecheck
+# PASS. Existing warning:
+# mclone-server: dead_code for PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks.
+
+pnpm native:web:smoke
+# PASS, saved /tmp/mclone-native-web-canvas.png.
+# Screenshot inspected: nonblank, correctly framed world render.
+# Existing warning: same mclone-server dead_code warning.
+
+pnpm native:web:catalog-smoke
+# PASS, saved /tmp/mclone-native-web-catalog-ui-probe-canvas.png.
+# Screenshot inspected: coherent world-list UI with expected delete status.
+# Existing warning: same mclone-server dead_code warning.
+
+git diff --check
+# PASS
+```
+
+Tripwires after Slice 2:
+
+- Dispatch sites: 5 total, unchanged from Slice 0.
+
+```text
+native/crates/mclone-xr-scene/src/lib.rs:5204:    fn apply_xr_ui_action(
+native/apps/mclone-android-client/src/lib.rs:1180:        fn apply_ui_action(
+native/apps/mclone-web-client/src/web_canvas.rs:3228:    fn apply_web_ui_action(&mut self, action: GameUiAction) -> FlatClientCatalogEffects {
+native/apps/mclone-native-client/src/flat_client_driver.rs:1430:    pub(crate) fn apply_ui_action(
+native/apps/mclone-native-client/src/app.rs:534:    fn apply_ui_action(
+```
+
+- Inert arms: 7 total. `mclone-native-client`: 0,
+  `mclone-web-client`: 0, `mclone-android-client`: 4,
+  `mclone-xr-scene`: 3.
+
+```text
+native/crates/mclone-xr-scene/src/lib.rs:5279:            GameUiAction::ToggleCrosshair => {}
+native/crates/mclone-xr-scene/src/lib.rs:5423:            | GameUiAction::SetServerSimulationCadence(_) => {}
+native/crates/mclone-xr-scene/src/lib.rs:5433:            | GameUiAction::BackToPause => {}
+native/apps/mclone-android-client/src/lib.rs:1218:                GameUiAction::SetFarLodRange(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1276:                GameUiAction::SetXrTurnMode(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1367:                | GameUiAction::SetServerSimulationCadence(_) => {}
+native/apps/mclone-android-client/src/lib.rs:1391:                | GameUiAction::BackToPause => {}
+```
+
+- TypeScript policy-string hits: 7 total, unchanged from Slice 0.
+
+```text
+native/apps/mclone-web-client/www/mclone-web-smoke.js:574:      "already exists",
+native/apps/mclone-web-client/www/mclone-web-smoke.js:578:      "cannot delete active local world",
+native/apps/mclone-web-client/www/mclone-web-smoke.js:591:      "was not found",
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:82:    throw new Error(`local world \`${id}\` already exists`);
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:113:    throw new Error(`local world \`${normalizedId}\` was not found`);
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:130:    throw new Error(`cannot delete active local world \`${normalizedId}\`; quit to title first`);
+native/apps/mclone-web-client/www/mclone-web-world-catalog.ts:134:    throw new Error(`local world \`${normalizedId}\` was not found`);
+```
 
 ## Slice 3: Demote TypeScript Catalog Glue To A Dumb Executor
 
