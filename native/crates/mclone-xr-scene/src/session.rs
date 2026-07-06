@@ -1623,6 +1623,7 @@ pub(crate) fn local_single_view_options(scene: &XrSceneOptions) -> LocalSingleVi
             .with_freeze_time(scene.freeze_time)
             .with_debug_passive_showcase(scene.debug_passive_showcase)
             .with_lighting_enabled(scene.lighting_enabled)
+            .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget)
             .with_render_compile_worker_count(scene.render_compile_worker_count);
     if let Some(world_dir) = &scene.world_dir {
         options = options.with_persistent_world_dir(world_dir.clone());

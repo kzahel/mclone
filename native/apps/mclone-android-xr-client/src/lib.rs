@@ -491,6 +491,7 @@ mod android {
         );
         let mut underwater_detection_mode = XrUnderwaterDetectionMode::default();
         let mut debug_ui_screen = None;
+        let mut adaptive_chunk_publication_budget = false;
         let mut argv = argv.into_iter();
         while let Some(arg) = argv.next() {
             if shared_args.parse_next_arg(
@@ -607,6 +608,15 @@ mod android {
                         Some(parse_next_string(&mut argv, "--frame-accounting")?),
                     )?;
                 }
+                "--adaptive-chunk-publication-budget" => {
+                    adaptive_chunk_publication_budget = parse_bool_arg(
+                        "--adaptive-chunk-publication-budget",
+                        Some(parse_next_string(
+                            &mut argv,
+                            "--adaptive-chunk-publication-budget",
+                        )?),
+                    )?;
+                }
                 "--multiview-proof" => {
                     options.multiview_proof = true;
                 }
@@ -703,8 +713,12 @@ mod android {
         scene.underwater_detection_mode = underwater_detection_mode;
         scene.debug_ui_screen = debug_ui_screen;
         scene.skip_actors = options.skip_actors;
+        scene.adaptive_chunk_publication_budget = adaptive_chunk_publication_budget;
         if options.remote_addr.is_some() && scene.world_dir.is_some() {
             bail!("--world-dir applies only to local integrated worlds");
+        }
+        if options.remote_addr.is_some() && scene.adaptive_chunk_publication_budget {
+            bail!("--adaptive-chunk-publication-budget applies only to local integrated worlds");
         }
         options.scene = scene.validated()?;
         options.render_options = shared_options.render_options;
@@ -897,6 +911,7 @@ mod android {
             freeze_time: scene.freeze_time,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
+            adaptive_chunk_publication_budget: false,
             far_lod: Default::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
@@ -1264,7 +1279,7 @@ mod android {
             startup_options.xr_render_scale
         );
         log::info!(
-            "Android XR scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} day_time={:?} freeze_time={} lighting={} skip_actors={}",
+            "Android XR scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} day_time={:?} freeze_time={} lighting={} adaptive_chunk_publication_budget={} skip_actors={}",
             scene_options.seed,
             scene_options.chunk_x,
             scene_options.chunk_z,
@@ -1273,6 +1288,7 @@ mod android {
             scene_options.day_time_override,
             scene_options.freeze_time,
             scene_options.lighting_enabled,
+            scene_options.adaptive_chunk_publication_budget,
             scene_options.skip_actors
         );
         log::info!(
@@ -1795,6 +1811,7 @@ mod android {
                 scene_options.render_distance,
                 scene_options.render_compile_worker_count,
                 scene_options.skip_actors,
+                scene_options.adaptive_chunk_publication_budget,
                 display_refresh,
                 render_section_upload_budget,
                 render_section_accept_budget,
@@ -1912,6 +1929,7 @@ mod android {
             scene_options.render_distance,
             scene_options.render_compile_worker_count,
             scene_options.skip_actors,
+            scene_options.adaptive_chunk_publication_budget,
             display_refresh,
             render_section_upload_budget,
             render_section_accept_budget,
@@ -2037,6 +2055,7 @@ mod android {
                 .with_freeze_time(scene.freeze_time)
                 .with_debug_passive_showcase(scene.debug_passive_showcase)
                 .with_lighting_enabled(scene.lighting_enabled)
+                .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget)
                 .with_render_compile_worker_count(scene.render_compile_worker_count);
         if let Some(world_dir) = &scene.world_dir {
             options = options.with_persistent_world_dir(world_dir.clone());
@@ -3178,6 +3197,7 @@ mod android {
         render_distance: u32,
         render_compile_worker_count: usize,
         skip_actors: bool,
+        adaptive_chunk_publication_budget: bool,
         display_refresh: XrDisplayRefreshSnapshot,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
@@ -3204,6 +3224,7 @@ mod android {
             render_distance,
             render_compile_worker_count,
             skip_actors,
+            adaptive_chunk_publication_budget,
             display_refresh,
             render_path,
             render_section_upload_budget,
@@ -3801,6 +3822,7 @@ mod android {
         render_distance: u32,
         render_compile_worker_count: usize,
         skip_actors: bool,
+        adaptive_chunk_publication_budget: bool,
         display_refresh: XrDisplayRefreshSnapshot,
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
@@ -3830,6 +3852,7 @@ mod android {
             render_distance: u32,
             render_compile_worker_count: usize,
             skip_actors: bool,
+            adaptive_chunk_publication_budget: bool,
             display_refresh: XrDisplayRefreshSnapshot,
             render_path: AndroidXrRenderPath,
             render_section_upload_budget: Option<usize>,
@@ -3856,6 +3879,7 @@ mod android {
                 render_distance,
                 render_compile_worker_count,
                 skip_actors,
+                adaptive_chunk_publication_budget,
                 display_refresh,
                 render_path,
                 render_section_upload_budget,
@@ -3975,7 +3999,7 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} frame_accounting_enabled={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} frame_accounting_enabled={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} adaptive_chunk_publication_budget={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_path.label(),
@@ -3984,6 +4008,7 @@ mod android {
                 format_optional_usize(self.render_section_accept_budget),
                 format_optional_usize(self.render_completed_result_accept_budget),
                 self.skip_actors,
+                self.adaptive_chunk_publication_budget,
                 self.render_distance,
                 self.render_compile_worker_count,
                 flight_speed,
@@ -4028,6 +4053,7 @@ mod android {
                 render_distance: self.render_distance,
                 render_compile_worker_count: self.render_compile_worker_count,
                 skip_actors: self.skip_actors,
+                adaptive_chunk_publication_budget: self.adaptive_chunk_publication_budget,
                 display_refresh: self.display_refresh.clone(),
                 target_hz: self.target_hz,
                 frame_accounting_enabled: self.frame_accounting_enabled,
@@ -4154,6 +4180,7 @@ mod android {
         render_distance: u32,
         render_compile_worker_count: usize,
         skip_actors: bool,
+        adaptive_chunk_publication_budget: bool,
         display_refresh: XrDisplayRefreshSnapshot,
         target_hz: f64,
         frame_accounting_enabled: bool,
@@ -4299,7 +4326,7 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} frame_accounting_enabled={} conservation_violations={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} {}={} {}={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} frame_accounting_enabled={} conservation_violations={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} adaptive_chunk_publication_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} {}={} {}={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
@@ -4309,6 +4336,7 @@ mod android {
                 format_optional_usize(self.render_section_accept_budget),
                 format_optional_usize(self.render_completed_result_accept_budget),
                 self.skip_actors,
+                self.adaptive_chunk_publication_budget,
                 self.xr_foveation.label(),
                 self.xr_render_scale,
                 self.xr_eye_size[0],

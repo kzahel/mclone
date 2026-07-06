@@ -101,6 +101,47 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-06 - Tactical 150 Slice 3 Adaptive Publication Desktop Checkpoint
+
+Commit: this checkpoint commit (benchmarks captured from the same worktree
+contents before the commit was created; base before edits was `704f6373`). Host: `kmacbook`, Apple
+M4 Pro, macOS `26.5.1` build `25F80`.
+
+Raw JSON artifacts were captured under `/tmp`:
+`/tmp/mclone-rd10-adaptive-1.json`,
+`/tmp/mclone-rd10-adaptive-2.json`,
+`/tmp/mclone-rd15-adaptive.json`,
+`/tmp/mclone-movement-frame-adaptive.json`, and
+`/tmp/mclone-movement-frame-control.json`.
+
+Startup-streaming rows used
+`--adaptive-chunk-publication-budget true --debug-passive-showcase false`.
+
+| Lane | Run | RD | Frames / Hz | Playable | Full view | Render quiescent | Over budget | Over 2x | p95 / p99 / max | Max publish | Max pending publication chunks |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| fresh startup adaptive | 1 | 10 | `6000 / 60` | `0.530s` | `9.730s` | `50.196s` | `0` | `0` | `7.010 / 7.450 / 8.961ms` | `1.847ms` | `124` |
+| fresh startup adaptive | 2 | 10 | `6000 / 60` | `0.512s` | `9.700s` | `50.171s` | `0` | `0` | `6.806 / 7.320 / 8.485ms` | `1.851ms` | `124` |
+| fresh startup adaptive | 1 | 15 | `9000 / 60` | `0.717s` | `20.022s` | `50.238s` | `24` | `2` | `10.594 / 12.252 / 39.042ms` | `2.021ms` | `179` |
+
+Movement-frame same-commit control:
+
+| Lane | Frames / Hz | Over budget | Over 2x | p95 / p99 / max | Accounting violations |
+|---|---:|---:|---:|---:|---:|
+| adaptive flag | `240 / 120` | `1` | `1` | `2.551 / 2.703 / 19.358ms` | `0` |
+| control | `240 / 120` | `1` | `1` | `2.548 / 2.830 / 17.131ms` | `0` |
+
+Interpretation:
+
+- RD10 reproduced the publication win twice: full view reached `9.70-9.73s`
+  with zero 60 Hz budget misses.
+- RD15 full view reached `20.022s`, a `2.86x` improvement over the Slice 0
+  `57.214s` baseline, but retained the known RD15 tail spikes (`24` over
+  budget, `2` over 2x).
+- Render quiescence stayed around `50s`, so Candidate A opens publication but
+  does not close the render-admission/mesh tail. The frame-pipeline
+  `budgetDecisionPanel` remained empty in these flat perf rows; full promotion
+  still needs decision-trace/report wiring before default-on.
+
 ### 2026-07-06 - Tactical 150 Slice 0 Desktop Clean Baselines
 
 Commit: `bc55076c` (`Fix throughput guardrail measurement gates`), clean tree

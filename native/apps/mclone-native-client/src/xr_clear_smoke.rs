@@ -793,6 +793,7 @@ fn xr_scene_options_from_desktop_scene(
         freeze_time: scene.freeze_time,
         debug_passive_showcase: scene.debug_passive_showcase,
         lighting_enabled: scene.lighting_enabled,
+        adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
         far_lod: scene.far_lod,
         underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
         debug_ui_screen: debug_ui_screen.map(xr_debug_ui_screen_from_desktop),

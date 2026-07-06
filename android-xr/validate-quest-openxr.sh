@@ -145,6 +145,9 @@ Options:
                      Add --section-occlusion VALUE to startup argv.
   --fullbright true|false
                      Add --fullbright VALUE to startup argv.
+  --adaptive-chunk-publication-budget true|false
+                     Add --adaptive-chunk-publication-budget VALUE to startup
+                     argv for local integrated worlds.
   --session-smoke MODE
                      Run a launch-scoped in-headset session replacement smoke.
                      MODE is new-world.
@@ -544,7 +547,7 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--world-dir|--world-root)
+        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--adaptive-chunk-publication-budget|--world-dir|--world-root)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2

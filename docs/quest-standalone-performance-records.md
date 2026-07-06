@@ -109,6 +109,53 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-06 - Tactical 150 Slice 3 Adaptive Publication Quest Checkpoint
+
+Commit: this checkpoint commit (release APK built from the same worktree
+contents before the commit was created; base before edits was `704f6373`). Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+
+All rows included `--adaptive-chunk-publication-budget true`, and the Android
+XR scene/options logs and perf markers reported
+`adaptive_chunk_publication_budget=true`.
+
+| Lane | Config | Skipped | Dropped delta | App p95 / p99 | Headroom avg | App over-period | Over 2x | Queue / oldest age | Pump stalls | Pending publication chunks |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD5 settled orbit | workers `2`, accept/upload `2/16/64` | `0` | `14` | `12.067 / 12.681ms` | `+3.085ms` | `0.0%` | `0` | `0 / 20.927ms` | `0` | `0` |
+| RD7 settled orbit | lane default | `0` | `17` | `12.653 / 13.544ms` | `+2.740ms` | `0.5%` | `0` | `19 / n/a` | `0` | `15` |
+| RD5 chunk-view churn | workers `2`, accept/upload `2/16/64` | `0` | `13` | `9.957 / 10.908ms` | `+8.832ms` | `0.1%` | `1` | `287 / 164.701ms` | `1` | `96` |
+
+Interpretation:
+
+- The RD5 settled-orbit guardrail is green against the 142 envelope
+  (`dropped_delta <= 17`, app p95 `<= 13.0ms`, headroom avg `>= +2.5ms`,
+  app-over-period `<= 2%`, over-2x `0`).
+- RD7 remains inside the pressure envelope (`dropped_delta <= 20`, app p95
+  `<= 13.5ms`, app-over-period `<= 2%`, over-2x `0`).
+- RD5 churn is comparable to the Slice 1 overlap churn baseline: app p95 is
+  `+0.060ms`, p99 is lower, dropped delta is `+1`, queue age is slightly lower
+  than `166.692ms`, and the one update-pump stall matches the existing churn
+  rows. Pending publication peaked at `96`, below the adaptive backlog cap.
+  The lane still lacks an aggregate chunks/sec field and full budget-decision
+  trace, so this is gate evidence, not default-on closure by itself.
+
+Raw artifacts:
+
+- `/tmp/mclone-quest-openxr-perf-orbit-rd5-adaptive.txt`
+- `/tmp/mclone-quest-openxr-perf-orbit-rd5-adaptive-logcat.txt`
+- `/tmp/mclone-quest-openxr-perf-orbit-rd7-adaptive.txt`
+- `/tmp/mclone-quest-openxr-perf-orbit-rd7-adaptive-logcat.txt`
+- `/tmp/mclone-quest-openxr-perf-churn-rd5-adaptive.txt`
+- `/tmp/mclone-quest-openxr-perf-churn-rd5-adaptive-logcat.txt`
+
 ### 2026-07-06 - Tactical 150 Slice 1 Quest Frame-Shape Default Decision
 
 Benchmarked code: A/B rows used the already-landed `--xr-frame-overlap` path

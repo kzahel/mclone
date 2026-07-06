@@ -645,6 +645,44 @@ budgets updated to point here.
   probe, Quest RD5/RD7/churn gates, native-window run, desktop-XR smoke, and
   default-on flip were intentionally not claimed without those measurements.
 
+2026-07-06 Slice 3 promotion checkpoint:
+
+- Added XR opt-in propagation without flipping defaults:
+  `XrSceneOptions::adaptive_chunk_publication_budget`, desktop XR scene
+  propagation, Android XR startup parsing/logging, and Android validator
+  pass-through for `--adaptive-chunk-publication-budget true|false`. This lets
+  Quest and desktop-XR promotion lanes actually exercise the Candidate A
+  controller instead of the fixed `1`/`1` path.
+- Desktop adaptive rows recorded in
+  [`../performance-records.md`](../performance-records.md): RD10 reproduced
+  full-view `9.730s` / `9.700s` with `0` over-budget frames; RD15 full-view
+  reached `20.022s` (`2.86x` better than the Slice 0 `57.214s` baseline) but
+  still had `24` over-budget and `2` over-2x frames. Movement-frame adaptive
+  and same-commit control both reported `1` over-budget / `1` over-2x frame.
+- Quest adaptive rows recorded in
+  [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md):
+  RD5 settled orbit is green (`skipped=0`, dropped delta `14`, app p95
+  `12.067ms`, headroom avg `+3.085ms`, over-period `0.0%`, over-2x `0`);
+  RD7 pressure is inside envelope (`skipped=0`, dropped delta `17`, app p95
+  `12.653ms`, over-period `0.5%`, over-2x `0`); RD5 churn is comparable to the
+  Slice 1 overlap baseline (app p95 `9.957ms`, p99 `10.908ms`, dropped delta
+  `13`, queue age `164.701ms`, one pump stall, pending publication `96`).
+- Validation passed:
+  `cargo fmt --manifest-path native/Cargo.toml --all --check`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_parses_adaptive_chunk_publication_budget_flag`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene`,
+  `pnpm native:xr:check`, and the three Android XR release APK gate runs above.
+  A raw `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  failed in this shell because `aarch64-linux-android-clang` was not on `PATH`;
+  the Android validator path built the same target successfully.
+- Status: Slice 3 promotion exit is still not complete. Defaults remain off
+  until a native-window desktop run, live desktop-XR smoke with the controller
+  active, cadence compatibility row with a real budget decision trace, and
+  budget-decision panel/report wiring are recorded. The current flat perf
+  `FramePipelineReport` still emits an empty `budgetDecisionPanel`, and Quest
+  churn still lacks an aggregate chunks/sec/decision-trace field.
+
 ## Slice 4: Candidate B — Render Admission And Workers
 
 Why: after publication opens, the desktop trailing edge is the paced render
