@@ -62,21 +62,22 @@ fn engine_camera_controller_toggles_movement_mode() {
     let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
 
     assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
-    assert_eq!(
-        camera.toggle_movement_mode(),
-        EngineCameraMovementMode::NoClip
-    );
+    assert_eq!(camera.toggle_movement_mode(), EngineCameraMovementMode::Fly);
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::NoClip);
     assert_eq!(
         camera.toggle_movement_mode(),
         EngineCameraMovementMode::HandPush
     );
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
     assert_eq!(
         camera.toggle_movement_mode(),
         EngineCameraMovementMode::Walking
     );
     assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
-    assert_eq!(EngineCameraMovementMode::NoClip.label(), "NOCLIP");
+    assert_eq!(EngineCameraMovementMode::Fly.label(), "FLY");
     assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
+    assert_eq!(EngineCameraCollisionMode::Normal.label(), "NORMAL");
+    assert_eq!(EngineCameraCollisionMode::NoClip.label(), "NOCLIP");
 }
 
 #[test]
@@ -268,9 +269,11 @@ fn engine_camera_frame_state_reports_controller_and_interaction_state() {
     let state = camera.frame_state(&interaction);
 
     assert_eq!(state.camera, camera.snapshot());
-    assert_eq!(state.movement_mode, EngineCameraMovementMode::NoClip);
+    assert_eq!(state.movement_mode, EngineCameraMovementMode::Fly);
+    assert_eq!(state.collision_mode, EngineCameraCollisionMode::NoClip);
     assert_eq!(state.view_mode, EngineCameraViewMode::FirstPerson);
-    assert_eq!(state.movement_mode_label(), "NOCLIP");
+    assert_eq!(state.movement_mode_label(), "FLY");
+    assert_eq!(state.collision_mode_label(), "NOCLIP");
     assert_eq!(state.view_mode_label(), "FIRST_PERSON");
     assert_eq!(state.on_ground, camera.on_ground());
     assert_eq!(state.horizontal_collision, camera.horizontal_collision());
@@ -334,13 +337,78 @@ fn engine_camera_controller_ticks_current_no_clip_keys() {
     let mut camera =
         EngineCameraController::from_eye_pose(Vec3d::new(15.5, 96.0, 8.0), 0.0, 0.0, 32.0);
     let client = ClientRuntime::local_integrated();
-    camera.set_movement_mode(EngineCameraMovementMode::NoClip);
+    camera.set_movement_mode(EngineCameraMovementMode::Fly);
+    camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
     camera.set_key(PlayerInputKey::Forward, true);
 
     let moved = camera.tick_movement(&client, 0.1);
 
     assert!(moved);
     assert!(camera.snapshot().eye.z > 8.0);
+}
+
+#[test]
+fn engine_camera_controller_fly_normal_collides_with_blocks() {
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+        ChunkPos::new(0, 0),
+        BlockPos::new(1, 1, 0),
+        BlockStateId(7),
+    )));
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 2.62, 0.5),
+        std::f64::consts::FRAC_PI_2,
+        0.0,
+        20.0,
+    );
+    camera.set_movement_mode(EngineCameraMovementMode::Fly);
+    camera.set_collision_mode(EngineCameraCollisionMode::Normal);
+
+    let before = camera.snapshot();
+    let after = camera.apply_movement_input(
+        &client,
+        EngineCameraInput {
+            dt_seconds: 0.1,
+            forward: true,
+            ..EngineCameraInput::default()
+        },
+    );
+
+    assert!(after.eye.x > before.eye.x);
+    assert!(after.eye.x < 1.0);
+    assert!(camera.horizontal_collision());
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+}
+
+#[test]
+fn engine_camera_controller_fly_no_clip_passes_through_blocks() {
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+        ChunkPos::new(0, 0),
+        BlockPos::new(1, 1, 0),
+        BlockStateId(7),
+    )));
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 2.62, 0.5),
+        std::f64::consts::FRAC_PI_2,
+        0.0,
+        20.0,
+    );
+    camera.set_movement_mode(EngineCameraMovementMode::Fly);
+    camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+
+    let after = camera.apply_movement_input(
+        &client,
+        EngineCameraInput {
+            dt_seconds: 0.1,
+            forward: true,
+            ..EngineCameraInput::default()
+        },
+    );
+
+    assert!(after.eye.x > 2.0);
+    assert!(!camera.horizontal_collision());
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::NoClip);
 }
 
 #[test]

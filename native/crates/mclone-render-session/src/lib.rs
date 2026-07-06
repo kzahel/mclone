@@ -7,7 +7,7 @@ use glam::{Quat, Vec3};
 use mclone_assets::ActorFigureId;
 use mclone_client::{
     ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
-    ClientRuntime, CollisionMovementResult, HAND_PUSH_DEFAULT_HAND_RADIUS,
+    ClientRuntime, CollisionMovementResult, FlyingMovementStep, HAND_PUSH_DEFAULT_HAND_RADIUS,
     HandPushLocomotionController, HandPushMovementStep, HandPushPose,
     LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND,
     LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
@@ -1693,15 +1693,15 @@ impl Default for EngineCameraInput {
 pub enum EngineCameraMovementMode {
     #[default]
     Walking,
-    NoClip,
+    Fly,
     HandPush,
 }
 
 impl EngineCameraMovementMode {
     pub const fn toggled(self) -> Self {
         match self {
-            Self::Walking => Self::NoClip,
-            Self::NoClip => Self::HandPush,
+            Self::Walking => Self::Fly,
+            Self::Fly => Self::HandPush,
             Self::HandPush => Self::Walking,
         }
     }
@@ -1709,8 +1709,31 @@ impl EngineCameraMovementMode {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Walking => "WALK",
-            Self::NoClip => "NOCLIP",
+            Self::Fly => "FLY",
             Self::HandPush => "HAND",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EngineCameraCollisionMode {
+    #[default]
+    Normal,
+    NoClip,
+}
+
+impl EngineCameraCollisionMode {
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Normal => Self::NoClip,
+            Self::NoClip => Self::Normal,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "NORMAL",
+            Self::NoClip => "NOCLIP",
         }
     }
 }
@@ -1791,6 +1814,7 @@ impl EngineCameraSnapshot {
 pub struct EngineCameraFrameState {
     pub camera: EngineCameraSnapshot,
     pub movement_mode: EngineCameraMovementMode,
+    pub collision_mode: EngineCameraCollisionMode,
     pub view_mode: EngineCameraViewMode,
     pub on_ground: bool,
     pub horizontal_collision: bool,
@@ -1802,6 +1826,7 @@ impl EngineCameraFrameState {
     pub fn from_player(
         player: &LocalPlayerController,
         movement_mode: EngineCameraMovementMode,
+        collision_mode: EngineCameraCollisionMode,
         view_mode: EngineCameraViewMode,
         speed_blocks_per_second: f64,
         selected_hotbar_slot: u8,
@@ -1809,6 +1834,7 @@ impl EngineCameraFrameState {
         Self {
             camera: EngineCameraSnapshot::from_player(player, speed_blocks_per_second),
             movement_mode,
+            collision_mode,
             view_mode,
             on_ground: player.on_ground(),
             horizontal_collision: player.horizontal_collision(),
@@ -1819,6 +1845,10 @@ impl EngineCameraFrameState {
 
     pub const fn movement_mode_label(&self) -> &'static str {
         self.movement_mode.label()
+    }
+
+    pub const fn collision_mode_label(&self) -> &'static str {
+        self.collision_mode.label()
     }
 
     pub const fn view_mode_label(&self) -> &'static str {
@@ -1860,6 +1890,7 @@ pub struct EngineCameraController {
     last_hand_push_input: Option<EngineHandPushInput>,
     last_room_scale_reconciliation: Option<EngineRoomScaleReconciliation>,
     movement_mode: EngineCameraMovementMode,
+    collision_mode: EngineCameraCollisionMode,
     view_mode: EngineCameraViewMode,
     first_person_player_visible: bool,
     speed_blocks_per_second: f64,
@@ -1902,6 +1933,7 @@ impl EngineCameraController {
             last_hand_push_input: None,
             last_room_scale_reconciliation: None,
             movement_mode: EngineCameraMovementMode::Walking,
+            collision_mode: EngineCameraCollisionMode::Normal,
             view_mode: EngineCameraViewMode::FirstPerson,
             first_person_player_visible: false,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
@@ -1957,6 +1989,10 @@ impl EngineCameraController {
         self.movement_mode
     }
 
+    pub const fn collision_mode(&self) -> EngineCameraCollisionMode {
+        self.collision_mode
+    }
+
     pub const fn view_mode(&self) -> EngineCameraViewMode {
         self.view_mode
     }
@@ -1986,11 +2022,38 @@ impl EngineCameraController {
             self.hand_push_emulation_phase = 0.0;
         }
         self.movement_mode = movement_mode;
+        if self.movement_mode == EngineCameraMovementMode::HandPush {
+            self.set_collision_mode(EngineCameraCollisionMode::Normal);
+        }
     }
 
     pub fn toggle_movement_mode(&mut self) -> EngineCameraMovementMode {
-        self.set_movement_mode(self.movement_mode.toggled());
+        let movement_mode = self.movement_mode.toggled();
+        self.set_movement_mode(movement_mode);
+        if movement_mode == EngineCameraMovementMode::Fly {
+            self.set_collision_mode(EngineCameraCollisionMode::NoClip);
+        }
         self.movement_mode
+    }
+
+    pub fn set_collision_mode(&mut self, collision_mode: EngineCameraCollisionMode) {
+        let collision_mode = if self.movement_mode == EngineCameraMovementMode::HandPush {
+            EngineCameraCollisionMode::Normal
+        } else {
+            collision_mode
+        };
+        if self.collision_mode != collision_mode {
+            self.player.clear_delta_movement();
+            self.hand_push.reset();
+            self.last_hand_push_input = None;
+            self.hand_push_emulation_phase = 0.0;
+        }
+        self.collision_mode = collision_mode;
+    }
+
+    pub fn toggle_collision_mode(&mut self) -> EngineCameraCollisionMode {
+        self.set_collision_mode(self.collision_mode.toggled());
+        self.collision_mode
     }
 
     pub const fn on_ground(&self) -> bool {
@@ -2113,6 +2176,7 @@ impl EngineCameraController {
         EngineCameraFrameState::from_player(
             &self.player,
             self.movement_mode,
+            self.collision_mode,
             self.view_mode,
             self.speed_blocks_per_second,
             interaction.selected_hotbar_slot(),
@@ -2185,10 +2249,18 @@ impl EngineCameraController {
         self.apply_key_input(input);
         match self.movement_mode {
             EngineCameraMovementMode::Walking => {
-                let _ = self.tick_walking(client, input);
+                if self.collision_mode == EngineCameraCollisionMode::NoClip {
+                    let _ = self.tick_no_clip(input);
+                } else {
+                    let _ = self.tick_walking(client, input);
+                }
             }
-            EngineCameraMovementMode::NoClip => {
-                let _ = self.tick_no_clip(input);
+            EngineCameraMovementMode::Fly => {
+                if self.collision_mode == EngineCameraCollisionMode::NoClip {
+                    let _ = self.tick_no_clip(input);
+                } else {
+                    let _ = self.tick_flying(client, input);
+                }
             }
             EngineCameraMovementMode::HandPush => {
                 let _ = self.tick_hand_push(client, input);
@@ -2203,14 +2275,26 @@ impl EngineCameraController {
             ..EngineCameraInput::default()
         };
         match self.movement_mode {
-            EngineCameraMovementMode::Walking => self.tick_walking(client, input),
-            EngineCameraMovementMode::NoClip => self.tick_no_clip(input),
+            EngineCameraMovementMode::Walking => {
+                if self.collision_mode == EngineCameraCollisionMode::NoClip {
+                    self.tick_no_clip(input)
+                } else {
+                    self.tick_walking(client, input)
+                }
+            }
+            EngineCameraMovementMode::Fly => {
+                if self.collision_mode == EngineCameraCollisionMode::NoClip {
+                    self.tick_no_clip(input)
+                } else {
+                    self.tick_flying(client, input)
+                }
+            }
             EngineCameraMovementMode::HandPush => self.tick_hand_push(client, input),
         }
     }
 
     pub fn probe_ground(&mut self, client: &ClientRuntime, distance: f64) {
-        if self.movement_mode == EngineCameraMovementMode::NoClip
+        if self.collision_mode == EngineCameraCollisionMode::NoClip
             || !distance.is_finite()
             || distance <= 0.0
         {
@@ -2313,6 +2397,51 @@ impl EngineCameraController {
         };
         player.tick_no_clip_movement_with_impulse(
             NoClipMovementStep {
+                yaw_radians,
+                pitch_radians,
+                speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
+                dt_seconds,
+                descending: false,
+                sprinting: false,
+            },
+            movement_impulse,
+        )
+    }
+
+    fn tick_flying(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
+        let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
+        Self::tick_player_flying(
+            &mut self.player,
+            client,
+            self.speed_blocks_per_second,
+            dt_seconds,
+            input
+                .movement_impulse
+                .map(EngineCameraMovementImpulse::as_player_impulse),
+            input.movement_yaw_radians,
+        )
+        .is_some()
+    }
+
+    pub fn tick_player_flying(
+        player: &mut LocalPlayerController,
+        client: &ClientRuntime,
+        speed_blocks_per_second: f64,
+        dt_seconds: f64,
+        movement_impulse: Option<(f32, f32)>,
+        movement_yaw_radians: Option<f64>,
+    ) -> Option<CollisionMovementResult> {
+        let pose = player.pose();
+        let movement_yaw = finite_movement_yaw(movement_yaw_radians);
+        let yaw_radians = movement_yaw.unwrap_or_else(|| pose.native_yaw_radians());
+        let pitch_radians = if movement_yaw.is_some() {
+            0.0
+        } else {
+            pose.native_pitch_radians()
+        };
+        player.tick_flying_movement_with_impulse(
+            client,
+            FlyingMovementStep {
                 yaw_radians,
                 pitch_radians,
                 speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),

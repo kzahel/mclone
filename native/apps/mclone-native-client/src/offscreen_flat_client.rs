@@ -29,7 +29,7 @@ use crate::cli::{
 use crate::flat_client_driver::{
     FlatClientDebugFrame, FlatClientDriver, FlatClientUiActionContext, FlatClientUiFrame,
     FlatClientUiPointerClickReport, FlatClientUiRenderOptions, FlatClientWorldActionStatus,
-    game_movement_mode,
+    game_collision_mode, game_movement_mode,
 };
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState};
 use crate::render_cache::load_asset_source;
@@ -359,6 +359,7 @@ impl OffscreenFlatClientHost {
                 far_lod_range_chunks: self.driver.scene.far_lod.extra_radius_chunks as i32,
                 frame_pacing: FramePacingUiState::default(),
                 movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
+                collision_mode: game_collision_mode(self.driver.camera.collision_mode()),
                 fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
                 movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
                 player_collision_box_visible: self.driver.player_collision_box_visible,
@@ -542,10 +543,15 @@ impl OffscreenFlatClientHost {
             return None;
         }
         let runtime = self.driver.runtime.as_ref()?;
+        let frame_state = self.driver.camera.frame_state(&self.driver.interaction);
         Some(DebugPaneStats {
             position: self.driver.spectator.position,
             speed: self.driver.spectator.speed,
-            movement_mode: self.driver.camera.movement_mode().label(),
+            movement_mode: format!(
+                "{}/{}",
+                frame_state.movement_mode_label(),
+                frame_state.collision_mode_label()
+            ),
             on_ground: self.driver.camera.on_ground(),
             seed: self.driver.scene.seed,
             runtime: runtime.stats(),

@@ -273,22 +273,35 @@ Landed behavior:
 
 ## Slice B: Split Fly From No-Clip
 
-- [ ] Refactor `mclone-render-session` so movement model and collision policy
+Status: landed 2026-07-06.
+
+- [x] Refactor `mclone-render-session` so movement model and collision policy
   are distinct state.
-- [ ] Preserve current no-clip behavior as `Fly + NoClip`.
-- [ ] Implement first colliding fly behavior as `Fly + Normal`.
-- [ ] Ensure `Player + Normal` and `Gorilla + Normal` preserve current
+- [x] Preserve current no-clip behavior as `Fly + NoClip`.
+- [x] Implement first colliding fly behavior as `Fly + Normal`.
+- [x] Ensure `Player + Normal` and `Gorilla + Normal` preserve current
   walking/hand-push behavior.
-- [ ] Add focused tests for fly-with-collision stopping at blocks, fly-no-clip
+- [x] Add focused tests for fly-with-collision stopping at blocks, fly-no-clip
   passing through blocks, and unchanged walking/hand-push behavior.
-- [ ] Update debug labels/HUD/menu state to report both movement and collision
+- [x] Update debug labels/HUD/menu state to report both movement and collision
   when useful.
 
-Exit criteria:
+Landed behavior:
 
-- `Fly` no longer inherently means no-clip.
-- The old no-clip developer workflow still exists.
-- Colliding fly is shared and does not live in a flat-only or XR-only adapter.
+- `mclone-render-session::EngineCameraMovementMode` now uses `Fly` as the
+  movement model and `EngineCameraCollisionMode` as the independent collision
+  policy.
+- `mclone-client` owns the colliding flight primitive. It reuses the existing
+  free-flight displacement intent and resolves it through shared world
+  collision.
+- `Fly + Normal` flies without gravity while respecting block collision.
+- `Fly + NoClip` preserves the old free no-clip behavior. The desktop movement
+  shortcut still enters this developer workflow.
+- Desktop, web, flat Android, and XR adapters all map shared `Collision` UI
+  state to the shared camera controller; the row is no longer a platform-local
+  stub.
+- Debug overlays/reporting can show combined labels such as `FLY/NORMAL` and
+  `FLY/NOCLIP`.
 
 ## Slice C: Shared Travel Assist Setting
 

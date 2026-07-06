@@ -77,12 +77,12 @@ use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
-    ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, EngineCameraController, EngineCameraFrameState,
-    EngineCameraInput, EngineCameraMovementImpulse, EngineCameraMovementMode,
-    RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest,
-    RenderSectionCompileResult, RenderSectionCompiler, RenderSectionNeighborReadiness,
-    RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
-    actor_instances_from_presentations, build_client_textured_sections,
+    ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, EngineCameraCollisionMode, EngineCameraController,
+    EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
+    EngineCameraMovementMode, RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
+    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
+    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
+    RenderSectionViewSync, actor_instances_from_presentations, build_client_textured_sections,
     build_render_sections_from_snapshots_with_biome_zoom_seed,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
     render_section_chunk_pos, render_section_neighbor_readiness, snapshot_contains_render_section,
@@ -93,9 +93,9 @@ use mclone_ui::{
     DebugOverlay, FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts,
     FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
     FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, FlatHudDebugOverlay,
-    GameFramePacingMode, GameHelpParent, GameMovementMode, GameOptionsParent, GamePlayerModel,
-    GameScreen, GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState, GuiKey, GuiScale,
-    Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+    GameCollisionMode, GameFramePacingMode, GameHelpParent, GameMovementMode, GameOptionsParent,
+    GamePlayerModel, GameScreen, GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState,
+    GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -3374,7 +3374,6 @@ impl WebChunkRenderSession {
                 }
                 ClientExperienceSettingEffect::SetFarLod { .. }
                 | ClientExperienceSettingEffect::ClearFarLod
-                | ClientExperienceSettingEffect::SetCollisionMode(_)
                 | ClientExperienceSettingEffect::SetTravelAssistMode(_)
                 | ClientExperienceSettingEffect::SetTurnMode(_)
                 | ClientExperienceSettingEffect::SetXrTurnMode(_)
@@ -3404,6 +3403,10 @@ impl WebChunkRenderSession {
                 ClientExperienceSettingEffect::SetMovementMode(movement_mode) => {
                     self.camera
                         .set_movement_mode(engine_movement_mode(movement_mode));
+                }
+                ClientExperienceSettingEffect::SetCollisionMode(collision_mode) => {
+                    self.camera
+                        .set_collision_mode(engine_collision_mode(collision_mode));
                 }
                 ClientExperienceSettingEffect::SetRenderDistance(_) => {}
                 ClientExperienceSettingEffect::SetFlySpeedMultiplier(multiplier) => {
@@ -3669,7 +3672,7 @@ impl WebChunkRenderSession {
             frame_pipeline_overlay_visible: false,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
-            collision_mode: None,
+            collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
             travel_assist_mode: None,
             turn_mode: None,
             xr_turn_mode: None,
@@ -4132,7 +4135,11 @@ impl WebChunkRenderSession {
             ],
             [camera.chunk_pos.x, camera.chunk_pos.z],
             camera.speed_blocks_per_second as f32,
-            camera_state.movement_mode_label(),
+            format!(
+                "{}/{}",
+                camera_state.movement_mode_label(),
+                camera_state.collision_mode_label()
+            ),
             camera_state.on_ground,
             FlatDebugView::with_center(radius_chunks as i32, [center.x, center.z]),
         );
@@ -5181,6 +5188,7 @@ fn write_camera_frame_state_to_js(
     set_bool(object, "horizontalCollision", state.horizontal_collision)?;
     set_bool(object, "verticalCollision", state.vertical_collision)?;
     set_string(object, "movementMode", state.movement_mode_label())?;
+    set_string(object, "collisionMode", state.collision_mode_label())?;
     set_number(
         object,
         "selectedHotbarSlot",
@@ -5929,7 +5937,6 @@ fn write_active_session_to_js_object(
 fn web_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
     settings.far_lod = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.collision_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -5970,7 +5977,7 @@ fn clamp_touch_look_sensitivity(value: f32) -> f32 {
 fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
     match mode {
         EngineCameraMovementMode::Walking => GameMovementMode::Walk,
-        EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+        EngineCameraMovementMode::Fly => GameMovementMode::Fly,
         EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
     }
 }
@@ -5978,8 +5985,22 @@ fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
 fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
     match mode {
         GameMovementMode::Walk => EngineCameraMovementMode::Walking,
-        GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+        GameMovementMode::Fly => EngineCameraMovementMode::Fly,
         GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+    }
+}
+
+fn game_collision_mode(mode: EngineCameraCollisionMode) -> GameCollisionMode {
+    match mode {
+        EngineCameraCollisionMode::Normal => GameCollisionMode::Normal,
+        EngineCameraCollisionMode::NoClip => GameCollisionMode::NoClip,
+    }
+}
+
+fn engine_collision_mode(mode: GameCollisionMode) -> EngineCameraCollisionMode {
+    match mode {
+        GameCollisionMode::Normal => EngineCameraCollisionMode::Normal,
+        GameCollisionMode::NoClip => EngineCameraCollisionMode::NoClip,
     }
 }
 

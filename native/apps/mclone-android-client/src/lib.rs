@@ -73,14 +73,14 @@ mod android {
         ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
         ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
         ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
-        EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
-        EngineCameraMovementMode,
+        EngineCameraCollisionMode, EngineCameraController, EngineCameraInput,
+        EngineCameraMovementImpulse, EngineCameraMovementMode,
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
-        GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameTouchSettings,
-        GameUiAction, GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point,
-        StatusOverlay, TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats,
+        GameCollisionMode, GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel,
+        GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState, GuiDrawList, GuiKey,
+        GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats,
         touch_action_button_rects, touch_controls_mode_label, touch_hotbar_slot_rects,
         touch_menu_button_rect, touch_movement_zone_rect,
     };
@@ -1540,8 +1540,16 @@ mod android {
                             movement_mode.label()
                         );
                     }
-                    ClientExperienceSettingEffect::SetCollisionMode(_)
-                    | ClientExperienceSettingEffect::SetTravelAssistMode(_)
+                    ClientExperienceSettingEffect::SetCollisionMode(collision_mode) => {
+                        self.camera
+                            .set_collision_mode(engine_collision_mode(collision_mode));
+                        let collision_mode = self.camera.collision_mode();
+                        log::info!(
+                            "Mclone Android player collision mode {}",
+                            collision_mode.label()
+                        );
+                    }
+                    ClientExperienceSettingEffect::SetTravelAssistMode(_)
                     | ClientExperienceSettingEffect::SetTurnMode(_) => {}
                     ClientExperienceSettingEffect::SetXrTurnMode(_) => {
                         self.session_status = StatusOverlay::new(
@@ -1681,7 +1689,7 @@ mod android {
                 frame_pipeline_overlay_visible: false,
                 player_model: self.player_model,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
-                collision_mode: None,
+                collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
                 travel_assist_mode: None,
                 turn_mode: None,
                 xr_turn_mode: None,
@@ -2345,9 +2353,6 @@ mod android {
         let mut settings = ClientExperienceSettingsProfile::all_supported();
         settings.far_lod =
             ClientExperienceCapabilityStatus::Unsupported("Far LOD is unavailable on flat Android");
-        settings.collision_mode = ClientExperienceCapabilityStatus::Unsupported(
-            "Collision mode is unavailable on flat Android",
-        );
         settings.travel_assist = ClientExperienceCapabilityStatus::Unsupported(
             "Travel assist is unavailable on flat Android",
         );
@@ -3131,7 +3136,7 @@ mod android {
     fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
         match mode {
             EngineCameraMovementMode::Walking => GameMovementMode::Walk,
-            EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+            EngineCameraMovementMode::Fly => GameMovementMode::Fly,
             EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
         }
     }
@@ -3139,8 +3144,22 @@ mod android {
     fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
         match mode {
             GameMovementMode::Walk => EngineCameraMovementMode::Walking,
-            GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+            GameMovementMode::Fly => EngineCameraMovementMode::Fly,
             GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+        }
+    }
+
+    fn game_collision_mode(mode: EngineCameraCollisionMode) -> GameCollisionMode {
+        match mode {
+            EngineCameraCollisionMode::Normal => GameCollisionMode::Normal,
+            EngineCameraCollisionMode::NoClip => GameCollisionMode::NoClip,
+        }
+    }
+
+    fn engine_collision_mode(mode: GameCollisionMode) -> EngineCameraCollisionMode {
+        match mode {
+            GameCollisionMode::Normal => EngineCameraCollisionMode::Normal,
+            GameCollisionMode::NoClip => EngineCameraCollisionMode::NoClip,
         }
     }
 

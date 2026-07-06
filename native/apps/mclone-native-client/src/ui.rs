@@ -12,11 +12,11 @@ use crate::cli::HeadlessScreenshotUi;
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingMode, FrameTimingStats};
 use crate::scene_runtime::WindowRuntimeStats;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DebugPaneStats {
     pub(crate) position: Vec3,
     pub(crate) speed: f32,
-    pub(crate) movement_mode: &'static str,
+    pub(crate) movement_mode: String,
     pub(crate) on_ground: bool,
     pub(crate) seed: i64,
     pub(crate) runtime: WindowRuntimeStats,
@@ -30,7 +30,7 @@ pub(crate) struct DebugPaneStats {
 }
 
 impl DebugPaneStats {
-    pub(crate) fn overlay(self) -> FlatDebugOverlay {
+    pub(crate) fn overlay(&self) -> FlatDebugOverlay {
         let budget = self
             .pacing
             .target_frame_ms
@@ -58,7 +58,7 @@ impl DebugPaneStats {
                 self.runtime.interest_center.z,
             ],
             self.speed,
-            self.movement_mode,
+            self.movement_mode.clone(),
             self.on_ground,
             FlatDebugView::with_tracking_radius(
                 self.runtime.render_distance as i32,
@@ -176,13 +176,13 @@ impl DebugPaneStats {
     }
 
     #[cfg(test)]
-    pub(crate) fn lines(self) -> Vec<String> {
+    pub(crate) fn lines(&self) -> Vec<String> {
         let mut lines = vec!["DEBUG".to_string()];
         lines.extend(self.overlay().lines());
         lines
     }
 
-    pub(crate) fn hud_debug_overlay(self) -> FlatHudDebugOverlay {
+    pub(crate) fn hud_debug_overlay(&self) -> FlatHudDebugOverlay {
         FlatHudDebugOverlay::new(self.overlay().to_debug_overlay())
     }
 }
@@ -226,7 +226,7 @@ mod tests {
         let stats = DebugPaneStats {
             position: Vec3::new(1.25, 64.0, -2.5),
             speed: 32.0,
-            movement_mode: "WALK",
+            movement_mode: "WALK/NORMAL".to_owned(),
             on_ground: true,
             seed: 12345,
             runtime: WindowRuntimeStats {
@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(lines[1], "POS 1.2 64.0 -2.5");
         assert_eq!(lines[2], "CHUNK 3 -4 SPEED 32.0");
         assert_eq!(lines[3], "SEED 12345");
-        assert_eq!(lines[4], "MODE WALK GROUND Y");
+        assert_eq!(lines[4], "MODE WALK/NORMAL GROUND Y");
         assert_eq!(lines[5], "VIEW R2 T3");
         assert_eq!(lines[6], "RUN NATIVE-THREAD CQ1 UQ2");
         assert_eq!(lines[7], "CHUNKS L9 V8 P1");

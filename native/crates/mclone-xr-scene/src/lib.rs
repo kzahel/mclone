@@ -84,18 +84,18 @@ use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
-    EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, EngineCameraSnapshot, EngineDebugVisualOptions, EngineHandPushInput,
-    EngineRoomScaleReconciliation, RenderSectionCacheUpdate, RenderSectionUploadCoordinator,
-    RenderSectionUploadFramePolicy, RenderSectionUploadPhaseReport,
-    actor_instances_from_presentations, engine_debug_world_lines,
+    EngineCameraCollisionMode, EngineCameraController, EngineCameraInput,
+    EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraSnapshot,
+    EngineDebugVisualOptions, EngineHandPushInput, EngineRoomScaleReconciliation,
+    RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
+    RenderSectionUploadPhaseReport, actor_instances_from_presentations, engine_debug_world_lines,
 };
 use mclone_server::WorkerFrameMetrics;
 use mclone_ui::{
-    Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GamePlayerModel,
-    GameScreen, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale,
-    LoadingProgressOverlay, Point, Rect, StatusOverlay, UiDrawCacheStats, UiPanelRevision,
-    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    Color, DEFAULT_JOIN_REMOTE_ADDR, GameCollisionMode, GameFramePacingMode, GameMovementMode,
+    GamePlayerModel, GameScreen, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode,
+    GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, UiDrawCacheStats,
+    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -3117,8 +3117,9 @@ where
             .replace(now)
             .map(|last| now.duration_since(last).as_secs_f64())
             .unwrap_or(0.0);
+        self.camera.set_movement_mode(EngineCameraMovementMode::Fly);
         self.camera
-            .set_movement_mode(EngineCameraMovementMode::NoClip);
+            .set_collision_mode(EngineCameraCollisionMode::NoClip);
         self.camera
             .set_speed_blocks_per_second(speed_blocks_per_second);
         let movement_yaw_radians = self
@@ -3166,8 +3167,9 @@ where
             .replace(now)
             .map(|last| now.duration_since(last).as_secs_f64())
             .unwrap_or(0.0);
+        self.camera.set_movement_mode(EngineCameraMovementMode::Fly);
         self.camera
-            .set_movement_mode(EngineCameraMovementMode::NoClip);
+            .set_collision_mode(EngineCameraCollisionMode::NoClip);
         self.camera
             .set_speed_blocks_per_second(speed_blocks_per_second);
         let input = xr_automated_orbit_input(dt_seconds, speed_blocks_per_second, elapsed_seconds);
@@ -4550,7 +4552,7 @@ where
             frame_pipeline_overlay_visible: false,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
-            collision_mode: None,
+            collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
             travel_assist_mode: None,
             turn_mode: Some(self.turn_policy.game_mode().into()),
             xr_turn_mode: Some(self.turn_policy.game_mode()),
@@ -5735,8 +5737,13 @@ where
                     let movement_mode = self.camera.movement_mode();
                     log::info!("XR player movement mode {}", movement_mode.label());
                 }
-                ClientExperienceSettingEffect::SetCollisionMode(_)
-                | ClientExperienceSettingEffect::SetTravelAssistMode(_) => {}
+                ClientExperienceSettingEffect::SetCollisionMode(collision_mode) => {
+                    self.camera
+                        .set_collision_mode(engine_collision_mode(collision_mode));
+                    let collision_mode = self.camera.collision_mode();
+                    log::info!("XR player collision mode {}", collision_mode.label());
+                }
+                ClientExperienceSettingEffect::SetTravelAssistMode(_) => {}
                 ClientExperienceSettingEffect::SetTurnMode(turn_mode) => {
                     let turn_mode = GameXrTurnMode::from(turn_mode);
                     self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
@@ -6229,7 +6236,6 @@ fn normalized_xr_remote_addr(addr: &str) -> String {
 fn xr_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
     settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.collision_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
         "Frame pipeline overlay needs the XR world-panel projection",
@@ -6909,7 +6915,7 @@ pub fn xr_automated_orbit_input(
 fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
     match mode {
         EngineCameraMovementMode::Walking => GameMovementMode::Walk,
-        EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+        EngineCameraMovementMode::Fly => GameMovementMode::Fly,
         EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
     }
 }
@@ -6917,8 +6923,22 @@ fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
 fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
     match mode {
         GameMovementMode::Walk => EngineCameraMovementMode::Walking,
-        GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+        GameMovementMode::Fly => EngineCameraMovementMode::Fly,
         GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+    }
+}
+
+fn game_collision_mode(mode: EngineCameraCollisionMode) -> GameCollisionMode {
+    match mode {
+        EngineCameraCollisionMode::Normal => GameCollisionMode::Normal,
+        EngineCameraCollisionMode::NoClip => GameCollisionMode::NoClip,
+    }
+}
+
+fn engine_collision_mode(mode: GameCollisionMode) -> EngineCameraCollisionMode {
+    match mode {
+        GameCollisionMode::Normal => EngineCameraCollisionMode::Normal,
+        GameCollisionMode::NoClip => EngineCameraCollisionMode::NoClip,
     }
 }
 

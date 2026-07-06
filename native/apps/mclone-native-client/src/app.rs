@@ -30,7 +30,7 @@ use crate::cli::{SceneOptions, StartupWaitPolicy, WindowStartIntent};
 use crate::flat_client_driver::{
     DesktopBlinkDebugCommitStatus, FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver,
     FlatClientHostAction, FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
-    FlatClientWorldActionStatus, game_movement_mode,
+    FlatClientWorldActionStatus, game_collision_mode, game_movement_mode,
 };
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -617,7 +617,12 @@ impl ChunkApp {
 
     fn toggle_movement_mode(&mut self) {
         let movement_mode = self.driver.camera.toggle_movement_mode();
-        log::info!("player movement mode {}", movement_mode.label());
+        let collision_mode = self.driver.camera.collision_mode();
+        log::info!(
+            "player movement mode {} collision {}",
+            movement_mode.label(),
+            collision_mode.label()
+        );
     }
 
     fn rebuild_render_resources(&mut self, asset_source: &impl AssetSource) -> Result<()> {
@@ -864,7 +869,11 @@ impl ChunkApp {
         DebugPaneStats {
             position: self.window_camera_view().eye,
             speed: camera_state.camera.speed_blocks_per_second as f32,
-            movement_mode: camera_state.movement_mode_label(),
+            movement_mode: format!(
+                "{}/{}",
+                camera_state.movement_mode_label(),
+                camera_state.collision_mode_label()
+            ),
             on_ground: camera_state.on_ground,
             seed: self.driver.scene.seed,
             runtime: self
@@ -1334,6 +1343,7 @@ impl ApplicationHandler for ChunkApp {
                     far_lod_range_chunks: self.driver.scene.far_lod.extra_radius_chunks as i32,
                     frame_pacing: self.frame_pacing.ui_state(),
                     movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
+                    collision_mode: game_collision_mode(self.driver.camera.collision_mode()),
                     fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
                     movement_speed_multiplier: self.driver.camera.movement_speed_multiplier()
                         as f32,

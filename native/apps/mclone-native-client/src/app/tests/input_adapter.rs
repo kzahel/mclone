@@ -226,10 +226,10 @@ fn desktop_touch_events_feed_shared_capability_resolution() {
 fn player_movement_mode_cycles_through_shared_modes() {
     assert_eq!(
         EngineCameraMovementMode::Walking.toggled(),
-        EngineCameraMovementMode::NoClip
+        EngineCameraMovementMode::Fly
     );
     assert_eq!(
-        EngineCameraMovementMode::NoClip.toggled(),
+        EngineCameraMovementMode::Fly.toggled(),
         EngineCameraMovementMode::HandPush
     );
     assert_eq!(
@@ -237,6 +237,6 @@ fn player_movement_mode_cycles_through_shared_modes() {
         EngineCameraMovementMode::Walking
     );
     assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
-    assert_eq!(EngineCameraMovementMode::NoClip.label(), "NOCLIP");
+    assert_eq!(EngineCameraMovementMode::Fly.label(), "FLY");
     assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
 }

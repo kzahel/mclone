@@ -168,6 +168,16 @@ impl PlayerInput {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlyingMovementStep {
+    pub yaw_radians: f64,
+    pub pitch_radians: f64,
+    pub speed_blocks_per_second: f64,
+    pub dt_seconds: f64,
+    pub descending: bool,
+    pub sprinting: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NoClipMovementStep {
     pub yaw_radians: f64,
     pub pitch_radians: f64,
@@ -955,6 +965,34 @@ impl LocalPlayerController {
         Some(displacement)
     }
 
+    pub fn tick_flying_movement(
+        &mut self,
+        client: &ClientRuntime,
+        step: FlyingMovementStep,
+    ) -> Option<CollisionMovementResult> {
+        self.tick_flying_movement_with_impulse(client, step, None)
+    }
+
+    pub fn tick_flying_movement_with_impulse(
+        &mut self,
+        client: &ClientRuntime,
+        step: FlyingMovementStep,
+        movement_impulse: Option<(f32, f32)>,
+    ) -> Option<CollisionMovementResult> {
+        let input = self.tick_input_with_movement_impulse(false, movement_impulse);
+        let step = FlyingMovementStep {
+            descending: self.keys.descend,
+            sprinting: self.keys.sprint,
+            ..step
+        };
+        let displacement = flying_displacement(input, step)?;
+        let collision = self.move_colliding(client, displacement);
+        self.delta_movement = Vec3d::ZERO;
+        self.auto_jump_time = 0;
+        self.clear_water_contact();
+        Some(collision)
+    }
+
     pub fn tick_walking_movement(
         &mut self,
         client: &ClientRuntime,
@@ -1691,6 +1729,20 @@ fn walking_input_acceleration(input: PlayerInput, y_rot_degrees: f64, speed: f64
 }
 
 pub fn no_clip_displacement(input: PlayerInput, step: NoClipMovementStep) -> Option<Vec3d> {
+    flying_displacement(
+        input,
+        FlyingMovementStep {
+            yaw_radians: step.yaw_radians,
+            pitch_radians: step.pitch_radians,
+            speed_blocks_per_second: step.speed_blocks_per_second,
+            dt_seconds: step.dt_seconds,
+            descending: step.descending,
+            sprinting: step.sprinting,
+        },
+    )
+}
+
+pub fn flying_displacement(input: PlayerInput, step: FlyingMovementStep) -> Option<Vec3d> {
     if !step.yaw_radians.is_finite()
         || !step.pitch_radians.is_finite()
         || !step.speed_blocks_per_second.is_finite()
@@ -2100,6 +2152,65 @@ mod tests {
         assert_eq!(displacement, Vec3d::new(0.0, -6.0, 0.0));
         assert!(!controller.input().shift_key_down);
         assert_eq!(controller.delta_movement(), Vec3d::ZERO);
+    }
+
+    #[test]
+    fn flying_movement_collides_with_full_block_wall() {
+        let client = client_with_blocks(&[(BlockPos::new(1, 0, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 0.0, 0.5),
+            ..Default::default()
+        });
+        controller.set_key(PlayerInputKey::Forward, true);
+
+        let result = controller
+            .tick_flying_movement(
+                &client,
+                FlyingMovementStep {
+                    yaw_radians: std::f64::consts::FRAC_PI_2,
+                    pitch_radians: 0.0,
+                    speed_blocks_per_second: 20.0,
+                    dt_seconds: 0.1,
+                    descending: false,
+                    sprinting: false,
+                },
+            )
+            .expect("flying movement");
+
+        assert_approx_eq(result.requested.x, 2.0);
+        assert_approx_eq(result.traveled.x, 0.2);
+        assert!(result.horizontal_collision);
+        assert!(!result.vertical_collision);
+        assert_eq!(controller.delta_movement(), Vec3d::ZERO);
+        assert_approx_eq(controller.pose().position.x, 0.7);
+    }
+
+    #[test]
+    fn no_clip_movement_passes_through_full_block_wall() {
+        let _client = client_with_blocks(&[(BlockPos::new(1, 0, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 0.0, 0.5),
+            ..Default::default()
+        });
+        controller.set_key(PlayerInputKey::Forward, true);
+
+        let displacement = controller
+            .tick_no_clip_movement(NoClipMovementStep {
+                yaw_radians: std::f64::consts::FRAC_PI_2,
+                pitch_radians: 0.0,
+                speed_blocks_per_second: 20.0,
+                dt_seconds: 0.1,
+                descending: false,
+                sprinting: false,
+            })
+            .expect("no-clip movement");
+
+        assert_approx_eq(displacement.x, 2.0);
+        assert!(!controller.horizontal_collision());
+        assert!(!controller.vertical_collision());
+        assert_approx_eq(controller.pose().position.x, 2.5);
     }
 
     #[test]

@@ -60,18 +60,20 @@ use mclone_render::gui::WorldGuiLine;
 use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
-    EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, EngineCameraViewMode, EngineDebugVisualOptions,
-    RenderSectionCacheUpdate, actor_instances_from_presentations, engine_debug_world_lines,
-    local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
+    EngineCameraCollisionMode, EngineCameraController, EngineCameraFrameState, EngineCameraInput,
+    EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraViewMode,
+    EngineDebugVisualOptions, RenderSectionCacheUpdate, actor_instances_from_presentations,
+    engine_debug_world_lines, local_player_actor_instance_for_view,
+    render_pose_from_snapshot_with_view_mode,
 };
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, FramePipelineHudOverlay,
-    GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameScreen,
-    GameSimulationCadence, GameUiAction, GameUiHost, GameUiRenderState, GuiKey, GuiScale,
-    LoadingProgressOverlay, LoadingProgressOverlayLayer, Point, StatusOverlay, UiDebugSnapshot,
-    UiDrawCacheStats, WorldCatalogUiState, WorldCatalogUiStatus, touch_controls_mode_label,
+    GameCollisionMode, GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel,
+    GameScreen, GameSimulationCadence, GameUiAction, GameUiHost, GameUiRenderState, GuiKey,
+    GuiScale, LoadingProgressOverlay, LoadingProgressOverlayLayer, Point, StatusOverlay,
+    UiDebugSnapshot, UiDrawCacheStats, WorldCatalogUiState, WorldCatalogUiStatus,
+    touch_controls_mode_label,
 };
 
 use crate::camera::SpectatorCamera;
@@ -270,6 +272,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) far_lod_range_chunks: i32,
     pub(crate) frame_pacing: FramePacingUiState,
     pub(crate) movement_mode: GameMovementMode,
+    pub(crate) collision_mode: GameCollisionMode,
     pub(crate) fly_speed_multiplier: f32,
     pub(crate) movement_speed_multiplier: f32,
     pub(crate) player_collision_box_visible: bool,
@@ -732,6 +735,7 @@ impl FlatClientDriver {
             far_lod_range_chunks: self.scene.far_lod.extra_radius_chunks as i32,
             frame_pacing,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
+            collision_mode: game_collision_mode(self.camera.collision_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
             player_collision_box_visible: self.player_collision_box_visible,
@@ -1036,6 +1040,7 @@ impl FlatClientDriver {
             far_lod_range_chunks: self.scene.far_lod.extra_radius_chunks as i32,
             frame_pacing: FramePacingUiState::default(),
             movement_mode: game_movement_mode(self.camera.movement_mode()),
+            collision_mode: game_collision_mode(self.camera.collision_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
             player_collision_box_visible: self.player_collision_box_visible,
@@ -1220,8 +1225,13 @@ impl FlatClientDriver {
                     let movement_mode = self.camera.movement_mode();
                     log::info!("player movement mode {}", movement_mode.label());
                 }
-                ClientExperienceSettingEffect::SetCollisionMode(_)
-                | ClientExperienceSettingEffect::SetTravelAssistMode(_)
+                ClientExperienceSettingEffect::SetCollisionMode(collision_mode) => {
+                    self.camera
+                        .set_collision_mode(engine_collision_mode(collision_mode));
+                    let collision_mode = self.camera.collision_mode();
+                    log::info!("player collision mode {}", collision_mode.label());
+                }
+                ClientExperienceSettingEffect::SetTravelAssistMode(_)
                 | ClientExperienceSettingEffect::SetTurnMode(_) => {}
                 ClientExperienceSettingEffect::SetXrTurnMode(_) => {}
                 ClientExperienceSettingEffect::CycleFramePacing => {
@@ -2568,7 +2578,6 @@ impl FlatClientDriver {
 
 fn desktop_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
-    settings.collision_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -2594,7 +2603,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         crosshair_visible: Some(options.crosshair_visible),
         player_model: options.player_model,
         movement_mode: options.movement_mode,
-        collision_mode: None,
+        collision_mode: Some(options.collision_mode),
         travel_assist_mode: None,
         turn_mode: None,
         xr_turn_mode: None,
@@ -2637,7 +2646,7 @@ pub(crate) const fn simulation_cadence_config_from_game(
 pub(crate) const fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
     match mode {
         EngineCameraMovementMode::Walking => GameMovementMode::Walk,
-        EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+        EngineCameraMovementMode::Fly => GameMovementMode::Fly,
         EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
     }
 }
@@ -2645,8 +2654,22 @@ pub(crate) const fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMo
 pub(crate) const fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
     match mode {
         GameMovementMode::Walk => EngineCameraMovementMode::Walking,
-        GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+        GameMovementMode::Fly => EngineCameraMovementMode::Fly,
         GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+    }
+}
+
+pub(crate) const fn game_collision_mode(mode: EngineCameraCollisionMode) -> GameCollisionMode {
+    match mode {
+        EngineCameraCollisionMode::Normal => GameCollisionMode::Normal,
+        EngineCameraCollisionMode::NoClip => GameCollisionMode::NoClip,
+    }
+}
+
+pub(crate) const fn engine_collision_mode(mode: GameCollisionMode) -> EngineCameraCollisionMode {
+    match mode {
+        GameCollisionMode::Normal => EngineCameraCollisionMode::Normal,
+        GameCollisionMode::NoClip => EngineCameraCollisionMode::NoClip,
     }
 }
 
@@ -3121,6 +3144,36 @@ mod tests {
 
         assert!(result.host_action.is_none());
         assert!(!driver.crosshair_visible);
+    }
+
+    #[test]
+    fn ui_action_sets_camera_collision_mode() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert_eq!(
+            driver.camera.collision_mode(),
+            EngineCameraCollisionMode::Normal
+        );
+        let result = driver.apply_ui_action(
+            GameUiAction::SetCollisionMode(GameCollisionMode::NoClip),
+            ui_action_context(),
+        );
+
+        assert!(result.host_action.is_none());
+        assert_eq!(
+            driver.camera.collision_mode(),
+            EngineCameraCollisionMode::NoClip
+        );
+        assert_eq!(
+            driver
+                .current_ui_render_state(
+                    FramePacingUiState::default(),
+                    BlockPaletteOverlay::hidden()
+                )
+                .collision_mode,
+            Some(GameCollisionMode::NoClip)
+        );
     }
 
     #[test]
