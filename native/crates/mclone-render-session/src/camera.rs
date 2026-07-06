@@ -25,7 +25,8 @@ const ENGINE_DEBUG_PLAYER_BOX_COLOR: [f32; 4] = [0.1, 0.95, 0.65, 0.95];
 const ENGINE_DEBUG_LEFT_HAND_COLOR: [f32; 4] = [0.2, 0.55, 1.0, 0.95];
 const ENGINE_DEBUG_RIGHT_HAND_COLOR: [f32; 4] = [1.0, 0.62, 0.18, 0.95];
 const ENGINE_DEBUG_HEADSET_RESIDUAL_COLOR: [f32; 4] = [1.0, 0.15, 0.15, 0.95];
-const ENGINE_ROOM_SCALE_RECONCILE_EPSILON: f64 = 1.0e-9;
+const ENGINE_ROOM_SCALE_BODY_FOLLOW_ENTER_METERS: f64 = 0.03;
+const ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS: f64 = 0.01;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineCameraInput {
@@ -343,6 +344,7 @@ pub struct EngineCameraController {
     hand_push: HandPushLocomotionController,
     last_hand_push_input: Option<EngineHandPushInput>,
     last_room_scale_reconciliation: Option<EngineRoomScaleReconciliation>,
+    room_scale_body_follow_active: bool,
     movement_mode: EngineCameraMovementMode,
     collision_mode: EngineCameraCollisionMode,
     view_mode: EngineCameraViewMode,
@@ -386,6 +388,7 @@ impl EngineCameraController {
             hand_push: HandPushLocomotionController::default(),
             last_hand_push_input: None,
             last_room_scale_reconciliation: None,
+            room_scale_body_follow_active: false,
             movement_mode: EngineCameraMovementMode::Walking,
             collision_mode: EngineCameraCollisionMode::Normal,
             view_mode: EngineCameraViewMode::FirstPerson,
@@ -409,6 +412,11 @@ impl EngineCameraController {
         self.last_room_scale_reconciliation
     }
 
+    fn reset_room_scale_body_follow(&mut self) {
+        self.room_scale_body_follow_active = false;
+        self.last_room_scale_reconciliation = None;
+    }
+
     pub fn set_eye_pose(&mut self, eye: Vec3d, yaw_radians: f64, pitch_radians: f64) {
         self.player.set_pose(LocalPlayerPose::from_eye_position(
             eye,
@@ -416,7 +424,7 @@ impl EngineCameraController {
             -pitch_radians.to_degrees(),
             LOCAL_PLAYER_STANDING_EYE_HEIGHT,
         ));
-        self.last_room_scale_reconciliation = None;
+        self.reset_room_scale_body_follow();
     }
 
     pub fn set_player_feet_pose(
@@ -435,7 +443,7 @@ impl EngineCameraController {
         self.player.clear_delta_movement();
         self.hand_push.reset();
         self.last_hand_push_input = None;
-        self.last_room_scale_reconciliation = None;
+        self.reset_room_scale_body_follow();
         self.hand_push_emulation_phase = 0.0;
     }
 
@@ -473,6 +481,7 @@ impl EngineCameraController {
             self.player.clear_delta_movement();
             self.hand_push.reset();
             self.last_hand_push_input = None;
+            self.reset_room_scale_body_follow();
             self.hand_push_emulation_phase = 0.0;
         }
         self.movement_mode = movement_mode;
@@ -500,6 +509,7 @@ impl EngineCameraController {
             self.player.clear_delta_movement();
             self.hand_push.reset();
             self.last_hand_push_input = None;
+            self.reset_room_scale_body_follow();
             self.hand_push_emulation_phase = 0.0;
         }
         self.collision_mode = collision_mode;
@@ -535,7 +545,9 @@ impl EngineCameraController {
     }
 
     pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
-        self.player.apply_player_position_update(update)
+        let command = self.player.apply_player_position_update(update);
+        self.reset_room_scale_body_follow();
+        command
     }
 
     pub fn next_pose_sync_command(&mut self) -> Option<EnginePoseSyncCommand> {
@@ -672,7 +684,7 @@ impl EngineCameraController {
             return;
         }
         self.player.turn_native_radians(yaw_delta_radians, 0.0);
-        self.last_room_scale_reconciliation = None;
+        self.reset_room_scale_body_follow();
     }
 
     pub fn turn_player_mouse_delta(
@@ -765,6 +777,7 @@ impl EngineCameraController {
     ) -> EngineRoomScaleReconciliation {
         let body_eye_before = self.player.pose().eye_position();
         if !headset_world_position.is_finite() {
+            self.room_scale_body_follow_active = false;
             let result = EngineRoomScaleReconciliation::no_op(body_eye_before, body_eye_before);
             self.last_room_scale_reconciliation = Some(result);
             return result;
@@ -775,9 +788,14 @@ impl EngineCameraController {
             0.0,
             headset_world_position.z - body_eye_before.z,
         );
-        if requested_body_movement.length_sqr()
-            <= ENGINE_ROOM_SCALE_RECONCILE_EPSILON * ENGINE_ROOM_SCALE_RECONCILE_EPSILON
-        {
+        let requested_body_movement_sqr = requested_body_movement.length_sqr();
+        let follow_threshold = if self.room_scale_body_follow_active {
+            ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS
+        } else {
+            ENGINE_ROOM_SCALE_BODY_FOLLOW_ENTER_METERS
+        };
+        if requested_body_movement_sqr <= follow_threshold * follow_threshold {
+            self.room_scale_body_follow_active = false;
             let result =
                 EngineRoomScaleReconciliation::no_op(body_eye_before, headset_world_position);
             self.last_room_scale_reconciliation = Some(result);
@@ -804,6 +822,8 @@ impl EngineCameraController {
             body_eye_after,
             collision,
         };
+        self.room_scale_body_follow_active = result.residual_horizontal_length_sqr()
+            > ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS * ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS;
         self.last_room_scale_reconciliation = Some(result);
         result
     }
@@ -1071,7 +1091,8 @@ pub fn engine_debug_world_lines(
         );
         if let Some(reconciliation) = camera.last_room_scale_reconciliation() {
             if reconciliation.residual_head_offset.length_sqr()
-                > ENGINE_ROOM_SCALE_RECONCILE_EPSILON * ENGINE_ROOM_SCALE_RECONCILE_EPSILON
+                > ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS
+                    * ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS
             {
                 let start = reconciliation.body_eye_after;
                 let end = start.add(reconciliation.residual_head_offset);
