@@ -702,8 +702,19 @@ pnpm native:timedemo:smoke
 # PASS.
 ```
 
-Windows checkpoint A: pending, user-scheduled. It remains required before
-this tactical closes, but it does not block starting Slice 3 on the Mac.
+Windows checkpoint A, 2026-07-06:
+
+- Host: `rex`, Windows 11 Core build 26200, `x86_64-pc-windows-msvc`.
+  This checkpoint was batched into the Windows checkpoint B host session and
+  recorded after Slice 6 closed, before leaving Windows.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics`:
+  PASS, 13 tests.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`:
+  PASS, 148 tests. Existing vendored `wgpu-hal` DX12 warning only.
+- `pnpm native:frame-budget:smoke`: PASS. Debug build, 60 frames at 120 Hz,
+  `frame_accounting_observed_frames=60`,
+  `frame_accounting_conservation_violations=0`, `average_frame_ms=1.346`,
+  `p95_frame_ms=2.519`, `max_frame_ms=14.506`.
 
 Next step: Slice 3, Quest / Android XR adoption from the Mac with the
 Quest attached. Start with the Slice 3 preflight hardware baselines and
@@ -886,9 +897,8 @@ git diff --check
 ```
 
 Next step: Slice 4, calibration, invariants, and meter-overhead measurement
-on the Mac with the Quest attached. Windows checkpoint A remains pending
-and may still be batched into checkpoint B, but it must complete before this
-tactical closes.
+on the Mac with the Quest attached. Windows checkpoint A was completed on
+2026-07-06 in the Windows checkpoint B host session.
 
 ## Slice 4: Calibration, Invariants, And Meter Overhead
 
@@ -1037,9 +1047,8 @@ Tripwires:
 - GPU timestamp sites before Slice 6: 0 hits.
 
 Next step: Slice 5, queue-age, admission-tail split, and peer-thread
-accounting from the Mac with the Quest attached. Windows checkpoint A remains
-deferrable to checkpoint B, but must still complete before this tactical
-closes.
+accounting from the Mac with the Quest attached. Windows checkpoint A was
+completed on 2026-07-06 in the Windows checkpoint B host session.
 
 ## Slice 5: Queue-Age, Admission-Tail Split, And Peer Threads
 
@@ -1205,10 +1214,10 @@ Tripwires:
 - GPU timestamp sites before Slice 6: 0 hits.
 
 Next step: Slice 6, GPU timestamp layer and perf-metrics promotion, still from
-the Mac with Quest for the first implementation pass. Windows checkpoint A
-remains deferrable to checkpoint B, but checkpoint B must run on Windows for
-Vulkan/DX12 timestamp validation and the external GPU capture spot-check before
-this tactical closes.
+the Mac with Quest for the first implementation pass. Windows checkpoint A was
+completed on 2026-07-06 in the Windows checkpoint B host session; checkpoint B
+must run on Windows for Vulkan/DX12 timestamp validation and the external GPU
+capture spot-check before this tactical closes.
 
 ## Slice 6: GPU Timestamp Layer And Perf-Metrics Promotion
 
