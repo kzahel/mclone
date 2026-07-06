@@ -452,7 +452,11 @@ The next useful work is mostly measurement quality before broad policy
 changes. Tactical
 [`tactical/144-frame-pipeline-accounting-instrumentation.md`](tactical/144-frame-pipeline-accounting-instrumentation.md)
 is the executable checklist for gaps 1-8, including sequencing relative to
-tactical 143; gaps 9-10 are follow-on work.
+tactical 143; gaps 9-10 are follow-on work:
+[`tactical/149-remote-contrast-accounting-honesty.md`](tactical/149-remote-contrast-accounting-honesty.md)
+(gap 9) and
+[`tactical/150-adaptive-frame-budget-controller.md`](tactical/150-adaptive-frame-budget-controller.md)
+(gap 10).
 
 As of 2026-07-06, gaps 1-8 are landed in tactical 144. Gap 6 closed after Mac
 Metal plus Windows Vulkan/DX12 timestamp validation, Windows RenderDoc capture,
@@ -484,12 +488,14 @@ through the shared client-experience facade.
    instead of inventing separate presentation-only state, routed through the
    shared client-experience facade.
 9. Keep remote/dedicated contrast lanes honest by surfacing network/decode/apply
-   counters and server-side scheduler counters separately.
+   counters and server-side scheduler counters separately. Follow-on tactical:
+   [`tactical/149-remote-contrast-accounting-honesty.md`](tactical/149-remote-contrast-accounting-honesty.md).
 10. Only then open policy levers through elapsed/headroom-aware budget
     calculation, not a large fixed publish or upload count. That successor
     tactical builds on
     [`tactical/142-throughput-policy-with-quest-rd5-guardrail.md`](tactical/142-throughput-policy-with-quest-rd5-guardrail.md)
-    and the measured data this work produces.
+    and the measured data this work produces. Follow-on tactical:
+    [`tactical/150-adaptive-frame-budget-controller.md`](tactical/150-adaptive-frame-budget-controller.md).
 
 ## Update Policy
 

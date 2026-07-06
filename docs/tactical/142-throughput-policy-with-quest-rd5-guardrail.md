@@ -653,6 +653,13 @@ inference:
 - [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md) owns the
   shared frame-pipeline accounting model, validation guardrails, and follow-on
   gaps 9-10 for remote/dedicated contrast and elapsed/headroom-aware budgeting.
+- [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
+  is the gap-9 successor: it owns the remote `SendOnly` fix and the
+  remote-dedicated contrast rows this tactical's blocked checkbox needs.
+- [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
+  is the gap-10 successor: it implements Candidate A/B as the shared budget
+  calculation, re-pins the stale gate baselines first, and owns the Quest
+  frame-shape (render-then-update) default decision.
 - [`140-streaming-throughput-frame-pacing-baselines.md`](140-streaming-throughput-frame-pacing-baselines.md)
   keeps the setup-era evidence and baseline history (its cadence-sweep
   interpretation rule is superseded by the falsification above).
