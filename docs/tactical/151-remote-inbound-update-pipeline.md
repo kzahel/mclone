@@ -1,7 +1,9 @@
 # 151: Remote Inbound Update Pipeline
 
-Status: active; Slice 0 documentation baseline completed 2026-07-06. This is
-the focused successor to tactical
+Status: active; Slice 0 documentation baseline completed 2026-07-06; revised
+2026-07-06 so Slice 1 starts by introducing a shared `ClientConnection`
+runtime boundary instead of a remote-only queue helper. This is the focused
+successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 for the remaining remote ready-batch stall. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
@@ -9,9 +11,10 @@ Umbrella bus work: tactical
 [`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md).
 
 Workstream: native Rust shared session/runtime boundary, native TCP transport,
-Android XR validation. Goal: make remote dedicated inbound updates arrive
-through the same client-side budgetable update boundary as local integrated
-play, without making the runtime/render frame read and decode TCP response
+Android XR validation. Goal: introduce one shared client-facing connection
+abstraction for local integrated, native remote, and web transports, then make
+remote dedicated inbound updates arrive through that same budgetable update
+boundary without making the runtime/render frame read and decode TCP response
 batches.
 
 ## Problem
@@ -73,16 +76,32 @@ Native remote dedicated is still socket-owned by the client runtime:
 - `pump_pending_remote_update_batches_report` then applies the decoded batch.
 
 Server-side dedicated already has an accept thread and a connection thread per
-client. The missing piece is the client-side receive actor/queue.
+client. The missing pieces are a shared client-facing connection abstraction
+and a remote client-side receive actor/queue behind that abstraction.
 
 ## Target Shape
 
-First native target:
+Shared client-facing target:
 
 ```text
 runtime/app thread
-  -> enqueue ClientCommand
-  -> drain decoded ServerUpdate envelopes under RuntimeUpdatePumpBudget
+  -> ClientConnection::enqueue_command(ClientCommand, CommandQueuePolicy)
+  -> ClientConnection::drain_update / drain_updates(RuntimeUpdatePumpBudget)
+  -> apply decoded ServerUpdate envelopes in receive order
+
+ClientConnection implementation
+  -> owns local runner bridge, TCP IO actor, WebSocket callback bridge,
+     worker bridge, or future P2P transport
+  -> exposes one command queue, one ordered inbound update queue, and one
+     diagnostics surface
+```
+
+First native remote implementation behind that boundary:
+
+```text
+runtime/app thread
+  -> enqueue ClientCommand through ClientConnection
+  -> drain decoded ServerUpdate envelopes through ClientConnection
 
 native remote client IO actor
   -> owns TcpStream
@@ -105,12 +124,12 @@ Web target:
 WebSocket message callback or Web Worker
   -> decode/queue ordered ServerUpdate envelopes
 runtime frame
-  -> drain/apply through the same policy boundary
+  -> drain/apply through ClientConnection
 ```
 
 No native OS thread is required for the first web slice. The shared contract is
-"ordered inbound queue plus budgeted decode/apply accounting", not "all
-platforms spawn the same kind of thread".
+"one `ClientConnection` boundary with an ordered inbound queue plus budgeted
+decode/apply accounting", not "all platforms spawn the same kind of thread".
 
 ## Slice Rules
 
@@ -119,6 +138,10 @@ platforms spawn the same kind of thread".
   named validation, commit, and state the next step.
 - Preserve receive order. Do not add priority lanes or coalescing for chunk
   streaming here.
+- Do not add another runtime-facing local-vs-remote session interface. Local
+  integrated, native remote TCP, web remote, and worker-backed local play
+  should converge on `ClientConnection` even if their transport internals
+  differ.
 - Keep startup, `DrainImmediately`, and `poll_until_idle` behavior explicit.
   Unlimited drains are allowed for those paths, but normal frame `poll()` must
   not read/decode socket batches.
@@ -134,7 +157,8 @@ Deliverables:
 - Update `session-network-architecture.md` with the current remote baseline:
   remote `SendOnly` and readiness landed, but ready batches still read/decode
   on the runtime path.
-- Add this tactical as the focused tracker for the remote inbound queue.
+- Add this tactical as the focused tracker for the shared client connection
+  boundary plus the remote inbound queue.
 - Update the tactical index and stale tactical 133 wording so docs do not claim
   remote still ignores `SendOnly`.
 
@@ -144,28 +168,39 @@ Validation:
 git diff --check
 ```
 
-## Slice 1: Queue Contract And Runtime Seam
+## Slice 1: Shared Client Connection Contract And Runtime Seam
 
-Goal: create the client-side inbound queue boundary before moving the socket.
+Goal: create one runtime-facing `ClientConnection` boundary before moving the
+remote socket. Local integrated and remote dedicated should stop presenting
+different session shapes to the runtime.
 
 Deliverables:
 
-- Introduce a remote inbound update envelope that carries:
+- Define the shared connection contract in the shared runtime/session layer.
+  Exact names can change, but the shape must cover:
+  - enqueue ordered `ClientCommand`s with a send/drain policy;
+  - drain one ordered `QueuedServerUpdate` at a time;
+  - drain under `RuntimeUpdatePumpBudget` for normal frame polling;
+  - expose diagnostics for command depth, update depth/bytes/age,
+    producer read/decode time, stalls, and conservation checks.
+- Introduce a shared inbound update envelope that carries:
   - decoded `ServerUpdate`,
   - encoded byte length,
   - batch sequence or response sequence,
   - received/queued timestamp,
   - producer-side read/decode timing.
-- Add a queue abstraction that drains one ordered update at a time and exposes
-  depth, bytes, oldest queued/applied age, producer read time, producer decode
-  time, and conservation counters.
-- Refactor remote runtime polling so "receive ready batch" and "apply queued
-  updates" are separate internal steps, even if the first slice still fills the
-  queue from the existing direct `try_drain_command_updates` call.
+- Adapt local integrated to the same `ClientConnection` boundary using the
+  existing `NativeIntegratedServerRunner` command/update channels. This should
+  be mostly an adapter move, not a behavior change.
+- Adapt remote dedicated runtime code to the same `ClientConnection` boundary.
+  In Slice 1 it may still fill the queue from the existing direct
+  `try_drain_command_updates` call, but "receive ready batch" and "apply queued
+  updates" must be separate internal steps.
 - Add tests proving a queued snapshot -> section update -> unload sequence
   preserves order across budget stalls.
-- Add a regression proving normal frame `poll()` applies from the queue under
-  budget and does not require `DrainImmediately` semantics.
+- Add regressions proving local integrated and remote-shaped connections both
+  honor `SendOnly`, normal frame `poll()` applies from the shared queue under
+  budget, and `DrainImmediately` remains explicit.
 
 Non-goals: no new thread yet, no wire protocol change, no web adoption.
 
@@ -188,7 +223,7 @@ Deliverables:
 - Runtime/app side sends outbound `ClientCommand`s through a command channel.
 - IO actor writes commands in order, reads the paired response batch with
   blocking socket I/O, decodes updates, and pushes ordered inbound envelopes to
-  the queue from Slice 1.
+  the `ClientConnection` inbound queue from Slice 1.
 - Preserve the existing handshake and frame codec.
 - Preserve reconnect/resync behavior, including clearing stale pending response
   state and issuing the resync command through the new actor.

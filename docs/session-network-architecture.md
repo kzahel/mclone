@@ -7,8 +7,8 @@ decoded update queue landed; Slice 3C local integrated chunk-interest unload
 hysteresis landed; Slice 3D resident cached-section dirty flags landed; revised
 2026-07-03 to adopt the vanilla ordered-stream update model (thin apply plus a
 frame-budget stall) and drop the earlier priority-class design; native remote
-`SendOnly` and TCP-readiness fixes landed 2026-07-06; focused remote inbound
-queue work is tracked in
+`SendOnly` and TCP-readiness fixes landed 2026-07-06; shared
+`ClientConnection` plus focused remote inbound queue work is tracked in
 [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md),
 with broader bus convergence tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
@@ -189,20 +189,27 @@ frame-driven on all platforms.
 Exact names can change, but the shared contract should look like this:
 
 ```text
-trait ClientSessionBus {
+trait ClientConnection {
   fn enqueue_command(&mut self, command: ClientCommand, policy: CommandQueuePolicy) -> Result<()>;
-  fn drain_updates(&mut self, budget: UpdateDrainBudget) -> Result<SessionUpdateDrain>;
-  fn diagnostics(&self) -> SessionBusDiagnostics;
+  fn drain_update(&mut self) -> Result<Option<QueuedServerUpdate>>;
+  fn drain_updates(&mut self, budget: UpdateDrainBudget) -> Result<ConnectionUpdateDrain>;
+  fn diagnostics(&self) -> ConnectionDiagnostics;
 }
 ```
 
-The bus owns transport/session mechanics and hands back decoded updates in
-receive order. The app/runtime owns when drained updates are applied and how
-much frame budget they may consume.
+`ClientConnection` is the shared client-facing analogue to Java's
+`Connection`: it owns transport/session mechanics and hands back decoded
+updates in receive order. Local integrated, native TCP, WebSocket, and future
+worker/P2P transports are implementation details behind this one boundary.
+The app/runtime owns when drained updates are applied and how much frame budget
+they may consume.
 
-Local integrated, native TCP, WebSocket, WebRTC, and worker channels should all
-fit behind this boundary. Platform adapters may be async internally; the shared
-runtime should not become async just because one backend is.
+This intentionally follows the reference engine at the architectural level:
+Minecraft uses one `Connection` model for multiplayer sockets and integrated
+singleplayer memory channels. Mclone should not keep separate runtime-facing
+interfaces for local integrated and remote dedicated play. Platform adapters
+may be async internally; the shared runtime should not become async just
+because one backend is.
 
 ## Parity And Divergence
 
