@@ -1354,6 +1354,18 @@ Quest is available in that session, run the periodic metrics lane and record
 `XR_META` agreement; otherwise run it from the Mac with the Quest attached
 before closing Slice 6.
 
+Post-slice correction, 2026-07-06:
+
+- `pnpm native:policy:wasm-check` was not part of the Slice 6 validation
+  block but should have been run because the timestamp target plumbing lives
+  in shared render/app-runtime code. ORG-00 later caught the blocker:
+  `gpu_timestamps.rs` called `log::warn!` while `mclone-render` declared
+  `log` only for non-wasm targets. Fixed by making `log` a normal
+  `mclone-render` dependency.
+- Follow-up validation: `pnpm native:policy:wasm-check` PASS, and
+  `cargo check --manifest-path native/Cargo.toml -p mclone-render --target wasm32-unknown-unknown`
+  PASS.
+
 ## Slice 7: Debug Overlay Through The Shared Facade
 
 Why: gap 8 — interactive diagnosis needs the same pipeline model the logs
