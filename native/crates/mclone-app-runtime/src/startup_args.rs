@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{Context, Result, bail};
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::RenderColorProfile;
@@ -14,6 +16,9 @@ pub const ARG_CHUNK_Z: &str = "--chunk-z";
 pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
 pub const ARG_RENDER_COMPILE_WORKERS: &str = "--render-compile-workers";
 pub const ARG_REMOTE_ADDR: &str = "--remote-addr";
+pub const ARG_WORLD_DIR: &str = "--world-dir";
+pub const ARG_WORLD_ROOT: &str = "--world-root";
+pub const ARG_TRANSIENT: &str = "--transient";
 pub const ARG_DAY_TIME: &str = "--day-time";
 pub const ARG_FREEZE_TIME: &str = "--freeze-time";
 pub const ARG_MOVEMENT_SPEED_MULTIPLIER: &str = "--movement-speed-multiplier";
@@ -114,8 +119,26 @@ impl Default for StartupSceneOptions {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StartupOptions {
     pub scene: StartupSceneOptions,
+    pub storage: StartupWorldStorageOptions,
     pub render_options: TexturedSectionRenderOptions,
     pub camera: StartupCameraOptions,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct StartupWorldStorageOptions {
+    pub transient: bool,
+    pub world_root: Option<PathBuf>,
+    pub world_dir: Option<PathBuf>,
+}
+
+impl StartupWorldStorageOptions {
+    pub fn world_root_or_default(&self, default_root: Option<PathBuf>) -> Option<PathBuf> {
+        if self.transient {
+            None
+        } else {
+            self.world_root.clone().or(default_root)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -127,6 +150,7 @@ pub struct StartupCameraOptions {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StartupArgState {
     scene: StartupSceneOptions,
+    storage: StartupWorldStorageOptions,
     render_options: TexturedSectionRenderOptions,
     camera: StartupCameraOptions,
     fullbright_explicit: bool,
@@ -136,6 +160,7 @@ impl StartupArgState {
     pub fn new(scene: StartupSceneOptions, render_options: TexturedSectionRenderOptions) -> Self {
         Self {
             scene,
+            storage: StartupWorldStorageOptions::default(),
             render_options,
             camera: StartupCameraOptions::default(),
             fullbright_explicit: false,
@@ -171,6 +196,37 @@ impl StartupArgState {
             }
             ARG_REMOTE_ADDR => {
                 self.scene.remote_addr = parse_remote_addr_arg(args.next())?;
+            }
+            ARG_WORLD_DIR => {
+                if self.storage.transient {
+                    bail!("{ARG_TRANSIENT} cannot be combined with {ARG_WORLD_DIR}");
+                }
+                if self.storage.world_root.is_some() {
+                    bail!("{ARG_WORLD_DIR} cannot be combined with {ARG_WORLD_ROOT}");
+                }
+                self.storage.world_dir =
+                    Some(PathBuf::from(parse_string_arg(ARG_WORLD_DIR, args.next())?));
+            }
+            ARG_WORLD_ROOT => {
+                if self.storage.transient {
+                    bail!("{ARG_TRANSIENT} cannot be combined with {ARG_WORLD_ROOT}");
+                }
+                if self.storage.world_dir.is_some() {
+                    bail!("{ARG_WORLD_DIR} cannot be combined with {ARG_WORLD_ROOT}");
+                }
+                self.storage.world_root = Some(PathBuf::from(parse_string_arg(
+                    ARG_WORLD_ROOT,
+                    args.next(),
+                )?));
+            }
+            ARG_TRANSIENT => {
+                if self.storage.world_dir.is_some() {
+                    bail!("{ARG_TRANSIENT} cannot be combined with {ARG_WORLD_DIR}");
+                }
+                if self.storage.world_root.is_some() {
+                    bail!("{ARG_TRANSIENT} cannot be combined with {ARG_WORLD_ROOT}");
+                }
+                self.storage.transient = true;
             }
             ARG_DAY_TIME => {
                 self.scene.day_time_override = Some(parse_u64_arg(ARG_DAY_TIME, args.next())?);
@@ -290,6 +346,7 @@ impl StartupArgState {
         }
         StartupOptions {
             scene: self.scene,
+            storage: self.storage,
             render_options: self.render_options,
             camera: self.camera,
         }
@@ -477,6 +534,10 @@ mod tests {
             }
         );
         assert_eq!(
+            StartupArgState::default().finish().storage,
+            StartupWorldStorageOptions::default()
+        );
+        assert_eq!(
             StartupArgState::default().finish().render_options,
             TexturedSectionRenderOptions::default()
         );
@@ -563,6 +624,84 @@ mod tests {
 
         let options = parse(&[ARG_LIGHTING, "false", ARG_FULLBRIGHT, "false"]);
         assert!(!options.render_options.force_fullbright);
+    }
+
+    #[test]
+    fn parses_world_storage_tokens() {
+        let options = parse(&[ARG_WORLD_DIR, "/tmp/mclone-world"]);
+        assert_eq!(
+            options.storage,
+            StartupWorldStorageOptions {
+                transient: false,
+                world_root: None,
+                world_dir: Some(PathBuf::from("/tmp/mclone-world")),
+            }
+        );
+
+        let options = parse(&[ARG_WORLD_ROOT, "/tmp/mclone-worlds"]);
+        assert_eq!(
+            options.storage,
+            StartupWorldStorageOptions {
+                transient: false,
+                world_root: Some(PathBuf::from("/tmp/mclone-worlds")),
+                world_dir: None,
+            }
+        );
+
+        let options = parse(&[ARG_TRANSIENT]);
+        assert_eq!(
+            options.storage,
+            StartupWorldStorageOptions {
+                transient: true,
+                world_root: None,
+                world_dir: None,
+            }
+        );
+        assert_eq!(options.storage.world_root_or_default(None), None);
+        assert_eq!(
+            StartupWorldStorageOptions::default()
+                .world_root_or_default(Some(PathBuf::from("/tmp/default-worlds"))),
+            Some(PathBuf::from("/tmp/default-worlds"))
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_world_storage_tokens() {
+        for args in [
+            vec![ARG_TRANSIENT, ARG_WORLD_DIR, "/tmp/mclone-world"],
+            vec![ARG_WORLD_DIR, "/tmp/mclone-world", ARG_TRANSIENT],
+            vec![ARG_TRANSIENT, ARG_WORLD_ROOT, "/tmp/mclone-worlds"],
+            vec![ARG_WORLD_ROOT, "/tmp/mclone-worlds", ARG_TRANSIENT],
+            vec![
+                ARG_WORLD_DIR,
+                "/tmp/mclone-world",
+                ARG_WORLD_ROOT,
+                "/tmp/mclone-worlds",
+            ],
+            vec![
+                ARG_WORLD_ROOT,
+                "/tmp/mclone-worlds",
+                ARG_WORLD_DIR,
+                "/tmp/mclone-world",
+            ],
+        ] {
+            let mut state = StartupArgState::default();
+            let mut args = args.into_iter().map(str::to_owned);
+            let err = loop {
+                let Some(arg) = args.next() else {
+                    panic!("expected conflicting storage args to fail");
+                };
+                match state.parse_next_arg(&arg, &mut args, RenderDistanceLimits::new(1, 16)) {
+                    Ok(true) => continue,
+                    Ok(false) => panic!("unexpected arg `{arg}`"),
+                    Err(error) => break error,
+                }
+            };
+            assert!(
+                err.to_string().contains("cannot be combined"),
+                "unexpected error: {err:#}"
+            );
+        }
     }
 
     #[test]

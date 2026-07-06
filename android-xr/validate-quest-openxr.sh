@@ -108,6 +108,11 @@ Options:
                      UI validation. Default: none.
   --remote-addr ADDR
                      Add --remote-addr ADDR to mclone.startup.argv.
+  --world-dir PATH   Add --world-dir PATH to mclone.startup.argv.
+  --world-root PATH  Add --world-root PATH to mclone.startup.argv.
+  --transient        Add --transient to mclone.startup.argv.
+  --app-arg TOKEN    Add one raw token to mclone.startup.argv. Repeat for
+                     flags and values that are parsed by the app.
   --adb-reverse      Install adb reverse tcp:PORT tcp:PORT for USB validation.
                      If --remote-addr is omitted, defaults it to
                      127.0.0.1:PORT. With --start-server and no explicit
@@ -534,14 +539,19 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright)
+        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--world-dir|--world-root)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2
             ;;
-        --freeze-time)
+        --freeze-time|--transient)
             STARTUP_ARGV+=("$1")
             shift
+            ;;
+        --app-arg)
+            require_arg "$1" "${2:-}"
+            STARTUP_ARGV+=("$2")
+            shift 2
             ;;
         --session-smoke)
             require_arg "$1" "${2:-}"

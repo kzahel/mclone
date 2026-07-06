@@ -220,6 +220,21 @@ sample. Summary files are written to:
 /tmp/mclone-quest-openxr-perf-stationary-rd10.txt
 ```
 
+For the persisted-world guardrail, use:
+
+```bash
+pnpm native:android-xr:perf:orbit:rd5:persisted
+```
+
+This removes an adb-visible Quest app-data world directory, prewarms it through
+the settled stationary lane, then reopens the same shared startup `--world-dir`
+for the RD5 settled-orbit metrics sample. Summary files are written to:
+
+```text
+/tmp/mclone-quest-openxr-persisted-rd5-prewarm-summary.txt
+/tmp/mclone-quest-openxr-persisted-rd5-summary.txt
+```
+
 For frozen-mesh render isolation, use the frozen stationary samples:
 
 ```bash

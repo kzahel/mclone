@@ -41,8 +41,8 @@ mod android {
     };
     use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
     use mclone_app_runtime::startup_args::{
-        RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_bool_arg,
-        parse_string_arg,
+        RenderDistanceLimits, StartupArgState, StartupSceneOptions, StartupWorldStorageOptions,
+        parse_bool_arg, parse_string_arg,
     };
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
@@ -270,6 +270,7 @@ mod android {
         scene: XrSceneOptions,
         render_options: TexturedSectionRenderOptions,
         remote_addr: Option<String>,
+        default_world_root_enabled: bool,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
@@ -304,6 +305,7 @@ mod android {
                 scene: XrSceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
                 remote_addr: None,
+                default_world_root_enabled: true,
                 session_smoke: None,
                 perf_seconds: None,
                 perf_flight: None,
@@ -664,10 +666,16 @@ mod android {
         }
         let shared_options = shared_args.finish();
         options.remote_addr = shared_options.scene.remote_addr.clone();
-        let mut scene = android_xr_scene_options_from_startup(shared_options.scene);
+        options.default_world_root_enabled =
+            !shared_options.storage.transient && shared_options.storage.world_root.is_none();
+        let mut scene =
+            android_xr_scene_options_from_startup(shared_options.scene, shared_options.storage);
         scene.underwater_detection_mode = underwater_detection_mode;
         scene.debug_ui_screen = debug_ui_screen;
         scene.skip_actors = options.skip_actors;
+        if options.remote_addr.is_some() && scene.world_dir.is_some() {
+            bail!("--world-dir applies only to local integrated worlds");
+        }
         options.scene = scene.validated()?;
         options.render_options = shared_options.render_options;
         if options.perf_flight.is_some() && options.perf_seconds.is_none() {
@@ -820,7 +828,10 @@ mod android {
         }
     }
 
-    fn android_xr_scene_options_from_startup(scene: StartupSceneOptions) -> XrSceneOptions {
+    fn android_xr_scene_options_from_startup(
+        scene: StartupSceneOptions,
+        storage: StartupWorldStorageOptions,
+    ) -> XrSceneOptions {
         XrSceneOptions {
             seed: scene.seed,
             chunk_x: scene.chunk_x,
@@ -836,8 +847,8 @@ mod android {
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
             skip_actors: false,
-            world_root: None,
-            world_dir: None,
+            world_root: storage.world_root,
+            world_dir: storage.world_dir,
         }
     }
 
@@ -1053,7 +1064,8 @@ mod android {
                 return;
             }
         };
-        if startup_options.scene.world_root.is_none() {
+        if startup_options.default_world_root_enabled && startup_options.scene.world_root.is_none()
+        {
             startup_options.scene.world_root = android_xr_world_root(&app);
         }
         let scene_options = startup_options.scene.clone();
@@ -1204,6 +1216,12 @@ mod android {
             scene_options.freeze_time,
             scene_options.lighting_enabled,
             scene_options.skip_actors
+        );
+        log::info!(
+            "Android XR world storage: default_root_enabled={} world_root={} world_dir={}",
+            startup_options.default_world_root_enabled,
+            format_optional_path(scene_options.world_root.as_ref()),
+            format_optional_path(scene_options.world_dir.as_ref())
         );
         log::info!(
             "Android XR render options: section_occlusion={} fullbright={} color_profile={}",
@@ -5463,6 +5481,12 @@ mod android {
         value
             .map(|value| value.to_string())
             .unwrap_or_else(|| "unbounded".to_owned())
+    }
+
+    fn format_optional_path(value: Option<&PathBuf>) -> String {
+        value
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_owned())
     }
 
     fn format_optional_f64(value: Option<f64>) -> String {

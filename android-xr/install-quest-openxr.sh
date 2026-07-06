@@ -47,6 +47,13 @@ Options:
                   Add --xr-underwater-mode MODE to startup argv.
   --remote-addr ADDR
                   Add --remote-addr ADDR to the launch-scoped mclone.startup.argv.
+  --world-dir PATH
+                  Add --world-dir PATH to startup argv.
+  --world-root PATH
+                  Add --world-root PATH to startup argv.
+  --transient      Add --transient to startup argv.
+  --app-arg TOKEN  Add one raw token to startup argv. Repeat for flags and
+                  values that are parsed by the app.
   --seed SEED      Add --seed SEED to the launch-scoped mclone.startup.argv.
   --chunk-x X      Add --chunk-x X to startup argv.
   --chunk-z Z      Add --chunk-z Z to startup argv.
@@ -183,14 +190,19 @@ while [[ $# -gt 0 ]]; do
             REMOTE_ADDR="$2"
             shift 2
             ;;
-        --seed|--chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright)
+        --seed|--chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--world-dir|--world-root)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2
             ;;
-        --freeze-time)
+        --freeze-time|--transient)
             STARTUP_ARGV+=("$1")
             shift
+            ;;
+        --app-arg)
+            require_arg "$1" "${2:-}"
+            STARTUP_ARGV+=("$2")
+            shift 2
             ;;
         --xr-skip-actors)
             STARTUP_ARGV+=("$1")

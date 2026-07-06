@@ -172,6 +172,16 @@ fn cli_rejects_conflicting_world_storage_args() {
     let err = Cli::parse([
         "--world-dir".to_owned(),
         "/tmp/mclone-world".to_owned(),
+        "--world-root".to_owned(),
+        "/tmp/mclone-worlds".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("--world-dir cannot be combined with --world-root"));
+
+    let err = Cli::parse([
+        "--world-dir".to_owned(),
+        "/tmp/mclone-world".to_owned(),
         "--remote-addr".to_owned(),
         "127.0.0.1:25565".to_owned(),
     ])

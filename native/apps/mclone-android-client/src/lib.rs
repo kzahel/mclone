@@ -46,6 +46,7 @@ mod android {
     };
     use mclone_app_runtime::startup_args::{
         RenderDistanceLimits, StartupArgState, StartupCameraOptions, StartupSceneOptions,
+        StartupWorldStorageOptions,
     };
     use mclone_app_runtime::world_catalog::{
         LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
@@ -2234,6 +2235,9 @@ mod android {
             }
         }
         let options = shared_args.finish();
+        if options.storage != StartupWorldStorageOptions::default() {
+            bail!("Android startup storage arguments are not supported");
+        }
         Ok(AndroidStartupOptions {
             scene: android_scene_options_from_startup(options.scene).validated()?,
             render_options: options.render_options,

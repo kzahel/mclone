@@ -571,10 +571,10 @@ instrumentation to watch it:
   default-control, and RD5 local-integrated churn are recorded from clean commit
   `bc55076c` in `docs/performance-records.md` and
   `docs/quest-standalone-performance-records.md`.
-- [x] Record the Quest persisted-world guardrail blocker: Android XR has an
-  internal `world_dir` hook, but no validation/argv lane exposes the desktop
-  persisted-world startup-streaming perf mode yet. Per tactical 150's detour
-  rule, Slice 0 records this blocker instead of adding new machinery.
+- [x] Unblock the Quest persisted-world guardrail row:
+  `pnpm native:android-xr:perf:orbit:rd5:persisted` now drives a packaged
+  clean/prewarm/reopen/sample flow through shared startup argv `--world-dir`.
+  Record Quest numbers after running that command on-device.
 - [x] Fix remote-dedicated churn accounting before using remote play as the
   "server costs moved off headset" comparison: completed in
   [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)

@@ -527,28 +527,10 @@ impl Cli {
         let mut xr_debug_ui_screen = None;
         let mut rebuild_render_scale = None;
         let mut far_lod = FarTerrainLodConfig::default();
-        let mut explicit_transient = false;
-        let mut world_root_explicit = false;
-        let mut world_root = Some(default_native_world_root());
-        let mut world_dir = None;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--transient" => {
-                    explicit_transient = true;
-                }
-                "--world-dir" => {
-                    world_dir = Some(PathBuf::from(
-                        args.next().context("--world-dir requires PATH")?,
-                    ));
-                }
-                "--world-root" => {
-                    world_root_explicit = true;
-                    world_root = Some(PathBuf::from(
-                        args.next().context("--world-root requires PATH")?,
-                    ));
-                }
                 "--xr-clear-smoke" => {
                     if mode.is_some()
                         || movement_perf
@@ -1016,12 +998,6 @@ impl Cli {
         {
             bail!("actor walk review options require --actor-walk-review");
         }
-        if explicit_transient && world_dir.is_some() {
-            bail!("--transient cannot be combined with --world-dir");
-        }
-        if explicit_transient && world_root_explicit {
-            bail!("--transient cannot be combined with --world-root");
-        }
         if startup_wait.is_some()
             && (perf_mode_count > 0
                 || xr_clear_smoke
@@ -1043,12 +1019,13 @@ impl Cli {
         }
         let startup_options = startup_args.finish();
         let startup_camera = startup_options.camera;
+        let startup_storage = startup_options.storage;
         let mut scene = SceneOptions::from_startup_scene(startup_options.scene)?;
         scene.first_person_player_visible = first_person_player_visible;
         scene.simulation_cadence = simulation_cadence;
         scene.far_lod = far_lod;
-        scene.world_root = if explicit_transient { None } else { world_root };
-        scene.world_dir = world_dir;
+        scene.world_root = startup_storage.world_root_or_default(Some(default_native_world_root()));
+        scene.world_dir = startup_storage.world_dir;
         if simulation_cadence_explicit && scene.remote_addr.is_some() {
             bail!("--simulation-cadence applies only to local integrated worlds");
         }

@@ -217,10 +217,11 @@ host cadence 60).
   dropped-frame delta validation row.
 - 142 gate numbers are re-pinned from those rows. RD5 is no longer judged
   against the stale 2026-07-04 envelope.
-- Quest persisted-world guardrail is blocked by missing Android XR
-  validation/argv support for the desktop persisted-world startup-streaming
-  mode. Per the diagnostics-detour rule, this slice records the blocker instead
-  of adding new machinery.
+- Quest persisted-world guardrail is no longer structurally blocked:
+  `pnpm native:android-xr:perf:orbit:rd5:persisted` now cleans an
+  adb-visible Quest world dir, prewarms it, reopens the same `--world-dir`, and
+  samples the existing RD5 settled-orbit metrics lane. No Quest numbers are
+  recorded here until that command is run on-device.
 
 Validation:
 
