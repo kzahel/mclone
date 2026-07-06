@@ -1,9 +1,9 @@
 # 151: Remote Inbound Update Pipeline
 
-Status: active; Slice 0 documentation baseline completed 2026-07-06; revised
-2026-07-06 so Slice 1 starts by introducing a shared `ClientConnection`
-runtime boundary instead of a remote-only queue helper. This is the focused
-successor to tactical
+Status: active; Slice 0 documentation baseline completed 2026-07-06; Slice 1
+shared `ClientConnection` runtime seam completed 2026-07-06. Slice 2 is next:
+move native remote TCP read/decode behind that connection boundary. This is the
+focused successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 for the remaining remote ready-batch stall. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
@@ -202,6 +202,8 @@ git diff --check
 
 ## Slice 1: Shared Client Connection Contract And Runtime Seam
 
+Status: completed 2026-07-06.
+
 Goal: create one runtime-facing `ClientConnection` boundary before moving the
 remote socket. Local integrated and remote dedicated should stop presenting
 different session shapes to the runtime.
@@ -262,6 +264,53 @@ The `rg` audit is not expected to be zero in Slice 1, but every remaining hit
 must be classified as one of: connection-adapter internals, explicit
 startup/compatibility helper, or test. No remaining hit may be part of normal
 frame runtime polling.
+
+Implementation notes:
+
+- Added a shared runtime-facing `ClientConnection` trait in
+  `mclone-app-runtime` with command send, one-at-a-time update drain, and queue
+  depth/byte metrics.
+- Added `QueuedServerUpdate` as the shared inbound envelope carrying decoded
+  `ServerUpdate`, encoded byte length, queue age, and transport-drained state.
+  True producer read/decode timing and response sequencing remain explicitly
+  unavailable until the Slice 2 native TCP IO actor owns the socket.
+- Adapted local integrated through `LocalIntegratedConnection` over the
+  existing `NativeIntegratedServerRunner` channels.
+- Adapted remote dedicated through `RemoteDedicatedConnection`. Its temporary
+  `pending_response_batches` and direct `try_drain_command_updates` /
+  `drain_command_updates` calls now live inside that adapter, not in the
+  runtime pump.
+- Replaced the duplicate local runner pump and remote pending-batch pump with
+  `pump_client_connection_updates_report`, shared by local and remote normal
+  frame `poll()`, `DrainImmediately`, and remote `poll_until_idle`.
+- Added a focused shared-pump test for receive-order preservation across a
+  budget stall, and updated the remote `SendOnly` regression to assert through
+  the connection adapter.
+
+Validation completed 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+rg -n "try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/apps/mclone-* || true
+git diff --check
+```
+
+`rg` classification:
+
+- `mclone-app-runtime/src/local_single_view.rs`: remaining
+  `pending_response_batches`, `drain_command_updates`, and
+  `try_drain_command_updates` hits are temporary remote connection-adapter
+  internals or tests.
+- `mclone-app-runtime/src/host_mode.rs`: remaining drain hits are the
+  compatibility trait and existing startup/test helpers.
+- `native/apps/mclone-*`: remaining drain hits are `RemoteDedicatedServerSession`
+  compatibility wrappers around `NativeClientSession`; Slice 2 should replace
+  the normal native remote path with an IO actor behind the same
+  `ClientConnection` boundary.
+- `pump_pending_remote_update_batches_report`: no remaining hits.
 
 ## Slice 2: Native TCP Client IO Actor
 

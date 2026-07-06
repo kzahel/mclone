@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,19 +11,19 @@ use glam::Vec3;
 use mclone_client::ClientRuntime;
 use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
-use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_protocol::{ClientCommand, ServerUpdate, encode_server_update};
 use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    NativeIntegratedServerWorldStorage, ServerRunnerDiagnostics, SimulationCadenceConfig,
-    host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
+    NativeIntegratedServerWorldStorage, ServerRunnerDiagnostics, ServerUpdateEnvelope,
+    SimulationCadenceConfig, host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
 use crate::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
 use crate::host_mode::{
-    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions, command_exchange,
+    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
     deferred_command_exchange, dispatch_remote_dedicated_command,
     prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
     update_drain_exchange,
@@ -134,7 +134,7 @@ impl LocalSingleViewSceneOptions {
 #[derive(Debug)]
 pub struct LocalSingleViewSceneRuntime {
     core: SingleViewRuntime,
-    server_runner: NativeIntegratedServerRunner,
+    connection: LocalIntegratedConnection,
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
@@ -142,6 +142,189 @@ pub struct LocalSingleViewSceneRuntime {
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
     last_runner_diagnostics_poll_at: Option<Instant>,
+}
+
+#[derive(Debug)]
+struct LocalIntegratedConnection {
+    runner: NativeIntegratedServerRunner,
+}
+
+impl LocalIntegratedConnection {
+    fn new(runner: NativeIntegratedServerRunner) -> Self {
+        Self { runner }
+    }
+
+    fn set_simulation_cadence(
+        &mut self,
+        cadence: SimulationCadenceConfig,
+    ) -> mclone_server::ServerRunnerResult<()> {
+        self.runner.set_simulation_cadence(cadence)
+    }
+
+    fn poll_diagnostics(&self) -> mclone_server::ServerRunnerResult<ServerRunnerDiagnostics> {
+        self.runner.poll_diagnostics()
+    }
+
+    fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
+        self.runner.refresh_fast_diagnostics(diagnostics);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueuedServerUpdate {
+    update: Option<ServerUpdate>,
+    encoded_len: usize,
+    queued_age: Duration,
+    transport_drained: bool,
+}
+
+impl QueuedServerUpdate {
+    fn single(
+        update: ServerUpdate,
+        encoded_len: usize,
+        queued_age: Duration,
+        transport_drained: bool,
+    ) -> Self {
+        Self {
+            update: Some(update),
+            encoded_len,
+            queued_age,
+            transport_drained,
+        }
+    }
+
+    fn empty(transport_drained: bool) -> Self {
+        Self {
+            update: None,
+            encoded_len: 0,
+            queued_age: Duration::ZERO,
+            transport_drained,
+        }
+    }
+
+    fn into_updates(self) -> Vec<ServerUpdate> {
+        self.update.into_iter().collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ClientConnectionQueueMetrics {
+    update_depth: usize,
+    update_bytes: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ClientConnectionDrainResult {
+    update: Option<QueuedServerUpdate>,
+    remaining_queue_depth: usize,
+    remaining_queue_bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionUpdateDrainMode {
+    Blocking,
+    ReadyOnly,
+}
+
+trait ClientConnection {
+    fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
+    fn drain_next_update(
+        &mut self,
+        mode: ConnectionUpdateDrainMode,
+    ) -> Result<ClientConnectionDrainResult>;
+    fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics>;
+}
+
+impl ClientConnection for LocalIntegratedConnection {
+    fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
+        self.runner
+            .send_command(command)
+            .context("failed to send local single-view integrated server command")
+    }
+
+    fn drain_next_update(
+        &mut self,
+        _mode: ConnectionUpdateDrainMode,
+    ) -> Result<ClientConnectionDrainResult> {
+        let Some(envelope) = self
+            .runner
+            .try_recv_update()
+            .context("failed to receive local single-view integrated server update")?
+        else {
+            return Ok(ClientConnectionDrainResult::default());
+        };
+        Ok(ClientConnectionDrainResult {
+            update: Some(queued_update_from_runner_envelope(envelope)),
+            ..ClientConnectionDrainResult::default()
+        })
+    }
+
+    fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
+        let diagnostics = self
+            .runner
+            .poll_diagnostics()
+            .context("failed to poll local single-view integrated server diagnostics")?;
+        Ok(ClientConnectionQueueMetrics {
+            update_depth: diagnostics.update_queue_depth,
+            update_bytes: diagnostics.update_queue_bytes,
+        })
+    }
+}
+
+fn queued_update_from_runner_envelope(envelope: ServerUpdateEnvelope) -> QueuedServerUpdate {
+    QueuedServerUpdate::single(
+        envelope.update,
+        envelope.encoded_len,
+        envelope.queued_age,
+        true,
+    )
+}
+
+fn pump_client_connection_updates_report<C>(
+    core: &mut SingleViewRuntime,
+    connection: &mut C,
+    budget: RuntimeUpdatePumpBudget,
+    drain_mode: ConnectionUpdateDrainMode,
+) -> Result<RuntimeUpdatePumpReport>
+where
+    C: ClientConnection,
+{
+    let pump_start = Instant::now();
+    let mut report = RuntimeUpdatePumpReport::default();
+    loop {
+        let drain_start = Instant::now();
+        let drain = connection.drain_next_update(drain_mode)?;
+        report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
+        let Some(queued_update) = drain.update else {
+            report.remaining_queue_depth = drain.remaining_queue_depth;
+            report.remaining_queue_bytes = drain.remaining_queue_bytes;
+            return Ok(report);
+        };
+
+        let encoded_len = queued_update.encoded_len;
+        let queued_age = queued_update.queued_age;
+        let transport_drained = queued_update.transport_drained;
+        let exchange_report = core.apply_exchange_report(update_drain_exchange(
+            queued_update.into_updates(),
+            transport_drained,
+        ));
+        report.apply_report.accumulate(exchange_report.update_apply);
+        report.update_bytes = report.update_bytes.saturating_add(encoded_len);
+        report.oldest_applied_update_age_ms = report
+            .oldest_applied_update_age_ms
+            .max(elapsed_ms(queued_age));
+
+        if budget.exhausted_after_update(pump_start.elapsed(), &report.apply_report) {
+            let metrics = connection.pending_update_metrics()?;
+            report.remaining_queue_depth = metrics.update_depth;
+            report.remaining_queue_bytes = metrics.update_bytes;
+            if metrics.update_depth > 0 {
+                report.stalled = true;
+                report.stall_count = 1;
+            }
+            return Ok(report);
+        }
+    }
 }
 
 struct DeferredChunkDropWorker {
@@ -345,7 +528,7 @@ impl LocalSingleViewSceneRuntime {
                 options.render_distance,
                 options.chunk_tracking_radius(),
             ),
-            server_runner,
+            connection: LocalIntegratedConnection::new(server_runner),
             mesh_assets,
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
@@ -445,7 +628,7 @@ impl LocalSingleViewSceneRuntime {
         if cadence == self.simulation_cadence {
             return Ok(false);
         }
-        self.server_runner
+        self.connection
             .set_simulation_cadence(cadence)
             .context("failed to set local single-view simulation cadence")?;
         self.simulation_cadence = cadence;
@@ -472,8 +655,8 @@ impl LocalSingleViewSceneRuntime {
         else {
             return Ok(false);
         };
-        self.server_runner
-            .send_command(command)
+        self.connection
+            .send_command_only(command)
             .context("failed to send local single-view chunk view command")?;
         Ok(true)
     }
@@ -509,24 +692,21 @@ impl LocalSingleViewSceneRuntime {
     ) -> Result<(bool, GameplayCommandTiming)> {
         let total_start = Instant::now();
         let send_start = Instant::now();
-        self.server_runner
-            .send_command(command)
+        self.connection
+            .send_command_only(command)
             .context("failed to send local single-view gameplay command")?;
         let send_ms = elapsed_ms(send_start.elapsed());
         let (drain_updates_ms, apply_report) = match policy {
             GameplayCommandUpdatePolicy::DrainImmediately => {
-                let drain_start = Instant::now();
-                let updates = self
-                    .server_runner
-                    .drain_updates()
-                    .context("failed to drain local single-view integrated server updates")?;
-                let drain_updates_ms = elapsed_ms(drain_start.elapsed());
-                let apply_report = if updates.is_empty() {
-                    RuntimeUpdateApplyReport::default()
-                } else {
-                    self.core.apply_server_updates_report(updates)
-                };
-                (drain_updates_ms, apply_report)
+                let pump_report = pump_client_connection_updates_report(
+                    &mut self.core,
+                    &mut self.connection,
+                    RuntimeUpdatePumpBudget::unlimited(),
+                    ConnectionUpdateDrainMode::ReadyOnly,
+                )
+                .context("failed to drain local single-view integrated server updates")?;
+                let drain_updates_ms = pump_report.drain_updates_ms;
+                (drain_updates_ms, pump_report.apply_report)
             }
             GameplayCommandUpdatePolicy::SendOnly => (0.0, RuntimeUpdateApplyReport::default()),
         };
@@ -553,7 +733,12 @@ impl LocalSingleViewSceneRuntime {
 
     pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
         let poll_start = Instant::now();
-        let pump_report = self.pump_runner_updates_report(budget)?;
+        let pump_report = pump_client_connection_updates_report(
+            &mut self.core,
+            &mut self.connection,
+            budget,
+            ConnectionUpdateDrainMode::ReadyOnly,
+        )?;
         let changed = pump_report.apply_report.changed;
         let deferred_drop_start = Instant::now();
         let client_deferred_chunk_drop_items = self.handoff_deferred_client_chunk_drops();
@@ -589,43 +774,6 @@ impl LocalSingleViewSceneRuntime {
         Ok(changed)
     }
 
-    fn pump_runner_updates_report(
-        &mut self,
-        budget: RuntimeUpdatePumpBudget,
-    ) -> Result<RuntimeUpdatePumpReport> {
-        let pump_start = Instant::now();
-        let mut report = RuntimeUpdatePumpReport::default();
-        loop {
-            let drain_start = Instant::now();
-            let envelope = self
-                .server_runner
-                .try_recv_update()
-                .context("failed to receive local single-view integrated server update")?;
-            report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
-            let Some(envelope) = envelope else {
-                return Ok(report);
-            };
-
-            report.update_bytes = report.update_bytes.saturating_add(envelope.encoded_len);
-            report.oldest_applied_update_age_ms = report
-                .oldest_applied_update_age_ms
-                .max(elapsed_ms(envelope.queued_age));
-            let apply_report = self.core.apply_server_updates_report(vec![envelope.update]);
-            report.apply_report.accumulate(apply_report);
-
-            if budget.exhausted_after_update(pump_start.elapsed(), &report.apply_report) {
-                let diagnostics = self.server_runner_diagnostics()?;
-                report.remaining_queue_depth = diagnostics.update_queue_depth;
-                report.remaining_queue_bytes = diagnostics.update_queue_bytes;
-                if diagnostics.update_queue_depth > 0 {
-                    report.stalled = true;
-                    report.stall_count = 1;
-                }
-                return Ok(report);
-            }
-        }
-    }
-
     fn poll_runner_diagnostics_for_frame(
         &mut self,
     ) -> Result<(Option<ServerRunnerDiagnostics>, f64, bool, f64)> {
@@ -637,7 +785,7 @@ impl LocalSingleViewSceneRuntime {
         if should_poll {
             let diagnostics_start = Instant::now();
             let runner_diagnostics = self
-                .server_runner
+                .connection
                 .poll_diagnostics()
                 .context("failed to poll local single-view integrated server diagnostics")?;
             self.simulation_cadence = runner_diagnostics.simulation_cadence;
@@ -646,8 +794,7 @@ impl LocalSingleViewSceneRuntime {
             self.last_runner_diagnostics_poll_at = Some(Instant::now());
             diagnostics_refreshed = true;
         } else if let Some(runner_diagnostics) = self.last_runner_diagnostics.as_mut() {
-            self.server_runner
-                .refresh_fast_diagnostics(runner_diagnostics);
+            self.connection.refresh_fast_diagnostics(runner_diagnostics);
         }
 
         let diagnostics_cache_age_ms = self
@@ -818,7 +965,7 @@ impl LocalSingleViewSceneRuntime {
     }
 
     fn server_runner_diagnostics(&self) -> Result<ServerRunnerDiagnostics> {
-        self.server_runner
+        self.connection
             .poll_diagnostics()
             .context("failed to poll local single-view integrated server diagnostics")
     }
@@ -1482,17 +1629,138 @@ impl<S> DerefMut for NativeSingleViewSessionRuntime<S> {
 #[derive(Debug)]
 pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
     core: SingleViewRuntime,
-    session: S,
-    pending_response_batches: usize,
+    connection: RemoteDedicatedConnection<S>,
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RemoteUpdateDrainMode {
-    Blocking,
-    ReadyOnly,
+#[derive(Debug)]
+struct RemoteDedicatedConnection<S> {
+    session: S,
+    pending_response_batches: usize,
+    queued_updates: VecDeque<QueuedServerUpdate>,
+    queued_update_bytes: usize,
+}
+
+impl<S> RemoteDedicatedConnection<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    fn new(session: S) -> Self {
+        Self {
+            session,
+            pending_response_batches: 0,
+            queued_updates: VecDeque::new(),
+            queued_update_bytes: 0,
+        }
+    }
+
+    fn session_mut(&mut self) -> &mut S {
+        &mut self.session
+    }
+
+    fn clear_pending_updates(&mut self) {
+        self.pending_response_batches = 0;
+        self.queued_updates.clear();
+        self.queued_update_bytes = 0;
+    }
+
+    fn push_response_batch(&mut self, updates: Vec<ServerUpdate>) -> Result<()> {
+        let transport_drained_after_batch = self.pending_response_batches == 0;
+        let update_count = updates.len();
+        if update_count == 0 {
+            self.queued_updates
+                .push_back(QueuedServerUpdate::empty(transport_drained_after_batch));
+            return Ok(());
+        }
+
+        for (index, update) in updates.into_iter().enumerate() {
+            let encoded_len = encode_server_update(&update)
+                .context("failed to measure remote dedicated server update bytes")?
+                .len();
+            self.queued_update_bytes = self.queued_update_bytes.saturating_add(encoded_len);
+            self.queued_updates.push_back(QueuedServerUpdate::single(
+                update,
+                encoded_len,
+                Duration::ZERO,
+                transport_drained_after_batch && index + 1 == update_count,
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl<S> ClientConnection for RemoteDedicatedConnection<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
+        self.session.send_command_only(command)?;
+        self.pending_response_batches = self.pending_response_batches.saturating_add(1);
+        Ok(())
+    }
+
+    fn drain_next_update(
+        &mut self,
+        mode: ConnectionUpdateDrainMode,
+    ) -> Result<ClientConnectionDrainResult> {
+        if let Some(update) = self.queued_updates.pop_front() {
+            self.queued_update_bytes = self.queued_update_bytes.saturating_sub(update.encoded_len);
+            return Ok(ClientConnectionDrainResult {
+                update: Some(update),
+                remaining_queue_depth: self.pending_response_batches + self.queued_updates.len(),
+                remaining_queue_bytes: self.queued_update_bytes,
+            });
+        }
+
+        if self.pending_response_batches == 0 {
+            return Ok(ClientConnectionDrainResult::default());
+        }
+
+        let updates = match mode {
+            ConnectionUpdateDrainMode::Blocking => Some(
+                self.session
+                    .drain_command_updates()
+                    .context("failed to drain remote dedicated server updates")?,
+            ),
+            ConnectionUpdateDrainMode::ReadyOnly => self
+                .session
+                .try_drain_command_updates()
+                .context("failed to poll remote dedicated server updates")?,
+        };
+        let Some(updates) = updates else {
+            return Ok(ClientConnectionDrainResult {
+                update: None,
+                remaining_queue_depth: self.pending_response_batches,
+                remaining_queue_bytes: self.queued_update_bytes,
+            });
+        };
+
+        self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
+        self.push_response_batch(updates)?;
+        if let Some(update) = self.queued_updates.pop_front() {
+            self.queued_update_bytes = self.queued_update_bytes.saturating_sub(update.encoded_len);
+            return Ok(ClientConnectionDrainResult {
+                update: Some(update),
+                remaining_queue_depth: self.pending_response_batches + self.queued_updates.len(),
+                remaining_queue_bytes: self.queued_update_bytes,
+            });
+        }
+
+        Ok(ClientConnectionDrainResult {
+            update: None,
+            remaining_queue_depth: self.pending_response_batches,
+            remaining_queue_bytes: self.queued_update_bytes,
+        })
+    }
+
+    fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
+        Ok(ClientConnectionQueueMetrics {
+            update_depth: self.pending_response_batches + self.queued_updates.len(),
+            update_bytes: self.queued_update_bytes,
+        })
+    }
 }
 
 impl<S> RemoteDedicatedSingleViewSceneRuntime<S>
@@ -1506,9 +1774,10 @@ where
 
     pub fn with_mesh_assets(
         options: SingleViewHostOptions,
-        mut session: S,
+        session: S,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
+        let mut connection = RemoteDedicatedConnection::new(session);
         let render_compile_dispatcher = NativeRenderSectionCompileDispatcher::with_worker_count(
             mesh_assets.catalog.clone(),
             options.render_compile_worker_count,
@@ -1523,13 +1792,12 @@ where
             options.render_distance,
             options.chunk_tracking_radius,
         ) {
-            dispatch_remote_dedicated_command(&mut core, &mut session, command)
+            dispatch_remote_dedicated_command(&mut core, connection.session_mut(), command)
                 .context("failed to initialize remote dedicated single-view runtime")?;
         }
         Ok(Self {
             core,
-            session,
-            pending_response_batches: 0,
+            connection,
             mesh_assets,
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
@@ -1625,11 +1893,13 @@ where
         let mut changed = true;
 
         if matches!(policy, GameplayCommandUpdatePolicy::DrainImmediately)
-            && self.pending_response_batches > 0
+            && self.connection.pending_update_metrics()?.update_depth > 0
         {
-            let pump_report = self.pump_pending_remote_update_batches_report(
+            let pump_report = pump_client_connection_updates_report(
+                &mut self.core,
+                &mut self.connection,
                 RuntimeUpdatePumpBudget::unlimited(),
-                RemoteUpdateDrainMode::Blocking,
+                ConnectionUpdateDrainMode::Blocking,
             )?;
             drain_updates_ms += pump_report.drain_updates_ms;
             changed |= pump_report.apply_report.changed;
@@ -1637,12 +1907,12 @@ where
         }
 
         let send_start = Instant::now();
-        if let Err(error) = self.session.send_command_only(command) {
+        if let Err(error) = self.connection.send_command_only(command) {
             let resync_command = prepare_remote_dedicated_resync_command(&mut self.core, error)?;
-            self.pending_response_batches = 0;
+            self.connection.clear_pending_updates();
             let changed = reconnect_remote_dedicated_session_and_resync(
                 &mut self.core,
-                &mut self.session,
+                self.connection.session_mut(),
                 resync_command,
             )?;
             let total_ms = elapsed_ms(total_start.elapsed());
@@ -1656,22 +1926,23 @@ where
             ));
         }
         let send_ms = elapsed_ms(send_start.elapsed());
-        self.pending_response_batches = self.pending_response_batches.saturating_add(1);
 
         match policy {
             GameplayCommandUpdatePolicy::DrainImmediately => {
-                let drain_start = Instant::now();
-                let updates = match self.session.drain_command_updates() {
-                    Ok(updates) => updates,
+                let pump_report = match pump_client_connection_updates_report(
+                    &mut self.core,
+                    &mut self.connection,
+                    RuntimeUpdatePumpBudget::unlimited(),
+                    ConnectionUpdateDrainMode::Blocking,
+                ) {
+                    Ok(pump_report) => pump_report,
                     Err(error) => {
-                        self.pending_response_batches =
-                            self.pending_response_batches.saturating_sub(1);
                         let resync_command =
                             prepare_remote_dedicated_resync_command(&mut self.core, error)?;
-                        self.pending_response_batches = 0;
+                        self.connection.clear_pending_updates();
                         let changed = reconnect_remote_dedicated_session_and_resync(
                             &mut self.core,
-                            &mut self.session,
+                            self.connection.session_mut(),
                             resync_command,
                         )?;
                         let total_ms = elapsed_ms(total_start.elapsed());
@@ -1680,20 +1951,15 @@ where
                             GameplayCommandTiming {
                                 total_ms,
                                 send_ms,
-                                drain_updates_ms: drain_updates_ms
-                                    + elapsed_ms(drain_start.elapsed()),
+                                drain_updates_ms,
                                 ..GameplayCommandTiming::default()
                             },
                         ));
                     }
                 };
-                self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
-                drain_updates_ms += elapsed_ms(drain_start.elapsed());
-                let exchange_report = self
-                    .core
-                    .apply_exchange_report(command_exchange(updates, true, true));
-                changed |= exchange_report.update_apply.changed;
-                apply_report.accumulate(exchange_report.update_apply);
+                drain_updates_ms += pump_report.drain_updates_ms;
+                changed |= pump_report.apply_report.changed;
+                apply_report.accumulate(pump_report.apply_report);
             }
             GameplayCommandUpdatePolicy::SendOnly => {
                 self.core.apply_exchange(deferred_command_exchange());
@@ -1724,10 +1990,10 @@ where
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
         let poll_start = Instant::now();
         let mut polls = 0;
-        while self.pending_response_batches > 0 {
+        while self.connection.pending_update_metrics()?.update_depth > 0 {
             self.poll_with_update_budget_and_drain_mode(
                 RuntimeUpdatePumpBudget::unlimited(),
-                RemoteUpdateDrainMode::Blocking,
+                ConnectionUpdateDrainMode::Blocking,
             )?;
             polls += 1;
         }
@@ -1735,16 +2001,21 @@ where
     }
 
     pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
-        self.poll_with_update_budget_and_drain_mode(budget, RemoteUpdateDrainMode::ReadyOnly)
+        self.poll_with_update_budget_and_drain_mode(budget, ConnectionUpdateDrainMode::ReadyOnly)
     }
 
     fn poll_with_update_budget_and_drain_mode(
         &mut self,
         budget: RuntimeUpdatePumpBudget,
-        drain_mode: RemoteUpdateDrainMode,
+        drain_mode: ConnectionUpdateDrainMode,
     ) -> Result<bool> {
         let poll_start = Instant::now();
-        let pump_report = self.pump_pending_remote_update_batches_report(budget, drain_mode)?;
+        let pump_report = pump_client_connection_updates_report(
+            &mut self.core,
+            &mut self.connection,
+            budget,
+            drain_mode,
+        )?;
         let changed = pump_report.apply_report.changed;
         self.core.finish_poll_diagnostics(
             RuntimePollTiming {
@@ -1762,50 +2033,6 @@ where
             None,
         );
         Ok(changed)
-    }
-
-    fn pump_pending_remote_update_batches_report(
-        &mut self,
-        budget: RuntimeUpdatePumpBudget,
-        drain_mode: RemoteUpdateDrainMode,
-    ) -> Result<RuntimeUpdatePumpReport> {
-        let pump_start = Instant::now();
-        let mut report = RuntimeUpdatePumpReport::default();
-        while self.pending_response_batches > 0 {
-            let drain_start = Instant::now();
-            let updates = match drain_mode {
-                RemoteUpdateDrainMode::Blocking => Some(
-                    self.session
-                        .drain_command_updates()
-                        .context("failed to drain remote dedicated server updates")?,
-                ),
-                RemoteUpdateDrainMode::ReadyOnly => self
-                    .session
-                    .try_drain_command_updates()
-                    .context("failed to poll remote dedicated server updates")?,
-            };
-            let Some(updates) = updates else {
-                report.remaining_queue_depth = self.pending_response_batches;
-                return Ok(report);
-            };
-            self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
-            report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
-            let exchange_report = self.core.apply_exchange_report(update_drain_exchange(
-                updates,
-                self.pending_response_batches == 0,
-            ));
-            report.apply_report.accumulate(exchange_report.update_apply);
-
-            if budget.exhausted_after_update(pump_start.elapsed(), &report.apply_report) {
-                report.remaining_queue_depth = self.pending_response_batches;
-                if self.pending_response_batches > 0 {
-                    report.stalled = true;
-                    report.stall_count = 1;
-                }
-                return Ok(report);
-            }
-        }
-        Ok(report)
     }
 
     pub fn sync_render_sections(
@@ -2090,6 +2317,54 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct ScriptedClientConnection {
+        sent_commands: Vec<ClientCommand>,
+        queued_updates: VecDeque<QueuedServerUpdate>,
+    }
+
+    impl ScriptedClientConnection {
+        fn new(updates: Vec<QueuedServerUpdate>) -> Self {
+            Self {
+                sent_commands: Vec::new(),
+                queued_updates: updates.into(),
+            }
+        }
+    }
+
+    impl ClientConnection for ScriptedClientConnection {
+        fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
+            self.sent_commands.push(command);
+            Ok(())
+        }
+
+        fn drain_next_update(
+            &mut self,
+            _mode: ConnectionUpdateDrainMode,
+        ) -> Result<ClientConnectionDrainResult> {
+            Ok(ClientConnectionDrainResult {
+                update: self.queued_updates.pop_front(),
+                remaining_queue_depth: self.queued_updates.len(),
+                remaining_queue_bytes: self
+                    .queued_updates
+                    .iter()
+                    .map(|update| update.encoded_len)
+                    .sum(),
+            })
+        }
+
+        fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
+            Ok(ClientConnectionQueueMetrics {
+                update_depth: self.queued_updates.len(),
+                update_bytes: self
+                    .queued_updates
+                    .iter()
+                    .map(|update| update.encoded_len)
+                    .sum(),
+            })
+        }
+    }
+
     #[test]
     fn local_single_view_options_apply_java_tracking_radius() {
         let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2);
@@ -2303,8 +2578,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(runtime.pending_response_batches, 0);
-        assert_eq!(runtime.session.blocking_drain_count, 1);
+        assert_eq!(runtime.connection.pending_response_batches, 0);
+        assert_eq!(runtime.connection.session.blocking_drain_count, 1);
         assert_eq!(runtime.core().day_time(), 0);
 
         let command = ClientCommand::SetChunkView(crate::chunk_view(
@@ -2321,24 +2596,85 @@ mod tests {
 
         assert_eq!(timing.drain_updates_ms, 0.0);
         assert_eq!(timing.updates, 0);
-        assert_eq!(runtime.pending_response_batches, 1);
+        assert_eq!(runtime.connection.pending_response_batches, 1);
 
         assert!(!runtime.poll().unwrap());
         let diagnostics = runtime.core().last_poll_diagnostics();
         assert_eq!(diagnostics.server_update_queue_depth, 1);
         assert_eq!(diagnostics.updates, 0);
         assert!(!diagnostics.update_pump_stalled);
-        assert_eq!(runtime.pending_response_batches, 1);
-        assert_eq!(runtime.session.try_drain_count, 1);
+        assert_eq!(runtime.connection.pending_response_batches, 1);
+        assert_eq!(runtime.connection.session.try_drain_count, 1);
         assert_eq!(runtime.core().day_time(), 0);
 
         let _changed = runtime.poll().unwrap();
         let diagnostics = runtime.core().last_poll_diagnostics();
         assert_eq!(diagnostics.server_update_queue_depth, 0);
         assert_eq!(diagnostics.updates, 1);
-        assert_eq!(runtime.pending_response_batches, 0);
-        assert_eq!(runtime.session.try_drain_count, 2);
+        assert_eq!(runtime.connection.pending_response_batches, 0);
+        assert_eq!(runtime.connection.session.try_drain_count, 2);
         assert_eq!(runtime.core().day_time(), 6000);
+    }
+
+    #[test]
+    fn shared_connection_pump_preserves_order_across_budget_stall() {
+        let center = ChunkPos::new(0, 0);
+        let mut core = SingleViewRuntime::remote_dedicated(
+            center,
+            0,
+            chunk_tracking_radius_for_render_distance(0),
+        );
+        let mut connection = ScriptedClientConnection::new(vec![
+            QueuedServerUpdate::single(
+                ServerUpdate::TimeUpdate { day_time: 100 },
+                11,
+                Duration::from_millis(3),
+                false,
+            ),
+            QueuedServerUpdate::single(
+                ServerUpdate::TimeUpdate { day_time: 200 },
+                13,
+                Duration::from_millis(5),
+                false,
+            ),
+            QueuedServerUpdate::single(
+                ServerUpdate::TimeUpdate { day_time: 300 },
+                17,
+                Duration::from_millis(7),
+                true,
+            ),
+        ]);
+
+        let first_report = pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::MaxElapsed(Duration::ZERO),
+            ConnectionUpdateDrainMode::ReadyOnly,
+        )
+        .unwrap();
+
+        assert_eq!(first_report.apply_report.updates, 1);
+        assert_eq!(first_report.update_bytes, 11);
+        assert_eq!(first_report.remaining_queue_depth, 2);
+        assert!(first_report.remaining_queue_bytes > 0);
+        assert!(first_report.oldest_applied_update_age_ms >= 3.0);
+        assert!(first_report.stalled);
+        assert_eq!(core.day_time(), 100);
+        assert!(!core.transport_drained());
+
+        let second_report = pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::unlimited(),
+            ConnectionUpdateDrainMode::ReadyOnly,
+        )
+        .unwrap();
+
+        assert_eq!(second_report.apply_report.updates, 2);
+        assert_eq!(second_report.update_bytes, 30);
+        assert_eq!(second_report.remaining_queue_depth, 0);
+        assert_eq!(core.day_time(), 300);
+        assert!(!second_report.stalled);
     }
 
     #[test]
