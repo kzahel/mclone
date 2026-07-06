@@ -170,7 +170,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 | 3: Quest / Android XR adoption | 1 Quest, 2 | Mac with Quest | landed 2026-07-05 |
 | 4: calibration, invariants, meter overhead | 7 | Mac with Quest | landed 2026-07-05 |
 | 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | landed 2026-07-05 |
-| 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | Mac implementation landed 2026-07-05; checkpoint B pending |
+| 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | closed 2026-07-06 |
 | 7: debug overlay through the shared facade | 8 | Mac | open |
 
 Gap numbers refer to the law doc's
@@ -1280,8 +1280,9 @@ git diff --check
 Plus one Quest metrics lane recorded in this section if Quest-side wgpu
 timestamps are enabled.
 
-Recorded result: Mac implementation landed 2026-07-05; Windows checkpoint B
-and Quest agreement rows remain pending before the slice fully closes.
+Recorded result: Mac implementation landed 2026-07-05. Windows checkpoint B,
+external capture, and Quest periodic metrics were completed on 2026-07-06;
+Slice 6 is closed. Slice 7 has not started.
 
 Changes:
 
@@ -1348,11 +1349,11 @@ git diff --check
 # PASS.
 ```
 
-Next step: run Windows checkpoint B after switching hosts: preparation pass,
-Vulkan/DX12 timestamp calibration, and PIX or RenderDoc spot-check. If a
-Quest is available in that session, run the periodic metrics lane and record
-`XR_META` agreement; otherwise run it from the Mac with the Quest attached
-before closing Slice 6.
+Checkpoint follow-up: run Windows checkpoint B after switching hosts:
+preparation pass, Vulkan/DX12 timestamp calibration, and PIX or RenderDoc
+spot-check. If a Quest is available in that session, run the periodic metrics
+lane and record `XR_META` status; otherwise run it from the Mac with the Quest
+attached before closing Slice 6.
 
 Post-slice correction, 2026-07-06:
 
@@ -1365,6 +1366,178 @@ Post-slice correction, 2026-07-06:
 - Follow-up validation: `pnpm native:policy:wasm-check` PASS, and
   `cargo check --manifest-path native/Cargo.toml -p mclone-render --target wasm32-unknown-unknown`
   PASS.
+
+Windows checkpoint B, 2026-07-06:
+
+- Host: `rex`, Windows 11 Core build 26200, `x86_64-pc-windows-msvc`.
+  Synced `main` to `54cc7ae3` (`render: fix gpu timestamp wasm check`),
+  matching `origin/main`; `54cc7ae3` is HEAD.
+- Toolchain prep: PowerShell `cargo` is
+  `C:\Users\sox\.cargo\bin\cargo.exe`, Cargo 1.96.0, host
+  `x86_64-pc-windows-msvc`; `pnpm --version` is 9.15.1.
+  `pnpm host:check` passed for Node/pnpm but noted no Chrome on PATH.
+  `pnpm assets:pack:check` initially reported a stale packed asset zip after
+  the host switch; `pnpm assets:pack` regenerated
+  `reference/minecraft-1.17.1/extracted.zip` with 6985 files. The lock then
+  checked current, and the timestamp-only lock rewrite was discarded.
+- Windows-only smoke fix: the original `native:accounting:smoke` default
+  6.0 ms spin is below this host's `GetThreadTimes` accounting granularity.
+  Release mode reported `thread_cpu_spin_ms=15.625` for the 6.0 ms target,
+  and debug mode tripped the thread-CPU conservation assertion. The Windows
+  default spin is now 200.0 ms; non-Windows keeps 6.0 ms. The final Windows
+  default run recorded `thread_cpu_spin_ms=203.125`, `wall_spin_ms=191.7766`,
+  `tolerance_ms=20.0`, and zero conservation violations.
+- Windows-only XR check fix: `pnpm native:xr:check` from plain PowerShell
+  initially resolved `bash` to WSL and failed before Cargo with
+  `Missing required command: cargo`. Rerunning with
+  `C:\Program Files\Git\bin` first in `PATH` used Git Bash and native Cargo,
+  then found a real compile error in `xr_clear_smoke`: the desktop clear-smoke
+  call to `create_eye_swapchain` lacked the new foveation argument. Passing
+  `None` preserves the no-foveation clear-smoke path, and the Git Bash rerun
+  passed.
+- Quest staging fix: the existing `com.kzahel.mclone.xr` package was
+  uninstalled before reinstalling because it may have been signed by the Mac
+  dev key. The first Windows Quest metrics run installed and launched the new
+  APK but failed asset loading with `Permission denied`; after reinstall, the
+  `adb push`-created `files/assets` tree was owned by `shell:ext_data_rw` with
+  `770` directories, so the app UID could not traverse it. The shared Android
+  validation helper now repairs external staged assets with
+  `chmod -R u+rwX,g+rwX,o+rX`; the rerun left `assets`, `packs`, and
+  `local-sounds` as `drwxrwsr-x` and passed.
+- RenderDoc capture hook: `accounting_smoke` now honors
+  `MCLONE_RENDERDOC_CAPTURE=1` by bracketing only the validation GPU
+  calibration pass with `Device::start_graphics_debugger_capture()` /
+  `stop_graphics_debugger_capture()`. Normal smoke runs leave this off.
+
+Windows GPU timestamp calibration:
+
+| backend | command | support | `Queue::get_timestamp_period()` | light pass | heavy pass | ratio | granularity notes |
+|---|---|---|---:|---:|---:|---:|---|
+| default Windows headless (DX12 by `native_backends`) | `pnpm native:accounting:smoke` | supported | 1.0 ns | 0.004096 ms | 1.350656 ms | 329.75 | whole-pass timestamps valid; latest default light pass raw delta 4096 ticks |
+| Vulkan | `WGPU_BACKEND=vulkan pnpm native:accounting:smoke` | supported | 1.0 ns | 0.005120 ms | 2.149376 ms | 419.80 | whole-pass timestamps valid; light pass raw delta 5120 ticks on the final forced run |
+| DX12 | `WGPU_BACKEND=dx12 pnpm native:accounting:smoke` | supported | 1.0 ns | 0.005120 ms | 1.350656 ms | 263.80 | whole-pass timestamps valid; light pass raw delta 5120 ticks |
+
+`get_timestamp_period()` returns 1.0 ns on both Vulkan and DX12 on this
+host. The observed calibration deltas are integer timestamp ticks scaled by
+that 1.0 ns period; the practical minimum pass delta observed here was
+4.096-5.120 us on Vulkan and 4.096-5.120 us on the default/DX12 lane across
+runs. The calibration remains coarse whole-pass timing only; no inside-pass
+or per-draw timestamps were added.
+
+Windows checkpoint B validation:
+
+```bash
+git fetch
+git checkout main
+git pull
+git rev-parse --short HEAD
+# PASS. HEAD and origin/main are 54cc7ae3.
+
+pnpm host:check
+# PASS for Node/pnpm; Chrome absent on PATH, not used by this native slice.
+
+pnpm assets:pack:check
+# Initial FAIL after host switch: packed asset zip stale.
+
+pnpm assets:pack
+pnpm assets:pack:write-lock
+pnpm assets:pack:check
+# PASS after regenerating reference/minecraft-1.17.1/extracted.zip.
+
+cargo fmt --manifest-path native/Cargo.toml --all --check
+# PASS.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
+# PASS. 13 tests passed.
+
+cargo test --manifest-path native/Cargo.toml -p mclone-render
+# PASS. 126 passed, 2 ignored.
+
+cargo build --manifest-path native/Cargo.toml -p mclone-native-client --bin accounting_smoke
+# PASS after adding the RenderDoc capture hook.
+
+pnpm native:accounting:smoke
+# Initial FAIL on the 6.0 ms Windows spin; PASS after the Windows default spin
+# fix. Schema version 4; GPU timestamp panel supported on DX12.
+
+pnpm native:desktop-offscreen:smoke
+# PASS. Saved /tmp/mclone-desktop-offscreen.png; screenshot inspected.
+
+pnpm native:xr:check
+# Initial FAIL because PowerShell resolved bash to WSL. PASS after rerunning
+# with Git Bash first in PATH and fixing the stale foveation argument.
+
+pnpm native:policy:wasm-check
+# PASS. Existing mclone-server dead-code warning only.
+
+pnpm native:android-xr:perf:stationary:rd10:metrics-periodic
+# Initial FAIL after reinstall because shell-owned external staged asset
+# directories were not app-readable. PASS after the external asset permission
+# repair. Quest 3 `XR_META_performance_metrics` periodic sampling enabled.
+
+git diff --check
+# PASS.
+```
+
+External capture spot-check:
+
+- RenderDoc was installed with winget from the `desktop` machine's documented
+  Windows setup path:
+  `winget install -e --id BaldurKarlsson.RenderDoc --source winget
+  --accept-package-agreements --accept-source-agreements --silent`.
+  Installed version: RenderDoc 1.45.0 under `C:\Program Files\RenderDoc`.
+- DX12 under RenderDoc did not create a headless adapter on this host
+  (`dx12 drivers/libraries could not be loaded`), so the external capture
+  spot-check used Vulkan.
+- Capture command:
+  `WGPU_BACKEND=vulkan MCLONE_RENDERDOC_CAPTURE=1 renderdoccmd capture
+  --wait-for-exit --capture-file C:\tmp\mclone-accounting-vulkan
+  native\target\debug\accounting_smoke.exe`.
+  The run passed with `timestampPeriodNs=1.0`, light `0.004096 ms`, heavy
+  `2.163584 ms`, ratio `528.22`, and zero conservation violations.
+- Capture artifacts: `C:\tmp\mclone-accounting-vulkan_capture.rdc` (76,435
+  bytes) and converted XML `C:\tmp\mclone-accounting-vulkan.zip` (178,960
+  bytes). RenderDoc `thumb` had no thumbnail because this headless calibration
+  has no swapchain backbuffer.
+- Converted capture evidence: driver `Vulkan`, `timestampPeriod=1`,
+  `timestampValidBits` includes 64-bit queues, labels
+  `mclone_gpu_timestamp_calibration_light_pass`,
+  `mclone_gpu_timestamp_calibration_heavy_pass`, and
+  `mclone_gpu_timestamp_calibration_sentinel_pass`, with
+  `vkCmdWriteTimestamp` chunks at the pass boundaries.
+
+Quest periodic metrics, Windows host with Quest 3 attached:
+
+- Device: Quest 3, ADB serial `2G0YC1ZF93041Z`, product/device `eureka`, API
+  34. Package `com.kzahel.mclone.xr` was uninstalled before reinstalling the
+  Windows-built release APK.
+- Command:
+  `pnpm native:android-xr:perf:stationary:rd10:metrics-periodic`.
+  Result: PASS after the external asset permission repair. The trailing
+  `xargs: environment is too large for exec` message from the Git Bash wrapper
+  appeared after the pass marker and did not affect the exit status.
+- `XR_META_performance_metrics` status: available and enabled in periodic
+  mode, with 17 counters. Samples reported `any_valid=true`; first sample
+  `app_gpu_ms=2.960`, `compositor_gpu_ms=1.199`, `gpu_util_pct=31.495`,
+  `motion_to_photon_ms=25.824`, `per_query_us=0.50`. Final summary:
+  `sample_seconds=20.010`, `mode=stationary-settled`, `render_path=per-eye`,
+  `frame_accounting_enabled=true`, `conservation_violations=0`, `frames=789`,
+  `target_hz=72.0`, `frame_p95_ms=29.049`, `frame_p99_ms=30.854`,
+  `frame_max_ms=32.599`, `over_budget=789`.
+- Quest-side wgpu timestamp agreement: not applicable for this slice. The
+  Android XR path did not emit a `gpuTimestampPanel` or wgpu timestamp totals
+  in the shared report; `XR_META_performance_metrics` remains the Quest GPU
+  authority, while wgpu timestamp calibration was validated on desktop
+  headless Metal, Windows Vulkan, and Windows DX12.
+
+Slice 6 close status after Windows checkpoint B:
+
+- Windows Vulkan/DX12 timestamp support, period, and calibration are recorded.
+- External capture is complete through RenderDoc Vulkan on Windows.
+- Quest periodic `XR_META_performance_metrics` sampling is recorded; wgpu
+  timestamp agreement on Quest is explicitly not applicable until that render
+  path emits a wgpu timestamp panel.
+- Slice 6 is closed. Slice 7 remains unstarted.
 
 ## Slice 7: Debug Overlay Through The Shared Facade
 
@@ -1447,9 +1620,11 @@ Listed so nobody mistakes this tactical for their plan:
 - Slice 2: resolved 2026-07-05. Keep legacy top-level benchmark JSON keys
   alongside the versioned `frame_pipeline_accounting` schema block for
   record compatibility.
-- Slice 6: are wgpu timestamps enabled on Quest at all (validation-only),
-  or desktop/headless-only behind capability facts? Decide from adapter
-  capabilities plus `XR_META` agreement and record.
+- Slice 6: resolved 2026-07-06. Quest-side wgpu timestamp agreement is not
+  applicable in this slice because Android XR does not emit a
+  `gpuTimestampPanel` or wgpu timestamp totals. `XR_META_performance_metrics`
+  remains the Quest GPU authority; desktop/headless wgpu timestamps are
+  validated on Mac Metal and Windows Vulkan/DX12.
 - Recorded deviation: 2026-07-05, Slices 0-2 started before tactical 143
   closed under the documented exception for new leaf crate and
   `mclone-native-client` timing-internal work. Slice 7 remains hard-gated

@@ -10,6 +10,10 @@ use mclone_render::gpu_timestamps::run_gpu_timestamp_calibration;
 use mclone_render::headless::create_headless_device;
 use serde_json::json;
 
+// Windows GetThreadTimes commonly advances in ~15.625 ms steps on this lane.
+#[cfg(windows)]
+const DEFAULT_SPIN_MS: f64 = 200.0;
+#[cfg(not(windows))]
 const DEFAULT_SPIN_MS: f64 = 6.0;
 const TARGET_PERIOD_MS: f64 = 16.667;
 const TOLERANCE_FRACTION: f64 = 0.10;
@@ -109,8 +113,22 @@ fn main() -> Result<()> {
 
 fn run_gpu_calibration_smoke() -> Result<(serde_json::Value, GpuTimestampPanelReport)> {
     let (device, queue) = create_headless_device().context("create headless GPU device")?;
-    let report = run_gpu_timestamp_calibration(&device, &queue, 2048)
-        .context("run GPU timestamp calibration")?;
+    let renderdoc_capture = std::env::var_os("MCLONE_RENDERDOC_CAPTURE").is_some();
+    if renderdoc_capture {
+        // SAFETY: This only asks an injected graphics debugger to begin a frame capture
+        // around the validation-only calibration pass. Normal smoke runs leave it off.
+        unsafe {
+            device.start_graphics_debugger_capture();
+        }
+    }
+    let report = run_gpu_timestamp_calibration(&device, &queue, 2048);
+    if renderdoc_capture {
+        // SAFETY: Pairs with the optional capture start above.
+        unsafe {
+            device.stop_graphics_debugger_capture();
+        }
+    }
+    let report = report.context("run GPU timestamp calibration")?;
     let panel = report.panel.clone();
     Ok((
         json!({

@@ -75,6 +75,7 @@ pub(super) fn create_eye(
         color_format,
         sample_count,
         "mclone_xr_swapchain",
+        None,
     )?;
 
     Ok(OpenXrEyeState {

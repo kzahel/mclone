@@ -374,6 +374,7 @@ mclone_stage_asset_pack() {
     "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
     "$ADB" -s "$serial" push "$asset_pack_path" "$remote_path" >/dev/null
     mclone_stage_local_sound_assets "$serial"
+    mclone_repair_external_asset_permissions "$serial"
     mclone_repair_emulator_asset_permissions "$serial"
 }
 
@@ -490,6 +491,18 @@ mclone_push_asset_tree() {
         [[ "$rel_path" != "$local_file" ]] || mclone_die "failed to derive relative asset path for $local_file"
         "$ADB" -s "$serial" push "$local_file" "$remote_dir/$rel_path" </dev/null >/dev/null
     done < <(find "$source_dir" -type f -print0)
+}
+
+mclone_repair_external_asset_permissions() {
+    local serial="$1"
+    local remote_asset_dir="/sdcard/Android/data/$MCLONE_ANDROID_APP_ID/files/assets"
+
+    [[ "${MCLONE_ANDROID_REPAIR_ASSET_PERMS:-1}" == "1" ]] || return 0
+
+    mclone_note "Repairing staged external asset permissions for $MCLONE_ANDROID_APP_ID"
+    "$ADB" -s "$serial" shell chmod -R u+rwX,g+rwX,o+rX "$remote_asset_dir" >/dev/null 2>&1 || {
+        mclone_note "Could not repair staged external asset permissions; app may be unable to read shell-owned staged assets"
+    }
 }
 
 mclone_repair_emulator_asset_permissions() {
