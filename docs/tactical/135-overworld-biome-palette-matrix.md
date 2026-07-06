@@ -432,18 +432,20 @@ Landed:
 
 Documented gaps from this slice:
 
-- Java default extra vegetation adds sugar cane and pumpkin to many non-ocean
-  overworld biomes. Native now wires the Java-shaped default
-  `PATCH_SUGAR_CANE` / `PATCH_PUMPKIN` table slots for the current main land
-  builders and still has high-signal sugar-cane coverage for
-  desert/badlands/swamp plus river/frozen-river/beach/shore rows. Visible
-  pumpkin fixtures have landed for swamp, stone shore, river, frozen river,
-  beach, snowy beach, swamp hills, sunflower plains, desert, desert hills,
-  desert lakes, base badlands, wooded badlands plateau, badlands plateau,
-  eroded badlands, modified wooded badlands plateau, and modified badlands
-  plateau. These fixtures are grass-boundary checks because the vanilla patch
-  survives on grass blocks, so interior sand/terracotta palette rows usually do
-  not emit pumpkin blocks.
+- Default-extra audit: Java `addDefaultExtraVegetation` is only
+  `PATCH_SUGAR_CANE` plus rarity-32 `PATCH_PUMPKIN`; desert, badlands, and
+  swamp use specialized sugar-cane/cactus variants plus the same pumpkin slot,
+  while jungle extra vegetation is melon/vines rather than default extra.
+  Native already table-wires the Java-shaped sugar-cane and pumpkin slots for
+  the current land lanes, and the matrix has high-signal visible sugar-cane
+  coverage through river/frozen-river/beach/shore, desert, badlands, and swamp
+  rows. Visible pumpkin fixtures have landed for swamp, stone shore, river,
+  frozen river, beach, snowy beach, swamp hills, sunflower plains, desert,
+  desert hills, desert lakes, base badlands, wooded badlands plateau, badlands
+  plateau, eroded badlands, modified wooded badlands plateau, and modified
+  badlands plateau. Further per-row default-extra fixture hunting would mostly
+  duplicate table-slot coverage and becomes exact decorated parity, not
+  high-value palette proof.
 - Java default springs now have table-slot coverage for the current land,
   river, beach/shore, desert/badlands, swamp, mushroom-field, and fallback land
   builders, plus deterministic exposed water/lava spring block fixtures for
@@ -632,8 +634,11 @@ low-visibility fixture breadth or a visible row-specific feature slice:
    default mushroom table slots into desert and ocean builders now, or leave
    them with `103` exact decorated parity because they are usually non-visible
    in current palette fixtures.
-2. Add deterministic default-extra visibility fixtures where they are still
-   high-signal, or explicitly narrow the matrix goal to small-mushroom plus the
-   already-pinned pumpkin/spring extras.
+2. Treat broad default-extra coverage as saturated for this palette matrix:
+   keep the current representative sugar-cane, pumpkin, and exposed-spring
+   fixtures here, and move additional default-extra counts to `103` exact
+   decorated parity.
 3. Pick one missing high-signal family outside the broad table slots: exact
-   jungle tree selector/count visibility buckets if staying in jungle rows.
+   jungle tree selector/count visibility buckets if staying in biome visual
+   variety, or spawn-table/no-normal-hostile coverage if shifting toward biome
+   behavior.
