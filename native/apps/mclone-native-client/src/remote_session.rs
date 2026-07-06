@@ -1,31 +1,33 @@
 use anyhow::{Context, Result};
-use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
-use mclone_net::NativeClientSession;
+use mclone_app_runtime::host_mode::{
+    RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
+};
+use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
 use mclone_protocol::{ClientCommand, ServerUpdate};
 
 #[derive(Debug)]
 pub(crate) struct RemoteServerSession {
     addr: String,
-    session: NativeClientSession,
+    session: NativeClientIoSession,
 }
 
 impl RemoteServerSession {
     pub(crate) fn connect(addr: impl Into<String>) -> Result<Self> {
         let addr = addr.into();
-        let session = NativeClientSession::connect(addr.as_str())
+        let session = NativeClientIoSession::connect(addr.as_str())
             .with_context(|| format!("failed to connect to remote server {addr}"))?;
         Ok(Self { addr, session })
     }
 
     pub(crate) fn reconnect(&mut self) -> Result<()> {
-        self.session = NativeClientSession::connect(self.addr.as_str())
+        self.session = NativeClientIoSession::connect(self.addr.as_str())
             .with_context(|| format!("failed to reconnect to remote server {}", self.addr))?;
         Ok(())
     }
 
     pub(crate) fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
         self.session
-            .send_command_only(&command)
+            .send_command_only(command)
             .with_context(|| format!("failed to send command to remote server {}", self.addr))
     }
 
@@ -38,6 +40,22 @@ impl RemoteServerSession {
     pub(crate) fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
         self.session
             .try_drain_command_updates()
+            .with_context(|| format!("failed to poll updates from remote server {}", self.addr))
+    }
+
+    pub(crate) fn drain_command_update_batch(&mut self) -> Result<RemoteCommandUpdateBatch> {
+        self.session
+            .drain_update_batch()
+            .map(remote_batch_from_native)
+            .with_context(|| format!("failed to drain updates from remote server {}", self.addr))
+    }
+
+    pub(crate) fn try_drain_command_update_batch(
+        &mut self,
+    ) -> Result<Option<RemoteCommandUpdateBatch>> {
+        self.session
+            .try_drain_update_batch()
+            .map(|batch| batch.map(remote_batch_from_native))
             .with_context(|| format!("failed to poll updates from remote server {}", self.addr))
     }
 }
@@ -55,8 +73,37 @@ impl RemoteDedicatedServerSession for RemoteServerSession {
         RemoteServerSession::try_drain_command_updates(self)
     }
 
+    fn drain_command_update_batch(&mut self) -> Result<RemoteCommandUpdateBatch> {
+        RemoteServerSession::drain_command_update_batch(self)
+    }
+
+    fn try_drain_command_update_batch(&mut self) -> Result<Option<RemoteCommandUpdateBatch>> {
+        RemoteServerSession::try_drain_command_update_batch(self)
+    }
+
     fn reconnect(&mut self) -> Result<()> {
         RemoteServerSession::reconnect(self)
+    }
+}
+
+fn remote_batch_from_native(batch: NativeServerUpdateBatch) -> RemoteCommandUpdateBatch {
+    let queued_age = batch.queued_age();
+    RemoteCommandUpdateBatch {
+        response_sequence: Some(batch.response_sequence),
+        producer_read_ms: batch.producer_read_ms,
+        producer_decode_ms: batch.producer_decode_ms,
+        updates: batch
+            .updates
+            .into_iter()
+            .map(|update| RemoteCommandUpdate {
+                update: update.update,
+                encoded_len: Some(update.encoded_len),
+                queued_age,
+                response_sequence: Some(update.response_sequence),
+                producer_read_ms: update.producer_read_ms,
+                producer_decode_ms: update.producer_decode_ms,
+            })
+            .collect(),
     }
 }
 

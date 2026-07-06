@@ -1,9 +1,10 @@
 # 151: Remote Inbound Update Pipeline
 
 Status: active; Slice 0 documentation baseline completed 2026-07-06; Slice 1
-shared `ClientConnection` runtime seam completed 2026-07-06. Slice 2 is next:
-move native remote TCP read/decode behind that connection boundary. This is the
-focused successor to tactical
+shared `ClientConnection` runtime seam completed 2026-07-06; Slice 2 native
+TCP client IO actor completed 2026-07-06. Slice 3 is next: surface remote
+producer/read/decode diagnostics through runtime accounting and re-tighten the
+remote frame budget contract. This is the focused successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 for the remaining remote ready-batch stall. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
@@ -67,17 +68,26 @@ owns the integrated server on a runner thread and publishes decoded
 `ServerUpdate` envelopes through a queue. The client runtime drains that queue
 under a budget.
 
-Native remote dedicated is still socket-owned by the client runtime:
+Native remote dedicated no longer has the normal runtime frame own the TCP
+socket. As of Slice 2:
 
-- `NativeClientSession` owns the `TcpStream`.
-- `RemoteDedicatedSingleViewSceneRuntime` counts pending response batches.
-- `try_drain_command_updates` peeks readiness, but if a batch is ready it calls
-  `read_server_update_batch` and decodes the whole batch on the caller thread.
-- `pump_pending_remote_update_batches_report` then applies the decoded batch.
+- `NativeClientIoSession` owns a background IO actor thread and keeps
+  `NativeClientSession` as a low-level compatibility/test helper.
+- The actor owns the primary `TcpStream`, writes outbound command frames, blocks
+  reading paired response batches, decodes updates, and queues
+  `NativeServerUpdateBatch` envelopes with byte/age/read/decode metadata.
+- Desktop, Android, and Android XR normal remote session wrappers hold
+  `NativeClientIoSession`, not `NativeClientSession`.
+- `RemoteDedicatedSingleViewSceneRuntime` still has a temporary
+  `pending_response_batches` counter inside its connection adapter because the
+  wire protocol remains one response per command. That counter no longer means
+  "socket read pending on the runtime thread"; it is adapter bookkeeping for
+  ordered response completion.
 
 Server-side dedicated already has an accept thread and a connection thread per
-client. The missing pieces are a shared client-facing connection abstraction
-and a remote client-side receive actor/queue behind that abstraction.
+client. The remaining pieces are runtime diagnostics/projection cleanup, Quest
+rebaseline, and web callback adoption behind the same client-facing connection
+abstraction.
 
 ## Target Shape
 
@@ -314,6 +324,8 @@ git diff --check
 
 ## Slice 2: Native TCP Client IO Actor
 
+Status: completed 2026-07-06.
+
 Goal: move native remote socket read/decode off the runtime frame.
 
 Deliverables:
@@ -342,6 +354,61 @@ cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
 git diff --check
 ```
+
+Implementation notes:
+
+- Added `NativeClientIoSession` in `mclone-net`. It spawns
+  `mclone-native-client-io`, keeps the existing native TCP handshake/frame
+  codec, sends command frames from a command channel, blocks reading paired
+  response batches on the actor thread, decodes updates there, and queues
+  `NativeServerUpdateBatch` envelopes.
+- Preserved `send_command_only` transport semantics with an actor write
+  acknowledgment: callers wait until the command frame is written/flushed, but
+  they do not wait for the response read/decode.
+- Added actor diagnostics for outbound command depth, inbound response/update
+  depth and bytes, read/decode total/max, response sequence, disconnected state,
+  and last error.
+- Added `RemoteCommandUpdateBatch` / `RemoteCommandUpdate` defaults to the
+  app-runtime host session trait so actor-backed sessions can pass encoded
+  lengths, queue age, response sequence, and producer timing into
+  `RemoteDedicatedConnection` while legacy tests/tools still return plain
+  `Vec<ServerUpdate>`.
+- Switched desktop, Android, and Android XR normal remote session wrappers to
+  `NativeClientIoSession`. `NativeClientSession` remains in `mclone-net` for
+  low-level tests/tools and the standalone remote-player visual smoke helper.
+- Updated desktop scene-runtime tests to keep `SendOnly` explicit and use
+  `DrainImmediately` for the reconnect/resync assertion.
+
+Validation completed 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client remote_session
+rg -n "NativeClientSession|drain_command_updates|try_drain_command_updates|NativeClientIoSession|drain_update_batch|try_drain_update_batch|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+git diff --check
+```
+
+`rg` classification:
+
+- `NativeClientSession`: remains as the low-level native TCP compatibility
+  helper in `mclone-net`, its tests, `request_server_updates`, and the
+  standalone desktop remote-player visual smoke helper. It is no longer held by
+  the normal desktop, Android, or Android XR remote session wrappers.
+- `drain_command_updates` / `try_drain_command_updates`: remain as legacy trait
+  defaults, compatibility wrapper methods, and tests. The normal runtime
+  connection adapter now calls `drain_command_update_batch` /
+  `try_drain_command_update_batch`.
+- `pending_response_batches`: remains only inside the remote
+  `ClientConnection` adapter and tests as temporary response-paired protocol
+  bookkeeping.
+- `pump_pending_remote_update_batches_report`: no remaining hits.
+
+Validation note: the app-crate check still reports existing Android XR
+dead-code warnings for `ANDROID_REMOTE_ADDR_NONE_SENTINEL` and
+`normalize_android_legacy_remote_addr`; they are unrelated to this slice.
 
 ## Slice 3: Remote Runtime Budget And Diagnostics
 

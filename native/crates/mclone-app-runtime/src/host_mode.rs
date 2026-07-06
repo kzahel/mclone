@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{Context, Result, bail};
 use mclone_client::ClientRuntime;
 use mclone_core::ChunkPos;
@@ -61,11 +63,72 @@ pub trait RemoteDedicatedServerSession {
     fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
         self.drain_command_updates().map(Some)
     }
+    fn drain_command_update_batch(&mut self) -> Result<RemoteCommandUpdateBatch> {
+        self.drain_command_updates()
+            .map(RemoteCommandUpdateBatch::from_updates)
+    }
+    fn try_drain_command_update_batch(&mut self) -> Result<Option<RemoteCommandUpdateBatch>> {
+        self.try_drain_command_updates()
+            .map(|updates| updates.map(RemoteCommandUpdateBatch::from_updates))
+    }
     fn reconnect(&mut self) -> Result<()>;
 
     fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
         self.send_command_only(command)?;
-        self.drain_command_updates()
+        self.drain_command_update_batch()
+            .map(RemoteCommandUpdateBatch::into_updates)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemoteCommandUpdate {
+    pub update: ServerUpdate,
+    pub encoded_len: Option<usize>,
+    pub queued_age: Duration,
+    pub response_sequence: Option<u64>,
+    pub producer_read_ms: f64,
+    pub producer_decode_ms: f64,
+}
+
+impl RemoteCommandUpdate {
+    pub fn legacy(update: ServerUpdate) -> Self {
+        Self {
+            update,
+            encoded_len: None,
+            queued_age: Duration::ZERO,
+            response_sequence: None,
+            producer_read_ms: 0.0,
+            producer_decode_ms: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RemoteCommandUpdateBatch {
+    pub updates: Vec<RemoteCommandUpdate>,
+    pub response_sequence: Option<u64>,
+    pub producer_read_ms: f64,
+    pub producer_decode_ms: f64,
+}
+
+impl RemoteCommandUpdateBatch {
+    pub fn from_updates(updates: Vec<ServerUpdate>) -> Self {
+        Self {
+            updates: updates
+                .into_iter()
+                .map(RemoteCommandUpdate::legacy)
+                .collect(),
+            response_sequence: None,
+            producer_read_ms: 0.0,
+            producer_decode_ms: 0.0,
+        }
+    }
+
+    pub fn into_updates(self) -> Vec<ServerUpdate> {
+        self.updates
+            .into_iter()
+            .map(|update| update.update)
+            .collect()
     }
 }
 

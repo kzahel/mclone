@@ -23,8 +23,8 @@ use mclone_ui::LoadingProgressOverlay;
 
 use crate::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
 use crate::host_mode::{
-    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
-    deferred_command_exchange, dispatch_remote_dedicated_command,
+    RemoteCommandUpdateBatch, RemoteDedicatedServerSession, SingleViewHostMode,
+    SingleViewHostOptions, deferred_command_exchange, dispatch_remote_dedicated_command,
     prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
     update_drain_exchange,
 };
@@ -176,6 +176,9 @@ pub struct QueuedServerUpdate {
     encoded_len: usize,
     queued_age: Duration,
     transport_drained: bool,
+    response_sequence: Option<u64>,
+    producer_read_ms: f64,
+    producer_decode_ms: f64,
 }
 
 impl QueuedServerUpdate {
@@ -190,6 +193,9 @@ impl QueuedServerUpdate {
             encoded_len,
             queued_age,
             transport_drained,
+            response_sequence: None,
+            producer_read_ms: 0.0,
+            producer_decode_ms: 0.0,
         }
     }
 
@@ -199,7 +205,22 @@ impl QueuedServerUpdate {
             encoded_len: 0,
             queued_age: Duration::ZERO,
             transport_drained,
+            response_sequence: None,
+            producer_read_ms: 0.0,
+            producer_decode_ms: 0.0,
         }
+    }
+
+    fn with_remote_metadata(
+        mut self,
+        response_sequence: Option<u64>,
+        producer_read_ms: f64,
+        producer_decode_ms: f64,
+    ) -> Self {
+        self.response_sequence = response_sequence;
+        self.producer_read_ms = producer_read_ms;
+        self.producer_decode_ms = producer_decode_ms;
+        self
     }
 
     fn into_updates(self) -> Vec<ServerUpdate> {
@@ -1666,26 +1687,44 @@ where
         self.queued_update_bytes = 0;
     }
 
-    fn push_response_batch(&mut self, updates: Vec<ServerUpdate>) -> Result<()> {
+    fn push_response_batch(&mut self, batch: RemoteCommandUpdateBatch) -> Result<()> {
         let transport_drained_after_batch = self.pending_response_batches == 0;
-        let update_count = updates.len();
+        let update_count = batch.updates.len();
+        let batch_response_sequence = batch.response_sequence;
+        let batch_producer_read_ms = batch.producer_read_ms;
+        let batch_producer_decode_ms = batch.producer_decode_ms;
         if update_count == 0 {
-            self.queued_updates
-                .push_back(QueuedServerUpdate::empty(transport_drained_after_batch));
+            self.queued_updates.push_back(
+                QueuedServerUpdate::empty(transport_drained_after_batch).with_remote_metadata(
+                    batch_response_sequence,
+                    batch_producer_read_ms,
+                    batch_producer_decode_ms,
+                ),
+            );
             return Ok(());
         }
 
-        for (index, update) in updates.into_iter().enumerate() {
-            let encoded_len = encode_server_update(&update)
-                .context("failed to measure remote dedicated server update bytes")?
-                .len();
+        for (index, update) in batch.updates.into_iter().enumerate() {
+            let encoded_len = match update.encoded_len {
+                Some(encoded_len) => encoded_len,
+                None => encode_server_update(&update.update)
+                    .context("failed to measure remote dedicated server update bytes")?
+                    .len(),
+            };
             self.queued_update_bytes = self.queued_update_bytes.saturating_add(encoded_len);
-            self.queued_updates.push_back(QueuedServerUpdate::single(
-                update,
-                encoded_len,
-                Duration::ZERO,
-                transport_drained_after_batch && index + 1 == update_count,
-            ));
+            self.queued_updates.push_back(
+                QueuedServerUpdate::single(
+                    update.update,
+                    encoded_len,
+                    update.queued_age,
+                    transport_drained_after_batch && index + 1 == update_count,
+                )
+                .with_remote_metadata(
+                    update.response_sequence.or(batch_response_sequence),
+                    update.producer_read_ms,
+                    update.producer_decode_ms,
+                ),
+            );
         }
         Ok(())
     }
@@ -1718,18 +1757,19 @@ where
             return Ok(ClientConnectionDrainResult::default());
         }
 
-        let updates = match mode {
+        let batch = match mode {
             ConnectionUpdateDrainMode::Blocking => Some(
                 self.session
-                    .drain_command_updates()
+                    .drain_command_update_batch()
                     .context("failed to drain remote dedicated server updates")?,
             ),
-            ConnectionUpdateDrainMode::ReadyOnly => self
-                .session
-                .try_drain_command_updates()
-                .context("failed to poll remote dedicated server updates")?,
+            ConnectionUpdateDrainMode::ReadyOnly => {
+                self.session
+                    .try_drain_command_update_batch()
+                    .context("failed to poll remote dedicated server updates")?
+            }
         };
-        let Some(updates) = updates else {
+        let Some(batch) = batch else {
             return Ok(ClientConnectionDrainResult {
                 update: None,
                 remaining_queue_depth: self.pending_response_batches,
@@ -1738,7 +1778,7 @@ where
         };
 
         self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
-        self.push_response_batch(updates)?;
+        self.push_response_batch(batch)?;
         if let Some(update) = self.queued_updates.pop_front() {
             self.queued_update_bytes = self.queued_update_bytes.saturating_sub(update.encoded_len);
             return Ok(ClientConnectionDrainResult {

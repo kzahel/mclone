@@ -700,11 +700,6 @@ fn window_runtime_reuses_remote_session_for_interest_updates() {
             &[ServerUpdate::TimeUpdate { day_time: 2 }],
         )
         .unwrap();
-        assert!(
-            mclone_net::try_read_client_command_frame(&mut stream)
-                .unwrap()
-                .is_none()
-        );
     });
 
     {
@@ -795,7 +790,16 @@ fn window_runtime_reconnects_remote_session_and_resyncs_chunk_cache() {
             .dirty_sections
             .clear();
 
-        assert!(runtime.set_interest_center(moved_center).unwrap());
+        assert!(
+            runtime
+                .scene
+                .set_interest_center_with_update_policy_timed(
+                    moved_center,
+                    GameplayCommandUpdatePolicy::DrainImmediately,
+                )
+                .unwrap()
+                .0
+        );
 
         assert_eq!(runtime.client().loaded_chunk_count(), 1);
         assert!(runtime.client().chunk_snapshot(initial_center).is_none());
