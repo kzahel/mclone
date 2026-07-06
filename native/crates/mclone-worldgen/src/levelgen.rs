@@ -1845,6 +1845,30 @@ mod tests {
         badlands_top_columns: usize,
     }
 
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    struct MacroGeometrySignal {
+        top_y_min: i32,
+        top_y_max: i32,
+        top_y_range: i32,
+        top_y_p05: i32,
+        top_y_p50: i32,
+        top_y_p95: i32,
+        neighbor_delta_ge_4: usize,
+        neighbor_delta_ge_8: usize,
+        neighbor_delta_ge_16: usize,
+        vertical_face_columns: usize,
+        solid_over_air_blocks: usize,
+        surface_near_carved_air_columns: usize,
+        carved_air_volume: usize,
+        carved_air_y_min: Option<i32>,
+        carved_air_y_max: Option<i32>,
+        long_vertical_air_spans: usize,
+        water_land_edge_delta_ge_4: usize,
+        water_land_edge_delta_ge_8: usize,
+        landmark_block_volume: usize,
+        landmark_column_count: usize,
+    }
+
     #[derive(Clone, Debug)]
     struct RepeatingPatternBiomeSource {
         width: usize,
@@ -2362,6 +2386,252 @@ mod tests {
         signal
     }
 
+    fn macro_geometry_signal(
+        chunk: &MutableChunkBlockBuffer,
+        is_landmark_block: impl Fn(RawBlockId) -> bool,
+        landmark_column_min_y: Option<i32>,
+    ) -> MacroGeometrySignal {
+        let mut top_y_by_column = [chunk.min_y; CHUNK_WIDTH as usize * CHUNK_WIDTH as usize];
+        let mut top_block_by_column = [AIR; CHUNK_WIDTH as usize * CHUNK_WIDTH as usize];
+        let mut top_heights = Vec::with_capacity(CHUNK_WIDTH as usize * CHUNK_WIDTH as usize);
+        let mut signal = MacroGeometrySignal {
+            top_y_min: i32::MAX,
+            top_y_max: i32::MIN,
+            ..MacroGeometrySignal::default()
+        };
+
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let column_index = (local_z * CHUNK_WIDTH + local_x) as usize;
+                for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+                    let block_id = chunk.get_block_at_y(local_x, y, local_z);
+                    if is_air_like(block_id) {
+                        continue;
+                    }
+                    top_y_by_column[column_index] = y;
+                    top_block_by_column[column_index] = block_id;
+                    signal.top_y_min = signal.top_y_min.min(y);
+                    signal.top_y_max = signal.top_y_max.max(y);
+                    top_heights.push(y);
+                    break;
+                }
+            }
+        }
+
+        top_heights.sort_unstable();
+        if let (Some(first), Some(last)) = (top_heights.first(), top_heights.last()) {
+            signal.top_y_min = *first;
+            signal.top_y_max = *last;
+            signal.top_y_range = *last - *first;
+            signal.top_y_p05 = percentile(&top_heights, 5);
+            signal.top_y_p50 = percentile(&top_heights, 50);
+            signal.top_y_p95 = percentile(&top_heights, 95);
+        }
+
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let column_index = (local_z * CHUNK_WIDTH + local_x) as usize;
+                if local_x + 1 < CHUNK_WIDTH {
+                    let neighbor_index = (local_z * CHUNK_WIDTH + local_x + 1) as usize;
+                    record_neighbor_top_delta(
+                        &mut signal,
+                        top_y_by_column[column_index],
+                        top_y_by_column[neighbor_index],
+                        top_block_by_column[column_index],
+                        top_block_by_column[neighbor_index],
+                    );
+                }
+                if local_z + 1 < CHUNK_WIDTH {
+                    let neighbor_index = ((local_z + 1) * CHUNK_WIDTH + local_x) as usize;
+                    record_neighbor_top_delta(
+                        &mut signal,
+                        top_y_by_column[column_index],
+                        top_y_by_column[neighbor_index],
+                        top_block_by_column[column_index],
+                        top_block_by_column[neighbor_index],
+                    );
+                }
+            }
+        }
+
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let column_index = (local_z * CHUNK_WIDTH + local_x) as usize;
+                if column_has_vertical_face_run(chunk, local_x, local_z, 4) {
+                    signal.vertical_face_columns += 1;
+                }
+                if !is_air_like(top_block_by_column[column_index])
+                    && column_has_surface_near_carved_air(
+                        chunk,
+                        local_x,
+                        local_z,
+                        top_y_by_column[column_index],
+                    )
+                {
+                    signal.surface_near_carved_air_columns += 1;
+                }
+            }
+        }
+
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let mut carved_air_span = 0usize;
+                let mut landmark_column_counted = false;
+                for y in chunk.min_y..chunk.min_y + chunk.height {
+                    let block_id = chunk.get_block_at_y(local_x, y, local_z);
+                    if y > chunk.min_y
+                        && is_macro_solid(block_id)
+                        && is_air_like(chunk.get_block_at_y(local_x, y - 1, local_z))
+                    {
+                        signal.solid_over_air_blocks += 1;
+                    }
+
+                    if block_id == crate::block::CAVE_AIR {
+                        signal.carved_air_volume += 1;
+                        signal.carved_air_y_min =
+                            Some(signal.carved_air_y_min.map_or(y, |min| min.min(y)));
+                        signal.carved_air_y_max =
+                            Some(signal.carved_air_y_max.map_or(y, |max| max.max(y)));
+                        carved_air_span += 1;
+                    } else if carved_air_span > 0 {
+                        if carved_air_span >= 8 {
+                            signal.long_vertical_air_spans += 1;
+                        }
+                        carved_air_span = 0;
+                    }
+
+                    if is_landmark_block(block_id) {
+                        signal.landmark_block_volume += 1;
+                        if !landmark_column_counted
+                            && landmark_column_min_y.map_or(true, |min_y| y >= min_y)
+                        {
+                            signal.landmark_column_count += 1;
+                            landmark_column_counted = true;
+                        }
+                    }
+                }
+                if carved_air_span >= 8 {
+                    signal.long_vertical_air_spans += 1;
+                }
+            }
+        }
+
+        signal
+    }
+
+    fn column_has_vertical_face_run(
+        chunk: &MutableChunkBlockBuffer,
+        local_x: i32,
+        local_z: i32,
+        min_run: usize,
+    ) -> bool {
+        for (offset_x, offset_z) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let neighbor_x = local_x + offset_x;
+            let neighbor_z = local_z + offset_z;
+            if !(0..CHUNK_WIDTH).contains(&neighbor_x) || !(0..CHUNK_WIDTH).contains(&neighbor_z) {
+                continue;
+            }
+
+            let mut run = 0usize;
+            for y in chunk.min_y..chunk.min_y + chunk.height {
+                if is_macro_solid(chunk.get_block_at_y(local_x, y, local_z))
+                    && is_air_like(chunk.get_block_at_y(neighbor_x, y, neighbor_z))
+                {
+                    run += 1;
+                    if run >= min_run {
+                        return true;
+                    }
+                } else {
+                    run = 0;
+                }
+            }
+        }
+        false
+    }
+
+    fn column_has_surface_near_carved_air(
+        chunk: &MutableChunkBlockBuffer,
+        local_x: i32,
+        local_z: i32,
+        top_y: i32,
+    ) -> bool {
+        let min_y = (top_y - 6).max(chunk.min_y);
+        let max_y = (top_y + 2).min(chunk.min_y + chunk.height - 1);
+        for (offset_x, offset_z) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let sample_x = local_x + offset_x;
+            let sample_z = local_z + offset_z;
+            if !(0..CHUNK_WIDTH).contains(&sample_x) || !(0..CHUNK_WIDTH).contains(&sample_z) {
+                continue;
+            }
+
+            for y in min_y..=max_y {
+                if chunk.get_block_at_y(sample_x, y, sample_z) == crate::block::CAVE_AIR {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn is_macro_solid(block_id: RawBlockId) -> bool {
+        !is_air_like(block_id) && !crate::block::has_fluid(block_id)
+    }
+
+    fn percentile(sorted: &[i32], percent: usize) -> i32 {
+        sorted[(sorted.len() - 1) * percent / 100]
+    }
+
+    fn record_neighbor_top_delta(
+        signal: &mut MacroGeometrySignal,
+        top_y: i32,
+        neighbor_top_y: i32,
+        top_block: RawBlockId,
+        neighbor_top_block: RawBlockId,
+    ) {
+        let delta = top_y.abs_diff(neighbor_top_y);
+        if delta >= 4 {
+            signal.neighbor_delta_ge_4 += 1;
+        }
+        if delta >= 8 {
+            signal.neighbor_delta_ge_8 += 1;
+        }
+        if delta >= 16 {
+            signal.neighbor_delta_ge_16 += 1;
+        }
+        if is_water(top_block) != is_water(neighbor_top_block) {
+            if delta >= 4 {
+                signal.water_land_edge_delta_ge_4 += 1;
+            }
+            if delta >= 8 {
+                signal.water_land_edge_delta_ge_8 += 1;
+            }
+        }
+    }
+
+    fn is_badlands_landmark_block_id(block_id: RawBlockId) -> bool {
+        matches!(
+            block_id,
+            RED_SAND
+                | TERRACOTTA
+                | crate::block::WHITE_TERRACOTTA
+                | crate::block::ORANGE_TERRACOTTA
+                | crate::block::MAGENTA_TERRACOTTA
+                | crate::block::LIGHT_BLUE_TERRACOTTA
+                | crate::block::YELLOW_TERRACOTTA
+                | crate::block::LIME_TERRACOTTA
+                | crate::block::PINK_TERRACOTTA
+                | crate::block::GRAY_TERRACOTTA
+                | crate::block::LIGHT_GRAY_TERRACOTTA
+                | crate::block::CYAN_TERRACOTTA
+                | crate::block::PURPLE_TERRACOTTA
+                | crate::block::BLUE_TERRACOTTA
+                | crate::block::BROWN_TERRACOTTA
+                | crate::block::GREEN_TERRACOTTA
+                | crate::block::RED_TERRACOTTA
+                | crate::block::BLACK_TERRACOTTA
+        )
+    }
+
     fn surface_fixture_block_name_at(
         oracle: &TerrainChunkOracleFixture,
         local_x: i32,
@@ -2669,6 +2939,85 @@ mod tests {
                 actual
             );
         }
+    }
+
+    #[test]
+    fn macro_geometry_signal_tracks_baseline_terrain_anchor() {
+        let oracle = terrain_fixture();
+        let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+        let generator = NoiseBasedChunkGenerator::new(
+            OverworldBiomeSource::new(seed, false, false),
+            seed,
+            NoiseGeneratorSettings::overworld(),
+        );
+        let chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+        let signal = macro_geometry_signal(&chunk, |_| false, None);
+
+        assert_eq!(
+            signal,
+            MacroGeometrySignal {
+                top_y_min: 86,
+                top_y_max: 98,
+                top_y_range: 12,
+                top_y_p05: 86,
+                top_y_p50: 88,
+                top_y_p95: 93,
+                neighbor_delta_ge_4: 0,
+                neighbor_delta_ge_8: 0,
+                neighbor_delta_ge_16: 0,
+                vertical_face_columns: 0,
+                solid_over_air_blocks: 0,
+                surface_near_carved_air_columns: 0,
+                carved_air_volume: 0,
+                carved_air_y_min: None,
+                carved_air_y_max: None,
+                long_vertical_air_spans: 0,
+                water_land_edge_delta_ge_4: 0,
+                water_land_edge_delta_ge_8: 0,
+                landmark_block_volume: 0,
+                landmark_column_count: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn macro_geometry_signal_tracks_eroded_badlands_pillar_anchor() {
+        let oracle = eroded_badlands_pillar_surface_fixture();
+        let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+        let generator = NoiseBasedChunkGenerator::new(
+            OverworldBiomeSource::new(seed, false, false),
+            seed,
+            NoiseGeneratorSettings::overworld(),
+        );
+        let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+        generator.build_surface_and_bedrock(&mut chunk);
+        let signal = macro_geometry_signal(&chunk, is_badlands_landmark_block_id, Some(80));
+
+        assert_eq!(
+            signal,
+            MacroGeometrySignal {
+                top_y_min: 67,
+                top_y_max: 122,
+                top_y_range: 55,
+                top_y_p05: 67,
+                top_y_p50: 87,
+                top_y_p95: 122,
+                neighbor_delta_ge_4: 154,
+                neighbor_delta_ge_8: 74,
+                neighbor_delta_ge_16: 41,
+                vertical_face_columns: 108,
+                solid_over_air_blocks: 0,
+                surface_near_carved_air_columns: 0,
+                carved_air_volume: 0,
+                carved_air_y_min: None,
+                carved_air_y_max: None,
+                long_vertical_air_spans: 0,
+                water_land_edge_delta_ge_4: 0,
+                water_land_edge_delta_ge_8: 0,
+                landmark_block_volume: 7023,
+                landmark_column_count: 144,
+            }
+        );
     }
 
     #[test]

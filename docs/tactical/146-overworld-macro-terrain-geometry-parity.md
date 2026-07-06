@@ -1,7 +1,8 @@
 # 146: Overworld Macro Terrain Geometry Parity
 
-Status: active parent; opened 2026-07-06. Initial tracking doc only; no new
-macro-geometry probes have landed yet.
+Status: active parent; opened 2026-07-06. Slice A landed: native worldgen now
+has deterministic macro-geometry signal tests for the existing baseline terrain
+and eroded-badlands pillar anchors.
 
 Workstream: native Rust worldgen. Goal: deterministic Minecraft Java 1.17.1
 overworld macro terrain shape parity before screenshot-led validation. This
@@ -113,13 +114,13 @@ Landed:
   taiga mountains, snowy taiga mountains, stone shore, shattered savanna,
   shattered savanna plateau, eroded badlands, ice spikes, frozen ocean, and
   deep frozen ocean.
+- `native/crates/mclone-worldgen/src/levelgen.rs` has a reusable
+  `MacroGeometrySignal` helper for test chunks and pinned values for seed
+  `12345`, chunk `(0,0)`, plus eroded-badlands seed `868`, chunk `(8,-6)`.
 
 Not yet landed:
 
 - A broad macro-geometry matrix with deterministic pass/fail rows.
-- Reusable metric probes for height range, local relief, steep faces,
-  solid-over-air, carved-air exposure, shore gradients, ravine signatures, and
-  ice/badlands landmark massing.
 - Exact Java oracle coverage for representative mountain, stone-shore,
   shattered-savanna, and ice-spike chunks chosen for macro shape rather than
   palette coverage.
@@ -138,17 +139,21 @@ Initial metric set:
 - `top_y_min`, `top_y_max`, and `top_y_range`: top non-air world height envelope
   per chunk.
 - `top_y_p05`, `top_y_p50`, `top_y_p95`: relief distribution without letting
-  one spike dominate.
+  one spike dominate. The current helper uses a sorted nearest-rank sample.
 - `neighbor_delta_ge_4`, `neighbor_delta_ge_8`, `neighbor_delta_ge_16`: adjacent
   top-column height jumps for slopes/cliffs.
 - `vertical_face_columns`: columns with exposed solid side faces over a minimum
-  contiguous height.
-- `solid_over_air_blocks`: non-air blocks with air-like block below; useful for
-  overhang and ceiling signatures, especially after carvers.
+  contiguous height. The current helper uses in-chunk neighbors and a four-block
+  contiguous exposed-side run.
+- `solid_over_air_blocks`: solid non-fluid blocks with air-like block below;
+  useful for overhang and ceiling signatures, especially after carvers.
 - `surface_near_carved_air_columns`: top-surface columns with cave air or
-  carved air within a small vertical window below or beside the surface.
+  carved air within a small vertical window below or beside the surface. The
+  current helper samples the same column plus cardinal in-chunk neighbors from
+  `top_y - 6` through `top_y + 2`.
 - `carved_air_volume`, `carved_air_y_range`, and `long_vertical_air_spans`:
-  cave/ravine magnitude and shape.
+  cave/ravine magnitude and shape. The current helper counts vertical cave-air
+  spans of eight or more blocks.
 - `water_land_edge_delta_ge_4` / `ge_8`: shore, river-bank, and stone-shore
   transition strength.
 - `landmark_block_volume`: packed ice, blue ice, terracotta/red sand,
@@ -172,14 +177,14 @@ Legend:
 
 | Macro family | Seed / chunk anchors | Existing coverage | Needed |
 |---|---:|---|---|
-| Baseline 1.17.1 noise terrain | seed `12345`, chunk `(0,0)` | Exact terrain-only and surface/bedrock oracle anchor | Derive and record baseline macro metrics so later metric helper changes have a known reference |
+| Baseline 1.17.1 noise terrain | seed `12345`, chunk `(0,0)` | Exact terrain-only and surface/bedrock oracle anchor; macro signal pinned at top Y `86..98`, p05/p50/p95 `86/88/93`, no steep, exposed-face, carved-air, shore, or landmark signal | Use as a control row when adding new macro metric helpers |
 | Mountains | seed `33`, chunk `(0,0)` | Palette matrix covers mountain surface/tree family | Java terrain/surface fixture plus height envelope, relief, steep-face, and exposed stone/gravel metrics |
 | Wooded / gravelly mountain variants | wooded seed `58`, `(0,0)`; gravelly seed `250`, `(0,0)`; modified gravelly seed `1831`, `(0,0)` | Palette matrix covers surface families and sparse tree family | Variant-specific gravel/stone surface volume plus relief comparison against Java fixtures |
 | Snowy mountain variants | snowy mountains seed `326`, `(0,0)`; taiga mountains seed `6126`, `(0,0)`; snowy taiga mountains seed `12006`, `(0,0)` | Palette matrix covers snowy/spruce/fern rows | Snow/top-layer plus relief metrics; decide whether these reuse the mountain metric row or need separate snow-top acceptance |
 | Stone shore / steep coast | seed `74739`, chunk `(0,0)`; visible fixture seed `0`, chunk `(8,16)` | Palette matrix covers stone-shore surface and default extras | Water-land edge gradients, exposed stone face counts, and shore/coast boundary metric fixture |
 | River and frozen-river banks | river seed `39`, `(0,0)`; frozen river seed `252`, `(0,0)` | Palette matrix covers water/seagrass or frozen-river sugar cane | Bank width, water-land delta, and boundary-shape metrics; later exact fixture if drift is found |
 | Shattered savanna relief | shattered seed `68`, chunk `(-6,0)`; plateau seed `153`, chunk `(-8,-2)` | Palette matrix covers shattered surface and acacia family; carved-stage fixture exists for seed `12345`, chunk `(60,199)` | Extreme relief, vertical face, solid-over-air, and Java surface fixture coverage for the chosen palette anchors |
-| Eroded badlands pillars | seed `868`, pillar oracle chunk `(8,-6)` | Exact Java surface oracle exists; `135` records tall-pillar signal | Promote pillar height/column metrics into reusable macro probes and use them as the first non-baseline row |
+| Eroded badlands pillars | seed `868`, pillar oracle chunk `(8,-6)` | Exact Java surface oracle exists; macro signal pinned at top Y `67..122`, p05/p50/p95 `67/87/122`, neighbor deltas `154/74/41`, `108` exposed-face columns, `7023` badlands landmark blocks, and `144` landmark columns at/above Y `80` | Add a second eroded-badlands or badlands-plateau anchor only if future rows show this one is too narrow |
 | Badlands plateaus | badlands seed `28`, chunk `(-2,-8)`; plateau seed `947`, chunk `(-6,-2)`; wooded seed `4764`, chunk `(6,-3)` | Palette matrix covers terracotta/red sand, dead bush/cactus, and wooded split | Plateau height envelope, terrace/block-family volume, and slope/edge metrics |
 | Ice spikes | seed `59`, chunk `(0,0)` | Palette matrix covers packed-ice spike/patch presence | Exact spike/patch geometry or at least Java-derived spike column/height/volume metrics |
 | Frozen-ocean icebergs | frozen seed `779`, `(0,0)`; deep frozen seed `1679`, `(0,0)` | Palette matrix covers packed/blue icebergs and blue ice | Iceberg volume/height/waterline metrics; later exact `IcebergFeature` mismatch buckets |
@@ -187,21 +192,39 @@ Legend:
 | Underwater carved floors | seed `12345`, chunks `(117,-128)` and `(-129,-256)` | Exact LIQUID carved-stage fixtures exist | Underwater floor / magma / obsidian / pending-tick macro metrics; runtime liquid shape stays in liquid tacticals |
 | Mushroom shore / low island transitions | mushroom shore seed `7056`, `(0,0)` | Palette matrix covers mycelium shore transition and huge mushrooms | Lowland island edge, waterline, and surface transition metrics if this becomes visually weak |
 
-## Suggested First Slice
+## Slice A: Metric Helper And First Anchors
 
-Slice A should be measurement-only:
+Status: landed.
 
-1. Add a small macro-geometry signal helper in native worldgen tests that can
-   compute the metrics above from `GeneratedChunk` / `MutableChunkBlockBuffer`
-   without changing generation behavior.
-2. Run it against the existing exact anchors first: seed `12345`, chunk `(0,0)`,
-   and eroded badlands seed `868`, chunk `(8,-6)`.
-3. Commit those metrics as focused tests or snapshot-like expectations that
-   prove the helper is stable.
-4. Only then pick the first new macro row. The best first row is eroded
-   badlands, because it already has an exact surface oracle and a clear
-   high-signal landmark. The best second row is stone shore or shattered
-   savanna, because those are visually important and not just decorator breadth.
+Implemented as focused native worldgen tests:
+
+- `macro_geometry_signal_tracks_baseline_terrain_anchor`
+- `macro_geometry_signal_tracks_eroded_badlands_pillar_anchor`
+
+This slice is measurement-only. It does not change generation behavior. The
+helper consumes `MutableChunkBlockBuffer` and produces deterministic metrics for
+height envelope, relief distribution, adjacent top-height deltas, exposed
+vertical faces, solid-over-air, near-surface carved air, carved-air volume/range,
+water-land edges, and row-specific landmark massing.
+
+Pinned values:
+
+| Anchor | Top Y | p05 / p50 / p95 | Neighbor deltas ge 4 / 8 / 16 | Exposed-face columns | Carved / overhang signal | Landmark signal |
+|---|---:|---:|---:|---:|---|---|
+| seed `12345`, chunk `(0,0)`, terrain stage | `86..98` | `86 / 88 / 93` | `0 / 0 / 0` | `0` | none | none |
+| seed `868`, chunk `(8,-6)`, surface stage | `67..122` | `67 / 87 / 122` | `154 / 74 / 41` | `108` | none | `7023` badlands blocks; `144` columns at/above Y `80` |
+
+## Suggested Next Slice
+
+Add the first new macro row that is not already covered by an exact oracle. The
+best next target is stone shore / steep coast:
+
+1. Generate Java terrain and surface fixtures for seed `74739`, chunk `(0,0)`.
+2. Pin macro signal values for top-height envelope, water-land edge deltas,
+   exposed stone/gravel face columns, and landmark block volume.
+3. If the fixture shows weak shoreline relief, compare against the existing
+   visible fixture candidate seed `0`, chunk `(8,16)` before changing generator
+   behavior.
 
 Do not start by changing density math. The first pass should tell us what the
 current native generator already does and where the Java fixture says it differs.
@@ -214,12 +237,13 @@ Docs-only updates use:
 git diff --check -- docs/tactical/146-overworld-macro-terrain-geometry-parity.md docs/tactical/README.md
 ```
 
-When Slice A starts, use focused native tests first:
+Use focused native tests first:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen fills_chunk_zero_zero_with_terrain_only_java_oracle
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen build_surface_and_bedrock_matches_java_oracle
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen build_eroded_badlands_pillar_surface_and_bedrock_matches_java_oracle
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen macro_geometry_signal_tracks
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen overworld_air_carvers_match_java
 ```
 
