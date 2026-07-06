@@ -427,13 +427,22 @@ mod native_tcp {
             Ok(Self { stream })
         }
 
+        pub fn send_command_only(&mut self, command: &ClientCommand) -> NativeTransportResult<()> {
+            write_client_command_frame(&mut self.stream, command)?;
+            self.stream.flush()?;
+            Ok(())
+        }
+
+        pub fn drain_command_updates(&mut self) -> NativeTransportResult<Vec<ServerUpdate>> {
+            read_server_update_batch(&mut self.stream)
+        }
+
         pub fn send_command(
             &mut self,
             command: &ClientCommand,
         ) -> NativeTransportResult<Vec<ServerUpdate>> {
-            write_client_command_frame(&mut self.stream, command)?;
-            self.stream.flush()?;
-            read_server_update_batch(&mut self.stream)
+            self.send_command_only(command)?;
+            self.drain_command_updates()
         }
     }
 

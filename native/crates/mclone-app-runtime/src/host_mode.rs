@@ -56,8 +56,14 @@ impl SingleViewHostOptions {
 }
 
 pub trait RemoteDedicatedServerSession {
-    fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>>;
+    fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
+    fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>>;
     fn reconnect(&mut self) -> Result<()>;
+
+    fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
+        self.send_command_only(command)?;
+        self.drain_command_updates()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -237,6 +243,8 @@ mod tests {
     #[derive(Debug)]
     struct ScriptedRemoteSession {
         sends: Vec<Result<Vec<ServerUpdate>>>,
+        send_only_count: usize,
+        drain_count: usize,
         reconnects: usize,
     }
 
@@ -244,13 +252,21 @@ mod tests {
         fn new(sends: Vec<Result<Vec<ServerUpdate>>>) -> Self {
             Self {
                 sends: sends.into_iter().rev().collect(),
+                send_only_count: 0,
+                drain_count: 0,
                 reconnects: 0,
             }
         }
     }
 
     impl RemoteDedicatedServerSession for ScriptedRemoteSession {
-        fn send_command(&mut self, _command: ClientCommand) -> Result<Vec<ServerUpdate>> {
+        fn send_command_only(&mut self, _command: ClientCommand) -> Result<()> {
+            self.send_only_count += 1;
+            Ok(())
+        }
+
+        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+            self.drain_count += 1;
             self.sends
                 .pop()
                 .expect("scripted remote session missing send result")
@@ -313,6 +329,34 @@ mod tests {
 
         assert_eq!(runtime.day_time(), 6000);
         assert_eq!(runtime.command_count(), 1);
+    }
+
+    #[test]
+    fn remote_dedicated_send_only_defers_update_drain_and_apply() {
+        let center = ChunkPos::new(0, 0);
+        let mut runtime = SingleViewRuntime::remote_dedicated(center, 0, 0);
+        let mut session =
+            ScriptedRemoteSession::new(vec![Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])]);
+
+        session
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                center,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .unwrap();
+        runtime.apply_exchange(deferred_command_exchange());
+
+        assert_eq!(session.send_only_count, 1);
+        assert_eq!(session.drain_count, 0);
+        assert_eq!(runtime.command_count(), 1);
+        assert_eq!(runtime.day_time(), 0);
+
+        let updates = session.drain_command_updates().unwrap();
+        runtime.apply_exchange(update_drain_exchange(updates, true));
+
+        assert_eq!(session.drain_count, 1);
+        assert_eq!(runtime.day_time(), 6000);
     }
 
     #[test]

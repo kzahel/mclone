@@ -23,19 +23,26 @@ impl RemoteServerSession {
         Ok(())
     }
 
-    pub(crate) fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
-        self.session.send_command(&command).with_context(|| {
-            format!(
-                "failed to exchange command with remote server {}",
-                self.addr
-            )
-        })
+    pub(crate) fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
+        self.session
+            .send_command_only(&command)
+            .with_context(|| format!("failed to send command to remote server {}", self.addr))
+    }
+
+    pub(crate) fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+        self.session
+            .drain_command_updates()
+            .with_context(|| format!("failed to drain updates from remote server {}", self.addr))
     }
 }
 
 impl RemoteDedicatedServerSession for RemoteServerSession {
-    fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
-        RemoteServerSession::send_command(self, command)
+    fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
+        RemoteServerSession::send_command_only(self, command)
+    }
+
+    fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+        RemoteServerSession::drain_command_updates(self)
     }
 
     fn reconnect(&mut self) -> Result<()> {

@@ -1,6 +1,8 @@
 # 149: Remote/Dedicated Contrast Accounting Honesty
 
-Status: proposed. Drafted 2026-07-06 as the gap-9 follow-on to tactical
+Status: active; Slice 1 code landed 2026-07-06, Quest churn evidence pending
+(no ADB device attached during implementation). Drafted 2026-07-06 as the
+gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 (gap 9). Predecessor evidence:
@@ -90,6 +92,58 @@ git diff --check
 
 Plus one local-integrated and one remote (`--adb-reverse --start-server`)
 Quest churn run recorded in this section.
+
+2026-07-06 Slice 1 implementation status:
+
+- Split native TCP remote sessions into explicit command-send and
+  command-response-drain operations while keeping the old request/response
+  helper as a convenience wrapper.
+- Updated the shared `RemoteDedicatedServerSession` contract plus desktop,
+  Android, Android XR, and XR placeholder adapters to expose split send/drain.
+- Remote `GameplayCommandUpdatePolicy::SendOnly` now sends the command,
+  records a deferred command exchange, and leaves the response batch for the
+  remote update pump instead of draining/applying it inside the send call.
+  `DrainImmediately` keeps the previous synchronous behavior and first drains
+  any older pending responses to preserve protocol order.
+- Remote `poll()` now drains pending response batches, applies updates, and
+  records the same shared `RuntimePollDiagnostics` update/apply timing fields
+  used by local-integrated polling where the current request/response protocol
+  has those facts.
+- Added a shared app-runtime regression,
+  `host_mode::tests::remote_dedicated_send_only_defers_update_drain_and_apply`,
+  that fails if a remote-shaped send-only command drains/applies the scripted
+  update inside the send call.
+
+Validation run on 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+pnpm native:android-xr:apk
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client
+git diff --check
+```
+
+Results: all passed. `cargo check -p mclone-android-xr-client` reported the
+existing `ANDROID_REMOTE_ADDR_NONE_SENTINEL` /
+`normalize_android_legacy_remote_addr` dead-code warnings only.
+
+144 tripwire greps on 2026-07-06:
+
+- accounting math outside `mclone-diagnostics`: 1 existing hit
+  (`native/crates/mclone-worldgen/src/levelgen/tests/terrain.rs`, test helper
+  `percentile`);
+- clock reads inside `mclone-diagnostics` core outside `clock.rs`: 0 hits;
+- GPU timestamp sites: 1 existing shared-render hit
+  (`native/crates/mclone-render/src/gpu_timestamps.rs`).
+
+Quest churn evidence: not captured in this session because `adb devices`
+reported no attached device. Remaining Slice 1 exit work is to run the
+local-integrated RD5 churn and remote `--adb-reverse --start-server` RD5 churn
+on a Quest and record whether command-send stalls stay under one frame period
+and local-integrated A/B remains within noise.
 
 ## Slice 2: Host-Mode-Honest Report Projection
 

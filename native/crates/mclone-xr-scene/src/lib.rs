@@ -1026,10 +1026,11 @@ enum XrSessionStartOutcome {
 pub enum XrLocalOnlyRemoteSession {}
 
 impl RemoteDedicatedServerSession for XrLocalOnlyRemoteSession {
-    fn send_command(
-        &mut self,
-        _command: mclone_protocol::ClientCommand,
-    ) -> Result<Vec<mclone_protocol::ServerUpdate>> {
+    fn send_command_only(&mut self, _command: mclone_protocol::ClientCommand) -> Result<()> {
+        match *self {}
+    }
+
+    fn drain_command_updates(&mut self) -> Result<Vec<mclone_protocol::ServerUpdate>> {
         match *self {}
     }
 

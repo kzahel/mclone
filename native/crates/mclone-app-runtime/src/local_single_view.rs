@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -23,8 +23,10 @@ use mclone_ui::LoadingProgressOverlay;
 
 use crate::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
 use crate::host_mode::{
-    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
-    dispatch_remote_dedicated_command,
+    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions, command_exchange,
+    deferred_command_exchange, dispatch_remote_dedicated_command,
+    prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
+    update_drain_exchange,
 };
 use crate::render_assets::{
     DEFAULT_RENDER_SECTION_COMPILE_WORKERS, NativeRenderSectionCompileDispatcher,
@@ -45,7 +47,6 @@ use crate::{
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_LOCAL_SINGLE_VIEW_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
-static REMOTE_DEDICATED_SEND_ONLY_IGNORED_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalSingleViewSceneOptions {
@@ -1444,6 +1445,7 @@ impl<S> DerefMut for NativeSingleViewSessionRuntime<S> {
 pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
     core: SingleViewRuntime,
     session: S,
+    pending_response_batches: usize,
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
@@ -1483,6 +1485,7 @@ where
         Ok(Self {
             core,
             session,
+            pending_response_batches: 0,
             mesh_assets,
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
@@ -1544,7 +1547,8 @@ where
     }
 
     pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
-        dispatch_remote_dedicated_command(&mut self.core, &mut self.session, command)
+        self.send_gameplay_command_timed(command)
+            .map(|(changed, _)| changed)
     }
 
     pub fn send_gameplay_command_with_update_policy(
@@ -1571,33 +1575,166 @@ where
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
     ) -> Result<(bool, GameplayCommandTiming)> {
-        if matches!(policy, GameplayCommandUpdatePolicy::SendOnly)
-            && !REMOTE_DEDICATED_SEND_ONLY_IGNORED_LOGGED.swap(true, Ordering::Relaxed)
-        {
-            log::warn!(
-                "remote dedicated session still ignores SendOnly command policy; native TCP session actor is tracked by tactical 133 Slice 4"
-            );
-        }
         let total_start = Instant::now();
-        let changed =
-            dispatch_remote_dedicated_command(&mut self.core, &mut self.session, command)?;
-        let total_ms = elapsed_ms(total_start.elapsed());
+        let mut drain_updates_ms = 0.0;
+        let mut apply_report = RuntimeUpdateApplyReport::default();
+        let mut changed = true;
+
+        if matches!(policy, GameplayCommandUpdatePolicy::DrainImmediately)
+            && self.pending_response_batches > 0
+        {
+            let pump_report = self
+                .pump_pending_remote_update_batches_report(RuntimeUpdatePumpBudget::unlimited())?;
+            drain_updates_ms += pump_report.drain_updates_ms;
+            changed |= pump_report.apply_report.changed;
+            apply_report.accumulate(pump_report.apply_report);
+        }
+
+        let send_start = Instant::now();
+        if let Err(error) = self.session.send_command_only(command) {
+            let resync_command = prepare_remote_dedicated_resync_command(&mut self.core, error)?;
+            self.pending_response_batches = 0;
+            let changed = reconnect_remote_dedicated_session_and_resync(
+                &mut self.core,
+                &mut self.session,
+                resync_command,
+            )?;
+            let total_ms = elapsed_ms(total_start.elapsed());
+            return Ok((
+                changed,
+                GameplayCommandTiming {
+                    total_ms,
+                    send_ms: elapsed_ms(send_start.elapsed()),
+                    ..GameplayCommandTiming::default()
+                },
+            ));
+        }
+        let send_ms = elapsed_ms(send_start.elapsed());
+        self.pending_response_batches = self.pending_response_batches.saturating_add(1);
+
+        match policy {
+            GameplayCommandUpdatePolicy::DrainImmediately => {
+                let drain_start = Instant::now();
+                let updates = match self.session.drain_command_updates() {
+                    Ok(updates) => updates,
+                    Err(error) => {
+                        self.pending_response_batches =
+                            self.pending_response_batches.saturating_sub(1);
+                        let resync_command =
+                            prepare_remote_dedicated_resync_command(&mut self.core, error)?;
+                        self.pending_response_batches = 0;
+                        let changed = reconnect_remote_dedicated_session_and_resync(
+                            &mut self.core,
+                            &mut self.session,
+                            resync_command,
+                        )?;
+                        let total_ms = elapsed_ms(total_start.elapsed());
+                        return Ok((
+                            changed,
+                            GameplayCommandTiming {
+                                total_ms,
+                                send_ms,
+                                drain_updates_ms: drain_updates_ms
+                                    + elapsed_ms(drain_start.elapsed()),
+                                ..GameplayCommandTiming::default()
+                            },
+                        ));
+                    }
+                };
+                self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
+                drain_updates_ms += elapsed_ms(drain_start.elapsed());
+                let exchange_report = self
+                    .core
+                    .apply_exchange_report(command_exchange(updates, true, true));
+                changed |= exchange_report.update_apply.changed;
+                apply_report.accumulate(exchange_report.update_apply);
+            }
+            GameplayCommandUpdatePolicy::SendOnly => {
+                self.core.apply_exchange(deferred_command_exchange());
+            }
+        }
+
         Ok((
             changed,
             GameplayCommandTiming {
-                total_ms,
-                send_ms: total_ms,
-                ..GameplayCommandTiming::default()
+                total_ms: elapsed_ms(total_start.elapsed()),
+                send_ms,
+                drain_updates_ms,
+                apply_updates_ms: apply_report.total_ms,
+                apply_dirty_mark_ms: apply_report.dirty_mark_ms,
+                apply_client_updates_ms: apply_report.client_apply_updates_ms,
+                updates: apply_report.updates,
+                snapshot_updates: apply_report.snapshot_updates,
+                section_block_updates: apply_report.section_block_updates,
+                unload_updates: apply_report.unload_updates,
             },
         ))
     }
 
     pub fn poll(&mut self) -> Result<bool> {
-        Ok(false)
+        self.poll_with_update_budget(RuntimeUpdatePumpBudget::default())
     }
 
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-        Ok((0, 0.0))
+        let poll_start = Instant::now();
+        let mut polls = 0;
+        while self.pending_response_batches > 0 {
+            self.poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())?;
+            polls += 1;
+        }
+        Ok((polls, elapsed_ms(poll_start.elapsed())))
+    }
+
+    pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
+        let poll_start = Instant::now();
+        let pump_report = self.pump_pending_remote_update_batches_report(budget)?;
+        let changed = pump_report.apply_report.changed;
+        self.core.finish_poll_diagnostics(
+            RuntimePollTiming {
+                total_ms: elapsed_ms(poll_start.elapsed()),
+                drain_updates_ms: pump_report.drain_updates_ms,
+                update_pump_stalled: pump_report.stalled,
+                update_pump_stall_count: pump_report.stall_count,
+                server_update_applied_bytes: pump_report.update_bytes,
+                server_update_oldest_applied_age_ms: pump_report.oldest_applied_update_age_ms,
+                ..RuntimePollTiming::default()
+            },
+            pump_report.apply_report,
+            None,
+        );
+        Ok(changed)
+    }
+
+    fn pump_pending_remote_update_batches_report(
+        &mut self,
+        budget: RuntimeUpdatePumpBudget,
+    ) -> Result<RuntimeUpdatePumpReport> {
+        let pump_start = Instant::now();
+        let mut report = RuntimeUpdatePumpReport::default();
+        while self.pending_response_batches > 0 {
+            let drain_start = Instant::now();
+            let updates = self
+                .session
+                .drain_command_updates()
+                .context("failed to drain remote dedicated server updates")?;
+            self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
+            report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
+            let exchange_report = self.core.apply_exchange_report(update_drain_exchange(
+                updates,
+                self.pending_response_batches == 0,
+            ));
+            report.apply_report.accumulate(exchange_report.update_apply);
+
+            if budget.exhausted_after_update(pump_start.elapsed(), &report.apply_report) {
+                report.remaining_queue_depth = self.pending_response_batches;
+                if self.pending_response_batches > 0 {
+                    report.stalled = true;
+                    report.stall_count = 1;
+                }
+                return Ok(report);
+            }
+        }
+        Ok(report)
     }
 
     pub fn sync_render_sections(
@@ -1814,7 +1951,11 @@ mod tests {
     enum NoRemoteSession {}
 
     impl RemoteDedicatedServerSession for NoRemoteSession {
-        fn send_command(&mut self, _command: ClientCommand) -> Result<Vec<ServerUpdate>> {
+        fn send_command_only(&mut self, _command: ClientCommand) -> Result<()> {
+            match *self {}
+        }
+
+        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
             match *self {}
         }
 

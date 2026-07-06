@@ -2533,10 +2533,19 @@ mod android {
     }
 
     impl RemoteDedicatedServerSession for AndroidRemoteServerSession {
-        fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
-            self.session.send_command(&command).with_context(|| {
+        fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
+            self.session.send_command_only(&command).with_context(|| {
                 format!(
-                    "failed to exchange command with Android remote server {}",
+                    "failed to send command to Android remote server {}",
+                    self.addr
+                )
+            })
+        }
+
+        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+            self.session.drain_command_updates().with_context(|| {
+                format!(
+                    "failed to drain updates from Android remote server {}",
                     self.addr
                 )
             })
