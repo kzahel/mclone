@@ -289,6 +289,7 @@ mod android {
         skip_actors: bool,
         full_frame_multiview: bool,
         frame_overlap: bool,
+        frame_overlap_mode: AndroidXrFrameOverlapMode,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
@@ -324,6 +325,7 @@ mod android {
                 skip_actors: false,
                 full_frame_multiview: false,
                 frame_overlap: false,
+                frame_overlap_mode: AndroidXrFrameOverlapMode::default(),
                 overlap_eye_submits: false,
                 overlap_runtime_prefetch: false,
                 render_section_upload_budget: None,
@@ -332,6 +334,24 @@ mod android {
                 xr_foveation: AndroidXrFoveation::Off,
                 xr_render_scale: ANDROID_XR_DEFAULT_RENDER_SCALE,
                 xr_display_refresh_rate: None,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    enum AndroidXrFrameOverlapMode {
+        #[default]
+        Default,
+        ExplicitOverlap,
+        Serial,
+    }
+
+    impl AndroidXrFrameOverlapMode {
+        const fn label(self) -> &'static str {
+            match self {
+                Self::Default => "default",
+                Self::ExplicitOverlap => "explicit-overlap",
+                Self::Serial => "serial",
             }
         }
     }
@@ -458,12 +478,13 @@ mod android {
     fn parse_android_xr_startup_options(
         startup_argv_json: Option<&str>,
     ) -> Result<AndroidXrStartupOptions> {
+        let mut options = AndroidXrStartupOptions::default();
         let Some(json) = startup_argv_json.filter(|json| !json.trim().is_empty()) else {
-            return Ok(AndroidXrStartupOptions::default());
+            resolve_android_xr_frame_overlap(&mut options)?;
+            return Ok(options);
         };
         let argv = serde_json::from_str::<Vec<String>>(json)
             .context("parse Android XR startup argv JSON")?;
-        let mut options = AndroidXrStartupOptions::default();
         let mut shared_args = StartupArgState::new(
             android_xr_startup_scene_defaults(),
             TexturedSectionRenderOptions::default(),
@@ -608,7 +629,16 @@ mod android {
                     options.full_frame_multiview = true;
                 }
                 "--xr-frame-overlap" => {
-                    options.frame_overlap = true;
+                    if options.frame_overlap_mode == AndroidXrFrameOverlapMode::Serial {
+                        bail!("--xr-frame-overlap cannot be combined with --xr-frame-serial");
+                    }
+                    options.frame_overlap_mode = AndroidXrFrameOverlapMode::ExplicitOverlap;
+                }
+                "--xr-frame-serial" => {
+                    if options.frame_overlap_mode == AndroidXrFrameOverlapMode::ExplicitOverlap {
+                        bail!("--xr-frame-serial cannot be combined with --xr-frame-overlap");
+                    }
+                    options.frame_overlap_mode = AndroidXrFrameOverlapMode::Serial;
                 }
                 "--xr-overlap-eye-submits" => {
                     options.overlap_eye_submits = true;
@@ -750,21 +780,6 @@ mod android {
                 "--xr-full-frame-multiview cannot be combined with multiview proof or microbenchmark modes"
             );
         }
-        if options.frame_overlap
-            && (options.full_frame_multiview
-                || options.multiview_proof
-                || options.terrain_multiview_proof
-                || options.terrain_multiview_perf
-                || options.sky_terrain_multiview_perf
-                || options.sky_terrain_actors_multiview_perf)
-        {
-            bail!("--xr-frame-overlap only applies to the per-eye full-frame path");
-        }
-        if options.frame_overlap
-            && (options.overlap_eye_submits || options.overlap_runtime_prefetch)
-        {
-            bail!("--xr-frame-overlap cannot be combined with older overlap probe flags");
-        }
         if options.overlap_eye_submits
             && (options.full_frame_multiview
                 || options.multiview_proof
@@ -808,7 +823,46 @@ mod android {
                 bail!("terrain multiview diagnostics cannot be combined with performance probes");
             }
         }
+        resolve_android_xr_frame_overlap(&mut options)?;
         Ok(options)
+    }
+
+    fn resolve_android_xr_frame_overlap(options: &mut AndroidXrStartupOptions) -> Result<()> {
+        let per_eye_full_frame = android_xr_uses_per_eye_full_frame_path(options);
+        let older_overlap_probe = options.overlap_eye_submits || options.overlap_runtime_prefetch;
+        match options.frame_overlap_mode {
+            AndroidXrFrameOverlapMode::Default => {
+                options.frame_overlap = per_eye_full_frame && !older_overlap_probe;
+            }
+            AndroidXrFrameOverlapMode::ExplicitOverlap => {
+                if !per_eye_full_frame {
+                    bail!("--xr-frame-overlap only applies to the per-eye full-frame path");
+                }
+                if older_overlap_probe {
+                    bail!("--xr-frame-overlap cannot be combined with older overlap probe flags");
+                }
+                options.frame_overlap = true;
+            }
+            AndroidXrFrameOverlapMode::Serial => {
+                if !per_eye_full_frame {
+                    bail!("--xr-frame-serial only applies to the per-eye full-frame path");
+                }
+                if older_overlap_probe {
+                    bail!("--xr-frame-serial cannot be combined with older overlap probe flags");
+                }
+                options.frame_overlap = false;
+            }
+        }
+        Ok(())
+    }
+
+    fn android_xr_uses_per_eye_full_frame_path(options: &AndroidXrStartupOptions) -> bool {
+        !(options.full_frame_multiview
+            || options.multiview_proof
+            || options.terrain_multiview_proof
+            || options.terrain_multiview_perf
+            || options.sky_terrain_multiview_perf
+            || options.sky_terrain_actors_multiview_perf)
     }
 
     fn android_xr_startup_scene_defaults() -> StartupSceneOptions {
@@ -1172,6 +1226,10 @@ mod android {
         log::info!(
             "Android XR full-frame multiview: {}",
             startup_options.full_frame_multiview
+        );
+        log::info!(
+            "Android XR frame overlap mode: {}",
+            startup_options.frame_overlap_mode.label()
         );
         log::info!(
             "Android XR frame overlap: {}",

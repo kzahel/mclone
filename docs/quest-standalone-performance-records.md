@@ -109,6 +109,73 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-06 - Tactical 150 Slice 1 Quest Frame-Shape Default Decision
+
+Benchmarked code: A/B rows used the already-landed `--xr-frame-overlap` path
+on commit `a864effe` (`Record Quest persisted-world guardrail run`) with the
+Slice 1 package lane additions in the worktree. The follow-up implementation in
+the same slice makes frame overlap the Android XR per-eye default, adds
+`--xr-frame-serial` for the legacy path, and was launch-validated with a release
+APK built from the worktree.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Pinned budgets | RD5 orbit/churn used render compile workers `2`, completed-result accept `2`, section upload `16`, section accept `64`; RD7 orbit and default-config control used their existing unbounded lane defaults |
+
+Summary:
+
+| Lane | Serial path | Overlap/default path | Result |
+|---|---:|---:|---|
+| RD5 settled orbit, pinned budgets | p95 `14.684ms`, head avg `+1.642ms`, over `12.4%`, dropped `23` | p95 `12.236ms`, head avg `+3.148ms`, over `0.0%`, dropped `14` | overlap wins |
+| RD7 settled orbit pressure | p95 `15.806ms`, head avg `+0.344ms`, over `33.1%`, dropped `18` | p95 `12.647ms`, head avg `+3.171ms`, over `0.5%`, dropped `16` | overlap wins |
+| RD5 chunk-view churn, pinned budgets | p95 `12.441ms`, head avg `+7.297ms`, over `1.3%`, dropped `17` | p95 `9.897ms`, head avg `+8.317ms`, over `0.1%`, dropped `12` | overlap wins |
+| RD5 default-config control | p95 `14.575ms`, head avg `+1.572ms`, over `12.9%`, dropped `16` | p95 `12.044ms`, head avg `+3.383ms`, over `0.0%`, dropped `18` | overlap wins |
+
+Interpretation:
+
+- Make per-eye frame overlap the Android XR default. The measured win is not
+  marginal: RD5/RD7 settled orbit and RD5 churn all gain app-work headroom and
+  reduce over-period frames. The default-config control also improves app p95 by
+  `2.531ms`.
+- Keep `--xr-frame-overlap` as an explicit confirmation flag and add
+  `--xr-frame-serial` for legacy A/B rows. The default is disabled for
+  full-frame multiview and multiview proof/perf modes because the path only
+  applies to the normal per-eye full-frame renderer.
+- Overlap includes the existing runtime/render-section prefetch path. In the
+  overlap rows, the normal runtime/upload max bucket is `0.000ms` while
+  `MCLONE_ANDROID_XR_PERF_OVERLAP` records prefetch work, e.g. RD5 orbit
+  max prefetch `6.852ms` and prefetch GPU upload `5.068ms`.
+
+Post-flip launch validation:
+
+```sh
+pnpm native:android-xr:validate
+```
+
+The release APK built, installed, and launched successfully. The log records:
+`Android XR frame overlap mode: default`, `Android XR frame overlap: true`, and
+`render_path=per-eye-frame-overlap`.
+
+Raw artifacts:
+
+- `/tmp/mclone-150-slice1-rd5-orbit-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-orbit-overlap-summary.txt`
+- `/tmp/mclone-150-slice1-rd7-orbit-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd7-orbit-overlap-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-churn-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-churn-overlap-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-shipping-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-shipping-default-overlap-summary.txt`
+- `/tmp/mclone-quest-openxr-logcat.txt`
+
 ### 2026-07-06 - Quest Persisted-World RD5 Guardrail Unblock Run
 
 Benchmarked code: Android XR release APK built from clean commit `9bbb4ff5`
@@ -900,15 +967,14 @@ MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=2.022 app_cpu_ms=n/a compositor_gpu_ms
 
 Interpretation:
 
-- `--xr-frame-overlap` is worth keeping as an opt-in path. It is a large live
-  stationary win (`19.251ms -> 15.206ms` app work, `51.72 -> 65.11 FPS`) and a
-  smaller but real live flight app-work win (`8.081ms -> 6.619ms`, with p99/max
-  spikes reduced and dropped frames halved).
-- It is not default-ready yet. Stationary RD10 is still over the 72 Hz app-work
-  period on `87.3%` of frames, and flight still submits at about `69 FPS`.
-  Motion-to-photon improved in stationary but worsened by `1.294ms` in the
-  flight sample, so comfort still needs a headset check before enabling this
-  outside perf/experimental lanes.
+- This historical RD10 stress row kept `--xr-frame-overlap` opt-in because
+  stationary RD10 was still over the 72 Hz app-work period on `87.3%` of frames,
+  and flight still submitted at about `69 FPS`. Tactical 150 Slice 1 supersedes
+  that default decision for the normal per-eye Quest path using the RD5/RD7
+  guardrail rows above.
+- It was already a large live stationary win (`19.251ms -> 15.206ms` app work,
+  `51.72 -> 65.11 FPS`) and a smaller but real live flight app-work win
+  (`8.081ms -> 6.619ms`, with p99/max spikes reduced and dropped frames halved).
 - The overlap counters prove the live N+1 prefetch half is active:
   stationary moved up to `22.927ms` max runtime-prefetch work out of the normal
   render bucket, and flight moved up to `51.116ms`. The normal
@@ -979,8 +1045,9 @@ Interpretation:
 - The measured win is mostly frame pacing / deferred stereo wait, not live
   N+1 runtime work: frozen render disables runtime polling and upload, so the
   prefetch fields are all zero.
-- Keep `--xr-frame-overlap` opt-in for now. It needs live stationary/flight RD10
-  validation and a headset comfort/latency check before becoming the default.
+- This opt-in conclusion is superseded by the 2026-07-06 Tactical 150 Slice 1
+  RD5/RD7 guardrail decision above, which makes frame overlap the default for
+  the normal per-eye Quest path while keeping stress-lane evidence historical.
 
 ### 2026-07-01 - Standalone Quest 3 Frozen RD10 Solid Terrain Layer Split (Slice O)
 

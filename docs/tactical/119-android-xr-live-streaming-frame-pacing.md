@@ -148,8 +148,9 @@ Things we already do reasonably well:
   dirty chunks instead of rebuilding everything inline.
 - Android XR has an optional render-section upload budget:
   `--xr-render-section-upload-budget`.
-- Android XR has optional per-eye frame overlap:
-  `--xr-frame-overlap`.
+- Android XR uses per-eye frame overlap by default after tactical 150 Slice 1;
+  `--xr-frame-overlap` keeps explicitly selecting it and `--xr-frame-serial`
+  forces the legacy serial path for A/B probes.
 - The Quest perf harness records app-work/headroom fields, not just paced frame
   wall time.
 
@@ -261,8 +262,10 @@ and [`117`](117-android-xr-rd10-gpu-floor-and-frame-overlap.md):
 | Flight default | `8.081 / 15.623 / 31.759 / 73.828ms` | `69.31` | `6.6%` | `max_terrain_runtime_upload_ms=48.837`, `max_runtime_sync_ms=48.176` |
 | Flight overlap | `6.619 / 15.156 / 29.742 / 56.720ms` | `69.26` | `6.0%` | fewer drops, but MTP worsened and FPS stayed flat |
 
-Interpretation: frame overlap is a useful opt-in, especially for frozen and
-stationary RD10, but it does not solve live flight bursts by itself.
+Interpretation: frame overlap was already useful, especially for frozen and
+stationary RD10. Tactical 150 Slice 1 later made it the normal per-eye Quest
+default from RD5/RD7 guardrail evidence, but this RD10 record still shows it
+does not solve live flight bursts by itself.
 
 ### Upload Budget Probe
 
@@ -413,7 +416,8 @@ Suggested lanes:
 - `--xr-render-section-upload-budget 2`,
 - `--xr-render-section-upload-budget 4`,
 - `--xr-render-section-upload-budget 8`,
-- repeat promising upload budgets with `--xr-frame-overlap`.
+- repeat promising upload budgets on the default frame-overlap path, with
+  `--xr-frame-serial` only for legacy comparison rows.
 
 Success condition: p95/p99/max app work and MTP improve without visible
 starvation, and queued upload sections do not grow without bound.
@@ -485,8 +489,9 @@ spike is actually prepared-record rebuild or CPU apply work.
   boundaries for desktop-style streaming hitches.
 - `106` tested Quest RD10 upload budgets. They improved some tail metrics and
   MTP but left visible pacing problems and queued uploads.
-- `117` landed `--xr-frame-overlap`. It is a useful opt-in and a frozen RD10
-  win, but live RD10 flight remains below the target.
+- `117` landed `--xr-frame-overlap`; tactical 150 Slice 1 promoted it to the
+  normal per-eye Quest default after RD5/RD7 guardrail A/B. Live RD10 flight
+  remains a stress lane below the target, not the default-shape blocker.
 - RD7 settled-orbit landed as the preferred product-style movement lane. It
   keeps a populated scene visible while moving around nearby chunks; frame
   overlap cuts missed 72 Hz slots from about `12.7%` to `2.4%`, but p95 remains

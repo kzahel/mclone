@@ -54,16 +54,14 @@ Initial probes corrected the measurement path and split the cheap GPU levers:
   the `~13.2-13.3ms` / `~14.1ms` baseline target. Keep the split for
   vanilla-shaped render-layer correctness, but do not count it as a Quest RD10
   perf win unless a later within-run A/B proves otherwise.
-- **Frame overlap is landed as an opt-in frozen-RD10 win.** Commit `1977a67`
+- **Frame overlap graduated after later guardrail A/B.** Commit `1977a67`
   added `--xr-frame-overlap` for the per-eye Android XR path. In a matched
   frozen RD10 A/B it moved app work from `12.685ms` avg / `13.554ms` p95 to
   `10.959ms` avg / `11.686ms` p95, with `0.0%` app-over-period and about
-  `2.93ms` average headroom. Live validation kept the flag useful but not
-  default-ready: stationary RD10 improved from `19.251ms` avg / `23.594ms` p95
-  / `51.72 FPS` to `15.206ms` avg / `16.932ms` p95 / `65.11 FPS`, while flight
-  improved app work from `8.081ms` to `6.619ms` avg but still submitted only
-  about `69 FPS`. Keep it opt-in pending comfort signoff and RD/scale policy
-  work.
+  `2.93ms` average headroom. The original RD10 stress-lane conclusion kept it
+  opt-in because live RD10 was still below target. Tactical 150 Slice 1 later
+  promoted it to the normal per-eye Quest default from RD5/RD7 guardrail A/B
+  evidence and added `--xr-frame-serial` for the old shape.
 - **RD7 settled orbit is now the product-style live lane.** Commit `abe9d6d`
   added a lane that waits for a populated RD7 scene, then orbits nearby chunks.
   On Quest 3, frame overlap improved this lane from `62.88 FPS` and about
@@ -134,7 +132,7 @@ them.
 | 2 | **M** — render-scale | Render eyes below native resolution; landed as a probe and showed real headroom | ~hrs | low |
 | 3 | **N** — fixed-foveated rendering | Applied successfully, but measured no app-work win; keep only as a possible dynamic/quality lever | ~hrs | low |
 | 4 | **O** — solid render layer | Landed for parity; measured no RD10 app-work win at scale 1.0 | done | keep/default |
-| 5 | **K (E4)** — CPU/GPU frame overlap | Opt-in per-eye path landed; frozen and live RD10 app work improved, but not default-ready | done+keep opt-in | latency/comfort |
+| 5 | **K (E4)** — CPU/GPU frame overlap | Per-eye path landed opt-in, then tactical 150 promoted it to the normal Quest default after RD5/RD7 A/B | default | latency/comfort |
 | 6 | **J** — draw batching / indirect arena | Shared vertex/index arena + `multi_draw_indexed_indirect` (carried from 106) | ~days | medium |
 | 7 | **P** — greedy meshing | Merge coplanar same-light/same-texture faces to cut index count | ~days | parity |
 | 8 | **Q** — application spacewarp | Render at 36, compositor reprojects to 72 | ~days | quality |
@@ -231,12 +229,16 @@ time here unless a future run exposes a visual or layer-classification bug.
 
 ## Slice K (E4) — CPU/GPU frame overlap (carried from 106)
 
-**Status.** Commit `1977a67` landed `--xr-frame-overlap` as a default-off
+**Status.** Commit `1977a67` initially landed `--xr-frame-overlap` as a default-off
 Android XR per-eye path and added
 `native:android-xr:perf:frozen:rd10:frame-overlap`. The path defers both eye
 submission waits into one stereo wait and caches live runtime/render-section
 prefetch work so the next frame consumes it instead of polling twice. It is
 rejected with multiview/proof lanes and with the older overlap probe flags.
+Update 2026-07-06: tactical
+[`150`](150-adaptive-frame-budget-controller.md) Slice 1 promoted this path to
+the normal per-eye Android XR default and added `--xr-frame-serial` for legacy
+A/B probes. Multiview/proof lanes still reject explicit frame overlap.
 
 Frozen RD10 result:
 [`quest-standalone-performance-records`](../quest-standalone-performance-records.md)

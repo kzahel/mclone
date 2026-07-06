@@ -75,6 +75,8 @@ Options:
                   Add --xr-skip-actors to startup argv.
   --xr-frame-overlap
                   Add --xr-frame-overlap to startup argv.
+  --xr-frame-serial
+                  Add --xr-frame-serial to startup argv.
   -h, --help       Show this help.
 USAGE
 }
@@ -208,7 +210,7 @@ while [[ $# -gt 0 ]]; do
             STARTUP_ARGV+=("$1")
             shift
             ;;
-        --xr-frame-overlap)
+        --xr-frame-overlap|--xr-frame-serial)
             STARTUP_ARGV+=("$1")
             shift
             ;;

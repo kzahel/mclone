@@ -357,8 +357,10 @@ Prerequisites before gating on Quest numbers:
 - **Pin lane configs.** The binding orbit/churn gates use
   `--render-compile-workers 2` and the `2/16/64` accept/upload budgets. That is
   still a lane config, not the shipping default; candidates that change shared
-  defaults must also run the RD5 shipping-default control. The clean Slice 0
-  control row was RD5 orbit with workers `1` and unbounded accept/upload budgets.
+  defaults must also run the RD5 shipping-default control. Tactical 150 Slice 1
+  changed the Android XR per-eye default to frame overlap; the default-config
+  control row is now RD5 orbit with workers `1`, unbounded accept/upload
+  budgets, and `render_path=per-eye-frame-overlap`.
 
 Gates are **absolute numbers pinned to the clean baseline**, not
 relative-to-previous-run. Relative gates ratchet: five consecutive candidates
@@ -368,20 +370,20 @@ regression" and collectively kill the lane.
 **Quest RD5 gate (every candidate):**
 
 - `skipped_delta = 0`
-- `dropped_frames_delta <= 17` in the one-shot Meta metrics window (baseline
-  `17 / 17`)
-- `app_work_p95 <= 15.25ms` (baseline `14.737-15.133ms`)
-- `headroom_avg >= +1.25ms` (baseline `+1.329..+1.619ms`)
-- `app_over_period_pct <= 16%` (baseline `13.7-15.7%`)
+- `dropped_frames_delta <= 17` in the one-shot Meta metrics window (Slice 1
+  overlap baseline `14`)
+- `app_work_p95 <= 13.0ms` (Slice 1 overlap baseline `12.236ms`)
+- `headroom_avg >= +2.5ms` (Slice 1 overlap baseline `+3.148ms`)
+- `app_over_period_pct <= 2%` (Slice 1 overlap baseline `0.0%`)
 - no frames over 2x period (baseline `0`)
 
 **Quest RD7 pressure check (shared-policy candidates):**
 
 - `skipped_delta = 0`
-- `dropped_frames_delta <= 32` in the one-shot Meta metrics window (baseline
-  `18 / 32`)
-- `app_work_p95 <= 17.5ms` (baseline `16.522-17.129ms`)
-- `app_over_period_pct <= 40%` (baseline `35.8-37.6%`)
+- `dropped_frames_delta <= 20` in the one-shot Meta metrics window (Slice 1
+  overlap baseline `16`)
+- `app_work_p95 <= 13.5ms` (Slice 1 overlap baseline `12.647ms`)
+- `app_over_period_pct <= 2%` (Slice 1 overlap baseline `0.5%`)
 - frames over 2x period `= 0` (baseline `0`)
 
 **Quest streaming check (candidates changing shared admission, publication,
@@ -393,15 +395,15 @@ and oldest-applied-update age. Until a durable baseline exists, treat this lane
 as evidence-gathering, not pass/fail — but run it, because settled orbit leaves
 the streaming machinery idle and cannot catch a burstier admission policy.
 Candidate A is exactly the kind of change this lane exists for: it multiplies
-the per-tick publish burst the client must absorb. The clean Slice 0 RD5 churn
-baseline is now pinned at app p95 `11.577-11.664ms`, app p99
-`13.216-13.290ms`, max runtime upload `7.339-8.516ms`, max GPU upload
-`5.834-6.011ms`, update queue depth `283`, oldest-applied age
-`164.784-170.014ms`, one update-pump stall per row, and pending publication
-chunks `123-125`. This is a safety/attribution lane, not proof that publication
-is an important Quest bottleneck; the first question is whether larger
-publication drains show up as server runner spikes, update queue age, client
-accept/store cost, dirty/prepare cost, upload cost, or dropped-frame deltas.
+the per-tick publish burst the client must absorb. After tactical 150 Slice 1,
+the RD5 churn overlap-default baseline is pinned at app p95 `9.897ms`, app p99
+`11.521ms`, dropped-frame delta `12`, app-over-period `0.1%`, update queue
+depth `283`, and oldest-applied age `166.692ms`; the serial comparison was app
+p95 `12.441ms`, p99 `14.188ms`, dropped-frame delta `17`, and over-period
+`1.3%`. This is a safety/attribution lane, not proof that publication is an
+important Quest bottleneck; the first question is whether larger publication
+drains show up as server runner spikes, update queue age, client accept/store
+cost, dirty/prepare cost, upload cost, prefetch cost, or dropped-frame deltas.
 
 **Desktop gates (every candidate):**
 
