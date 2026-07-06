@@ -27,6 +27,7 @@ const ENGINE_DEBUG_RIGHT_HAND_COLOR: [f32; 4] = [1.0, 0.62, 0.18, 0.95];
 const ENGINE_DEBUG_HEADSET_RESIDUAL_COLOR: [f32; 4] = [1.0, 0.15, 0.15, 0.95];
 const ENGINE_ROOM_SCALE_BODY_FOLLOW_ENTER_METERS: f64 = 0.03;
 const ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS: f64 = 0.01;
+const ENGINE_ROOM_SCALE_BLOCKED_RETRY_METERS: f64 = 0.05;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineCameraInput {
@@ -345,6 +346,7 @@ pub struct EngineCameraController {
     last_hand_push_input: Option<EngineHandPushInput>,
     last_room_scale_reconciliation: Option<EngineRoomScaleReconciliation>,
     room_scale_body_follow_active: bool,
+    room_scale_blocked_residual: Option<Vec3d>,
     movement_mode: EngineCameraMovementMode,
     collision_mode: EngineCameraCollisionMode,
     view_mode: EngineCameraViewMode,
@@ -389,6 +391,7 @@ impl EngineCameraController {
             last_hand_push_input: None,
             last_room_scale_reconciliation: None,
             room_scale_body_follow_active: false,
+            room_scale_blocked_residual: None,
             movement_mode: EngineCameraMovementMode::Walking,
             collision_mode: EngineCameraCollisionMode::Normal,
             view_mode: EngineCameraViewMode::FirstPerson,
@@ -414,6 +417,7 @@ impl EngineCameraController {
 
     fn reset_room_scale_body_follow(&mut self) {
         self.room_scale_body_follow_active = false;
+        self.room_scale_blocked_residual = None;
         self.last_room_scale_reconciliation = None;
     }
 
@@ -778,6 +782,7 @@ impl EngineCameraController {
         let body_eye_before = self.player.pose().eye_position();
         if !headset_world_position.is_finite() {
             self.room_scale_body_follow_active = false;
+            self.room_scale_blocked_residual = None;
             let result = EngineRoomScaleReconciliation::no_op(body_eye_before, body_eye_before);
             self.last_room_scale_reconciliation = Some(result);
             return result;
@@ -796,11 +801,25 @@ impl EngineCameraController {
         };
         if requested_body_movement_sqr <= follow_threshold * follow_threshold {
             self.room_scale_body_follow_active = false;
+            self.room_scale_blocked_residual = None;
             let result =
                 EngineRoomScaleReconciliation::no_op(body_eye_before, headset_world_position);
             self.last_room_scale_reconciliation = Some(result);
             return result;
         }
+        if let Some(blocked_residual) = self.room_scale_blocked_residual {
+            let blocked_delta = requested_body_movement.subtract(blocked_residual);
+            if blocked_delta.length_sqr()
+                <= ENGINE_ROOM_SCALE_BLOCKED_RETRY_METERS * ENGINE_ROOM_SCALE_BLOCKED_RETRY_METERS
+            {
+                self.room_scale_body_follow_active = true;
+                let result =
+                    EngineRoomScaleReconciliation::no_op(body_eye_before, headset_world_position);
+                self.last_room_scale_reconciliation = Some(result);
+                return result;
+            }
+        }
+        self.room_scale_blocked_residual = None;
 
         let collision = self
             .player
@@ -824,6 +843,16 @@ impl EngineCameraController {
         };
         self.room_scale_body_follow_active = result.residual_horizontal_length_sqr()
             > ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS * ENGINE_ROOM_SCALE_BODY_FOLLOW_EXIT_METERS;
+        self.room_scale_blocked_residual =
+            if collision.horizontal_collision && self.room_scale_body_follow_active {
+                Some(Vec3d::new(
+                    result.residual_head_offset.x,
+                    0.0,
+                    result.residual_head_offset.z,
+                ))
+            } else {
+                None
+            };
         self.last_room_scale_reconciliation = Some(result);
         result
     }

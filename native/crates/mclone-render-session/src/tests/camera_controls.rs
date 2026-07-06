@@ -197,6 +197,73 @@ fn room_scale_reconciliation_exits_active_follow_below_deadband() {
 }
 
 #[test]
+fn room_scale_reconciliation_holds_blocked_wall_jitter() {
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+        ChunkPos::new(0, 0),
+        BlockPos::new(1, 1, 0),
+        BlockStateId(7),
+    )));
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 2.62, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+
+    let blocked = camera.reconcile_room_scale_headset(&client, Vec3d::new(1.5, 2.62, 0.5));
+
+    assert!(blocked.collision.horizontal_collision);
+    assert_close(blocked.consumed_body_movement.x, 0.2);
+    assert_close(blocked.residual_head_offset.x, 0.8);
+    assert_close(camera.player().pose().eye_position().x, 0.7);
+    assert_close(camera.player().pose().eye_position().z, 0.5);
+
+    let jitter = camera.reconcile_room_scale_headset(&client, Vec3d::new(1.5, 2.62, 0.52));
+
+    assert_eq!(jitter.requested_body_movement, Vec3d::ZERO);
+    assert_eq!(jitter.consumed_body_movement, Vec3d::ZERO);
+    assert_close(jitter.residual_head_offset.x, 0.8);
+    assert_close(jitter.residual_head_offset.z, 0.02);
+    assert_close(camera.player().pose().eye_position().x, 0.7);
+    assert_close(camera.player().pose().eye_position().z, 0.5);
+}
+
+#[test]
+fn room_scale_reconciliation_retries_after_meaningful_blocked_residual_change() {
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+        ChunkPos::new(0, 0),
+        BlockPos::new(1, 1, 0),
+        BlockStateId(7),
+    )));
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 2.62, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+
+    let blocked = camera.reconcile_room_scale_headset(&client, Vec3d::new(1.5, 2.62, 0.5));
+
+    assert!(blocked.collision.horizontal_collision);
+    assert_close(camera.player().pose().eye_position().x, 0.7);
+    assert_close(camera.player().pose().eye_position().z, 0.5);
+
+    let retry = camera.reconcile_room_scale_headset(&client, Vec3d::new(1.5, 2.62, 0.57));
+
+    assert!(retry.collision.horizontal_collision);
+    assert_close(retry.requested_body_movement.x, 0.8);
+    assert_close(retry.requested_body_movement.z, 0.07);
+    assert_close(retry.consumed_body_movement.x, 0.0);
+    assert_close(retry.consumed_body_movement.z, 0.07);
+    assert_close(retry.residual_head_offset.x, 0.8);
+    assert_close(retry.residual_head_offset.z, 0.0);
+    assert_close(camera.player().pose().eye_position().x, 0.7);
+    assert_close(camera.player().pose().eye_position().z, 0.57);
+}
+
+#[test]
 fn room_scale_reconciliation_moves_body_toward_headset_in_clear_space() {
     let client = ClientRuntime::local_integrated();
     let mut camera = EngineCameraController::from_eye_pose(

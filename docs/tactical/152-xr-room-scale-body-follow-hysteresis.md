@@ -1,6 +1,6 @@
 # 152: XR Room-Scale Body Follow Hysteresis
 
-Status: active; Slice 1 code landed on 2026-07-06 after headset feel
+Status: active; Slices 1-2 code landed on 2026-07-06 after headset feel
 investigation. Headset validation remains required before closing.
 
 Workstream: native Rust XR locomotion, shared render-session camera/player
@@ -170,6 +170,33 @@ Slice 1 landed details:
 - Explicit discontinuities reset the follow state: eye/feet pose changes,
   movement/collision mode changes, yaw-turn rebases, and accepted server
   position updates.
+
+## Slice 2 - Blocked Residual Stability
+
+Headset validation after Slice 1 reported that standing still felt good in open
+space, but pressing the HMD/body target slightly into a wall still produced a
+one-dimensional swim along the wall edge. The likely mechanism is:
+
+- A collision-blocked reconciliation leaves a large residual, so body follow
+  remains active.
+- Each tiny HMD jitter while the target remains inside the wall becomes another
+  collision-backed movement attempt.
+- The collision solver rejects the wall-normal component, but can still consume
+  tiny wall-tangent components, so the body swims along the edge.
+
+Landed policy:
+
+- [x] After a collision-blocked reconciliation, remember the remaining
+  horizontal residual as a blocked-residual anchor.
+- [x] While the current residual stays within `0.05m` of that anchor, report a
+  no-op reconciliation instead of retrying collision.
+- [x] Clear the blocked-residual anchor when the residual drops below the normal
+  body-follow threshold, an explicit discontinuity happens, or the residual
+  changes enough to represent deliberate motion.
+- [x] Preserve deliberate movement along/out of the wall by retrying once the
+  blocked residual changes by more than the blocked retry threshold.
+- [x] Add focused tests for wall-edge jitter suppression and meaningful
+  blocked-residual retry.
 
 ## Gorilla / Hand-Push Follow-Up
 
