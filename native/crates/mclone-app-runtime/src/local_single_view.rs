@@ -995,6 +995,19 @@ where
         self.set_chunk_view(center, self.render_distance(), self.chunk_tracking_radius())
     }
 
+    pub fn set_interest_center_with_update_policy_timed(
+        &mut self,
+        center: ChunkPos,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        self.set_chunk_view_with_update_policy_timed(
+            center,
+            self.render_distance(),
+            self.chunk_tracking_radius(),
+            policy,
+        )
+    }
+
     pub fn set_render_distance(&mut self, render_distance: u32) -> Result<bool> {
         self.set_chunk_view(
             self.interest_center(),
@@ -1009,9 +1022,32 @@ where
         render_distance: u32,
         chunk_tracking_radius: u32,
     ) -> Result<bool> {
+        self.set_chunk_view_with_update_policy_timed(
+            center,
+            render_distance,
+            chunk_tracking_radius,
+            GameplayCommandUpdatePolicy::SendOnly,
+        )
+        .map(|(changed, _)| changed)
+    }
+
+    pub fn set_chunk_view_with_update_policy_timed(
+        &mut self,
+        center: ChunkPos,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<(bool, GameplayCommandTiming)> {
         match self {
             Self::Local(scene) => {
-                scene.set_chunk_view(center, render_distance, chunk_tracking_radius)
+                let Some(command) = scene.core_mut().set_chunk_view_command(
+                    center,
+                    render_distance,
+                    chunk_tracking_radius,
+                ) else {
+                    return Ok((false, GameplayCommandTiming::default()));
+                };
+                scene.send_gameplay_command_with_update_policy_timed(command, policy)
             }
             Self::RemoteDedicated(scene) => {
                 let Some(command) = scene.core_mut().set_chunk_view_command(
@@ -1019,9 +1055,9 @@ where
                     render_distance,
                     chunk_tracking_radius,
                 ) else {
-                    return Ok(false);
+                    return Ok((false, GameplayCommandTiming::default()));
                 };
-                scene.send_gameplay_command(command)
+                scene.send_gameplay_command_with_update_policy_timed(command, policy)
             }
         }
     }

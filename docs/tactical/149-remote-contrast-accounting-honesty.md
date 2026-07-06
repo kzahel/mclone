@@ -1,9 +1,9 @@
 # 149: Remote/Dedicated Contrast Accounting Honesty
 
-Status: active; Slice 1 `SendOnly` code and Quest evidence landed 2026-07-06.
-Remote contrast is still blocked by Slice 2 host-mode-honest projection and by
-the new remote interest-commit stall recorded below. Drafted 2026-07-06 as the
-gap-9 follow-on to tactical
+Status: active; Slice 1 `SendOnly` code, Quest evidence, and the follow-up
+interest-command isolation landed 2026-07-06. Remote contrast is still blocked
+by Slice 2 host-mode-honest projection and by the remote update-poll/drain
+stall recorded below. Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 (gap 9). Predecessor evidence:
@@ -225,10 +225,87 @@ Remote result:
   (`mclone dedicated server listening ...`) with no labeled server-side
   summary. That is the intended Slice 2 gap.
 
-Next implementation step before durable contrast rows: fix or isolate the
-remote `commit_interest` stall, then do Slice 2's host-mode-honest report
-projection so remote client/server halves stop presenting unavailable counters
-as zeros.
+2026-07-06 interest-command isolation follow-up:
+
+- Added policy-aware, timed interest/chunk-view updates in
+  `NativeSingleViewSceneRuntime`: recurring `set_chunk_view` /
+  `set_interest_center` calls now send their command with
+  `GameplayCommandUpdatePolicy::SendOnly` and expose the command timing.
+- XR locomotion records the interest command separately from player-pose
+  sync, and Android XR emits
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND` plus matching
+  per-worst-frame markers.
+- The Quest validation summary extractor now retains the locomotion and
+  worst-frame command markers instead of requiring a logcat dig for this
+  specific isolation.
+
+Validation run on 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+pnpm native:android-xr:apk
+```
+
+Results: all passed. `cargo check -p mclone-android-xr-client` still reported
+only the existing `ANDROID_REMOTE_ADDR_NONE_SENTINEL` /
+`normalize_android_legacy_remote_addr` dead-code warnings.
+
+Quest remote churn evidence captured 2026-07-06 on Meta Quest 3
+`2G0YC1ZF93041Z` from the pre-commit worktree after the interest-command
+isolation change:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-interest-sendonly-remote-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-interest-sendonly-remote-20260706-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-churn-rd5-interest-sendonly-remote-20260706-server.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Result:
+
+- The interest command is now isolated and cheap:
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND` in logcat reported
+  `max_total_ms=0.287`, `max_send_ms=0.279`,
+  `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`, and zero
+  updates.
+- The previous remote `commit_interest` frame-loop stall is gone:
+  `MCLONE_ANDROID_XR_PERF_STAGES` reported `max_locomotion_ms=0.337`, and
+  worst frame `141` had `locomotion_ms=0.151` with
+  `commit_interest_ms=0.111`.
+- The remaining remote stall is in runtime polling/update draining, not in
+  locomotion or command send: worst frame `141` had
+  `app_work_ms=6007.791` / `render_mclone_frame_ms=6007.728`, while
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX` reported
+  `poll_total_ms=6000.083`, `drain_updates_ms=5990.776`,
+  `apply_updates_ms=9.303`, `updates=402`, `snapshot_updates=169`,
+  `section_updates=61`, and `unload_updates=169`.
+
+Next implementation step before durable contrast rows: make the remote update
+pump drain pending response batches under a frame budget (or otherwise decouple
+TCP response draining from one render-frame poll), then do Slice 2's
+host-mode-honest report projection so remote client/server halves stop
+presenting unavailable counters as zeros.
 
 ## Slice 2: Host-Mode-Honest Report Projection
 

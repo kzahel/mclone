@@ -46,8 +46,9 @@ use mclone_app_runtime::world_catalog::{
     WorldCatalogError,
 };
 use mclone_app_runtime::{
-    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, TraversalReadySectionCache,
-    debug_block_palette_overlay, elapsed_ms, set_player_appearance_command_for_ui_model,
+    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics,
+    TraversalReadySectionCache, debug_block_palette_overlay, elapsed_ms,
+    set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
@@ -639,6 +640,15 @@ pub struct XrLocomotionTiming {
     pub commit_server_command_unload_updates: usize,
     pub commit_position_updates_ms: f64,
     pub commit_interest_ms: f64,
+    pub commit_interest_command_send_ms: f64,
+    pub commit_interest_command_drain_updates_ms: f64,
+    pub commit_interest_command_apply_updates_ms: f64,
+    pub commit_interest_command_apply_dirty_mark_ms: f64,
+    pub commit_interest_command_apply_client_updates_ms: f64,
+    pub commit_interest_command_updates: usize,
+    pub commit_interest_command_snapshot_updates: usize,
+    pub commit_interest_command_section_block_updates: usize,
+    pub commit_interest_command_unload_updates: usize,
     pub gameplay_interaction_ms: f64,
 }
 
@@ -656,6 +666,29 @@ struct XrCameraCommitTiming {
     server_command_unload_updates: usize,
     position_updates_ms: f64,
     interest_ms: f64,
+    interest_command_send_ms: f64,
+    interest_command_drain_updates_ms: f64,
+    interest_command_apply_updates_ms: f64,
+    interest_command_apply_dirty_mark_ms: f64,
+    interest_command_apply_client_updates_ms: f64,
+    interest_command_updates: usize,
+    interest_command_snapshot_updates: usize,
+    interest_command_section_block_updates: usize,
+    interest_command_unload_updates: usize,
+}
+
+impl XrCameraCommitTiming {
+    fn record_interest_command_timing(&mut self, timing: GameplayCommandTiming) {
+        self.interest_command_send_ms = timing.send_ms;
+        self.interest_command_drain_updates_ms = timing.drain_updates_ms;
+        self.interest_command_apply_updates_ms = timing.apply_updates_ms;
+        self.interest_command_apply_dirty_mark_ms = timing.apply_dirty_mark_ms;
+        self.interest_command_apply_client_updates_ms = timing.apply_client_updates_ms;
+        self.interest_command_updates = timing.updates;
+        self.interest_command_snapshot_updates = timing.snapshot_updates;
+        self.interest_command_section_block_updates = timing.section_block_updates;
+        self.interest_command_unload_updates = timing.unload_updates;
+    }
 }
 
 impl XrLocomotionTiming {
@@ -674,6 +707,30 @@ impl XrLocomotionTiming {
         self.commit_server_command_unload_updates = timing.server_command_unload_updates;
         self.commit_position_updates_ms = timing.position_updates_ms;
         self.commit_interest_ms = timing.interest_ms;
+        self.commit_interest_command_send_ms = timing.interest_command_send_ms;
+        self.commit_interest_command_drain_updates_ms = timing.interest_command_drain_updates_ms;
+        self.commit_interest_command_apply_updates_ms = timing.interest_command_apply_updates_ms;
+        self.commit_interest_command_apply_dirty_mark_ms =
+            timing.interest_command_apply_dirty_mark_ms;
+        self.commit_interest_command_apply_client_updates_ms =
+            timing.interest_command_apply_client_updates_ms;
+        self.commit_interest_command_updates = timing.interest_command_updates;
+        self.commit_interest_command_snapshot_updates = timing.interest_command_snapshot_updates;
+        self.commit_interest_command_section_block_updates =
+            timing.interest_command_section_block_updates;
+        self.commit_interest_command_unload_updates = timing.interest_command_unload_updates;
+    }
+
+    fn record_interest_command_timing(&mut self, timing: GameplayCommandTiming) {
+        self.commit_interest_command_send_ms = timing.send_ms;
+        self.commit_interest_command_drain_updates_ms = timing.drain_updates_ms;
+        self.commit_interest_command_apply_updates_ms = timing.apply_updates_ms;
+        self.commit_interest_command_apply_dirty_mark_ms = timing.apply_dirty_mark_ms;
+        self.commit_interest_command_apply_client_updates_ms = timing.apply_client_updates_ms;
+        self.commit_interest_command_updates = timing.updates;
+        self.commit_interest_command_snapshot_updates = timing.snapshot_updates;
+        self.commit_interest_command_section_block_updates = timing.section_block_updates;
+        self.commit_interest_command_unload_updates = timing.unload_updates;
     }
 }
 
@@ -3294,10 +3351,14 @@ where
         };
         let center = ChunkPos::new(center_x, center_z);
         let interest_start = Instant::now();
-        let changed = runtime
-            .set_interest_center(center)
+        let (changed, command_timing) = runtime
+            .set_interest_center_with_update_policy_timed(
+                center,
+                GameplayCommandUpdatePolicy::SendOnly,
+            )
             .context("set XR automated chunk-view churn interest center")?;
         timing.commit_interest_ms = elapsed_ms(interest_start.elapsed());
+        timing.record_interest_command_timing(command_timing);
         if changed {
             log::info!(
                 "MCLONE_ANDROID_XR_CHUNK_VIEW_CHURN center_x={} center_z={} changed=true",
@@ -6210,8 +6271,10 @@ where
     let (server_changed, mut timing) =
         sync_engine_camera_player_pose_for_runtime_timed(runtime, camera).context(context)?;
     let interest_start = Instant::now();
-    let interest_changed = update_interest_from_engine_camera_for_runtime(runtime, camera)?;
+    let (interest_changed, interest_command_timing) =
+        update_interest_from_engine_camera_for_runtime_timed(runtime, camera)?;
     timing.interest_ms = elapsed_ms(interest_start.elapsed());
+    timing.record_interest_command_timing(interest_command_timing);
     Ok((server_changed || interest_changed, timing))
 }
 
@@ -6291,9 +6354,24 @@ fn update_interest_from_engine_camera_for_runtime<S>(
 where
     S: RemoteDedicatedServerSession,
 {
+    update_interest_from_engine_camera_for_runtime_timed(runtime, camera)
+        .map(|(changed, _)| changed)
+}
+
+fn update_interest_from_engine_camera_for_runtime_timed<S>(
+    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    camera: &EngineCameraController,
+) -> Result<(bool, GameplayCommandTiming)>
+where
+    S: RemoteDedicatedServerSession,
+{
     let snapshot = camera.snapshot();
     let center = snapshot.chunk_pos;
-    if runtime.set_interest_center(center)? {
+    let (changed, timing) = runtime.set_interest_center_with_update_policy_timed(
+        center,
+        GameplayCommandUpdatePolicy::SendOnly,
+    )?;
+    if changed {
         log::info!(
             "XR terrain chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
             center.x,
@@ -6302,9 +6380,8 @@ where
             snapshot.eye.y,
             snapshot.eye.z
         );
-        return Ok(true);
     }
-    Ok(false)
+    Ok((changed, timing))
 }
 
 fn xr_game_ui_for_session(session: Option<&ActiveSessionDescriptor>, seed: i64) -> GameUiHost {
