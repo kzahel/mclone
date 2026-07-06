@@ -1748,6 +1748,23 @@ mod tests {
     }
 
     #[test]
+    fn movement_experience_reducer_selecting_warp_restores_normal_collision() {
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Walk,
+            collision_mode: GameCollisionMode::NoClip,
+            travel_assist_mode: GameTravelAssistMode::Off,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::TravelAssistMode(GameTravelAssistMode::Warp),
+        );
+
+        assert_eq!(state.collision_mode, GameCollisionMode::Normal);
+        assert_eq!(state.travel_assist_mode, GameTravelAssistMode::Warp);
+    }
+
+    #[test]
     fn movement_experience_reducer_rejects_travel_assist_for_fly() {
         let mut state = ClientExperienceSettingsState {
             movement_mode: GameMovementMode::Fly,

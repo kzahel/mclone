@@ -360,6 +360,7 @@ impl OffscreenFlatClientHost {
                 frame_pacing: FramePacingUiState::default(),
                 movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
                 collision_mode: game_collision_mode(self.driver.camera.collision_mode()),
+                travel_assist_mode: self.driver.travel_assist_mode,
                 fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
                 movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
                 player_collision_box_visible: self.driver.player_collision_box_visible,

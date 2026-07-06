@@ -23,7 +23,9 @@ use mclone_render::headless::{
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameCollisionMode, GameMovementMode, GameUiHost, GuiDrawList, GuiScale};
+use mclone_ui::{
+    GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiDrawList, GuiScale,
+};
 
 use crate::actor_assets::load_actor_texture_assets;
 use crate::camera::SpectatorCamera;
@@ -1218,6 +1220,7 @@ fn render_renderer_rebuild_smoke_frame(
         frame_pacing: FramePacingUiState::default(),
         movement_mode: GameMovementMode::Walk,
         collision_mode: GameCollisionMode::Normal,
+        travel_assist_mode: GameTravelAssistMode::Off,
         fly_speed_multiplier: 1.0,
         movement_speed_multiplier: 1.0,
         player_collision_box_visible: false,

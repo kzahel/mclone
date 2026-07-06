@@ -2726,8 +2726,8 @@ fn options_layout(
     let column_width = ((panel.width - 42.0 - column_gap) * 0.5).max(110.0);
     let left_x = panel.x + 18.0;
     let right_x = left_x + column_width + column_gap;
-    let mut left_y = panel.y + 34.0;
-    let mut right_y = panel.y + 34.0;
+    let mut left_y = panel.y + 30.0;
+    let mut right_y = panel.y + 30.0;
 
     push_checkbox(
         &mut layout,
@@ -3067,7 +3067,7 @@ fn options_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {
                 + u8::from(state.server_cadence.is_some()),
         ) * 22.0
         + 48.0;
-    let right_rows_height = (8
+    let right_rows_height = (9
         + usize::from(state.collision_mode.is_some())
         + usize::from(state.travel_assist_mode.is_some())
         + usize::from(state.turn_mode.is_some() || state.xr_turn_mode.is_some())

@@ -33,7 +33,7 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::actor_instances_from_presentations;
 use mclone_server::{SqliteWorldStore, WorkerFrameMetrics, initial_spawn_center_for_seed};
-use mclone_ui::{GameCollisionMode, GameMovementMode, GameUiHost, GuiScale};
+use mclone_ui::{GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiScale};
 
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
@@ -3125,6 +3125,7 @@ pub(crate) fn run_startup_streaming_perf(
                 frame_pacing: FramePacingUiState::default(),
                 movement_mode: GameMovementMode::Walk,
                 collision_mode: GameCollisionMode::Normal,
+                travel_assist_mode: GameTravelAssistMode::Off,
                 fly_speed_multiplier: 1.0,
                 movement_speed_multiplier: 1.0,
                 player_collision_box_visible: false,
@@ -3572,6 +3573,7 @@ pub(crate) fn run_frame_budget_probe(
                 frame_pacing: FramePacingUiState::default(),
                 movement_mode: GameMovementMode::Walk,
                 collision_mode: GameCollisionMode::Normal,
+                travel_assist_mode: GameTravelAssistMode::Off,
                 fly_speed_multiplier: 1.0,
                 movement_speed_multiplier: 1.0,
                 player_collision_box_visible: false,

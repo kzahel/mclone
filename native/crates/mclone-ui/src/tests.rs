@@ -140,7 +140,7 @@ fn movement_experience_modes_have_stable_labels_and_cycles() {
     );
     assert_eq!(
         GameTravelAssistMode::Blink.next(),
-        GameTravelAssistMode::Warp
+        GameTravelAssistMode::Off
     );
     assert_eq!(GameTravelAssistMode::Warp.next(), GameTravelAssistMode::Off);
     assert!(!GameTravelAssistMode::Off.is_enabled());

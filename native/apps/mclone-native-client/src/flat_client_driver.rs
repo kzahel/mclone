@@ -70,10 +70,10 @@ use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, FramePipelineHudOverlay,
     GameCollisionMode, GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel,
-    GameScreen, GameSimulationCadence, GameUiAction, GameUiHost, GameUiRenderState, GuiKey,
-    GuiScale, LoadingProgressOverlay, LoadingProgressOverlayLayer, Point, StatusOverlay,
-    UiDebugSnapshot, UiDrawCacheStats, WorldCatalogUiState, WorldCatalogUiStatus,
-    touch_controls_mode_label,
+    GameScreen, GameSimulationCadence, GameTravelAssistMode, GameUiAction, GameUiHost,
+    GameUiRenderState, GuiKey, GuiScale, LoadingProgressOverlay, LoadingProgressOverlayLayer,
+    Point, StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, WorldCatalogUiState,
+    WorldCatalogUiStatus, touch_controls_mode_label,
 };
 
 use crate::camera::SpectatorCamera;
@@ -153,6 +153,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) crosshair_visible: bool,
     pub(crate) frame_pipeline_overlay_visible: bool,
     pub(crate) debug_diagnostics_visible: bool,
+    pub(crate) travel_assist_mode: GameTravelAssistMode,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
@@ -274,6 +275,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) frame_pacing: FramePacingUiState,
     pub(crate) movement_mode: GameMovementMode,
     pub(crate) collision_mode: GameCollisionMode,
+    pub(crate) travel_assist_mode: GameTravelAssistMode,
     pub(crate) fly_speed_multiplier: f32,
     pub(crate) movement_speed_multiplier: f32,
     pub(crate) player_collision_box_visible: bool,
@@ -367,6 +369,7 @@ impl FlatClientDriver {
             crosshair_visible: true,
             frame_pipeline_overlay_visible: false,
             debug_diagnostics_visible: false,
+            travel_assist_mode: GameTravelAssistMode::Off,
             player_model: GamePlayerModel::default(),
             render_resources: None,
             render_stats: RenderStreamStats::default(),
@@ -480,6 +483,10 @@ impl FlatClientDriver {
             self.desktop_blink_debug = DesktopBlinkDebugState::default();
             return false;
         }
+        if self.travel_assist_mode != GameTravelAssistMode::Blink {
+            self.desktop_blink_debug = DesktopBlinkDebugState::default();
+            return false;
+        }
         if !self.ensure_desktop_blink_debug_worker() {
             self.desktop_blink_debug = DesktopBlinkDebugState::default();
             return false;
@@ -501,6 +508,10 @@ impl FlatClientDriver {
     pub(crate) fn update_desktop_blink_debug_preview(&mut self) -> bool {
         if !self.desktop_blink_debug.active {
             return false;
+        }
+        if self.travel_assist_mode != GameTravelAssistMode::Blink {
+            self.clear_desktop_blink_debug();
+            return true;
         }
         let mut changed = self.submit_desktop_blink_debug_request();
         changed |= self.poll_desktop_blink_debug_worker();
@@ -525,6 +536,10 @@ impl FlatClientDriver {
         &mut self,
     ) -> anyhow::Result<DesktopBlinkDebugCommitStatus> {
         if !self.desktop_blink_debug.active {
+            return Ok(DesktopBlinkDebugCommitStatus::Inactive);
+        }
+        if self.travel_assist_mode != GameTravelAssistMode::Blink {
+            self.clear_desktop_blink_debug();
             return Ok(DesktopBlinkDebugCommitStatus::Inactive);
         }
         if self.runtime.is_none() {
@@ -739,6 +754,7 @@ impl FlatClientDriver {
             frame_pacing,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             collision_mode: game_collision_mode(self.camera.collision_mode()),
+            travel_assist_mode: self.travel_assist_mode,
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
             player_collision_box_visible: self.player_collision_box_visible,
@@ -1045,6 +1061,7 @@ impl FlatClientDriver {
             frame_pacing: FramePacingUiState::default(),
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             collision_mode: game_collision_mode(self.camera.collision_mode()),
+            travel_assist_mode: self.travel_assist_mode,
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
             player_collision_box_visible: self.player_collision_box_visible,
@@ -1243,8 +1260,14 @@ impl FlatClientDriver {
                     let collision_mode = self.camera.collision_mode();
                     log::info!("player collision mode {}", collision_mode.label());
                 }
-                ClientExperienceSettingEffect::SetTravelAssistMode(_)
-                | ClientExperienceSettingEffect::SetTurnMode(_) => {}
+                ClientExperienceSettingEffect::SetTravelAssistMode(travel_assist_mode) => {
+                    self.travel_assist_mode = travel_assist_mode;
+                    if self.travel_assist_mode != GameTravelAssistMode::Blink {
+                        self.clear_desktop_blink_debug();
+                    }
+                    log::info!("player travel assist {}", travel_assist_mode.label());
+                }
+                ClientExperienceSettingEffect::SetTurnMode(_) => {}
                 ClientExperienceSettingEffect::SetXrTurnMode(_) => {}
                 ClientExperienceSettingEffect::CycleFramePacing => {
                     result.host_action = Some(FlatClientHostAction::CycleFramePacing);
@@ -2590,7 +2613,6 @@ impl FlatClientDriver {
 
 fn desktop_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
-    settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -2616,7 +2638,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         player_model: options.player_model,
         movement_mode: options.movement_mode,
         collision_mode: Some(options.collision_mode),
-        travel_assist_mode: None,
+        travel_assist_mode: Some(options.travel_assist_mode),
         turn_mode: None,
         xr_turn_mode: None,
         fly_speed_multiplier: options.fly_speed_multiplier,
@@ -3190,6 +3212,42 @@ mod tests {
     }
 
     #[test]
+    fn ui_action_sets_travel_assist_mode_and_clears_desktop_blink_when_disabled() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        let result = driver.apply_ui_action(
+            GameUiAction::SetTravelAssistMode(GameTravelAssistMode::Blink),
+            ui_action_context(),
+        );
+
+        assert!(result.host_action.is_none());
+        assert_eq!(driver.travel_assist_mode, GameTravelAssistMode::Blink);
+        assert_eq!(
+            driver
+                .current_ui_render_state(
+                    FramePacingUiState::default(),
+                    BlockPaletteOverlay::hidden()
+                )
+                .travel_assist_mode,
+            Some(GameTravelAssistMode::Blink)
+        );
+
+        driver.desktop_blink_debug.active = true;
+        let result = driver.apply_ui_action(
+            GameUiAction::SetTravelAssistMode(GameTravelAssistMode::Off),
+            ui_action_context(),
+        );
+
+        assert!(result.host_action.is_none());
+        assert_eq!(driver.travel_assist_mode, GameTravelAssistMode::Off);
+        assert_eq!(
+            driver.desktop_blink_debug,
+            DesktopBlinkDebugState::default()
+        );
+    }
+
+    #[test]
     fn ui_action_toggles_frame_pipeline_overlay_visibility() {
         let scene = SceneOptions::default();
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
@@ -3331,14 +3389,14 @@ mod tests {
         let committed_snapshot = driver
             .ui_v2_debug_snapshot_for_state(committed_state)
             .expect("Options is a v2 screen");
-        let first_person = debug_widget_rect(&committed_snapshot, "First Person Body");
+        let crosshair = debug_widget_rect(&committed_snapshot, "Crosshair");
         let point = Point {
-            x: first_person.x + 16.0,
-            y: first_person.bottom() - 2.0,
+            x: crosshair.x + 16.0,
+            y: crosshair.bottom() - 2.0,
         };
 
         let mut divergent_state = committed_state;
-        divergent_state.touch_controls_mode = Some(TouchControlsMode::Auto);
+        divergent_state.crosshair_visible = None;
         let mut divergent_surface = UiSurface::new();
         divergent_surface.set_screen(Some(UiScreenId::Options {
             parent: mclone_ui::GameOptionsParent::Pause,
@@ -3349,13 +3407,13 @@ mod tests {
             .debug_snapshot()
             .expect("divergent Options surface should be active");
 
-        assert_eq!(debug_hovered_label(&divergent_snapshot), Some("Crosshair"));
+        assert_ne!(debug_hovered_label(&divergent_snapshot), Some("Crosshair"));
 
         driver.commit_ui_render_state(committed_state);
         let report = driver.apply_ui_pointer_click(point, ui_action_context());
 
-        assert_eq!(report.action, Some(GameUiAction::ToggleFirstPersonPlayer));
-        assert!(driver.camera.first_person_player_visible());
+        assert_eq!(report.action, Some(GameUiAction::ToggleCrosshair));
+        assert!(!driver.crosshair_visible);
     }
 
     #[test]

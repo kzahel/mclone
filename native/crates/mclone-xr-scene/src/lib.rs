@@ -96,10 +96,10 @@ use mclone_render_session::{
 use mclone_server::WorkerFrameMetrics;
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, GameCollisionMode, GameFramePacingMode,
-    GameMovementMode, GamePlayerModel, GameScreen, GameUiAction, GameUiHost, GameUiRenderState,
-    GameXrTurnMode, GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
-    UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay,
-    render_status_overlay,
+    GameMovementMode, GamePlayerModel, GameScreen, GameTravelAssistMode, GameUiAction, GameUiHost,
+    GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect,
+    StatusOverlay, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
+    render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -1161,6 +1161,7 @@ where
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     player_collision_box_visible: bool,
+    travel_assist_mode: GameTravelAssistMode,
     player_model: GamePlayerModel,
     draw: TexturedSectionDrawResources,
     traversal_ready_sections: TraversalReadySectionCache,
@@ -1342,6 +1343,7 @@ where
             },
             render_options,
             player_collision_box_visible: false,
+            travel_assist_mode: GameTravelAssistMode::Off,
             player_model: GamePlayerModel::default(),
             draw,
             traversal_ready_sections: TraversalReadySectionCache::default(),
@@ -1462,6 +1464,7 @@ where
             },
             render_options,
             player_collision_box_visible: false,
+            travel_assist_mode: GameTravelAssistMode::Off,
             player_model: GamePlayerModel::default(),
             draw: started.draw,
             traversal_ready_sections: TraversalReadySectionCache::default(),
@@ -3016,6 +3019,12 @@ where
         views: &[xr::View],
         transform: XrStageToWorld,
     ) -> Result<XrBlinkTeleportFrame> {
+        if let Some(frame) = xr_blink_teleport_disabled_frame(self.travel_assist_mode, controllers)
+        {
+            self.clear_xr_blink_teleport();
+            return Ok(frame);
+        }
+
         let left_axis = xr_left_stick_raw_axis(controllers);
         let left_axis_active = left_axis.length() > XR_JOYPAD_DEAD_ZONE;
         let blink_engaged = xr_left_stick_blink_engaged(controllers);
@@ -4738,7 +4747,7 @@ where
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
-            travel_assist_mode: None,
+            travel_assist_mode: Some(self.travel_assist_mode),
             turn_mode: Some(self.turn_policy.game_mode().into()),
             xr_turn_mode: Some(self.turn_policy.game_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
@@ -6043,7 +6052,13 @@ where
                     let collision_mode = self.camera.collision_mode();
                     log::info!("XR player collision mode {}", collision_mode.label());
                 }
-                ClientExperienceSettingEffect::SetTravelAssistMode(_) => {}
+                ClientExperienceSettingEffect::SetTravelAssistMode(travel_assist_mode) => {
+                    self.travel_assist_mode = travel_assist_mode;
+                    if self.travel_assist_mode != GameTravelAssistMode::Blink {
+                        self.clear_xr_blink_teleport();
+                    }
+                    log::info!("XR travel assist {}", travel_assist_mode.label());
+                }
                 ClientExperienceSettingEffect::SetTurnMode(turn_mode) => {
                     let turn_mode = GameXrTurnMode::from(turn_mode);
                     self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
@@ -6557,7 +6572,6 @@ fn normalized_xr_remote_addr(addr: &str) -> String {
 fn xr_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
     settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -6993,6 +7007,15 @@ fn xr_blink_teleport_config() -> TeleportConfig {
         arc_height: XR_BLINK_TELEPORT_ARC_HEIGHT,
         ..TeleportConfig::default()
     }
+}
+
+fn xr_blink_teleport_disabled_frame(
+    travel_assist_mode: GameTravelAssistMode,
+    _controllers: &[XrControllerSnapshot],
+) -> Option<XrBlinkTeleportFrame> {
+    (travel_assist_mode != GameTravelAssistMode::Blink).then_some(XrBlinkTeleportFrame {
+        suppress_left_stick_movement: false,
+    })
 }
 
 fn xr_blink_teleport_intent(
@@ -8265,6 +8288,23 @@ mod tests {
             Vec2::new(0.0, -(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01)),
             false,
         )]));
+    }
+
+    #[test]
+    fn xr_travel_assist_off_does_not_suppress_left_stick_movement() {
+        let controllers = [test_controller(
+            XrHand::Left,
+            Vec2::new(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01, 0.0),
+            false,
+        )];
+
+        let frame = xr_blink_teleport_disabled_frame(GameTravelAssistMode::Off, &controllers)
+            .expect("travel assist off disables Blink");
+
+        assert!(!frame.suppress_left_stick_movement);
+        assert!(
+            xr_blink_teleport_disabled_frame(GameTravelAssistMode::Blink, &controllers).is_none()
+        );
     }
 
     #[test]

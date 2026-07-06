@@ -305,13 +305,15 @@ Landed behavior:
 
 ## Slice C: Shared Travel Assist Setting
 
-- [ ] Add `Travel Assist = Off/Blink/Warp` to shared settings and UI.
-- [ ] Route current desktop Blink debug adapter through this setting instead of
+Status: landed 2026-07-06.
+
+- [x] Add `Travel Assist = Off/Blink/Warp` to shared settings and UI.
+- [x] Route current desktop Blink debug adapter through this setting instead of
   making it an always-debug-only path.
-- [ ] Gate XR Blink update/suppression on `Travel Assist = Blink`.
-- [ ] Make `Travel Assist = Off` restore continuous XR left-stick movement.
-- [ ] Mark `Warp` pending or disabled until its path execution is implemented.
-- [ ] Add tests for `Fly -> Travel Assist Off`, `NoClip -> Travel Assist Off`,
+- [x] Gate XR Blink update/suppression on `Travel Assist = Blink`.
+- [x] Make `Travel Assist = Off` restore continuous XR left-stick movement.
+- [x] Mark `Warp` pending or disabled until its path execution is implemented.
+- [x] Add tests for `Fly -> Travel Assist Off`, `NoClip -> Travel Assist Off`,
   `Blink/Warp -> Collision Normal`, and the XR left-stick pass-through case.
 
 Exit criteria:
@@ -320,6 +322,19 @@ Exit criteria:
 - Blink remains shared and still works through the existing teleport evaluator.
 - Travel assist is not XR-only; non-XR profiles can expose it when they have an
   input adapter.
+
+Landed behavior:
+
+- Desktop flat and XR profiles expose the shared `Travel Assist` row.
+- Desktop Blink preview/commit is gated by `Travel Assist = Blink`; switching
+  the setting away from Blink clears any active preview.
+- XR Blink update and left-stick suppression are gated by
+  `Travel Assist = Blink`; with `Off`, left-stick movement passes through to
+  continuous locomotion.
+- `Warp` remains a shared enum/reducer value but is skipped by the menu cycle
+  until the path execution implementation lands.
+- Web and flat Android keep the row hidden for now because they do not yet have
+  a usable travel-assist input adapter.
 
 ## Slice D: Turn Setting Rename And Profile Projection
 

@@ -1176,7 +1176,7 @@ impl GameTravelAssistMode {
     pub const fn next(self) -> Self {
         match self {
             Self::Off => Self::Blink,
-            Self::Blink => Self::Warp,
+            Self::Blink => Self::Off,
             Self::Warp => Self::Off,
         }
     }
