@@ -359,7 +359,13 @@ fn debug_overlay_renders_title_and_lines() {
 
     render_debug_overlay(GuiScale::from_pixels(960, 540), &mut draw, &overlay);
 
-    assert!(!draw.commands().is_empty());
+    let text_commands = draw
+        .commands()
+        .iter()
+        .filter(|command| matches!(command, GuiDrawCommand::Text { .. }))
+        .count();
+    assert_eq!(text_commands, 3);
+    assert!(draw.commands().len() <= 16, "{:?}", draw.commands());
 }
 
 #[test]

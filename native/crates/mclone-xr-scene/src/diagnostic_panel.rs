@@ -13,10 +13,13 @@ use mclone_ui::{
 
 use crate::XR_DIAGNOSTIC_PANEL_PIXELS;
 
+const DEBUG_DIAGNOSTICS_REFRESH_INTERVAL_RENDER_CALLS: u32 = 15;
+
 pub(crate) struct XrDiagnosticPanel {
     renderer: WorldGuiRenderer,
     frame_metrics_visible: bool,
     debug_diagnostics_visible: bool,
+    debug_diagnostics_refresh_calls: u32,
     frame_metrics: Option<FramePipelineHudOverlay>,
     frame_metrics_cache: XrFrameMetricsPanelCache,
     debug_overlay: Option<DebugOverlay>,
@@ -29,6 +32,7 @@ impl XrDiagnosticPanel {
             renderer: WorldGuiRenderer::new(device, color_format),
             frame_metrics_visible: false,
             debug_diagnostics_visible: false,
+            debug_diagnostics_refresh_calls: 0,
             frame_metrics: None,
             frame_metrics_cache: XrFrameMetricsPanelCache::default(),
             debug_overlay: None,
@@ -49,7 +53,26 @@ impl XrDiagnosticPanel {
     }
 
     pub(crate) fn set_debug_diagnostics_visible(&mut self, visible: bool) {
+        if self.debug_diagnostics_visible != visible {
+            self.debug_diagnostics_refresh_calls = 0;
+        }
         self.debug_diagnostics_visible = visible;
+    }
+
+    pub(crate) fn should_refresh_debug_overlay(&mut self) -> bool {
+        if !self.debug_diagnostics_visible {
+            return false;
+        }
+        if self.debug_overlay.is_none() {
+            self.debug_diagnostics_refresh_calls = 0;
+            return true;
+        }
+        self.debug_diagnostics_refresh_calls = self.debug_diagnostics_refresh_calls.wrapping_add(1);
+        if self.debug_diagnostics_refresh_calls < DEBUG_DIAGNOSTICS_REFRESH_INTERVAL_RENDER_CALLS {
+            return false;
+        }
+        self.debug_diagnostics_refresh_calls = 0;
+        true
     }
 
     pub(crate) fn set_frame_pipeline_report(
@@ -71,6 +94,7 @@ impl XrDiagnosticPanel {
 
     pub(crate) fn clear_debug_overlay(&mut self) {
         self.debug_overlay = None;
+        self.debug_diagnostics_refresh_calls = 0;
         self.debug_overlay_cache.clear();
     }
 

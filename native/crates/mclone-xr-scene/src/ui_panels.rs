@@ -632,8 +632,10 @@ where
             self.diagnostic_panel.clear_debug_overlay();
             return;
         }
-        let overlay = self.debug_diagnostics_overlay();
-        self.diagnostic_panel.set_debug_overlay(overlay);
+        if self.diagnostic_panel.should_refresh_debug_overlay() {
+            let overlay = self.debug_diagnostics_overlay();
+            self.diagnostic_panel.set_debug_overlay(overlay);
+        }
     }
 
     pub(crate) fn debug_diagnostics_overlay(&self) -> DebugOverlay {

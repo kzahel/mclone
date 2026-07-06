@@ -2474,10 +2474,10 @@ pub fn render_debug_overlay_at(
     let title = Color::rgba(220, 238, 220, 255);
     let muted = Color::rgba(165, 186, 176, 255);
     let mut y = panel.y + 5.0;
-    font.draw_shadow(draw, &overlay.title, panel.x + 6.0, y, title);
+    font.draw_shadow_atlas(draw, &overlay.title, panel.x + 6.0, y, title);
     y += line_height;
     for line in &overlay.lines {
-        font.draw_shadow(draw, line, panel.x + 6.0, y, muted);
+        font.draw_shadow_atlas(draw, line, panel.x + 6.0, y, muted);
         y += line_height;
     }
     draw.pop_clip();
