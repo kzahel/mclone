@@ -276,7 +276,7 @@ with a desktop-only smoke silently.
 | Slice | Scope | Status |
 |---|---|---|
 | ORG-00: baseline and no-regression harness | inventory, line counts, benchmark baselines | landed 2026-07-06; baseline has current validation blockers |
-| ORG-01: test relocation pass | move large inline tests out of production files | open |
+| ORG-01: test relocation pass | move large inline tests out of production files | active; ORG-01A landed 2026-07-06 |
 | ORG-02: crate-root and facade cleanup | thin roots and module-local test facades | open |
 | ORG-03: `mclone-render-session` split | render-section session ownership modules | open |
 | ORG-04: `mclone-xr-scene` non-render split | options, timing, locomotion, tracking, UI math | open |
@@ -470,6 +470,15 @@ Primary targets:
 - `native/apps/mclone-native-client/src/app.rs`
 - `native/apps/mclone-native-client/src/scene_runtime.rs`
 
+Sub-slices:
+
+| Batch | Scope | Status |
+|---|---|---|
+| ORG-01A | move the clearest test-heavy facades: `mclone-server/src/lib.rs`, `mclone-worldgen/src/feature.rs`, `mclone-worldgen/src/levelgen.rs` | landed 2026-07-06 |
+| ORG-01B | split the relocated large test-only files into logical submodules so raw >1k file counts improve too | next |
+| ORG-01C | move remaining shared-crate inline tests: `integrated.rs`, `mclone-render-session/src/lib.rs`, `mclone-ui/src/v2.rs` | open |
+| ORG-01D | move native-client app inline tests from `main.rs`, `app.rs`, and `scene_runtime.rs` | open |
+
 Deliverables:
 
 - replace large inline `mod tests` blocks with `#[cfg(test)] mod tests;` or
@@ -500,7 +509,60 @@ git diff --check
 
 Log:
 
-- Pending.
+- ORG-01A landed 2026-07-06 as a move-only test relocation batch. No
+  production behavior changed and no public items were added for tests.
+- Replaced trailing inline `mod tests` blocks with `#[cfg(test)] mod tests;`
+  in:
+  - `native/crates/mclone-server/src/lib.rs`
+  - `native/crates/mclone-worldgen/src/feature.rs`
+  - `native/crates/mclone-worldgen/src/levelgen.rs`
+- Moved test bodies to:
+  - `native/crates/mclone-server/src/tests.rs`
+  - `native/crates/mclone-worldgen/src/feature/tests.rs`
+  - `native/crates/mclone-worldgen/src/levelgen/tests.rs`
+- Moved server and levelgen test-only imports out of facade files and into the
+  relocated test modules. Updated `levelgen` fixture `include_str!` paths by
+  one directory level for the new `src/levelgen/tests.rs` location.
+- Facade line-count deltas from the current worktree before the move:
+
+| File | Before | After |
+|---|---:|---:|
+| `native/crates/mclone-server/src/lib.rs` | `4,073` | `160` |
+| `native/crates/mclone-worldgen/src/feature.rs` | `3,669` | `293` |
+| `native/crates/mclone-worldgen/src/levelgen.rs` | `4,348` | `25` |
+
+- Reran line-count tripwires:
+  - raw non-vendored Rust files above `1,000` LoC: `66`
+    (`/tmp/mclone-org145-ORG-01-oversized-files.txt`)
+  - production tripwire files above `1,000` LoC: `48`
+    (`/tmp/mclone-org145-ORG-01-production-oversized-files.txt`)
+- Interpretation: the three facades are no longer large, but the raw and
+  production tripwires still count the new large test-only files because the
+  current scripts do not classify standalone test modules specially. ORG-01B
+  should split those relocated test modules into logical files before this
+  slice is considered complete.
+
+Validation:
+
+```text
+cargo fmt --manifest-path native/Cargo.toml --all --check
+PASS
+
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen --lib
+PASS
+
+git diff --check
+PASS
+
+cargo test --manifest-path native/Cargo.toml
+FAIL with the same current baseline mclone-server blockers:
+- runner::native::tests::native_runner_reports_native_thread_kind_and_queue_depths
+  at crates/mclone-server/src/runner.rs:1378, expected thread kind None but got
+  MessageTransfer.
+- tests::generated_origin_chunk_block_light_strict_matches_scheduler_light_oracle_fixture
+  at crates/mclone-server/src/tests.rs:1298 after relocation, block light
+  mismatch at section 5 byte 1499, expected 0x00 got 0x01.
+```
 
 ## ORG-02: Crate-Root And Facade Cleanup
 
