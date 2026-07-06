@@ -1294,6 +1294,13 @@ where
         }
     }
 
+    pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
+        match self {
+            Self::Local(scene) => scene.poll_with_update_budget(budget),
+            Self::RemoteDedicated(scene) => scene.poll_with_update_budget(budget),
+        }
+    }
+
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
         match self {
             Self::Local(scene) => scene.poll_until_idle(),

@@ -12,8 +12,8 @@ use mclone_app_runtime::local_single_view::{
     build_local_single_view_client_runtime,
 };
 use mclone_app_runtime::{
-    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, SingleViewRuntimeStats,
-    TimedRenderSectionCacheUpdate,
+    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
+    SingleViewRuntimeStats, TimedRenderSectionCacheUpdate,
 };
 #[cfg(test)]
 use mclone_app_runtime::{camera_position_inside_water_block, snapshot_block_state_at_world};
@@ -369,6 +369,13 @@ impl WindowSceneRuntime {
 
     pub(crate) fn poll(&mut self) -> Result<bool> {
         self.scene.poll()
+    }
+
+    pub(crate) fn poll_with_update_budget(
+        &mut self,
+        budget: RuntimeUpdatePumpBudget,
+    ) -> Result<bool> {
+        self.scene.poll_with_update_budget(budget)
     }
 
     #[cfg(test)]

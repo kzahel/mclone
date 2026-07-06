@@ -6,10 +6,10 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_app_runtime::RenderSectionSyncTiming;
 use mclone_app_runtime::frame_render::{
     FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
+use mclone_app_runtime::{RenderSectionSyncTiming, RuntimeUpdatePumpBudget};
 use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
@@ -2692,7 +2692,16 @@ pub(crate) fn run_loading_settle_perf(
         let mut runtime = WindowSceneRuntime::with_assets(&scene, &assets)?;
         let runtime_create_ms = elapsed_ms(runtime_create_start.elapsed());
         let (runtime_poll_count, runtime_poll_ms) =
-            poll_window_runtime_until_idle_with_timeout(&mut runtime, LOADING_SETTLE_IDLE_TIMEOUT)?;
+            poll_window_runtime_until_loading_target_settled(
+                &mut runtime,
+                expected_target_chunks,
+                LOADING_SETTLE_IDLE_TIMEOUT,
+            )
+            .with_context(|| {
+                format!(
+                    "render distance {render_distance} did not reach loading target before idle"
+                )
+            })?;
         let runtime_settle_ms = elapsed_ms(runtime_start.elapsed());
         let player_position_updates = runtime.drain_player_position_updates().len();
 
@@ -2758,6 +2767,55 @@ pub(crate) fn run_loading_settle_perf(
         total_elapsed_ms: elapsed_ms(total_start.elapsed()),
         samples,
     })
+}
+
+fn poll_window_runtime_until_loading_target_settled(
+    runtime: &mut WindowSceneRuntime,
+    expected_target_chunks: usize,
+    timeout: Duration,
+) -> Result<(usize, f64)> {
+    let deadline = Instant::now() + timeout;
+    let mut polls = 0_usize;
+    let mut poll_ms = 0.0_f64;
+
+    loop {
+        let poll_start = Instant::now();
+        runtime
+            .poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())
+            .context("failed to poll window runtime while waiting for loading progress")?;
+        poll_ms += elapsed_ms(poll_start.elapsed());
+        polls += 1;
+
+        let stats = runtime.stats();
+        if let Some(progress) = stats.loading_progress {
+            if progress.target_chunk_count == expected_target_chunks
+                && progress.target_ready_chunks == progress.target_chunk_count
+            {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let (idle_polls, idle_ms) =
+                    poll_window_runtime_until_idle_with_timeout(runtime, remaining)?;
+                return Ok((polls + idle_polls, poll_ms + idle_ms));
+            }
+        }
+
+        if Instant::now() >= deadline {
+            let progress = stats.loading_progress;
+            bail!(
+                "timed out waiting for loading target after {:.3}s: expected_target_chunks={} loading_progress={:?} loaded_chunks={} pending_jobs={} pending_publications={} server_update_queue_depth={}",
+                timeout.as_secs_f64(),
+                expected_target_chunks,
+                progress,
+                stats.loaded_chunks,
+                stats.pending_jobs,
+                stats.pending_publications,
+                stats.server_update_queue_depth
+            );
+        }
+
+        if stats.server_update_queue_depth == 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
 }
 
 fn prewarm_startup_streaming_world(

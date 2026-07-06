@@ -70,6 +70,7 @@ pub(super) struct XrPerformanceMetricsProbe {
     fp: xr::raw::PerformanceMetricsMETA,
     session: xr::sys::Session,
     counters: Vec<(xr::sys::Path, String)>,
+    last_dropped_frames: Option<f64>,
     frames: u32,
     next_attempt_frame: u32,
     attempts: u32,
@@ -119,10 +120,13 @@ impl XrPerformanceMetricsProbe {
             "XR_META_performance_metrics: collection enabled, mode={}, warming up",
             mode.label()
         );
+        let initial_dropped_frames =
+            query_named_counter_scalar(&fp, session_handle, &counters, "dropped_frame");
         Some(Self {
             fp,
             session: session_handle,
             counters,
+            last_dropped_frames: initial_dropped_frames,
             frames: 0,
             next_attempt_frame: WARMUP_FRAMES,
             attempts: 0,
@@ -168,7 +172,7 @@ impl XrPerformanceMetricsProbe {
         self.done = true;
     }
 
-    fn sample_and_log(&self) -> bool {
+    fn sample_and_log(&mut self) -> bool {
         for _ in 0..WARMUP_SWEEPS {
             for (path, _) in &self.counters {
                 let _ = query_counter(&self.fp, self.session, *path);
@@ -216,8 +220,15 @@ impl XrPerformanceMetricsProbe {
             }
         }
 
+        let dropped_frames_start = self.last_dropped_frames;
+        let dropped_frames_delta =
+            metric_counter_delta(dropped_frames_start, sample.dropped_frames);
+        if sample.dropped_frames.is_some() {
+            self.last_dropped_frames = sample.dropped_frames;
+        }
+
         log::info!(
-            "MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms={} app_cpu_ms={} compositor_gpu_ms={} compositor_cpu_ms={} gpu_util_pct={} cpu_util_avg_pct={} cpu_util_worst_pct={} motion_to_photon_ms={} dropped_frames={} stale_frames={} counters={} any_valid={} attempt={}/{} per_query_us={:.2} mode={} sample={} interval_frames={}",
+            "MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms={} app_cpu_ms={} compositor_gpu_ms={} compositor_cpu_ms={} gpu_util_pct={} cpu_util_avg_pct={} cpu_util_worst_pct={} motion_to_photon_ms={} dropped_frames={} dropped_frames_start={} dropped_frames_end={} dropped_frames_delta={} stale_frames={} counters={} any_valid={} attempt={}/{} per_query_us={:.2} mode={} sample={} interval_frames={}",
             format_metric(sample.app_gpu_ms),
             format_metric(sample.app_cpu_ms),
             format_metric(sample.compositor_gpu_ms),
@@ -227,6 +238,9 @@ impl XrPerformanceMetricsProbe {
             format_metric(sample.cpu_util_worst_pct),
             format_metric(sample.motion_to_photon_ms),
             format_metric(sample.dropped_frames),
+            format_metric(dropped_frames_start),
+            format_metric(sample.dropped_frames),
+            format_metric(dropped_frames_delta),
             format_metric(sample.stale_frames),
             self.counters.len(),
             any_valid,
@@ -291,6 +305,10 @@ fn format_metric(value: Option<f64>) -> String {
         Some(value) => format!("{value:.3}"),
         None => "n/a".to_owned(),
     }
+}
+
+fn metric_counter_delta(previous: Option<f64>, current: Option<f64>) -> Option<f64> {
+    Some((current? - previous?).max(0.0))
 }
 
 fn enumerate_counters(
@@ -373,6 +391,19 @@ fn query_counter(
     }
 }
 
+fn query_named_counter_scalar(
+    fp: &xr::raw::PerformanceMetricsMETA,
+    session: xr::sys::Session,
+    counters: &[(xr::sys::Path, String)],
+    needle: &str,
+) -> Option<f64> {
+    counters
+        .iter()
+        .find(|(_, name)| name.contains(needle))
+        .and_then(|(path, _)| query_counter(fp, session, *path))
+        .and_then(|counter| counter_scalar(&counter))
+}
+
 fn counter_scalar(counter: &xr::sys::PerformanceMetricsCounterMETA) -> Option<f64> {
     let flags = counter.counter_flags;
     if flags.contains(xr::sys::PerformanceMetricsCounterFlagsMETA::FLOAT_VALUE_VALID) {
@@ -396,5 +427,26 @@ fn unit_label(unit: xr::sys::PerformanceMetricsCounterUnitMETA) -> &'static str 
         "Hz"
     } else {
         "generic"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::metric_counter_delta;
+
+    #[test]
+    fn dropped_frame_delta_requires_two_samples() {
+        assert_eq!(metric_counter_delta(None, Some(7.0)), None);
+        assert_eq!(metric_counter_delta(Some(7.0), None), None);
+    }
+
+    #[test]
+    fn dropped_frame_delta_is_window_difference() {
+        assert_eq!(metric_counter_delta(Some(7.0), Some(10.0)), Some(3.0));
+    }
+
+    #[test]
+    fn dropped_frame_delta_saturates_after_counter_reset() {
+        assert_eq!(metric_counter_delta(Some(10.0), Some(7.0)), Some(0.0));
     }
 }
