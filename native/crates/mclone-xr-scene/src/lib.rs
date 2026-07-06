@@ -2885,7 +2885,7 @@ where
         }
 
         if self.blink_teleport.active {
-            self.commit_xr_blink_teleport()?;
+            self.commit_xr_blink_teleport(views, transform)?;
             return Ok(XrBlinkTeleportFrame {
                 suppress_left_stick_movement: true,
             });
@@ -3031,7 +3031,11 @@ where
         true
     }
 
-    fn commit_xr_blink_teleport(&mut self) -> Result<()> {
+    fn commit_xr_blink_teleport(
+        &mut self,
+        views: &[xr::View],
+        transform: XrStageToWorld,
+    ) -> Result<()> {
         self.poll_xr_blink_teleport_worker();
         let preview = self.blink_teleport.preview.take();
         self.clear_xr_blink_teleport();
@@ -3047,12 +3051,23 @@ where
             return Ok(());
         };
 
-        let pitch_radians = self.camera.snapshot().pitch_radians;
-        self.camera.set_player_feet_pose(
-            target_feet,
-            -preview.target_yaw_degrees.to_radians(),
-            pitch_radians,
-        );
+        let snapshot = self.camera.snapshot();
+        let landing_yaw_radians = match xr_blink_teleport_landing_yaw_radians(
+            snapshot.yaw_radians,
+            views,
+            transform,
+            preview.target_yaw_degrees,
+        ) {
+            Ok(yaw_radians) => yaw_radians,
+            Err(error) => {
+                log::warn!(
+                    "failed to solve XR Blink landing yaw from headset pose, falling back to body yaw: {error:#}"
+                );
+                -preview.target_yaw_degrees.to_radians()
+            }
+        };
+        self.camera
+            .set_player_feet_pose(target_feet, landing_yaw_radians, snapshot.pitch_radians);
         if let Some(runtime) = self.runtime.as_ref() {
             self.camera
                 .probe_ground(runtime.client(), XR_BLINK_TELEPORT_GROUND_PROBE_DISTANCE);
@@ -6700,7 +6715,22 @@ fn target_yaw_degrees_from_stick_delta(
 ) -> f64 {
     let delta_degrees =
         normalize_radians_180(current_angle_radians - start_angle_radians).to_degrees();
-    normalize_degrees_180(base_yaw_degrees + delta_degrees)
+    normalize_degrees_180(base_yaw_degrees - delta_degrees)
+}
+
+fn xr_blink_teleport_landing_yaw_radians(
+    current_root_yaw_radians: f64,
+    views: &[xr::View],
+    transform: XrStageToWorld,
+    target_yaw_degrees: f64,
+) -> Result<f64> {
+    if !current_root_yaw_radians.is_finite() || !target_yaw_degrees.is_finite() {
+        bail!("invalid XR Blink landing yaw input");
+    }
+    let current_headset_yaw_radians = f64::from(xr_headset_world_yaw_from_views(views, transform)?);
+    let target_headset_yaw_radians = -target_yaw_degrees.to_radians();
+    let yaw_delta = normalize_radians_180(target_headset_yaw_radians - current_headset_yaw_radians);
+    Ok(normalize_radians_180(current_root_yaw_radians + yaw_delta))
 }
 
 fn normalize_radians_180(radians: f64) -> f64 {
@@ -7887,8 +7917,57 @@ mod tests {
         let target = target_yaw_degrees_from_stick_delta(0.0, left, top);
         let forward = horizontal_forward_from_player_yaw_degrees(target);
 
-        assert!((target + 90.0).abs() < 1.0e-9);
-        assert_vec3d_close(forward, Vec3d::new(1.0, 0.0, 0.0));
+        assert!((target - 90.0).abs() < 1.0e-9);
+        assert_vec3d_close(forward, Vec3d::new(-1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn xr_blink_landing_yaw_matches_arrow_under_current_headset_pose() {
+        let origin = XrTrackingOrigin::from_stage_view(
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            XrViewAlignmentMode::ViewPose,
+        )
+        .unwrap();
+        let before_snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.0, 72.0, -12.0),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let before_transform =
+            XrStageToWorld::from_tracking_origin(origin, before_snapshot).unwrap();
+        let left = test_xr_view(
+            Vec3::new(-0.03, 0.0, 0.0),
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        );
+        let right = test_xr_view(
+            Vec3::new(0.03, 0.0, 0.0),
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        );
+        let target_yaw_degrees = 0.0;
+
+        let landing_yaw = xr_blink_teleport_landing_yaw_radians(
+            before_snapshot.yaw_radians,
+            &[left, right],
+            before_transform,
+            target_yaw_degrees,
+        )
+        .unwrap();
+        let after_snapshot = EngineCameraSnapshot::from_eye_pose(
+            before_snapshot.eye,
+            landing_yaw,
+            before_snapshot.pitch_radians,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let after_transform = XrStageToWorld::from_tracking_origin(origin, after_snapshot).unwrap();
+        let headset_yaw = xr_headset_world_yaw_from_views(&[left, right], after_transform).unwrap();
+        let desired_yaw = -target_yaw_degrees.to_radians() as f32;
+
+        assert!(
+            normalize_angle(headset_yaw - desired_yaw).abs() < 1.0e-6,
+            "headset yaw {headset_yaw} did not match desired arrow yaw {desired_yaw}"
+        );
     }
 
     #[test]
