@@ -152,6 +152,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) player_collision_box_visible: bool,
     pub(crate) crosshair_visible: bool,
     pub(crate) frame_pipeline_overlay_visible: bool,
+    pub(crate) debug_diagnostics_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
@@ -279,6 +280,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) first_person_player_visible: bool,
     pub(crate) crosshair_visible: bool,
     pub(crate) frame_pipeline_overlay_visible: bool,
+    pub(crate) debug_diagnostics_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) server_cadence: Option<GameSimulationCadence>,
 }
@@ -364,6 +366,7 @@ impl FlatClientDriver {
             player_collision_box_visible: false,
             crosshair_visible: true,
             frame_pipeline_overlay_visible: false,
+            debug_diagnostics_visible: false,
             player_model: GamePlayerModel::default(),
             render_resources: None,
             render_stats: RenderStreamStats::default(),
@@ -742,6 +745,7 @@ impl FlatClientDriver {
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: self.crosshair_visible,
             frame_pipeline_overlay_visible: self.frame_pipeline_overlay_visible,
+            debug_diagnostics_visible: self.debug_diagnostics_visible,
             player_model: self.player_model,
             server_cadence: self.server_simulation_cadence(),
         });
@@ -1047,6 +1051,7 @@ impl FlatClientDriver {
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: self.crosshair_visible,
             frame_pipeline_overlay_visible: self.frame_pipeline_overlay_visible,
+            debug_diagnostics_visible: self.debug_diagnostics_visible,
             player_model: self.player_model,
             server_cadence: self.server_simulation_cadence(),
         }))
@@ -1203,6 +1208,13 @@ impl FlatClientDriver {
                     self.frame_pipeline_overlay_visible = visible;
                     log::info!(
                         "frame pipeline overlay {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(visible) => {
+                    self.debug_diagnostics_visible = visible;
+                    log::info!(
+                        "debug diagnostics {}",
                         if visible { "visible" } else { "hidden" }
                     );
                 }
@@ -2617,6 +2629,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         fps_cap: options.frame_pacing.fps_cap,
         server_cadence: options.server_cadence,
         frame_pipeline_overlay_visible: options.frame_pipeline_overlay_visible,
+        debug_diagnostics_visible: options.debug_diagnostics_visible,
         touch_controls_mode: None,
         touch_settings: None,
         block_palette: Default::default(),
@@ -3196,6 +3209,27 @@ mod tests {
                     BlockPaletteOverlay::hidden(),
                 )
                 .frame_pipeline_overlay_visible
+        );
+    }
+
+    #[test]
+    fn ui_action_toggles_debug_diagnostics_visibility() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert!(!driver.debug_diagnostics_visible);
+        let result =
+            driver.apply_ui_action(GameUiAction::ToggleDebugDiagnostics, ui_action_context());
+
+        assert!(result.host_action.is_none());
+        assert!(driver.debug_diagnostics_visible);
+        assert!(
+            driver
+                .current_ui_render_state(
+                    FramePacingUiState::default(),
+                    BlockPaletteOverlay::hidden(),
+                )
+                .debug_diagnostics_visible
         );
     }
 

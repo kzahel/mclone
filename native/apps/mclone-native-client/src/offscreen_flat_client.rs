@@ -334,7 +334,7 @@ impl OffscreenFlatClientHost {
                 .upload_runtime_sections(frame.device, |elapsed| elapsed.as_secs_f64() * 1000.0)?;
         }
 
-        let debug_stats = self.debug_pane_stats(options.debug_pane);
+        let debug_stats = self.debug_pane_stats(self.driver.debug_diagnostics_visible);
         let debug_view_readiness_overlay = debug_stats
             .is_some()
             .then(|| {
@@ -366,6 +366,7 @@ impl OffscreenFlatClientHost {
                 first_person_player_visible: self.driver.camera.first_person_player_visible(),
                 crosshair_visible: self.driver.crosshair_visible,
                 frame_pipeline_overlay_visible: self.driver.frame_pipeline_overlay_visible,
+                debug_diagnostics_visible: self.driver.debug_diagnostics_visible,
                 player_model: self.driver.player_model,
                 server_cadence: self.driver.server_simulation_cadence(),
             },
@@ -865,6 +866,7 @@ fn configure_screenshot_scene(
     }
     host.driver.player_collision_box_visible = options.player_collision_box;
     host.driver.frame_pipeline_overlay_visible = options.frame_pipeline_overlay;
+    host.driver.debug_diagnostics_visible = options.debug_pane;
     host.driver.camera.set_view_mode(options.camera_view);
     if options.blink_debug {
         if !host.driver.begin_desktop_blink_debug() {

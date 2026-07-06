@@ -124,6 +124,7 @@ impl ClientExperienceController {
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
             | GameUiAction::ToggleFramePipelineOverlay
+            | GameUiAction::ToggleDebugDiagnostics
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetCollisionMode(_)
@@ -230,6 +231,7 @@ pub struct ClientExperienceSettingsProfile {
     pub first_person_player: ClientExperienceCapabilityStatus,
     pub crosshair: ClientExperienceCapabilityStatus,
     pub frame_pipeline_overlay: ClientExperienceCapabilityStatus,
+    pub debug_diagnostics: ClientExperienceCapabilityStatus,
     pub player_model: ClientExperienceCapabilityStatus,
     pub movement_mode: ClientExperienceCapabilityStatus,
     pub collision_mode: ClientExperienceCapabilityStatus,
@@ -262,6 +264,7 @@ impl ClientExperienceSettingsProfile {
             first_person_player: ClientExperienceCapabilityStatus::Supported,
             crosshair: ClientExperienceCapabilityStatus::Supported,
             frame_pipeline_overlay: ClientExperienceCapabilityStatus::Supported,
+            debug_diagnostics: ClientExperienceCapabilityStatus::Supported,
             player_model: ClientExperienceCapabilityStatus::Supported,
             movement_mode: ClientExperienceCapabilityStatus::Supported,
             collision_mode: ClientExperienceCapabilityStatus::Supported,
@@ -292,6 +295,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::ToggleFirstPersonPlayer => self.first_person_player,
             ClientExperienceActionKind::ToggleCrosshair => self.crosshair,
             ClientExperienceActionKind::ToggleFramePipelineOverlay => self.frame_pipeline_overlay,
+            ClientExperienceActionKind::ToggleDebugDiagnostics => self.debug_diagnostics,
             ClientExperienceActionKind::SetPlayerModel => self.player_model,
             ClientExperienceActionKind::SetMovementMode => self.movement_mode,
             ClientExperienceActionKind::SetCollisionMode => self.collision_mode,
@@ -481,6 +485,14 @@ impl ClientExperienceSettingsController {
                     ),
                 );
             }
+            GameUiAction::ToggleDebugDiagnostics => {
+                self.state.debug_diagnostics_visible = !self.state.debug_diagnostics_visible;
+                effects.setting_effects.push(
+                    ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(
+                        self.state.debug_diagnostics_visible,
+                    ),
+                );
+            }
             GameUiAction::SetPlayerModel(model) => {
                 self.state.player_model = model;
                 effects
@@ -664,6 +676,10 @@ impl ClientExperienceSettingsController {
                 profile.frame_pipeline_overlay,
             ),
             (
+                ClientExperienceActionKind::ToggleDebugDiagnostics,
+                profile.debug_diagnostics,
+            ),
+            (
                 ClientExperienceActionKind::SetPlayerModel,
                 profile.player_model,
             ),
@@ -794,6 +810,7 @@ pub struct ClientExperienceSettingsState {
     pub first_person_player_visible: bool,
     pub crosshair_visible: Option<bool>,
     pub frame_pipeline_overlay_visible: bool,
+    pub debug_diagnostics_visible: bool,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub collision_mode: GameCollisionMode,
@@ -835,6 +852,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             first_person_player_visible: state.first_person_player_visible,
             crosshair_visible: state.crosshair_visible,
             frame_pipeline_overlay_visible: state.frame_pipeline_overlay_visible,
+            debug_diagnostics_visible: state.debug_diagnostics_visible,
             player_model: state.player_model,
             movement_mode: state.movement_mode,
             collision_mode: state
@@ -877,6 +895,7 @@ impl ClientExperienceSettingsState {
         state.first_person_player_visible = self.first_person_player_visible;
         state.crosshair_visible = self.crosshair_visible;
         state.frame_pipeline_overlay_visible = self.frame_pipeline_overlay_visible;
+        state.debug_diagnostics_visible = self.debug_diagnostics_visible;
         state.player_model = self.player_model;
         state.movement_mode = self.movement_mode;
         state.collision_mode = Some(self.collision_mode);
@@ -1095,6 +1114,7 @@ pub enum ClientExperienceSettingEffect {
     SetFirstPersonPlayerVisible(bool),
     SetCrosshairVisible(bool),
     SetFramePipelineOverlayVisible(bool),
+    SetDebugDiagnosticsVisible(bool),
     SetPlayerModel(GamePlayerModel),
     SyncPlayerAppearance,
     SetMovementMode(GameMovementMode),
@@ -1166,6 +1186,7 @@ pub enum ClientExperienceActionKind {
     ToggleFirstPersonPlayer,
     ToggleCrosshair,
     ToggleFramePipelineOverlay,
+    ToggleDebugDiagnostics,
     SetPlayerModel,
     SetMovementMode,
     SetCollisionMode,
@@ -1223,6 +1244,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::ToggleFramePipelineOverlay => {
             ClientExperienceActionKind::ToggleFramePipelineOverlay
         }
+        GameUiAction::ToggleDebugDiagnostics => ClientExperienceActionKind::ToggleDebugDiagnostics,
         GameUiAction::SetPlayerModel(_) => ClientExperienceActionKind::SetPlayerModel,
         GameUiAction::SetMovementMode(_) => ClientExperienceActionKind::SetMovementMode,
         GameUiAction::SetCollisionMode(_) => ClientExperienceActionKind::SetCollisionMode,
@@ -1281,6 +1303,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetFarLodRange
         | ClientExperienceActionKind::ToggleCrosshair
         | ClientExperienceActionKind::ToggleFramePipelineOverlay
+        | ClientExperienceActionKind::ToggleDebugDiagnostics
         | ClientExperienceActionKind::SetTurnMode
         | ClientExperienceActionKind::SetXrTurnMode
         | ClientExperienceActionKind::CycleFramePacing
@@ -1385,6 +1408,7 @@ mod tests {
             GameUiAction::ToggleFirstPersonPlayer,
             GameUiAction::ToggleCrosshair,
             GameUiAction::ToggleFramePipelineOverlay,
+            GameUiAction::ToggleDebugDiagnostics,
             GameUiAction::SetPlayerModel(GamePlayerModel::UprightBear),
             GameUiAction::SetMovementMode(GameMovementMode::Fly),
             GameUiAction::SetCollisionMode(GameCollisionMode::NoClip),
@@ -1402,7 +1426,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 47);
+        assert_eq!(samples.len(), 48);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -1412,6 +1436,10 @@ mod tests {
         );
         assert_eq!(
             classify_game_ui_action(GameUiAction::ToggleFramePipelineOverlay),
+            ClientExperienceActionClassification::CapabilityGated
+        );
+        assert_eq!(
+            classify_game_ui_action(GameUiAction::ToggleDebugDiagnostics),
             ClientExperienceActionClassification::CapabilityGated
         );
         assert_eq!(
@@ -1511,6 +1539,18 @@ mod tests {
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(true)]
         );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::ToggleDebugDiagnostics,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert!(settings.state().debug_diagnostics_visible);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(
+                true
+            )]
+        );
     }
 
     #[test]
@@ -1562,6 +1602,9 @@ mod tests {
             frame_pipeline_overlay: ClientExperienceCapabilityStatus::Unsupported(
                 "Frame pipeline overlay is unavailable for this profile",
             ),
+            debug_diagnostics: ClientExperienceCapabilityStatus::Unsupported(
+                "Debug diagnostics are unavailable for this profile",
+            ),
             ..ClientExperienceSettingsProfile::default()
         };
         let mut settings = ClientExperienceSettingsController::default();
@@ -1588,6 +1631,18 @@ mod tests {
                 kind: ClientExperienceActionKind::ToggleFramePipelineOverlay,
                 status: ClientExperienceCapabilityStatus::Unsupported(
                     "Frame pipeline overlay is unavailable for this profile"
+                ),
+            }]
+        );
+
+        let effects = settings.apply_ui_action(GameUiAction::ToggleDebugDiagnostics, profile);
+        assert!(!settings.state().debug_diagnostics_visible);
+        assert_eq!(
+            effects.capability_projection.actions,
+            vec![ClientExperienceActionAvailability {
+                kind: ClientExperienceActionKind::ToggleDebugDiagnostics,
+                status: ClientExperienceCapabilityStatus::Unsupported(
+                    "Debug diagnostics are unavailable for this profile"
                 ),
             }]
         );

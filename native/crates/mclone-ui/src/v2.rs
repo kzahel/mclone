@@ -2058,6 +2058,7 @@ impl GameUiHost {
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
             | GameUiAction::ToggleFramePipelineOverlay
+            | GameUiAction::ToggleDebugDiagnostics
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetCollisionMode(_)
@@ -2259,6 +2260,7 @@ const UI_V2_OPTIONS_TURN_MODE: UiWidgetId = UiWidgetId(120);
 const UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY: UiWidgetId = UiWidgetId(121);
 const UI_V2_OPTIONS_COLLISION_MODE: UiWidgetId = UiWidgetId(122);
 const UI_V2_OPTIONS_TRAVEL_ASSIST: UiWidgetId = UiWidgetId(123);
+const UI_V2_OPTIONS_DEBUG_DIAGNOSTICS: UiWidgetId = UiWidgetId(124);
 const UI_V2_SERVER_SETTINGS_HOST_RATE: UiWidgetId = UiWidgetId(701);
 const UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE: UiWidgetId = UiWidgetId(702);
 const UI_V2_SERVER_SETTINGS_PHYSICS_RATE: UiWidgetId = UiWidgetId(703);
@@ -2874,6 +2876,15 @@ fn options_layout(
         "Frame Metrics",
         state.frame_pipeline_overlay_visible,
         GameUiAction::ToggleFramePipelineOverlay,
+    );
+    right_y += 20.0;
+    push_checkbox(
+        &mut layout,
+        UI_V2_OPTIONS_DEBUG_DIAGNOSTICS,
+        Rect::new(right_x, right_y, column_width, 18.0),
+        "Debug Pane",
+        state.debug_diagnostics_visible,
+        GameUiAction::ToggleDebugDiagnostics,
     );
     right_y += 20.0;
     layout.push(

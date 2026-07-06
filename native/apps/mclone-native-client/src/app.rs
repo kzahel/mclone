@@ -190,7 +190,6 @@ struct ChunkApp {
     mouse_locked: bool,
     mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
-    debug_visible: bool,
     ui_v2_hit_debug: bool,
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
@@ -234,7 +233,6 @@ impl ChunkApp {
             mouse_locked: false,
             mouse_lock_requested: false,
             last_cursor: None,
-            debug_visible: false,
             ui_v2_hit_debug,
             last_frame: Instant::now(),
             next_redraw_at: None,
@@ -1036,7 +1034,11 @@ impl ApplicationHandler for ChunkApp {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        self.debug_visible = !self.debug_visible;
+                        self.apply_ui_action(
+                            GameUiAction::ToggleDebugDiagnostics,
+                            event_loop,
+                            false,
+                        );
                         self.schedule_next_redraw(event_loop);
                         return;
                     }
@@ -1318,15 +1320,16 @@ impl ApplicationHandler for ChunkApp {
                 };
                 self.driver.set_ui_scale(gui_scale);
                 let render_options = self.driver.effective_render_options();
-                let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
-                    .then(|| self.debug_pane_stats(render_options));
+                let debug_stats = (self.driver.debug_diagnostics_visible
+                    && self.driver.runtime.is_some())
+                .then(|| self.debug_pane_stats(render_options));
                 let session_projection = self.driver.session_projection();
                 let flat_hud = self.current_flat_hud(
                     session_projection.status_overlay.clone(),
                     self.driver.ui_is_active(),
                 );
                 let loading_progress_overlay = session_projection.loading_progress_overlay;
-                let debug_view_readiness_overlay = (self.debug_visible
+                let debug_view_readiness_overlay = (self.driver.debug_diagnostics_visible
                     && loading_progress_overlay.is_none())
                 .then(|| {
                     self.driver
@@ -1351,6 +1354,7 @@ impl ApplicationHandler for ChunkApp {
                     first_person_player_visible: self.driver.camera.first_person_player_visible(),
                     crosshair_visible: self.driver.crosshair_visible,
                     frame_pipeline_overlay_visible: self.driver.frame_pipeline_overlay_visible,
+                    debug_diagnostics_visible: self.driver.debug_diagnostics_visible,
                     player_model: self.driver.player_model,
                     server_cadence: self.driver.server_simulation_cadence(),
                 };

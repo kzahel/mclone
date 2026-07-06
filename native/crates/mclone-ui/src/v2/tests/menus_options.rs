@@ -165,6 +165,11 @@ fn options_buttons_emit_expected_actions_from_committed_rects() {
         .widget(UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY)
         .expect("frame metrics row")
         .rect;
+    let debug_diagnostics = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_DEBUG_DIAGNOSTICS)
+        .expect("debug diagnostics row")
+        .rect;
     let controls = surface
         .layout()
         .widget(UI_V2_OPTIONS_CONTROLS)
@@ -188,6 +193,7 @@ fn options_buttons_emit_expected_actions_from_committed_rects() {
         ),
         (turn, GameUiAction::SetTurnMode(GameTurnMode::Snap30)),
         (frame_metrics, GameUiAction::ToggleFramePipelineOverlay),
+        (debug_diagnostics, GameUiAction::ToggleDebugDiagnostics),
         (
             controls,
             GameUiAction::OpenHelp(GameHelpParent::OptionsPause),

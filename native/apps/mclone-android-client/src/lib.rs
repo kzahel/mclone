@@ -1525,6 +1525,13 @@ mod android {
                         );
                         ok = false;
                     }
+                    ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(_) => {
+                        self.session_status = StatusOverlay::new(
+                            "Debug diagnostics panel is unavailable on flat Android",
+                            false,
+                        );
+                        ok = false;
+                    }
                     ClientExperienceSettingEffect::SetPlayerModel(model) => {
                         self.player_model = model;
                         log::info!("Mclone Android player model set to {}", model.label());
@@ -1690,6 +1697,7 @@ mod android {
                 first_person_player_visible: self.camera.first_person_player_visible(),
                 crosshair_visible: Some(self.crosshair_visible),
                 frame_pipeline_overlay_visible: false,
+                debug_diagnostics_visible: false,
                 player_model: self.player_model,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
                 collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
@@ -2372,6 +2380,9 @@ mod android {
             ClientExperienceCapabilityStatus::Unsupported("FPS cap is fixed on flat Android");
         settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
             "Frame pipeline overlay is unavailable on flat Android",
+        );
+        settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
+            "Debug diagnostics panel is unavailable on flat Android",
         );
         settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
             "Server simulation cadence is unavailable on flat Android",

@@ -3131,6 +3131,7 @@ pub(crate) fn run_startup_streaming_perf(
                 first_person_player_visible: false,
                 crosshair_visible: true,
                 frame_pipeline_overlay_visible: false,
+                debug_diagnostics_visible: false,
                 player_model: Default::default(),
                 server_cadence: None,
             });
@@ -3577,6 +3578,7 @@ pub(crate) fn run_frame_budget_probe(
                 first_person_player_visible: false,
                 crosshair_visible: true,
                 frame_pipeline_overlay_visible: false,
+                debug_diagnostics_visible: false,
                 player_model: Default::default(),
                 server_cadence: None,
             });

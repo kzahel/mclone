@@ -3378,6 +3378,7 @@ impl WebChunkRenderSession {
                 | ClientExperienceSettingEffect::SetTurnMode(_)
                 | ClientExperienceSettingEffect::SetXrTurnMode(_)
                 | ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(_)
+                | ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(_)
                 | ClientExperienceSettingEffect::CycleFramePacing
                 | ClientExperienceSettingEffect::CycleFpsCap
                 | ClientExperienceSettingEffect::SetServerSimulationCadence(_) => {}
@@ -3526,6 +3527,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::ToggleCrosshair
                 | GameUiAction::ToggleFirstPersonPlayer
                 | GameUiAction::ToggleFramePipelineOverlay
+                | GameUiAction::ToggleDebugDiagnostics
                 | GameUiAction::SetPlayerModel(_)
                 | GameUiAction::SetMovementMode(_)
                 | GameUiAction::SetCollisionMode(_)
@@ -3670,6 +3672,7 @@ impl WebChunkRenderSession {
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: Some(self.crosshair_visible),
             frame_pipeline_overlay_visible: false,
+            debug_diagnostics_visible: false,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
@@ -5398,6 +5401,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleCrosshair => "toggleCrosshair",
         GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",
         GameUiAction::ToggleFramePipelineOverlay => "toggleFramePipelineOverlay",
+        GameUiAction::ToggleDebugDiagnostics => "toggleDebugDiagnostics",
         GameUiAction::SetPlayerModel(_) => "setPlayerModel",
         GameUiAction::SetMovementMode(_) => "setMovementMode",
         GameUiAction::SetCollisionMode(_) => "setCollisionMode",
@@ -5944,6 +5948,9 @@ fn web_client_experience_profile() -> ClientExperienceProfile {
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
         "Frame pipeline overlay is unavailable until web emits frame accounting reports",
+    );
+    settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
+        "Debug diagnostics panel is unavailable until the web presenter is wired",
     );
     settings.server_simulation_cadence = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     ClientExperienceProfile::new(settings)

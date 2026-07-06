@@ -1,6 +1,7 @@
 # 148: XR Diagnostic Widget Panels
 
-Status: Slice 1 landed 2026-07-06; later slices proposed.
+Status: Slice 1 landed 2026-07-06; Slice 3A landed 2026-07-06;
+later slices proposed.
 
 Workstream: native Rust shared UI, diagnostics, and XR presentation. This is a
 successor follow-up to tactical
@@ -286,6 +287,62 @@ Deliverables:
 
 Non-goal: do not port every historical debug label if the data source is
 desktop-only or obsolete. Prefer a small useful shared subset first.
+
+Slice 3A implementation record:
+
+- Added a shared `ToggleDebugDiagnostics` UI action, settings capability,
+  render-state bit, and `SetDebugDiagnosticsVisible` effect alongside the
+  existing frame metrics toggle.
+- Added a shared Options menu checkbox labeled `Debug Pane`. Desktop tilde now
+  routes through the same shared action instead of toggling an app-local flag.
+- Kept desktop flat/offscreen rendering on the existing shared
+  `DebugOverlay`/`FlatDebugOverlay` draw model.
+- Extended `mclone-xr-scene::XrDiagnosticPanel` to present the shared
+  `DebugOverlay` text widget through the same passive XR-safe world panel used
+  by frame metrics. The first XR snapshot is intentionally compact: pose,
+  movement/collision mode, render distance/tracking, host queue depths,
+  chunk/draw/actor counts, mesh/upload counters, and render options.
+- Desktop and XR profiles support debug diagnostics. Flat Android and web
+  profiles project the shared action as unsupported with explicit messages
+  until their presenters are wired.
+
+Validation run:
+
+```bash
+cargo fmt --all
+cargo check -p mclone-ui
+cargo check -p mclone-app-runtime
+cargo check -p mclone-native-client --features xr
+cargo check -p mclone-xr-scene
+cargo check -p mclone-web-client
+cargo check -p mclone-web-client --target wasm32-unknown-unknown
+cargo check -p mclone-android-client
+cargo check -p mclone-android-xr-client
+cargo test -p mclone-ui menus_options
+cargo test -p mclone-app-runtime client_experience
+cargo test -p mclone-xr-scene xr_profile_supports_debug_diagnostics
+cargo test -p mclone-native-client ui_action_toggles_debug_diagnostics_visibility
+```
+
+Screenshot validation:
+
+```bash
+cargo run --quiet -p mclone-native-client --bin mclone-native-client -- \
+  --screenshot /tmp/mclone-debug-diagnostics-widget.png --width 960 \
+  --height 540 --startup-wait idle --seed 12345 --chunk-x 0 --chunk-z 0 \
+  --render-distance 2 --day-time 6000 --freeze-time --lighting false \
+  --fullbright true --screenshot-hud false --screenshot-debug-pane true
+
+cargo run --quiet -p mclone-native-client --bin mclone-native-client -- \
+  --screenshot /tmp/mclone-debug-diagnostics-options.png --width 960 \
+  --height 540 --screenshot-ui options-pause --startup-wait idle \
+  --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 \
+  --day-time 6000 --freeze-time --lighting false --fullbright true \
+  --screenshot-hud false
+```
+
+Both screenshots were inspected. The debug pane renders over the world, and
+the Options panel shows the `Debug Pane` checkbox without layout overlap.
 
 ## Slice 4: Diagnostic Action Tripwires
 

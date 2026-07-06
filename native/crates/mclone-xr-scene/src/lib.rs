@@ -95,10 +95,11 @@ use mclone_render_session::{
 };
 use mclone_server::WorkerFrameMetrics;
 use mclone_ui::{
-    Color, DEFAULT_JOIN_REMOTE_ADDR, GameCollisionMode, GameFramePacingMode, GameMovementMode,
-    GamePlayerModel, GameScreen, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode,
-    GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, UiDrawCacheStats,
-    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, GameCollisionMode, GameFramePacingMode,
+    GameMovementMode, GamePlayerModel, GameScreen, GameUiAction, GameUiHost, GameUiRenderState,
+    GameXrTurnMode, GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
+    UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay,
+    render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -2739,6 +2740,7 @@ where
         let mut panel_stats = WorldGuiPanelRenderStats::default();
         let mut draw_cache_stats = UiDrawCacheStats::default();
         let diagnostic_panel = xr_diagnostic_panel_from_render_views(render_views);
+        self.refresh_debug_diagnostics_overlay();
         let (diagnostic_panel_stats, diagnostic_draw_cache) = self
             .diagnostic_panel
             .render_multiview(
@@ -4425,6 +4427,7 @@ where
         let mut ui_draw_cache_stats = panel_draw.draw_cache;
         let mut xr_world_panel_ms = 0.0;
         let diagnostic_panel_start = collect_split_timing.then(Instant::now);
+        self.refresh_debug_diagnostics_overlay();
         let (diagnostic_panel_stats, diagnostic_draw_cache) = self
             .diagnostic_panel
             .render_in_slot(
@@ -4731,6 +4734,7 @@ where
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: None,
             frame_pipeline_overlay_visible: self.diagnostic_panel.frame_metrics_visible(),
+            debug_diagnostics_visible: self.diagnostic_panel.debug_diagnostics_visible(),
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
@@ -4753,6 +4757,108 @@ where
             touch_settings: None,
             block_palette,
         }
+    }
+
+    fn refresh_debug_diagnostics_overlay(&mut self) {
+        if !self.diagnostic_panel.debug_diagnostics_visible() {
+            self.diagnostic_panel.clear_debug_overlay();
+            return;
+        }
+        let overlay = self.debug_diagnostics_overlay();
+        self.diagnostic_panel.set_debug_overlay(overlay);
+    }
+
+    fn debug_diagnostics_overlay(&self) -> DebugOverlay {
+        let snapshot = self.camera.snapshot();
+        let runtime_stats = self.runtime.as_ref().map(|runtime| runtime.stats());
+        let render_distance =
+            runtime_stats.map_or(self.scene.render_distance, |stats| stats.render_distance);
+        let tracking_radius = runtime_stats.map_or(0, |stats| stats.chunk_tracking_radius);
+        let interest_center =
+            runtime_stats.map_or(snapshot.chunk_pos, |stats| stats.interest_center);
+        let host = runtime_stats
+            .map(|stats| stats.host_mode.label().to_ascii_uppercase())
+            .unwrap_or_else(|| "STARTUP".to_owned());
+        let runner = runtime_stats
+            .and_then(|stats| stats.server_runner_kind)
+            .map(|kind| kind.label().to_ascii_uppercase())
+            .unwrap_or_else(|| "REMOTE".to_owned());
+        let actor_indices = self.render_stats.drawn_actor_index_count;
+        let lines = vec![
+            format!(
+                "POS {:.1} {:.1} {:.1}",
+                snapshot.eye.x, snapshot.eye.y, snapshot.eye.z
+            ),
+            format!(
+                "CHUNK {} {} SPEED {:.1}",
+                snapshot.chunk_pos.x,
+                snapshot.chunk_pos.z,
+                self.camera.speed_blocks_per_second()
+            ),
+            format!(
+                "MODE {}/{} GROUND {}",
+                self.camera.movement_mode().label(),
+                self.camera.collision_mode().label(),
+                if self.camera.on_ground() { "Y" } else { "N" }
+            ),
+            format!(
+                "VIEW R{} T{} C{} {}",
+                render_distance, tracking_radius, interest_center.x, interest_center.z
+            ),
+            format!(
+                "HOST {} {} SQ{} UQ{}",
+                host,
+                runner,
+                runtime_stats.map_or(0, |stats| stats.server_command_queue_depth),
+                runtime_stats.map_or(0, |stats| stats.server_update_queue_depth)
+            ),
+            format!(
+                "CHUNKS L{} V{} P{}",
+                runtime_stats.map_or(0, |stats| stats.loaded_chunks),
+                runtime_stats.map_or(0, |stats| stats.client_visible_chunks),
+                runtime_stats.map_or(0, |stats| stats.pending_jobs)
+            ),
+            format!(
+                "DRAW S {}/{} F {}/{}",
+                self.render_stats.drawn_section_count,
+                self.render_stats.section_count,
+                self.render_stats.drawn_face_count,
+                self.render_stats.face_count
+            ),
+            format!(
+                "ACTOR R {}/{} I{}",
+                self.render_stats.drawn_actor_count, self.render_stats.actor_count, actor_indices
+            ),
+            format!(
+                "MESH R{} U{} D{} SQ{} CQ{} X{}",
+                self.render_stats.last_rebuilt_section_count,
+                self.render_stats.last_uploaded_section_count,
+                self.render_stats.last_deferred_section_count,
+                self.render_stats.last_submitted_compile_section_count,
+                self.render_stats.last_completed_compile_section_count,
+                self.render_stats.last_stale_compile_section_count
+            ),
+            format!(
+                "PENDING R{} C{}",
+                runtime_stats.map_or(0, |stats| stats.pending_render_chunks),
+                self.render_stats.last_pending_compile_jobs
+            ),
+            format!(
+                "OPTIONS OCC {} FULL {} {}",
+                if self.render_options.section_occlusion_culling {
+                    "Y"
+                } else {
+                    "N"
+                },
+                if self.render_options.force_fullbright {
+                    "Y"
+                } else {
+                    "N"
+                },
+                self.render_options.color_profile.label()
+            ),
+        ];
+        DebugOverlay::new("XR DEBUG", lines)
     }
 
     fn client_experience_settings_state(&self) -> ClientExperienceSettingsState {
@@ -5906,6 +6012,13 @@ where
                     self.diagnostic_panel.set_frame_metrics_visible(visible);
                     log::info!(
                         "XR frame pipeline overlay {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
+                ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(visible) => {
+                    self.diagnostic_panel.set_debug_diagnostics_visible(visible);
+                    log::info!(
+                        "XR debug diagnostics {}",
                         if visible { "visible" } else { "hidden" }
                     );
                 }
@@ -8765,6 +8878,13 @@ mod tests {
         let profile = xr_client_experience_profile();
 
         assert!(profile.settings.frame_pipeline_overlay.is_supported());
+    }
+
+    #[test]
+    fn xr_profile_supports_debug_diagnostics() {
+        let profile = xr_client_experience_profile();
+
+        assert!(profile.settings.debug_diagnostics.is_supported());
     }
 
     const EMULATED_XR_CREATE_SEED: i64 = 24_680;
