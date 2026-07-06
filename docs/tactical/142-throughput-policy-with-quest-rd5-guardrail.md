@@ -14,6 +14,14 @@ over-budget frames.
 Workstream: native Rust performance, desktop streaming throughput, Android XR /
 Quest frame-pacing guardrails.
 
+Measurement hierarchy: [`../topics/performance.md`](../topics/performance.md)
+is the parent performance index, and
+[`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md) is the
+durable accounting/budgeting rulebook for any frame-pipeline policy change.
+Use that rulebook's stage model, report schema, and gaps 9-10 before turning
+this tactical's Candidate A/B notes into a new successor implementation
+tactical.
+
 ## Decision
 
 Optimize throughput against desktop-shaped startup streaming, not against small
@@ -642,6 +650,9 @@ inference:
 
 ## Links
 
+- [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md) owns the
+  shared frame-pipeline accounting model, validation guardrails, and follow-on
+  gaps 9-10 for remote/dedicated contrast and elapsed/headroom-aware budgeting.
 - [`140-streaming-throughput-frame-pacing-baselines.md`](140-streaming-throughput-frame-pacing-baselines.md)
   keeps the setup-era evidence and baseline history (its cadence-sweep
   interpretation rule is superseded by the falsification above).
