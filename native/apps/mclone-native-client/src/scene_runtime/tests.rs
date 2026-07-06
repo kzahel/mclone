@@ -715,6 +715,119 @@ fn window_runtime_reuses_remote_session_for_interest_updates() {
 }
 
 #[test]
+fn window_runtime_remote_poll_reports_io_actor_read_without_blocking() {
+    if !extracted_asset_root().exists() {
+        return;
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (second_command_tx, second_command_rx) = std::sync::mpsc::channel();
+    let (release_response_tx, release_response_rx) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        mclone_net::complete_server_handshake(&mut stream).unwrap();
+        assert_eq!(
+            mclone_net::read_client_command_frame(&mut stream).unwrap(),
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+        );
+        mclone_net::write_server_update_batch(
+            &mut stream,
+            &[ServerUpdate::TimeUpdate { day_time: 1 }],
+        )
+        .unwrap();
+        assert_eq!(
+            mclone_net::read_client_command_frame(&mut stream).unwrap(),
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(1, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+        );
+        second_command_tx.send(()).unwrap();
+        release_response_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        mclone_net::write_server_update_batch(
+            &mut stream,
+            &[ServerUpdate::TimeUpdate { day_time: 2 }],
+        )
+        .unwrap();
+    });
+
+    {
+        let scene = SceneOptions {
+            render_distance: 0,
+            remote_addr: Some(addr.to_string()),
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        assert!(runtime.set_interest_center(ChunkPos::new(1, 0)).unwrap());
+        second_command_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+
+        let poll_start = std::time::Instant::now();
+        assert!(!runtime.poll().unwrap());
+        let no_response_poll_wall_ms = poll_start.elapsed().as_secs_f64() * 1_000.0;
+        let no_response_diagnostics = runtime.last_poll_diagnostics();
+        assert_eq!(no_response_diagnostics.updates, 0);
+        assert_eq!(no_response_diagnostics.producer_read_ms, 0.0);
+        assert_eq!(no_response_diagnostics.producer_decode_ms, 0.0);
+        assert!(
+            no_response_poll_wall_ms < 50.0,
+            "ready-only poll blocked before the server released a response: {no_response_poll_wall_ms:.3}ms"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        release_response_tx.send(()).unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let applied = loop {
+            let poll_start = std::time::Instant::now();
+            let _changed = runtime.poll().unwrap();
+            let poll_wall_ms = poll_start.elapsed().as_secs_f64() * 1_000.0;
+            let diagnostics = runtime.last_poll_diagnostics();
+            if diagnostics.updates > 0 {
+                break (diagnostics, poll_wall_ms);
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for held remote response"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        let (diagnostics, applied_poll_wall_ms) = applied;
+        assert_eq!(diagnostics.updates, 1);
+        assert!(
+            diagnostics.producer_read_ms >= 100.0,
+            "IO actor read timing should include the held response, got {:.3}ms",
+            diagnostics.producer_read_ms
+        );
+        assert_eq!(diagnostics.producer_response_sequence, Some(2));
+        assert!(
+            diagnostics.drain_updates_ms < 50.0,
+            "runtime drain should not include held socket read time: {:.3}ms",
+            diagnostics.drain_updates_ms
+        );
+        assert!(
+            diagnostics.poll_total_ms < 50.0,
+            "runtime poll should not include held socket read time: {:.3}ms",
+            diagnostics.poll_total_ms
+        );
+        assert!(
+            applied_poll_wall_ms < 50.0,
+            "measured runtime poll wall time should remain below socket hold: {applied_poll_wall_ms:.3}ms"
+        );
+    }
+    server.join().unwrap();
+}
+
+#[test]
 fn window_runtime_reconnects_remote_session_and_resyncs_chunk_cache() {
     if !extracted_asset_root().exists() {
         return;

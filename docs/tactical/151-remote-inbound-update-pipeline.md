@@ -2,9 +2,9 @@
 
 Status: active; Slice 0 documentation baseline completed 2026-07-06; Slice 1
 shared `ClientConnection` runtime seam completed 2026-07-06; Slice 2 native
-TCP client IO actor completed 2026-07-06. Slice 3 is next: surface remote
-producer/read/decode diagnostics through runtime accounting and re-tighten the
-remote frame budget contract. This is the focused successor to tactical
+TCP client IO actor completed 2026-07-06; Slice 3 remote runtime budget and
+diagnostics completed 2026-07-06. Slice 4 is next: Quest remote chunk-view
+churn rebaseline. This is the focused successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 for the remaining remote ready-batch stall. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
@@ -412,6 +412,8 @@ dead-code warnings for `ANDROID_REMOTE_ADDR_NONE_SENTINEL` and
 
 ## Slice 3: Remote Runtime Budget And Diagnostics
 
+Status: completed 2026-07-06.
+
 Goal: make remote frame `poll()` indistinguishable from local integrated at the
 client update boundary.
 
@@ -443,6 +445,58 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-
 pnpm native:accounting:smoke
 git diff --check
 ```
+
+Implementation notes:
+
+- Carried producer-side read time, decode time, and response sequence through
+  `RuntimeUpdatePumpReport`, `RuntimePollTiming`, and
+  `RuntimePollDiagnostics`.
+- Preserved native IO actor batch totals while avoiding double counting:
+  `NativeServerUpdateBatch` still owns the full producer read/decode totals,
+  per-update envelopes carry per-update parser samples, and
+  `RemoteDedicatedConnection` attaches the batch producer total once to the
+  first queued update from that batch. Legacy/fake sessions without batch
+  totals still use per-update metadata.
+- Made normal-frame remote `poll()` surface producer metadata from already
+  queued decoded updates without making the runtime thread read or decode the
+  socket response.
+- Added desktop perf JSON fields for `poll_producer_read_ms`,
+  `poll_producer_decode_ms`, and `poll_producer_response_sequence` in frame
+  budget and startup streaming reports, including startup aggregate totals.
+- Added Android XR runtime max markers for producer read/decode/sequence through
+  `XrTerrainUploadSummary`.
+- Added a desktop loopback regression that holds a remote response while the
+  runtime polls, then asserts the held socket time appears as producer read
+  time and not as runtime drain/poll wall time.
+
+Validation completed 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client window_runtime_remote_poll_reports_io_actor_read_without_blocking -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+pnpm native:accounting:smoke
+cargo fmt --manifest-path native/Cargo.toml --all --check
+rg -n "pending response batch|pending_response_batch|pump_pending_remote_update_batches_report|try_drain_command_updates|drain_command_updates|NativeClientSession" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+git diff --check
+```
+
+Validation note: the app-crate check still reports the existing Android XR
+dead-code warnings for `ANDROID_REMOTE_ADDR_NONE_SENTINEL` and
+`normalize_android_legacy_remote_addr`; they are unrelated to this slice.
+
+`rg` classification:
+
+- `pending_response_batches` remains only as response-paired protocol
+  bookkeeping inside the remote `ClientConnection` adapter and its tests.
+- `drain_command_updates` / `try_drain_command_updates` remain as legacy trait
+  defaults, compatibility wrappers, low-level native session helpers, and
+  tests. Normal runtime polling uses the shared update queue.
+- `NativeClientSession` remains as the low-level native TCP compatibility
+  helper and the standalone remote-player visual smoke helper, not the normal
+  desktop/Android/Android XR remote runtime session.
 
 ## Slice 4: Quest Remote Churn Rebaseline
 

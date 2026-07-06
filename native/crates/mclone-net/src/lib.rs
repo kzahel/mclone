@@ -816,17 +816,19 @@ mod native_tcp {
         for _ in 0..update_count {
             let read_start = Instant::now();
             let payload = read_frame(reader, "server update")?;
-            producer_read_ms += elapsed_ms(read_start.elapsed());
+            let update_read_ms = elapsed_ms(read_start.elapsed());
+            producer_read_ms += update_read_ms;
             let encoded_len = payload.len();
             let decode_start = Instant::now();
             let update = decode_server_update(&payload)?;
-            producer_decode_ms += elapsed_ms(decode_start.elapsed());
+            let update_decode_ms = elapsed_ms(decode_start.elapsed());
+            producer_decode_ms += update_decode_ms;
             updates.push(NativeServerUpdateEnvelope {
                 update,
                 encoded_len,
                 response_sequence,
-                producer_read_ms,
-                producer_decode_ms,
+                producer_read_ms: update_read_ms,
+                producer_decode_ms: update_decode_ms,
             });
         }
         Ok(NativeServerUpdateBatch {

@@ -765,6 +765,9 @@ pub struct XrTerrainUploadSummary {
     pub poll_changed: bool,
     pub poll_total_ms: f64,
     pub poll_drain_updates_ms: f64,
+    pub poll_producer_read_ms: f64,
+    pub poll_producer_decode_ms: f64,
+    pub poll_producer_response_sequence: Option<u64>,
     pub poll_client_deferred_chunk_drop_ms: f64,
     pub poll_client_deferred_chunk_drop_items: usize,
     pub poll_client_deferred_chunk_drop_backlog_items: usize,
@@ -6029,6 +6032,9 @@ fn xr_poll_diagnostics_upload_summary(
     XrTerrainUploadSummary {
         poll_total_ms: diagnostics.poll_total_ms,
         poll_drain_updates_ms: diagnostics.drain_updates_ms,
+        poll_producer_read_ms: diagnostics.producer_read_ms,
+        poll_producer_decode_ms: diagnostics.producer_decode_ms,
+        poll_producer_response_sequence: diagnostics.producer_response_sequence,
         poll_client_deferred_chunk_drop_ms: diagnostics.client_deferred_chunk_drop_ms,
         poll_client_deferred_chunk_drop_items: diagnostics.client_deferred_chunk_drop_items,
         poll_client_deferred_chunk_drop_backlog_items: diagnostics

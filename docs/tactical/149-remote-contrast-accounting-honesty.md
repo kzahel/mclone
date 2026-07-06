@@ -3,8 +3,9 @@
 Status: active; Slice 1 `SendOnly` code, Quest evidence, the follow-up
 interest-command isolation, and the remote response-readiness poll fix landed
 2026-07-06. Remote contrast is still blocked by Slice 2 host-mode-honest
-projection and by the remaining single-batch remote drain/apply stall recorded
-below; the focused fix for that stall is tactical
+projection and by the Quest rebaseline for the single-batch remote
+drain/apply stall recorded below; the focused fix/rebaseline tracker is
+tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
