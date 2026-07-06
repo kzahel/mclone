@@ -171,6 +171,9 @@ decode and client-runtime-side apply.
   integrated, native remote TCP, web remote, and worker-backed local play
   should converge on `ClientConnection` even if their transport internals
   differ.
+- Adding `ClientConnection` without deleting or moving the duplicate
+  local-vs-remote runtime pump logic is not a completed slice. Transport
+  adapters may differ; normal frame update draining must be shared.
 - Keep startup, `DrainImmediately`, and `poll_until_idle` behavior explicit.
   Unlimited drains are allowed for those paths, but normal frame `poll()` must
   not read/decode socket batches.
@@ -225,6 +228,18 @@ Deliverables:
   In Slice 1 it may still fill the queue from the existing direct
   `try_drain_command_updates` call, but "receive ready batch" and "apply queued
   updates" must be separate internal steps.
+- Move the normal-frame drain/apply loop behind one shared runtime helper over
+  `ClientConnection`. Local integrated and remote dedicated should call the
+  same helper for `poll()` budget handling, queue depth/byte/age diagnostics,
+  stall reporting, and apply timing.
+- Delete or demote remote-only runtime state whose sole job is pending response
+  draining. If `pending_response_batches` or equivalent state still exists in
+  Slice 1, it must live inside the remote connection adapter as temporary
+  transport state, not in the runtime pump.
+- Remove direct normal-frame calls to remote transport drains from runtime and
+  platform adapters. Calls such as `try_drain_command_updates` /
+  `drain_command_updates` should be connection-adapter internals or explicit
+  startup/compatibility helpers, not the app frame path.
 - Add tests proving a queued snapshot -> section update -> unload sequence
   preserves order across budget stalls.
 - Add regressions proving local integrated and remote-shaped connections both
@@ -239,8 +254,14 @@ Validation:
 cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
 cargo test --manifest-path native/Cargo.toml -p mclone-net
+rg -n "try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/apps/mclone-* || true
 git diff --check
 ```
+
+The `rg` audit is not expected to be zero in Slice 1, but every remaining hit
+must be classified as one of: connection-adapter internals, explicit
+startup/compatibility helper, or test. No remaining hit may be part of normal
+frame runtime polling.
 
 ## Slice 2: Native TCP Client IO Actor
 

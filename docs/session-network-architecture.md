@@ -204,6 +204,12 @@ worker/P2P transports are implementation details behind this one boundary.
 The app/runtime owns when drained updates are applied and how much frame budget
 they may consume.
 
+Adding this boundary is only successful if it removes runtime duplication.
+Local integrated and remote dedicated may keep different producer adapters, but
+normal frame polling, `SendOnly`, `DrainImmediately`, update budget checks,
+ordering, queue diagnostics, and conservation accounting should live in one
+shared runtime path instead of parallel local/remote pump implementations.
+
 This intentionally follows the reference engine at the architectural level:
 Minecraft uses one `Connection` model for multiplayer sockets and integrated
 singleplayer memory channels. Mclone should not keep separate runtime-facing
