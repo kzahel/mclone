@@ -2551,6 +2551,15 @@ mod android {
             })
         }
 
+        fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
+            self.session.try_drain_command_updates().with_context(|| {
+                format!(
+                    "failed to poll updates from Android remote server {}",
+                    self.addr
+                )
+            })
+        }
+
         fn reconnect(&mut self) -> Result<()> {
             self.session = NativeClientSession::connect(self.addr.as_str()).with_context(|| {
                 format!("failed to reconnect to Android remote server {}", self.addr)

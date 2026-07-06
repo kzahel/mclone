@@ -1,9 +1,10 @@
 # 149: Remote/Dedicated Contrast Accounting Honesty
 
-Status: active; Slice 1 `SendOnly` code, Quest evidence, and the follow-up
-interest-command isolation landed 2026-07-06. Remote contrast is still blocked
-by Slice 2 host-mode-honest projection and by the remote update-poll/drain
-stall recorded below. Drafted 2026-07-06 as the gap-9 follow-on to tactical
+Status: active; Slice 1 `SendOnly` code, Quest evidence, the follow-up
+interest-command isolation, and the remote response-readiness poll fix landed
+2026-07-06. Remote contrast is still blocked by Slice 2 host-mode-honest
+projection and by the remaining single-batch remote drain/apply stall recorded
+below. Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 (gap 9). Predecessor evidence:
@@ -301,11 +302,96 @@ Result:
   `apply_updates_ms=9.303`, `updates=402`, `snapshot_updates=169`,
   `section_updates=61`, and `unload_updates=169`.
 
-Next implementation step before durable contrast rows: make the remote update
-pump drain pending response batches under a frame budget (or otherwise decouple
-TCP response draining from one render-frame poll), then do Slice 2's
-host-mode-honest report projection so remote client/server halves stop
-presenting unavailable counters as zeros.
+2026-07-06 remote response-readiness follow-up:
+
+- Added `NativeClientSession::try_drain_command_updates`, which uses a
+  nonblocking TCP readiness probe before attempting the existing blocking
+  response-batch read.
+- Extended `RemoteDedicatedServerSession` with `try_drain_command_updates`
+  and wired the native desktop, Android, and Android XR adapters through it.
+- Remote render-frame `poll()` now drains only ready response batches.
+  Synchronous startup, `DrainImmediately`, and `poll_until_idle` keep blocking
+  drains so initialization and protocol ordering stay unchanged.
+- `RuntimePollDiagnostics` now carries remote pending-response depth through
+  `server_update_queue_depth`; the Android XR perf markers therefore report
+  a real remote client-side pending queue instead of rendering that fact as
+  zero.
+- Added regressions:
+  `mclone_net::tests::native_tcp_client_try_drain_does_not_wait_for_delayed_response`
+  and
+  `local_single_view::tests::remote_poll_skips_pending_response_until_ready`.
+
+Validation run on 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+pnpm native:android-xr:apk
+```
+
+Results: all passed. `cargo check -p mclone-android-xr-client` still reported
+only the existing `ANDROID_REMOTE_ADDR_NONE_SENTINEL` /
+`normalize_android_legacy_remote_addr` dead-code warnings.
+
+Quest remote churn evidence captured 2026-07-06 on Meta Quest 3
+`2G0YC1ZF93041Z` from the pre-commit worktree after the response-readiness
+change:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-remote-ready-drain-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-remote-ready-drain-20260706-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-churn-rd5-remote-ready-drain-20260706-server.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Result:
+
+- The previous multi-second wait-for-server poll stall is gone:
+  `app_work_max_ms` dropped from `6007.791` to `268.630`, and
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms` dropped from
+  `6000.083` to `262.168`.
+- Remote pending-response depth is now visible:
+  `MCLONE_ANDROID_XR_PERF_QUEUE_MAX server_update_q=2` and
+  `MCLONE_ANDROID_XR_PERF_UPLOAD_MAX server_update_queue_depth=2`.
+- Locomotion/interest remains isolated:
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND` reported
+  `max_total_ms=0.242`, `max_send_ms=0.232`,
+  `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`, and zero
+  updates.
+- The remaining remote stall is one ready response batch being drained and
+  applied in a single frame: worst frame `2332` had
+  `app_work_ms=268.630`, `render_mclone_frame_ms=268.406`, and
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX` reported
+  `drain_updates_ms=253.930`, `apply_updates_ms=9.344`, `updates=402`,
+  `snapshot_updates=169`, `section_updates=61`, and
+  `unload_updates=169`.
+
+Next implementation step before durable contrast rows: split the ready remote
+response batch into a budgetable client-side update queue (or otherwise make
+remote batch decode/apply incremental), then do Slice 2's host-mode-honest
+report projection so remote client/server halves stop presenting unavailable
+counters as zeros.
 
 ## Slice 2: Host-Mode-Honest Report Projection
 

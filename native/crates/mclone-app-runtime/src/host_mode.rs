@@ -58,6 +58,9 @@ impl SingleViewHostOptions {
 pub trait RemoteDedicatedServerSession {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
     fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>>;
+    fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
+        self.drain_command_updates().map(Some)
+    }
     fn reconnect(&mut self) -> Result<()>;
 
     fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {

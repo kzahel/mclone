@@ -34,6 +34,12 @@ impl RemoteServerSession {
             .drain_command_updates()
             .with_context(|| format!("failed to drain updates from remote server {}", self.addr))
     }
+
+    pub(crate) fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
+        self.session
+            .try_drain_command_updates()
+            .with_context(|| format!("failed to poll updates from remote server {}", self.addr))
+    }
 }
 
 impl RemoteDedicatedServerSession for RemoteServerSession {
@@ -43,6 +49,10 @@ impl RemoteDedicatedServerSession for RemoteServerSession {
 
     fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
         RemoteServerSession::drain_command_updates(self)
+    }
+
+    fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
+        RemoteServerSession::try_drain_command_updates(self)
     }
 
     fn reconnect(&mut self) -> Result<()> {

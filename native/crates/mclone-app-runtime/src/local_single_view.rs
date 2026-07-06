@@ -575,6 +575,8 @@ impl LocalSingleViewSceneRuntime {
                 client_deferred_chunk_drop_backlog_items,
                 update_pump_stalled: pump_report.stalled,
                 update_pump_stall_count: pump_report.stall_count,
+                server_update_queue_depth: pump_report.remaining_queue_depth,
+                server_update_queue_bytes: pump_report.remaining_queue_bytes,
                 server_update_applied_bytes: pump_report.update_bytes,
                 server_update_oldest_applied_age_ms: pump_report.oldest_applied_update_age_ms,
                 poll_diagnostics_ms,
@@ -1487,6 +1489,12 @@ pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
     far_lod_cache: FarTerrainLodCache,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteUpdateDrainMode {
+    Blocking,
+    ReadyOnly,
+}
+
 impl<S> RemoteDedicatedSingleViewSceneRuntime<S>
 where
     S: RemoteDedicatedServerSession,
@@ -1619,8 +1627,10 @@ where
         if matches!(policy, GameplayCommandUpdatePolicy::DrainImmediately)
             && self.pending_response_batches > 0
         {
-            let pump_report = self
-                .pump_pending_remote_update_batches_report(RuntimeUpdatePumpBudget::unlimited())?;
+            let pump_report = self.pump_pending_remote_update_batches_report(
+                RuntimeUpdatePumpBudget::unlimited(),
+                RemoteUpdateDrainMode::Blocking,
+            )?;
             drain_updates_ms += pump_report.drain_updates_ms;
             changed |= pump_report.apply_report.changed;
             apply_report.accumulate(pump_report.apply_report);
@@ -1715,15 +1725,26 @@ where
         let poll_start = Instant::now();
         let mut polls = 0;
         while self.pending_response_batches > 0 {
-            self.poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())?;
+            self.poll_with_update_budget_and_drain_mode(
+                RuntimeUpdatePumpBudget::unlimited(),
+                RemoteUpdateDrainMode::Blocking,
+            )?;
             polls += 1;
         }
         Ok((polls, elapsed_ms(poll_start.elapsed())))
     }
 
     pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
+        self.poll_with_update_budget_and_drain_mode(budget, RemoteUpdateDrainMode::ReadyOnly)
+    }
+
+    fn poll_with_update_budget_and_drain_mode(
+        &mut self,
+        budget: RuntimeUpdatePumpBudget,
+        drain_mode: RemoteUpdateDrainMode,
+    ) -> Result<bool> {
         let poll_start = Instant::now();
-        let pump_report = self.pump_pending_remote_update_batches_report(budget)?;
+        let pump_report = self.pump_pending_remote_update_batches_report(budget, drain_mode)?;
         let changed = pump_report.apply_report.changed;
         self.core.finish_poll_diagnostics(
             RuntimePollTiming {
@@ -1731,6 +1752,8 @@ where
                 drain_updates_ms: pump_report.drain_updates_ms,
                 update_pump_stalled: pump_report.stalled,
                 update_pump_stall_count: pump_report.stall_count,
+                server_update_queue_depth: pump_report.remaining_queue_depth,
+                server_update_queue_bytes: pump_report.remaining_queue_bytes,
                 server_update_applied_bytes: pump_report.update_bytes,
                 server_update_oldest_applied_age_ms: pump_report.oldest_applied_update_age_ms,
                 ..RuntimePollTiming::default()
@@ -1744,15 +1767,27 @@ where
     fn pump_pending_remote_update_batches_report(
         &mut self,
         budget: RuntimeUpdatePumpBudget,
+        drain_mode: RemoteUpdateDrainMode,
     ) -> Result<RuntimeUpdatePumpReport> {
         let pump_start = Instant::now();
         let mut report = RuntimeUpdatePumpReport::default();
         while self.pending_response_batches > 0 {
             let drain_start = Instant::now();
-            let updates = self
-                .session
-                .drain_command_updates()
-                .context("failed to drain remote dedicated server updates")?;
+            let updates = match drain_mode {
+                RemoteUpdateDrainMode::Blocking => Some(
+                    self.session
+                        .drain_command_updates()
+                        .context("failed to drain remote dedicated server updates")?,
+                ),
+                RemoteUpdateDrainMode::ReadyOnly => self
+                    .session
+                    .try_drain_command_updates()
+                    .context("failed to poll remote dedicated server updates")?,
+            };
+            let Some(updates) = updates else {
+                report.remaining_queue_depth = self.pending_response_batches;
+                return Ok(report);
+            };
             self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
             report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
             let exchange_report = self.core.apply_exchange_report(update_drain_exchange(
@@ -1980,6 +2015,8 @@ fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<Chu
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::*;
     use crate::render_assets::extracted_asset_root;
 
@@ -1997,6 +2034,59 @@ mod tests {
 
         fn reconnect(&mut self) -> Result<()> {
             match *self {}
+        }
+    }
+
+    #[derive(Debug)]
+    struct PollableRemoteSession {
+        blocking_drains: VecDeque<Result<Vec<ServerUpdate>>>,
+        ready_drains: VecDeque<Option<Result<Vec<ServerUpdate>>>>,
+        send_count: usize,
+        blocking_drain_count: usize,
+        try_drain_count: usize,
+        reconnect_count: usize,
+    }
+
+    impl PollableRemoteSession {
+        fn new(
+            blocking_drains: Vec<Result<Vec<ServerUpdate>>>,
+            ready_drains: Vec<Option<Result<Vec<ServerUpdate>>>>,
+        ) -> Self {
+            Self {
+                blocking_drains: blocking_drains.into(),
+                ready_drains: ready_drains.into(),
+                send_count: 0,
+                blocking_drain_count: 0,
+                try_drain_count: 0,
+                reconnect_count: 0,
+            }
+        }
+    }
+
+    impl RemoteDedicatedServerSession for PollableRemoteSession {
+        fn send_command_only(&mut self, _command: ClientCommand) -> Result<()> {
+            self.send_count += 1;
+            Ok(())
+        }
+
+        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+            self.blocking_drain_count += 1;
+            self.blocking_drains
+                .pop_front()
+                .unwrap_or_else(|| anyhow::bail!("scripted blocking drain missing response"))
+        }
+
+        fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
+            self.try_drain_count += 1;
+            match self.ready_drains.pop_front().unwrap_or(None) {
+                Some(result) => result.map(Some),
+                None => Ok(None),
+            }
+        }
+
+        fn reconnect(&mut self) -> Result<()> {
+            self.reconnect_count += 1;
+            Ok(())
         }
     }
 
@@ -2189,6 +2279,66 @@ mod tests {
                 .update_queue_depth,
             0
         );
+    }
+
+    #[test]
+    fn remote_poll_skips_pending_response_until_ready() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let center = ChunkPos::new(0, 0);
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let session = PollableRemoteSession::new(
+            vec![Ok(Vec::new())],
+            vec![
+                None,
+                Some(Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])),
+            ],
+        );
+        let mut runtime = RemoteDedicatedSingleViewSceneRuntime::with_mesh_assets(
+            SingleViewHostOptions::new(center, 0),
+            session,
+            mesh_assets,
+        )
+        .unwrap();
+
+        assert_eq!(runtime.pending_response_batches, 0);
+        assert_eq!(runtime.session.blocking_drain_count, 1);
+        assert_eq!(runtime.core().day_time(), 0);
+
+        let command = ClientCommand::SetChunkView(crate::chunk_view(
+            ChunkPos::new(1, 0),
+            0,
+            chunk_tracking_radius_for_render_distance(0),
+        ));
+        let (_changed, timing) = runtime
+            .send_gameplay_command_with_update_policy_timed(
+                command,
+                GameplayCommandUpdatePolicy::SendOnly,
+            )
+            .unwrap();
+
+        assert_eq!(timing.drain_updates_ms, 0.0);
+        assert_eq!(timing.updates, 0);
+        assert_eq!(runtime.pending_response_batches, 1);
+
+        assert!(!runtime.poll().unwrap());
+        let diagnostics = runtime.core().last_poll_diagnostics();
+        assert_eq!(diagnostics.server_update_queue_depth, 1);
+        assert_eq!(diagnostics.updates, 0);
+        assert!(!diagnostics.update_pump_stalled);
+        assert_eq!(runtime.pending_response_batches, 1);
+        assert_eq!(runtime.session.try_drain_count, 1);
+        assert_eq!(runtime.core().day_time(), 0);
+
+        let _changed = runtime.poll().unwrap();
+        let diagnostics = runtime.core().last_poll_diagnostics();
+        assert_eq!(diagnostics.server_update_queue_depth, 0);
+        assert_eq!(diagnostics.updates, 1);
+        assert_eq!(runtime.pending_response_batches, 0);
+        assert_eq!(runtime.session.try_drain_count, 2);
+        assert_eq!(runtime.core().day_time(), 6000);
     }
 
     #[test]

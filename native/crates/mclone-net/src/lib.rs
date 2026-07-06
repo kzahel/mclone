@@ -437,12 +437,40 @@ mod native_tcp {
             read_server_update_batch(&mut self.stream)
         }
 
+        pub fn try_drain_command_updates(
+            &mut self,
+        ) -> NativeTransportResult<Option<Vec<ServerUpdate>>> {
+            if !self.server_update_batch_available()? {
+                return Ok(None);
+            }
+            self.drain_command_updates().map(Some)
+        }
+
         pub fn send_command(
             &mut self,
             command: &ClientCommand,
         ) -> NativeTransportResult<Vec<ServerUpdate>> {
             self.send_command_only(command)?;
             self.drain_command_updates()
+        }
+
+        fn server_update_batch_available(&self) -> NativeTransportResult<bool> {
+            self.stream.set_nonblocking(true)?;
+            let mut byte = [0u8; 1];
+            let peek_result = loop {
+                match self.stream.peek(&mut byte) {
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                    result => break result,
+                }
+            };
+            self.stream.set_nonblocking(false)?;
+
+            match peek_result {
+                Ok(0) => Ok(true),
+                Ok(_) => Ok(true),
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
+                Err(err) => Err(err.into()),
+            }
         }
     }
 
@@ -989,6 +1017,49 @@ mod tests {
                 second_updates
             );
         }
+        server.join().unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_try_drain_does_not_wait_for_delayed_response() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        let server_command = command.clone();
+        let expected_updates = vec![ServerUpdate::TimeUpdate { day_time: 1234 }];
+        let server_updates = expected_updates.clone();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
+            assert_eq!(
+                read_client_command_frame(&mut stream).unwrap(),
+                server_command
+            );
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            write_server_update_batch(&mut stream, &server_updates).unwrap();
+        });
+
+        let mut session = NativeClientSession::connect(addr).unwrap();
+        session.send_command_only(&command).unwrap();
+
+        let poll_start = std::time::Instant::now();
+        assert_eq!(session.try_drain_command_updates().unwrap(), None);
+        assert!(
+            poll_start.elapsed() < std::time::Duration::from_millis(100),
+            "try_drain_command_updates blocked on a delayed server response"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(
+            session.try_drain_command_updates().unwrap(),
+            Some(expected_updates)
+        );
         server.join().unwrap();
     }
 
