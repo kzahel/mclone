@@ -17,6 +17,11 @@ use mclone_core::{
     LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, block_to_section_coord, chunk_section_index,
     local_block_coord, local_section_block_coord,
 };
+use mclone_frame_budget::{
+    BudgetController, BudgetControllerConfig, BudgetControllerInput, BudgetDecisionAddress,
+    BudgetDecisionFamily, BudgetDecisionReport, BudgetTelemetryWindow, EwmaCostEstimator,
+    FamilyBudgetConfig, FrameHostKind, StageId, WorkWindow,
+};
 use mclone_protocol::{ChunkView, SectionBlockUpdate};
 use mclone_worldgen::block::{
     OBSIDIAN, RawBlockId, STONE, block_light_emission, block_light_opacity,
@@ -62,10 +67,15 @@ use crate::timing::{
 use crate::worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 use crate::{
     CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState, ChunkResidency, ChunkStatusStep, ChunkTicketKey,
-    ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, LightStatusMailboxKind,
-    MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics, WorldBlockPos,
-    WorldgenMailboxKind, full_chunk_status_for_ticket_level,
+    ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus,
+    LightStatusMailboxKind, MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics,
+    WorldBlockPos, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+type SimulationTimingStart = Option<std::time::Instant>;
+#[cfg(target_arch = "wasm32")]
+type SimulationTimingStart = Option<()>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkStatusJob {
@@ -439,6 +449,7 @@ pub struct ChunkScheduler {
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
     worldgen_mailbox: WorldgenMailbox,
     pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
+    publication_budget: ChunkPublicationBudgetState,
     light_mailbox: LightStatusMailbox,
     pending_light_status_batches: BTreeMap<ChunkJobId, Vec<PendingLightStatus>>,
     pending_light_publications: VecDeque<CompletedLightStatus>,
@@ -453,6 +464,143 @@ pub struct ChunkScheduler {
     next_job_id: u64,
     next_revision: u64,
     store: PersistenceMailbox,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ChunkPublicationBudgetConfig {
+    pub enabled: bool,
+    pub gameplay_rate_hz: u32,
+}
+
+impl ChunkPublicationBudgetConfig {
+    pub const fn disabled() -> Self {
+        Self {
+            enabled: false,
+            gameplay_rate_hz: DEFAULT_GAMEPLAY_RATE_HZ,
+        }
+    }
+
+    pub const fn adaptive_for_gameplay_rate_hz(gameplay_rate_hz: u32) -> Self {
+        Self {
+            enabled: true,
+            gameplay_rate_hz,
+        }
+    }
+
+    fn target_period_ms(self) -> Option<f64> {
+        if !self.enabled || self.gameplay_rate_hz == 0 {
+            return None;
+        }
+        Some(1_000.0 / f64::from(self.gameplay_rate_hz))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ChunkPublicationBudgetState {
+    config: ChunkPublicationBudgetConfig,
+    controller: BudgetController,
+    estimator: EwmaCostEstimator,
+    last_pending_worldgen_publication_chunk_limit: usize,
+}
+
+impl Default for ChunkPublicationBudgetState {
+    fn default() -> Self {
+        Self::new(ChunkPublicationBudgetConfig::disabled())
+    }
+}
+
+impl ChunkPublicationBudgetState {
+    fn new(config: ChunkPublicationBudgetConfig) -> Self {
+        Self {
+            config,
+            controller: BudgetController::new(chunk_publication_budget_controller_config()),
+            estimator: EwmaCostEstimator::new(DEFAULT_PUBLICATION_COST_EWMA_ALPHA),
+            last_pending_worldgen_publication_chunk_limit:
+                DEFAULT_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT,
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.config.enabled
+    }
+
+    fn set_config(&mut self, config: ChunkPublicationBudgetConfig) {
+        if self.config == config {
+            return;
+        }
+        *self = Self::new(config);
+    }
+
+    fn set_gameplay_rate_hz(&mut self, gameplay_rate_hz: u32) {
+        self.set_config(ChunkPublicationBudgetConfig {
+            gameplay_rate_hz,
+            ..self.config
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PublicationGrant {
+    min_units: usize,
+    max_units: usize,
+    elapsed_us: u128,
+}
+
+impl PublicationGrant {
+    const fn fixed(units: usize) -> Self {
+        Self {
+            min_units: units,
+            max_units: units,
+            elapsed_us: 0,
+        }
+    }
+
+    fn from_decision(decision: Option<&BudgetDecisionReport>, fallback_units: usize) -> Self {
+        decision.map_or_else(
+            || Self::fixed(fallback_units),
+            |decision| Self {
+                min_units: decision.grant.min_units as usize,
+                max_units: decision.grant.max_units as usize,
+                elapsed_us: elapsed_ms_to_us(decision.grant.elapsed_ms),
+            },
+        )
+    }
+
+    fn allows_next_unit(self, start: SimulationTimingStart, spent_units: usize) -> bool {
+        if spent_units < self.min_units {
+            return true;
+        }
+        if spent_units >= self.max_units {
+            return false;
+        }
+        self.elapsed_us == 0 || simulation_timing_elapsed_us(start) < self.elapsed_us
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PublicationBudgetGrants {
+    adaptive_enabled: bool,
+    feature: PublicationGrant,
+    light: PublicationGrant,
+    pending_worldgen_publication_chunk_limit: usize,
+    feature_estimated_unit_us: Option<u128>,
+    light_estimated_unit_us: Option<u128>,
+}
+
+impl ChunkSchedulerPublicationDiagnostics {
+    fn record_budget_grants(&mut self, grants: PublicationBudgetGrants) {
+        self.adaptive_budget_enabled = grants.adaptive_enabled;
+        self.feature_publish_budget_min_units = grants.feature.min_units;
+        self.feature_publish_budget_max_units = grants.feature.max_units;
+        self.feature_publish_budget_elapsed_us = grants.feature.elapsed_us;
+        self.feature_publish_estimated_unit_us = grants.feature_estimated_unit_us;
+        self.light_publish_budget_min_units = grants.light.min_units;
+        self.light_publish_budget_max_units = grants.light.max_units;
+        self.light_publish_budget_elapsed_us = grants.light.elapsed_us;
+        self.light_publish_estimated_unit_us = grants.light_estimated_unit_us;
+        self.pending_worldgen_publication_chunk_limit =
+            grants.pending_worldgen_publication_chunk_limit;
+    }
 }
 
 impl ChunkScheduler {
@@ -529,6 +677,7 @@ impl ChunkScheduler {
             job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::new(),
             pending_worldgen_publications: VecDeque::new(),
+            publication_budget: ChunkPublicationBudgetState::default(),
             light_mailbox: LightStatusMailbox::new(),
             pending_light_status_batches: BTreeMap::new(),
             pending_light_publications: VecDeque::new(),
@@ -573,6 +722,7 @@ impl ChunkScheduler {
             job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::with_wasm_job_worker(config.clone()),
             pending_worldgen_publications: VecDeque::new(),
+            publication_budget: ChunkPublicationBudgetState::default(),
             light_mailbox: LightStatusMailbox::with_wasm_job_worker(config),
             pending_light_status_batches: BTreeMap::new(),
             pending_light_publications: VecDeque::new(),
@@ -600,6 +750,19 @@ impl ChunkScheduler {
 
     pub fn set_lighting_enabled(&mut self, enabled: bool) {
         self.lighting_enabled = enabled;
+    }
+
+    pub const fn publication_budget_config(&self) -> ChunkPublicationBudgetConfig {
+        self.publication_budget.config
+    }
+
+    pub fn set_publication_budget_config(&mut self, config: ChunkPublicationBudgetConfig) {
+        self.publication_budget.set_config(config);
+    }
+
+    pub fn set_publication_budget_gameplay_rate_hz(&mut self, gameplay_rate_hz: u32) {
+        self.publication_budget
+            .set_gameplay_rate_hz(gameplay_rate_hz);
     }
 
     pub fn apply_interest(
@@ -633,10 +796,11 @@ impl ChunkScheduler {
         ChunkSchedulerPublicationDiagnostics,
     )> {
         let mut publication = ChunkSchedulerPublicationDiagnostics::default();
+        let grants = self.publication_budget_grants(&mut publication);
         self.store.process_one_background_write();
         let mut events = self.poll_persistence()?;
-        events.extend(self.publish_completed_worldgen_jobs(&mut publication)?);
-        events.extend(self.publish_pending_light_statuses(&mut publication)?);
+        events.extend(self.publish_completed_worldgen_jobs(&mut publication, grants.feature)?);
+        events.extend(self.publish_pending_light_statuses(&mut publication, grants.light)?);
         self.store.process_one_background_write();
         events.extend(self.poll_persistence()?);
         publication.pending_worldgen_publication_jobs = self.pending_worldgen_publications.len();
@@ -644,6 +808,83 @@ impl ChunkScheduler {
             self.pending_worldgen_publication_target_count();
         publication.pending_light_publications = self.pending_light_publications.len();
         Ok((events, publication))
+    }
+
+    fn publication_budget_grants(
+        &mut self,
+        diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
+    ) -> PublicationBudgetGrants {
+        if !self.publication_budget.enabled() {
+            let grants = PublicationBudgetGrants {
+                adaptive_enabled: false,
+                feature: PublicationGrant::fixed(DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET),
+                light: PublicationGrant::fixed(DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET),
+                pending_worldgen_publication_chunk_limit: usize::MAX,
+                feature_estimated_unit_us: None,
+                light_estimated_unit_us: None,
+            };
+            diagnostics.record_budget_grants(grants);
+            return grants;
+        }
+
+        let target_period_ms = self
+            .publication_budget
+            .config
+            .target_period_ms()
+            .unwrap_or(50.0);
+        let queue_depth = (self.pending_worldgen_publication_target_count()
+            + self.pending_light_publications.len()) as u64;
+        let input = BudgetControllerInput::new(target_period_ms)
+            .with_window(
+                BudgetTelemetryWindow::new(
+                    FrameHostKind::IntegratedServerRunner,
+                    WorkWindow::GameplayTick,
+                )
+                .with_app_work_p95_ms(0.0)
+                .with_headroom_p05_ms(target_period_ms)
+                .with_queue_age_ms(queue_depth, 0.0),
+            )
+            .with_costs(self.publication_budget.estimator.estimates);
+        let panel = self.publication_budget.controller.decide(&input);
+        let feature_decision =
+            decision_for(&panel.decisions, BudgetDecisionFamily::FeaturePublication);
+        let light_decision = decision_for(&panel.decisions, BudgetDecisionFamily::LightPublication);
+        let admission_decision =
+            decision_for(&panel.decisions, BudgetDecisionFamily::FeatureJobAdmission);
+        let pending_worldgen_publication_chunk_limit = admission_decision
+            .and_then(|decision| decision.grant.max_pending_units)
+            .map(|units| units as usize)
+            .unwrap_or(DEFAULT_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT)
+            .max(1);
+        self.publication_budget
+            .last_pending_worldgen_publication_chunk_limit =
+            pending_worldgen_publication_chunk_limit;
+        let grants = PublicationBudgetGrants {
+            adaptive_enabled: true,
+            feature: PublicationGrant::from_decision(
+                feature_decision,
+                DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET,
+            ),
+            light: PublicationGrant::from_decision(
+                light_decision,
+                DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET,
+            ),
+            pending_worldgen_publication_chunk_limit,
+            feature_estimated_unit_us: self
+                .publication_budget
+                .estimator
+                .estimates
+                .feature_publish_ms
+                .map(elapsed_ms_to_us),
+            light_estimated_unit_us: self
+                .publication_budget
+                .estimator
+                .estimates
+                .light_publish_ms
+                .map(elapsed_ms_to_us),
+        };
+        diagnostics.record_budget_grants(grants);
+        grants
     }
 
     pub fn wait_for_worldgen_completion(&mut self, timeout: Duration) -> bool {
@@ -2313,6 +2554,9 @@ impl ChunkScheduler {
         if job_targets.is_empty() {
             return Vec::new();
         }
+        if self.feature_publication_backlog_blocks_job(job_targets.len()) {
+            return Vec::new();
+        }
 
         let (job_id, seeded_dependencies) = self.create_feature_job(&job_targets, priority_centers);
         let mut events = Vec::with_capacity(job_targets.len());
@@ -2353,26 +2597,64 @@ impl ChunkScheduler {
         }
     }
 
+    fn feature_publication_backlog_blocks_job(&self, target_count: usize) -> bool {
+        if !self.publication_budget.enabled() {
+            return false;
+        }
+        let pending_after_admission = self
+            .pending_worldgen_publication_target_count()
+            .saturating_add(target_count);
+        pending_after_admission
+            > self
+                .publication_budget
+                .last_pending_worldgen_publication_chunk_limit
+    }
+
     fn publish_completed_worldgen_jobs(
         &mut self,
         diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
+        grant: PublicationGrant,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let completed = self.worldgen_mailbox.drain_completed();
         diagnostics.completed_feature_jobs_drained = diagnostics
             .completed_feature_jobs_drained
             .saturating_add(completed.len());
+        if self.publication_budget.enabled() {
+            for completed_job in &completed {
+                self.mark_job_complete(
+                    completed_job.job_id,
+                    completed_job.cache_report,
+                    completed_job.timing,
+                );
+                diagnostics.feature_jobs_pipeline_completed = diagnostics
+                    .feature_jobs_pipeline_completed
+                    .saturating_add(1);
+            }
+        }
         self.pending_worldgen_publications
             .extend(completed.into_iter().map(PendingWorldgenPublication::new));
         let mut events = Vec::new();
-        let mut remaining_budget = DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET;
+        if self.publication_budget.enabled() && !self.pending_worldgen_publications.is_empty() {
+            events.extend(self.enqueue_next_pending_feature_job());
+        }
+        let publish_start = simulation_timing_start();
+        let before_units = diagnostics
+            .feature_chunks_published
+            .saturating_add(diagnostics.feature_chunks_skipped);
+        let mut remaining_budget = grant.max_units;
 
-        while remaining_budget > 0 {
+        while grant.allows_next_unit(
+            publish_start,
+            grant.max_units.saturating_sub(remaining_budget),
+        ) {
             let Some(publication) = self.pending_worldgen_publications.pop_front() else {
                 break;
             };
             let (mut published, pending) = self.publish_completed_feature_job(
                 publication,
                 &mut remaining_budget,
+                grant,
+                publish_start,
                 diagnostics,
             )?;
             events.append(&mut published);
@@ -2382,6 +2664,18 @@ impl ChunkScheduler {
             }
         }
 
+        let spent_units = diagnostics
+            .feature_chunks_published
+            .saturating_add(diagnostics.feature_chunks_skipped)
+            .saturating_sub(before_units);
+        let spent_us = simulation_timing_elapsed_us(publish_start);
+        diagnostics.feature_publish_spent_units = spent_units;
+        diagnostics.feature_publish_spent_us = spent_us;
+        self.observe_publication_spend(
+            BudgetDecisionFamily::FeaturePublication,
+            spent_us,
+            spent_units,
+        );
         Ok(events)
     }
 
@@ -2389,6 +2683,8 @@ impl ChunkScheduler {
         &mut self,
         mut publication: PendingWorldgenPublication,
         remaining_budget: &mut usize,
+        grant: PublicationGrant,
+        publish_start: SimulationTimingStart,
         diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
     ) -> ChunkStoreResult<(Vec<ChunkSchedulerEvent>, Option<PendingWorldgenPublication>)> {
         let Some(job) = self.jobs.get(&publication.completed.job_id).cloned() else {
@@ -2399,7 +2695,13 @@ impl ChunkScheduler {
         let generated = &publication.completed.generated_chunks;
         let retained_dependencies = &publication.completed.retained_dependencies;
 
-        while publication.next_target_index < job.target_chunks.len() && *remaining_budget > 0 {
+        while publication.next_target_index < job.target_chunks.len()
+            && *remaining_budget > 0
+            && grant.allows_next_unit(
+                publish_start,
+                grant.max_units.saturating_sub(*remaining_budget),
+            )
+        {
             let pos = job.target_chunks[publication.next_target_index];
             publication.next_target_index += 1;
             *remaining_budget -= 1;
@@ -2509,7 +2811,9 @@ impl ChunkScheduler {
         for dependency in completed.retained_dependencies.into_values() {
             self.mark_dependency_ready(dependency);
         }
-        self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
+        if !self.publication_budget.enabled() {
+            self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
+        }
         diagnostics.feature_jobs_completed = diagnostics.feature_jobs_completed.saturating_add(1);
         if !pending_light_statuses.is_empty() {
             diagnostics.light_status_batches_enqueued =
@@ -2517,13 +2821,16 @@ impl ChunkScheduler {
             self.light_mailbox
                 .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
         }
-        events.extend(self.enqueue_next_pending_feature_job());
+        if !self.publication_budget.enabled() {
+            events.extend(self.enqueue_next_pending_feature_job());
+        }
         Ok((events, None))
     }
 
     fn publish_pending_light_statuses(
         &mut self,
         diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
+        grant: PublicationGrant,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let completed = self.light_mailbox.drain_completed();
         diagnostics.completed_light_statuses_drained = diagnostics
@@ -2531,8 +2838,15 @@ impl ChunkScheduler {
             .saturating_add(completed.len());
         self.pending_light_publications.extend(completed);
         let mut events = Vec::new();
-        let mut remaining_budget = DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET;
-        while remaining_budget > 0 {
+        let publish_start = simulation_timing_start();
+        let before_units = diagnostics
+            .light_statuses_published
+            .saturating_add(diagnostics.light_statuses_skipped);
+        let mut remaining_budget = grant.max_units;
+        while grant.allows_next_unit(
+            publish_start,
+            grant.max_units.saturating_sub(remaining_budget),
+        ) {
             let Some(completed) = self.pending_light_publications.pop_front() else {
                 break;
             };
@@ -2597,7 +2911,39 @@ impl ChunkScheduler {
             }
         }
 
+        let spent_units = diagnostics
+            .light_statuses_published
+            .saturating_add(diagnostics.light_statuses_skipped)
+            .saturating_sub(before_units);
+        let spent_us = simulation_timing_elapsed_us(publish_start);
+        diagnostics.light_publish_spent_units = spent_units;
+        diagnostics.light_publish_spent_us = spent_us;
+        self.observe_publication_spend(
+            BudgetDecisionFamily::LightPublication,
+            spent_us,
+            spent_units,
+        );
         Ok(events)
+    }
+
+    fn observe_publication_spend(
+        &mut self,
+        family: BudgetDecisionFamily,
+        elapsed_us: u128,
+        units: usize,
+    ) {
+        if !self.publication_budget.enabled() || units == 0 {
+            return;
+        }
+        let Some(target_period_ms) = self.publication_budget.config.target_period_ms() else {
+            return;
+        };
+        self.publication_budget.estimator.observe_for_target_period(
+            target_period_ms,
+            family,
+            micros_to_ms(elapsed_us),
+            units as u32,
+        );
     }
 
     fn create_feature_job(
@@ -3540,6 +3886,50 @@ mod tests {
     }
 
     #[test]
+    fn adaptive_publication_marks_pipeline_complete_and_admits_followup_job() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler.set_lighting_enabled(false);
+        scheduler.set_publication_budget_config(
+            ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(20),
+        );
+        let center = ChunkPos::new(0, 0);
+        let targets = sorted_chunk_positions_by_priority(square(center, 33), &[center]);
+
+        scheduler
+            .stored_chunk_misses
+            .extend(targets.iter().copied());
+        scheduler
+            .enqueue_runtime_chunks(targets, ChunkStatus::Features, &[center])
+            .unwrap();
+        let first_job_id = scheduler.metrics().latest_feature_job_id.unwrap();
+        assert!(scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30)));
+
+        let report = scheduler.tick_report().unwrap();
+
+        assert!(report.publication.adaptive_budget_enabled);
+        assert_eq!(report.publication.completed_feature_jobs_drained, 1);
+        assert_eq!(report.publication.feature_jobs_pipeline_completed, 1);
+        assert_eq!(report.publication.feature_publish_budget_min_units, 1);
+        assert_eq!(report.publication.feature_publish_budget_max_units, 1);
+        assert_eq!(report.publication.feature_publish_spent_units, 1);
+        assert_eq!(
+            report.publication.pending_worldgen_publication_chunk_limit,
+            DEFAULT_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT
+        );
+        assert_eq!(
+            scheduler.job(first_job_id).map(|job| job.state),
+            Some(ChunkJobState::Complete)
+        );
+        assert!(
+            scheduler
+                .jobs()
+                .any(|job| job.id != first_job_id && job.state == ChunkJobState::Running),
+            "adaptive publication should admit the next feature job while the first publication drains"
+        );
+        assert!(scheduler.pending_publication_count() > 0);
+    }
+
+    #[test]
     fn high_render_distance_initial_persistence_loads_are_center_bounded() {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler.set_lighting_enabled(false);
@@ -3825,7 +4215,78 @@ const STARTUP_CHUNK_LOAD_REQUEST_LIMIT: usize = 9;
 const BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT: usize = 128;
 const STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 9;
 const BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 128;
+const DEFAULT_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT: usize =
+    STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT + BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT;
+const MAX_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT: usize =
+    BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT * 2;
+const DEFAULT_PUBLICATION_COST_EWMA_ALPHA: f64 = 0.25;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;
+
+fn chunk_publication_budget_controller_config() -> BudgetControllerConfig {
+    let scheduler_publication = BudgetDecisionAddress::new(
+        FrameHostKind::IntegratedServerRunner,
+        WorkWindow::GameplayTick,
+        StageId::SchedulerPublication,
+    );
+    BudgetControllerConfig {
+        raise_after_clean_windows: 3,
+        over_period_pct_cut_threshold: 0.0,
+        queue_age_limit_ms: None,
+        queue_depth_limit: None,
+        families: vec![
+            FamilyBudgetConfig::new(
+                BudgetDecisionFamily::FeaturePublication,
+                scheduler_publication,
+                DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET as u32,
+                4,
+                0.02,
+                0.20,
+            ),
+            FamilyBudgetConfig::new(
+                BudgetDecisionFamily::LightPublication,
+                scheduler_publication,
+                DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET as u32,
+                4,
+                0.02,
+                0.20,
+            ),
+            FamilyBudgetConfig::new(
+                BudgetDecisionFamily::FeatureJobAdmission,
+                BudgetDecisionAddress::new(
+                    FrameHostKind::IntegratedServerRunner,
+                    WorkWindow::GameplayTick,
+                    StageId::TerrainGeneration,
+                ),
+                1,
+                1,
+                0.0,
+                0.0,
+            )
+            .with_pending_units(
+                DEFAULT_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT as u32,
+                MAX_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT as u32,
+            ),
+        ],
+    }
+}
+
+fn decision_for(
+    decisions: &[BudgetDecisionReport],
+    family: BudgetDecisionFamily,
+) -> Option<&BudgetDecisionReport> {
+    decisions.iter().find(|decision| decision.family == family)
+}
+
+fn elapsed_ms_to_us(ms: f64) -> u128 {
+    if !ms.is_finite() || ms <= 0.0 {
+        return 0;
+    }
+    (ms * 1_000.0).round() as u128
+}
+
+fn micros_to_ms(micros: u128) -> f64 {
+    micros as f64 / 1_000.0
+}
 
 fn snapshot_is_client_ready_for_lighting_mode(
     snapshot: &ChunkSnapshot,

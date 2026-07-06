@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use mclone_diagnostics::{
+pub use mclone_diagnostics::{
     BudgetDecisionAddress, BudgetDecisionFamily, BudgetDecisionPanelReport, BudgetDecisionReason,
     BudgetDecisionReport, BudgetDecisionTraceReport, BudgetGrantReport, BudgetHostMode,
     BudgetInputSnapshotReport, FrameHostKind, StageId, WorkWindow,
@@ -422,7 +422,11 @@ impl BudgetController {
             decisions.push(BudgetDecisionReport {
                 family: family_config.family,
                 address: family_config.address,
-                grant: state.grant(*family_config, target_period_ms.unwrap_or(0.0)),
+                grant: state.grant(
+                    *family_config,
+                    target_period_ms.unwrap_or(0.0),
+                    input.costs.cost_for(family_config.family),
+                ),
                 trace: BudgetDecisionTraceReport {
                     reason,
                     input_snapshot: snapshot,
@@ -573,12 +577,26 @@ impl FamilyState {
         BudgetDecisionReason::RaiseSustainedHeadroom
     }
 
-    fn grant(self, config: FamilyBudgetConfig, target_period_ms: f64) -> BudgetGrantReport {
+    fn grant(
+        self,
+        config: FamilyBudgetConfig,
+        target_period_ms: f64,
+        per_unit_cost_ms: Option<f64>,
+    ) -> BudgetGrantReport {
         let elapsed_ms = sanitize_ms(target_period_ms) * self.current_period_fraction;
+        let current_max_units = self.current_units.max(config.floor_units());
+        let max_units = per_unit_cost_ms
+            .and_then(finite_positive)
+            .filter(|_| elapsed_ms > 0.0)
+            .map(|cost| {
+                let elapsed_units = (elapsed_ms / cost).floor() as u32;
+                elapsed_units.clamp(config.floor_units(), current_max_units)
+            })
+            .unwrap_or(current_max_units);
         BudgetGrantReport::new(
             elapsed_ms,
             config.floor_units(),
-            self.current_units.max(config.floor_units()),
+            max_units,
             self.current_pending_units,
         )
     }
@@ -974,6 +992,25 @@ mod tests {
                 .elapsed_ms,
             1.6
         );
+    }
+
+    #[test]
+    fn measured_unit_cost_caps_grant_to_elapsed_budget() {
+        let mut controller = BudgetController::new(test_config());
+        for _ in 0..8 {
+            controller.decide(&clean_input(10.0));
+        }
+
+        let with_cost = clean_input(10.0).with_costs(BudgetCostEstimates {
+            feature_publish_ms: Some(1.5),
+            ..BudgetCostEstimates::default()
+        });
+        let panel = controller.decide(&with_cost);
+        let feature = decision(&panel, BudgetDecisionFamily::FeaturePublication);
+
+        assert_eq!(feature.grant.elapsed_ms, 4.0);
+        assert_eq!(feature.grant.max_units, 2);
+        assert_eq!(feature.trace.input_snapshot.per_unit_cost_ms, Some(1.5));
     }
 
     #[test]

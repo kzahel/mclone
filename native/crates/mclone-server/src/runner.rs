@@ -14,6 +14,8 @@ use mclone_protocol::{ClientCommand, ProtocolCodecError, ServerUpdate};
 use mclone_protocol::{decode_client_command, encode_client_command, encode_server_update};
 
 #[cfg(not(target_arch = "wasm32"))]
+use crate::ChunkPublicationBudgetConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::IntegratedServer;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::SimulationCadence;
@@ -529,6 +531,7 @@ mod native {
         pub debug_passive_showcase: bool,
         pub tick_interval: Duration,
         pub cadence: SimulationCadenceConfig,
+        pub publication_budget: ChunkPublicationBudgetConfig,
         pub world_storage: NativeIntegratedServerWorldStorage,
         player_chunk_tracking_policy: PlayerChunkTrackingPolicy,
     }
@@ -543,6 +546,7 @@ mod native {
                 debug_passive_showcase: true,
                 tick_interval: Duration::from_millis(50),
                 cadence: SimulationCadenceConfig::new(20, 20, 60),
+                publication_budget: ChunkPublicationBudgetConfig::disabled(),
                 world_storage: NativeIntegratedServerWorldStorage::Transient,
                 player_chunk_tracking_policy: PlayerChunkTrackingPolicy::dedicated_default(),
             }
@@ -584,6 +588,17 @@ mod native {
             self
         }
 
+        pub fn with_adaptive_chunk_publication_budget(mut self, enabled: bool) -> Self {
+            self.publication_budget = if enabled {
+                ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(
+                    self.cadence.gameplay_rate_hz,
+                )
+            } else {
+                ChunkPublicationBudgetConfig::disabled()
+            };
+            self
+        }
+
         pub fn with_world_storage(
             mut self,
             world_storage: NativeIntegratedServerWorldStorage,
@@ -602,6 +617,12 @@ mod native {
             cadence: SimulationCadenceConfig,
         ) -> Self {
             self.cadence = cadence;
+            if self.publication_budget.enabled {
+                self.publication_budget =
+                    ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(
+                        cadence.gameplay_rate_hz,
+                    );
+            }
             self.tick_interval = host_tick_interval_for_rate_hz(cadence.host_rate_hz);
             self
         }
@@ -901,6 +922,13 @@ mod native {
             }
         };
         server.set_lighting_enabled(config.lighting_enabled);
+        server.set_publication_budget_config(if config.publication_budget.enabled {
+            ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(
+                config.cadence.gameplay_rate_hz,
+            )
+        } else {
+            ChunkPublicationBudgetConfig::disabled()
+        });
         server.set_day_time_frozen(config.day_time_frozen);
         server.set_debug_passive_showcase_enabled(config.debug_passive_showcase);
         if let Some(day_time) = config.day_time {
@@ -1171,6 +1199,9 @@ mod native {
                 let result = timing_state.set_cadence(cadence, tick_interval);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 result?;
+                if server.publication_budget_config().enabled {
+                    server.set_publication_budget_gameplay_rate_hz(cadence.gameplay_rate_hz);
+                }
                 *next_tick = Instant::now() + timing_state.tick_interval;
                 refresh_cadence_diagnostics(diagnostics, timing_state);
                 refresh_diagnostics(

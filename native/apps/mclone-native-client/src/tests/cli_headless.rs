@@ -382,6 +382,7 @@ fn cli_parses_screenshot_scene_options() {
                 first_person_player_visible: false,
                 debug_passive_showcase: true,
                 lighting_enabled: true,
+                adaptive_chunk_publication_budget: false,
                 far_lod: Default::default(),
             },
             TexturedSectionRenderOptions::default(),

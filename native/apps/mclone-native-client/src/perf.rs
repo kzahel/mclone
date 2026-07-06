@@ -216,6 +216,10 @@ impl MovementPerfReport {
             self.options.scene.render_compile_worker_count
         );
         println!(
+            "  \"adaptive_chunk_publication_budget\": {},",
+            self.options.scene.adaptive_chunk_publication_budget
+        );
+        println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
         );
@@ -498,6 +502,18 @@ struct StartupStreamingFrameReport {
     poll_ms: f64,
     poll_server_reported_total_ms: f64,
     poll_scheduler_publish_completed_ms: f64,
+    scheduler_adaptive_publication_budget_enabled: bool,
+    scheduler_feature_publish_budget_max_units: usize,
+    scheduler_feature_publish_budget_ms: f64,
+    scheduler_feature_publish_spent_units: usize,
+    scheduler_feature_publish_spent_ms: f64,
+    scheduler_feature_publish_estimated_unit_ms: Option<f64>,
+    scheduler_light_publish_budget_max_units: usize,
+    scheduler_light_publish_budget_ms: f64,
+    scheduler_light_publish_spent_units: usize,
+    scheduler_light_publish_spent_ms: f64,
+    scheduler_light_publish_estimated_unit_ms: Option<f64>,
+    scheduler_pending_worldgen_publication_chunk_limit: usize,
     poll_apply_updates_ms: f64,
     poll_dirty_mark_ms: f64,
     poll_client_apply_updates_ms: f64,
@@ -567,6 +583,18 @@ struct FrameBudgetProbeFrameReport {
     poll_scheduler_purge_stale_tickets_ms: f64,
     poll_scheduler_reconcile_holders_ms: f64,
     poll_scheduler_publish_completed_ms: f64,
+    poll_scheduler_adaptive_publication_budget_enabled: bool,
+    poll_scheduler_feature_publish_budget_max_units: usize,
+    poll_scheduler_feature_publish_budget_ms: f64,
+    poll_scheduler_feature_publish_spent_units: usize,
+    poll_scheduler_feature_publish_spent_ms: f64,
+    poll_scheduler_feature_publish_estimated_unit_ms: Option<f64>,
+    poll_scheduler_light_publish_budget_max_units: usize,
+    poll_scheduler_light_publish_budget_ms: f64,
+    poll_scheduler_light_publish_spent_units: usize,
+    poll_scheduler_light_publish_spent_ms: f64,
+    poll_scheduler_light_publish_estimated_unit_ms: Option<f64>,
+    poll_scheduler_pending_worldgen_publication_chunk_limit: usize,
     poll_scheduler_pending_unload_ms: f64,
     poll_scheduler_apply_events_ms: f64,
     poll_scheduler_completed_feature_jobs_drained: usize,
@@ -663,6 +691,18 @@ impl Default for FrameBudgetProbeFrameReport {
             poll_scheduler_purge_stale_tickets_ms: 0.0,
             poll_scheduler_reconcile_holders_ms: 0.0,
             poll_scheduler_publish_completed_ms: 0.0,
+            poll_scheduler_adaptive_publication_budget_enabled: false,
+            poll_scheduler_feature_publish_budget_max_units: 0,
+            poll_scheduler_feature_publish_budget_ms: 0.0,
+            poll_scheduler_feature_publish_spent_units: 0,
+            poll_scheduler_feature_publish_spent_ms: 0.0,
+            poll_scheduler_feature_publish_estimated_unit_ms: None,
+            poll_scheduler_light_publish_budget_max_units: 0,
+            poll_scheduler_light_publish_budget_ms: 0.0,
+            poll_scheduler_light_publish_spent_units: 0,
+            poll_scheduler_light_publish_spent_ms: 0.0,
+            poll_scheduler_light_publish_estimated_unit_ms: None,
+            poll_scheduler_pending_worldgen_publication_chunk_limit: 0,
             poll_scheduler_pending_unload_ms: 0.0,
             poll_scheduler_apply_events_ms: 0.0,
             poll_scheduler_completed_feature_jobs_drained: 0,
@@ -1168,6 +1208,58 @@ impl FrameBudgetProbeReport {
                 frame.poll_scheduler_publish_completed_ms
             );
             println!(
+                "      \"poll_scheduler_adaptive_publication_budget_enabled\": {},",
+                frame.poll_scheduler_adaptive_publication_budget_enabled
+            );
+            println!(
+                "      \"poll_scheduler_feature_publish_budget_max_units\": {},",
+                frame.poll_scheduler_feature_publish_budget_max_units
+            );
+            println!(
+                "      \"poll_scheduler_feature_publish_budget_ms\": {:.3},",
+                frame.poll_scheduler_feature_publish_budget_ms
+            );
+            println!(
+                "      \"poll_scheduler_feature_publish_spent_units\": {},",
+                frame.poll_scheduler_feature_publish_spent_units
+            );
+            println!(
+                "      \"poll_scheduler_feature_publish_spent_ms\": {:.3},",
+                frame.poll_scheduler_feature_publish_spent_ms
+            );
+            print_optional_f64_json(
+                "      ",
+                "poll_scheduler_feature_publish_estimated_unit_ms",
+                frame.poll_scheduler_feature_publish_estimated_unit_ms,
+                true,
+            );
+            println!(
+                "      \"poll_scheduler_light_publish_budget_max_units\": {},",
+                frame.poll_scheduler_light_publish_budget_max_units
+            );
+            println!(
+                "      \"poll_scheduler_light_publish_budget_ms\": {:.3},",
+                frame.poll_scheduler_light_publish_budget_ms
+            );
+            println!(
+                "      \"poll_scheduler_light_publish_spent_units\": {},",
+                frame.poll_scheduler_light_publish_spent_units
+            );
+            println!(
+                "      \"poll_scheduler_light_publish_spent_ms\": {:.3},",
+                frame.poll_scheduler_light_publish_spent_ms
+            );
+            print_optional_f64_json(
+                "      ",
+                "poll_scheduler_light_publish_estimated_unit_ms",
+                frame.poll_scheduler_light_publish_estimated_unit_ms,
+                true,
+            );
+            println!(
+                "      \"poll_scheduler_pending_worldgen_publication_chunk_limit\": {},",
+                frame.poll_scheduler_pending_worldgen_publication_chunk_limit
+            );
+            println!(
                 "      \"poll_scheduler_completed_feature_jobs_drained\": {},",
                 frame.poll_scheduler_completed_feature_jobs_drained
             );
@@ -1623,6 +1715,10 @@ impl StartupStreamingPerfReport {
             self.options.scene.simulation_cadence.physics_rate_hz
         );
         println!(
+            "  \"adaptive_chunk_publication_budget\": {},",
+            self.options.scene.adaptive_chunk_publication_budget
+        );
+        println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
         );
@@ -1903,6 +1999,58 @@ impl StartupStreamingPerfReport {
                 frame.poll_scheduler_publish_completed_ms
             );
             println!(
+                "      \"scheduler_adaptive_publication_budget_enabled\": {},",
+                frame.scheduler_adaptive_publication_budget_enabled
+            );
+            println!(
+                "      \"scheduler_feature_publish_budget_max_units\": {},",
+                frame.scheduler_feature_publish_budget_max_units
+            );
+            println!(
+                "      \"scheduler_feature_publish_budget_ms\": {:.3},",
+                frame.scheduler_feature_publish_budget_ms
+            );
+            println!(
+                "      \"scheduler_feature_publish_spent_units\": {},",
+                frame.scheduler_feature_publish_spent_units
+            );
+            println!(
+                "      \"scheduler_feature_publish_spent_ms\": {:.3},",
+                frame.scheduler_feature_publish_spent_ms
+            );
+            print_optional_f64_json(
+                "      ",
+                "scheduler_feature_publish_estimated_unit_ms",
+                frame.scheduler_feature_publish_estimated_unit_ms,
+                true,
+            );
+            println!(
+                "      \"scheduler_light_publish_budget_max_units\": {},",
+                frame.scheduler_light_publish_budget_max_units
+            );
+            println!(
+                "      \"scheduler_light_publish_budget_ms\": {:.3},",
+                frame.scheduler_light_publish_budget_ms
+            );
+            println!(
+                "      \"scheduler_light_publish_spent_units\": {},",
+                frame.scheduler_light_publish_spent_units
+            );
+            println!(
+                "      \"scheduler_light_publish_spent_ms\": {:.3},",
+                frame.scheduler_light_publish_spent_ms
+            );
+            print_optional_f64_json(
+                "      ",
+                "scheduler_light_publish_estimated_unit_ms",
+                frame.scheduler_light_publish_estimated_unit_ms,
+                true,
+            );
+            println!(
+                "      \"scheduler_pending_worldgen_publication_chunk_limit\": {},",
+                frame.scheduler_pending_worldgen_publication_chunk_limit
+            );
+            println!(
                 "      \"poll_apply_updates_ms\": {:.3},",
                 frame.poll_apply_updates_ms
             );
@@ -2069,6 +2217,58 @@ impl StartupStreamingPerfReport {
         println!(
             "    \"scheduler_pending_light_publications\": {},",
             final_frame.scheduler_pending_light_publications
+        );
+        println!(
+            "    \"scheduler_adaptive_publication_budget_enabled\": {},",
+            final_frame.scheduler_adaptive_publication_budget_enabled
+        );
+        println!(
+            "    \"scheduler_feature_publish_budget_max_units\": {},",
+            final_frame.scheduler_feature_publish_budget_max_units
+        );
+        println!(
+            "    \"scheduler_feature_publish_budget_ms\": {:.3},",
+            final_frame.scheduler_feature_publish_budget_ms
+        );
+        println!(
+            "    \"scheduler_feature_publish_spent_units\": {},",
+            final_frame.scheduler_feature_publish_spent_units
+        );
+        println!(
+            "    \"scheduler_feature_publish_spent_ms\": {:.3},",
+            final_frame.scheduler_feature_publish_spent_ms
+        );
+        print_optional_f64_json(
+            "    ",
+            "scheduler_feature_publish_estimated_unit_ms",
+            final_frame.scheduler_feature_publish_estimated_unit_ms,
+            true,
+        );
+        println!(
+            "    \"scheduler_light_publish_budget_max_units\": {},",
+            final_frame.scheduler_light_publish_budget_max_units
+        );
+        println!(
+            "    \"scheduler_light_publish_budget_ms\": {:.3},",
+            final_frame.scheduler_light_publish_budget_ms
+        );
+        println!(
+            "    \"scheduler_light_publish_spent_units\": {},",
+            final_frame.scheduler_light_publish_spent_units
+        );
+        println!(
+            "    \"scheduler_light_publish_spent_ms\": {:.3},",
+            final_frame.scheduler_light_publish_spent_ms
+        );
+        print_optional_f64_json(
+            "    ",
+            "scheduler_light_publish_estimated_unit_ms",
+            final_frame.scheduler_light_publish_estimated_unit_ms,
+            true,
+        );
+        println!(
+            "    \"scheduler_pending_worldgen_publication_chunk_limit\": {},",
+            final_frame.scheduler_pending_worldgen_publication_chunk_limit
         );
         println!(
             "    \"scheduler_worldgen_mailbox_pending_jobs\": {},",
@@ -2289,6 +2489,14 @@ fn per_second(count: usize, elapsed_ms: f64) -> f64 {
         0.0
     } else {
         count as f64 / (elapsed_ms / 1000.0)
+    }
+}
+
+fn print_optional_f64_json(indent: &str, key: &str, value: Option<f64>, trailing_comma: bool) {
+    let suffix = if trailing_comma { "," } else { "" };
+    match value {
+        Some(value) => println!("{indent}\"{key}\": {value:.3}{suffix}"),
+        None => println!("{indent}\"{key}\": null{suffix}"),
     }
 }
 
@@ -3084,6 +3292,30 @@ pub(crate) fn run_startup_streaming_perf(
             report.poll_server_reported_total_ms = poll_diagnostics.server_reported_total_ms;
             report.poll_scheduler_publish_completed_ms =
                 poll_diagnostics.scheduler_publish_completed_ms;
+            report.scheduler_adaptive_publication_budget_enabled =
+                poll_diagnostics.scheduler_adaptive_publication_budget_enabled;
+            report.scheduler_feature_publish_budget_max_units =
+                poll_diagnostics.scheduler_feature_publish_budget_max_units;
+            report.scheduler_feature_publish_budget_ms =
+                poll_diagnostics.scheduler_feature_publish_budget_ms;
+            report.scheduler_feature_publish_spent_units =
+                poll_diagnostics.scheduler_feature_publish_spent_units;
+            report.scheduler_feature_publish_spent_ms =
+                poll_diagnostics.scheduler_feature_publish_spent_ms;
+            report.scheduler_feature_publish_estimated_unit_ms =
+                poll_diagnostics.scheduler_feature_publish_estimated_unit_ms;
+            report.scheduler_light_publish_budget_max_units =
+                poll_diagnostics.scheduler_light_publish_budget_max_units;
+            report.scheduler_light_publish_budget_ms =
+                poll_diagnostics.scheduler_light_publish_budget_ms;
+            report.scheduler_light_publish_spent_units =
+                poll_diagnostics.scheduler_light_publish_spent_units;
+            report.scheduler_light_publish_spent_ms =
+                poll_diagnostics.scheduler_light_publish_spent_ms;
+            report.scheduler_light_publish_estimated_unit_ms =
+                poll_diagnostics.scheduler_light_publish_estimated_unit_ms;
+            report.scheduler_pending_worldgen_publication_chunk_limit =
+                poll_diagnostics.scheduler_pending_worldgen_publication_chunk_limit;
             report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
             report.poll_dirty_mark_ms = poll_diagnostics.dirty_mark_ms;
             report.poll_client_apply_updates_ms = poll_diagnostics.client_apply_updates_ms;
@@ -3520,6 +3752,30 @@ pub(crate) fn run_frame_budget_probe(
                 poll_diagnostics.scheduler_reconcile_holders_ms;
             report.poll_scheduler_publish_completed_ms =
                 poll_diagnostics.scheduler_publish_completed_ms;
+            report.poll_scheduler_adaptive_publication_budget_enabled =
+                poll_diagnostics.scheduler_adaptive_publication_budget_enabled;
+            report.poll_scheduler_feature_publish_budget_max_units =
+                poll_diagnostics.scheduler_feature_publish_budget_max_units;
+            report.poll_scheduler_feature_publish_budget_ms =
+                poll_diagnostics.scheduler_feature_publish_budget_ms;
+            report.poll_scheduler_feature_publish_spent_units =
+                poll_diagnostics.scheduler_feature_publish_spent_units;
+            report.poll_scheduler_feature_publish_spent_ms =
+                poll_diagnostics.scheduler_feature_publish_spent_ms;
+            report.poll_scheduler_feature_publish_estimated_unit_ms =
+                poll_diagnostics.scheduler_feature_publish_estimated_unit_ms;
+            report.poll_scheduler_light_publish_budget_max_units =
+                poll_diagnostics.scheduler_light_publish_budget_max_units;
+            report.poll_scheduler_light_publish_budget_ms =
+                poll_diagnostics.scheduler_light_publish_budget_ms;
+            report.poll_scheduler_light_publish_spent_units =
+                poll_diagnostics.scheduler_light_publish_spent_units;
+            report.poll_scheduler_light_publish_spent_ms =
+                poll_diagnostics.scheduler_light_publish_spent_ms;
+            report.poll_scheduler_light_publish_estimated_unit_ms =
+                poll_diagnostics.scheduler_light_publish_estimated_unit_ms;
+            report.poll_scheduler_pending_worldgen_publication_chunk_limit =
+                poll_diagnostics.scheduler_pending_worldgen_publication_chunk_limit;
             report.poll_scheduler_pending_unload_ms = poll_diagnostics.scheduler_pending_unload_ms;
             report.poll_scheduler_apply_events_ms = poll_diagnostics.scheduler_apply_events_ms;
             report.poll_scheduler_completed_feature_jobs_drained =

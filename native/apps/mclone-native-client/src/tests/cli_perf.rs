@@ -130,6 +130,34 @@ fn cli_parses_startup_streaming_perf_options() {
 }
 
 #[test]
+fn cli_parses_adaptive_chunk_publication_budget_flag() {
+    let cli = Cli::parse([
+        "--startup-streaming-perf".to_owned(),
+        "--adaptive-chunk-publication-budget".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        cli,
+        Cli::StartupStreamingPerf {
+            options: StartupStreamingPerfOptions {
+                scene: SceneOptions {
+                    adaptive_chunk_publication_budget: true,
+                    ..SceneOptions::default()
+                },
+                render_options: TexturedSectionRenderOptions::default(),
+                width: 1280,
+                height: 720,
+                frames: DEFAULT_STARTUP_STREAMING_PERF_FRAMES,
+                target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
+                persisted_world: false,
+            },
+        }
+    );
+}
+
+#[test]
 fn cli_allows_startup_streaming_target_hz_before_mode_flag() {
     let cli = Cli::parse([
         "--target-hz".to_owned(),

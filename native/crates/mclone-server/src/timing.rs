@@ -14,7 +14,22 @@ use crate::{ChunkSchedulerEvent, PlayerChunkTrackingDiagnostics};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ChunkSchedulerPublicationDiagnostics {
+    pub adaptive_budget_enabled: bool,
+    pub feature_publish_budget_min_units: usize,
+    pub feature_publish_budget_max_units: usize,
+    pub feature_publish_budget_elapsed_us: u128,
+    pub feature_publish_spent_units: usize,
+    pub feature_publish_spent_us: u128,
+    pub feature_publish_estimated_unit_us: Option<u128>,
+    pub light_publish_budget_min_units: usize,
+    pub light_publish_budget_max_units: usize,
+    pub light_publish_budget_elapsed_us: u128,
+    pub light_publish_spent_units: usize,
+    pub light_publish_spent_us: u128,
+    pub light_publish_estimated_unit_us: Option<u128>,
+    pub pending_worldgen_publication_chunk_limit: usize,
     pub completed_feature_jobs_drained: usize,
+    pub feature_jobs_pipeline_completed: usize,
     pub feature_chunks_published: usize,
     pub feature_chunks_skipped: usize,
     pub feature_jobs_completed: usize,

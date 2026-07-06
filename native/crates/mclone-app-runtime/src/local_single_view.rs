@@ -58,6 +58,7 @@ pub struct LocalSingleViewSceneOptions {
     pub freeze_time: bool,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
+    pub adaptive_chunk_publication_budget: bool,
     pub world_storage: NativeIntegratedServerWorldStorage,
     pub render_compile_worker_count: usize,
 }
@@ -73,6 +74,7 @@ impl LocalSingleViewSceneOptions {
             freeze_time: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            adaptive_chunk_publication_budget: false,
             world_storage: NativeIntegratedServerWorldStorage::Transient,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
         }
@@ -105,6 +107,11 @@ impl LocalSingleViewSceneOptions {
 
     pub const fn with_lighting_enabled(mut self, lighting_enabled: bool) -> Self {
         self.lighting_enabled = lighting_enabled;
+        self
+    }
+
+    pub const fn with_adaptive_chunk_publication_budget(mut self, enabled: bool) -> Self {
+        self.adaptive_chunk_publication_budget = enabled;
         self
     }
 
@@ -2293,6 +2300,7 @@ fn native_runner_config(
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
         .with_local_integrated_chunk_tracking()
+        .with_adaptive_chunk_publication_budget(options.adaptive_chunk_publication_budget)
         .with_world_storage(options.world_storage.clone())
         .with_cadence_derived_tick_interval(options.cadence)
 }

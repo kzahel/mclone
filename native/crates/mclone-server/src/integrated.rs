@@ -61,12 +61,12 @@ use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemot
 use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
-    ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
-    ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult,
-    FluidKind, FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics,
-    ServerPhysicsStepReport, ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics,
-    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
-    WorldBlockPos, WorldStore,
+    ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
+    ChunkPublicationBudgetConfig, ChunkRecord, ChunkScheduler, ChunkSchedulerEvent,
+    ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind, FluidTickList,
+    NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerPhysicsStepReport,
+    ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
+    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos, WorldStore,
 };
 
 #[cfg(feature = "physics-rapier")]
@@ -437,6 +437,19 @@ impl IntegratedServer {
         self.scheduler.set_lighting_enabled(enabled);
         self.loading_progress
             .set_target_status(runtime_chunk_target_status(&self.scheduler));
+    }
+
+    pub fn publication_budget_config(&self) -> ChunkPublicationBudgetConfig {
+        self.scheduler.publication_budget_config()
+    }
+
+    pub fn set_publication_budget_config(&mut self, config: ChunkPublicationBudgetConfig) {
+        self.scheduler.set_publication_budget_config(config);
+    }
+
+    pub fn set_publication_budget_gameplay_rate_hz(&mut self, gameplay_rate_hz: u32) {
+        self.scheduler
+            .set_publication_budget_gameplay_rate_hz(gameplay_rate_hz);
     }
 
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {

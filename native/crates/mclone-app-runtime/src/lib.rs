@@ -914,6 +914,20 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_purge_stale_tickets_ms: f64,
     pub scheduler_reconcile_holders_ms: f64,
     pub scheduler_publish_completed_ms: f64,
+    pub scheduler_adaptive_publication_budget_enabled: bool,
+    pub scheduler_feature_publish_budget_min_units: usize,
+    pub scheduler_feature_publish_budget_max_units: usize,
+    pub scheduler_feature_publish_budget_ms: f64,
+    pub scheduler_feature_publish_spent_units: usize,
+    pub scheduler_feature_publish_spent_ms: f64,
+    pub scheduler_feature_publish_estimated_unit_ms: Option<f64>,
+    pub scheduler_light_publish_budget_min_units: usize,
+    pub scheduler_light_publish_budget_max_units: usize,
+    pub scheduler_light_publish_budget_ms: f64,
+    pub scheduler_light_publish_spent_units: usize,
+    pub scheduler_light_publish_spent_ms: f64,
+    pub scheduler_light_publish_estimated_unit_ms: Option<f64>,
+    pub scheduler_pending_worldgen_publication_chunk_limit: usize,
     pub scheduler_pending_unload_ms: f64,
     pub scheduler_apply_events_ms: f64,
     pub scheduler_completed_feature_jobs_drained: usize,
@@ -2402,6 +2416,39 @@ impl SingleViewRuntime {
             micros_to_ms(tick.timing.scheduler_reconcile_holders_us);
         diagnostics.scheduler_publish_completed_ms =
             micros_to_ms(tick.timing.scheduler_publish_completed_us);
+        diagnostics.scheduler_adaptive_publication_budget_enabled =
+            tick.scheduler_publication.adaptive_budget_enabled;
+        diagnostics.scheduler_feature_publish_budget_min_units =
+            tick.scheduler_publication.feature_publish_budget_min_units;
+        diagnostics.scheduler_feature_publish_budget_max_units =
+            tick.scheduler_publication.feature_publish_budget_max_units;
+        diagnostics.scheduler_feature_publish_budget_ms =
+            micros_to_ms(tick.scheduler_publication.feature_publish_budget_elapsed_us);
+        diagnostics.scheduler_feature_publish_spent_units =
+            tick.scheduler_publication.feature_publish_spent_units;
+        diagnostics.scheduler_feature_publish_spent_ms =
+            micros_to_ms(tick.scheduler_publication.feature_publish_spent_us);
+        diagnostics.scheduler_feature_publish_estimated_unit_ms = tick
+            .scheduler_publication
+            .feature_publish_estimated_unit_us
+            .map(micros_to_ms);
+        diagnostics.scheduler_light_publish_budget_min_units =
+            tick.scheduler_publication.light_publish_budget_min_units;
+        diagnostics.scheduler_light_publish_budget_max_units =
+            tick.scheduler_publication.light_publish_budget_max_units;
+        diagnostics.scheduler_light_publish_budget_ms =
+            micros_to_ms(tick.scheduler_publication.light_publish_budget_elapsed_us);
+        diagnostics.scheduler_light_publish_spent_units =
+            tick.scheduler_publication.light_publish_spent_units;
+        diagnostics.scheduler_light_publish_spent_ms =
+            micros_to_ms(tick.scheduler_publication.light_publish_spent_us);
+        diagnostics.scheduler_light_publish_estimated_unit_ms = tick
+            .scheduler_publication
+            .light_publish_estimated_unit_us
+            .map(micros_to_ms);
+        diagnostics.scheduler_pending_worldgen_publication_chunk_limit = tick
+            .scheduler_publication
+            .pending_worldgen_publication_chunk_limit;
         diagnostics.scheduler_pending_unload_ms =
             micros_to_ms(tick.timing.scheduler_pending_unload_us);
         diagnostics.scheduler_apply_events_ms = micros_to_ms(tick.timing.scheduler_apply_events_us);

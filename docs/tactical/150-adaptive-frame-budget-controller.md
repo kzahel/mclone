@@ -606,6 +606,45 @@ Exit criteria: acceptance rows recorded; default flipped on for desktop and
 Quest local-integrated; 142's throttle-inventory rows for the two publish
 budgets updated to point here.
 
+2026-07-06 Slice 3 implementation checkpoint:
+
+- Added opt-in shared scheduler publication wiring:
+  `ChunkPublicationBudgetConfig` on `mclone-server`, native local-runtime
+  propagation, and `--adaptive-chunk-publication-budget true|false` for
+  native client lanes. The default remains fixed `1`/`1` until the promotion
+  gate set is recorded.
+- Extended the Slice 2 controller so measured per-unit cost caps max units
+  inside the elapsed grant. The scheduler-specific family config keeps the
+  fixed feature/light publication constants as floors and caps the shared
+  feature/light grant at the recorded sweep-knee `4` units; slower lanes can
+  still grant less from measured cost.
+- `ChunkScheduler::poll()` now computes feature/light publication grants in
+  adaptive mode, enforces both unit and elapsed bounds inside the per-chunk
+  publication loop, feeds measured spend back into EWMA estimates, and reports
+  grant/spend/estimate/backlog-cap counters through runtime and perf JSON.
+- Adaptive mode marks a feature job pipeline-complete when the worldgen
+  mailbox drains, keeps publication backlog separate, admits the next feature
+  job while publication drains, and blocks admission when pending publication
+  plus the new job would exceed the controller backlog cap. Fixed mode keeps
+  the old publication-complete job transition.
+- Validation passed:
+  `cargo fmt --manifest-path native/Cargo.toml --all --check`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-frame-budget`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-server`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_parses_adaptive_chunk_publication_budget_flag`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-server --target wasm32-unknown-unknown`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-frame-budget --target wasm32-unknown-unknown`,
+  and an adaptive desktop RD5/60-frame startup-streaming smoke:
+  `cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-frames 60 --render-distance 5 --target-hz 60 --adaptive-chunk-publication-budget true --debug-passive-showcase false`.
+  The smoke reported `adaptive_chunk_publication_budget=true`,
+  `0` over-budget frames, feature/light budget max units `4`, and max pending
+  worldgen-publication chunks `104` below the sampled cap `147`.
+- Status: implementation is landed behind the flag; Slice 3 promotion exit is
+  not complete because the RD10/RD15 reproducibility rows, movement-frame
+  probe, Quest RD5/RD7/churn gates, native-window run, desktop-XR smoke, and
+  default-on flip were intentionally not claimed without those measurements.
+
 ## Slice 4: Candidate B — Render Admission And Workers
 
 Why: after publication opens, the desktop trailing edge is the paced render
