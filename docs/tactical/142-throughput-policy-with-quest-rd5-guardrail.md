@@ -309,17 +309,20 @@ Recorded so nobody re-runs dead experiments:
 
 Every Quest-motivated cap that also throttles desktop, in one place. "Plan"
 names the candidate that may change it; nothing here changes by default.
+Host/window/stage addresses use the Slice 1.5 vocabulary from tactical 150 and
+the law doc's Platform Timelines table; `RenderAdmission*` is the law-doc
+shorthand for the four render-admission substage `StageId`s.
 
-| Throttle | Default | Owner | Why it exists | Plan |
-|---|---|---|---|---|
-| `DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET` | `1`/gameplay tick | `mclone-server/src/scheduler.rs` | publication hitch slicing (`030`) | Candidate A (validated `3x`) |
-| `DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET` | `1`/gameplay tick | `mclone-server/src/scheduler.rs` | same | Candidate A |
-| Single in-flight feature job; next job gated on full publication | structural | `scheduler.rs` (`has_incomplete_feature_status_job`, `mark_job_complete`) | job bookkeeping simplicity | Candidate A |
-| Worldgen / light-status workers | `1` thread each | `worldgen_mailbox.rs`, `light_mailbox.rs` | bring-up shape | only if generation becomes the measured limit after A |
-| `DEFAULT_RENDER_CHUNK_MESH_BUDGET` | `1` chunk/sync call | `mclone-app-runtime/src/lib.rs` | Quest frame safety | Candidate B |
-| `DEFAULT_RENDER_SECTION_COMPILE_WORKERS` + in-flight cap | `1` | `mclone-app-runtime/src/render_assets.rs` | Quest sync/upload tails (`120`) | Candidate B, later lever (bulk-drain effect falsified) |
-| Update-pump elapsed budget / unload cap | `2ms` / `16` | `mclone-app-runtime/src/lib.rs` (`133`) | Quest apply tails | keep; absorbed the `32`/tick prototype bursts cleanly |
-| XR upload/accept/completed-result budgets | `None`; opt-in CLI flags | `mclone-xr-scene`, android-xr CLI | Quest measurement lanes (`128`) | unchanged; lane args, not defaults |
+| Throttle | Default | Owner | Host/window/stage address | Why it exists | Plan |
+|---|---|---|---|---|---|
+| `DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET` | `1`/gameplay tick | `mclone-server/src/scheduler.rs` | `IntegratedServerRunner` `GameplayTick` / `DedicatedServerCommandLoop` `CommandTick` / `WebRafWorkers` `WorkerPoll`; `SchedulerPublication` | publication hitch slicing (`030`) | Candidate A (validated `3x`) |
+| `DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET` | `1`/gameplay tick | `mclone-server/src/scheduler.rs` | same host windows; `SchedulerPublication` plus `LightComputeStatus` dependency | same | Candidate A |
+| Single in-flight feature job; next job gated on full publication | structural | `scheduler.rs` (`has_incomplete_feature_status_job`, `mark_job_complete`) | same server host windows; `TerrainGeneration` -> `SchedulerPublication` handoff | job bookkeeping simplicity | Candidate A |
+| Worldgen / light-status workers | `1` thread each | `worldgen_mailbox.rs`, `light_mailbox.rs` | `IntegratedServerRunner` / `DedicatedServerCommandLoop` / `WebRafWorkers` `WorkerPoll`; `TerrainGeneration`, `LightComputeStatus` | bring-up shape | only if generation becomes the measured limit after A |
+| `DEFAULT_RENDER_CHUNK_MESH_BUDGET` | `1` chunk/sync call | `mclone-app-runtime/src/lib.rs` | display hosts `BeforeRender`, XR overlap `PostSubmitOverlapSlack`, headless `OffscreenStep`; `RenderSectionAdmission` and `RenderAdmission*` | Quest frame safety | Candidate B |
+| `DEFAULT_RENDER_SECTION_COMPILE_WORKERS` + in-flight cap | `1` | `mclone-app-runtime/src/render_assets.rs` | display/offscreen admission windows submit `RenderAdmissionWorkerSubmit`; compile workers run `CpuMeshCompile` in `WorkerPoll` | Quest sync/upload tails (`120`) | Candidate B, later lever (bulk-drain effect falsified) |
+| Update-pump elapsed budget / unload cap | `2ms` / `16` | `mclone-app-runtime/src/lib.rs` (`133`) | display hosts `BeforeRender`, XR overlap `PostSubmitOverlapSlack`, headless `OffscreenStep`; `TransportDecode`, `ClientUpdateApply` | Quest apply tails | keep; absorbed the `32`/tick prototype bursts cleanly |
+| XR upload/accept/completed-result budgets | `None`; opt-in CLI flags | `mclone-xr-scene`, android-xr CLI | `AndroidXrOpenXr` / `DesktopXrOpenXr` `BeforeRender` and overlap `PostSubmitOverlapSlack`; `CompletedResultAcceptance`, `GpuUpload`, `UploadApply` | Quest measurement lanes (`128`) | unchanged; lane args, not defaults |
 
 Any candidate that relaxes one of these must land as a measured budget
 calculation, not as a new fixed global default.

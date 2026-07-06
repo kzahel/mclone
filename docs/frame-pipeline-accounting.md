@@ -124,60 +124,101 @@ irrelevant if the desktop or headset frame loop cannot admit the results safely.
 
 ## Platform Timelines
 
-### Desktop Flat
+Budget controller reports and decisions use the shared
+`(FrameHostKind, WorkWindow, StageId)` address vocabulary. `StageId` remains
+the only stage taxonomy; `CriticalPathLabel` records whether a stage is
+current-frame critical, next-frame slack, a parallel CPU peer, remote-host work,
+or queued/backpressured in that host mode.
 
-Desktop usually has more slack and less severe comfort risk. Coarse budgets often
-show up as slow world fill rather than dropped frames.
+Platform shells still own platform orchestration: `winit`, Android activity,
+browser RAF/worker glue, OpenXR session/swapchain ownership, and headless
+capture loops do not move into the budget controller. The controller only
+addresses where a budget is consumed.
 
-Current desktop native window shape is mostly:
+### Host Families
 
-```text
-event/redraw
-  -> runtime poll and section sync/upload
-  -> UI/frame setup
-  -> render encode
-  -> queue submit / present
-  -> wait or schedule next redraw
-```
+Desktop flat (`FrameHostKind::DesktopFlatWinit`) usually has more slack and less
+severe comfort risk. Coarse budgets often show up as slow world fill rather than
+dropped frames. Its current native window shape is still mostly event/redraw,
+runtime poll and section sync/upload, UI/frame setup, render encode, queue
+submit/present, then wait or schedule next redraw.
 
-The desired throughput shape is to submit earlier when practical and spend
-bounded post-submit or next-frame slack on terrain streaming. Even without that
-full shape, desktop should use measured elapsed budgets rather than fixed tiny
-counts when the frame loop has clear headroom.
+Flat Android (`FrameHostKind::FlatAndroidWinit`) mirrors the flat display shape
+but is owned by the Android activity/winit adapter and Android surface
+presentation pacing.
 
-### Quest / Android XR
+Web (`FrameHostKind::WebRafWorkers`) is a RAF display loop plus workers: RAF
+drives camera/input, update drain, render admission, upload, draw, and canvas
+present; the integrated server tick runs on a worker timer; worldgen/light and
+render compile can run in separate workers.
 
-Quest has a smaller frame period and tighter thermal/headroom constraints. At
-72 Hz the period is `13.889 ms`, and usable CPU slack may be much smaller than
-that after pose, draw encode, GPU execution, runtime overhead, and compositor
-timing are accounted for.
+Android XR (`FrameHostKind::AndroidXrOpenXr`) and desktop XR
+(`FrameHostKind::DesktopXrOpenXr`) have different session shells but share the
+same `mclone-xr-scene` terrain frame interior. Quest has the tighter headroom
+budget; at 72 Hz the period is `13.889 ms`, and useful signals are
+`app_work_*`, `headroom_*`, and `app_over_period_*`, not legacy paced frame wall
+time. XR frame overlap is a work-window shape, not a separate policy fork.
 
-The useful signals are `app_work_*`, `headroom_*`, and `app_over_period_*`, not
-legacy paced frame wall time. A controller that is harmless on desktop can be
-unsafe on Quest if it turns a zero-or-one-unit decision into a current-frame
-burst.
+Headless/offscreen/perf (`FrameHostKind::HeadlessOffscreenPerf`) is repeatable
+and useful, but each lane measures one fixed-frame shape. Raw worldgen,
+scheduler-loading, mesh CPU, GPU-upload, startup-streaming, and frame-budget
+lanes must still be paired with the desktop-shaped and Quest guardrail lanes
+that correspond to the changed stage.
 
-The opt-in XR frame-overlap path already demonstrates part of the target shape:
-submit eye work, defer some wait, prefetch pose-independent runtime/render work,
-then consume it on a later frame. That path is not yet the default policy and is
-not a substitute for an adaptive budget controller.
+Server ticks split into the wall-clock integrated runner
+(`FrameHostKind::IntegratedServerRunner`) and the command-driven dedicated
+server (`FrameHostKind::DedicatedServerCommandLoop`). The dedicated server does
+one gameplay service step per client command today; it has no wall-clock slack
+window.
 
-### Headless / Benchmark Lanes
+### Work-Window Mapping
 
-Headless lanes are valuable because they are repeatable, but they each measure a
-specific shape:
+`RenderAdmission*` below means the exact stage family
+`RenderAdmissionDirtyReadyScan`, `RenderAdmissionRequestBuild`,
+`RenderAdmissionWorkerSubmit`, and
+`RenderAdmissionPreparedRecordMaintenance`.
 
-- raw worldgen lanes measure algorithmic ceiling without scheduler/light/client.
-- scheduler-loading lanes measure server loading/publication without client mesh
-  or frame pacing.
-- mesh CPU lanes measure snapshot-to-mesh work without `wgpu` or admission
-  pacing.
-- GPU-upload lanes measure prebuilt mesh upload without draw/frame pacing.
-- startup-streaming lanes are closest to desktop-shaped local play.
-- Quest/OpenXR lanes are the authority for headset frame pacing.
-
-Do not optimize for any single isolation lane without rerunning the desktop-shaped
-and Quest guardrail lanes that correspond to the changed stage.
+| Host kind | Work window | StageIds that run there today | Receipts / absence notes |
+|---|---|---|---|
+| `DesktopFlatWinit` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmissionDirtyReadyScan`, `RenderAdmissionRequestBuild`, `RenderAdmissionWorkerSubmit`, `RenderAdmissionPreparedRecordMaintenance`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `UiDebug` | `apps/mclone-native-client/src/app.rs` `WindowEvent::RedrawRequested` calls `update_camera_from_keys`, `poll_runtime_and_upload`, and `render_full_frame_with_ui`; `flat_client_driver.rs` `poll_runtime`, `upload_runtime_sections`, and `render_full_frame_with_ui`. |
+| `DesktopFlatWinit` | `WorkerPoll` | `CpuMeshCompile` | Native render compile work runs through `mclone-app-runtime/src/render_assets.rs` `RenderSectionCompileWorker` / `run_render_section_compile_dispatcher`; the display loop submits and accepts results in `BeforeRender`. |
+| `DesktopFlatWinit` | `PostSubmitOverlapSlack` | window does not exist on this host today | After `SurfaceFrame::render_with_report` the app records timing, finishes startup/session bookkeeping, and schedules the next redraw; no post-submit terrain drain runs in `app.rs`. |
+| `DesktopFlatWinit` | `GameplayTick` | window does not exist on this host | Local integrated server ticks are owned by `IntegratedServerRunner`, not the desktop display loop. |
+| `DesktopFlatWinit` | `TickSlack` | window does not exist on this host | Local integrated server tick slack is owned by `IntegratedServerRunner`, not the desktop display loop. |
+| `FlatAndroidWinit` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `UiDebug` | `apps/mclone-android-client/src/lib.rs` `AndroidFrameRenderer::render` polls the scene, applies camera corrections/input, syncs render sections, uploads section updates, releases compile jobs, and calls `render_full_frame_for_view`; `AndroidGpuState::render_mclone_frame` submits and presents. |
+| `FlatAndroidWinit` | `WorkerPoll` | `CpuMeshCompile` | Flat Android uses the shared native render compile dispatcher in `mclone-app-runtime/src/render_assets.rs`; the Android render step submits and accepts results in `BeforeRender`. |
+| `FlatAndroidWinit` | `PostSubmitOverlapSlack` | window does not exist on this host today | The Android winit shell presents and requests another redraw if needed; there is no budgeted post-submit drain in `render_mclone_frame`. |
+| `FlatAndroidWinit` | `GameplayTick` | window does not exist on this host | Integrated server work is addressed through the server-runner host kind. |
+| `FlatAndroidWinit` | `TickSlack` | window does not exist on this host | Integrated server slack is addressed through the server-runner host kind. |
+| `WebRafWorkers` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `UiDebug` | `www/mclone-web-app.ts` `tickFrame` drives the RAF frame; `web_canvas.rs` `sync_render_streaming_frame_*`, `finish_render_streaming_frame`, and `render_chunk_report_with_cache_update` drain updates, run `sync_render_sections_with_budget`, upload sections, draw, submit, and present. |
+| `WebRafWorkers` | `WorkerPoll` | `HostSessionCommands`, `TerrainGeneration`, `LightComputeStatus`, `SchedulerPublication`, `CpuMeshCompile` | `web_server_worker.rs` `tick`, `poll`, and `handleCommandFrame` service the integrated server worker; `www/mclone-server-job-worker.ts` handles worldgen/light jobs; `www/mclone-render-compiler-worker.ts` `handleCompile` runs render compile work and returns completed results. |
+| `WebRafWorkers` | `PostSubmitOverlapSlack` | window does not exist on this host today | Browser RAF has no blocking present wait that Rust owns. Once the RAF callback returns, scheduling is back in the browser; any background work must be a worker window. |
+| `WebRafWorkers` | `TickSlack` | window does not exist on this host today | The web server worker is timer/message driven; it does not own a native blocking wait-until-next-tick slack loop. |
+| `AndroidXrOpenXr` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `GpuExecutionPresentationWait`, `UiDebug` | `apps/mclone-android-xr-client/src/lib.rs` `run_mclone_frame_loop` polls Android/OpenXR events, waits/begins the frame, polls controllers, then calls `render_mclone_frame` / `render_mclone_multiview_frame`; `mclone-xr-scene/src/lib.rs` `render_prepared_frame*` and `poll_runtime_and_upload` own runtime sync, accept/upload, records, encode, and waits. |
+| `AndroidXrOpenXr` | `PostSubmitOverlapSlack` | `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords` | In the per-eye frame-overlap path, `mclone-xr-scene/src/lib.rs` `render_prepared_frame` defers eye waits, runs `poll_runtime_and_upload` as `overlap_runtime_prefetch`, then waits for the deferred submission. This is the Quest overlap window. |
+| `AndroidXrOpenXr` | `WorkerPoll` | `CpuMeshCompile` | XR render compile workers use `mclone-app-runtime/src/render_assets.rs` `RenderSectionCompileWorker`; `mclone-xr-scene` submits/accepts results in `BeforeRender` or overlap prefetch. |
+| `AndroidXrOpenXr` | `GameplayTick` | window does not exist on this host | Local integrated server cadence is addressed to `IntegratedServerRunner`; the XR shell only observes its queued effects. |
+| `AndroidXrOpenXr` | `TickSlack` | window does not exist on this host | Local integrated server slack is addressed to `IntegratedServerRunner`, not the OpenXR shell. |
+| `DesktopXrOpenXr` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `GpuExecutionPresentationWait`, `UiDebug` | `apps/mclone-native-client/src/xr_clear_smoke.rs` `run_mclone` polls OpenXR events, waits/begins frames, polls controllers, and calls `render_mclone_frame`; that calls the same `mclone-xr-scene` terrain frame interior. |
+| `DesktopXrOpenXr` | `PostSubmitOverlapSlack` | conditional shared-XR window; window does not exist in the current smoke unless overlap is enabled | The window is the same `mclone-xr-scene` deferred-eye-wait / `overlap_runtime_prefetch` path used by Android XR, but desktop smoke currently runs the serial path. |
+| `DesktopXrOpenXr` | `WorkerPoll` | `CpuMeshCompile` | Desktop XR terrain compile uses the same shared native render compile worker path as Android XR when mclone terrain is active. |
+| `DesktopXrOpenXr` | `GameplayTick` | window does not exist on this host | Server cadence is not owned by the OpenXR session loop. |
+| `DesktopXrOpenXr` | `TickSlack` | window does not exist on this host | Server slack is not owned by the OpenXR session loop. |
+| `HeadlessOffscreenPerf` | `OffscreenStep` | `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `UiDebug` | `mclone-render/src/headless.rs` `run_headless_frame_loop` / `run_headless_capture_loop`; `apps/mclone-native-client/src/offscreen_flat_client.rs` `render_frame`; `apps/mclone-native-client/src/perf.rs` `run_startup_streaming_perf` and `run_frame_budget_probe`. |
+| `HeadlessOffscreenPerf` | `WorkerPoll` | `CpuMeshCompile` | Startup-streaming and offscreen local-runtime lanes use the same shared native render compile worker path; the fixed frame consumes results in `OffscreenStep`. |
+| `HeadlessOffscreenPerf` | `PostSubmitOverlapSlack` | window does not exist on this host | There is no compositor-owned present interval. Optional `pace_frame_duration` sleeping in headless loops is measurement pacing, not a budget window. |
+| `HeadlessOffscreenPerf` | `GameplayTick` | window does not exist on this host | Startup-streaming/offscreen local servers still use the shared server runner when a local world is active; the headless render step does not own gameplay ticks. |
+| `HeadlessOffscreenPerf` | `TickSlack` | window does not exist on this host | The headless render step does not own server slack. |
+| `IntegratedServerRunner` | `GameplayTick` | `HostSessionCommands`, `SchedulerPublication`, `TerrainGeneration`, `LightComputeStatus` | `mclone-server/src/runner.rs` `run_native_integrated_server_loop` advances cadence and calls `try_simulation_tick_report_with_physics_steps`; `mclone-server/src/scheduler.rs` `tick_report_with_record_builders` calls `poll_with_publication_diagnostics`. |
+| `IntegratedServerRunner` | `TickSlack` | `HostSessionCommands` | `mclone-server/src/runner.rs` `recv_until_next_tick` and `drain_available_commands` service control traffic around the next tick deadline and publish already-produced updates. Candidate controller work must treat the configured cadence period as an input. |
+| `IntegratedServerRunner` | `WorkerPoll` | `TerrainGeneration`, `LightComputeStatus` | The scheduler feeds worldgen/light mailbox workers; their work is peer CPU pressure for local integrated play and remote-host work for remote clients. |
+| `IntegratedServerRunner` | `BeforeRender` | window does not exist on this host | This host has no display render step. |
+| `IntegratedServerRunner` | `PostSubmitOverlapSlack` | window does not exist on this host | This host has no surface, OpenXR session, or compositor submit point. |
+| `DedicatedServerCommandLoop` | `CommandTick` | `HostSessionCommands`, `SchedulerPublication`, `TerrainGeneration`, `LightComputeStatus` | `apps/mclone-dedicated-server/src/main.rs` `run_server_loop_inner` receives one network command and calls `DedicatedSession::handle_client_command`; the session advances server work and responds with updates. |
+| `DedicatedServerCommandLoop` | `WorkerPoll` | `TerrainGeneration`, `LightComputeStatus` | The dedicated process can still run server worker mailboxes, but they are not client-frame work. |
+| `DedicatedServerCommandLoop` | `TickSlack` | window does not exist on this host | The current dedicated loop is command-driven, not a wall-clock wait-until-next-tick loop. |
+| `DedicatedServerCommandLoop` | `BeforeRender` | window does not exist on this host | The dedicated server has no renderer. |
+| `DedicatedServerCommandLoop` | `PostSubmitOverlapSlack` | window does not exist on this host | The dedicated server has no surface, OpenXR session, or compositor. |
 
 ## Measurement Requirements
 
@@ -424,6 +465,15 @@ Behavior:
 - allow desktop to ramp higher when frame headroom is consistently large;
 - preserve vanilla/reference correctness gates: status order, light readiness,
   neighbor readiness, stale-result rejection, and atomic drawable publication.
+
+Policy placement rule: no new budget, pacing, throttle, or admission constant
+lands in an app crate or platform loop shell. Anything budget-shaped enters as a
+controller output or a shared-config floor, addressed through the Platform
+Timelines `(FrameHostKind, WorkWindow, StageId)` vocabulary. Existing web-local
+`WEB_FRAME_UPDATE_DRAIN_BUDGET` and `WEB_RENDER_CHUNK_MESH_BUDGET` constants
+are grandfathered fail-safe floors pending web controller wiring; do not add
+siblings. Hosts the controller does not reach yet stay on their fixed floors,
+not forked policy.
 
 This is compatible with Java's reference shape: deadline-driven render compile
 admission, explicit dispatcher/upload queues, bounded resources, and old drawable

@@ -12,6 +12,31 @@ pub enum CriticalPathLabel {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub enum FrameHostKind {
+    DesktopFlatWinit,
+    FlatAndroidWinit,
+    WebRafWorkers,
+    AndroidXrOpenXr,
+    DesktopXrOpenXr,
+    HeadlessOffscreenPerf,
+    IntegratedServerRunner,
+    DedicatedServerCommandLoop,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkWindow {
+    BeforeRender,
+    PostSubmitOverlapSlack,
+    GameplayTick,
+    TickSlack,
+    WorkerPoll,
+    OffscreenStep,
+    CommandTick,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum StageId {
     InputPoseEvents,
     HostSessionCommands,

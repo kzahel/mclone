@@ -1,9 +1,10 @@
 # 150: Adaptive Frame Budget Controller
 
-Status: proposed; Slice 0 guardrail hygiene/baselines captured 2026-07-06 on
-clean commit `bc55076c`; Slice 1 Quest frame-shape default flipped 2026-07-06;
-Slice 1.5 (frame-loop work-window contract) inserted 2026-07-06 from the
-loop-inventory review, before any controller work.
+Status: active implementation plan; Slice 0 guardrail hygiene/baselines
+captured 2026-07-06 on clean commit `bc55076c`; Slice 1 Quest frame-shape
+default flipped 2026-07-06; Slice 1.5 frame-loop work-window contract landed
+2026-07-06 as docs plus inert diagnostics vocabulary, before any controller
+work.
 Drafted 2026-07-06 as the gap-10 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
@@ -433,6 +434,27 @@ cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
 cargo check --manifest-path native/Cargo.toml -p mclone-diagnostics --target wasm32-unknown-unknown
 git diff --check
 ```
+
+2026-07-06 Slice 1.5 result:
+
+- Added inert `FrameHostKind` and `WorkWindow` enums next to `StageId` and
+  `CriticalPathLabel` in `mclone-diagnostics`; they are exported but not wired
+  into the report schema or any engine loop.
+- Extended the law doc's Platform Timelines with every loop family from the
+  inventory, the work windows that exist on each host, explicit non-existent
+  window rows for RAF/headless/dedicated/server-vs-display boundaries, and
+  file/function receipts.
+- Mirrored contract rule 10 into the law doc: no new platform-local
+  budget/pacing/throttle/admission constants; budget-shaped policy must enter
+  as controller output or shared floors addressed by `(FrameHostKind,
+  WorkWindow, StageId)`.
+- Updated 142's throttle inventory with obvious `(host, window, stage)`
+  addresses. No engine behavior or loop ordering changed.
+- Validation passed:
+  `cargo fmt --manifest-path native/Cargo.toml --all --check`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-diagnostics --target wasm32-unknown-unknown`,
+  and `git diff --check`.
 
 ## Slice 2: Controller Core (Sans-I/O)
 

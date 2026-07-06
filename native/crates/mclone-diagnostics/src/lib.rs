@@ -20,4 +20,4 @@ pub use gpu::{GpuPassId, GpuTimestampPanelReport, GpuTimestampPassReport};
 pub use peer::{PeerThreadActivityReport, PeerThreadId, PeerThreadPanelReport};
 pub use queue::{QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport};
 pub use schema::{FRAME_PIPELINE_SCHEMA_VERSION, FramePipelineReport};
-pub use stage::{CriticalPathLabel, StageId, StageSpan};
+pub use stage::{CriticalPathLabel, FrameHostKind, StageId, StageSpan, WorkWindow};
