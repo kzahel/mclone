@@ -43,6 +43,7 @@ use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const DESKTOP_BLINK_DEBUG_KEY: KeyCode = KeyCode::KeyT;
+const FRAME_PIPELINE_OVERLAY_KEY: KeyCode = KeyCode::F6;
 const DEBUG_PHYSICS_CUBE_SHOOT_KEY: KeyCode = KeyCode::F7;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
@@ -496,6 +497,7 @@ impl ChunkApp {
             ),
         );
         hud.status = status;
+        hud.frame_pipeline = self.driver.latest_frame_pipeline_overlay();
         hud
     }
 
@@ -784,8 +786,7 @@ impl ChunkApp {
         let poll_start = Instant::now();
         let poll = self.driver.poll_runtime()?;
         self.driver
-            .frame_timing
-            .record_runtime_poll(elapsed_ms(poll_start.elapsed()));
+            .record_runtime_poll_timing(elapsed_ms(poll_start.elapsed()));
         if !poll.needs_section_upload {
             return Ok(());
         }
@@ -1042,6 +1043,17 @@ impl ApplicationHandler for ChunkApp {
                         && !event.repeat
                     {
                         self.trigger_render_scale_rebuild(event_loop);
+                        return;
+                    }
+                    if key_code == FRAME_PIPELINE_OVERLAY_KEY
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.apply_ui_action(
+                            GameUiAction::ToggleFramePipelineOverlay,
+                            event_loop,
+                            false,
+                        );
                         return;
                     }
                     if event.state == ElementState::Pressed && self.driver.ui_is_active() {
@@ -1328,6 +1340,7 @@ impl ApplicationHandler for ChunkApp {
                     player_collision_box_visible: self.driver.player_collision_box_visible,
                     first_person_player_visible: self.driver.camera.first_person_player_visible(),
                     crosshair_visible: self.driver.crosshair_visible,
+                    frame_pipeline_overlay_visible: self.driver.frame_pipeline_overlay_visible,
                     player_model: self.driver.player_model,
                     server_cadence: self.driver.server_simulation_cadence(),
                 };
@@ -1361,7 +1374,7 @@ impl ApplicationHandler for ChunkApp {
                 };
                 match result {
                     Ok(report) => {
-                        self.driver.frame_timing.record_surface_frame(
+                        self.driver.record_surface_frame_timing(
                             elapsed_ms(render_start.elapsed()),
                             report.acquire_ms,
                             report.encode_ms,

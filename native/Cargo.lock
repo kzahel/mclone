@@ -1653,6 +1653,7 @@ dependencies = [
 name = "mclone-ui"
 version = "0.0.0"
 dependencies = [
+ "mclone-diagnostics",
  "mclone-input",
 ]
 

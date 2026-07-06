@@ -122,6 +122,7 @@ impl ClientExperienceController {
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
+            | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetXrTurnMode(_)
@@ -224,6 +225,7 @@ pub struct ClientExperienceSettingsProfile {
     pub player_collision_box: ClientExperienceCapabilityStatus,
     pub first_person_player: ClientExperienceCapabilityStatus,
     pub crosshair: ClientExperienceCapabilityStatus,
+    pub frame_pipeline_overlay: ClientExperienceCapabilityStatus,
     pub player_model: ClientExperienceCapabilityStatus,
     pub movement_mode: ClientExperienceCapabilityStatus,
     pub xr_turn: ClientExperienceCapabilityStatus,
@@ -252,6 +254,7 @@ impl ClientExperienceSettingsProfile {
             player_collision_box: ClientExperienceCapabilityStatus::Supported,
             first_person_player: ClientExperienceCapabilityStatus::Supported,
             crosshair: ClientExperienceCapabilityStatus::Supported,
+            frame_pipeline_overlay: ClientExperienceCapabilityStatus::Supported,
             player_model: ClientExperienceCapabilityStatus::Supported,
             movement_mode: ClientExperienceCapabilityStatus::Supported,
             xr_turn: ClientExperienceCapabilityStatus::Supported,
@@ -278,6 +281,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::TogglePlayerCollisionBox => self.player_collision_box,
             ClientExperienceActionKind::ToggleFirstPersonPlayer => self.first_person_player,
             ClientExperienceActionKind::ToggleCrosshair => self.crosshair,
+            ClientExperienceActionKind::ToggleFramePipelineOverlay => self.frame_pipeline_overlay,
             ClientExperienceActionKind::SetPlayerModel => self.player_model,
             ClientExperienceActionKind::SetMovementMode => self.movement_mode,
             ClientExperienceActionKind::SetXrTurnMode => self.xr_turn,
@@ -445,6 +449,15 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetCrosshairVisible(*visible));
             }
+            GameUiAction::ToggleFramePipelineOverlay => {
+                self.state.frame_pipeline_overlay_visible =
+                    !self.state.frame_pipeline_overlay_visible;
+                effects.setting_effects.push(
+                    ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(
+                        self.state.frame_pipeline_overlay_visible,
+                    ),
+                );
+            }
             GameUiAction::SetPlayerModel(model) => {
                 self.state.player_model = model;
                 effects
@@ -596,6 +609,10 @@ impl ClientExperienceSettingsController {
                 profile.crosshair,
             ),
             (
+                ClientExperienceActionKind::ToggleFramePipelineOverlay,
+                profile.frame_pipeline_overlay,
+            ),
+            (
                 ClientExperienceActionKind::SetPlayerModel,
                 profile.player_model,
             ),
@@ -708,6 +725,7 @@ pub struct ClientExperienceSettingsState {
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
     pub crosshair_visible: Option<bool>,
+    pub frame_pipeline_overlay_visible: bool,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub xr_turn_mode: Option<GameXrTurnMode>,
@@ -745,6 +763,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             player_collision_box_visible: state.player_collision_box_visible,
             first_person_player_visible: state.first_person_player_visible,
             crosshair_visible: state.crosshair_visible,
+            frame_pipeline_overlay_visible: state.frame_pipeline_overlay_visible,
             player_model: state.player_model,
             movement_mode: state.movement_mode,
             xr_turn_mode: state.xr_turn_mode,
@@ -777,6 +796,7 @@ impl ClientExperienceSettingsState {
         state.player_collision_box_visible = self.player_collision_box_visible;
         state.first_person_player_visible = self.first_person_player_visible;
         state.crosshair_visible = self.crosshair_visible;
+        state.frame_pipeline_overlay_visible = self.frame_pipeline_overlay_visible;
         state.player_model = self.player_model;
         state.movement_mode = self.movement_mode;
         state.xr_turn_mode = self.xr_turn_mode;
@@ -867,6 +887,7 @@ pub enum ClientExperienceSettingEffect {
     SetPlayerCollisionBoxVisible(bool),
     SetFirstPersonPlayerVisible(bool),
     SetCrosshairVisible(bool),
+    SetFramePipelineOverlayVisible(bool),
     SetPlayerModel(GamePlayerModel),
     SyncPlayerAppearance,
     SetMovementMode(GameMovementMode),
@@ -934,6 +955,7 @@ pub enum ClientExperienceActionKind {
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
     ToggleCrosshair,
+    ToggleFramePipelineOverlay,
     SetPlayerModel,
     SetMovementMode,
     SetXrTurnMode,
@@ -985,6 +1007,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
             ClientExperienceActionKind::ToggleFirstPersonPlayer
         }
         GameUiAction::ToggleCrosshair => ClientExperienceActionKind::ToggleCrosshair,
+        GameUiAction::ToggleFramePipelineOverlay => {
+            ClientExperienceActionKind::ToggleFramePipelineOverlay
+        }
         GameUiAction::SetPlayerModel(_) => ClientExperienceActionKind::SetPlayerModel,
         GameUiAction::SetMovementMode(_) => ClientExperienceActionKind::SetMovementMode,
         GameUiAction::SetXrTurnMode(_) => ClientExperienceActionKind::SetXrTurnMode,
@@ -1037,6 +1062,7 @@ pub const fn classify_client_experience_action_kind(
         ClientExperienceActionKind::ToggleFarLod
         | ClientExperienceActionKind::SetFarLodRange
         | ClientExperienceActionKind::ToggleCrosshair
+        | ClientExperienceActionKind::ToggleFramePipelineOverlay
         | ClientExperienceActionKind::SetXrTurnMode
         | ClientExperienceActionKind::CycleFramePacing
         | ClientExperienceActionKind::CycleFpsCap
@@ -1139,6 +1165,7 @@ mod tests {
             GameUiAction::TogglePlayerCollisionBox,
             GameUiAction::ToggleFirstPersonPlayer,
             GameUiAction::ToggleCrosshair,
+            GameUiAction::ToggleFramePipelineOverlay,
             GameUiAction::SetPlayerModel(GamePlayerModel::UprightBear),
             GameUiAction::SetMovementMode(GameMovementMode::Fly),
             GameUiAction::SetXrTurnMode(GameXrTurnMode::Snap30),
@@ -1153,12 +1180,16 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 43);
+        assert_eq!(samples.len(), 44);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
         assert_eq!(
             classify_game_ui_action(GameUiAction::ToggleFarLod),
+            ClientExperienceActionClassification::CapabilityGated
+        );
+        assert_eq!(
+            classify_game_ui_action(GameUiAction::ToggleFramePipelineOverlay),
             ClientExperienceActionClassification::CapabilityGated
         );
         assert_eq!(
@@ -1248,6 +1279,16 @@ mod tests {
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetFullbright(false)]
         );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::ToggleFramePipelineOverlay,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert!(settings.state().frame_pipeline_overlay_visible);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(true)]
+        );
     }
 
     #[test]
@@ -1296,6 +1337,9 @@ mod tests {
             far_lod: ClientExperienceCapabilityStatus::Unsupported(
                 "Far LOD is unavailable for this profile",
             ),
+            frame_pipeline_overlay: ClientExperienceCapabilityStatus::Unsupported(
+                "Frame pipeline overlay is unavailable for this profile",
+            ),
             ..ClientExperienceSettingsProfile::default()
         };
         let mut settings = ClientExperienceSettingsController::default();
@@ -1310,6 +1354,18 @@ mod tests {
                 kind: ClientExperienceActionKind::ToggleFarLod,
                 status: ClientExperienceCapabilityStatus::Unsupported(
                     "Far LOD is unavailable for this profile"
+                ),
+            }]
+        );
+
+        let effects = settings.apply_ui_action(GameUiAction::ToggleFramePipelineOverlay, profile);
+        assert!(!settings.state().frame_pipeline_overlay_visible);
+        assert_eq!(
+            effects.capability_projection.actions,
+            vec![ClientExperienceActionAvailability {
+                kind: ClientExperienceActionKind::ToggleFramePipelineOverlay,
+                status: ClientExperienceCapabilityStatus::Unsupported(
+                    "Frame pipeline overlay is unavailable for this profile"
                 ),
             }]
         );

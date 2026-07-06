@@ -258,6 +258,7 @@ fn cli_parses_full_frame_screenshot_options() {
                 camera_view: mclone_render_session::EngineCameraViewMode::ThirdPersonBack,
                 ui: HeadlessScreenshotUi::Pause,
                 hud: true,
+                frame_pipeline_overlay: false,
                 debug_pane: true,
                 player_collision_box: true,
                 blink_debug: true,
@@ -268,6 +269,23 @@ fn cli_parses_full_frame_screenshot_options() {
             },
         }
     );
+}
+
+#[test]
+fn cli_parses_frame_pipeline_overlay_screenshot_flag() {
+    let cli = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-frame-pipeline.png".to_owned(),
+        "--screenshot-frame-pipeline-overlay".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::HeadlessScreenshot { options } = cli else {
+        panic!("expected screenshot CLI");
+    };
+    assert!(options.hud);
+    assert!(options.frame_pipeline_overlay);
 }
 
 #[test]

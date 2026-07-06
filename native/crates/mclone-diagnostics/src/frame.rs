@@ -397,6 +397,12 @@ pub struct FrameSummaryReport {
     pub rendered_frames: u64,
     pub dropped_frames: u64,
     pub stale_frames: u64,
+    pub latest_frame_wall_ms: f64,
+    pub latest_wait_ms: f64,
+    pub latest_app_work_ms: f64,
+    pub latest_thread_cpu_ms: Option<f64>,
+    pub latest_blocked_ms: Option<f64>,
+    pub latest_headroom_ms: Option<f64>,
     pub frame_wall: PercentileSummary,
     pub wait: PercentileSummary,
     pub app_work: PercentileSummary,
@@ -493,9 +499,8 @@ impl FrameAccumulator {
             }
         }
         let frames = self.observations.len() as u64;
-        let latest_stage_spans = self
-            .observations
-            .last()
+        let latest = self.observations.last();
+        let latest_stage_spans = latest
             .map(|frame| frame.stage_spans.clone())
             .unwrap_or_default();
         FrameSummaryReport {
@@ -514,6 +519,13 @@ impl FrameAccumulator {
                 .filter(|frame| frame.dropped)
                 .count() as u64,
             stale_frames: self.observations.iter().filter(|frame| frame.stale).count() as u64,
+            latest_frame_wall_ms: latest.map_or(0.0, |frame| frame.frame_wall_ms),
+            latest_wait_ms: latest.map_or(0.0, |frame| frame.wait_ms),
+            latest_app_work_ms: latest.map_or(0.0, FrameObservation::computed_app_work_ms),
+            latest_thread_cpu_ms: latest.and_then(|frame| frame.thread_cpu_ms),
+            latest_blocked_ms: latest.and_then(FrameObservation::blocked_ms),
+            latest_headroom_ms: latest
+                .and_then(|frame| frame.headroom_ms(self.config.target_period_ms)),
             frame_wall: PercentileSummary::from_samples(&frame_wall, method),
             wait: PercentileSummary::from_samples(&wait, method),
             app_work: PercentileSummary::from_samples(&app_work, method),
@@ -715,6 +727,10 @@ mod tests {
         assert_eq!(report.schema_version, crate::FRAME_PIPELINE_SCHEMA_VERSION);
         assert_eq!(report.frames, 4);
         assert_eq!(report.rendered_frames, 4);
+        assert_eq!(report.latest_frame_wall_ms, 41.0);
+        assert_eq!(report.latest_wait_ms, 0.0);
+        assert_eq!(report.latest_app_work_ms, 25.0);
+        assert_eq!(report.latest_headroom_ms, Some(-15.0));
         assert_eq!(report.over_budget.over_budget_frames, 3);
         assert_eq!(report.over_budget.over_2x_budget_frames, 2);
         assert_eq!(report.over_budget.over_4x_budget_frames, 1);

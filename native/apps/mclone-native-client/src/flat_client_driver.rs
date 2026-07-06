@@ -67,16 +67,17 @@ use mclone_render_session::{
 };
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
-    BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
-    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUiAction, GameUiHost,
-    GameUiRenderState, GuiKey, GuiScale, LoadingProgressOverlay, LoadingProgressOverlayLayer,
-    Point, StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, WorldCatalogUiState,
-    WorldCatalogUiStatus, touch_controls_mode_label,
+    BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, FramePipelineHudOverlay,
+    GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameScreen,
+    GameSimulationCadence, GameUiAction, GameUiHost, GameUiRenderState, GuiKey, GuiScale,
+    LoadingProgressOverlay, LoadingProgressOverlayLayer, Point, StatusOverlay, UiDebugSnapshot,
+    UiDrawCacheStats, WorldCatalogUiState, WorldCatalogUiStatus, touch_controls_mode_label,
 };
 
 use crate::camera::SpectatorCamera;
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{FramePacingMode, FramePacingUiState, FrameTimingStats};
+use crate::frame_pipeline_accounting::DesktopFramePipelineAccounting;
 use crate::scene_runtime::{
     WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
 };
@@ -148,10 +149,12 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) player_collision_box_visible: bool,
     pub(crate) crosshair_visible: bool,
+    pub(crate) frame_pipeline_overlay_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
+    frame_pipeline_accounting: DesktopFramePipelineAccounting,
     world_catalog: Option<NativeWorldCatalog>,
     client_experience: ClientExperienceController,
     status_overlay: StatusOverlay,
@@ -201,6 +204,7 @@ pub(crate) struct FlatClientRuntimePoll {
 
 pub(crate) struct FlatClientSectionSync {
     pub(crate) section_update: RenderSectionCacheUpdate,
+    pub(crate) sync_timing: mclone_app_runtime::RenderSectionSyncTiming,
     pub(crate) remesh_ms: f64,
     pub(crate) loaded_chunk_count: usize,
 }
@@ -271,6 +275,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) player_collision_box_visible: bool,
     pub(crate) first_person_player_visible: bool,
     pub(crate) crosshair_visible: bool,
+    pub(crate) frame_pipeline_overlay_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) server_cadence: Option<GameSimulationCadence>,
 }
@@ -355,10 +360,12 @@ impl FlatClientDriver {
             render_options,
             player_collision_box_visible: false,
             crosshair_visible: true,
+            frame_pipeline_overlay_visible: false,
             player_model: GamePlayerModel::default(),
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
+            frame_pipeline_accounting: DesktopFramePipelineAccounting::default(),
             world_catalog: scene.world_root.clone().map(NativeWorldCatalog::new),
             client_experience: ClientExperienceController::new(desktop_client_experience_profile()),
             status_overlay: StatusOverlay::hidden(),
@@ -404,6 +411,44 @@ impl FlatClientDriver {
     pub(crate) fn tick_frame_timing(&mut self, frame_ms: f64, target_frame_ms: Option<f64>) {
         self.render_stats.last_frame_ms = frame_ms as f32;
         self.frame_timing.begin_frame(frame_ms, target_frame_ms);
+        self.frame_pipeline_accounting
+            .begin_frame(frame_ms, target_frame_ms);
+    }
+
+    pub(crate) fn latest_frame_pipeline_overlay(&self) -> Option<FramePipelineHudOverlay> {
+        if !self.frame_pipeline_overlay_visible {
+            return None;
+        }
+        self.frame_pipeline_accounting
+            .latest_report()
+            .map(|(report, revision)| FramePipelineHudOverlay::new(report, revision))
+    }
+
+    pub(crate) fn record_runtime_poll_timing(&mut self, elapsed_ms: f64) {
+        self.frame_timing.record_runtime_poll(elapsed_ms);
+        self.frame_pipeline_accounting
+            .record_runtime_poll(elapsed_ms);
+    }
+
+    pub(crate) fn record_surface_frame_timing(
+        &mut self,
+        render_ms: f64,
+        acquire_ms: f64,
+        encode_ms: f64,
+        submit_ms: f64,
+        present_ms: f64,
+    ) {
+        self.frame_timing
+            .record_surface_frame(render_ms, acquire_ms, encode_ms, submit_ms, present_ms);
+        let runtime_stats = self.runtime.as_ref().map(WindowSceneRuntime::stats);
+        self.frame_pipeline_accounting.finish_frame(
+            render_ms,
+            acquire_ms,
+            submit_ms,
+            present_ms,
+            runtime_stats,
+            self.render_stats,
+        );
     }
 
     pub(crate) fn apply_held_input_frame(
@@ -692,6 +737,7 @@ impl FlatClientDriver {
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: self.crosshair_visible,
+            frame_pipeline_overlay_visible: self.frame_pipeline_overlay_visible,
             player_model: self.player_model,
             server_cadence: self.server_simulation_cadence(),
         });
@@ -995,6 +1041,7 @@ impl FlatClientDriver {
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: self.crosshair_visible,
+            frame_pipeline_overlay_visible: self.frame_pipeline_overlay_visible,
             player_model: self.player_model,
             server_cadence: self.server_simulation_cadence(),
         }))
@@ -1146,6 +1193,13 @@ impl FlatClientDriver {
                 ClientExperienceSettingEffect::SetCrosshairVisible(visible) => {
                     self.crosshair_visible = visible;
                     log::info!("crosshair {}", if visible { "visible" } else { "hidden" });
+                }
+                ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(visible) => {
+                    self.frame_pipeline_overlay_visible = visible;
+                    log::info!(
+                        "frame pipeline overlay {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
                 }
                 ClientExperienceSettingEffect::SetPlayerModel(model) => {
                     self.player_model = model;
@@ -2060,11 +2114,15 @@ impl FlatClientDriver {
             return Ok(None);
         };
         let remesh_start = std::time::Instant::now();
-        let section_update = runtime.sync_render_sections(camera_view.render_eye)?;
+        let timed_update = runtime.sync_render_sections_with_completed_result_acceptance_timed(
+            camera_view.render_eye,
+            None,
+        )?;
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let loaded_chunk_count = runtime.client().loaded_chunk_count();
         Ok(Some(FlatClientSectionSync {
-            section_update,
+            section_update: timed_update.cache_update,
+            sync_timing: timed_update.timing,
             remesh_ms,
             loaded_chunk_count,
         }))
@@ -2114,6 +2172,7 @@ impl FlatClientDriver {
         upload_report: TexturedSectionUploadReport,
         section_count: usize,
         index_count: u32,
+        sync_timing: Option<mclone_app_runtime::RenderSectionSyncTiming>,
         remesh_ms: f64,
         upload_ms: f64,
         loaded_chunk_count: Option<usize>,
@@ -2129,6 +2188,12 @@ impl FlatClientDriver {
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
         self.frame_timing.record_remesh_upload(remesh_ms, upload_ms);
+        if let Some(sync_timing) = sync_timing {
+            self.frame_pipeline_accounting
+                .record_render_section_sync(sync_timing, remesh_ms);
+        }
+        self.frame_pipeline_accounting
+            .record_upload_apply(upload_ms);
         FlatClientSectionUploadSummary {
             section_count,
             face_count,
@@ -2172,6 +2237,7 @@ impl FlatClientDriver {
                 .as_ref()
                 .expect("render resources present after upload")
                 .index_count(),
+            Some(sync.sync_timing),
             sync.remesh_ms,
             upload_ms,
             Some(sync.loaded_chunk_count),
@@ -2211,6 +2277,7 @@ impl FlatClientDriver {
                 .as_ref()
                 .expect("render resources present after upload")
                 .index_count(),
+            None,
             sync.remesh_ms,
             upload_ms,
             None,
@@ -2274,6 +2341,8 @@ impl FlatClientDriver {
         self.render_stats.last_remesh_ms = 0.0;
         self.render_stats.last_upload_ms = upload_ms;
         self.frame_timing.record_remesh_upload(0.0, upload_ms);
+        self.frame_pipeline_accounting
+            .record_upload_apply(upload_ms);
         FlatClientSectionUploadSummary {
             section_count,
             face_count,
@@ -2483,6 +2552,7 @@ impl FlatClientDriver {
         self.interaction = ClientInteractionController::new();
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
+        self.frame_pipeline_accounting = DesktopFramePipelineAccounting::default();
         self.underwater_effect.reset();
         if let Some(runtime) = &mut self.runtime {
             runtime.clear_far_lod();
@@ -2525,6 +2595,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         frame_pacing_mode: game_frame_pacing_mode(options.frame_pacing.mode),
         fps_cap: options.frame_pacing.fps_cap,
         server_cadence: options.server_cadence,
+        frame_pipeline_overlay_visible: options.frame_pipeline_overlay_visible,
         touch_controls_mode: None,
         touch_settings: None,
         block_palette: Default::default(),
@@ -3038,6 +3109,29 @@ mod tests {
 
         assert!(result.host_action.is_none());
         assert!(!driver.crosshair_visible);
+    }
+
+    #[test]
+    fn ui_action_toggles_frame_pipeline_overlay_visibility() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert!(!driver.frame_pipeline_overlay_visible);
+        let result = driver.apply_ui_action(
+            GameUiAction::ToggleFramePipelineOverlay,
+            ui_action_context(),
+        );
+
+        assert!(result.host_action.is_none());
+        assert!(driver.frame_pipeline_overlay_visible);
+        assert!(
+            driver
+                .current_ui_render_state(
+                    FramePacingUiState::default(),
+                    BlockPaletteOverlay::hidden(),
+                )
+                .frame_pipeline_overlay_visible
+        );
     }
 
     #[test]

@@ -9,8 +9,9 @@ use crate::{
     fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
     movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
     render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
-    render_flat_hud_debug_layer, render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer,
-    render_flat_hud_retained_layer, render_flat_hud_status_layer, render_flat_hud_transient_layers,
+    render_flat_hud_debug_layer, render_flat_hud_frame_pipeline_layer,
+    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
+    render_flat_hud_status_layer, render_flat_hud_transient_layers,
     render_loading_progress_overlay, render_loading_progress_panel_at,
     render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
     touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
@@ -1571,6 +1572,22 @@ impl FlatHudDebugState {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct FlatHudFramePipelineState {
+    scale: GuiScale,
+    overlay: crate::FramePipelineHudOverlay,
+}
+
+impl FlatHudFramePipelineState {
+    fn from_hud(scale: GuiScale, hud: &FlatHud) -> Option<Self> {
+        hud.frame_pipeline
+            .as_ref()
+            .filter(|overlay| overlay.visible())
+            .cloned()
+            .map(|overlay| Self { scale, overlay })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct CachedFlatHudRetainedLayer {
     state: FlatHudRetainedState,
     draw: GuiDrawList,
@@ -1600,6 +1617,12 @@ struct CachedFlatHudDebugLayer {
     draw: GuiDrawList,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct CachedFlatHudFramePipelineLayer {
+    state: FlatHudFramePipelineState,
+    draw: GuiDrawList,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct FlatHudSurface {
     retained: Option<CachedFlatHudRetainedLayer>,
@@ -1607,6 +1630,7 @@ struct FlatHudSurface {
     status: Option<CachedFlatHudStatusLayer>,
     prompt: Option<CachedFlatHudPromptLayer>,
     debug: Option<CachedFlatHudDebugLayer>,
+    frame_pipeline: Option<CachedFlatHudFramePipelineLayer>,
 }
 
 impl FlatHudSurface {
@@ -1739,6 +1763,35 @@ impl FlatHudSurface {
         let mut draw = GuiDrawList::new();
         render_flat_hud_debug_layer(scale, &mut draw, hud);
         self.debug = Some(CachedFlatHudDebugLayer {
+            state,
+            draw: draw.clone(),
+        });
+        FlatHudDrawList {
+            draw,
+            retained_cache: UiDrawCacheStats::rebuild(),
+        }
+    }
+
+    fn render_frame_pipeline_layer(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
+        let Some(state) = FlatHudFramePipelineState::from_hud(scale, hud) else {
+            self.frame_pipeline = None;
+            return FlatHudDrawList {
+                draw: GuiDrawList::new(),
+                retained_cache: UiDrawCacheStats::default(),
+            };
+        };
+        if let Some(cached) = &self.frame_pipeline {
+            if cached.state == state {
+                return FlatHudDrawList {
+                    draw: cached.draw.clone(),
+                    retained_cache: UiDrawCacheStats::cache_hit(),
+                };
+            }
+        }
+
+        let mut draw = GuiDrawList::new();
+        render_flat_hud_frame_pipeline_layer(scale, &mut draw, hud);
+        self.frame_pipeline = Some(CachedFlatHudFramePipelineLayer {
             state,
             draw: draw.clone(),
         });
@@ -2003,6 +2056,7 @@ impl GameUiHost {
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
+            | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetXrTurnMode(_)
@@ -2083,17 +2137,20 @@ impl GameUiHost {
         let status = self.hud_surface.render_status_layer(scale, hud);
         let prompt = self.hud_surface.render_prompt_layer(scale, hud);
         let debug = self.hud_surface.render_debug_layer(scale, hud);
+        let frame_pipeline = self.hud_surface.render_frame_pipeline_layer(scale, hud);
         let mut draw = retained.draw.clone();
         draw.append(&hotbar.draw);
         draw.append(&status.draw);
         draw.append(&prompt.draw);
         draw.append(&debug.draw);
+        draw.append(&frame_pipeline.draw);
         render_flat_hud_transient_layers(scale, &mut draw, hud);
         let mut retained_cache = retained.retained_cache;
         retained_cache.add(hotbar.retained_cache);
         retained_cache.add(status.retained_cache);
         retained_cache.add(prompt.retained_cache);
         retained_cache.add(debug.retained_cache);
+        retained_cache.add(frame_pipeline.retained_cache);
         FlatHudDrawList {
             draw,
             retained_cache,
@@ -2195,6 +2252,7 @@ const UI_V2_OPTIONS_CONTROLS: UiWidgetId = UiWidgetId(117);
 const UI_V2_OPTIONS_SERVER_SETTINGS: UiWidgetId = UiWidgetId(118);
 const UI_V2_OPTIONS_BACK: UiWidgetId = UiWidgetId(119);
 const UI_V2_OPTIONS_XR_TURN_MODE: UiWidgetId = UiWidgetId(120);
+const UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY: UiWidgetId = UiWidgetId(121);
 const UI_V2_SERVER_SETTINGS_HOST_RATE: UiWidgetId = UiWidgetId(701);
 const UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE: UiWidgetId = UiWidgetId(702);
 const UI_V2_SERVER_SETTINGS_PHYSICS_RATE: UiWidgetId = UiWidgetId(703);
@@ -2778,6 +2836,15 @@ fn options_layout(
         GameUiAction::CycleFpsCap,
     );
     right_y += 22.0;
+    push_checkbox(
+        &mut layout,
+        UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY,
+        Rect::new(right_x, right_y, column_width, 18.0),
+        "Frame Metrics",
+        state.frame_pipeline_overlay_visible,
+        GameUiAction::ToggleFramePipelineOverlay,
+    );
+    right_y += 20.0;
     layout.push(
         UiWidget::slider(
             UI_V2_OPTIONS_RADIUS,
@@ -2958,7 +3025,7 @@ fn options_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {
                 + u8::from(state.server_cadence.is_some()),
         ) * 22.0
         + 48.0;
-    let right_rows_height = (7
+    let right_rows_height = (8
         + usize::from(state.xr_turn_mode.is_some())
         + usize::from(state.touch_settings.is_some())) as f32
         * 22.0;

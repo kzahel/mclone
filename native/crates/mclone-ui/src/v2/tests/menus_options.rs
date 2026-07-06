@@ -144,6 +144,11 @@ fn options_buttons_emit_expected_actions_from_committed_rects() {
         .widget(UI_V2_OPTIONS_XR_TURN_MODE)
         .expect("XR turn row")
         .rect;
+    let frame_metrics = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY)
+        .expect("frame metrics row")
+        .rect;
     let controls = surface
         .layout()
         .widget(UI_V2_OPTIONS_CONTROLS)
@@ -158,6 +163,7 @@ fn options_buttons_emit_expected_actions_from_committed_rects() {
             GameUiAction::OpenServerSettings(GameOptionsParent::Pause),
         ),
         (xr_turn, GameUiAction::SetXrTurnMode(GameXrTurnMode::Snap30)),
+        (frame_metrics, GameUiAction::ToggleFramePipelineOverlay),
         (
             controls,
             GameUiAction::OpenHelp(GameHelpParent::OptionsPause),

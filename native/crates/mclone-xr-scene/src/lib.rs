@@ -4534,6 +4534,7 @@ where
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: None,
+            frame_pipeline_overlay_visible: false,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             xr_turn_mode: Some(self.turn_policy.game_mode()),
@@ -5702,6 +5703,7 @@ where
                     );
                 }
                 ClientExperienceSettingEffect::SetCrosshairVisible(_) => {}
+                ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(_) => {}
                 ClientExperienceSettingEffect::SetPlayerModel(model) => {
                     self.player_model = model;
                     log::info!("XR player model set to {}", model.label());
@@ -6204,6 +6206,9 @@ fn normalized_xr_remote_addr(addr: &str) -> String {
 fn xr_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
     settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
+        "Frame pipeline overlay needs the XR world-panel projection",
+    );
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;

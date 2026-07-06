@@ -264,10 +264,12 @@ sink's formatting code is a defect. The logs remain the benchmark authority
 and the overlay stays a thin view because all three are projections of the
 same data, not because of discipline alone.
 
-As of Slice 5 of tactical 144, schema v3 carries the shared frame summary,
-queue panel, and local peer-thread panel. Desktop startup-streaming JSON and
-Quest/Android XR perf markers use the same render-admission/upload stage names
-for completed-result acceptance, dirty/ready scan, request build, worker submit,
+As of Slice 7 of tactical 144, schema v5 carries the shared frame summary,
+queue panel, local peer-thread panel, GPU timestamp panel, and latest-frame
+fields consumed by the debug overlay. Desktop startup-streaming JSON,
+Quest/Android XR perf markers, accounting-smoke JSON, and the desktop flat
+overlay use the same report structs and render-admission/upload stage names for
+completed-result acceptance, dirty/ready scan, request build, worker submit,
 prepared-record maintenance, admission remainder, and upload apply.
 
 ### Per-Lane Time-Source Authority
@@ -452,12 +454,12 @@ changes. Tactical
 is the executable checklist for gaps 1-8, including sequencing relative to
 tactical 143; gaps 9-10 are follow-on work.
 
-As of 2026-07-06, gaps 1-6 and the CPU/conservation/meter parts of gap 7 are
-landed in tactical 144. Gap 6 closed after Mac Metal plus Windows Vulkan/DX12
-timestamp validation, Windows RenderDoc capture, and Quest periodic
-`XR_META_performance_metrics` sampling; Quest-side wgpu timestamp agreement is
-not applicable until Android XR emits a wgpu timestamp panel. Gap 8 (debug
-overlay) remains in this tactical.
+As of 2026-07-06, gaps 1-8 are landed in tactical 144. Gap 6 closed after Mac
+Metal plus Windows Vulkan/DX12 timestamp validation, Windows RenderDoc capture,
+and Quest periodic `XR_META_performance_metrics` sampling; Quest-side wgpu
+timestamp agreement is not applicable until Android XR emits a wgpu timestamp
+panel. Gap 8 closed with the desktop flat/offscreen debug overlay routed
+through the shared client-experience facade.
 
 1. Extract the shared accounting owner (`mclone-diagnostics`): one
    budget/percentile/over-period/headroom implementation and one versioned
@@ -478,9 +480,9 @@ overlay) remains in this tactical.
 7. Land the instrumentation-validation harness: conservation invariants,
    CPU/GPU calibration lanes, and the meter-overhead A/B with a recorded
    ceiling.
-8. Add a UI/debug overlay view that mirrors the logging counters instead of
-   inventing separate presentation-only state (after tactical 143 closes,
-   routed through the shared client-experience facade).
+8. Landed: add a UI/debug overlay view that mirrors the logging counters
+   instead of inventing separate presentation-only state, routed through the
+   shared client-experience facade.
 9. Keep remote/dedicated contrast lanes honest by surfacing network/decode/apply
    counters and server-side scheduler counters separately.
 10. Only then open policy levers through elapsed/headroom-aware budget

@@ -376,11 +376,24 @@ impl WindowSceneRuntime {
         self.scene.core_mut().apply_server_updates(updates)
     }
 
+    #[cfg(test)]
     pub(crate) fn sync_render_sections(
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
         self.scene.sync_render_sections(camera_position)
+    }
+
+    pub(crate) fn sync_render_sections_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        self.scene
+            .sync_render_sections_with_completed_result_acceptance_timed(
+                camera_position,
+                completed_result_accept_budget,
+            )
     }
 
     pub(crate) fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(

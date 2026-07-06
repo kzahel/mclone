@@ -1,6 +1,7 @@
 # 144: Frame Pipeline Accounting Instrumentation
 
-Status: open; tactical 143 gate satisfied 2026-07-05. Opened 2026-07-05.
+Status: closed 2026-07-06. Opened 2026-07-05; tactical 143 gate
+satisfied 2026-07-05.
 This tactical is the executable checklist for
 [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 (revised 2026-07-05). That document is law for this work; this tactical is
@@ -169,7 +170,7 @@ rg -n "write_timestamp|timestamp_writes: Some\(|create_query_set" \
 | 4: calibration, invariants, meter overhead | 7 | Mac with Quest | landed 2026-07-05 |
 | 5: queue-age, admission-tail split, peer threads | 3, 4, 5 | Mac with Quest | landed 2026-07-05 |
 | 6: GPU timestamp layer and perf-metrics promotion | 6 | Mac with Quest; Windows checkpoint B | closed 2026-07-06 |
-| 7: debug overlay through the shared facade | 8 | Mac | open |
+| 7: debug overlay through the shared facade | 8 | Mac | closed 2026-07-06 |
 
 Gap numbers refer to the law doc's
 [Actionable Gaps](../frame-pipeline-accounting.md#actionable-gaps). Gaps 9-10
@@ -1289,7 +1290,7 @@ timestamps are enabled.
 
 Recorded result: Mac implementation landed 2026-07-05. Windows checkpoint B,
 external capture, and Quest periodic metrics were completed on 2026-07-06;
-Slice 6 is closed. Slice 7 has not started.
+Slice 6 is closed. Slice 7 closed later on 2026-07-06 and is recorded below.
 
 Changes:
 
@@ -1544,7 +1545,8 @@ Slice 6 close status after Windows checkpoint B:
 - Quest periodic `XR_META_performance_metrics` sampling is recorded; wgpu
   timestamp agreement on Quest is explicitly not applicable until that render
   path emits a wgpu timestamp panel.
-- Slice 6 is closed. Slice 7 remains unstarted.
+- Slice 6 is closed. Slice 7 closed later on Mac with the shared-facade
+  overlay slice recorded below.
 
 Additional desktop OpenXR runtime confidence pass, 2026-07-06:
 
@@ -1611,7 +1613,63 @@ pnpm native:desktop-offscreen:smoke
 git diff --check
 ```
 
-Recorded result: (pending)
+Recorded result: landed 2026-07-06.
+
+Implementation:
+
+- Added `GameUiAction::ToggleFramePipelineOverlay` as a capability-gated
+  shared settings action through `ClientExperienceController`, with desktop
+  flat support and explicit unsupported profile projection for web, flat
+  Android, and XR.
+- Added the bounded `mclone-ui` frame-pipeline HUD layer in
+  `frame_pipeline_overlay.rs`, backed by the shared
+  `FramePipelineReport`/`FrameSummaryReport`/`QueuePanelReport` schema. The
+  retained HUD surface caches it independently from the hotbar, status,
+  prompts, and legacy debug layer.
+- Added desktop flat/offscreen live report publication in
+  `frame_pipeline_accounting.rs`, including current-frame stage spans,
+  queue snapshots, and the latest-frame summary values needed by the thin
+  overlay view.
+- Added `--screenshot-frame-pipeline-overlay true|false` for offscreen
+  validation captures. When enabled, screenshot capture renders enough frames
+  to display the prior published frame report.
+
+Validation:
+
+```text
+cargo fmt --manifest-path native/Cargo.toml --all --check: PASS
+cargo check --manifest-path native/Cargo.toml -p mclone-ui -p mclone-app-runtime -p mclone-native-client: PASS
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics: PASS, 14 passed
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime: PASS, 110 passed
+cargo test --manifest-path native/Cargo.toml -p mclone-ui: PASS, 63 passed
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client: PASS, 151 passed
+pnpm native:policy:wasm-check: PASS with the pre-existing mclone-server unused-method warning for with_unload_hysteresis_chunks
+pnpm native:desktop-offscreen:smoke: PASS, /tmp/mclone-desktop-offscreen.png, 166 sections, 30 drawn sections, 0 GUI commands
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --screenshot /tmp/mclone-frame-pipeline-overlay.png --width 1280 --height 720 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-frame-pipeline-overlay true: PASS, 134 GUI commands
+git diff --check: PASS
+```
+
+Screenshot inspection:
+
+- `/tmp/mclone-frame-pipeline-overlay.png` was opened and inspected. The
+  overlay renders a top-right `FRAME PIPELINE` panel over the world with
+  budget bar, current-frame waterfall, and queue rows visible; text fits
+  inside the panel and does not overlap other HUD elements.
+
+Tripwires:
+
+```text
+rg -n "fn apply_ui_action|fn apply_web_ui_action|fn apply_xr_ui_action" native/apps native/crates/mclone-xr-scene/src -g '*.rs':
+  5 expected dispatch/facade entry points:
+  native/crates/mclone-xr-scene/src/lib.rs
+  native/apps/mclone-web-client/src/web_canvas.rs
+  native/apps/mclone-android-client/src/lib.rs
+  native/apps/mclone-native-client/src/app.rs
+  native/apps/mclone-native-client/src/flat_client_driver.rs
+
+rg -n "GameUiAction::[A-Za-z]+(\(_\))? => \{\}" native/apps native/crates/mclone-xr-scene/src -g '*.rs':
+  0 hits
+```
 
 ## Out Of Scope, Adjacent Workstreams
 

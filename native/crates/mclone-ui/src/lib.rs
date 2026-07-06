@@ -2,7 +2,9 @@
 
 use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
+mod frame_pipeline_overlay;
 mod v2;
+pub use frame_pipeline_overlay::{FramePipelineHudOverlay, render_frame_pipeline_overlay};
 pub use v2::{
     FlatHudDrawList, GameUiHost, LoadingProgressDrawList, LoadingProgressOverlayLayer,
     UiDebugSnapshot, UiDebugWidget, UiDrawCacheStats, UiFrameState, UiLayout, UiPanelDrawList,
@@ -1339,6 +1341,7 @@ pub enum GameUiAction {
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
     ToggleCrosshair,
+    ToggleFramePipelineOverlay,
     SetPlayerModel(GamePlayerModel),
     SetMovementMode(GameMovementMode),
     SetXrTurnMode(GameXrTurnMode),
@@ -1434,6 +1437,7 @@ pub struct GameUiRenderState {
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
     pub crosshair_visible: Option<bool>,
+    pub frame_pipeline_overlay_visible: bool,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub xr_turn_mode: Option<GameXrTurnMode>,
@@ -1467,6 +1471,7 @@ impl Default for GameUiRenderState {
             player_collision_box_visible: false,
             first_person_player_visible: false,
             crosshair_visible: Some(true),
+            frame_pipeline_overlay_visible: false,
             player_model: GamePlayerModel::Player,
             movement_mode: GameMovementMode::Walk,
             xr_turn_mode: None,
@@ -2161,6 +2166,7 @@ pub struct FlatHud {
     pub touch: TouchOverlay,
     pub status: StatusOverlay,
     pub debug: Option<FlatHudDebugOverlay>,
+    pub frame_pipeline: Option<FramePipelineHudOverlay>,
 }
 
 impl FlatHud {
@@ -2174,6 +2180,7 @@ impl FlatHud {
             touch: TouchOverlay::hidden(),
             status: StatusOverlay::hidden(),
             debug: None,
+            frame_pipeline: None,
         }
     }
 
@@ -2202,6 +2209,10 @@ impl FlatHud {
                 .debug
                 .as_ref()
                 .is_some_and(FlatHudDebugOverlay::visible)
+            || self
+                .frame_pipeline
+                .as_ref()
+                .is_some_and(FramePipelineHudOverlay::visible)
     }
 
     pub(crate) fn should_render_flat_hotbar(&self) -> bool {
@@ -2250,6 +2261,7 @@ pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     render_flat_hud_status_layer(scale, draw, hud);
     render_flat_hud_prompt_layer(scale, draw, hud);
     render_flat_hud_debug_layer(scale, draw, hud);
+    render_flat_hud_frame_pipeline_layer(scale, draw, hud);
     render_flat_hud_transient_layers(scale, draw, hud);
 }
 
@@ -2291,6 +2303,21 @@ pub(crate) fn render_flat_hud_debug_layer(scale: GuiScale, draw: &mut GuiDrawLis
         return;
     };
     render_debug_overlay_at(scale, draw, &debug.overlay, debug.origin);
+}
+
+pub(crate) fn render_flat_hud_frame_pipeline_layer(
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    hud: &FlatHud,
+) {
+    let Some(overlay) = hud
+        .frame_pipeline
+        .as_ref()
+        .filter(|overlay| overlay.visible())
+    else {
+        return;
+    };
+    render_frame_pipeline_overlay(scale, draw, overlay);
 }
 
 pub(crate) fn render_flat_hud_transient_layers(

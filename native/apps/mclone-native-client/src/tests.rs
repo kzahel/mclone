@@ -18,6 +18,7 @@ fn screenshot_cli(
             camera_view: mclone_render_session::EngineCameraViewMode::FirstPerson,
             ui: HeadlessScreenshotUi::None,
             hud: false,
+            frame_pipeline_overlay: false,
             debug_pane: false,
             player_collision_box: false,
             blink_debug: false,

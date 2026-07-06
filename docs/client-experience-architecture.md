@@ -829,6 +829,7 @@ Decided in this revision (2026-07-05):
 | `TogglePlayerCollisionBox` | core action | Settings controller. |
 | `ToggleFirstPersonPlayer` | core action | Settings controller. |
 | `ToggleCrosshair` | capability-gated | Settings controller; hidden/unsupported profiles project shared unavailable state. |
+| `ToggleFramePipelineOverlay` | capability-gated | Settings controller; desktop flat/offscreen profiles support the shared diagnostics overlay, while web/Android/XR profiles project unavailable state until their report sink or world-panel projection exists. |
 | `SetPlayerModel` | core action | Settings controller emits player-appearance sync effect. |
 | `SetMovementMode` | core action | Settings controller. |
 | `SetXrTurnMode` | capability-gated | Settings controller; non-XR profiles project shared unavailable state. |

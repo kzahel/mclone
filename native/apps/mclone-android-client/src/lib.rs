@@ -1515,6 +1515,13 @@ mod android {
                             if visible { "visible" } else { "hidden" }
                         );
                     }
+                    ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(_) => {
+                        self.session_status = StatusOverlay::new(
+                            "Frame pipeline overlay is unavailable on flat Android",
+                            false,
+                        );
+                        ok = false;
+                    }
                     ClientExperienceSettingEffect::SetPlayerModel(model) => {
                         self.player_model = model;
                         log::info!("Mclone Android player model set to {}", model.label());
@@ -1668,6 +1675,7 @@ mod android {
                 player_collision_box_visible: self.player_collision_box_visible,
                 first_person_player_visible: self.camera.first_person_player_visible(),
                 crosshair_visible: Some(self.crosshair_visible),
+                frame_pipeline_overlay_visible: false,
                 player_model: self.player_model,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
                 xr_turn_mode: None,
@@ -2339,6 +2347,9 @@ mod android {
         );
         settings.fps_cap =
             ClientExperienceCapabilityStatus::Unsupported("FPS cap is fixed on flat Android");
+        settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
+            "Frame pipeline overlay is unavailable on flat Android",
+        );
         settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
             "Server simulation cadence is unavailable on flat Android",
         );

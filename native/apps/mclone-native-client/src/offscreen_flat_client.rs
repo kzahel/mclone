@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -364,6 +364,7 @@ impl OffscreenFlatClientHost {
                 player_collision_box_visible: self.driver.player_collision_box_visible,
                 first_person_player_visible: self.driver.camera.first_person_player_visible(),
                 crosshair_visible: self.driver.crosshair_visible,
+                frame_pipeline_overlay_visible: self.driver.frame_pipeline_overlay_visible,
                 player_model: self.driver.player_model,
                 server_cadence: self.driver.server_simulation_cadence(),
             },
@@ -378,11 +379,19 @@ impl OffscreenFlatClientHost {
                 view_readiness_overlay: debug_view_readiness_overlay,
             },
         };
+        let render_start = Instant::now();
         let summary = self.driver.render_full_frame_with_ui(
             frame,
             self.driver.scene.render_distance,
             ui_frame,
         )?;
+        self.driver.record_surface_frame_timing(
+            render_start.elapsed().as_secs_f64() * 1000.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        );
         self.last_summary = Some(summary);
         log::trace!(
             "offscreen flat client rendered frame {} sections={} drawn_sections={}",
@@ -412,6 +421,7 @@ impl OffscreenFlatClientHost {
             ),
         );
         hud.status = status_overlay;
+        hud.frame_pipeline = self.driver.latest_frame_pipeline_overlay();
         hud
     }
 
@@ -726,11 +736,16 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let startup_wait = options.startup_wait;
+    let frame_count = if options.frame_pipeline_overlay {
+        startup_wait.offscreen_capture_frame_count().max(2)
+    } else {
+        startup_wait.offscreen_capture_frame_count()
+    };
     let (loop_report, frame_pixels, host) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
-            frame_count: startup_wait.offscreen_capture_frame_count(),
+            frame_count,
             pace_frame_duration: None,
         },
         move |device, queue, format, size| {
@@ -843,6 +858,7 @@ fn configure_screenshot_scene(
         host.set_camera_look_at(eye, Vec3::from_array(target));
     }
     host.driver.player_collision_box_visible = options.player_collision_box;
+    host.driver.frame_pipeline_overlay_visible = options.frame_pipeline_overlay;
     host.driver.camera.set_view_mode(options.camera_view);
     if options.blink_debug {
         if !host.driver.begin_desktop_blink_debug() {

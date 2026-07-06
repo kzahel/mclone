@@ -1222,6 +1222,7 @@ fn render_renderer_rebuild_smoke_frame(
         player_collision_box_visible: false,
         first_person_player_visible: false,
         crosshair_visible: true,
+        frame_pipeline_overlay_visible: false,
         player_model: Default::default(),
         server_cadence,
     });
