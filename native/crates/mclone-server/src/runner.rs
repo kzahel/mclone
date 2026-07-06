@@ -1377,11 +1377,11 @@ mod native {
             );
             assert_eq!(
                 diagnostics.worldgen_job_frame_metrics.transport_kind,
-                WorkerFrameTransportKind::None
+                WorkerFrameTransportKind::MessageTransfer
             );
             assert_eq!(
                 diagnostics.light_status_job_frame_metrics.transport_kind,
-                WorkerFrameTransportKind::None
+                WorkerFrameTransportKind::MessageTransfer
             );
 
             runner.join_shutdown().unwrap();
