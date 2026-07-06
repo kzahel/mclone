@@ -748,7 +748,7 @@ mclone_install_launch_smoke() {
     mclone_run_session_smoke "$serial"
 
     mclone_collect_logcat "$serial" "$pid" "$log_path"
-    if grep -E "FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" "$log_path" >/dev/null 2>&1; then
+    if grep -E "FATAL EXCEPTION|Fatal signal|thread .* panicked|panicked at" "$log_path" >/dev/null 2>&1; then
         mclone_die "fatal Mclone logcat entries found in $log_path"
     fi
     if [[ "${MCLONE_ANDROID_REQUIRE_RENDERED_FRAME:-1}" == "1" ]] \

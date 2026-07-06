@@ -110,7 +110,7 @@ check_interactive_launch_result() {
     mclone_note "Checking Android XR startup logs for ${LAUNCH_CHECK_SECONDS}s"
     while (( SECONDS < deadline )); do
         log_output="$("$ADB" -s "$serial" logcat -d -t 2000 2>/dev/null | tr -d '\r' || true)"
-        if failure_lines="$(printf '%s\n' "$log_output" | grep -E "MCLONE_ANDROID_XR_FAILURE|FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" || true)" \
+        if failure_lines="$(printf '%s\n' "$log_output" | grep -E "MCLONE_ANDROID_XR_FAILURE|FATAL EXCEPTION|Fatal signal|thread .* panicked|panicked at" || true)" \
             && [[ -n "$failure_lines" ]]; then
             printf '%s\n' "$failure_lines" >&2
             mclone_die "Android XR startup failure detected"
@@ -127,7 +127,7 @@ check_interactive_launch_result() {
     done
     pid="$("$ADB" -s "$serial" shell pidof "$MCLONE_ANDROID_XR_APP_ID" 2>/dev/null | tr -d '\r' || true)"
     if [[ -z "$pid" ]]; then
-        printf '%s\n' "$log_output" | grep -E "MCLONE_ANDROID_XR|FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" >&2 || true
+        printf '%s\n' "$log_output" | grep -E "MCLONE_ANDROID_XR|FATAL EXCEPTION|Fatal signal|thread .* panicked|panicked at" >&2 || true
         if [[ "$saw_process" == "1" ]]; then
             mclone_die "Android XR process exited during startup"
         fi

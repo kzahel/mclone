@@ -574,7 +574,10 @@ instrumentation to watch it:
 - [x] Unblock the Quest persisted-world guardrail row:
   `pnpm native:android-xr:perf:orbit:rd5:persisted` now drives a packaged
   clean/prewarm/reopen/sample flow through shared startup argv `--world-dir`.
-  Record Quest numbers after running that command on-device.
+  The first on-device run is recorded in
+  `docs/quest-standalone-performance-records.md`: reopened RD5 orbit had
+  `skipped_delta=0`, `0` over-2x frames, app p95 `14.843ms`, and app
+  over-period `14.6%`.
 - [x] Fix remote-dedicated churn accounting before using remote play as the
   "server costs moved off headset" comparison: completed in
   [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)

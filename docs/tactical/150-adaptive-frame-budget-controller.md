@@ -220,8 +220,10 @@ host cadence 60).
 - Quest persisted-world guardrail is no longer structurally blocked:
   `pnpm native:android-xr:perf:orbit:rd5:persisted` now cleans an
   adb-visible Quest world dir, prewarms it, reopens the same `--world-dir`, and
-  samples the existing RD5 settled-orbit metrics lane. No Quest numbers are
-  recorded here until that command is run on-device.
+  samples the existing RD5 settled-orbit metrics lane. The first on-device run
+  is recorded in `docs/quest-standalone-performance-records.md`: reopened RD5
+  orbit had `skipped_delta=0`, `0` over-2x frames, app p95 `14.843ms`, and
+  app over-period `14.6%`.
 
 Validation:
 

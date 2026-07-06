@@ -55,6 +55,7 @@ Settled orbit at walking-like speed:
 
 ```bash
 pnpm native:android-xr:perf:orbit:rd5:metrics
+pnpm native:android-xr:perf:orbit:rd5:persisted
 pnpm native:android-xr:perf:orbit:rd5:frame-overlap
 pnpm native:android-xr:perf:orbit:rd7:metrics
 pnpm native:android-xr:perf:orbit:rd7:frame-overlap
@@ -107,6 +108,86 @@ draw counts during the measured window. Current frozen scripts use
 force-stops the app and sleeps the headset during cleanup.
 
 ## Records
+
+### 2026-07-06 - Quest Persisted-World RD5 Guardrail Unblock Run
+
+Benchmarked code: Android XR release APK built from clean commit `9bbb4ff5`
+(`Stabilize XR body follow at blocked walls`). The successful run reused that
+APK and already-staged assets with `--skip-build --skip-assets` after fixing a
+validator false positive for a benign Quest system warning containing the word
+`SIGSEGV`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated SQLite world at `/sdcard/Android/data/com.kzahel.mclone.xr/files/persisted-world-guardrail/rd5`, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| World storage after run | `world.sqlite3` plus WAL/SHM, `20M` total |
+| Pinned budgets | render compile workers `2`, completed-result accept `2`, section upload `16`, section accept `64` |
+
+Command:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-persisted-world.sh \
+  --skip-build \
+  --skip-assets
+```
+
+The packaged lane is:
+
+```sh
+pnpm native:android-xr:perf:orbit:rd5:persisted
+```
+
+Raw artifacts:
+
+- `/tmp/mclone-quest-openxr-persisted-rd5-prewarm-summary.txt`
+- `/tmp/mclone-quest-openxr-persisted-rd5-prewarm-logcat.txt`
+- `/tmp/mclone-quest-openxr-persisted-rd5-summary.txt`
+- `/tmp/mclone-quest-openxr-persisted-rd5-logcat.txt`
+
+Primary frame/headroom rows:
+
+| Phase | Mode | Settle | FPS | Frames | Skipped | Dropped delta | App avg | App p95 | App p99 | App max | Head avg | App over-period | Over 2x |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| prewarm | stationary-settled | `32.289s` / `2272` frames | `63.85` | `1278` | `0` | n/a | `12.862ms` | `14.248ms` | `16.839ms` | `18.265ms` | `+1.027ms` | `132/1278` (`10.3%`) | `0` |
+| reopen | settled-orbit | `17.424s` / `1213` frames | `65.35` | `2941` | `0` | `53` | `12.615ms` | `14.843ms` | `16.771ms` | `20.182ms` | `+1.274ms` | `429/2941` (`14.6%`) | `0` |
+
+Reopen detail:
+
+| Field | Value |
+|---|---:|
+| Flight distance | `7.488` blocks |
+| Meta app/compositor GPU | `6.591ms` / `1.675ms` |
+| GPU util / CPU util avg/worst | `57.598%` / `35.922%` / `46.000%` |
+| Motion-to-photon | `34.436ms` |
+| Drawn sections / indices | `125` / `1,127,148` |
+| Loaded sections / ready sections | `848` / `1936` |
+| Rebuilt / uploaded sections | `32` / `7` (`16` queued upload sections at max) |
+| Server pending jobs / publications max | `11` / `12` |
+| Scheduler loaded / visible / ticket chunks max | `288` / `196` / `1600` |
+| Scheduler pending worldgen chunks / light publications max | `5` / `7` |
+| Runtime poll / sync / GPU upload max | `1.201ms` / `3.473ms` / `4.262ms` |
+| Server tick / scheduler tick max | `63.430ms` / `61.749ms` |
+| Prepared record rebuilds | `247`, avg `0.712ms`, max `1.577ms` |
+
+Interpretation:
+
+- The blocker is cleared: Android XR now accepts the shared startup
+  `--world-dir`, the validator can prewarm and reopen a persisted Quest world,
+  and the lane emits the normal RD5 settled-orbit marker block.
+- The reopened run is not a no-work static scene: it still has local integrated
+  streaming work while orbiting (`scheduler_pending_worldgen_publication_chunks=5`,
+  `scheduler_pending_light_publications=7`, `queued_upload_sections=16` at max),
+  but it validates the already-created SQLite world path and avoids repeating
+  a fresh app-local storage bootstrap.
+- Frame pacing is in the current RD5 guardrail envelope: `skipped_delta=0`,
+  `0` over-2x frames, app p95 `14.843ms`, and app over-period `14.6%`.
 
 ### 2026-07-06 - Tactical 150 Slice 0 Quest Guardrail Recapture
 

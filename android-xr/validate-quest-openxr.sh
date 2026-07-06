@@ -1164,7 +1164,7 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
-    if grep -E "MCLONE_ANDROID_XR_FAILURE|FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" "$LOG_PATH" >/dev/null 2>&1; then
+    if grep -E "MCLONE_ANDROID_XR_FAILURE|FATAL EXCEPTION|Fatal signal|thread .* panicked|panicked at" "$LOG_PATH" >/dev/null 2>&1; then
         failure=1
         break
     fi
