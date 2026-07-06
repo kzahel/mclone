@@ -489,18 +489,34 @@ pnpm native:android-xr:apk
 git diff --check
 ```
 
-## Slice 5: Web Callback Adoption
+## Slice 5: Web Shared Ingress Adoption
 
-Goal: make web remote feed the same inbound queue without requiring native OS
-threads.
+Goal: make web integrated and web remote feed the same wasm-compatible
+`ClientConnection` ingress used by native local/remote, without requiring native
+OS threads. Web worker, `SharedArrayBuffer`, promise, and WebSocket callback
+mechanics are producer/adapter details; the runtime-facing command/update shape
+must be shared.
 
 Deliverables:
 
-- Route WebSocket `message` callbacks through the same ordered inbound envelope
-  type and queue metadata.
-- Keep browser lifecycle, promises, and JS glue in the web app/adapter.
-- Add a web remote smoke proving command enqueue and inbound update application
-  are separate runtime operations.
+- Move the shared `ClientConnection` contract, `QueuedServerUpdate` envelope,
+  and budgeted drain/apply helper to a wasm-compatible shared module if they
+  still live in native-only runtime code.
+- Adapt web integrated worker/local-host paths so worker or
+  `SharedArrayBuffer` internals feed the same ordered inbound envelope queue as
+  native integrated.
+- Adapt web remote WebSocket paths so `message` callbacks, promise plumbing, or
+  a future web worker feed the same ordered inbound envelope queue as native
+  remote.
+- Delete or demote duplicate web command-response apply paths such as
+  host-specific `exchange_command` / `WebRuntimeHost` drains where practical.
+  Remaining compatibility helpers must be explicitly isolated from normal frame
+  polling.
+- Keep browser lifecycle, promises, JS glue, WebSocket setup, and worker
+  construction in the web app/adapter behind the shared ingress boundary.
+- Add web integrated and web remote smokes proving command enqueue, producer
+  decode/queue, and inbound update application are separate runtime operations
+  using the shared budgeted drain path.
 
 Validation:
 
