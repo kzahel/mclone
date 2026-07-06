@@ -61,8 +61,9 @@ mod android {
         XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use mclone_xr_scene::{
-        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrMcloneTerrainState, XrSceneOptions,
-        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFramePipelineHostTiming,
+        XrFramePipelineReporter, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
+        XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
     };
     use openxr as xr;
 
@@ -3055,6 +3056,8 @@ mod android {
         let mut frame_stats = XrFrameStats::default();
         let render_path = frame_targets.render_path();
         let xr_eye_size = frame_targets.eye_size();
+        let mut frame_pipeline_reporter =
+            XrFramePipelineReporter::new(display_refresh.current_rate.map(f64::from));
         let mut perf_probe = AndroidXrPerfProbe::new(
             perf_seconds,
             perf_flight,
@@ -3329,6 +3332,20 @@ mod android {
                 frame_timing.thread_cpu_ms = (end_ms - start_ms).max(0.0);
                 frame_timing.thread_cpu_valid = true;
             }
+            let (frame_pipeline_report, frame_pipeline_revision) = frame_pipeline_reporter
+                .record_frame(
+                    XrFramePipelineHostTiming {
+                        frame_wall_ms: frame_timing.frame_wall_ms,
+                        wait_frame_ms: frame_timing.wait_frame_ms,
+                        controller_poll_ms: frame_timing.controller_poll_ms,
+                        rendered: rendered_frame.is_some(),
+                        thread_cpu_ms: frame_timing
+                            .thread_cpu_valid
+                            .then_some(frame_timing.thread_cpu_ms),
+                    },
+                    rendered_frame.map(|rendered| rendered.summary),
+                );
+            terrain.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
             if !perf_started_after_ready {
                 perf_probe.record_frame(frame_timing, frame_stats, rendered_frame);
             }

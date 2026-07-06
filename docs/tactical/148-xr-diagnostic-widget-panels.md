@@ -1,6 +1,6 @@
 # 148: XR Diagnostic Widget Panels
 
-Status: proposed; opened 2026-07-06.
+Status: Slice 1 landed 2026-07-06; later slices proposed.
 
 Workstream: native Rust shared UI, diagnostics, and XR presentation. This is a
 successor follow-up to tactical
@@ -197,6 +197,46 @@ and verify the passive frame metrics panel remains readable off-center in the
 world. It must not interfere with block-palette pointer interaction or gameplay
 ray/use/attack input.
 
+Slice 1 implementation record:
+
+- Added `mclone-xr-scene::diagnostic_panel` with a dedicated
+  `WorldGuiRenderer` and cache for the shared `FramePipelineHudOverlay` draw
+  model.
+- Added `mclone-xr-scene::frame_pipeline_reporter` as the live XR
+  host-fed `FramePipelineReport` accumulator. Android XR and desktop XR smoke
+  now feed completed-frame timing and the latest `XrTerrainFrameSummary` into
+  the scene.
+- Rendered the passive frame metrics panel in both per-eye and full-frame
+  multiview paths using a single stereo-derived off-center panel pose that is
+  captured on toggle-on instead of recomputed from the headset every frame.
+- Wired the shared `Frame Metrics` menu action in XR:
+  `SetFramePipelineOverlayVisible(visible)` now changes XR diagnostic panel
+  visibility, `GameUiRenderState` reflects the bit, and the XR profile marks
+  the capability supported.
+- Kept the first panel passive. It has no pointer hit-test path, does not clip
+  controller rays, and does not participate in gameplay or menu interaction.
+
+Validation run:
+
+```bash
+cargo fmt
+cargo check -p mclone-xr-scene
+cargo check -p mclone-native-client --features xr
+cargo test -p mclone-ui frame_pipeline
+cargo test -p mclone-xr-scene
+cargo check -p mclone-android-xr-client
+```
+
+Android target validation attempted with:
+
+```bash
+cargo check -p mclone-android-xr-client --target aarch64-linux-android
+```
+
+That target check was blocked on the macOS host by a missing Android C compiler:
+`aarch64-linux-android-clang`. Device/APK validation remains required on an
+Android-prepared host.
+
 ## Slice 2: Shared Diagnostic Widget Surface
 
 Goal: make frame metrics a first-class shared diagnostic widget instead of a
@@ -262,15 +302,11 @@ to build a brittle static-analysis system.
 
 ## Open Questions
 
-- Should the Android XR always-on live report reuse the perf probe accumulator
-  with a rolling window, or should it keep a smaller always-on report stream and
-  reserve worst-frame history for explicit perf mode?
-- Should desktop OpenXR construct its report in the XR host frame loop, or
-  should `mclone-xr-scene` own a host-fed accumulator with timing inputs from
-  both desktop and Android?
+- Slice 1 chose a smaller always-on live report stream in `mclone-xr-scene`;
+  the Android perf probe remains the richer explicit perf/log sink. Revisit
+  only if the live panel needs worst-frame history or GPU/compositor panels.
 - What exact off-center placement is most comfortable on Quest 3? First device
   validation should record the chosen angle, distance, and panel size.
 - Should a developer-only flat-HUD mirror ever exist? Current direction says
   not as a product feature; reconsider only if several diagnostics need a
   short-lived fallback before widget extraction.
-

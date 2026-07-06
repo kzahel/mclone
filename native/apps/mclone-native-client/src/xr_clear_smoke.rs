@@ -18,8 +18,9 @@ use mclone_xr_host::{
 };
 #[cfg(not(target_os = "android"))]
 use mclone_xr_scene::{
-    XrDebugUiScreen as SceneXrDebugUiScreen, XrMcloneTerrainState, XrSceneOptions,
-    XrStartupViewPose, XrTerrainEyeTarget, XrUnderwaterDetectionMode,
+    XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrFramePipelineReporter,
+    XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+    XrTerrainFrameSummary, XrUnderwaterDetectionMode,
 };
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
@@ -35,6 +36,8 @@ use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{
     native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
 };
+#[cfg(not(target_os = "android"))]
+use mclone_app_runtime::elapsed_ms;
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::local_single_view::NativeSingleViewSessionRuntime;
 #[cfg(not(target_os = "android"))]
@@ -472,6 +475,7 @@ fn run_smoke_frames(
     let mut submitted_frame_progress_deadline =
         frame_limit.map(|_| Instant::now() + SUBMITTED_FRAME_PROGRESS_TIMEOUT);
     let mut frame_stats = XrFrameStats::default();
+    let mut frame_pipeline_reporter = XrFramePipelineReporter::new(None);
     let mut runtime_requested_exit = false;
 
     while frame_limit
@@ -507,21 +511,27 @@ fn run_smoke_frames(
             OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
         }
 
+        let frame_wall_start = Instant::now();
         let submitted_frames_before = frame_stats.submitted_frames;
+        let wait_begin_start = Instant::now();
         let frame_state = mclone_xr_host::wait_begin_frame(
             &mut graphics.frame_wait,
             &mut graphics.frame_stream,
             &mut frame_stats,
         )?;
+        let wait_begin_ms = elapsed_ms(wait_begin_start.elapsed());
 
+        let mut controller_poll_ms = 0.0;
+        let mut rendered_summary = None;
         let frame_result = if frame_state.should_render {
-            let result = controller_actions
-                .poll(
-                    &graphics.session,
-                    &stage,
-                    frame_state.predicted_display_time,
-                )
-                .and_then(|controllers| {
+            let controller_poll_start = Instant::now();
+            let result = match controller_actions.poll(
+                &graphics.session,
+                &stage,
+                frame_state.predicted_display_time,
+            ) {
+                Ok(controllers) => {
+                    controller_poll_ms = elapsed_ms(controller_poll_start.elapsed());
                     controller_summary.record(&controllers);
                     if let Some(mclone) = &mut mclone {
                         render_mclone_frame(
@@ -534,6 +544,9 @@ fn run_smoke_frames(
                             mclone,
                             &controllers,
                         )
+                        .map(|summary| {
+                            rendered_summary = Some(summary);
+                        })
                     } else {
                         render_clear_frame(
                             &mut graphics,
@@ -544,7 +557,12 @@ fn run_smoke_frames(
                             &mut right_eye,
                         )
                     }
-                });
+                }
+                Err(err) => {
+                    controller_poll_ms = elapsed_ms(controller_poll_start.elapsed());
+                    Err(err)
+                }
+            };
             result.map(|()| {
                 frame_stats.record_submitted_frame();
             })
@@ -565,6 +583,21 @@ fn run_smoke_frames(
                 &[],
             );
             return Err(err);
+        }
+
+        if let Some(mclone) = &mut mclone {
+            let (frame_pipeline_report, frame_pipeline_revision) = frame_pipeline_reporter
+                .record_frame(
+                    XrFramePipelineHostTiming {
+                        frame_wall_ms: elapsed_ms(frame_wall_start.elapsed()),
+                        wait_frame_ms: wait_begin_ms,
+                        controller_poll_ms,
+                        rendered: rendered_summary.is_some(),
+                        thread_cpu_ms: None,
+                    },
+                    rendered_summary,
+                );
+            mclone.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
         }
 
         if let Some(deadline) = submitted_frame_progress_deadline.as_mut() {
@@ -864,7 +897,7 @@ fn render_mclone_frame(
     right_eye: &mut platform_graphics::OpenXrEyeState,
     mclone: &mut DesktopXrMcloneTerrainState,
     controllers: &[XrControllerSnapshot],
-) -> Result<()> {
+) -> Result<XrTerrainFrameSummary> {
     let stereo_views =
         mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)
             .context("locate OpenXR stereo views for mclone frame")?;
@@ -897,7 +930,7 @@ fn render_mclone_frame(
     );
     let left_release_result = left_target.release();
     let right_release_result = right_target.release();
-    render_result?;
+    let frame_summary = render_result?;
     left_release_result?;
     right_release_result?;
 
@@ -909,7 +942,8 @@ fn render_mclone_frame(
         stereo_views,
         left_eye,
         right_eye,
-    )
+    )?;
+    Ok(frame_summary)
 }
 
 #[cfg(not(target_os = "android"))]

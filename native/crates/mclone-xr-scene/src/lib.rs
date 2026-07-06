@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -57,6 +58,7 @@ use mclone_client::{
     view_vector_from_rot_degrees,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
+use mclone_diagnostics::FramePipelineReport;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
@@ -100,6 +102,12 @@ use mclone_ui::{
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
 
+mod diagnostic_panel;
+mod frame_pipeline_reporter;
+
+use diagnostic_panel::XrDiagnosticPanel;
+pub use frame_pipeline_reporter::{XrFramePipelineHostTiming, XrFramePipelineReporter};
+
 pub const DEFAULT_XR_SEED: i64 = 12_345;
 pub const DEFAULT_XR_CHUNK_X: i32 = 0;
 pub const DEFAULT_XR_CHUNK_Z: i32 = 0;
@@ -121,6 +129,11 @@ pub const XR_UI_FPS_CAP: u32 = 90;
 pub const XR_MENU_PANEL_PIXELS: [u32; 2] = [1024, 576];
 pub const XR_MENU_PANEL_DISTANCE_BLOCKS: f32 = 2.2;
 pub const XR_MENU_PANEL_WIDTH_BLOCKS: f32 = 1.75;
+pub const XR_DIAGNOSTIC_PANEL_PIXELS: [u32; 2] = [384, 216];
+pub const XR_DIAGNOSTIC_PANEL_DISTANCE_BLOCKS: f32 = 2.25;
+pub const XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS: f32 = 0.9;
+pub const XR_DIAGNOSTIC_PANEL_RIGHT_OFFSET_BLOCKS: f32 = 0.86;
+pub const XR_DIAGNOSTIC_PANEL_UP_OFFSET_BLOCKS: f32 = 0.16;
 pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
@@ -1066,6 +1079,7 @@ where
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
     world_gui_overlay_renderer: WorldGuiRenderer,
+    diagnostic_panel: XrDiagnosticPanel,
     ui: GameUiHost,
     menu_overlay_cache: XrMenuPanelOverlayCache,
     status_overlay: StatusOverlay,
@@ -1096,6 +1110,7 @@ where
     menu_pointer_down: bool,
     gameplay_interaction_buttons: XrGameplayInteractionButtons,
     menu_panel_pose: Option<WorldGuiPanel>,
+    diagnostic_panel_pose: Option<WorldGuiPanel>,
     menu_panel_anchor: XrUiPanelAnchor,
     menu_panel_recenter_pending: bool,
     latest_controllers: Vec<XrControllerSnapshot>,
@@ -1253,6 +1268,7 @@ where
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
+            diagnostic_panel: XrDiagnosticPanel::new(device, color_format),
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
             status_overlay: StatusOverlay::hidden(),
@@ -1288,6 +1304,7 @@ where
             menu_pointer_down: false,
             gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
+            diagnostic_panel_pose: None,
             menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: true,
             latest_controllers: Vec::new(),
@@ -1372,6 +1389,7 @@ where
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
+            diagnostic_panel: XrDiagnosticPanel::new(device, color_format),
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
             status_overlay: StatusOverlay::hidden(),
@@ -1407,6 +1425,7 @@ where
             menu_pointer_down: false,
             gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
+            diagnostic_panel_pose: None,
             menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: false,
             latest_controllers: Vec::new(),
@@ -1424,6 +1443,15 @@ where
 
     pub fn set_audio_engine(&mut self, audio: Option<AudioEngine>) {
         self.audio = audio;
+    }
+
+    pub fn set_frame_pipeline_report(&mut self, report: Arc<FramePipelineReport>, revision: u64) {
+        self.diagnostic_panel
+            .set_frame_pipeline_report(report, revision);
+    }
+
+    pub fn clear_frame_pipeline_report(&mut self) {
+        self.diagnostic_panel.clear_frame_pipeline_report();
     }
 
     pub fn set_session_runtime_factory<F>(&mut self, factory: F)
@@ -1947,6 +1975,7 @@ where
         let uniform_frame = self.next_per_view_uniform_frame();
         let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
         let right_view_slot = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
+        let diagnostic_panel = self.diagnostic_panel_pose_for_render_views(render_views);
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
@@ -1954,6 +1983,7 @@ where
             &prepared_stereo_draw,
             left_target,
             render_views[0],
+            diagnostic_panel,
             &actor_instances,
             render_options,
             sky_clear_color,
@@ -1977,6 +2007,7 @@ where
             &prepared_stereo_draw,
             right_target,
             render_views[1],
+            diagnostic_panel,
             &actor_instances,
             render_options,
             sky_clear_color,
@@ -2618,11 +2649,33 @@ where
                 )
                 .context("render XR world debug lines multiview")?;
         }
+        let mut panel_stats = WorldGuiPanelRenderStats::default();
+        let mut draw_cache_stats = UiDrawCacheStats::default();
+        let diagnostic_panel = self.diagnostic_panel_pose_for_render_views(render_views);
+        let (diagnostic_panel_stats, diagnostic_draw_cache) = self
+            .diagnostic_panel
+            .render_multiview(
+                device,
+                queue,
+                encoder,
+                overlay_target,
+                render_views,
+                diagnostic_panel,
+            )
+            .context("render XR diagnostic panel multiview")?;
+        panel_stats.add(diagnostic_panel_stats);
+        draw_cache_stats.add(diagnostic_draw_cache);
         if !self.ui.is_active() {
-            return Ok(XrWorldOverlayStats::default());
+            return Ok(XrWorldOverlayStats {
+                panel: panel_stats,
+                draw_cache: draw_cache_stats,
+            });
         }
         let Some(panel) = self.menu_panel_pose else {
-            return Ok(XrWorldOverlayStats::default());
+            return Ok(XrWorldOverlayStats {
+                panel: panel_stats,
+                draw_cache: draw_cache_stats,
+            });
         };
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         let ui_state = self.current_ui_render_state();
@@ -2638,7 +2691,7 @@ where
         let controller_ray_lines = self
             .xr_menu_controller_ray_lines(panel)
             .context("build XR menu controller ray visuals")?;
-        let mut panel_stats = if let Some(cache_revision) = panel_draw.cache_revision {
+        let mut menu_panel_stats = if let Some(cache_revision) = panel_draw.cache_revision {
             self.world_gui_renderer.render_panel_cached_multiview(
                 device,
                 queue,
@@ -2707,12 +2760,26 @@ where
                     )
             }
             .context("render XR menu panel overlay multiview")?;
-            panel_stats.add(overlay_stats);
+            menu_panel_stats.add(overlay_stats);
         }
+        panel_stats.add(menu_panel_stats);
+        draw_cache_stats.add(panel_draw.draw_cache);
         Ok(XrWorldOverlayStats {
             panel: panel_stats,
-            draw_cache: panel_draw.draw_cache,
+            draw_cache: draw_cache_stats,
         })
+    }
+
+    fn diagnostic_panel_pose_for_render_views(
+        &mut self,
+        render_views: [ChunkRenderView; 2],
+    ) -> WorldGuiPanel {
+        if let Some(panel) = self.diagnostic_panel_pose {
+            return panel;
+        }
+        let panel = xr_diagnostic_panel_from_render_views(render_views);
+        self.diagnostic_panel_pose = Some(panel);
+        panel
     }
 
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
@@ -4102,6 +4169,7 @@ where
         prepared_draw: &PreparedTexturedSectionStereoDraw,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
+        diagnostic_panel: WorldGuiPanel,
         actor_instances: &[mclone_render::entity::ActorInstance],
         render_options: TexturedSectionRenderOptions,
         sky_clear_color: wgpu::Color,
@@ -4262,52 +4330,71 @@ where
             xr_world_lines_ms = world_lines_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         }
         let mut ui_panel_stats = WorldGuiPanelRenderStats::default();
+        let mut ui_draw_cache_stats = panel_draw.draw_cache;
         let mut xr_world_panel_ms = 0.0;
+        let diagnostic_panel_start = collect_split_timing.then(Instant::now);
+        let (diagnostic_panel_stats, diagnostic_draw_cache) = self
+            .diagnostic_panel
+            .render_in_slot(
+                device,
+                queue,
+                &mut encoder,
+                RenderFrameTarget::color(target.color_view, target.size),
+                render_view,
+                diagnostic_panel,
+                view_slot,
+            )
+            .with_context(|| format!("render XR diagnostic panel for {label} eye"))?;
+        ui_panel_stats.add(diagnostic_panel_stats);
+        ui_draw_cache_stats.add(diagnostic_draw_cache);
+        xr_world_panel_ms +=
+            diagnostic_panel_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
                 let world_panel_start = collect_split_timing.then(Instant::now);
                 let controller_ray_lines = self
                     .xr_menu_controller_ray_lines(panel)
                     .context("build XR menu controller ray visuals")?;
-                ui_panel_stats = if let Some(cache_revision) = panel_draw.cache_revision {
-                    self.world_gui_renderer.render_panel_cached_in_slot(
-                        device,
-                        queue,
-                        &mut encoder,
-                        RenderFrameTarget::color(target.color_view, target.size),
-                        render_view,
-                        XR_MENU_PANEL_PIXELS,
-                        [gui_scale.width, gui_scale.height],
-                        &panel_draw.panel_draw,
-                        panel,
-                        if panel_draw.overlay_draw.commands().is_empty() {
-                            &controller_ray_lines
-                        } else {
-                            &[]
-                        },
-                        view_slot,
-                        cache_revision,
-                    )
-                } else {
-                    self.world_gui_renderer.render_panel_in_slot_report(
-                        device,
-                        queue,
-                        &mut encoder,
-                        RenderFrameTarget::color(target.color_view, target.size),
-                        render_view,
-                        XR_MENU_PANEL_PIXELS,
-                        [gui_scale.width, gui_scale.height],
-                        &panel_draw.panel_draw,
-                        panel,
-                        if panel_draw.overlay_draw.commands().is_empty() {
-                            &controller_ray_lines
-                        } else {
-                            &[]
-                        },
-                        view_slot,
-                    )
-                }
-                .with_context(|| format!("render XR menu panel for {label} eye"))?;
+                let mut menu_panel_stats =
+                    if let Some(cache_revision) = panel_draw.cache_revision {
+                        self.world_gui_renderer.render_panel_cached_in_slot(
+                            device,
+                            queue,
+                            &mut encoder,
+                            RenderFrameTarget::color(target.color_view, target.size),
+                            render_view,
+                            XR_MENU_PANEL_PIXELS,
+                            [gui_scale.width, gui_scale.height],
+                            &panel_draw.panel_draw,
+                            panel,
+                            if panel_draw.overlay_draw.commands().is_empty() {
+                                &controller_ray_lines
+                            } else {
+                                &[]
+                            },
+                            view_slot,
+                            cache_revision,
+                        )
+                    } else {
+                        self.world_gui_renderer.render_panel_in_slot_report(
+                            device,
+                            queue,
+                            &mut encoder,
+                            RenderFrameTarget::color(target.color_view, target.size),
+                            render_view,
+                            XR_MENU_PANEL_PIXELS,
+                            [gui_scale.width, gui_scale.height],
+                            &panel_draw.panel_draw,
+                            panel,
+                            if panel_draw.overlay_draw.commands().is_empty() {
+                                &controller_ray_lines
+                            } else {
+                                &[]
+                            },
+                            view_slot,
+                        )
+                    }
+                    .with_context(|| format!("render XR menu panel for {label} eye"))?;
                 if !panel_draw.overlay_draw.commands().is_empty() {
                     let overlay_stats =
                         if let Some(cache_revision) = panel_draw.overlay_cache_revision {
@@ -4341,9 +4428,10 @@ where
                             )
                         }
                         .with_context(|| format!("render XR menu panel overlay for {label} eye"))?;
-                    ui_panel_stats.add(overlay_stats);
+                    menu_panel_stats.add(overlay_stats);
                 }
-                xr_world_panel_ms =
+                ui_panel_stats.add(menu_panel_stats);
+                xr_world_panel_ms +=
                     world_panel_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
             }
         }
@@ -4399,7 +4487,7 @@ where
                 poll_wait_ms,
             },
             ui_panel: ui_panel_stats,
-            ui_draw_cache: panel_draw.draw_cache,
+            ui_draw_cache: ui_draw_cache_stats,
             submission,
         })
     }
@@ -4550,7 +4638,7 @@ where
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: None,
-            frame_pipeline_overlay_visible: false,
+            frame_pipeline_overlay_visible: self.diagnostic_panel.frame_metrics_visible(),
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
@@ -5722,7 +5810,16 @@ where
                     );
                 }
                 ClientExperienceSettingEffect::SetCrosshairVisible(_) => {}
-                ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(_) => {}
+                ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(visible) => {
+                    self.diagnostic_panel.set_frame_metrics_visible(visible);
+                    if visible {
+                        self.diagnostic_panel_pose = None;
+                    }
+                    log::info!(
+                        "XR frame pipeline overlay {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
                 ClientExperienceSettingEffect::SetPlayerModel(model) => {
                     self.player_model = model;
                     log::info!("XR player model set to {}", model.label());
@@ -6238,9 +6335,6 @@ fn xr_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
     settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
-        "Frame pipeline overlay needs the XR world-panel projection",
-    );
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -7071,6 +7165,35 @@ pub fn xr_menu_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> Wo
     )
 }
 
+pub fn xr_diagnostic_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> WorldGuiPanel {
+    let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+    let forward = average_unit_direction(
+        render_views[0].camera_forward,
+        render_views[1].camera_forward,
+        Vec3::NEG_Z,
+    );
+    let up = average_unit_direction(
+        render_views[0].camera_up,
+        render_views[1].camera_up,
+        Vec3::Y,
+    );
+    let right = average_unit_direction(
+        render_views[0].camera_right,
+        render_views[1].camera_right,
+        Vec3::X,
+    );
+    WorldGuiPanel::new(
+        center_position
+            + forward * XR_DIAGNOSTIC_PANEL_DISTANCE_BLOCKS
+            + right * XR_DIAGNOSTIC_PANEL_RIGHT_OFFSET_BLOCKS
+            + up * XR_DIAGNOSTIC_PANEL_UP_OFFSET_BLOCKS,
+        right,
+        up,
+        XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS,
+        xr_diagnostic_panel_height_blocks(),
+    )
+}
+
 pub fn xr_game_ui_panel_from_controllers(
     controllers: &[XrControllerSnapshot],
     transform: XrStageToWorld,
@@ -7297,6 +7420,11 @@ pub fn xr_menu_pointer_trigger_down(trigger: f32, was_down: bool) -> bool {
 
 fn xr_menu_panel_height_blocks() -> f32 {
     XR_MENU_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
+}
+
+fn xr_diagnostic_panel_height_blocks() -> f32 {
+    XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS * XR_DIAGNOSTIC_PANEL_PIXELS[1] as f32
+        / XR_DIAGNOSTIC_PANEL_PIXELS[0] as f32
 }
 
 fn xr_game_ui_panel_height_blocks() -> f32 {
@@ -8279,6 +8407,29 @@ mod tests {
     }
 
     #[test]
+    fn xr_diagnostic_panel_anchors_off_center_from_hmd() {
+        let left = test_render_view(Vec3::new(-0.03, 64.0, 0.0));
+        let right = test_render_view(Vec3::new(0.03, 64.0, 0.0));
+
+        let panel = xr_diagnostic_panel_from_render_views([left, right]);
+
+        assert!(
+            (panel.center
+                - Vec3::new(
+                    XR_DIAGNOSTIC_PANEL_RIGHT_OFFSET_BLOCKS,
+                    64.0 + XR_DIAGNOSTIC_PANEL_UP_OFFSET_BLOCKS,
+                    -XR_DIAGNOSTIC_PANEL_DISTANCE_BLOCKS,
+                ))
+            .length()
+                < 1.0e-6
+        );
+        assert!((panel.right - Vec3::X).length() < 1.0e-6);
+        assert!((panel.up - Vec3::Y).length() < 1.0e-6);
+        assert_eq!(panel.width, XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS);
+        assert_eq!(panel.height, xr_diagnostic_panel_height_blocks());
+    }
+
+    #[test]
     fn xr_game_ui_panel_anchors_to_left_hand_and_faces_hmd() {
         let views = [
             test_render_view(Vec3::new(-0.03, 64.0, 0.0)),
@@ -8497,6 +8648,13 @@ mod tests {
         harness.route_emulated_ui_action(GameUiAction::DeleteWorld(delete_id));
         assert_eq!(harness.ui.screen(), Some(GameScreen::WorldList));
         assert!(!harness.has_widget("Existing World"));
+    }
+
+    #[test]
+    fn xr_profile_supports_frame_pipeline_overlay() {
+        let profile = xr_client_experience_profile();
+
+        assert!(profile.settings.frame_pipeline_overlay.is_supported());
     }
 
     const EMULATED_XR_CREATE_SEED: i64 = 24_680;

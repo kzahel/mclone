@@ -14,6 +14,7 @@ mclone-app-runtime.workspace = true
 mclone-assets.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true
+mclone-diagnostics.workspace = true
 mclone-mesh.workspace = true
 mclone-protocol.workspace = true
 mclone-render.workspace = true
