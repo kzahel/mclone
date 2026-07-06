@@ -88,10 +88,19 @@ The July 5 measurement pass confirmed the waterfall shape: desktop RD10/RD15
 full-view readiness still tracks the `~19` chunks/sec publication wall with an
 empty client update queue, while Quest RD5 local-integrated chunk-view churn has
 good average headroom but visible update queue age, upload/accept backpressure,
-and the same one-job publication backlog. A remote-dedicated contrast was
-attempted but is not interpretable yet because the current remote session path
-still ignores `SendOnly` command policy and hides the server/scheduler/runtime
-diagnostic counters.
+and the same one-job publication backlog.
+
+The July 6 tactical 149 contrast pass fixed the remote accounting gap and
+captured two Quest RD5 local rows plus two Quest RD5 remote rows. Server and
+scheduler work now visibly leaves the headset in remote mode: the client marks
+`host-publication`, `server-runner`, `worldgen`, and `light-status` as
+`remote-host`, while the dedicated server emits its own
+`MCLONE_DEDICATED_SERVER_SUMMARY`. The headset-paid work changed shape rather
+than disappearing: remote rows expose network producer read/decode and update
+apply as client costs, keep mesh/upload/render local, and showed lower update
+oldest-applied age but worse over-period rate than the local rows in that
+capture. Use the remote lane only with both halves of the report, not as a
+single headset-only row.
 
 ## What Actually Limits Desktop (Measured)
 
@@ -545,10 +554,11 @@ instrumentation to watch it:
 - [ ] Add the Meta dropped-frame before/after delta to the Quest perf summary.
 - [ ] Capture clean-commit baselines: repeat RD10/RD15 startup-streaming from a
   clean tree, and recapture Quest RD5/RD7 settled orbit clean.
-- [ ] Fix remote-dedicated churn accounting before using remote play as the
-  "server costs moved off headset" comparison: remote `SendOnly` must not block
-  the XR frame loop, and the client summary needs network/update/apply counters
-  even when server/scheduler counters live on the host.
+- [x] Fix remote-dedicated churn accounting before using remote play as the
+  "server costs moved off headset" comparison: completed in
+  [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
+  with schema v6 availability markers, Quest local-vs-remote contrast rows, and
+  dedicated-server summaries.
 - [ ] Implement Candidate A as a shared budget calculation and run the full
   promotion loop, including the Quest streaming check.
 

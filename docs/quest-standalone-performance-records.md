@@ -108,6 +108,106 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-06 - Quest RD5 Local vs Remote Chunk-View Churn Contrast
+
+Benchmarked code: Android XR release APK built from clean commit `4f86dad3`
+(`Add shared debug diagnostics toggle`).
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Lane | RD5 chunk-view churn, center alternates by `16` chunks every `3s` |
+| Budgets | render compile workers `2`, completed-result accept `2`, section upload `16`, section accept `64` |
+
+Local integrated command shape:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Remote dedicated command shape adds `--adb-reverse --start-server` and writes a
+server log. Raw local artifacts were captured under:
+
+- `/tmp/mclone-quest-openxr-churn-rd5-slice3-local-a-20260706-summary.txt`
+- `/tmp/mclone-quest-openxr-churn-rd5-slice3-local-b-20260706-summary.txt`
+- `/tmp/mclone-quest-openxr-churn-rd5-slice3-remote-a-20260706-summary.txt`
+- `/tmp/mclone-quest-openxr-churn-rd5-slice3-remote-b-20260706-summary.txt`
+- `/tmp/mclone-quest-openxr-churn-rd5-slice3-remote-a-20260706-server.txt`
+- `/tmp/mclone-quest-openxr-churn-rd5-slice3-remote-b-20260706-server.txt`
+
+Primary frame/headroom rows:
+
+| Mode | Run | FPS | Frames | App avg | App p50 | App p95 | App p99 | App max | Head avg | Head p05 | Head min | App over-period | Over 2x |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| local integrated | A | `71.04` | `3198` | `6.412ms` | `5.443ms` | `11.532ms` | `13.473ms` | `16.246ms` | `+7.477ms` | `+2.357ms` | `-2.357ms` | `204/3198` (`0.7%`) | `0` |
+| local integrated | B | `71.03` | `3197` | `6.449ms` | `5.619ms` | `11.526ms` | `13.303ms` | `16.318ms` | `+7.440ms` | `+2.363ms` | `-2.429ms` | `166/3197` (`0.5%`) | `0` |
+| remote dedicated | A | `69.45` | `3126` | `7.719ms` | `5.424ms` | `14.928ms` | `17.425ms` | `20.515ms` | `+6.169ms` | `-1.039ms` | `-6.626ms` | `673/3126` (`10.8%`) | `0` |
+| remote dedicated | B | `69.65` | `3135` | `7.543ms` | `5.337ms` | `14.940ms` | `17.432ms` | `20.448ms` | `+6.346ms` | `-1.051ms` | `-6.559ms` | `703/3135` (`10.5%`) | `1` |
+
+Runtime/update maxima:
+
+| Mode | Run | Runtime upload / sync / GPU upload | Poll / apply / client apply | Producer read / decode | Update queue depth / bytes / oldest age | Update-pump stalls |
+|---|---|---:|---:|---:|---:|---:|
+| local integrated | A | `8.987 / 6.091 / 7.401ms` | `2.113 / 2.081 / 2.021ms` | `0.000 / 0.000ms` | `283` / `7,497,776` / `167.385ms` | `true`, count `1` |
+| local integrated | B | `7.293 / 2.105 / 6.518ms` | `2.173 / 2.096 / 2.043ms` | `0.000 / 0.000ms` | `283` / `7,551,038` / `169.310ms` | `true`, count `1` |
+| remote dedicated | A | `7.686 / 5.447 / 5.681ms` | `2.141 / 2.108 / 2.064ms` | `5917.254 / 10.911ms` | `387` / `9,724,619` / `14.368ms` | `true`, count `1` |
+| remote dedicated | B | `8.062 / 4.046 / 6.664ms` | `2.135 / 2.124 / 2.069ms` | `5780.298 / 12.454ms` | `387` / `9,724,619` / `15.067ms` | `true`, count `1` |
+
+Server-owned lane accounting:
+
+| Mode | Run | Client server tick / scheduler tick | Client pending publication / worldgen chunks / light publications | Server-side summary |
+|---|---|---:|---:|---|
+| local integrated | A | `70.721 / 70.575ms` | `124 / 124 / 8` | same process; lanes `availability=local` |
+| local integrated | B | `53.156 / 53.005ms` | `125 / 125 / 9` | same process; lanes `availability=local` |
+| remote dedicated | A | `0.000 / 0.000ms` | `0 / 0 / 0` | `phase=active`, `commands=16`, `updates_sent=4217`, `tick_total_ms=123.702`, `scheduler_tick_ms=103.806` |
+| remote dedicated | B | `0.000 / 0.000ms` | `0 / 0 / 0` | `phase=active`, `commands=16`, `updates_sent=4217`, `tick_total_ms=125.400`, `scheduler_tick_ms=105.613` |
+
+Availability markers:
+
+- local rows: `host-publication` queue and `server-runner` peer reported
+  `availability=local`;
+- remote rows: `host-publication` queue and `server-runner` peer reported
+  `availability=remote-host`; `worldgen` and `light-status` peers also
+  reported `availability=remote-host`; render-compile workers stayed local.
+
+Interpretation:
+
+- The remote lane is now usable as a contrast row: no multi-second command-send
+  stall, schema v6 availability labels prevent server-side zeros from reading
+  as local idle work, and the host process emits server-side summaries.
+- Server/scheduler work measurably leaves the headset in remote mode: the
+  client-side server/scheduler pending fields become `0` because those lanes
+  are `remote-host`, while the dedicated server reports the cumulative tick and
+  scheduler work.
+- The headset does not become free. Client-paid work remains: network
+  read/decode, update apply, mesh/upload, and render pacing. In this run remote
+  had lower update oldest-applied age (`~14-15ms` vs `~167-169ms`) but higher
+  over-period rate (`~10-11%` vs `<1%`) and similar apply/upload tails.
+
 ### 2026-07-05 - Standalone Quest 3 RD5 Chunk-View Churn Attribution
 
 Benchmarked code: Android XR release APK built from `f5f90f83` plus doc-only

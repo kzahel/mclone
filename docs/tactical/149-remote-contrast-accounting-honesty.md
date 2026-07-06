@@ -1,14 +1,15 @@
 # 149: Remote/Dedicated Contrast Accounting Honesty
 
-Status: active; Slice 2 host-mode-honest report projection landed 2026-07-06.
-Slice 1 `SendOnly` code, Quest evidence, the follow-up interest-command
-isolation, and the remote response-readiness poll fix also landed 2026-07-06.
-Tactical 151's Quest rebaseline proved the single-batch remote drain/apply
-stall moved out of runtime `poll()`, and Slice 4A then removed the send-side
-stall where `SendOnly` waited behind the response-paired IO actor. Remote
-client/server reports now identify remote-host-owned lanes explicitly; durable
-local-vs-remote contrast rows are Slice 3. Web shared-ingress convergence
-remains tracked in tactical
+Status: closed 2026-07-06. Slice 3 recorded durable Quest RD5 local-vs-remote
+contrast rows and desktop loopback remote evidence. Slice 2 landed
+host-mode-honest report projection; Slice 1 landed `SendOnly` correctness,
+Quest evidence, the follow-up interest-command isolation, and the remote
+response-readiness poll fix. Tactical 151's Quest rebaseline proved the
+single-batch remote drain/apply stall moved out of runtime `poll()`, and Slice
+4A then removed the send-side stall where `SendOnly` waited behind the
+response-paired IO actor. Remote client/server reports now identify
+remote-host-owned lanes explicitly. Web shared-ingress convergence remains
+tracked in tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
@@ -626,6 +627,129 @@ Exit criteria:
   remote play as the comparison" is checked with a pointer here.
 
 Validation: the capture commands above, plus `git diff --check`.
+
+2026-07-06 Slice 3 implementation status:
+
+- Recorded two Quest RD5 local-integrated chunk-view churn rows and two Quest
+  RD5 remote-dedicated rows in
+  [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
+  All four rows used clean commit `4f86dad3`, Meta Quest 3 `2G0YC1ZF93041Z`,
+  seed `12345`, render distance `5`, chunk-view churn offset `16` chunks every
+  `3s`, render compile workers `2`, completed-result accept budget `2`, section
+  upload budget `16`, and section accept budget `64`.
+- Recorded the desktop-shaped loopback remote smoke in
+  [`../performance-records.md`](../performance-records.md). The desktop
+  startup-streaming perf path still explicitly requires local integrated mode,
+  so the desktop row records the allowed gap plus loopback remote screenshots
+  and dedicated-server summaries instead of inventing a one-off perf lane.
+- Updated tactical
+  [`142-throughput-policy-with-quest-rd5-guardrail.md`](142-throughput-policy-with-quest-rd5-guardrail.md)
+  with the interpretation note and checked its remote-accounting prerequisite.
+
+Validation run on 2026-07-06:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-assets \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-slice3-local-a-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-slice3-local-a-20260706-logcat.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-slice3-local-b-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-slice3-local-b-20260706-logcat.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-slice3-remote-a-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-slice3-remote-a-20260706-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-churn-rd5-slice3-remote-a-20260706-server.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-slice3-remote-b-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-slice3-remote-b-20260706-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-churn-rd5-slice3-remote-b-20260706-server.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+
+pnpm native:remote:smoke
+git diff --check
+```
+
+Results: all passed. The Quest remote rows reported schema v6
+`availability=remote-host` for server-owned lanes and dedicated-server summary
+lines in the host logs. `pnpm native:remote:smoke` saved valid screenshots to
+`/tmp/mclone-native-remote-client-smoke.png` and
+`/tmp/mclone-native-remote-client-smoke-observer.png`.
 
 ## Out Of Scope
 

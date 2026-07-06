@@ -101,6 +101,47 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-06 - Desktop Loopback Remote Contrast Smoke
+
+Commit: `4f86dad3` (`Add shared debug diagnostics toggle`), clean tree before
+capture. Host: Apple M4 Pro Mac, Darwin arm64.
+
+Command:
+
+```sh
+pnpm native:remote:smoke
+```
+
+Result: pass. The smoke built `mclone-dedicated-server` and
+`mclone-native-client`, started a loopback dedicated server, launched two
+headless remote native clients, and saved rendered screenshots to:
+
+- `/tmp/mclone-native-remote-client-smoke.png`
+- `/tmp/mclone-native-remote-client-smoke-observer.png`
+
+Desktop remote smoke summary:
+
+| Client | Render distance | Sections / drawn sections | GUI commands | Remote players | Entities | Actors / drawn actors |
+|---|---:|---:|---:|---:|---:|---:|
+| actor | `2` | `166 / 12` | `12819` | `0` | `2` | `2 / 2` |
+| observer | `2` | `166 / 37` | `13051` | `1` | `2` | `3 / 3` |
+
+Dedicated server summary excerpts:
+
+| Phase | Connection | Commands | Updates sent | Tick total | Scheduler tick | Active sessions |
+|---|---:|---:|---:|---:|---:|---:|
+| active | `#1` | `1` | `93` | `2.531ms` | `0.924ms` | `2` |
+| active | `#2` | `2` | `149` | `3.318ms` | `1.701ms` | `2` |
+| final | `#2` | `12` | `300` | `23.214ms` | `15.648ms` | `1` |
+| final | `#1` | `14` | `307` | `25.462ms` | `17.679ms` | `0` |
+
+Gap: there is still no desktop remote-host startup-streaming perf lane.
+`--startup-streaming-perf` currently requires the local integrated server path,
+so this record is a desktop-shaped remote rendering/connectivity contrast and
+server-summary proof, not a desktop remote streaming baseline. Do not create a
+one-off permanent lane just for this row; add a real remote startup/streaming
+lane only if later policy work needs desktop remote startup numbers.
+
 ### 2026-07-05 - Persisted World Startup-Streaming Split
 
 Commit reported by benchmark JSON: `14ceba0a`.
