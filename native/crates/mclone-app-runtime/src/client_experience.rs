@@ -9,8 +9,9 @@ use crate::far_lod::{
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameSimulationCadence,
-    GameTouchSettings, GameUiAction, GameUiRenderState, GameXrTurnMode,
+    GameCollisionMode, GameFramePacingMode, GameMovementMode, GamePlayerModel,
+    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
+    GameUiRenderState, GameXrTurnMode,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,6 +229,9 @@ pub struct ClientExperienceSettingsProfile {
     pub frame_pipeline_overlay: ClientExperienceCapabilityStatus,
     pub player_model: ClientExperienceCapabilityStatus,
     pub movement_mode: ClientExperienceCapabilityStatus,
+    pub collision_mode: ClientExperienceCapabilityStatus,
+    pub travel_assist: ClientExperienceCapabilityStatus,
+    pub turn_mode: ClientExperienceCapabilityStatus,
     pub xr_turn: ClientExperienceCapabilityStatus,
     pub frame_pacing: ClientExperienceCapabilityStatus,
     pub fps_cap: ClientExperienceCapabilityStatus,
@@ -257,6 +261,9 @@ impl ClientExperienceSettingsProfile {
             frame_pipeline_overlay: ClientExperienceCapabilityStatus::Supported,
             player_model: ClientExperienceCapabilityStatus::Supported,
             movement_mode: ClientExperienceCapabilityStatus::Supported,
+            collision_mode: ClientExperienceCapabilityStatus::Supported,
+            travel_assist: ClientExperienceCapabilityStatus::Supported,
+            turn_mode: ClientExperienceCapabilityStatus::Supported,
             xr_turn: ClientExperienceCapabilityStatus::Supported,
             frame_pacing: ClientExperienceCapabilityStatus::Supported,
             fps_cap: ClientExperienceCapabilityStatus::Supported,
@@ -728,6 +735,9 @@ pub struct ClientExperienceSettingsState {
     pub frame_pipeline_overlay_visible: bool,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
+    pub collision_mode: GameCollisionMode,
+    pub travel_assist_mode: GameTravelAssistMode,
+    pub turn_mode: Option<GameTurnMode>,
     pub xr_turn_mode: Option<GameXrTurnMode>,
     pub fly_speed_multiplier: f32,
     pub min_fly_speed_multiplier: f32,
@@ -766,6 +776,9 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             frame_pipeline_overlay_visible: state.frame_pipeline_overlay_visible,
             player_model: state.player_model,
             movement_mode: state.movement_mode,
+            collision_mode: legacy_collision_mode_for_movement(state.movement_mode),
+            travel_assist_mode: GameTravelAssistMode::Off,
+            turn_mode: state.xr_turn_mode.map(GameTurnMode::from),
             xr_turn_mode: state.xr_turn_mode,
             fly_speed_multiplier: state.fly_speed_multiplier,
             min_fly_speed_multiplier: state.min_fly_speed_multiplier,
@@ -799,7 +812,12 @@ impl ClientExperienceSettingsState {
         state.frame_pipeline_overlay_visible = self.frame_pipeline_overlay_visible;
         state.player_model = self.player_model;
         state.movement_mode = self.movement_mode;
-        state.xr_turn_mode = self.xr_turn_mode;
+        // The current render state still exposes the legacy XR-specific turn
+        // slot. Keep it synchronized until the UI row is renamed.
+        state.xr_turn_mode = self
+            .turn_mode
+            .map(GameXrTurnMode::from)
+            .or(self.xr_turn_mode);
         state.fly_speed_multiplier = self.fly_speed_multiplier;
         state.min_fly_speed_multiplier = self.min_fly_speed_multiplier;
         state.max_fly_speed_multiplier = self.max_fly_speed_multiplier;
@@ -843,6 +861,94 @@ impl ClientExperienceSettingsState {
             self.min_movement_speed_multiplier,
             self.max_movement_speed_multiplier,
         )
+    }
+
+    pub fn apply_movement_experience_change(
+        &mut self,
+        change: ClientExperienceMovementSettingChange,
+    ) -> bool {
+        let before = self.movement_experience_tuple();
+        match change {
+            ClientExperienceMovementSettingChange::MovementMode(mode) => {
+                self.movement_mode = mode;
+                if mode == GameMovementMode::Fly {
+                    self.travel_assist_mode = GameTravelAssistMode::Off;
+                }
+                if mode == GameMovementMode::HandPush {
+                    self.collision_mode = GameCollisionMode::Normal;
+                }
+            }
+            ClientExperienceMovementSettingChange::CollisionMode(mode) => {
+                self.collision_mode = mode;
+                if mode == GameCollisionMode::NoClip {
+                    self.travel_assist_mode = GameTravelAssistMode::Off;
+                }
+            }
+            ClientExperienceMovementSettingChange::TravelAssistMode(mode) => {
+                if self.movement_mode == GameMovementMode::Fly {
+                    self.travel_assist_mode = GameTravelAssistMode::Off;
+                } else {
+                    self.travel_assist_mode = mode;
+                    if mode.is_enabled() {
+                        self.collision_mode = GameCollisionMode::Normal;
+                    }
+                }
+            }
+            ClientExperienceMovementSettingChange::TurnMode(mode) => {
+                self.turn_mode = mode;
+                self.xr_turn_mode = mode.map(GameXrTurnMode::from);
+            }
+        }
+        self.normalize_movement_experience();
+        self.movement_experience_tuple() != before
+    }
+
+    pub fn normalize_movement_experience(&mut self) -> bool {
+        let before = self.movement_experience_tuple();
+        if self.movement_mode == GameMovementMode::Fly {
+            self.travel_assist_mode = GameTravelAssistMode::Off;
+        }
+        if self.movement_mode == GameMovementMode::HandPush {
+            self.collision_mode = GameCollisionMode::Normal;
+        }
+        if self.collision_mode == GameCollisionMode::NoClip {
+            self.travel_assist_mode = GameTravelAssistMode::Off;
+        }
+        if self.travel_assist_mode.is_enabled() {
+            self.collision_mode = GameCollisionMode::Normal;
+        }
+        self.movement_experience_tuple() != before
+    }
+
+    fn movement_experience_tuple(
+        self,
+    ) -> (
+        GameMovementMode,
+        GameCollisionMode,
+        GameTravelAssistMode,
+        Option<GameTurnMode>,
+    ) {
+        (
+            self.movement_mode,
+            self.collision_mode,
+            self.travel_assist_mode,
+            self.turn_mode,
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientExperienceMovementSettingChange {
+    MovementMode(GameMovementMode),
+    CollisionMode(GameCollisionMode),
+    TravelAssistMode(GameTravelAssistMode),
+    TurnMode(Option<GameTurnMode>),
+}
+
+const fn legacy_collision_mode_for_movement(mode: GameMovementMode) -> GameCollisionMode {
+    match mode {
+        GameMovementMode::Fly => GameCollisionMode::NoClip,
+        GameMovementMode::Walk | GameMovementMode::HandPush => GameCollisionMode::Normal,
     }
 }
 
@@ -1416,6 +1522,105 @@ mod tests {
                     ),
                 })
         );
+    }
+
+    #[test]
+    fn movement_experience_reducer_disables_travel_assist_for_fly() {
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Walk,
+            collision_mode: GameCollisionMode::Normal,
+            travel_assist_mode: GameTravelAssistMode::Blink,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        assert!(state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::MovementMode(GameMovementMode::Fly)
+        ));
+
+        assert_eq!(state.movement_mode, GameMovementMode::Fly);
+        assert_eq!(state.collision_mode, GameCollisionMode::Normal);
+        assert_eq!(state.travel_assist_mode, GameTravelAssistMode::Off);
+    }
+
+    #[test]
+    fn movement_experience_reducer_disables_travel_assist_for_no_clip() {
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Walk,
+            collision_mode: GameCollisionMode::Normal,
+            travel_assist_mode: GameTravelAssistMode::Blink,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::CollisionMode(GameCollisionMode::NoClip),
+        );
+
+        assert_eq!(state.collision_mode, GameCollisionMode::NoClip);
+        assert_eq!(state.travel_assist_mode, GameTravelAssistMode::Off);
+    }
+
+    #[test]
+    fn movement_experience_reducer_selecting_blink_restores_normal_collision() {
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Walk,
+            collision_mode: GameCollisionMode::NoClip,
+            travel_assist_mode: GameTravelAssistMode::Off,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::TravelAssistMode(GameTravelAssistMode::Blink),
+        );
+
+        assert_eq!(state.collision_mode, GameCollisionMode::Normal);
+        assert_eq!(state.travel_assist_mode, GameTravelAssistMode::Blink);
+    }
+
+    #[test]
+    fn movement_experience_reducer_rejects_travel_assist_for_fly() {
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Fly,
+            collision_mode: GameCollisionMode::Normal,
+            travel_assist_mode: GameTravelAssistMode::Off,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        let changed = state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::TravelAssistMode(GameTravelAssistMode::Blink),
+        );
+
+        assert!(!changed);
+        assert_eq!(state.movement_mode, GameMovementMode::Fly);
+        assert_eq!(state.travel_assist_mode, GameTravelAssistMode::Off);
+    }
+
+    #[test]
+    fn movement_experience_reducer_keeps_gorilla_collision_normal() {
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Fly,
+            collision_mode: GameCollisionMode::NoClip,
+            travel_assist_mode: GameTravelAssistMode::Off,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::MovementMode(GameMovementMode::HandPush),
+        );
+
+        assert_eq!(state.movement_mode, GameMovementMode::HandPush);
+        assert_eq!(state.collision_mode, GameCollisionMode::Normal);
+    }
+
+    #[test]
+    fn movement_experience_reducer_syncs_shared_turn_to_legacy_xr_slot() {
+        let mut state = ClientExperienceSettingsState::default();
+
+        state.apply_movement_experience_change(ClientExperienceMovementSettingChange::TurnMode(
+            Some(GameTurnMode::Smooth),
+        ));
+
+        assert_eq!(state.turn_mode, Some(GameTurnMode::Smooth));
+        assert_eq!(state.xr_turn_mode, Some(GameXrTurnMode::Smooth));
     }
 
     #[test]

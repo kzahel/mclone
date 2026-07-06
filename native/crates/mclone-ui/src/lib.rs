@@ -1134,6 +1134,85 @@ impl GameMovementMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameCollisionMode {
+    #[default]
+    Normal,
+    NoClip,
+}
+
+impl GameCollisionMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "Normal",
+            Self::NoClip => "NoClip",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Normal => Self::NoClip,
+            Self::NoClip => Self::Normal,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameTravelAssistMode {
+    #[default]
+    Off,
+    Blink,
+    Warp,
+}
+
+impl GameTravelAssistMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Blink => "Blink",
+            Self::Warp => "Warp",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Blink,
+            Self::Blink => Self::Warp,
+            Self::Warp => Self::Off,
+        }
+    }
+
+    pub const fn is_enabled(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameTurnMode {
+    #[default]
+    Snap15,
+    Snap30,
+    Smooth,
+}
+
+impl GameTurnMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Snap15 => "Snap 15",
+            Self::Snap30 => "Snap 30",
+            Self::Smooth => "Smooth",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Snap15 => Self::Snap30,
+            Self::Snap30 => Self::Smooth,
+            Self::Smooth => Self::Snap15,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GameXrTurnMode {
     #[default]
     Snap15,
@@ -1155,6 +1234,26 @@ impl GameXrTurnMode {
             Self::Snap15 => Self::Snap30,
             Self::Snap30 => Self::Smooth,
             Self::Smooth => Self::Snap15,
+        }
+    }
+}
+
+impl From<GameXrTurnMode> for GameTurnMode {
+    fn from(value: GameXrTurnMode) -> Self {
+        match value {
+            GameXrTurnMode::Snap15 => Self::Snap15,
+            GameXrTurnMode::Snap30 => Self::Snap30,
+            GameXrTurnMode::Smooth => Self::Smooth,
+        }
+    }
+}
+
+impl From<GameTurnMode> for GameXrTurnMode {
+    fn from(value: GameTurnMode) -> Self {
+        match value {
+            GameTurnMode::Snap15 => Self::Snap15,
+            GameTurnMode::Snap30 => Self::Snap30,
+            GameTurnMode::Smooth => Self::Smooth,
         }
     }
 }
