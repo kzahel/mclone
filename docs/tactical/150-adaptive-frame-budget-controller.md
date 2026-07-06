@@ -1,7 +1,10 @@
 # 150: Adaptive Frame Budget Controller
 
 Status: proposed; Slice 0 guardrail hygiene/baselines captured 2026-07-06 on
-clean commit `bc55076c`. Drafted 2026-07-06 as the gap-10 follow-on to tactical
+clean commit `bc55076c`; Slice 1 Quest frame-shape default flipped 2026-07-06;
+Slice 1.5 (frame-loop work-window contract) inserted 2026-07-06 from the
+loop-inventory review, before any controller work.
+Drafted 2026-07-06 as the gap-10 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 ([Budget Controller Direction](../frame-pipeline-accounting.md#budget-controller-direction)
@@ -26,9 +29,12 @@ it.
 
 - Gate: tactical
   [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
-  closes first (law-doc gap order 9 -> 10). Exception: Slice 0 (baselines)
-  and Slice 2 (sans-I/O controller core, no wiring) may run while 149 is in
-  flight, since neither changes engine behavior.
+  closes first (law-doc gap order 9 -> 10). Exception: Slice 0 (baselines),
+  Slice 1.5 (contract: docs plus inert types), and Slice 2 (sans-I/O
+  controller core, no wiring) may run while 149 is in flight, since none of
+  them changes engine behavior.
+- Slice 2 must not start before Slice 1.5 lands: the controller's inputs
+  and outputs are expressed in the Slice 1.5 host/window vocabulary.
 - One slice per session, in order. Between slices the user reviews.
 - Candidates land one policy family at a time; never bundle Candidate A and
   B changes in one measured comparison.
@@ -47,14 +53,16 @@ disagrees materially, re-pin in Slice 0 and use the new numbers.
 | Budget 4 + `--render-compile-workers 2` | quiescent `20.09s` -> `11.41s`; workers 4 flat |
 | Desktop RD10 persisted reopen | clean Slice 0: playable `0.112-0.125s`, full-view `1.018-1.022s`, actionable idle `25.141-25.146s`, `0/2400` over-budget |
 | Raw / server-only / server+light RD10 ceilings | `551.5` / `126.7` / `40.6` chunks/sec |
-| Quest RD5 local churn (fixed budgets) | clean Slice 0: `skipped_delta=0`, app p95 `11.577-11.664ms`, queue age max `164.784-170.014ms`, 1 pump stall, pending publication `123-125` |
-| Quest RD5 settled-orbit gate (re-pinned in 142) | `skipped_delta=0`, dropped delta `<= 17`, app p95 `<= 15.25ms`, headroom avg `>= +1.25ms`, over-period `<= 16%`, over-2x `0` |
-| Quest RD5 shipping-default control | clean Slice 0, workers `1`, unbounded budgets: app p95 `14.920ms`, headroom avg `+1.251ms`, over-period `19.1%`, over-2x `0` |
-| Quest RD7 settled-orbit pressure check (re-pinned in 142) | `skipped_delta=0`, dropped delta `<= 32`, app p95 `<= 17.5ms`, over-period `<= 40%`, over-2x `0` |
+| Quest RD5 local churn (fixed budgets) | Slice 1 overlap default: `skipped_delta=0`, dropped delta `12`, app p95 `9.897ms`, queue age max `166.692ms`, over-period `0.1%`; serial comparison app p95 `12.441ms`, dropped delta `17` |
+| Quest RD5 settled-orbit gate (re-pinned in 142 after Slice 1) | `skipped_delta=0`, dropped delta `<= 17`, app p95 `<= 13.0ms`, headroom avg `>= +2.5ms`, over-period `<= 2%`, over-2x `0` |
+| Quest RD5 shipping-default control | Slice 1 overlap default, workers `1`, unbounded budgets: dropped delta `18`, app p95 `12.044ms`, headroom avg `+3.383ms`, over-period `0.0%`, over-2x `0`; pre-flip serial control app p95 `14.575ms`, over-period `12.9%` |
+| Quest RD7 settled-orbit pressure check (re-pinned in 142 after Slice 1) | `skipped_delta=0`, dropped delta `<= 20`, app p95 `<= 13.5ms`, over-period `<= 2%`, over-2x `0` |
 
 The RD5 discrepancy row is closed by Slice 0: the dirty 2026-07-04 gate numbers
 no longer govern this tactical. Use the clean `bc55076c` envelopes above and in
-142 for all later candidate gates.
+142 for serial-control comparisons. Slice 1 changes the Android XR per-eye
+default to frame overlap; later Quest candidate gates use the overlap envelopes
+above and the re-pinned 142 gates.
 
 ## Java Reference Anchors (1.17.1)
 
@@ -118,8 +126,9 @@ Read this section, your slice, the law doc's
 [Budget Controller Direction](../frame-pipeline-accounting.md#budget-controller-direction),
 and 142's
 [Budget Calculation Boundary](142-throughput-policy-with-quest-rd5-guardrail.md#budget-calculation-boundary)
-before writing code. If your context is compressed mid-task, re-read this
-section first.
+before writing code. From Slice 2 on, also read the law doc's Platform
+Timelines work-window mapping that Slice 1.5 adds. If your context is
+compressed mid-task, re-read this section first.
 
 1. **One shared budget calculation.** Floors, caps, ramp rates, and measured
    inputs may differ per lane; code paths may not. A `#[cfg]` or `is_quest`
@@ -169,6 +178,19 @@ section first.
    flips an already-validated default), no gameplay tick-rate change (116),
    no buffer/arena upload rework (128), no wgpu upgrades, no far-LOD budget
    integration (121), no XR HUD panels (148).
+10. **No new platform-local budget policy.** From this tactical forward, no
+    new budget, pacing, throttle, or admission constant lands in an app
+    crate or platform loop shell. Anything budget-shaped enters as a
+    controller output or a shared-config floor, addressed through the
+    Slice 1.5 host/window vocabulary. Existing app-local constants
+    (`WEB_FRAME_UPDATE_DRAIN_BUDGET` / `WEB_RENDER_CHUNK_MESH_BUDGET` in
+    `apps/mclone-web-client/src/web_canvas.rs`) are grandfathered as
+    fail-safe floors pending web wiring — do not add siblings. Hosts the
+    controller does not reach yet stay on their fixed floors (rule 2):
+    behind on wiring is acceptable; forked on policy is not. Benchmark
+    lane args remain measurement config, not policy — this rule governs
+    shipped defaults and engine code paths. Slice 1.5 mirrors this rule
+    into the law doc.
 
 ## Slice 0: Guardrail Hygiene And Clean Baselines
 
@@ -272,6 +294,146 @@ changed; no open "maybe" state.
 Validation: the four Quest lanes above plus
 `pnpm native:android-xr:validate` launch health, `git diff --check`.
 
+2026-07-06 Slice 1 result:
+
+- Decision: make per-eye frame overlap the Android XR default. The opt-in flag
+  `--xr-frame-overlap` remains accepted as an explicit confirmation path, and
+  the new `--xr-frame-serial` flag forces the old serial shape for A/B lanes.
+  The default is resolved only for the normal per-eye full-frame path; multiview
+  proof/perf and full-frame multiview lanes stay serial/inapplicable.
+- Package aliases now include serial comparison lanes for
+  `native:android-xr:perf:orbit:rd5:serial`,
+  `native:android-xr:perf:orbit:rd7:serial`, and
+  `native:android-xr:perf:churn:rd5:serial`; the matching `:metrics` lanes run
+  the new default.
+- The overlap win includes the existing N+1 runtime/render-section prefetch:
+  the frame-overlap path defers the stereo GPU wait and moves runtime/upload
+  work into `MCLONE_ANDROID_XR_PERF_OVERLAP`, so the normal runtime/upload max
+  bucket falls to `0.000ms` in the overlap rows.
+- The one caveat is attribution, not a blocker: overlap shifts local integrated
+  server/scheduler work into the prefetch/slack window, so max server/scheduler
+  tick markers rise in these rows. App-work p95, headroom, over-period frames,
+  and dropped deltas all improve, so this is the frame shape later budget
+  candidates should target.
+
+| Lane | Serial p95 / head avg / over / dropped | Overlap p95 / head avg / over / dropped | Decision |
+|---|---:|---:|---|
+| RD5 settled orbit, pinned budgets | `14.684ms` / `+1.642ms` / `12.4%` / `23` | `12.236ms` / `+3.148ms` / `0.0%` / `14` | overlap wins |
+| RD7 settled orbit pressure | `15.806ms` / `+0.344ms` / `33.1%` / `18` | `12.647ms` / `+3.171ms` / `0.5%` / `16` | overlap wins |
+| RD5 chunk-view churn, pinned budgets | `12.441ms` / `+7.297ms` / `1.3%` / `17` | `9.897ms` / `+8.317ms` / `0.1%` / `12` | overlap wins |
+| RD5 default-config control | `14.575ms` / `+1.572ms` / `12.9%` / `16` | `12.044ms` / `+3.383ms` / `0.0%` / `18` | overlap wins |
+
+Raw artifacts:
+
+- `/tmp/mclone-150-slice1-rd5-orbit-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-orbit-overlap-summary.txt`
+- `/tmp/mclone-150-slice1-rd7-orbit-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd7-orbit-overlap-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-churn-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-churn-overlap-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-shipping-default-summary.txt`
+- `/tmp/mclone-150-slice1-rd5-shipping-default-overlap-summary.txt`
+- `/tmp/mclone-quest-openxr-logcat.txt` from the post-flip launch health run;
+  it logs `Android XR frame overlap mode: default`,
+  `Android XR frame overlap: true`, and
+  `render_path=per-eye-frame-overlap`.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+bash -n android-xr/validate-quest-openxr.sh
+bash -n android-xr/install-quest-openxr.sh
+node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"
+pnpm native:android-xr:validate
+git diff --check
+```
+
+## Slice 1.5: Frame Loop Work-Window Contract
+
+Why: the controller's outputs are consumed inside host loops, and the
+2026-07-06 loop inventory found those loops share work items but hand-roll
+orchestration — three flat-client orderings, two XR shells around one
+shared interior, three server tick models. Policy has already forked along
+that seam once: `web_canvas.rs` carries its own
+`WEB_FRAME_UPDATE_DRAIN_BUDGET` / `WEB_RENDER_CHUNK_MESH_BUDGET` copies of
+the shared mesh/drain budgets, and the `RenderSectionUploadFramePolicy`
+accept/upload budgets are consumed only by the XR path. Without a shared
+description of where budgeted work runs, Slices 3-4 would name their
+consumption points in desktop+Quest terms and every other host would
+inherit that shape. This slice fixes the vocabulary before the behavior.
+It is docs plus inert types only: no engine behavior change, no new
+counters (detour rule applies), and no loop refactor.
+
+Host-loop inventory (2026-07-06; raw material for the mapping table):
+
+| Host loop | Owner | Frame/tick entry |
+|---|---|---|
+| Desktop flat winit | `apps/mclone-native-client` | `app.rs` redraw -> `FlatClientDriver` (`flat_client_driver.rs`), which also drives the offscreen/headless/perf lanes |
+| Flat Android winit | `apps/mclone-android-client` | `render()` in `src/lib.rs`, inline against `NativeSingleViewSessionRuntime` |
+| Web RAF + workers | `apps/mclone-web-client` | `tickFrame` (`www/mclone-web-app.ts`) -> `web_canvas.rs` streaming-frame path; server tick `web_server_worker.rs::tick` on a worker `setInterval`; separate render-compile worker |
+| Android XR OpenXR | `apps/mclone-android-xr-client` | `run_mclone_frame_loop` (`src/lib.rs`), plus the proof/perf harness loops |
+| Desktop XR OpenXR | `apps/mclone-native-client` | `xr_clear_smoke::run_mclone` |
+| Headless/offscreen/perf | `apps/mclone-native-client` | `headless.rs`, `offscreen_flat_client.rs`, `perf.rs` fixed-frame loops |
+| Integrated server runner | `crates/mclone-server` | `runner.rs::run_native_integrated_server_loop` (wall-clock, cadence-driven) |
+| Dedicated server | `apps/mclone-dedicated-server` | `run_server_loop_inner` (`src/main.rs`) — command-driven, one gameplay tick per client command, no wall-clock slack |
+
+What is already shared: every loop calls the same `mclone-app-runtime` work
+items (`poll*`, `sync_render_sections*`, `release_render_compile_jobs`,
+`render_full_frame*`), and the two XR shells share one frame interior
+(`mclone-xr-scene::render_frame*` / `poll_runtime_and_upload`). What is not
+shared: the ordering shells above and the pacing/budget code around them.
+The shells stay platform-owned (winit/RAF/OpenXR/worker glue is app-adapter
+business); the vocabulary is what unifies.
+
+Deliverables:
+
+- vocabulary types, sans-I/O and inert, in `mclone-diagnostics` next to
+  `StageId`/`CriticalPathLabel` (`src/stage.rs`); if review moves them into
+  the Slice 2 crate instead, record the decision:
+  - `FrameHostKind`: one variant per host-loop family in the table above;
+  - `WorkWindow`: where in a host loop budgeted work may run — e.g.
+    before-render, post-submit/overlap slack, tick slack, worker poll,
+    offscreen step; pick the exact variant set against the inventory, not
+    against desktop/Quest intuition;
+  - work families and critical-path classes are **not** new types: reuse
+    `StageId` and `CriticalPathLabel`. A second stage-naming enum is a
+    defect — same rule as platform branches in budget math;
+  - the types stay unused by the report schema until Slice 2's version
+    bump; that is expected, not dead code to remove;
+- law doc extension: Platform Timelines gains the missing hosts (web RAF +
+  workers, flat Android, desktop XR, server ticks, headless), plus a
+  per-loop mapping table — for each host loop, which `WorkWindow`s exist,
+  which `StageId`s run in each window today, with file/function receipts,
+  and explicit "window does not exist on this host" rows (the dedicated
+  server has no wall-clock tick slack; RAF has no blocking wait; headless
+  has no compositor);
+- mirror contract rule 10 (no new platform-local budget policy) into the
+  law doc;
+- update 142's throttle-inventory rows with their (host, window, stage)
+  addresses where the mapping makes one obvious.
+
+Falsification bar: the vocabulary is accepted only when every inventory
+row is fully described, including the three awkward hosts — web RAF +
+workers, the command-driven dedicated server, and headless. If a loop
+cannot be described, the vocabulary is wrong: fix the vocabulary, not the
+host. This is the check that keeps the contract from being
+desktop+Quest-shaped.
+
+Exit criteria: types land inert and compile natively and for
+`wasm32-unknown-unknown`; the law doc mapping table covers every inventory
+row; rule 10 mirrored; no diffs outside `mclone-diagnostics` and docs.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
+cargo check --manifest-path native/Cargo.toml -p mclone-diagnostics --target wasm32-unknown-unknown
+git diff --check
+```
+
 ## Slice 2: Controller Core (Sans-I/O)
 
 Why: the budget math must be provably correct before it owns real budgets —
@@ -280,7 +442,8 @@ same argument, same payoff as the 144 accounting core.
 Deliverables:
 
 - new leaf crate, working name `mclone-frame-budget`, depending only on
-  `mclone-diagnostics` (report/summary types) and `serde`. If review prefers
+  `mclone-diagnostics` (report/summary types plus the Slice 1.5
+  `FrameHostKind`/`WorkWindow`/stage vocabulary) and `serde`. If review prefers
   a module inside `mclone-diagnostics`, record the decision; the constraint
   that matters is sans-I/O, engine-free, one owner;
 - inputs (per law doc): target frame/tick period and lane; recent app-work
@@ -288,12 +451,14 @@ Deliverables:
   depth and oldest-age; per-unit elapsed cost estimators (EWMA) for
   feature publish, light publish, result accept, section upload, admission
   scan; host mode (local-integrated vs remote, from 149's projection);
-  floors/caps config;
+  floors/caps config. Every input sample is tagged with the Slice 1.5
+  `FrameHostKind` and `WorkWindow` it was measured in;
 - outputs: per-family budget decisions in elapsed terms with unit caps —
   publication drain budget (ms/tick + max units), job-admission backlog
   bound, render admission budget (ms/frame + max units), XR accept/upload
-  budgets (ms/frame + max units) — plus a decision trace (inputs snapshot,
-  reason code) for the report;
+  budgets (ms/frame + max units) — each addressed to a (host kind, work
+  window, stage family) consumption point from the Slice 1.5 mapping table,
+  plus a decision trace (inputs snapshot, reason code) for the report;
 - control law: cut fast (one bad window: miss, negative headroom p05, or
   queue-age violation halves toward floor), raise slow (N consecutive clean
   windows add one increment toward cap), hysteresis so steady state does not
@@ -419,7 +584,7 @@ deadline from `XrMcloneTerrainState::render_compile_frame_deadline()`
 (`native/crates/mclone-xr-scene/src/lib.rs`), and unused by the live desktop
 path (`flat_client_driver.rs` calls the unbudgeted variant with `None`).
 Upload/accept count caps are owned by `RenderSectionUploadFramePolicy` in
-`native/crates/mclone-render-session/src/lib.rs`. Candidate B is therefore
+`native/crates/mclone-render-session/src/upload.rs`. Candidate B is therefore
 mostly "make the controller supply the deadline/caps these seams already
 accept", not new plumbing.
 
@@ -523,6 +688,13 @@ not as a perf row.
 ## Non-Goals
 
 - Desktop flat loop reordering (submit-early); recorded trigger in Slice 1.
+- Hoisting the flat-client frame interior into a shared driver (an
+  `mclone-app-runtime` flat analog of `mclone-xr-scene::render_frame*`,
+  absorbing desktop's `FlatClientDriver` plus the Android-flat and web
+  orderings). That is a named follow-up tactical, sequenced after
+  Candidates A/B so the driver interface is shaped by the controller's real
+  consumption points and gates re-pin once; Slice 1.5's vocabulary is what
+  makes that hoist mechanical. This tactical must not start the refactor.
 - Thread scheduling/niceness/perf-levels (130), CPU/GPU overlap internals
   (117/131), upload buffer/arena lifetime (128), cadence semantics (116),
   far-LOD budget integration (121), web worker/job lifecycle, XR overlay
