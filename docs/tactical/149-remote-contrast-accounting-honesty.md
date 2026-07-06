@@ -2,10 +2,11 @@
 
 Status: active; Slice 1 `SendOnly` code, Quest evidence, the follow-up
 interest-command isolation, and the remote response-readiness poll fix landed
-2026-07-06. Remote contrast is still blocked by Slice 2 host-mode-honest
-projection and by the Quest rebaseline for the single-batch remote
-drain/apply stall recorded below; the focused fix/rebaseline tracker is
-tactical
+2026-07-06. Tactical 151's Quest rebaseline proved the single-batch remote
+drain/apply stall moved out of runtime `poll()`, but it also found a new
+send-side stall where `SendOnly` waits behind the response-paired IO actor.
+Remote contrast is still blocked by Slice 2 host-mode-honest projection and by
+that command-send decoupling work in tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
@@ -382,20 +383,32 @@ Result:
   `max_total_ms=0.242`, `max_send_ms=0.232`,
   `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`, and zero
   updates.
-- The remaining remote stall is one ready response batch being drained and
-  applied in a single frame: worst frame `2332` had
+- Before tactical 151, the remaining remote stall was one ready response batch
+  being drained and applied in a single frame: worst frame `2332` had
   `app_work_ms=268.630`, `render_mclone_frame_ms=268.406`, and
   `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX` reported
   `drain_updates_ms=253.930`, `apply_updates_ms=9.344`, `updates=402`,
   `snapshot_updates=169`, `section_updates=61`, and
   `unload_updates=169`.
 
-Next implementation step before durable contrast rows: implement tactical
+2026-07-06 tactical 151 Slice 4 rebaseline:
+
+- The ready-batch runtime drain moved off the headset frame. The same Quest RD5
+  remote churn lane reported `poll_total_ms=2.127`, `drain_updates_ms=0.148`,
+  `apply_updates_ms=2.112`, and `producer_read_ms=5766.112` in
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX`.
+- The remote lane is still not interpretable enough for durable contrast rows:
+  the worst frame moved to `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND`
+  with `max_total_ms=2770.917`, `max_send_ms=2770.910`,
+  `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`, and zero
+  updates. That means command send can still wait for the IO actor to finish a
+  previous response read before it writes/acks the next `SendOnly` command.
+
+Next implementation step before durable contrast rows: finish tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md)
-so a ready remote response batch is read/decoded into a client-side inbound
-queue off the runtime frame, then do Slice 2's host-mode-honest report
-projection so remote client/server halves stop presenting unavailable counters
-as zeros.
+Slice 4A so remote command enqueue no longer waits behind the response-paired
+IO actor read loop, then do Slice 2's host-mode-honest report projection so
+remote client/server halves stop presenting unavailable counters as zeros.
 
 ## Slice 2: Host-Mode-Honest Report Projection
 
@@ -484,7 +497,7 @@ Validation: the capture commands above, plus `git diff --check`.
 
 - Any budget/admission/publication policy change — tactical
   [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md).
-- Remote ready-batch receive/decode split — tactical
+- Remote inbound receive/decode and command-send queue decoupling — tactical
   [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 - Broader remote transport performance work (server push, batching,
   compression, WebSocket/web convergence) — tactical

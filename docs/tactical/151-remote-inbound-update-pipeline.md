@@ -3,8 +3,10 @@
 Status: active; Slice 0 documentation baseline completed 2026-07-06; Slice 1
 shared `ClientConnection` runtime seam completed 2026-07-06; Slice 2 native
 TCP client IO actor completed 2026-07-06; Slice 3 remote runtime budget and
-diagnostics completed 2026-07-06. Slice 4 is next: Quest remote chunk-view
-churn rebaseline. This is the focused successor to tactical
+diagnostics completed 2026-07-06; Slice 4 Quest remote chunk-view churn
+rebaseline completed 2026-07-06. Slice 4A is next: decouple remote command
+enqueue from the response-paired IO actor read loop. This is the focused
+successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 for the remaining remote ready-batch stall. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
@@ -500,6 +502,8 @@ dead-code warnings for `ANDROID_REMOTE_ADDR_NONE_SENTINEL` and
 
 ## Slice 4: Quest Remote Churn Rebaseline
 
+Status: completed 2026-07-06.
+
 Goal: prove the specific 253.930 ms ready-batch drain moved off the headset
 runtime frame.
 
@@ -540,6 +544,112 @@ Validation:
 
 ```bash
 pnpm native:android-xr:apk
+git diff --check
+```
+
+Results:
+
+- Built the Android XR release APK successfully:
+  `android-xr/app/build/outputs/apk/release/app-release.apk`.
+- Ran the documented Quest RD5 remote chunk-view churn lane through
+  `--adb-reverse --start-server` against the local dedicated server. Output:
+  - summary:
+    `/tmp/mclone-quest-openxr-remote-churn-rd5-slice4-summary.txt`;
+  - logcat:
+    `/tmp/mclone-quest-openxr-remote-churn-rd5-slice4-logcat.txt`;
+  - server log:
+    `/tmp/mclone-quest-openxr-remote-churn-rd5-slice4-server.log`.
+- Validation passed and the run emitted `MCLONE_ANDROID_XR_READY` plus
+  `MCLONE_ANDROID_XR_PERF_SUMMARY`.
+- Sample facts: `mode=chunk-view-churn`, `render_distance=5`,
+  `render_compile_workers=2`, `sample_seconds=45.016`, `frames=2937`,
+  `target_hz=72.0`, `budget_ms=13.889`, `conservation_violations=0`.
+- The old ready-batch runtime drain is fixed for this lane:
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX` reported `poll_total_ms=2.127`,
+  `drain_updates_ms=0.148`, `apply_updates_ms=2.112`,
+  `dirty_mark_ms=1.890`, `client_apply_ms=2.061`, `updates=171`,
+  `snapshot_updates=162`, `section_updates=23`, and `unload_updates=16`.
+- Producer receive/decode work is now visible as off-frame producer work:
+  `producer_read_ms=5766.112`, `producer_decode_ms=13.180`,
+  `producer_response_sequence=20`.
+- The remote lane is not yet clean enough to unblock tactical 149 host-mode
+  projection. The worst frame moved to command send:
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND` reported
+  `max_total_ms=2770.917`, `max_send_ms=2770.910`,
+  `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`, and zero
+  updates. This means `SendOnly` no longer drains the response, but
+  `send_command_only` can still wait for the IO actor to finish a previous
+  response read before it writes/acks the next command.
+
+Validation completed 2026-07-06:
+
+```bash
+pnpm native:android-xr:apk
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-remote-churn-rd5-slice4-summary.txt \
+  --log /tmp/mclone-quest-openxr-remote-churn-rd5-slice4-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-remote-churn-rd5-slice4-server.log \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+## Slice 4A: Remote Command Send Queue Decoupling
+
+Goal: make remote `SendOnly` and interest-command enqueue return without
+waiting behind a previous response read.
+
+Why: Slice 4 proved receive/decode moved out of runtime `poll()`, but the Quest
+frame loop can still stall when `send_command_only` waits for the IO actor's
+write acknowledgment while the actor is blocked reading the previous
+one-response-per-command batch. This is still not reference-shaped enough: the
+runtime should enqueue outbound commands and continue; transport flush and
+paired response completion belong to the producer/adapter side.
+
+Deliverables:
+
+- Change the native remote command path so normal frame `SendOnly` does not
+  wait for the IO actor to finish reading a prior response before returning.
+  Either:
+  - acknowledge once the command is accepted into the actor's ordered outbound
+    queue, or
+  - split the actor so outbound writes can progress while inbound reads block.
+- Preserve command order and paired response accounting. `pending_response_batches`
+  may remain adapter-local while the protocol is paired, but it must not force
+  the app/runtime thread to wait for a prior response read.
+- Preserve explicit failure behavior: disconnected/error state must surface on
+  the next drain/poll/reconnect path instead of being silently dropped.
+- Add a native loopback regression where command B is sent while command A's
+  response is deliberately held; command B `SendOnly` must return quickly and
+  no runtime poll sample may block on the held response.
+- Re-run the Quest RD5 remote chunk-view churn lane or a narrowed equivalent
+  and confirm `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND` no longer
+  reports multi-second `send_ms`.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client remote
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
 git diff --check
 ```
 
