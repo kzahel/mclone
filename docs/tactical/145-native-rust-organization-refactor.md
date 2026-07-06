@@ -1,7 +1,7 @@
 # 145: Native Rust Organization Refactor
 
-Status: active parent; ORG-03 render-session split landed. Next slice:
-ORG-04. The Gate State section below is the authoritative expected result for
+Status: active parent; ORG-04 XR scene non-render split landed. Next slice:
+ORG-05. The Gate State section below is the authoritative expected result for
 every gate command; older per-slice logs are historical.
 Opened 2026-07-06. This tactical is the current implementation tracker for
 reducing oversized native Rust modules while preserving behavior, public
@@ -344,8 +344,8 @@ with a desktop-only smoke silently.
 | ORG-02: crate-root and facade cleanup | thin roots and module-local test facades | landed 2026-07-06 |
 | ORG-02B: baseline gate repair | fix the two known `mclone-server` test failures so `cargo test` is green | landed 2026-07-06 |
 | ORG-03: `mclone-render-session` split | render-section session ownership modules | completed |
-| ORG-04: `mclone-xr-scene` non-render split | options, timing, locomotion, tracking, UI math | next |
-| ORG-05: `mclone-xr-scene` render/state split | terrain state, stereo/multiview render paths, overlay rendering | open |
+| ORG-04: `mclone-xr-scene` non-render split | options, timing, locomotion, tracking, UI math | completed |
+| ORG-05: `mclone-xr-scene` render/state split | terrain state, stereo/multiview render paths, overlay rendering | next |
 | ORG-06: Android XR adapter split | activity/startup/frame-loop/perf/target modules | open |
 | ORG-07: Web canvas adapter split | wasm exports, compiler session, render session, catalog bridge, JS codecs | open |
 | ORG-08: chunk renderer split | view/target/culling/upload/draw-resource modules | open |
@@ -1208,7 +1208,35 @@ git diff --check
 
 Log:
 
-- Pending.
+- Landed 2026-07-06. The non-render value types, helper functions, and
+  stateful method groups moved out of `lib.rs` into `options`, `timing`,
+  `tracking`, `locomotion`, `teleport`, `ui_panels`, `comfort`, and
+  `session`. `XrMcloneTerrainState` stayed in the crate root and render-frame,
+  per-eye, multiview, submission, and render-upload methods remain there for
+  ORG-05.
+- Public helper paths are preserved through root re-exports. A few moved helper
+  fields use parent-module visibility only where existing root tests or sibling
+  split impls still read those helper values; `XrMcloneTerrainState` field
+  visibility was not widened.
+- `native/crates/mclone-xr-scene/src/lib.rs` dropped from `9,032` lines to
+  `4,479` lines. New module sizes are: `session.rs` `1,643`,
+  `ui_panels.rs` `1,095`, `timing.rs` `625`, `locomotion.rs` `613`,
+  `teleport.rs` `482`, `tracking.rs` `358`, `comfort.rs` `224`, and
+  `options.rs` `204`.
+- Pre-flight every-slice gates matched the Gate State table before edits when
+  the native local-socket and headless-GPU lanes were run in their required
+  unsandboxed host context.
+- Post-change validation passed:
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`
+  - `cargo test --manifest-path native/Cargo.toml`
+  - `pnpm native:xr:check`
+  - `pnpm native:web:build`
+  - `pnpm native:perf:smoke`
+  - `git diff --check`
+- Validation produced only pre-existing warnings: Android XR dead-code warnings
+  during native tests and the `with_unload_hysteresis_chunks` dead-code warning
+  during web build.
 
 ## ORG-05: `mclone-xr-scene` Render And State Split
 
