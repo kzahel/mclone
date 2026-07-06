@@ -6,8 +6,11 @@ intent and resident cache lookup landed; Slice 3B local integrated producer-side
 decoded update queue landed; Slice 3C local integrated chunk-interest unload
 hysteresis landed; Slice 3D resident cached-section dirty flags landed; revised
 2026-07-03 to adopt the vanilla ordered-stream update model (thin apply plus a
-frame-budget stall) and drop the earlier priority-class design; remaining
-implementation tracked in
+frame-budget stall) and drop the earlier priority-class design; native remote
+`SendOnly` and TCP-readiness fixes landed 2026-07-06; focused remote inbound
+queue work is tracked in
+[`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md),
+with broader bus convergence tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -123,9 +126,20 @@ integrated Java-shaped views keep a one-chunk unload hysteresis margin so
 boundary oscillation can retain the trailing edge instead of immediately
 unloading and reloading it.
 
-Native remote dedicated is even more request/response-shaped today:
-`NativeClientSession::send_command` writes one command and blocks reading one
-server-update batch on the caller thread.
+Native remote dedicated has the first two request/response escapes but is still
+batch-shaped at the client boundary. `SendOnly` commands now write the command
+and leave the paired response for the poll pump, and `poll` uses
+`try_drain_command_updates` so the runtime no longer waits for a response that
+is not ready. Once a response is ready, though, the app/runtime thread still
+reads and decodes the whole response batch before applying it. The 2026-07-06
+Quest RD5 remote churn run recorded the remaining shape as one frame with
+`drain_updates_ms=253.930`, `apply_updates_ms=9.344`, and `updates=402`.
+
+Server-side native dedicated is already threaded: an accept thread spawns a
+connection thread per client, the connection thread reads commands and waits on
+the authoritative server loop for the response, then writes one update batch.
+The missing piece is the client-side receive actor/queue. Today the client
+runtime still owns the socket at the moment a ready batch is drained.
 
 Web remote uses browser WebSocket callbacks underneath, but the Rust-facing
 session still presents command exchange as "send frame, await response." Web
@@ -288,11 +302,14 @@ Local integrated:
 Native remote TCP:
 
 - Move `TcpStream` ownership to a session/network thread; that thread owns
-  payload decode.
+  blocking socket reads and payload decode.
 - The app thread enqueues `ClientCommand` frames and drains decoded
   `ServerUpdate`s from queues.
 - The first implementation can keep the current wire codec and blocking socket
   reads in the IO thread.
+- The first implementation can also keep one response batch per command on the
+  wire: the important boundary change is that a ready batch becomes queued
+  decoded updates before the runtime pump sees it.
 - Server-push wire changes can come later; the app/runtime boundary should be
   ready before the wire protocol is broadened.
 
@@ -358,3 +375,11 @@ stay event-driven.
 - [`tactical/131-quest-cpu-gpu-overlap-and-frame-cost-hygiene.md`](./tactical/131-quest-cpu-gpu-overlap-and-frame-cost-hygiene.md)
   records the measured Quest RD7 command/update tail that triggered this work
   and the dirty-mark cost diagnosis behind the thin-apply requirement.
+- [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
+  records the shared bus implementation plan and the local integrated slices
+  already landed.
+- [`tactical/149-remote-contrast-accounting-honesty.md`](./tactical/149-remote-contrast-accounting-honesty.md)
+  records the remote `SendOnly` and readiness evidence that exposed the
+  remaining ready-batch drain.
+- [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md)
+  tracks the focused native remote inbound queue implementation.

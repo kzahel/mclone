@@ -21,6 +21,8 @@ The engine is native-first Rust with five validated client/platform lanes:
 Desktop flat remains the fastest daily interactive development loop. That is an iteration choice, not permission to make shared engine APIs desktop-shaped. For feature work that does not name a platform, use the default framing: **shared implementation, desktop validation first**.
 
 Client platform and server host mode are separate axes. Local integrated play, remote dedicated play, and future session/P2P modes should reuse shared command/update contracts instead of becoming platform forks.
+The durable command/update topology and local-vs-remote transport boundary live
+in [`session-network-architecture.md`](session-network-architecture.md).
 
 ## Crate Ownership
 

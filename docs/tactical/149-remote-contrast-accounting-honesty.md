@@ -4,7 +4,9 @@ Status: active; Slice 1 `SendOnly` code, Quest evidence, the follow-up
 interest-command isolation, and the remote response-readiness poll fix landed
 2026-07-06. Remote contrast is still blocked by Slice 2 host-mode-honest
 projection and by the remaining single-batch remote drain/apply stall recorded
-below. Drafted 2026-07-06 as the gap-9 follow-on to tactical
+below; the focused fix for that stall is tactical
+[`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
+Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 (gap 9). Predecessor evidence:
@@ -387,11 +389,12 @@ Result:
   `snapshot_updates=169`, `section_updates=61`, and
   `unload_updates=169`.
 
-Next implementation step before durable contrast rows: split the ready remote
-response batch into a budgetable client-side update queue (or otherwise make
-remote batch decode/apply incremental), then do Slice 2's host-mode-honest
-report projection so remote client/server halves stop presenting unavailable
-counters as zeros.
+Next implementation step before durable contrast rows: implement tactical
+[`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md)
+so a ready remote response batch is read/decoded into a client-side inbound
+queue off the runtime frame, then do Slice 2's host-mode-honest report
+projection so remote client/server halves stop presenting unavailable counters
+as zeros.
 
 ## Slice 2: Host-Mode-Honest Report Projection
 
@@ -480,8 +483,10 @@ Validation: the capture commands above, plus `git diff --check`.
 
 - Any budget/admission/publication policy change — tactical
   [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md).
-- Remote transport performance work (batching, compression, WebSocket/web
-  convergence) — tactical
+- Remote ready-batch receive/decode split — tactical
+  [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
+- Broader remote transport performance work (server push, batching,
+  compression, WebSocket/web convergence) — tactical
   [`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md).
 - Multiplayer correctness/authority work.
 

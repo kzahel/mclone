@@ -1,0 +1,336 @@
+# 151: Remote Inbound Update Pipeline
+
+Status: active; Slice 0 documentation baseline completed 2026-07-06. This is
+the focused successor to tactical
+[`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
+for the remaining remote ready-batch stall. Architecture target:
+[`../session-network-architecture.md`](../session-network-architecture.md).
+Umbrella bus work: tactical
+[`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md).
+
+Workstream: native Rust shared session/runtime boundary, native TCP transport,
+Android XR validation. Goal: make remote dedicated inbound updates arrive
+through the same client-side budgetable update boundary as local integrated
+play, without making the runtime/render frame read and decode TCP response
+batches.
+
+## Problem
+
+The 2026-07-06 remote fixes removed two older blockers:
+
+- `SendOnly` commands no longer drain/apply remote response batches inside the
+  command send path.
+- Remote `poll()` no longer waits for a response that is not ready; it uses TCP
+  readiness first.
+
+The remaining Quest RD5 remote churn stall is different. One response batch was
+ready, and the runtime frame read/decoded/applied that entire batch:
+
+- `app_work_ms=268.630`
+- `poll_total_ms=262.168`
+- `drain_updates_ms=253.930`
+- `apply_updates_ms=9.344`
+- `updates=402`
+
+This means the frame is no longer waiting for the host to finish work. It is
+paying client-side receive/decode and batch construction for a large ready
+response. That work must move behind a client inbound queue.
+
+## Reference Shape
+
+Minecraft Java 1.17.1 keeps local/integrated and remote/multiplayer shaped like
+the same connection stack:
+
+- `Connection.connectToLocalServer(...)` uses Netty `LocalChannel`, so
+  integrated singleplayer bypasses physical TCP but not the packet/connection
+  model.
+- Remote multiplayer uses socket channels and a Netty worker group.
+- `PacketDecoder.decode(...)` constructs packet objects on the Netty pipeline.
+- `PacketUtils.ensureRunningOnSameThread(...)` schedules packet handling back
+  onto the Minecraft client/server thread when needed.
+- `ClientPacketListener.handleLevelChunk(...)` installs the chunk data and
+  marks sections dirty on the client thread.
+- `ChunkRenderDispatcher` handles expensive mesh rebuild work separately.
+
+The target here follows that shape at the boundary level: receive/decode is
+producer-side, ordered apply is client-runtime-side, and meshing remains in the
+terrain compile/upload pipeline. We are not adding a chunk-meshing shortcut or
+a speculative chunk-decode worker pool in this tactical.
+
+## Current Mclone Shape
+
+Local integrated already bypasses socket I/O. `NativeIntegratedServerRunner`
+owns the integrated server on a runner thread and publishes decoded
+`ServerUpdate` envelopes through a queue. The client runtime drains that queue
+under a budget.
+
+Native remote dedicated is still socket-owned by the client runtime:
+
+- `NativeClientSession` owns the `TcpStream`.
+- `RemoteDedicatedSingleViewSceneRuntime` counts pending response batches.
+- `try_drain_command_updates` peeks readiness, but if a batch is ready it calls
+  `read_server_update_batch` and decodes the whole batch on the caller thread.
+- `pump_pending_remote_update_batches_report` then applies the decoded batch.
+
+Server-side dedicated already has an accept thread and a connection thread per
+client. The missing piece is the client-side receive actor/queue.
+
+## Target Shape
+
+First native target:
+
+```text
+runtime/app thread
+  -> enqueue ClientCommand
+  -> drain decoded ServerUpdate envelopes under RuntimeUpdatePumpBudget
+
+native remote client IO actor
+  -> owns TcpStream
+  -> writes outbound command frames
+  -> blocks reading response batches
+  -> decodes batches into ordered ServerUpdate envelopes
+  -> pushes envelopes plus byte/age/timing metadata to inbound queue
+
+dedicated server connection thread
+  -> unchanged first: one command in, one response batch out
+```
+
+The first implementation can keep the current one-response-per-command wire
+protocol. Server-push broadening is useful later, but it is not required to
+remove the Quest ready-batch stall from the runtime frame.
+
+Web target:
+
+```text
+WebSocket message callback or Web Worker
+  -> decode/queue ordered ServerUpdate envelopes
+runtime frame
+  -> drain/apply through the same policy boundary
+```
+
+No native OS thread is required for the first web slice. The shared contract is
+"ordered inbound queue plus budgeted decode/apply accounting", not "all
+platforms spawn the same kind of thread".
+
+## Slice Rules
+
+- One slice per session.
+- At the end of each slice: update this document with status/evidence, run the
+  named validation, commit, and state the next step.
+- Preserve receive order. Do not add priority lanes or coalescing for chunk
+  streaming here.
+- Keep startup, `DrainImmediately`, and `poll_until_idle` behavior explicit.
+  Unlimited drains are allowed for those paths, but normal frame `poll()` must
+  not read/decode socket batches.
+- Report unavailable host-side counters as unavailable, not zero. Tactical 149
+  owns the projection work after this stall is removed.
+
+## Slice 0: Documentation Baseline
+
+Status: completed 2026-07-06.
+
+Deliverables:
+
+- Update `session-network-architecture.md` with the current remote baseline:
+  remote `SendOnly` and readiness landed, but ready batches still read/decode
+  on the runtime path.
+- Add this tactical as the focused tracker for the remote inbound queue.
+- Update the tactical index and stale tactical 133 wording so docs do not claim
+  remote still ignores `SendOnly`.
+
+Validation:
+
+```bash
+git diff --check
+```
+
+## Slice 1: Queue Contract And Runtime Seam
+
+Goal: create the client-side inbound queue boundary before moving the socket.
+
+Deliverables:
+
+- Introduce a remote inbound update envelope that carries:
+  - decoded `ServerUpdate`,
+  - encoded byte length,
+  - batch sequence or response sequence,
+  - received/queued timestamp,
+  - producer-side read/decode timing.
+- Add a queue abstraction that drains one ordered update at a time and exposes
+  depth, bytes, oldest queued/applied age, producer read time, producer decode
+  time, and conservation counters.
+- Refactor remote runtime polling so "receive ready batch" and "apply queued
+  updates" are separate internal steps, even if the first slice still fills the
+  queue from the existing direct `try_drain_command_updates` call.
+- Add tests proving a queued snapshot -> section update -> unload sequence
+  preserves order across budget stalls.
+- Add a regression proving normal frame `poll()` applies from the queue under
+  budget and does not require `DrainImmediately` semantics.
+
+Non-goals: no new thread yet, no wire protocol change, no web adoption.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+git diff --check
+```
+
+## Slice 2: Native TCP Client IO Actor
+
+Goal: move native remote socket read/decode off the runtime frame.
+
+Deliverables:
+
+- Add a native remote client IO actor/thread that owns `TcpStream`.
+- Runtime/app side sends outbound `ClientCommand`s through a command channel.
+- IO actor writes commands in order, reads the paired response batch with
+  blocking socket I/O, decodes updates, and pushes ordered inbound envelopes to
+  the queue from Slice 1.
+- Preserve the existing handshake and frame codec.
+- Preserve reconnect/resync behavior, including clearing stale pending response
+  state and issuing the resync command through the new actor.
+- Expose actor diagnostics: outbound command depth, inbound update depth/bytes,
+  read/decode max/total, disconnected/error state, and response sequence.
+- Keep old `NativeClientSession::send_command` helpers for tests/tools if they
+  are still useful, but remove them from the normal runtime frame path.
+
+Non-goals: server push, compression, WebSocket rewrite.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+git diff --check
+```
+
+## Slice 3: Remote Runtime Budget And Diagnostics
+
+Goal: make remote frame `poll()` indistinguishable from local integrated at the
+client update boundary.
+
+Deliverables:
+
+- Normal frame `poll()` drains decoded remote inbound updates one at a time
+  under `RuntimeUpdatePumpBudget`, always applying at least one pending update
+  for progress.
+- `DrainImmediately`, startup, and `poll_until_idle` use explicit unlimited
+  queue drains without reintroducing socket reads on the runtime thread.
+- `RuntimePollTiming` and Android XR markers split:
+  - producer read time,
+  - producer decode time,
+  - queued bytes/depth/age,
+  - runtime apply time,
+  - dirty mark/client apply time,
+  - deferred/stalled counts.
+- Remove or rename any "pending response batch" diagnostics that now really
+  mean inbound queued updates.
+- Add a desktop loopback remote smoke that asserts no runtime poll sample has
+  socket read/decode attribution.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+pnpm native:accounting:smoke
+git diff --check
+```
+
+## Slice 4: Quest Remote Churn Rebaseline
+
+Goal: prove the specific 253.930 ms ready-batch drain moved off the headset
+runtime frame.
+
+Deliverables:
+
+- Build the Android XR APK.
+- Run the same Quest RD5 remote chunk-view churn lane used in tactical 149:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+- Record whether max runtime poll is now dominated by apply/terrain lifecycle
+  rather than socket read/decode.
+- Update tactical 149 with the result and unblock its Slice 2 host-mode-honest
+  projection if the remote client lane is now interpretable.
+
+Validation:
+
+```bash
+pnpm native:android-xr:apk
+git diff --check
+```
+
+## Slice 5: Web Callback Adoption
+
+Goal: make web remote feed the same inbound queue without requiring native OS
+threads.
+
+Deliverables:
+
+- Route WebSocket `message` callbacks through the same ordered inbound envelope
+  type and queue metadata.
+- Keep browser lifecycle, promises, and JS glue in the web app/adapter.
+- Add a web remote smoke proving command enqueue and inbound update application
+  are separate runtime operations.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+git diff --check
+```
+
+## Out Of Scope
+
+- Server-push protocol broadening. Keep it in tactical 133 Slice 6 after the
+  client inbound boundary exists.
+- Compression or binary protocol redesign.
+- Chunk meshing, GPU upload, render admission, or terrain coordinator policy.
+  Those remain in tactical 128 and related performance trackers.
+- Multiplayer authority/correctness beyond preserving ordered command/update
+  delivery.
+- Priority/coalescing lanes for chunk streaming.
+
+## Open Questions
+
+- Should the first native IO actor queue decoded `ServerUpdate`s directly, or
+  queue encoded per-update frames and decode under a producer budget on the IO
+  actor? Default answer: decode on the IO actor first, because local integrated
+  already queues decoded updates and the current stall is measured as
+  runtime-side ready-batch drain/decode.
+- Should the queue be bounded by bytes or by updates? Default answer: expose
+  both; fail or disconnect only after a conservative byte cap is added with a
+  clear error path.
+- Does the response-paired wire protocol force head-of-line blocking that
+  matters after the client IO actor lands? Measure first; server-push belongs
+  to a later slice only if the new queue still shows source-shaped bursts.

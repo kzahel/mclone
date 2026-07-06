@@ -17,8 +17,9 @@ landed and improved the section-block client tail; Slice 3J deferred client
 chunk snapshot payload drops landed and removed the Quest unload client-apply
 tail while making cleanup cost explicit in poll diagnostics; Slice 3K native
 deferred payload drop worker landed and moved that cleanup off the app frame;
-remote/web bus convergence and broader terrain coordinator lifecycle remain
-active
+remote `SendOnly` and response-readiness fixes landed under tactical 149;
+focused native remote inbound-queue work is split to tactical 151; web bus
+convergence and broader terrain coordinator lifecycle remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -114,8 +115,8 @@ ordered queue behind a common policy boundary.
   resulting snapshots/unloads arrive through the runtime pump.
 - The local `NativeSingleViewSessionRuntime::set_chunk_view` wrapper now
   preserves that deferred-update local path instead of routing through the
-  default immediate-drain gameplay helper. Remote dedicated still keeps current
-  request/response behavior.
+  default immediate-drain gameplay helper. Remote dedicated now honors
+  `SendOnly` too, but still has a paired response-batch transport shape.
 - `LocalSingleViewSceneRuntime::poll` applies updates in strict receive order
   under the default elapsed-time budget, while startup and `poll_until_idle`
   use an explicit unlimited pump.
@@ -131,9 +132,11 @@ ordered queue behind a common policy boundary.
 - `poll_until_idle` treats runner idle plus `update_queue_depth == 0` as done.
   Slice 2 must keep undrained updates observable (leave them in the channel)
   so idle and startup/bootstrap semantics stay correct.
-- Native remote TCP still blocks the caller in `NativeClientSession::send_command`
-  while reading one response batch, and it ignores the `SendOnly` policy. A
-  one-time warning now surfaces that temporary limitation until Slice 4.
+- Native remote TCP no longer drains remote `SendOnly` responses inside the
+  command send path, and normal remote `poll()` first checks TCP readiness
+  before draining. Once a response batch is ready, the runtime thread still
+  reads and decodes the whole batch. Tactical 151 owns moving that ready-batch
+  read/decode to a client IO actor and inbound queue.
 - Web remote WebSocket is event-driven underneath, but the Rust-facing session
   is still shaped as command exchange.
 
@@ -184,12 +187,14 @@ Recorded result:
 - XR camera/player pose sync and flat native camera pose sync now use
   `SendOnly`.
 - Correction acknowledgement/resync, startup/bootstrap, explicit chunk-view
-  changes, interactions, and remote dedicated command exchange keep immediate
-  behavior for now.
-- Remote dedicated ignores the policy temporarily because the current native
-  TCP/WebSocket transport is still request/response-shaped. Slice 4/Slice 6
-  track the real session actor and server-push broadening needed to remove
-  that limitation.
+  changes, interactions, and remote dedicated command exchange kept immediate
+  behavior at the time this slice first landed.
+- Historical note: remote dedicated ignored the policy temporarily because the
+  native TCP/WebSocket transport was still request/response-shaped. Tactical
+  149 later removed the native remote `SendOnly` limitation and added
+  TCP-readiness polling. Tactical 151 owns the remaining native remote
+  ready-batch read/decode split; Slice 6 below still owns future server-push
+  broadening.
 - Added regression coverage:
   `local_send_only_command_defers_update_application_until_poll`.
 - Behavior note: position corrections triggered by a `SendOnly` pose are now
@@ -231,8 +236,9 @@ instead of blowing one frame.
 - [x] Remove the immediate drain from `set_chunk_view`; view changes become
   send-only and their resulting updates arrive through the pump.
 - [x] Surface (one-time log or diagnostics flag) when a `SendOnly` command is
-  sent on a transport that ignores the policy (remote dedicated until
-  Slice 4), so the asymmetry is visible instead of silent.
+  sent on a transport that cannot honor the policy, so the asymmetry is visible
+  instead of silent. Historical remote dedicated limitation removed by
+  tactical 149.
 - [x] Diagnostics per pump: applied count, remaining queue depth, bytes queued,
   bytes applied, oldest applied update age, stall occurrences, and
   drain/decode/apply/dirty-mark time.
@@ -260,8 +266,9 @@ Recorded result:
   at least one pending update.
 - `LocalSingleViewSceneRuntime::set_chunk_view` no longer drains or applies
   updates immediately.
-- Remote dedicated logs once when `SendOnly` is requested on the still
-  request/response-shaped transport.
+- Remote dedicated originally logged once when `SendOnly` was requested on the
+  still request/response-shaped transport. Tactical 149 later replaced that
+  limitation with split send/drain behavior and readiness-aware remote polling.
 - Diagnostics now expose update-pump stalls, queued bytes, applied bytes,
   oldest applied update age, and the existing drain/apply/dirty/client timing
   in flat perf and Android XR summaries.
@@ -913,6 +920,11 @@ current churn lane.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
+Status: superseded by focused tactical
+[`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md)
+after the 2026-07-06 remote `SendOnly` and TCP-readiness fixes in tactical
+149 exposed the remaining ready-batch drain/decode stall.
+
 Goal: make native remote dedicated follow the same client bus shape.
 
 - Move `TcpStream` ownership into a dedicated network/session thread; that
@@ -922,8 +934,8 @@ Goal: make native remote dedicated follow the same client bus shape.
   bus.
 - Keep blocking socket IO inside the network thread for the first pass.
 - Keep the existing TCP frame codec initially.
-- Remove the temporary Slice 1 limitation where remote dedicated ignores the
-  `SendOnly` policy.
+- Preserve tactical 149's remote `SendOnly` behavior and remove the remaining
+  ready-batch read/decode work from the runtime frame.
 - Decide whether the dedicated server needs a server-push wire mode before
   remote clients can receive updates without sending commands.
 
@@ -989,8 +1001,8 @@ another doc, explicitly decide where these remaining valuable items live:
   or split payload items further if sustained movement shows memory/backlog
   pressure.
 - Remote TCP session actor: native remote still needs a real inbound update
-  bus and producer-side decode so `SendOnly` works outside local integrated
-  play.
+  bus and producer-side decode so ready response batches do not read/decode on
+  the runtime frame. This is now tracked in tactical 151.
 - Web bus convergence: browser WebSocket/worker callbacks should feed the same
   ordered inbound queue behind the shared policy.
 - Correction latency fast-lane: keep this only as the recorded escalation path
