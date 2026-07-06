@@ -1,7 +1,7 @@
 # 144: Frame Pipeline Accounting Instrumentation
 
-Status: open, gated on tactical 143. Opened 2026-07-05. This tactical is the
-executable checklist for
+Status: open; tactical 143 gate satisfied 2026-07-05. Opened 2026-07-05.
+This tactical is the executable checklist for
 [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 (revised 2026-07-05). That document is law for this work; this tactical is
 the work order and log. If they ever disagree, stop and reconcile the
@@ -17,16 +17,14 @@ generation, lighting, and far-LOD instead of tuning fixed counts blind.
 
 - Default: implementation starts after tactical
   [`143-client-experience-convergence-burn-down.md`](143-client-experience-convergence-burn-down.md)
-  closes. 143's contract gives convergence priority, and its remaining
-  slices touch `mclone-xr-scene`, `mclone-android-client`, and app dispatch
-  surfaces that Slices 3, 5, and 7 here would collide with.
-- Slice 7 (debug overlay) is hard-gated on 143 regardless: its HUD toggle
+  closes. This gate is satisfied: tactical 143 closed on 2026-07-05.
+- Slice 7 (debug overlay) keeps the 143 routing requirement: its HUD toggle
   must land as a capability-classified shared `GameUiAction` through
   `ClientExperienceController`, not as new app-local UI state.
-- Exception: if 143 stalls on a decision only the user can make, Slices 0-2
-  and 4 touch no 143 surface (new leaf crate, `mclone-native-client` timing
-  internals, headless lanes) and may start early. Record any such deviation
-  under Open Questions with the reason.
+- Historical exception: Slices 0-2 started before 143 closed under the
+  documented low-collision exception for new leaf crate and
+  `mclone-native-client` timing-internal work. That deviation is recorded
+  under Open Questions.
 
 ## Host Machines And Hardware
 
@@ -1652,5 +1650,5 @@ Listed so nobody mistakes this tactical for their plan:
   validated on Mac Metal and Windows Vulkan/DX12.
 - Recorded deviation: 2026-07-05, Slices 0-2 started before tactical 143
   closed under the documented exception for new leaf crate and
-  `mclone-native-client` timing-internal work. Slice 7 remains hard-gated
-  on tactical 143.
+  `mclone-native-client` timing-internal work. Slice 7's gate is now
+  satisfied because tactical 143 closed on 2026-07-05.
