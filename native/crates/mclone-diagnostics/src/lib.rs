@@ -1,6 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod availability;
+mod budget;
 pub mod clock;
 mod frame;
 mod gpu;
@@ -11,6 +12,11 @@ mod schema;
 mod stage;
 
 pub use availability::DiagnosticLaneAvailability;
+pub use budget::{
+    BudgetDecisionAddress, BudgetDecisionFamily, BudgetDecisionPanelReport, BudgetDecisionReason,
+    BudgetDecisionReport, BudgetDecisionTraceReport, BudgetGrantReport, BudgetHostMode,
+    BudgetInputSnapshotReport,
+};
 pub use frame::{
     ConservationViolationCounts, FrameAccountingConfig, FrameAccumulator, FrameObservation,
     FrameSummaryReport, HeadroomSummary, OverBudgetTiers, PercentileMethod, PercentileRing,

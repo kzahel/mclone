@@ -7,6 +7,7 @@ members = [
   "crates/mclone-client",
   "crates/mclone-core",
   "crates/mclone-diagnostics",
+  "crates/mclone-frame-budget",
   "crates/mclone-input",
   "crates/mclone-light",
   "crates/mclone-mesh",
@@ -58,6 +59,7 @@ mclone-blocks = { path = "crates/mclone-blocks" }
 mclone-client = { path = "crates/mclone-client" }
 mclone-core = { path = "crates/mclone-core" }
 mclone-diagnostics = { path = "crates/mclone-diagnostics" }
+mclone-frame-budget = { path = "crates/mclone-frame-budget" }
 mclone-input = { path = "crates/mclone-input" }
 mclone-light = { path = "crates/mclone-light" }
 mclone-mesh = { path = "crates/mclone-mesh" }

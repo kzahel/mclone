@@ -4,7 +4,7 @@ Status: active implementation plan; Slice 0 guardrail hygiene/baselines
 captured 2026-07-06 on clean commit `bc55076c`; Slice 1 Quest frame-shape
 default flipped 2026-07-06; Slice 1.5 frame-loop work-window contract landed
 2026-07-06 as docs plus inert diagnostics vocabulary, before any controller
-work.
+work; Slice 2 sans-I/O controller core landed 2026-07-06 with no engine wiring.
 Drafted 2026-07-06 as the gap-10 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
@@ -519,6 +519,29 @@ cargo test --manifest-path native/Cargo.toml -p mclone-frame-budget
 cargo check --manifest-path native/Cargo.toml -p mclone-frame-budget --target wasm32-unknown-unknown
 git diff --check
 ```
+
+2026-07-06 Slice 2 result:
+
+- Added the leaf `mclone-frame-budget` crate, depending only on
+  `mclone-diagnostics` and `serde`, with a sans-I/O `BudgetController`,
+  EWMA per-unit cost estimator, shared floors/caps config, and grant ledger.
+- Kept the report vocabulary in `mclone-diagnostics` to avoid a dependency
+  cycle: `FramePipelineReport` schema version bumped to `7` and now carries a
+  default-empty `budgetDecisionPanel` with decision family, host/window/stage
+  address, grant, input snapshot, and reason code.
+- Implemented deterministic control-law behavior only: cold/missing input
+  floors, target-period reset, cut-fast on frame miss / negative headroom /
+  queue age, raise-slow under hysteresis, period-relative elapsed grants, and
+  host-frame bounded catch-up semantics. No engine loop or consumer wiring.
+- Tests assert exact floor, step-response, cap/hysteresis, target-period reset,
+  EWMA reset, catch-up non-multiplication, and granted-vs-spent conservation
+  behavior.
+- Validation passed:
+  `cargo fmt --manifest-path native/Cargo.toml --all --check`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-frame-budget`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-frame-budget --target wasm32-unknown-unknown`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics`, and
+  `git diff --check`.
 
 ## Slice 3: Candidate A — Publication Drain Policy
 

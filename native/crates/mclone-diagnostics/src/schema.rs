@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    FrameSummaryReport, GpuTimestampPanelReport, PeerThreadPanelReport, QueuePanelReport,
-    StageSpan, WorstFrameDetail,
+    BudgetDecisionPanelReport, FrameSummaryReport, GpuTimestampPanelReport, PeerThreadPanelReport,
+    QueuePanelReport, StageSpan, WorstFrameDetail,
 };
 
-pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 6;
+pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +16,8 @@ pub struct FramePipelineReport {
     pub queue_panel: QueuePanelReport,
     pub peer_thread_panel: PeerThreadPanelReport,
     pub gpu_timestamp_panel: GpuTimestampPanelReport,
+    #[serde(default)]
+    pub budget_decision_panel: BudgetDecisionPanelReport,
     pub worst_frames: Vec<WorstFrameDetail>,
 }
 
@@ -29,6 +31,7 @@ impl FramePipelineReport {
             queue_panel,
             peer_thread_panel: PeerThreadPanelReport::empty(),
             gpu_timestamp_panel: GpuTimestampPanelReport::unsupported(),
+            budget_decision_panel: BudgetDecisionPanelReport::empty(),
         }
     }
 
@@ -42,6 +45,14 @@ impl FramePipelineReport {
         gpu_timestamp_panel: GpuTimestampPanelReport,
     ) -> Self {
         self.gpu_timestamp_panel = gpu_timestamp_panel;
+        self
+    }
+
+    pub fn with_budget_decision_panel(
+        mut self,
+        budget_decision_panel: BudgetDecisionPanelReport,
+    ) -> Self {
+        self.budget_decision_panel = budget_decision_panel;
         self
     }
 }
@@ -75,6 +86,10 @@ mod tests {
         );
         assert_eq!(
             json["gpuTimestampPanel"]["schemaVersion"],
+            FRAME_PIPELINE_SCHEMA_VERSION
+        );
+        assert_eq!(
+            json["budgetDecisionPanel"]["schemaVersion"],
             FRAME_PIPELINE_SCHEMA_VERSION
         );
     }
