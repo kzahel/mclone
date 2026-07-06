@@ -1548,6 +1548,22 @@ Slice 6 close status after Windows checkpoint B:
   path emits a wgpu timestamp panel.
 - Slice 6 is closed. Slice 7 remains unstarted.
 
+Additional desktop OpenXR runtime confidence pass, 2026-07-06:
+
+- Host: `rex`, Windows 11 Core build 26200. Runtime: VirtualDesktopXR v1.0.10
+  through the Virtual Desktop OpenXR manifest. Headset: Quest 3. GPU:
+  NVIDIA GeForce RTX 4090, Vulkan API 1.4.341, queue family 0. This was an
+  extra live desktop-XR validation pass, not a required Slice 6 closure gate.
+- `scripts\start-xr.bat --vdxr --frames 2 --no-quest-launch --no-quest-restore --no-pause`:
+  PASS after fixing the Windows launcher to pass
+  `--bin mclone-native-client` to `cargo run`. Session reached `FOCUSED`;
+  submitted 2 runtime frames, skipped 0.
+- `scripts\start-xr.bat --vdxr --mclone --frames 120 --no-quest-launch --no-quest-restore --no-pause`:
+  PASS. Session reached `FOCUSED`; submitted 120 runtime frames, skipped 0.
+  Summary: `frames=57`, `sections=44`, `drawn_sections=6`,
+  `indices=190224`, `drawn_indices=77976`, `actors=2`, `drawn_actors=2`.
+- `pnpm native:xr:windows:restore`: PASS after the connected smokes.
+
 ## Slice 7: Debug Overlay Through The Shared Facade
 
 Why: gap 8 — interactive diagnosis needs the same pipeline model the logs

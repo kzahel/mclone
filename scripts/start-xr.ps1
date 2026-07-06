@@ -81,6 +81,7 @@ $cargoCommon = @("--manifest-path", "native/Cargo.toml", "-p", "mclone-native-cl
 $cargoCheck += $cargoCommon
 $cargoBuild += $cargoCommon
 $cargoRun += $cargoCommon
+$cargoRun += @("--bin", "mclone-native-client")
 
 if ($CheckOnly) {
     Write-Host "Checking mclone XR feature..."
