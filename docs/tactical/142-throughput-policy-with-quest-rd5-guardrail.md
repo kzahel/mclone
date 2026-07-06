@@ -11,6 +11,9 @@ The persisted-world desktop-shaped split is also measured as of 2026-07-05:
 RD10 already-generated startup reaches playable in `0.125s`, full target view
 in `1.031s`, and stable actionable render idle in `25.142s` with `0/2400`
 over-budget frames.
+Slice 0 of tactical 150 recaptured the binding desktop and Quest guardrail rows
+on a clean commit (`bc55076c`, 2026-07-06). Those rows re-pin the RD5/RD7 Quest
+gate envelopes below and supersede the dirty 2026-07-04 gate numbers.
 Workstream: native Rust performance, desktop streaming throughput, Android XR /
 Quest frame-pacing guardrails.
 
@@ -344,19 +347,18 @@ how "unchanged" limits change.
 
 Prerequisites before gating on Quest numbers:
 
-- **Re-baseline clean.** Both 2026-07-04 Quest records were captured on a dirty
-  worktree (flagged in the records). Recapture RD5 and RD7 settled orbit on a
-  clean commit before treating the gates as binding.
-- **Fix the Meta dropped-frame delta.** PerfMetrics currently logs one early
-  absolute counter. Record a before/after delta per sample window; until then
-  dropped frames are advisory, and `skipped_delta`/`app_work`/`headroom` are
-  the binding fields.
-- **Pin lane configs.** The orbit lanes pass `--render-compile-workers 2` and
-  the `2/16/64` accept/upload budgets — a candidate policy, not the shipping
-  default (defaults are workers `1`, budgets unbounded). Keep lane args stable
-  across comparisons, and when a candidate changes a shared default, also run
-  RD5 once in default config (the 2026-07-04 records already include a passing
-  unbounded RD5 control).
+- **Re-baseline clean (completed 2026-07-06).** Tactical 150 Slice 0 recaptured
+  RD5/RD7 settled orbit and RD5 churn on clean commit `bc55076c`; durable rows
+  are in `docs/quest-standalone-performance-records.md`.
+- **Fix the Meta dropped-frame delta (completed 2026-07-06).** PerfMetrics now
+  records `dropped_frames_start`, `dropped_frames_end`, and
+  `dropped_frames_delta` per sample. A periodic validation row showed the delta
+  advancing across repeated windows.
+- **Pin lane configs.** The binding orbit/churn gates use
+  `--render-compile-workers 2` and the `2/16/64` accept/upload budgets. That is
+  still a lane config, not the shipping default; candidates that change shared
+  defaults must also run the RD5 shipping-default control. The clean Slice 0
+  control row was RD5 orbit with workers `1` and unbounded accept/upload budgets.
 
 Gates are **absolute numbers pinned to the clean baseline**, not
 relative-to-previous-run. Relative gates ratchet: five consecutive candidates
@@ -366,17 +368,21 @@ regression" and collectively kill the lane.
 **Quest RD5 gate (every candidate):**
 
 - `skipped_delta = 0`
-- `app_work_p95 <= 14.0ms` (baseline `13.434ms`)
-- `headroom_avg >= +1.5ms` (baseline `+2.212ms`)
-- `app_over_period_pct <= 8%` (baseline `3.7%`)
+- `dropped_frames_delta <= 17` in the one-shot Meta metrics window (baseline
+  `17 / 17`)
+- `app_work_p95 <= 15.25ms` (baseline `14.737-15.133ms`)
+- `headroom_avg >= +1.25ms` (baseline `+1.329..+1.619ms`)
+- `app_over_period_pct <= 16%` (baseline `13.7-15.7%`)
 - no frames over 2x period (baseline `0`)
 
 **Quest RD7 pressure check (shared-policy candidates):**
 
 - `skipped_delta = 0`
-- `app_work_p95 <= 19.5ms` (baseline `18.515ms`)
-- `app_over_period_pct <= 85%` (baseline `81.9%`)
-- frames over 2x period `<= 5` (baseline `3`)
+- `dropped_frames_delta <= 32` in the one-shot Meta metrics window (baseline
+  `18 / 32`)
+- `app_work_p95 <= 17.5ms` (baseline `16.522-17.129ms`)
+- `app_over_period_pct <= 40%` (baseline `35.8-37.6%`)
+- frames over 2x period `= 0` (baseline `0`)
 
 **Quest streaming check (candidates changing shared admission, publication,
 upload, or worker policy):** run the existing flight RD7 metrics lane or the
@@ -387,11 +393,15 @@ and oldest-applied-update age. Until a durable baseline exists, treat this lane
 as evidence-gathering, not pass/fail — but run it, because settled orbit leaves
 the streaming machinery idle and cannot catch a burstier admission policy.
 Candidate A is exactly the kind of change this lane exists for: it multiplies
-the per-tick publish burst the client must absorb. This is a safety/attribution
-lane, not proof that publication is an important Quest bottleneck; the first
-question is whether larger publication drains show up as server runner spikes,
-update queue age, client accept/store cost, dirty/prepare cost, upload cost, or
-dropped-frame deltas.
+the per-tick publish burst the client must absorb. The clean Slice 0 RD5 churn
+baseline is now pinned at app p95 `11.577-11.664ms`, app p99
+`13.216-13.290ms`, max runtime upload `7.339-8.516ms`, max GPU upload
+`5.834-6.011ms`, update queue depth `283`, oldest-applied age
+`164.784-170.014ms`, one update-pump stall per row, and pending publication
+chunks `123-125`. This is a safety/attribution lane, not proof that publication
+is an important Quest bottleneck; the first question is whether larger
+publication drains show up as server runner spikes, update queue age, client
+accept/store cost, dirty/prepare cost, upload cost, or dropped-frame deltas.
 
 **Desktop gates (every candidate):**
 
@@ -549,11 +559,22 @@ instrumentation to watch it:
 - [ ] Add worldgen/light mailbox busy-vs-idle time if Candidate A still needs
   mailbox utilization after the publication counters and queue samples are
   captured on full RD10/RD15 lanes.
-- [ ] Harden the loading-settle idle predicate against the startup false-idle
-  window (required before any idle-sensitive sweep reruns).
-- [ ] Add the Meta dropped-frame before/after delta to the Quest perf summary.
-- [ ] Capture clean-commit baselines: repeat RD10/RD15 startup-streaming from a
-  clean tree, and recapture Quest RD5/RD7 settled orbit clean.
+- [x] Harden the loading-settle idle predicate against the startup false-idle
+  window (commit `bc55076c`). Validation: RD5 loading-settle with
+  `--simulation-cadence 60/20/60` waited for `169/169` ready chunks instead of
+  false-idling at `0`.
+- [x] Add the Meta dropped-frame before/after delta to the Quest perf summary:
+  `dropped_frames_start`, `dropped_frames_end`, and `dropped_frames_delta` now
+  appear in one-shot and periodic metrics rows.
+- [x] Capture clean-commit baselines: desktop RD10/RD15 startup-streaming,
+  persisted startup, frame-budget, movement-frame, Quest RD5/RD7 orbit, RD5
+  default-control, and RD5 local-integrated churn are recorded from clean commit
+  `bc55076c` in `docs/performance-records.md` and
+  `docs/quest-standalone-performance-records.md`.
+- [x] Record the Quest persisted-world guardrail blocker: Android XR has an
+  internal `world_dir` hook, but no validation/argv lane exposes the desktop
+  persisted-world startup-streaming perf mode yet. Per tactical 150's detour
+  rule, Slice 0 records this blocker instead of adding new machinery.
 - [x] Fix remote-dedicated churn accounting before using remote play as the
   "server costs moved off headset" comparison: completed in
   [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)

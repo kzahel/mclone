@@ -108,6 +108,62 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-06 - Tactical 150 Slice 0 Quest Guardrail Recapture
+
+Benchmarked code: Android XR release APK built from clean commit `bc55076c`
+(`Fix throughput guardrail measurement gates`). Host: `kmacbook`, Apple M4 Pro
+Mac. Raw summaries and logcats were captured under `/tmp/mclone-142-baselines/`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Pinned budgets | render compile workers `2`, completed-result accept `2`, section upload `16`, section accept `64` |
+
+Settled-orbit guardrail rows:
+
+| Lane | Run | Config | FPS | Frames | Skipped | Dropped delta | App avg | App p95 | App p99 | App max | Head avg | App over-period | Over 2x |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD5 orbit | 1 | pinned | `64.44` | `2901` | `0` | `17` | `12.270ms` | `14.737ms` | `16.718ms` | `19.331ms` | `+1.619ms` | `396/2901` (`13.7%`) | `0` |
+| RD5 orbit | 2 | pinned | `62.92` | `2832` | `0` | `17` | `12.560ms` | `15.133ms` | `17.243ms` | `19.824ms` | `+1.329ms` | `444/2832` (`15.7%`) | `0` |
+| RD5 orbit | 1 | shipping default | `62.66` | `2821` | `0` | `17` | `12.638ms` | `14.920ms` | `16.222ms` | `18.198ms` | `+1.251ms` | `538/2821` (`19.1%`) | `0` |
+| RD7 orbit | 1 | pinned | `58.20` | `2620` | `0` | `18` | `13.681ms` | `16.522ms` | `19.183ms` | `23.829ms` | `+0.208ms` | `938/2620` (`35.8%`) | `0` |
+| RD7 orbit | 2 | pinned | `57.56` | `2591` | `0` | `32` | `13.784ms` | `17.129ms` | `19.534ms` | `21.819ms` | `+0.105ms` | `973/2591` (`37.6%`) | `0` |
+
+RD5 local-integrated chunk-view churn rows, pinned config, center alternates by
+`16` chunks every `3s`:
+
+| Run | FPS | Frames | Skipped | Dropped delta | App avg | App p95 | App p99 | App max | Head avg | App over-period | Runtime upload max | GPU upload max | Update q / oldest age | Pump stalls | Pending publication chunks |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `70.96` | `3194` | `0` | `29` | `6.361ms` | `11.664ms` | `13.290ms` | `19.401ms` | `+7.528ms` | `14/3194` (`0.4%`) | `7.339ms` | `5.834ms` | `283 / 164.784ms` | `1` | `125` |
+| 2 | `71.16` | `3203` | `0` | `22` | `6.453ms` | `11.577ms` | `13.216ms` | `17.103ms` | `+7.436ms` | `18/3203` (`0.6%`) | `8.516ms` | `6.011ms` | `283 / 170.014ms` | `1` | `123` |
+
+Meta dropped-frame delta validation:
+
+- One-shot guardrail rows now include `dropped_frames_start`,
+  `dropped_frames_end`, and `dropped_frames_delta`.
+- A separate RD5 stationary `--perf-metrics-periodic` validation emitted
+  repeated windows with advancing start/end counters, for example sample 1
+  `0 -> 15`, sample 2 `15 -> 16`, sample 3 `16 -> 16`, and later samples such
+  as `218 -> 258`.
+
+Interpretation:
+
+- The old RD5 142 gate is stale: on the clean baseline, RD5 pinned orbit still
+  has `skipped_delta=0` and `0` over-2x frames, but app p95 is
+  `14.737-15.133ms` and over-period is `13.7-15.7%`.
+- RD7 pinned orbit is cleaner than the previous pressure-check envelope:
+  app p95 `16.522-17.129ms`, over-period `35.8-37.6%`, and `0` over-2x frames.
+- RD5 churn remains the streaming guardrail row for Candidate A/B: update queue
+  depth still reaches `283`, oldest-applied age is `~165-170ms`, and each row
+  has one update-pump stall while render app p95 stays under `12ms`.
+
 ### 2026-07-06 - Quest RD5 Local vs Remote Chunk-View Churn Contrast
 
 Benchmarked code: Android XR release APK built from clean commit `4f86dad3`

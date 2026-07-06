@@ -101,6 +101,45 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-06 - Tactical 150 Slice 0 Desktop Clean Baselines
+
+Commit: `bc55076c` (`Fix throughput guardrail measurement gates`), clean tree
+for every benchmark JSON row (`git_dirty=false`). Host: `kmacbook`, Apple M4
+Pro, macOS `26.5.1` build `25F80`.
+
+Raw JSON artifacts were captured under `/tmp/mclone-142-baselines/`.
+
+Startup-streaming rows:
+
+| Lane | Run | RD | Frames / Hz | Playable | Full view | Render quiescent | Over budget | Over 2x | p95 / p99 / max |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| fresh startup | 1 | 10 | `6000 / 60` | `1.066s` | `27.588s` | `56.651s` | `0` | `0` | `7.963 / 8.886 / 16.573ms` |
+| fresh startup | 2 | 10 | `6000 / 60` | `1.074s` | `27.526s` | `56.746s` | `0` | `0` | `7.781 / 8.718 / 16.223ms` |
+| fresh startup | 1 | 15 | `9000 / 60` | `1.267s` | `57.214s` | `82.718s` | `0` | `0` | `11.107 / 12.147 / 16.174ms` |
+| fresh startup | 2 | 15 | `9000 / 60` | `1.196s` | `57.255s` | `82.779s` | `26` | `2` | `11.774 / 13.378 / 39.451ms` |
+| persisted startup | 1 | 10 | `2400 / 60` | `0.125s` | `1.018s` | `25.141s` | `0` | `0` | `7.926 / 8.883 / 13.095ms` |
+| persisted startup | 2 | 10 | `2400 / 60` | `0.112s` | `1.022s` | `25.146s` | `0` | `0` | `8.161 / 9.038 / 13.021ms` |
+
+Frame probes:
+
+| Lane | Run | Frames / Hz | Top-level over budget | Top-level over 2x | Accounting app over-period | p95 / p99 / max |
+|---|---:|---:|---:|---:|---:|---:|
+| frame-budget | 1 | `240 / 120` | `1` | `1` | `0` | `3.253 / 3.467 / 17.713ms` |
+| frame-budget | 2 | `240 / 120` | `1` | `1` | `0` | `2.928 / 3.470 / 17.775ms` |
+| movement-frame | 1 | `240 / 120` | `1` | `1` | `0` | `3.905 / 4.550 / 18.668ms` |
+| movement-frame | 2 | `240 / 120` | `1` | `1` | `0` | `3.812 / 4.230 / 18.702ms` |
+
+Interpretation:
+
+- RD10 full-view readiness still pins the publication wall at `~27.5s`, but the
+  current clean render-quiescent semantics settle at `~56.7s`, not the older
+  `~33s` dirty-control row.
+- RD15 full-view is stable at `~57.2s`; render quiescence is stable at
+  `~82.7s`, but one row had a `39.451ms` tail frame and `26` app over-period
+  frames.
+- Persisted RD10 remains generation/light-free and stable: full view
+  `~1.02s`, actionable render idle `~25.14s`, and `0/2400` over-budget frames.
+
 ### 2026-07-06 - Desktop Loopback Remote Contrast Smoke
 
 Commit: `4f86dad3` (`Add shared debug diagnostics toggle`), clean tree before

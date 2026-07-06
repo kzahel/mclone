@@ -1,6 +1,7 @@
 # 150: Adaptive Frame Budget Controller
 
-Status: proposed. Drafted 2026-07-06 as the gap-10 follow-on to tactical
+Status: proposed; Slice 0 guardrail hygiene/baselines captured 2026-07-06 on
+clean commit `bc55076c`. Drafted 2026-07-06 as the gap-10 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 ([Budget Controller Direction](../frame-pipeline-accounting.md#budget-controller-direction)
@@ -40,20 +41,20 @@ disagrees materially, re-pin in Slice 0 and use the new numbers.
 
 | Anchor | Value |
 |---|---|
-| Desktop RD10 fresh startup-streaming, publish budget 1 | playable `1.08s`, full-view `27.5s`, quiescent `33.1s` |
+| Desktop RD10 fresh startup-streaming, publish budget 1 | clean Slice 0: playable `1.066-1.074s`, full-view `27.526-27.588s`, quiescent `56.651-56.746s`, `0/6000` over-budget |
+| Desktop RD15 fresh startup-streaming, publish budget 1 | clean Slice 0: playable `1.196-1.267s`, full-view `57.214-57.255s`, quiescent `82.718-82.779s`; one row had `26/9000` over-budget and `2` over-2x frames |
 | Same lane, fixed publish budget 4 (sweep knee) | full-view `9.68s`, 0 over-budget |
 | Budget 4 + `--render-compile-workers 2` | quiescent `20.09s` -> `11.41s`; workers 4 flat |
-| Desktop RD10 persisted reopen | playable `0.125s`, full-view `1.03s`, actionable idle `25.1s` |
+| Desktop RD10 persisted reopen | clean Slice 0: playable `0.112-0.125s`, full-view `1.018-1.022s`, actionable idle `25.141-25.146s`, `0/2400` over-budget |
 | Raw / server-only / server+light RD10 ceilings | `551.5` / `126.7` / `40.6` chunks/sec |
-| Quest RD5 local churn (fixed budgets) | `skipped_delta=0`, app p95 `12.631ms`, queue age max `167ms`, 1 pump stall, pending publication `124` |
-| Quest RD5 settled-orbit gate (142, **stale — see Slice 0**) | app_work_p95 `<= 14.0ms`, headroom_avg `>= +1.5ms`, over-period `<= 8%` |
-| Quest RD5 orbit measured 2026-07-05 (144 Slice 3, same lane) | app p95 `15.46..15.69ms` — outside the 142 gate |
-| Quest RD7 settled-orbit pressure check | app_work_p95 `<= 19.5ms`, over-period `<= 85%`, `<= 5` frames over 2x |
+| Quest RD5 local churn (fixed budgets) | clean Slice 0: `skipped_delta=0`, app p95 `11.577-11.664ms`, queue age max `164.784-170.014ms`, 1 pump stall, pending publication `123-125` |
+| Quest RD5 settled-orbit gate (re-pinned in 142) | `skipped_delta=0`, dropped delta `<= 17`, app p95 `<= 15.25ms`, headroom avg `>= +1.25ms`, over-period `<= 16%`, over-2x `0` |
+| Quest RD5 shipping-default control | clean Slice 0, workers `1`, unbounded budgets: app p95 `14.920ms`, headroom avg `+1.251ms`, over-period `19.1%`, over-2x `0` |
+| Quest RD7 settled-orbit pressure check (re-pinned in 142) | `skipped_delta=0`, dropped delta `<= 32`, app p95 `<= 17.5ms`, over-period `<= 40%`, over-2x `0` |
 
-The RD5 discrepancy row is why Slice 0 exists: the 2026-07-04 gate numbers
-were captured on a dirty worktree and no longer match the same lane measured
-one day later. Do not gate any candidate against a number that fails on an
-unmodified tree.
+The RD5 discrepancy row is closed by Slice 0: the dirty 2026-07-04 gate numbers
+no longer govern this tactical. Use the clean `bc55076c` envelopes above and in
+142 for all later candidate gates.
 
 ## Java Reference Anchors (1.17.1)
 
@@ -202,6 +203,24 @@ Exit criteria: all baseline rows recorded on a clean commit with spreads;
 142 gates re-pinned; the two measurement fixes validated (dropped-frame
 delta visible across two windows; idle predicate no longer false-idles at
 host cadence 60).
+
+2026-07-06 Slice 0 result:
+
+- Measurement fixes landed in clean commit `bc55076c`: loading-settle now waits
+  for the expected loading target before accepting runtime idle, and Quest
+  PerfMetrics emits `dropped_frames_start/end/delta`.
+- Desktop clean baselines are recorded in `docs/performance-records.md` from
+  `/tmp/mclone-142-baselines/{frame-budget,startup,movement}*.json`.
+- Quest clean baselines are recorded in
+  `docs/quest-standalone-performance-records.md`: RD5/RD7 pinned orbit, RD5
+  shipping-default control, RD5 local-integrated churn, and a periodic
+  dropped-frame delta validation row.
+- 142 gate numbers are re-pinned from those rows. RD5 is no longer judged
+  against the stale 2026-07-04 envelope.
+- Quest persisted-world guardrail is blocked by missing Android XR
+  validation/argv support for the desktop persisted-world startup-streaming
+  mode. Per the diagnostics-detour rule, this slice records the blocker instead
+  of adding new machinery.
 
 Validation:
 
