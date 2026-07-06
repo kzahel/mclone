@@ -1,0 +1,127 @@
+use super::*;
+
+#[test]
+fn dedicated_player_receives_world_info_before_chunk_view_snapshots() {
+    let mut server = IntegratedServer::new(1124);
+    server.set_lighting_enabled(false);
+    let player = server.add_dedicated_player();
+
+    let updates = set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
+
+    assert_eq!(
+        first_biome_zoom_seed(&updates),
+        Some(obfuscate_biome_zoom_seed(1124))
+    );
+    assert!(
+        updates
+            .iter()
+            .position(|update| matches!(update, ServerUpdate::WorldInfo { .. }))
+            < updates
+                .iter()
+                .position(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
+    );
+}
+
+#[test]
+fn dedicated_player_views_keep_disjoint_ticket_sets() {
+    let mut server = IntegratedServer::new(12_345);
+    server.set_lighting_enabled(false);
+    let player_a = server.add_dedicated_player();
+    let player_b = server.add_dedicated_player();
+
+    let updates_a =
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+    let updates_b =
+        set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(4, 0), 0);
+
+    let snapshots_a = snapshot_positions(&updates_a);
+    let snapshots_b = snapshot_positions(&updates_b);
+    assert!(snapshots_a.contains(&ChunkPos::new(0, 0)));
+    assert!(!snapshots_a.contains(&ChunkPos::new(4, 0)));
+    assert!(snapshots_b.contains(&ChunkPos::new(4, 0)));
+    assert!(!snapshots_b.contains(&ChunkPos::new(0, 0)));
+    assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 1);
+    assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(4, 0)), 1);
+}
+
+#[test]
+fn overlapping_player_views_unload_only_for_player_leaving_chunk() {
+    let mut server = IntegratedServer::new(12_345);
+    server.set_lighting_enabled(false);
+    let player_a = server.add_dedicated_player();
+    let player_b = server.add_dedicated_player();
+    set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+    set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
+
+    let updates_a =
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(1, 0), 0);
+    let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+
+    assert!(has_chunk_unload(&updates_a, ChunkPos::new(0, 0)));
+    assert!(!has_chunk_unload(&updates_b, ChunkPos::new(0, 0)));
+    assert!(
+        server
+            .scheduler()
+            .holder(ChunkPos::new(0, 0))
+            .is_some_and(ChunkHolder::is_client_visible)
+    );
+    assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 1);
+}
+
+#[test]
+fn smaller_player_view_receives_fewer_snapshots_than_larger_view() {
+    let mut server = IntegratedServer::new(12_345);
+    server.set_lighting_enabled(false);
+    let player_a = server.add_dedicated_player();
+    let player_b = server.add_dedicated_player();
+
+    let updates_a =
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+    let updates_b =
+        set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 1);
+
+    let snapshots_a = snapshot_positions(&updates_a);
+    let snapshots_b = snapshot_positions(&updates_b);
+    assert_eq!(snapshots_a.len(), 1);
+    assert_eq!(snapshots_b.len(), 9);
+    assert!(snapshots_b.len() > snapshots_a.len());
+}
+
+#[test]
+fn block_delta_routing_sends_only_to_players_tracking_changed_chunk() {
+    let mut server = IntegratedServer::new(12_345);
+    server.set_lighting_enabled(false);
+    let player_a = server.add_dedicated_player();
+    let player_b = server.add_dedicated_player();
+    set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+    set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(2, 0), 0);
+    server
+        .try_handle_command_for_player(
+            player_a,
+            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(8.5, 80.0, 8.5),
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                on_ground: true,
+            }),
+        )
+        .expect("move player a");
+    let pos = BlockPos::new(8, 80, 8);
+    assert!(server.scheduler_mut().set_block_at_world(pos, DIRT));
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    let updates_a = server
+        .try_handle_command_for_player(
+            player_a,
+            ClientCommand::PlayerAction(PlayerActionCommand {
+                pos,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }),
+        )
+        .expect("break block");
+    let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+
+    assert!(has_section_block_updates(&updates_a));
+    assert!(!has_section_block_updates(&updates_b));
+}

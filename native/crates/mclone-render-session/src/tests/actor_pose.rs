@@ -1,0 +1,237 @@
+use super::*;
+
+#[test]
+fn third_person_render_camera_tracks_player_view_from_behind() {
+    let snapshot = EngineCameraSnapshot::from_eye_pose(Vec3d::new(8.0, 70.0, 8.0), 0.0, 0.0, 24.0);
+
+    let first = legacy_chunk_camera_from_snapshot(snapshot, 2);
+    let third = legacy_chunk_camera_from_snapshot_with_view_mode(
+        snapshot,
+        EngineCameraViewMode::ThirdPersonBack,
+        2,
+    );
+
+    assert_eq!(first.eye, [8.0, 70.0, 8.0]);
+    assert_eq!(first.target, [8.0, 70.0, 9.0]);
+    assert_eq!(third.eye, [8.0, 70.0, 4.0]);
+    assert_eq!(third.target, [8.0, 70.0, 5.0]);
+    assert_eq!(third.z_far, first.z_far);
+
+    let first_pose = render_pose_from_snapshot(snapshot, 2);
+    let third_pose = render_pose_from_snapshot_with_view_mode(
+        snapshot,
+        EngineCameraViewMode::ThirdPersonBack,
+        2,
+    );
+    assert_vec3_close(first_pose.eye, Vec3::new(8.0, 70.0, 8.0));
+    assert_vec3_close(third_pose.eye, Vec3::new(8.0, 70.0, 4.0));
+    assert_eq!(third_pose.z_far, first_pose.z_far);
+}
+
+#[test]
+fn render_pose_uses_engine_yaw_pitch_convention() {
+    let eye = Vec3d::new(8.0, 70.0, 8.0);
+    let forward =
+        render_pose_from_snapshot(EngineCameraSnapshot::from_eye_pose(eye, 0.0, 0.0, 24.0), 0)
+            .render_view(1280, 720)
+            .expect("forward render pose")
+            .camera_forward;
+    let east = render_pose_from_snapshot(
+        EngineCameraSnapshot::from_eye_pose(eye, std::f64::consts::FRAC_PI_2, 0.0, 24.0),
+        0,
+    )
+    .render_view(1280, 720)
+    .expect("east render pose")
+    .camera_forward;
+    let up = render_pose_from_snapshot(
+        EngineCameraSnapshot::from_eye_pose(eye, 0.0, std::f64::consts::FRAC_PI_2, 24.0),
+        0,
+    )
+    .render_view(1280, 720)
+    .expect("up render pose")
+    .camera_forward;
+    let down = render_pose_from_snapshot(
+        EngineCameraSnapshot::from_eye_pose(eye, 0.0, -std::f64::consts::FRAC_PI_2, 24.0),
+        0,
+    )
+    .render_view(1280, 720)
+    .expect("down render pose")
+    .camera_forward;
+
+    assert_vec3_close(forward, Vec3::Z);
+    assert_vec3_close(east, Vec3::X);
+    assert_vec3_close(up, Vec3::Y);
+    assert_vec3_close(down, Vec3::NEG_Y);
+}
+
+#[test]
+fn local_player_actor_instance_uses_controller_feet_pose() {
+    let client = ClientRuntime::local_integrated();
+    let camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(1.25, 70.62, -3.5),
+        std::f64::consts::FRAC_PI_2,
+        0.0,
+        24.0,
+    );
+
+    let actor = local_player_actor_instance(&camera, &client, default_player_figure_id());
+
+    assert_eq!(actor.feet_position, Vec3::new(1.25, 69.0, -3.5));
+    assert!((actor.yaw_radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+    assert_eq!(
+        actor.shape,
+        mclone_render::entity::ActorInstanceShape::Figure(default_player_figure_id())
+    );
+}
+
+#[test]
+fn local_player_actor_instance_uses_selected_figure() {
+    let client = ClientRuntime::local_integrated();
+    let camera =
+        EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+
+    let actor =
+        local_player_actor_instance(&camera, &client, mclone_assets::upright_bear_figure_id());
+
+    assert_eq!(
+        actor.shape,
+        mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::upright_bear_figure_id())
+    );
+}
+
+#[test]
+fn chicken_entity_actor_uses_chicken_figure() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(7)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Chicken),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: true,
+        width: 0.4,
+        height: 0.7,
+        walk_animation_distance: 0.25,
+        chicken_wing_flap_radians: Some(0.4),
+    };
+
+    let actors = actor_instances_from_presentations(&[presentation], &client);
+
+    assert_eq!(actors.len(), 1);
+    assert_eq!(
+        actors[0].shape,
+        mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::chicken_figure_id())
+    );
+    assert_eq!(actors[0].width, 0.4);
+    assert_eq!(actors[0].height, 0.7);
+    assert!(actors[0].animation.is_some());
+    assert_eq!(actors[0].chicken_wing_flap_radians, Some(0.4));
+}
+
+#[test]
+fn item_entity_actor_uses_egg_item_shape() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(8)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Item),
+        appearance: ActorAppearance::NONE,
+        item_stack: Some(mclone_protocol::ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::Egg,
+            count: 1,
+        }),
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: false,
+        width: 0.25,
+        height: 0.25,
+        walk_animation_distance: 0.0,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actors = actor_instances_from_presentations(&[presentation], &client);
+
+    assert_eq!(actors.len(), 1);
+    assert_eq!(
+        actors[0].shape,
+        mclone_render::entity::ActorInstanceShape::ItemEgg
+    );
+    assert_eq!(actors[0].width, 0.25);
+    assert_eq!(actors[0].height, 0.25);
+}
+
+#[test]
+fn local_player_actor_for_view_hides_first_person_by_default() {
+    let client = ClientRuntime::local_integrated();
+    let camera =
+        EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+
+    assert!(
+        local_player_actor_instance_for_view(&camera, &client, default_player_figure_id())
+            .is_none()
+    );
+}
+
+#[test]
+fn local_player_actor_for_view_can_render_first_person_body_only() {
+    let client = ClientRuntime::local_integrated();
+    let mut camera =
+        EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+    camera.set_first_person_player_visible(true);
+
+    let actor =
+        local_player_actor_instance_for_view(&camera, &client, default_player_figure_id()).unwrap();
+
+    assert_eq!(actor.feet_position, Vec3::new(1.25, 69.0, -3.5));
+    assert!(actor.first_person_body_only);
+}
+
+#[test]
+fn local_player_actor_for_view_keeps_third_person_full_body() {
+    let client = ClientRuntime::local_integrated();
+    let mut camera =
+        EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+    camera.set_view_mode(EngineCameraViewMode::ThirdPersonBack);
+    camera.set_first_person_player_visible(true);
+
+    let actor =
+        local_player_actor_instance_for_view(&camera, &client, default_player_figure_id()).unwrap();
+
+    assert!(!actor.first_person_body_only);
+}
+
+#[test]
+fn engine_camera_controller_picks_block_from_player_view() {
+    let target = BlockPos::new(1, 2, 4);
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+        ChunkPos::new(0, 0),
+        target,
+        BlockStateId(1),
+    )));
+    let interaction = ClientInteractionController::new();
+    let camera = EngineCameraController::from_eye_pose(Vec3d::new(1.5, 2.5, 1.5), 0.0, 0.0, 32.0);
+
+    let hit = camera.pick_block(&client, &interaction);
+
+    assert_eq!(hit.hit_type(), HitResultType::Block);
+    assert_eq!(hit.block_pos, target);
+}
+
+#[test]
+fn engine_camera_render_pose_targets_forward_direction() {
+    let camera = EngineCameraController::from_eye_pose(Vec3d::new(1.0, 2.0, 3.0), 0.0, 0.0, 32.0);
+
+    let render_view = camera
+        .render_pose(2)
+        .render_view(1280, 720)
+        .expect("render pose should build");
+
+    assert_vec3_close(render_view.camera_position, Vec3::new(1.0, 2.0, 3.0));
+    assert_vec3_close(render_view.camera_forward, Vec3::Z);
+    assert!(render_view.z_far > 700.0);
+}

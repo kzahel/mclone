@@ -276,7 +276,7 @@ with a desktop-only smoke silently.
 | Slice | Scope | Status |
 |---|---|---|
 | ORG-00: baseline and no-regression harness | inventory, line counts, benchmark baselines | landed 2026-07-06; baseline has current validation blockers |
-| ORG-01: test relocation pass | move large inline tests out of production files | active; ORG-01B landed 2026-07-06 |
+| ORG-01: test relocation pass | move large inline tests out of production files | active; ORG-01C landed 2026-07-06 |
 | ORG-02: crate-root and facade cleanup | thin roots and module-local test facades | open |
 | ORG-03: `mclone-render-session` split | render-section session ownership modules | open |
 | ORG-04: `mclone-xr-scene` non-render split | options, timing, locomotion, tracking, UI math | open |
@@ -476,8 +476,8 @@ Sub-slices:
 |---|---|---|
 | ORG-01A | move the clearest test-heavy facades: `mclone-server/src/lib.rs`, `mclone-worldgen/src/feature.rs`, `mclone-worldgen/src/levelgen.rs` | landed 2026-07-06 |
 | ORG-01B | split the relocated large test-only files into logical submodules so raw >1k file counts improve too | landed 2026-07-06 |
-| ORG-01C | move remaining shared-crate inline tests: `integrated.rs`, `mclone-render-session/src/lib.rs`, `mclone-ui/src/v2.rs` | next |
-| ORG-01D | move native-client app inline tests from `main.rs`, `app.rs`, and `scene_runtime.rs` | open |
+| ORG-01C | move remaining shared-crate inline tests: `integrated.rs`, `mclone-render-session/src/lib.rs`, `mclone-ui/src/v2.rs` | landed 2026-07-06 |
+| ORG-01D | move native-client app inline tests from `main.rs`, `app.rs`, and `scene_runtime.rs` | next |
 
 Deliverables:
 
@@ -609,6 +609,68 @@ FAIL with the same current baseline mclone-server blockers:
 - tests::light::generated_origin_chunk_block_light_strict_matches_scheduler_light_oracle_fixture
   at crates/mclone-server/src/tests/light.rs:744 after the ORG-01B split,
   block light mismatch at section 5 byte 1499, expected 0x00 got 0x01.
+
+cargo fmt --manifest-path native/Cargo.toml --all --check
+PASS
+
+git diff --check
+PASS
+
+cargo test --manifest-path native/Cargo.toml
+FAIL with the same current baseline mclone-server blockers listed above.
+```
+
+- ORG-01C landed 2026-07-06 as a move-only relocation and immediate split of
+  the remaining shared-crate inline test blocks. No production behavior changed
+  and no public production items were added for tests.
+- Replaced trailing inline `mod tests` blocks with `#[cfg(test)] mod tests;`
+  in:
+  - `native/crates/mclone-server/src/integrated.rs`
+  - `native/crates/mclone-render-session/src/lib.rs`
+  - `native/crates/mclone-ui/src/v2.rs`
+- Moved and split test bodies under:
+  - `native/crates/mclone-server/src/integrated/tests.rs` plus
+    `integrated/tests/*.rs`
+  - `native/crates/mclone-render-session/src/tests.rs` plus `tests/*.rs`
+  - `native/crates/mclone-ui/src/v2/tests.rs` plus `v2/tests/*.rs`
+- Kept shared test imports/helpers in the parent test modules so child modules
+  can use `use super::*` without widening production visibility.
+- Largest ORG-01C split test modules after the move:
+
+| File | LoC |
+|---|---:|
+| `native/crates/mclone-render-session/src/tests/dirty_sync.rs` | `628` |
+| `native/crates/mclone-server/src/integrated/tests/debug_interactions.rs` | `610` |
+| `native/crates/mclone-render-session/src/tests/camera_controls.rs` | `566` |
+| `native/crates/mclone-render-session/src/tests/engine_session.rs` | `418` |
+| `native/crates/mclone-ui/src/v2/tests/menus_options.rs` | `412` |
+
+- Reran line-count tripwires:
+  - raw non-vendored Rust files above `1,000` LoC: `63`
+    (`/tmp/mclone-org145-ORG-01C-oversized-files.txt`)
+  - production tripwire files above `1,000` LoC: `45`
+    (`/tmp/mclone-org145-ORG-01C-production-oversized-files.txt`)
+- Interpretation: ORG-01C did not add any new raw `>1,000` LoC test-only
+  files. The touched parent files still exceed production soft targets because
+  their production bodies remain in scope for later production split slices.
+
+Validation:
+
+```text
+cargo test --manifest-path native/Cargo.toml -p mclone-ui --lib
+PASS
+
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session --lib
+PASS
+
+cargo test --manifest-path native/Cargo.toml -p mclone-server --lib
+FAIL with the same current baseline mclone-server blockers:
+- runner::native::tests::native_runner_reports_native_thread_kind_and_queue_depths
+  at crates/mclone-server/src/runner.rs:1378, expected thread kind None but got
+  MessageTransfer.
+- tests::light::generated_origin_chunk_block_light_strict_matches_scheduler_light_oracle_fixture
+  at crates/mclone-server/src/tests/light.rs:744, block light mismatch at
+  section 5 byte 1499, expected 0x00 got 0x01.
 
 cargo fmt --manifest-path native/Cargo.toml --all --check
 PASS
