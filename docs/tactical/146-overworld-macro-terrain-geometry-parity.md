@@ -1,8 +1,8 @@
 # 146: Overworld Macro Terrain Geometry Parity
 
-Status: active parent; opened 2026-07-06. Slice A landed: native worldgen now
-has deterministic macro-geometry signal tests for the existing baseline terrain
-and eroded-badlands pillar anchors.
+Status: active parent; opened 2026-07-06. Slice A and Slice B landed: native
+worldgen now has deterministic macro-geometry signal tests for baseline terrain,
+eroded-badlands pillars, and stone-shore / steep-coast anchors.
 
 Workstream: native Rust worldgen. Goal: deterministic Minecraft Java 1.17.1
 overworld macro terrain shape parity before screenshot-led validation. This
@@ -114,16 +114,18 @@ Landed:
   taiga mountains, snowy taiga mountains, stone shore, shattered savanna,
   shattered savanna plateau, eroded badlands, ice spikes, frozen ocean, and
   deep frozen ocean.
-- `native/crates/mclone-worldgen/src/levelgen.rs` has a reusable
+- Stone-shore / steep-coast exact Java terrain and surface fixtures exist for
+  seed `74739`, chunks `(0,0)` and `(6,8)`.
+- `native/crates/mclone-worldgen/src/levelgen/tests.rs` has a reusable
   `MacroGeometrySignal` helper for test chunks and pinned values for seed
-  `12345`, chunk `(0,0)`, plus eroded-badlands seed `868`, chunk `(8,-6)`.
+  `12345`, chunk `(0,0)`, eroded-badlands seed `868`, chunk `(8,-6)`, and
+  stone-shore seed `74739`, chunks `(0,0)` and `(6,8)`.
 
 Not yet landed:
 
 - A broad macro-geometry matrix with deterministic pass/fail rows.
-- Exact Java oracle coverage for representative mountain, stone-shore,
-  shattered-savanna, and ice-spike chunks chosen for macro shape rather than
-  palette coverage.
+- Exact Java oracle coverage for representative mountain, shattered-savanna,
+  and ice-spike chunks chosen for macro shape rather than palette coverage.
 - A clear answer for which overhang signatures are density-field terrain,
   carver-created voids, or post-surface feature massing.
 
@@ -181,7 +183,7 @@ Legend:
 | Mountains | seed `33`, chunk `(0,0)` | Palette matrix covers mountain surface/tree family | Java terrain/surface fixture plus height envelope, relief, steep-face, and exposed stone/gravel metrics |
 | Wooded / gravelly mountain variants | wooded seed `58`, `(0,0)`; gravelly seed `250`, `(0,0)`; modified gravelly seed `1831`, `(0,0)` | Palette matrix covers surface families and sparse tree family | Variant-specific gravel/stone surface volume plus relief comparison against Java fixtures |
 | Snowy mountain variants | snowy mountains seed `326`, `(0,0)`; taiga mountains seed `6126`, `(0,0)`; snowy taiga mountains seed `12006`, `(0,0)` | Palette matrix covers snowy/spruce/fern rows | Snow/top-layer plus relief metrics; decide whether these reuse the mountain metric row or need separate snow-top acceptance |
-| Stone shore / steep coast | seed `74739`, chunk `(0,0)`; visible fixture seed `0`, chunk `(8,16)` | Palette matrix covers stone-shore surface and default extras | Water-land edge gradients, exposed stone face counts, and shore/coast boundary metric fixture |
+| Stone shore / steep coast | seed `74739`, chunks `(0,0)` and `(6,8)` | Exact terrain/surface oracle anchors; `(0,0)` pins stone relief at top Y `62..78`, p05/p50/p95 `62/65/76`, deltas `11/0/0`, `9` exposed-face columns, `1163` above-sea stone/gravel blocks, and no water-edge signal; `(6,8)` pins shoreline relief at top Y `62..83`, p05/p50/p95 `62/62/81`, deltas `69/58/23`, `35` exposed-face columns, `117` solid-over-air blocks, water-edge deltas `57/57`, and `798` above-sea stone/gravel blocks | Use as the control row for future shore/coast metric helper changes |
 | River and frozen-river banks | river seed `39`, `(0,0)`; frozen river seed `252`, `(0,0)` | Palette matrix covers water/seagrass or frozen-river sugar cane | Bank width, water-land delta, and boundary-shape metrics; later exact fixture if drift is found |
 | Shattered savanna relief | shattered seed `68`, chunk `(-6,0)`; plateau seed `153`, chunk `(-8,-2)` | Palette matrix covers shattered surface and acacia family; carved-stage fixture exists for seed `12345`, chunk `(60,199)` | Extreme relief, vertical face, solid-over-air, and Java surface fixture coverage for the chosen palette anchors |
 | Eroded badlands pillars | seed `868`, pillar oracle chunk `(8,-6)` | Exact Java surface oracle exists; macro signal pinned at top Y `67..122`, p05/p50/p95 `67/87/122`, neighbor deltas `154/74/41`, `108` exposed-face columns, `7023` badlands landmark blocks, and `144` landmark columns at/above Y `80` | Add a second eroded-badlands or badlands-plateau anchor only if future rows show this one is too narrow |
@@ -214,17 +216,41 @@ Pinned values:
 | seed `12345`, chunk `(0,0)`, terrain stage | `86..98` | `86 / 88 / 93` | `0 / 0 / 0` | `0` | none | none |
 | seed `868`, chunk `(8,-6)`, surface stage | `67..122` | `67 / 87 / 122` | `154 / 74 / 41` | `108` | none | `7023` badlands blocks; `144` columns at/above Y `80` |
 
+## Slice B: Stone Shore / Steep Coast
+
+Status: landed.
+
+Implemented as exact Java fixture tests plus macro signal tests:
+
+- `fills_stone_shore_chunk_with_terrain_only_java_oracle`
+- `fills_stone_shore_edge_chunk_with_terrain_only_java_oracle`
+- `build_stone_shore_surface_and_bedrock_matches_java_oracle`
+- `build_stone_shore_edge_surface_and_bedrock_matches_java_oracle`
+- `macro_geometry_signal_tracks_stone_shore_steep_coast_anchor`
+- `macro_geometry_signal_tracks_stone_shore_water_edge_anchor`
+
+The first planned anchor, seed `74739`, chunk `(0,0)`, is a useful stone-shore
+relief control but has no in-chunk water-land edge by the current metric. A
+nearby deterministic scan found seed `74739`, chunk `(6,8)`, which keeps the
+same seed family and provides the stronger shoreline transition.
+
+Pinned values:
+
+| Anchor | Top Y | p05 / p50 / p95 | Neighbor deltas ge 4 / 8 / 16 | Exposed-face columns | Shore / overhang signal | Landmark signal |
+|---|---:|---:|---:|---:|---|---|
+| seed `74739`, chunk `(0,0)`, surface stage | `62..78` | `62 / 65 / 76` | `11 / 0 / 0` | `9` | no water-edge or solid-over-air signal | `1163` stone/gravel blocks at/above sea level; `137` columns |
+| seed `74739`, chunk `(6,8)`, surface stage | `62..83` | `62 / 62 / 81` | `69 / 58 / 23` | `35` | water-edge deltas `57 / 57`; `117` solid-over-air blocks | `798` stone/gravel blocks at/above sea level; `118` columns |
+
 ## Suggested Next Slice
 
-Add the first new macro row that is not already covered by an exact oracle. The
-best next target is stone shore / steep coast:
+Add the next visible macro row that is not already covered by an exact oracle.
+The best next target is shattered savanna relief:
 
-1. Generate Java terrain and surface fixtures for seed `74739`, chunk `(0,0)`.
-2. Pin macro signal values for top-height envelope, water-land edge deltas,
-   exposed stone/gravel face columns, and landmark block volume.
-3. If the fixture shows weak shoreline relief, compare against the existing
-   visible fixture candidate seed `0`, chunk `(8,16)` before changing generator
-   behavior.
+1. Generate Java terrain and surface fixtures for seed `68`, chunk `(-6,0)`.
+2. Pin top-height envelope, extreme relief, exposed vertical faces,
+   solid-over-air, and acacia/surface landmark metrics.
+3. If that anchor is too narrow, add plateau seed `153`, chunk `(-8,-2)` before
+   changing generator behavior.
 
 Do not start by changing density math. The first pass should tell us what the
 current native generator already does and where the Java fixture says it differs.
@@ -243,6 +269,7 @@ Use focused native tests first:
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen fills_chunk_zero_zero_with_terrain_only_java_oracle
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen build_surface_and_bedrock_matches_java_oracle
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen build_eroded_badlands_pillar_surface_and_bedrock_matches_java_oracle
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen stone_shore
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen macro_geometry_signal_tracks
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen overworld_air_carvers_match_java
 ```

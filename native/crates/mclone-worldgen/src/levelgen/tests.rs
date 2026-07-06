@@ -1910,6 +1910,34 @@ fn eroded_badlands_pillar_surface_fixture() -> TerrainChunkOracleFixture {
     .expect("valid eroded badlands pillar surface chunk oracle fixture")
 }
 
+fn stone_shore_terrain_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../test/fixtures/integration/overworld-seed-74739-chunks-0-0-terrain-only.json"
+    ))
+    .expect("valid stone shore terrain chunk oracle fixture")
+}
+
+fn stone_shore_surface_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../test/fixtures/integration/overworld-seed-74739-chunks-0-0-surface-only.json"
+    ))
+    .expect("valid stone shore surface chunk oracle fixture")
+}
+
+fn stone_shore_edge_terrain_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../test/fixtures/integration/overworld-seed-74739-chunks-6-8-terrain-only.json"
+    ))
+    .expect("valid stone shore edge terrain chunk oracle fixture")
+}
+
+fn stone_shore_edge_surface_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../test/fixtures/integration/overworld-seed-74739-chunks-6-8-surface-only.json"
+    ))
+    .expect("valid stone shore edge surface chunk oracle fixture")
+}
+
 fn full_chunk_fixture() -> FullChunkOracleFixture {
     serde_json::from_str(include_str!(
         "../../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0.json"
@@ -2313,6 +2341,34 @@ fn assert_chunk_blocks_match(actual: &[u8], expected: &[u8], min_y: i32) {
     }
 }
 
+fn assert_terrain_chunk_matches_java_oracle(oracle: TerrainChunkOracleFixture) {
+    assert_eq!(oracle.module, "terrain-chunk");
+    assert_eq!(oracle.minecraft_version, "1.17.1");
+    assert_eq!(
+        oracle.generator_class,
+        "net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator"
+    );
+    assert_eq!(oracle.min_y, 0);
+    assert_eq!(oracle.height, 256);
+    assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
+
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+    let expected = terrain_stage_blocks_from_oracle(&oracle);
+
+    assert_eq!(chunk.chunk_x, oracle.chunk_x);
+    assert_eq!(chunk.chunk_z, oracle.chunk_z);
+    assert_eq!(chunk.min_y, oracle.min_y);
+    assert_eq!(chunk.height, oracle.height);
+    assert!(!chunk.blocks.contains(&BEDROCK));
+    assert_chunk_blocks_match(&chunk.blocks, &expected, oracle.min_y);
+}
+
 fn surface_top_signal(oracle: &TerrainChunkOracleFixture) -> SurfaceTopSignal {
     assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
     let mut signal = SurfaceTopSignal {
@@ -2348,6 +2404,7 @@ fn surface_top_signal(oracle: &TerrainChunkOracleFixture) -> SurfaceTopSignal {
 fn macro_geometry_signal(
     chunk: &MutableChunkBlockBuffer,
     is_landmark_block: impl Fn(RawBlockId) -> bool,
+    landmark_block_min_y: Option<i32>,
     landmark_column_min_y: Option<i32>,
 ) -> MacroGeometrySignal {
     let mut top_y_by_column = [chunk.min_y; CHUNK_WIDTH as usize * CHUNK_WIDTH as usize];
@@ -2459,7 +2516,9 @@ fn macro_geometry_signal(
                     carved_air_span = 0;
                 }
 
-                if is_landmark_block(block_id) {
+                if is_landmark_block(block_id)
+                    && landmark_block_min_y.map_or(true, |min_y| y >= min_y)
+                {
                     signal.landmark_block_volume += 1;
                     if !landmark_column_counted
                         && landmark_column_min_y.map_or(true, |min_y| y >= min_y)
@@ -2589,6 +2648,10 @@ fn is_badlands_landmark_block_id(block_id: RawBlockId) -> bool {
             | crate::block::RED_TERRACOTTA
             | crate::block::BLACK_TERRACOTTA
     )
+}
+
+fn is_stone_shore_landmark_block_id(block_id: RawBlockId) -> bool {
+    matches!(block_id, STONE | GRAVEL)
 }
 
 fn surface_fixture_block_name_at(
@@ -2899,6 +2962,24 @@ fn fills_chunk_zero_zero_with_terrain_only_java_oracle() {
 }
 
 #[test]
+fn fills_stone_shore_chunk_with_terrain_only_java_oracle() {
+    let oracle = stone_shore_terrain_fixture();
+    assert_eq!(oracle.seed, "74739");
+    assert_eq!(oracle.chunk_x, 0);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+fn fills_stone_shore_edge_chunk_with_terrain_only_java_oracle() {
+    let oracle = stone_shore_edge_terrain_fixture();
+    assert_eq!(oracle.seed, "74739");
+    assert_eq!(oracle.chunk_x, 6);
+    assert_eq!(oracle.chunk_z, 8);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
 fn macro_geometry_signal_tracks_baseline_terrain_anchor() {
     let oracle = terrain_fixture();
     let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
@@ -2908,7 +2989,7 @@ fn macro_geometry_signal_tracks_baseline_terrain_anchor() {
         NoiseGeneratorSettings::overworld(),
     );
     let chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
-    let signal = macro_geometry_signal(&chunk, |_| false, None);
+    let signal = macro_geometry_signal(&chunk, |_| false, None, None);
 
     assert_eq!(
         signal,
@@ -2948,7 +3029,7 @@ fn macro_geometry_signal_tracks_eroded_badlands_pillar_anchor() {
     );
     let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
     generator.build_surface_and_bedrock(&mut chunk);
-    let signal = macro_geometry_signal(&chunk, is_badlands_landmark_block_id, Some(80));
+    let signal = macro_geometry_signal(&chunk, is_badlands_landmark_block_id, None, Some(80));
 
     assert_eq!(
         signal,
@@ -2978,10 +3059,118 @@ fn macro_geometry_signal_tracks_eroded_badlands_pillar_anchor() {
 }
 
 #[test]
+fn macro_geometry_signal_tracks_stone_shore_steep_coast_anchor() {
+    let oracle = stone_shore_surface_fixture();
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+    generator.build_surface_and_bedrock(&mut chunk);
+    let signal = macro_geometry_signal(
+        &chunk,
+        is_stone_shore_landmark_block_id,
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+    );
+
+    assert_eq!(
+        signal,
+        MacroGeometrySignal {
+            top_y_min: 62,
+            top_y_max: 78,
+            top_y_range: 16,
+            top_y_p05: 62,
+            top_y_p50: 65,
+            top_y_p95: 76,
+            neighbor_delta_ge_4: 11,
+            neighbor_delta_ge_8: 0,
+            neighbor_delta_ge_16: 0,
+            vertical_face_columns: 9,
+            solid_over_air_blocks: 0,
+            surface_near_carved_air_columns: 0,
+            carved_air_volume: 0,
+            carved_air_y_min: None,
+            carved_air_y_max: None,
+            long_vertical_air_spans: 0,
+            water_land_edge_delta_ge_4: 0,
+            water_land_edge_delta_ge_8: 0,
+            landmark_block_volume: 1163,
+            landmark_column_count: 137,
+        }
+    );
+}
+
+#[test]
+fn macro_geometry_signal_tracks_stone_shore_water_edge_anchor() {
+    let oracle = stone_shore_edge_surface_fixture();
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+    generator.build_surface_and_bedrock(&mut chunk);
+    let signal = macro_geometry_signal(
+        &chunk,
+        is_stone_shore_landmark_block_id,
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+    );
+
+    assert_eq!(
+        signal,
+        MacroGeometrySignal {
+            top_y_min: 62,
+            top_y_max: 83,
+            top_y_range: 21,
+            top_y_p05: 62,
+            top_y_p50: 62,
+            top_y_p95: 81,
+            neighbor_delta_ge_4: 69,
+            neighbor_delta_ge_8: 58,
+            neighbor_delta_ge_16: 23,
+            vertical_face_columns: 35,
+            solid_over_air_blocks: 117,
+            surface_near_carved_air_columns: 0,
+            carved_air_volume: 0,
+            carved_air_y_min: None,
+            carved_air_y_max: None,
+            long_vertical_air_spans: 0,
+            water_land_edge_delta_ge_4: 57,
+            water_land_edge_delta_ge_8: 57,
+            landmark_block_volume: 798,
+            landmark_column_count: 118,
+        }
+    );
+}
+
+#[test]
 fn build_surface_and_bedrock_matches_java_oracle() {
     let oracle = surface_fixture();
     assert_eq!(oracle.chunk_x, 0);
     assert_eq!(oracle.chunk_z, 0);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+fn build_stone_shore_surface_and_bedrock_matches_java_oracle() {
+    let oracle = stone_shore_surface_fixture();
+    assert_eq!(oracle.seed, "74739");
+    assert_eq!(oracle.chunk_x, 0);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+fn build_stone_shore_edge_surface_and_bedrock_matches_java_oracle() {
+    let oracle = stone_shore_edge_surface_fixture();
+    assert_eq!(oracle.seed, "74739");
+    assert_eq!(oracle.chunk_x, 6);
+    assert_eq!(oracle.chunk_z, 8);
     assert_surface_chunk_matches_java_oracle(oracle);
 }
 
