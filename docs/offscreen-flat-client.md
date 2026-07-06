@@ -149,7 +149,7 @@ Target examples:
 
 ```bash
 # Full flat-client screenshot from the real offscreen host.
-cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --screenshot /tmp/mclone-flat-client.png \
   --width 1280 --height 720 \
   --startup-wait idle \
@@ -157,14 +157,14 @@ cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
   --day-time 6000 --freeze-time
 
 # Use the same host startup policy with playable readiness plus warmup frames.
-cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --screenshot /tmp/mclone-flat-client-warm.png \
   --width 1280 --height 720 \
   --startup-wait frames:2 \
   --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2
 
 # Future shape: deterministic client loop that writes frames or streams them.
-cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --offscreen-client --frames 240 --frame-sink png-sequence:/tmp/mclone-frames
 ```
 

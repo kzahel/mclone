@@ -271,6 +271,8 @@ function nativeCaptureCommand(options, outputPath, dimensions, pose, chunk) {
     "native/Cargo.toml",
     "-p",
     "mclone-native-client",
+    "--bin",
+    "mclone-native-client",
     "--",
     "--screenshot",
     outputPath,

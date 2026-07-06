@@ -315,9 +315,9 @@ git diff --check
 Release comparison:
 
 ```bash
-cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --frame-budget-probe --frame-budget-frames 120 --target-hz 120
-cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --movement-frame-probe --frame-budget-frames 240 --target-hz 120
 ```
 

@@ -1010,12 +1010,12 @@ Pixel-affecting lighting work must capture and inspect a native screenshot in
 comparison around when changing render consumption:
 
 ```bash
-cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --screenshot /tmp/mclone-light-current.png \
   --width 960 --height 640 --seed 12345 --chunk-x 0 --chunk-z 0 \
   --render-distance 2 --fullbright false
 
-cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --screenshot /tmp/mclone-light-fullbright.png \
   --width 960 --height 640 --seed 12345 --chunk-x 0 --chunk-z 0 \
   --render-distance 2 --fullbright true

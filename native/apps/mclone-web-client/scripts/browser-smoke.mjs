@@ -2754,6 +2754,8 @@ function startNativeWebSocketServer() {
       "native/Cargo.toml",
       "-p",
       "mclone-dedicated-server",
+      "--bin",
+      "mclone-dedicated-server",
       "--",
       "--listen",
       "127.0.0.1:0",
