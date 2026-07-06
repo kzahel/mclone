@@ -1,6 +1,7 @@
 # 145: Native Rust Organization Refactor
 
-Status: active parent; ORG-00 landed with current baseline validation blockers.
+Status: active parent; ORG-02 landed, ORG-03 next, with current baseline
+validation blockers unchanged.
 Opened 2026-07-06. This tactical is the current implementation tracker for
 reducing oversized native Rust modules while preserving behavior, public
 coherence, vanilla parity, platform boundaries, and benchmark performance.
@@ -277,8 +278,8 @@ with a desktop-only smoke silently.
 |---|---|---|
 | ORG-00: baseline and no-regression harness | inventory, line counts, benchmark baselines | landed 2026-07-06; baseline has current validation blockers |
 | ORG-01: test relocation pass | move large inline tests out of production files | landed 2026-07-06; ORG-01D complete |
-| ORG-02: crate-root and facade cleanup | thin roots and module-local test facades | next |
-| ORG-03: `mclone-render-session` split | render-section session ownership modules | open |
+| ORG-02: crate-root and facade cleanup | thin roots and module-local test facades | landed 2026-07-06 |
+| ORG-03: `mclone-render-session` split | render-section session ownership modules | next |
 | ORG-04: `mclone-xr-scene` non-render split | options, timing, locomotion, tracking, UI math | open |
 | ORG-05: `mclone-xr-scene` render/state split | terrain state, stereo/multiview render paths, overlay rendering | open |
 | ORG-06: Android XR adapter split | activity/startup/frame-loop/perf/target modules | open |
@@ -785,7 +786,55 @@ git diff --check
 
 Log:
 
-- Pending.
+- Landed 2026-07-06.
+- Moved remaining crate-root inline tests:
+  - `native/crates/mclone-mesh/src/lib.rs` is now a 45-line facade; tests live
+    in `src/tests.rs` plus bounded `src/tests/{debug_mesh,visibility,
+    textured_catalog,textured_mesh}.rs` modules.
+  - `native/crates/mclone-ui/src/lib.rs` moved its trailing test module to
+    `src/tests.rs`.
+- Moved clear `mclone-worldgen::feature` helper groups into local modules:
+  - `feature/direction.rs` owns `Direction` and `offset_pos`.
+  - `feature/heightmap.rs` owns feature-world surface projection and reduced
+    heightmap predicates.
+  - `feature/selectors.rs` owns random/simple/boolean selector dispatch.
+- Retained root/facade helpers:
+  - `native/crates/mclone-server/src/lib.rs` remains short crate-wide server
+    glue; `mutable_buffer_from_snapshot`, `full_chunk_status_for_ticket_level`,
+    and the raw chunk conversion helper intentionally stay near the public
+    server facade until a server-internal owner split needs them.
+  - `native/crates/mclone-worldgen/src/levelgen.rs` was already a pure facade.
+  - `native/apps/mclone-native-client/src/main.rs` remains app entry, CLI
+    dispatch, and feature-gated benchmark metadata glue; it is below the slice
+    threshold and was not split.
+  - `native/crates/mclone-ui/src/lib.rs` remains a `3,243` production-LoC
+    exception. Splitting UI primitives, widgets, HUD, loading draw lists, and
+    legacy helpers is ORG-09 work, not an ORG-02 facade cleanup.
+- Largest moved test modules after the split:
+  - `native/crates/mclone-ui/src/tests.rs`: `640` lines.
+  - `native/crates/mclone-mesh/src/tests.rs`: `594` lines.
+  - `native/crates/mclone-mesh/src/tests/textured_mesh.rs`: `451` lines.
+- Tripwires:
+  - Raw non-vendored files above `1,000` LoC: `60`.
+    Full list: `/tmp/mclone-org145-ORG-02-oversized-files.txt`.
+  - Production non-vendored files above `1,000` LoC: `45`.
+    Full list: `/tmp/mclone-org145-ORG-02-production-oversized-files.txt`.
+- Validation:
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen --lib`:
+    PASS, `186` passed, `1` ignored.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-mesh --lib`:
+    PASS, `83` passed.
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-ui --lib`: PASS,
+    `61` passed.
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`: PASS.
+  - `cargo build --manifest-path native/Cargo.toml -p mclone-web-client
+    --target wasm32-unknown-unknown`: FAIL with the known baseline
+    `mclone-render/src/gpu_timestamps.rs:443` unresolved `log::warn!` blocker.
+  - `cargo test --manifest-path native/Cargo.toml`: FAIL with the same current
+    baseline `mclone-server` blockers:
+    `runner::native::tests::native_runner_reports_native_thread_kind_and_queue_depths`
+    and
+    `tests::light::generated_origin_chunk_block_light_strict_matches_scheduler_light_oracle_fixture`.
 
 ## ORG-03: `mclone-render-session` Split
 

@@ -1,15 +1,18 @@
-use crate::block::{RawBlockId, has_fluid, is_air_like, is_leaves, material_blocks_motion};
-use crate::levelgen::MutableChunkBlockBuffer;
-use crate::placement::{BlockPos, HeightmapType};
+use crate::placement::BlockPos;
 use crate::prng::RandomSource;
+
+#[cfg(test)]
+use crate::{block::RawBlockId, levelgen::MutableChunkBlockBuffer, placement::HeightmapType};
 
 mod bamboo;
 mod blob;
 mod configured;
 mod context;
+mod direction;
 mod disk;
 mod dripstone;
 mod glow_lichen;
+mod heightmap;
 mod ice;
 mod lake;
 mod mushroom;
@@ -18,6 +21,7 @@ mod ore;
 mod patch;
 mod placed;
 mod region;
+mod selectors;
 mod spring;
 mod tables;
 mod top_layer;
@@ -36,6 +40,7 @@ pub use configured::{
     TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
+pub use direction::Direction;
 pub use placed::{
     DecorationReport, PlacedFeature, apply_overworld_biome_decoration,
     apply_overworld_biome_decoration_to_region, apply_overworld_biome_features,
@@ -47,7 +52,12 @@ pub(crate) use context::{
     ConstantFeatureBiomeResolver, DEFAULT_FEATURE_BIOME, FeatureBiomeResolver,
     OverworldFeatureBiomeResolver,
 };
+pub(crate) use direction::offset_pos;
+pub(crate) use heightmap::{heightmap_height, project_to_surface};
 pub(crate) use placed::apply_overworld_biome_decoration_to_region_timed;
+pub(crate) use selectors::{
+    place_random_boolean_selector, place_random_selector, place_simple_random_selector,
+};
 
 #[cfg(test)]
 pub(crate) use placed::test_support;
@@ -59,71 +69,6 @@ pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
 /// force full terrain generation during startup.
 pub const FEATURES_CHUNK_DEPENDENCY_RADIUS: i32 = 8;
 pub const FEATURES_BLOCK_DEPENDENCY_RADIUS: i32 = FEATURES_WRITE_RADIUS_CUTOFF;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Direction {
-    Down,
-    Up,
-    North,
-    South,
-    West,
-    East,
-}
-
-impl Direction {
-    const ALL: [Self; 6] = [
-        Self::Down,
-        Self::Up,
-        Self::North,
-        Self::South,
-        Self::West,
-        Self::East,
-    ];
-
-    const GLOW_LICHEN_VALID: [Self; 5] =
-        [Self::Up, Self::North, Self::East, Self::South, Self::West];
-
-    const fn offset(self) -> (i32, i32, i32) {
-        match self {
-            Self::Down => (0, -1, 0),
-            Self::Up => (0, 1, 0),
-            Self::North => (0, 0, -1),
-            Self::South => (0, 0, 1),
-            Self::West => (-1, 0, 0),
-            Self::East => (1, 0, 0),
-        }
-    }
-
-    const fn opposite(self) -> Self {
-        match self {
-            Self::Down => Self::Up,
-            Self::Up => Self::Down,
-            Self::North => Self::South,
-            Self::South => Self::North,
-            Self::West => Self::East,
-            Self::East => Self::West,
-        }
-    }
-
-    const fn axis(self) -> i32 {
-        match self {
-            Self::Down | Self::Up => 0,
-            Self::North | Self::South => 1,
-            Self::West | Self::East => 2,
-        }
-    }
-
-    const fn bit(self) -> u8 {
-        match self {
-            Self::Down => 1 << 0,
-            Self::Up => 1 << 1,
-            Self::North => 1 << 2,
-            Self::South => 1 << 3,
-            Self::West => 1 << 4,
-            Self::East => 1 << 5,
-        }
-    }
-}
 
 impl ConfiguredFeature {
     pub fn place<W: FeatureWorld>(
@@ -190,101 +135,6 @@ impl ConfiguredFeature {
             Self::Kelp => ocean::place_kelp(world, random, origin),
             Self::Ore(config) => ore::place_ore(world, random, origin, config),
             Self::FreezeTopLayer => top_layer::place_freeze_top_layer(world, biomes, origin),
-        }
-    }
-}
-
-fn offset_pos(pos: BlockPos, direction: Direction) -> BlockPos {
-    let (dx, dy, dz) = direction.offset();
-    BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz)
-}
-
-fn place_random_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
-    world: &mut W,
-    biomes: &B,
-    random: &mut impl RandomSource,
-    origin: BlockPos,
-    config: &RandomFeatureConfiguration,
-) -> bool {
-    for weighted in &config.features {
-        if random.next_float() < weighted.chance {
-            return weighted
-                .feature
-                .place_with_biomes(world, biomes, random, origin);
-        }
-    }
-
-    config
-        .default_feature
-        .place_with_biomes(world, biomes, random, origin)
-}
-
-fn place_simple_random_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
-    world: &mut W,
-    biomes: &B,
-    random: &mut impl RandomSource,
-    origin: BlockPos,
-    config: &SimpleRandomFeatureConfiguration,
-) -> bool {
-    if config.features.is_empty() {
-        return false;
-    }
-
-    let index = random.next_int_bound(config.features.len() as i32) as usize;
-    config.features[index].place_with_biomes(world, biomes, random, origin)
-}
-
-fn place_random_boolean_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
-    world: &mut W,
-    biomes: &B,
-    random: &mut impl RandomSource,
-    origin: BlockPos,
-    config: &RandomBooleanFeatureConfiguration,
-) -> bool {
-    if random.next_boolean() {
-        config
-            .feature_true
-            .place_with_biomes(world, biomes, random, origin)
-    } else {
-        config
-            .feature_false
-            .place_with_biomes(world, biomes, random, origin)
-    }
-}
-
-fn project_to_surface<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<BlockPos> {
-    Some(BlockPos::new(
-        pos.x,
-        world.world_surface_height_at(pos.x, pos.z)?,
-        pos.z,
-    ))
-}
-
-fn heightmap_height(
-    chunk: &MutableChunkBlockBuffer,
-    heightmap: HeightmapType,
-    local_x: i32,
-    local_z: i32,
-) -> i32 {
-    if let Some(height) = chunk.cached_worldgen_height(heightmap, local_x, local_z) {
-        return height;
-    }
-
-    for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
-        if heightmap_is_opaque(heightmap, chunk.get_block_at_y(local_x, y, local_z)) {
-            return y + 1;
-        }
-    }
-    chunk.min_y
-}
-
-fn heightmap_is_opaque(heightmap: HeightmapType, block_id: RawBlockId) -> bool {
-    match heightmap {
-        HeightmapType::WorldSurfaceWg | HeightmapType::WorldSurface => !is_air_like(block_id),
-        HeightmapType::OceanFloorWg | HeightmapType::OceanFloor => material_blocks_motion(block_id),
-        HeightmapType::MotionBlocking => material_blocks_motion(block_id) || has_fluid(block_id),
-        HeightmapType::MotionBlockingNoLeaves => {
-            (material_blocks_motion(block_id) || has_fluid(block_id)) && !is_leaves(block_id)
         }
     }
 }
