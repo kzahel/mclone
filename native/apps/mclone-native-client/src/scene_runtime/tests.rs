@@ -671,6 +671,7 @@ fn window_runtime_reuses_remote_session_for_interest_updates() {
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
+    let (second_response_tx, second_response_rx) = std::sync::mpsc::channel();
     let server = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         mclone_net::complete_server_handshake(&mut stream).unwrap();
@@ -700,6 +701,7 @@ fn window_runtime_reuses_remote_session_for_interest_updates() {
             &[ServerUpdate::TimeUpdate { day_time: 2 }],
         )
         .unwrap();
+        second_response_tx.send(()).unwrap();
     });
 
     {
@@ -710,6 +712,9 @@ fn window_runtime_reuses_remote_session_for_interest_updates() {
         };
         let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
         assert!(runtime.set_interest_center(ChunkPos::new(1, 0)).unwrap());
+        second_response_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
     }
     server.join().unwrap();
 }

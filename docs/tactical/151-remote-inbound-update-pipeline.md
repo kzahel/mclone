@@ -4,11 +4,11 @@ Status: active; Slice 0 documentation baseline completed 2026-07-06; Slice 1
 shared `ClientConnection` runtime seam completed 2026-07-06; Slice 2 native
 TCP client IO actor completed 2026-07-06; Slice 3 remote runtime budget and
 diagnostics completed 2026-07-06; Slice 4 Quest remote chunk-view churn
-rebaseline completed 2026-07-06. Slice 4A is next: decouple remote command
-enqueue from the response-paired IO actor read loop. This is the focused
-successor to tactical
+rebaseline completed 2026-07-06; Slice 4A remote command enqueue decoupling
+completed 2026-07-06. Slice 5 web shared ingress adoption is next. This is the
+focused remote connection successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
-for the remaining remote ready-batch stall. Architecture target:
+and a convergence slice for tactical 133's shared bus shape. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
 Umbrella bus work: tactical
 [`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md).
@@ -78,6 +78,10 @@ socket. As of Slice 2:
 - The actor owns the primary `TcpStream`, writes outbound command frames, blocks
   reading paired response batches, decodes updates, and queues
   `NativeServerUpdateBatch` envelopes with byte/age/read/decode metadata.
+- As of Slice 4A, runtime `SendOnly` enqueue returns once the command is accepted
+  into the actor's ordered outbound queue. Physical write, flush, response read,
+  decode, and disconnect reporting remain actor/adapter work surfaced through the
+  later drain/poll/reconnect path.
 - Desktop, Android, and Android XR normal remote session wrappers hold
   `NativeClientIoSession`, not `NativeClientSession`.
 - `RemoteDedicatedSingleViewSceneRuntime` still has a temporary
@@ -87,8 +91,8 @@ socket. As of Slice 2:
   ordered response completion.
 
 Server-side dedicated already has an accept thread and a connection thread per
-client. The remaining pieces are runtime diagnostics/projection cleanup, Quest
-rebaseline, and web callback adoption behind the same client-facing connection
+client. The remaining pieces are host-mode-honest diagnostics projection in
+tactical 149 and web callback adoption behind the same client-facing connection
 abstraction.
 
 ## Target Shape
@@ -612,6 +616,8 @@ node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
 
 ## Slice 4A: Remote Command Send Queue Decoupling
 
+Status: completed 2026-07-06.
+
 Goal: make remote `SendOnly` and interest-command enqueue return without
 waiting behind a previous response read.
 
@@ -651,6 +657,82 @@ cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client remote
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
 git diff --check
+```
+
+Results:
+
+- `NativeClientIoSession::send_command_only` now returns after accepting the
+  command into the IO actor's ordered outbound queue. It no longer waits for a
+  per-command write acknowledgment, so a prior response read cannot stall the
+  runtime frame's interest-command send path.
+- The IO actor still owns the `TcpStream`, preserves command/write order, reads
+  the paired response batch after each write, queues decoded update batches, and
+  marks disconnected on read/write/queue failure for the next drain/poll/reconnect
+  path.
+- Added
+  `native_tcp_client_io_actor_queues_command_while_prior_response_is_held`, which
+  deliberately holds command A's response, sends command B, verifies the second
+  `SendOnly` returns in under `100ms`, and then drains both response batches in
+  order.
+- Updated
+  `window_runtime_reuses_remote_session_for_interest_updates` to wait for the
+  async actor/server handoff before teardown. The test now matches the new
+  enqueue-only send contract instead of assuming synchronous socket write on
+  return.
+- Quest RD5 remote chunk-view churn rebaseline passed on Meta Quest 3. The Slice
+  4 send-side stall is gone:
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND` reported
+  `max_total_ms=0.061`, `max_send_ms=0.021`,
+  `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`, and zero updates.
+- The receive/decode work remains producer-side:
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX` reported `poll_total_ms=2.134`,
+  `drain_updates_ms=0.132`, `apply_updates_ms=2.091`,
+  `producer_read_ms=6021.649`, `producer_decode_ms=13.114`,
+  `updates=183`, `snapshot_updates=169`, `section_updates=22`, and
+  `unload_updates=16`.
+- Sample facts: `mode=chunk-view-churn`, `render_distance=5`,
+  `render_compile_workers=2`, `sample_seconds=45.014`, `frames=3133`,
+  `target_hz=72.0`, `budget_ms=13.889`, `conservation_violations=0`.
+- Output:
+  - summary:
+    `/tmp/mclone-quest-openxr-remote-churn-rd5-slice4a-summary.txt`;
+  - logcat:
+    `/tmp/mclone-quest-openxr-remote-churn-rd5-slice4a-logcat.txt`;
+  - server log:
+    `/tmp/mclone-quest-openxr-remote-churn-rd5-slice4a-server.log`.
+
+Validation completed 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client remote -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+pnpm native:android-xr:apk
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-remote-churn-rd5-slice4a-summary.txt \
+  --log /tmp/mclone-quest-openxr-remote-churn-rd5-slice4a-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-remote-churn-rd5-slice4a-server.log \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
 ```
 
 ## Slice 5: Web Shared Ingress Adoption

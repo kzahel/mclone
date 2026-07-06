@@ -647,7 +647,6 @@ mod native_tcp {
     #[derive(Debug)]
     struct NativeClientIoCommand {
         command: ClientCommand,
-        write_result_tx: mpsc::Sender<Result<(), String>>,
     }
 
     impl NativeClientIoSession {
@@ -675,7 +674,6 @@ mod native_tcp {
         }
 
         pub fn send_command_only(&mut self, command: ClientCommand) -> NativeTransportResult<()> {
-            let (write_result_tx, write_result_rx) = mpsc::channel();
             self.diagnostics
                 .outbound_command_depth
                 .fetch_add(1, Ordering::AcqRel);
@@ -685,23 +683,13 @@ mod native_tcp {
                     .fetch_sub(1, Ordering::AcqRel);
                 return Err(self.diagnostics.actor_stopped_error());
             };
-            if command_tx
-                .send(NativeClientIoCommand {
-                    command,
-                    write_result_tx,
-                })
-                .is_err()
-            {
+            if command_tx.send(NativeClientIoCommand { command }).is_err() {
                 self.diagnostics
                     .outbound_command_depth
                     .fetch_sub(1, Ordering::AcqRel);
                 return Err(self.diagnostics.actor_stopped_error());
             }
-            match write_result_rx.recv() {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(message)) => Err(NativeTransportError::ActorStopped { message }),
-                Err(_) => Err(self.diagnostics.actor_stopped_error()),
-            }
+            Ok(())
         }
 
         pub fn drain_update_batch(&mut self) -> NativeTransportResult<NativeServerUpdateBatch> {
@@ -779,11 +767,9 @@ mod native_tcp {
                 .and_then(|()| stream.flush().map_err(NativeTransportError::from))
             {
                 let message = error.to_string();
-                let _ = command_request.write_result_tx.send(Err(message.clone()));
                 diagnostics.mark_disconnected(message);
                 return;
             }
-            let _ = command_request.write_result_tx.send(Ok(()));
 
             response_sequence = response_sequence.saturating_add(1);
             let batch = match read_server_update_batch_instrumented(&mut stream, response_sequence)
@@ -1487,6 +1473,80 @@ mod tests {
 
         let batch = session.drain_update_batch().unwrap();
         assert_eq!(batch.into_updates(), expected_updates);
+        server.join().unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_io_actor_queues_command_while_prior_response_is_held() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let first_command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        let second_command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(1, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        let first_server_command = first_command.clone();
+        let second_server_command = second_command.clone();
+        let first_updates = vec![ServerUpdate::TimeUpdate { day_time: 10 }];
+        let second_updates = vec![ServerUpdate::TimeUpdate { day_time: 20 }];
+        let first_server_updates = first_updates.clone();
+        let second_server_updates = second_updates.clone();
+        let (first_command_read_tx, first_command_read_rx) = std::sync::mpsc::channel();
+        let (release_first_response_tx, release_first_response_rx) = std::sync::mpsc::channel();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
+            assert_eq!(
+                read_client_command_frame(&mut stream).unwrap(),
+                first_server_command
+            );
+            first_command_read_tx.send(()).unwrap();
+            release_first_response_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            write_server_update_batch(&mut stream, &first_server_updates).unwrap();
+            assert_eq!(
+                read_client_command_frame(&mut stream).unwrap(),
+                second_server_command
+            );
+            write_server_update_batch(&mut stream, &second_server_updates).unwrap();
+        });
+
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        session.send_command_only(first_command).unwrap();
+        first_command_read_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+
+        let send_start = std::time::Instant::now();
+        session.send_command_only(second_command).unwrap();
+        assert!(
+            send_start.elapsed() < std::time::Duration::from_millis(100),
+            "actor-backed send waited for the prior held response"
+        );
+        assert_eq!(session.try_drain_update_batch().unwrap(), None);
+        assert_eq!(session.diagnostics().outbound_command_depth, 1);
+
+        release_first_response_tx.send(()).unwrap();
+        let first_batch = session.drain_update_batch().unwrap();
+        assert_eq!(first_batch.response_sequence, 1);
+        assert_eq!(first_batch.into_updates(), first_updates);
+        let second_batch = session.drain_update_batch().unwrap();
+        assert_eq!(second_batch.response_sequence, 2);
+        assert_eq!(second_batch.into_updates(), second_updates);
+
+        let diagnostics = session.diagnostics();
+        assert_eq!(diagnostics.outbound_command_depth, 0);
+        assert_eq!(diagnostics.inbound_response_batches, 0);
+        assert_eq!(diagnostics.response_sequence, 2);
+        assert!(!diagnostics.disconnected);
         server.join().unwrap();
     }
 

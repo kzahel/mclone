@@ -3,10 +3,10 @@
 Status: active; Slice 1 `SendOnly` code, Quest evidence, the follow-up
 interest-command isolation, and the remote response-readiness poll fix landed
 2026-07-06. Tactical 151's Quest rebaseline proved the single-batch remote
-drain/apply stall moved out of runtime `poll()`, but it also found a new
-send-side stall where `SendOnly` waits behind the response-paired IO actor.
-Remote contrast is still blocked by Slice 2 host-mode-honest projection and by
-that command-send decoupling work in tactical
+drain/apply stall moved out of runtime `poll()`, and Slice 4A then removed the
+send-side stall where `SendOnly` waited behind the response-paired IO actor.
+Remote contrast is now blocked by Slice 2 host-mode-honest projection in this
+tactical; web shared-ingress convergence remains tracked in tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
@@ -17,13 +17,15 @@ Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
 probe bug / architecture gap, not a baseline).
 
 Workstream: native Rust shared diagnostics/protocol contract. Goal: make the
-local-integrated vs remote/dedicated comparison real. Today the remote lane
-cannot be interpreted: the remote session path ignores
-`GameplayCommandUpdatePolicy::SendOnly` (a recorded `5.7s` chunk-view command
-stall on the XR frame loop), and the client summary renders server/scheduler
-counters as zeros instead of "these live on the remote host". Until this is
-fixed, every "backpressure moved the cost off the headset" claim is
-unverifiable, and the budget controller tactical
+local-integrated vs remote/dedicated comparison real. The original remote
+transport blockers were fixed in Slice 1 and tactical 151: remote sends now
+honor `GameplayCommandUpdatePolicy::SendOnly`, ready response-batch
+read/decode is producer-side, and command enqueue no longer waits behind a
+previous paired response read. The remaining blocker is report honesty: the
+client summary still renders server/scheduler counters as zeros instead of
+"these live on the remote host". Until that projection is fixed, every
+"backpressure moved the cost off the headset" claim is unverifiable, and the
+budget controller tactical
 ([`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md))
 cannot use host mode as a controller input with a straight face.
 
@@ -404,11 +406,24 @@ Result:
   updates. That means command send can still wait for the IO actor to finish a
   previous response read before it writes/acks the next `SendOnly` command.
 
-Next implementation step before durable contrast rows: finish tactical
-[`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md)
-Slice 4A so remote command enqueue no longer waits behind the response-paired
-IO actor read loop, then do Slice 2's host-mode-honest report projection so
-remote client/server halves stop presenting unavailable counters as zeros.
+2026-07-06 tactical 151 Slice 4A rebaseline:
+
+- Remote command enqueue now returns without waiting behind the previous paired
+  response read. The same Quest RD5 remote churn lane reported
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_INTEREST_COMMAND max_total_ms=0.061`,
+  `max_send_ms=0.021`, `max_drain_updates_ms=0.000`,
+  `max_apply_updates_ms=0.000`, and zero updates.
+- Runtime receive/apply remained in the intended producer/apply shape:
+  `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms=2.134`,
+  `drain_updates_ms=0.132`, `apply_updates_ms=2.091`,
+  `producer_read_ms=6021.649`, and `producer_decode_ms=13.114`.
+- The remote lane is now clean enough to resume Slice 2 host-mode-honest report
+  projection. The remaining accounting problem is presentation of unavailable
+  remote-host counters as zeros, not a known headset-frame transport stall.
+
+Next implementation step before durable contrast rows: do Slice 2's
+host-mode-honest report projection so remote client/server halves stop
+presenting unavailable counters as zeros.
 
 ## Slice 2: Host-Mode-Honest Report Projection
 
@@ -497,8 +512,10 @@ Validation: the capture commands above, plus `git diff --check`.
 
 - Any budget/admission/publication policy change — tactical
   [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md).
-- Remote inbound receive/decode and command-send queue decoupling — tactical
-  [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
+- Web shared-ingress convergence and broader remote transport cleanup —
+  tactical
+  [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md);
+  native remote receive/decode and command-send decoupling completed there.
 - Broader remote transport performance work (server push, batching,
   compression, WebSocket/web convergence) — tactical
   [`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md).
