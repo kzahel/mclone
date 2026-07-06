@@ -130,11 +130,11 @@ pub const XR_UI_FPS_CAP: u32 = 90;
 pub const XR_MENU_PANEL_PIXELS: [u32; 2] = [1024, 576];
 pub const XR_MENU_PANEL_DISTANCE_BLOCKS: f32 = 2.2;
 pub const XR_MENU_PANEL_WIDTH_BLOCKS: f32 = 1.75;
-pub const XR_DIAGNOSTIC_PANEL_PIXELS: [u32; 2] = [384, 216];
+pub const XR_DIAGNOSTIC_PANEL_PIXELS: [u32; 2] = [336, 192];
 pub const XR_DIAGNOSTIC_PANEL_DISTANCE_BLOCKS: f32 = 2.25;
-pub const XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS: f32 = 0.9;
-pub const XR_DIAGNOSTIC_PANEL_RIGHT_OFFSET_BLOCKS: f32 = 0.86;
-pub const XR_DIAGNOSTIC_PANEL_UP_OFFSET_BLOCKS: f32 = 0.16;
+pub const XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS: f32 = 1.2;
+pub const XR_DIAGNOSTIC_PANEL_RIGHT_OFFSET_BLOCKS: f32 = 0.0;
+pub const XR_DIAGNOSTIC_PANEL_UP_OFFSET_BLOCKS: f32 = -0.46;
 pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
@@ -1167,7 +1167,6 @@ where
     menu_pointer_down: bool,
     gameplay_interaction_buttons: XrGameplayInteractionButtons,
     menu_panel_pose: Option<WorldGuiPanel>,
-    diagnostic_panel_pose: Option<WorldGuiPanel>,
     menu_panel_anchor: XrUiPanelAnchor,
     menu_panel_recenter_pending: bool,
     latest_controllers: Vec<XrControllerSnapshot>,
@@ -1361,7 +1360,6 @@ where
             menu_pointer_down: false,
             gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
-            diagnostic_panel_pose: None,
             menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: true,
             latest_controllers: Vec::new(),
@@ -1482,7 +1480,6 @@ where
             menu_pointer_down: false,
             gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
-            diagnostic_panel_pose: None,
             menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: false,
             latest_controllers: Vec::new(),
@@ -2032,7 +2029,7 @@ where
         let uniform_frame = self.next_per_view_uniform_frame();
         let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
         let right_view_slot = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
-        let diagnostic_panel = self.diagnostic_panel_pose_for_render_views(render_views);
+        let diagnostic_panel = xr_diagnostic_panel_from_render_views(render_views);
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
@@ -2708,7 +2705,7 @@ where
         }
         let mut panel_stats = WorldGuiPanelRenderStats::default();
         let mut draw_cache_stats = UiDrawCacheStats::default();
-        let diagnostic_panel = self.diagnostic_panel_pose_for_render_views(render_views);
+        let diagnostic_panel = xr_diagnostic_panel_from_render_views(render_views);
         let (diagnostic_panel_stats, diagnostic_draw_cache) = self
             .diagnostic_panel
             .render_multiview(
@@ -2825,18 +2822,6 @@ where
             panel: panel_stats,
             draw_cache: draw_cache_stats,
         })
-    }
-
-    fn diagnostic_panel_pose_for_render_views(
-        &mut self,
-        render_views: [ChunkRenderView; 2],
-    ) -> WorldGuiPanel {
-        if let Some(panel) = self.diagnostic_panel_pose {
-            return panel;
-        }
-        let panel = xr_diagnostic_panel_from_render_views(render_views);
-        self.diagnostic_panel_pose = Some(panel);
-        panel
     }
 
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
@@ -5873,9 +5858,6 @@ where
                 ClientExperienceSettingEffect::SetCrosshairVisible(_) => {}
                 ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(visible) => {
                     self.diagnostic_panel.set_frame_metrics_visible(visible);
-                    if visible {
-                        self.diagnostic_panel_pose = None;
-                    }
                     log::info!(
                         "XR frame pipeline overlay {}",
                         if visible { "visible" } else { "hidden" }
@@ -8484,7 +8466,7 @@ mod tests {
     }
 
     #[test]
-    fn xr_diagnostic_panel_anchors_off_center_from_hmd() {
+    fn xr_diagnostic_panel_anchors_centered_below_hmd() {
         let left = test_render_view(Vec3::new(-0.03, 64.0, 0.0));
         let right = test_render_view(Vec3::new(0.03, 64.0, 0.0));
 

@@ -154,26 +154,65 @@ fn render_frame_budget_bar(
         );
     }
 
-    let target_label = if target_ms > 0.0 {
-        format!("{target_ms:.1}")
-    } else {
-        "UNCAP".to_owned()
-    };
-    let headroom = summary
-        .latest_headroom_ms
-        .map(|ms| format!("{ms:+.1}"))
-        .unwrap_or_else(|| "N/A".to_owned());
     font.draw_shadow_atlas(
         draw,
-        &format!(
-            "BUDGET APP {:.1} WAIT {:.1} HEAD {} TARGET {}",
-            app_ms, wait_ms, headroom, target_label
+        &frame_budget_status_line(
+            app_ms,
+            wait_ms,
+            summary.latest_headroom_ms,
+            summary.target_period_ms,
         ),
         content.x,
         y,
         if over { APP_OVER } else { TEXT_MAIN },
     );
     y + 22.0
+}
+
+fn frame_budget_status_line(
+    app_ms: f64,
+    wait_ms: f64,
+    headroom_ms: Option<f64>,
+    target_ms: Option<f64>,
+) -> String {
+    let headroom = headroom_ms
+        .map(format_signed_status_ms)
+        .unwrap_or_else(|| format!("{:>5}", "N/A"));
+    let target = target_ms
+        .filter(|ms| ms.is_finite() && *ms > 0.0)
+        .map(format_status_ms)
+        .unwrap_or_else(|| format!("{:>4}", "UNC"));
+    format!(
+        "BUDGET APP {} WAIT {} HEAD {} TGT {}",
+        format_status_ms(app_ms),
+        format_status_ms(wait_ms),
+        headroom,
+        target
+    )
+}
+
+fn format_status_ms(ms: f64) -> String {
+    let ms = if ms.is_finite() { ms.max(0.0) } else { 0.0 };
+    if ms < 100.0 {
+        format!("{ms:>4.1}")
+    } else if ms < 1000.0 {
+        format!("{ms:>4.0}")
+    } else {
+        "999+".to_owned()
+    }
+}
+
+fn format_signed_status_ms(ms: f64) -> String {
+    let ms = if ms.is_finite() { ms } else { 0.0 };
+    if ms.abs() < 100.0 {
+        format!("{ms:+5.1}")
+    } else if ms.abs() < 1000.0 {
+        format!("{ms:+5.0}")
+    } else if ms.is_sign_negative() {
+        " -999".to_owned()
+    } else {
+        " +999".to_owned()
+    }
 }
 
 fn render_stage_waterfall(
@@ -412,6 +451,18 @@ mod tests {
             "unexpected overlay command count: {}",
             draw.commands().len()
         );
+    }
+
+    #[test]
+    fn budget_status_line_keeps_stable_width_for_changing_numbers() {
+        let one_digit = frame_budget_status_line(9.8, 0.9, Some(9.8), Some(16.0));
+        let two_digit = frame_budget_status_line(10.0, 11.2, Some(-10.0), Some(120.0));
+        let no_budget = frame_budget_status_line(3.0, 0.0, None, None);
+
+        assert_eq!(one_digit.chars().count(), two_digit.chars().count());
+        assert_eq!(one_digit.chars().count(), no_budget.chars().count());
+        assert_eq!(one_digit, "BUDGET APP  9.8 WAIT  0.9 HEAD  +9.8 TGT 16.0");
+        assert!(Font::default().width(&one_digit) <= PANEL_WIDTH - PANEL_MARGIN * 2.0);
     }
 
     #[test]

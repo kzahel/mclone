@@ -208,7 +208,10 @@ Slice 1 implementation record:
   the scene.
 - Rendered the passive frame metrics panel in both per-eye and full-frame
   multiview paths using a single stereo-derived off-center panel pose that is
-  captured on toggle-on instead of recomputed from the headset every frame.
+  recomputed from the headset views so the panel stays sticky relative to the
+  headset instead of anchoring in world space.
+- Follow-up headset tuning moved the sticky panel to a centered position below
+  the eye centerline and increased its physical size for readability.
 - Wired the shared `Frame Metrics` menu action in XR:
   `SetFramePipelineOverlayVisible(visible)` now changes XR diagnostic panel
   visibility, `GameUiRenderState` reflects the bit, and the XR profile marks
