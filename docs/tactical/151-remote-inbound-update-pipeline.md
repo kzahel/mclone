@@ -131,6 +131,35 @@ No native OS thread is required for the first web slice. The shared contract is
 "one `ClientConnection` boundary with an ordered inbound queue plus budgeted
 decode/apply accounting", not "all platforms spawn the same kind of thread".
 
+## Threading And Drain Contract
+
+This tactical should move Mclone closer to the reference shape at the boundary,
+not by copying Netty or Java's exact task scheduler:
+
+- Java integrated singleplayer uses `Connection` over Netty
+  `LocalChannel` / `LocalServerChannel`; it is an in-process memory transport,
+  not loopback TCP and not a separate client/server API.
+- Java multiplayer uses socket channels and Netty worker groups.
+- Java packet decode/object construction happens on the channel pipeline, then
+  `PacketUtils.ensureRunningOnSameThread(...)` hands packet handling to the
+  client/server thread when needed.
+- Java's client drains all queued packet-handler tasks each frame in receive
+  order. Mclone intentionally diverges with `RuntimeUpdatePumpBudget` for Quest
+  frame pacing; `Unlimited` remains the parity escape hatch for startup,
+  idle waits, and tests.
+- Mclone local integrated may remain runner-thread plus Rust channels
+  internally. Native remote should use a blocking TCP IO actor. Web should use
+  browser callbacks or workers. Those are transport implementation details
+  behind one `ClientConnection` contract.
+- The shared runtime should stay frame-driven and synchronous at the boundary.
+  Do not make the runtime async just because a web or TCP implementation is
+  async/evented internally.
+
+Non-goal for Slice 1: do not build a Netty clone, a literal Java packet-task
+queue, or a second local-vs-remote runtime interface. The reference requirement
+is one connection-shaped command/update surface with ordered producer-side
+decode and client-runtime-side apply.
+
 ## Slice Rules
 
 - One slice per session.

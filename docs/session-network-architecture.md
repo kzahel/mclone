@@ -211,6 +211,14 @@ interfaces for local integrated and remote dedicated play. Platform adapters
 may be async internally; the shared runtime should not become async just
 because one backend is.
 
+This is a boundary match, not a Netty clone. Java integrated singleplayer uses
+`LocalChannel` / `LocalServerChannel` and drains all queued packet handlers on
+the client thread each frame. Mclone may keep local integrated as a runner
+thread plus Rust channels, native remote as a blocking TCP IO actor, and web as
+callbacks/workers, as long as those implementations converge on this ordered
+`ClientConnection` command/update surface. The deliberate divergence remains
+the budgeted drain described below.
+
 ## Parity And Divergence
 
 The reference-porting policy requires recording where we follow the Java shape
