@@ -47,10 +47,10 @@ mod android {
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_diagnostics::{
-        CriticalPathLabel, FrameAccountingConfig, FrameAccumulator, FrameObservation,
-        FramePipelineReport, FrameSummaryReport, PeerThreadActivityReport, PeerThreadId,
-        PeerThreadPanelReport, PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport,
-        StageId, StageSpan, percentile_sorted_ms,
+        CriticalPathLabel, DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator,
+        FrameObservation, FramePipelineReport, FrameSummaryReport, PeerThreadActivityReport,
+        PeerThreadId, PeerThreadPanelReport, PercentileMethod, QueueAgeReport, QueueAgeTracker,
+        QueueId, QueuePanelReport, StageId, StageSpan, percentile_sorted_ms,
     };
     use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
     use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -5224,20 +5224,33 @@ mod android {
                 now_ms,
             );
 
-            let publication_depth = upload
-                .server_pending_publications
-                .saturating_add(upload.poll_scheduler_pending_worldgen_publication_chunks)
-                .saturating_add(upload.poll_scheduler_pending_light_publications);
-            host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
+            if !upload.host_mode.server_owned_lanes_are_remote() {
+                let publication_depth = upload
+                    .server_pending_publications
+                    .saturating_add(upload.poll_scheduler_pending_worldgen_publication_chunks)
+                    .saturating_add(upload.poll_scheduler_pending_light_publications);
+                host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
+            }
             render_compile_jobs
                 .reconcile_depth(usize_to_u64(upload.pending_compile_jobs_after), now_ms);
         }
+
+        let latest_host_mode = details
+            .iter()
+            .rev()
+            .find_map(|detail| detail.summary.map(|summary| summary.upload.host_mode))
+            .unwrap_or_default();
+        let host_publication = if latest_host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublication)
+        } else {
+            host_publication.report(now_ms)
+        };
 
         QueuePanelReport::new(vec![
             inbound_updates.report(now_ms),
             completed_results.report(now_ms),
             upload_work.report(now_ms),
-            host_publication.report(now_ms),
+            host_publication,
             render_compile_jobs.report(now_ms),
         ])
     }
@@ -5289,13 +5302,13 @@ mod android {
             .filter_map(|detail| detail.summary)
             .map(|summary| summary.upload.completed_compile_section_count)
             .sum::<usize>();
+        let server_lanes_remote = latest_upload.host_mode.server_owned_lanes_are_remote();
 
         PeerThreadPanelReport::new(vec![
-            PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
-                .with_pending_jobs(usize_to_u64(max_server_pending_jobs))
-                .with_busy_idle_ms(Some(server_busy_ms), None),
+            server_runner_peer_report(server_lanes_remote, max_server_pending_jobs, server_busy_ms),
             worker_metrics_peer_report(
                 PeerThreadId::Worldgen,
+                server_lanes_remote,
                 usize_to_u64(latest_upload.worldgen_job_frame_metrics.request_frames),
                 usize_to_u64(latest_upload.worldgen_job_frame_metrics.response_frames),
                 usize_to_u64(latest_upload.worldgen_job_frame_metrics.request_bytes),
@@ -5308,6 +5321,7 @@ mod android {
             ),
             worker_metrics_peer_report(
                 PeerThreadId::LightStatus,
+                server_lanes_remote,
                 usize_to_u64(latest_upload.light_status_job_frame_metrics.request_frames),
                 usize_to_u64(latest_upload.light_status_job_frame_metrics.response_frames),
                 usize_to_u64(latest_upload.light_status_job_frame_metrics.request_bytes),
@@ -5335,6 +5349,7 @@ mod android {
 
     fn worker_metrics_peer_report(
         lane: PeerThreadId,
+        server_lanes_remote: bool,
         request_frames: u64,
         response_frames: u64,
         request_bytes: u64,
@@ -5345,7 +5360,7 @@ mod android {
         max_request_us: u128,
         pending_jobs: usize,
     ) -> PeerThreadActivityReport {
-        PeerThreadActivityReport::new(lane)
+        let report = PeerThreadActivityReport::new(lane)
             .with_pending_jobs(usize_to_u64(pending_jobs))
             .with_frames(request_frames, response_frames)
             .with_bytes(request_bytes, response_bytes)
@@ -5354,7 +5369,32 @@ mod android {
                 (last_request_us > 0).then_some(micros_to_ms(last_request_us)),
                 micros_to_ms(total_request_us),
                 micros_to_ms(max_request_us),
-            )
+            );
+        if server_lanes_remote {
+            report.with_availability(DiagnosticLaneAvailability::RemoteHost)
+        } else {
+            report
+        }
+    }
+
+    fn remote_host_queue_report(queue: QueueId) -> QueueAgeReport {
+        QueueAgeReport::snapshot(queue, 0, 0, 0, None, 0.0, 0)
+            .with_availability(DiagnosticLaneAvailability::RemoteHost)
+    }
+
+    fn server_runner_peer_report(
+        server_lanes_remote: bool,
+        pending_jobs: usize,
+        busy_ms: f64,
+    ) -> PeerThreadActivityReport {
+        let report = PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
+            .with_pending_jobs(usize_to_u64(pending_jobs))
+            .with_busy_idle_ms(Some(busy_ms), None);
+        if server_lanes_remote {
+            report.with_availability(DiagnosticLaneAvailability::RemoteHost)
+        } else {
+            report
+        }
     }
 
     fn log_android_xr_frame_pipeline_report(report: &FramePipelineReport) {
@@ -5368,19 +5408,20 @@ mod android {
         );
         for queue in &report.queue_panel.queues {
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_QUEUE queue={} enqueued={} dequeued={} depth={} oldest_age_ms={} max_oldest_age_ms={:.3} conservation_violations={}",
+                "MCLONE_ANDROID_XR_PERF_QUEUE queue={} enqueued={} dequeued={} depth={} oldest_age_ms={} max_oldest_age_ms={:.3} conservation_violations={} availability={}",
                 queue_id_label(&queue.queue),
                 queue.enqueued_total,
                 queue.dequeued_total,
                 queue.depth,
                 format_optional_f64(queue.oldest_age_ms),
                 queue.max_oldest_age_ms,
-                queue.conservation_violations
+                queue.conservation_violations,
+                queue.availability.label()
             );
         }
         for peer in &report.peer_thread_panel.peers {
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_PEER lane={} active={} pending_jobs={} request_frames={} response_frames={} request_bytes={} response_bytes={} max_pending_frames={} busy_ms={} idle_ms={} last_request_ms={} total_request_ms={:.3} max_request_ms={:.3} conservation_violations={}",
+                "MCLONE_ANDROID_XR_PERF_PEER lane={} active={} pending_jobs={} request_frames={} response_frames={} request_bytes={} response_bytes={} max_pending_frames={} busy_ms={} idle_ms={} last_request_ms={} total_request_ms={:.3} max_request_ms={:.3} conservation_violations={} availability={}",
                 peer_thread_id_label(&peer.lane),
                 peer.active,
                 peer.pending_jobs,
@@ -5394,7 +5435,8 @@ mod android {
                 format_optional_f64(peer.last_request_ms),
                 peer.total_request_ms,
                 peer.max_request_ms,
-                peer.conservation_violations
+                peer.conservation_violations,
+                peer.availability.label()
             );
         }
         for span in &report.stage_spans {
@@ -6083,6 +6125,11 @@ mod android {
         b: mclone_xr_scene::XrTerrainUploadSummary,
     ) -> mclone_xr_scene::XrTerrainUploadSummary {
         mclone_xr_scene::XrTerrainUploadSummary {
+            host_mode: if b.host_mode.server_owned_lanes_are_remote() {
+                b.host_mode
+            } else {
+                a.host_mode
+            },
             poll_changed: a.poll_changed || b.poll_changed,
             poll_total_ms: a.poll_total_ms.max(b.poll_total_ms),
             poll_drain_updates_ms: a.poll_drain_updates_ms.max(b.poll_drain_updates_ms),

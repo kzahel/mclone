@@ -3,8 +3,9 @@ use std::sync::Arc;
 use mclone_app_runtime::frame_render::RenderStreamStats;
 use mclone_app_runtime::{RenderSectionSyncTiming, SingleViewRuntimeStats};
 use mclone_diagnostics::{
-    FrameAccountingConfig, FrameAccumulator, FrameObservation, FramePipelineReport,
-    QueueAgeTracker, QueueId, QueuePanelReport, StageId, StageSpan,
+    DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator, FrameObservation,
+    FramePipelineReport, QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
+    StageSpan,
 };
 
 #[derive(Clone, Debug)]
@@ -150,10 +151,16 @@ impl DesktopFrameQueueTrackers {
             usize_to_u64(runtime.map_or(0, |stats| stats.server_update_queue_depth)),
             now_ms,
         );
-        self.host_publication.reconcile_depth(
-            usize_to_u64(runtime.map_or(0, |stats| stats.pending_publications)),
-            now_ms,
-        );
+        let host_publication_remote =
+            runtime.is_some_and(|stats| stats.host_mode.server_owned_lanes_are_remote());
+        if host_publication_remote {
+            self.host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+        } else {
+            self.host_publication.reconcile_depth(
+                usize_to_u64(runtime.map_or(0, |stats| stats.pending_publications)),
+                now_ms,
+            );
+        }
         self.render_compile_jobs.reconcile_depth(
             usize_to_u64(runtime.map_or(render.last_pending_compile_jobs, |stats| {
                 stats.pending_render_compile_jobs
@@ -168,13 +175,22 @@ impl DesktopFrameQueueTrackers {
             .reconcile_depth(usize_to_u64(render.last_deferred_section_count), now_ms);
 
         QueuePanelReport::new(vec![
-            self.host_publication.report(now_ms),
+            if host_publication_remote {
+                remote_host_queue_report(QueueId::HostPublication)
+            } else {
+                self.host_publication.report(now_ms)
+            },
             self.inbound_updates.report(now_ms),
             self.render_compile_jobs.report(now_ms),
             self.completed_results.report(now_ms),
             self.upload_work.report(now_ms),
         ])
     }
+}
+
+fn remote_host_queue_report(queue: QueueId) -> QueueAgeReport {
+    QueueAgeReport::snapshot(queue, 0, 0, 0, None, 0.0, 0)
+        .with_availability(DiagnosticLaneAvailability::RemoteHost)
 }
 
 fn render_section_sync_stage_spans(
@@ -272,5 +288,92 @@ mod tests {
                 .iter()
                 .any(|queue| queue.queue == QueueId::UploadWork && queue.depth == 3)
         );
+    }
+
+    #[test]
+    fn desktop_accounting_marks_remote_host_publication_queue() {
+        let mut accounting = DesktopFramePipelineAccounting::default();
+        accounting.begin_frame(16.0, Some(16.0));
+        accounting.finish_frame(
+            4.0,
+            0.25,
+            0.25,
+            0.5,
+            Some(runtime_stats(
+                mclone_app_runtime::host_mode::SingleViewHostMode::RemoteDedicated,
+            )),
+            RenderStreamStats::default(),
+        );
+
+        let (report, _) = accounting.latest_report().expect("report");
+        let host_publication = report
+            .queue_panel
+            .queues
+            .iter()
+            .find(|queue| queue.queue == QueueId::HostPublication)
+            .expect("host publication queue");
+        assert_eq!(
+            host_publication.availability,
+            DiagnosticLaneAvailability::RemoteHost
+        );
+        assert_eq!(host_publication.depth, 0);
+
+        let inbound_updates = report
+            .queue_panel
+            .queues
+            .iter()
+            .find(|queue| queue.queue == QueueId::InboundUpdates)
+            .expect("inbound update queue");
+        assert_eq!(
+            inbound_updates.availability,
+            DiagnosticLaneAvailability::Local
+        );
+        assert_eq!(inbound_updates.depth, 2);
+    }
+
+    fn runtime_stats(
+        host_mode: mclone_app_runtime::host_mode::SingleViewHostMode,
+    ) -> SingleViewRuntimeStats {
+        SingleViewRuntimeStats {
+            host_mode,
+            server_runner_kind: None,
+            server_command_queue_depth: 0,
+            server_update_queue_depth: 2,
+            server_update_queue_bytes: 0,
+            interest_center: mclone_core::ChunkPos::new(0, 0),
+            render_distance: 2,
+            chunk_tracking_radius: 3,
+            loaded_chunks: 0,
+            pending_jobs: 0,
+            pending_publications: 7,
+            pending_render_chunks: 0,
+            pending_render_compile_jobs: 0,
+            inflight_render_sections: 0,
+            client_visible_chunks: 0,
+            active_ticket_chunks: 0,
+            loading_progress: None,
+            tracked_players: 0,
+            player_visible_chunks: 0,
+            aggregate_player_ticket_chunks: 0,
+            player_outbound_queue_depth: 0,
+            max_player_visible_chunks: 0,
+            max_player_outbound_queue_depth: 0,
+            pending_unload_chunks: 0,
+            block_ticking_chunks: 0,
+            entity_ticking_chunks: 0,
+            last_tick: 0,
+            last_simulation_tick: 0,
+            last_tick_unloads_processed: 0,
+            last_simulation_block_tick_chunks: 0,
+            last_simulation_entity_tick_chunks: 0,
+            last_simulation_scheduler_tick_ms: 0.0,
+            last_simulation_block_tick_ms: 0.0,
+            last_simulation_fluid_tick_ms: 0.0,
+            last_simulation_entity_tick_ms: 0.0,
+            last_simulation_fluid_ticks_executed: 0,
+            last_simulation_deferred_fluid_ticks: 0,
+            last_simulation_fluid_mutated_blocks: 0,
+            scheduled_fluid_ticks: 0,
+        }
     }
 }

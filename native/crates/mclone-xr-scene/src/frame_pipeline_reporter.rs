@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
 use mclone_diagnostics::{
-    FrameAccountingConfig, FrameAccumulator, FrameObservation, FramePipelineReport,
-    PeerThreadActivityReport, PeerThreadId, PeerThreadPanelReport, PercentileMethod,
-    QueueAgeTracker, QueueId, QueuePanelReport, StageId, StageSpan,
+    DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator, FrameObservation,
+    FramePipelineReport, PeerThreadActivityReport, PeerThreadId, PeerThreadPanelReport,
+    PercentileMethod, QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
+    StageSpan,
 };
 
-use crate::{XrTerrainFrameSummary, XrTerrainFrameTiming, XrTerrainUploadSummary};
+use crate::{
+    XrTerrainFrameSummary, XrTerrainFrameTiming, XrTerrainHostMode, XrTerrainUploadSummary,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XrFramePipelineHostTiming {
@@ -182,21 +185,34 @@ impl XrFramePipelineQueueTrackers {
                 now_ms,
             );
 
-            let publication_depth = upload
-                .server_pending_publications
-                .saturating_add(upload.poll_scheduler_pending_worldgen_publication_chunks)
-                .saturating_add(upload.poll_scheduler_pending_light_publications);
-            self.host_publication
-                .reconcile_depth(usize_to_u64(publication_depth), now_ms);
+            if upload.host_mode.server_owned_lanes_are_remote() {
+                self.host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+            } else {
+                let publication_depth = upload
+                    .server_pending_publications
+                    .saturating_add(upload.poll_scheduler_pending_worldgen_publication_chunks)
+                    .saturating_add(upload.poll_scheduler_pending_light_publications);
+                self.host_publication
+                    .reconcile_depth(usize_to_u64(publication_depth), now_ms);
+            }
             self.render_compile_jobs
                 .reconcile_depth(usize_to_u64(upload.pending_compile_jobs_after), now_ms);
         }
+
+        let host_mode = upload.map_or(XrTerrainHostMode::LocalIntegrated, |upload| {
+            upload.host_mode
+        });
+        let host_publication = if host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublication)
+        } else {
+            self.host_publication.report(now_ms)
+        };
 
         QueuePanelReport::new(vec![
             self.inbound_updates.report(now_ms),
             self.completed_results.report(now_ms),
             self.upload_work.report(now_ms),
-            self.host_publication.report(now_ms),
+            host_publication,
             self.render_compile_jobs.report(now_ms),
         ])
     }
@@ -211,13 +227,17 @@ fn xr_frame_pipeline_peer_thread_panel(
     let max_worldgen_pending_jobs = upload.poll_scheduler_worldgen_mailbox_pending_jobs;
     let max_light_pending_jobs = upload.poll_scheduler_light_mailbox_pending_statuses;
     let max_render_compile_pending_jobs = upload.pending_compile_jobs_after;
+    let server_lanes_remote = upload.host_mode.server_owned_lanes_are_remote();
 
     PeerThreadPanelReport::new(vec![
-        PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
-            .with_pending_jobs(usize_to_u64(upload.server_pending_jobs))
-            .with_busy_idle_ms(Some(upload.poll_server_reported_total_ms), None),
+        server_runner_peer_report(
+            server_lanes_remote,
+            upload.server_pending_jobs,
+            upload.poll_server_reported_total_ms,
+        ),
         worker_metrics_peer_report(
             PeerThreadId::Worldgen,
+            server_lanes_remote,
             usize_to_u64(upload.worldgen_job_frame_metrics.request_frames),
             usize_to_u64(upload.worldgen_job_frame_metrics.response_frames),
             usize_to_u64(upload.worldgen_job_frame_metrics.request_bytes),
@@ -230,6 +250,7 @@ fn xr_frame_pipeline_peer_thread_panel(
         ),
         worker_metrics_peer_report(
             PeerThreadId::LightStatus,
+            server_lanes_remote,
             usize_to_u64(upload.light_status_job_frame_metrics.request_frames),
             usize_to_u64(upload.light_status_job_frame_metrics.response_frames),
             usize_to_u64(upload.light_status_job_frame_metrics.request_bytes),
@@ -249,8 +270,29 @@ fn xr_frame_pipeline_peer_thread_panel(
     ])
 }
 
+fn remote_host_queue_report(queue: QueueId) -> QueueAgeReport {
+    QueueAgeReport::snapshot(queue, 0, 0, 0, None, 0.0, 0)
+        .with_availability(DiagnosticLaneAvailability::RemoteHost)
+}
+
+fn server_runner_peer_report(
+    server_lanes_remote: bool,
+    pending_jobs: usize,
+    busy_ms: f64,
+) -> PeerThreadActivityReport {
+    let report = PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
+        .with_pending_jobs(usize_to_u64(pending_jobs))
+        .with_busy_idle_ms(Some(busy_ms), None);
+    if server_lanes_remote {
+        report.with_availability(DiagnosticLaneAvailability::RemoteHost)
+    } else {
+        report
+    }
+}
+
 fn worker_metrics_peer_report(
     lane: PeerThreadId,
+    server_lanes_remote: bool,
     request_frames: u64,
     response_frames: u64,
     request_bytes: u64,
@@ -261,7 +303,7 @@ fn worker_metrics_peer_report(
     max_request_us: u128,
     pending_jobs: usize,
 ) -> PeerThreadActivityReport {
-    PeerThreadActivityReport::new(lane)
+    let report = PeerThreadActivityReport::new(lane)
         .with_pending_jobs(usize_to_u64(pending_jobs))
         .with_frames(request_frames, response_frames)
         .with_bytes(request_bytes, response_bytes)
@@ -270,7 +312,12 @@ fn worker_metrics_peer_report(
             (last_request_us > 0).then_some(micros_to_ms(last_request_us)),
             micros_to_ms(total_request_us),
             micros_to_ms(max_request_us),
-        )
+        );
+    if server_lanes_remote {
+        report.with_availability(DiagnosticLaneAvailability::RemoteHost)
+    } else {
+        report
+    }
 }
 
 fn frame_accounting_config(target_hz: Option<f64>) -> FrameAccountingConfig {
@@ -329,6 +376,91 @@ mod tests {
         assert!(report.stage_spans.iter().any(|span| {
             span.stage == StageId::GpuExecutionPresentationWait && span.elapsed_ms == 2.0
         }));
+    }
+
+    #[test]
+    fn reporter_marks_remote_host_lanes_as_unavailable_locally() {
+        let mut reporter = XrFramePipelineReporter::new(Some(72.0));
+        let (report, _revision) = reporter.record_frame(
+            XrFramePipelineHostTiming {
+                frame_wall_ms: 13.0,
+                wait_frame_ms: 4.0,
+                controller_poll_ms: 0.25,
+                rendered: true,
+                thread_cpu_ms: Some(7.0),
+            },
+            Some(XrTerrainFrameSummary {
+                rendered_frames: 1,
+                section_count: 1,
+                drawn_section_count: 1,
+                index_count: 6,
+                drawn_index_count: 6,
+                gui_command_count: 0,
+                ui_panel: Default::default(),
+                ui_draw_cache: Default::default(),
+                ui_active: false,
+                local_startup_active: false,
+                actor_count: 0,
+                drawn_actor_count: 0,
+                head_comfort: Default::default(),
+                timing: XrTerrainFrameTiming::default(),
+                upload: XrTerrainUploadSummary {
+                    host_mode: XrTerrainHostMode::RemoteDedicated,
+                    server_update_queue_depth: 3,
+                    pending_compile_jobs_after: 2,
+                    ..XrTerrainUploadSummary::default()
+                },
+            }),
+        );
+
+        let host_publication = report
+            .queue_panel
+            .queues
+            .iter()
+            .find(|queue| queue.queue == QueueId::HostPublication)
+            .expect("host publication queue");
+        assert_eq!(
+            host_publication.availability,
+            DiagnosticLaneAvailability::RemoteHost
+        );
+        assert_eq!(host_publication.depth, 0);
+        let inbound_updates = report
+            .queue_panel
+            .queues
+            .iter()
+            .find(|queue| queue.queue == QueueId::InboundUpdates)
+            .expect("inbound update queue");
+        assert_eq!(
+            inbound_updates.availability,
+            DiagnosticLaneAvailability::Local
+        );
+        assert_eq!(inbound_updates.depth, 3);
+
+        for lane in [
+            PeerThreadId::ServerRunner,
+            PeerThreadId::Worldgen,
+            PeerThreadId::LightStatus,
+        ] {
+            let peer = report
+                .peer_thread_panel
+                .peers
+                .iter()
+                .find(|peer| peer.lane == lane)
+                .expect("server-owned peer lane");
+            assert_eq!(peer.availability, DiagnosticLaneAvailability::RemoteHost);
+            assert!(!peer.active);
+        }
+        let render_workers = report
+            .peer_thread_panel
+            .peers
+            .iter()
+            .find(|peer| peer.lane == PeerThreadId::RenderCompileWorkers)
+            .expect("render workers lane");
+        assert_eq!(
+            render_workers.availability,
+            DiagnosticLaneAvailability::Local
+        );
+        assert!(render_workers.active);
     }
 
     #[test]

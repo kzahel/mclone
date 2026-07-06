@@ -11,10 +11,24 @@ use crate::{
     chunk_tracking_radius_for_render_distance, chunk_view,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SingleViewHostMode {
+    #[default]
     LocalIntegrated,
     RemoteDedicated,
+}
+
+impl SingleViewHostMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LocalIntegrated => "local-integrated",
+            Self::RemoteDedicated => "remote-dedicated",
+        }
+    }
+
+    pub const fn server_owned_lanes_are_remote(self) -> bool {
+        matches!(self, Self::RemoteDedicated)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

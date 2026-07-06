@@ -1,12 +1,14 @@
 # 149: Remote/Dedicated Contrast Accounting Honesty
 
-Status: active; Slice 1 `SendOnly` code, Quest evidence, the follow-up
-interest-command isolation, and the remote response-readiness poll fix landed
-2026-07-06. Tactical 151's Quest rebaseline proved the single-batch remote
-drain/apply stall moved out of runtime `poll()`, and Slice 4A then removed the
-send-side stall where `SendOnly` waited behind the response-paired IO actor.
-Remote contrast is now blocked by Slice 2 host-mode-honest projection in this
-tactical; web shared-ingress convergence remains tracked in tactical
+Status: active; Slice 2 host-mode-honest report projection landed 2026-07-06.
+Slice 1 `SendOnly` code, Quest evidence, the follow-up interest-command
+isolation, and the remote response-readiness poll fix also landed 2026-07-06.
+Tactical 151's Quest rebaseline proved the single-batch remote drain/apply
+stall moved out of runtime `poll()`, and Slice 4A then removed the send-side
+stall where `SendOnly` waited behind the response-paired IO actor. Remote
+client/server reports now identify remote-host-owned lanes explicitly; durable
+local-vs-remote contrast rows are Slice 3. Web shared-ingress convergence
+remains tracked in tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
@@ -473,6 +475,123 @@ pnpm native:accounting:smoke
 pnpm native:startup-streaming:smoke
 git diff --check
 ```
+
+2026-07-06 Slice 2 implementation status:
+
+- Added shared `DiagnosticLaneAvailability` to `mclone-diagnostics`
+  (`local`, `remote-host`, `unsupported`) and bumped frame-pipeline schema to
+  v6. Queue and peer reports serialize availability and default missing older
+  JSON to `local`.
+- Propagated host mode through `SingleViewRuntimeStats` and XR upload
+  summaries. Desktop, XR scene, and Android XR frame-pipeline reports now mark
+  `host-publication` as `remote-host` for remote-dedicated sessions while
+  keeping inbound/update, upload, render-compile, and completed-result queues
+  local.
+- Remote Android XR peer markers now mark `server-runner`, `worldgen`, and
+  `light-status` as `remote-host`; render-compile workers remain local. Existing
+  `MCLONE_ANDROID_XR_PERF_QUEUE` and `MCLONE_ANDROID_XR_PERF_PEER` marker keys
+  are preserved with an additive `availability=` field.
+- The flat debug overlay renders remote-owned queues as `REMOTE HOST` instead
+  of visually presenting local zero-depth work.
+- The dedicated server emits `MCLONE_DEDICATED_SERVER_SUMMARY` lines with
+  `phase=active` on the first and every 16th successful command, plus
+  `phase=final` on disconnect. The summary carries cumulative tick,
+  scheduler, publication, pending, update-batch, and active-session fields, so
+  validator runs that terminate the server process still leave server-side
+  evidence.
+- Web/WASM compiled against the shared schema and `mclone-ui` overlay changes.
+  The browser client does not yet consume the native frame-pipeline report sink;
+  the remaining shared-ingress/runtime convergence stays with tactical 151.
+
+Validation run on 2026-07-06:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-diagnostics
+cargo test --manifest-path native/Cargo.toml -p mclone-ui frame_pipeline_overlay -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene frame_pipeline_reporter -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client frame_pipeline_accounting -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-dedicated-server
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-dedicated-server
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:accounting:smoke
+pnpm native:startup-streaming:smoke
+pnpm native:remote:smoke
+```
+
+Results: all passed. Android XR check still reports the pre-existing
+`ANDROID_REMOTE_ADDR_NONE_SENTINEL` /
+`normalize_android_legacy_remote_addr` dead-code warnings. Web wasm check still
+reports the pre-existing `PlayerChunkTrackingPolicy::with_unload_hysteresis_chunks`
+dead-code warning. `pnpm native:remote:smoke` saved refreshed screenshots to
+`/tmp/mclone-native-remote-client-smoke.png` and
+`/tmp/mclone-native-remote-client-smoke-observer.png`; both rendered terrain,
+HUD, and remote-player state correctly.
+
+Tactical 144 tripwire grep results:
+
+- accounting math outside shared owner: one existing worldgen terrain-test
+  helper (`native/crates/mclone-worldgen/src/levelgen/tests/terrain.rs`);
+- diagnostics core clock reads outside `clock.rs`: zero;
+- GPU timestamp sites: one shared render site
+  (`native/crates/mclone-render/src/gpu_timestamps.rs`).
+
+Quest remote RD5 host-mode-honesty evidence captured 2026-07-06 on Meta Quest 3
+`2G0YC1ZF93041Z`:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-host-mode-honesty-summary-active-20260706.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-host-mode-honesty-logcat-active-20260706.txt \
+  --server-log /tmp/mclone-quest-openxr-churn-rd5-host-mode-honesty-server-active-20260706.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Result:
+
+- Client report marker: `MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE schema_version=6
+  frames=3126 queues=5 peers=4 stages=12`.
+- Remote-owned lanes are explicit: `queue=host-publication ...
+  availability=remote-host`; `lane=server-runner`, `lane=worldgen`, and
+  `lane=light-status` all report `availability=remote-host`; inbound,
+  upload-work, completed-result, render-compile queue/peer lanes remain
+  `availability=local`.
+- Remote client network/apply counters are populated:
+  `MCLONE_ANDROID_XR_PERF_UPLOAD_MAX server_update_queue_depth=387
+  server_update_queue_bytes=9724619 server_update_oldest_applied_age_ms=14.140`
+  and `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms=2.176
+  drain_updates_ms=0.065 producer_read_ms=5765.921
+  producer_decode_ms=12.250 apply_updates_ms=2.154 client_apply_ms=2.067`.
+- Dedicated server log includes active server-side summaries:
+  `MCLONE_DEDICATED_SERVER_SUMMARY phase=active connection=#1
+  connection_commands=16 commands=16 update_batches=16 updates_sent=4217
+  tick_total_ms=122.124 scheduler_tick_ms=102.568
+  scheduler_publish_completed_ms=0.008 active_sessions=1`.
+
+Next step: Slice 3 capture rows. Use this schema/projection evidence to record
+durable Quest and desktop local-vs-remote contrast rows in the performance
+record docs, rather than changing accounting code again.
 
 ## Slice 3: Capture The Contrast Rows
 

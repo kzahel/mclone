@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
+use crate::DiagnosticLaneAvailability;
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum QueueId {
@@ -17,6 +19,8 @@ pub enum QueueId {
 #[serde(rename_all = "camelCase")]
 pub struct QueueAgeReport {
     pub queue: QueueId,
+    #[serde(default)]
+    pub availability: DiagnosticLaneAvailability,
     pub enqueued_total: u64,
     pub dequeued_total: u64,
     pub depth: u64,
@@ -115,6 +119,7 @@ impl QueueAgeTracker {
         }
         QueueAgeReport {
             queue: self.queue.clone(),
+            availability: DiagnosticLaneAvailability::Local,
             enqueued_total: self.enqueued_total,
             dequeued_total: self.dequeued_total,
             depth: actual_depth,
@@ -137,6 +142,7 @@ impl QueueAgeReport {
     ) -> Self {
         Self {
             queue,
+            availability: DiagnosticLaneAvailability::Local,
             enqueued_total,
             dequeued_total,
             depth,
@@ -144,6 +150,11 @@ impl QueueAgeReport {
             max_oldest_age_ms: sanitize_ms(max_oldest_age_ms),
             conservation_violations,
         }
+    }
+
+    pub fn with_availability(mut self, availability: DiagnosticLaneAvailability) -> Self {
+        self.availability = availability;
+        self
     }
 }
 
@@ -197,5 +208,32 @@ mod tests {
         assert_eq!(report.dequeued_total, 2);
         assert_eq!(report.depth, 1);
         assert_eq!(report.oldest_age_ms, Some(15.0));
+    }
+
+    #[test]
+    fn queue_report_can_mark_remote_host_ownership() {
+        let report = QueueAgeReport::snapshot(QueueId::HostPublication, 0, 0, 0, None, 0.0, 0)
+            .with_availability(DiagnosticLaneAvailability::RemoteHost);
+
+        assert_eq!(report.availability, DiagnosticLaneAvailability::RemoteHost);
+        assert_eq!(report.depth, 0);
+    }
+
+    #[test]
+    fn queue_report_deserializes_missing_availability_as_local() {
+        let report: QueueAgeReport = serde_json::from_str(
+            r#"{
+                "queue": "host-publication",
+                "enqueuedTotal": 0,
+                "dequeuedTotal": 0,
+                "depth": 0,
+                "oldestAgeMs": null,
+                "maxOldestAgeMs": 0.0,
+                "conservationViolations": 0
+            }"#,
+        )
+        .expect("queue report without availability");
+
+        assert_eq!(report.availability, DiagnosticLaneAvailability::Local);
     }
 }

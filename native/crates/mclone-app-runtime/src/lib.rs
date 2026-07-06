@@ -56,6 +56,8 @@ use mclone_ui::{
     GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay,
 };
 
+use crate::host_mode::SingleViewHostMode;
+
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET: Duration = Duration::from_millis(2);
@@ -983,6 +985,7 @@ pub struct RuntimePollDiagnostics {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SingleViewRuntimeStats {
+    pub host_mode: SingleViewHostMode,
     pub server_runner_kind: Option<ServerRunnerKind>,
     pub server_command_queue_depth: usize,
     pub server_update_queue_depth: usize,
@@ -2290,12 +2293,14 @@ impl SingleViewRuntime {
 
     pub fn stats(
         &self,
+        host_mode: SingleViewHostMode,
         runner_diagnostics: Option<&ServerRunnerDiagnostics>,
         pending_render_compile_jobs: usize,
     ) -> SingleViewRuntimeStats {
         let scheduler_metrics = runner_diagnostics.map(|diagnostics| diagnostics.scheduler_metrics);
         let chunk_tracking = runner_diagnostics.map(|diagnostics| &diagnostics.chunk_tracking);
         SingleViewRuntimeStats {
+            host_mode,
             server_runner_kind: runner_diagnostics.map(|diagnostics| diagnostics.kind),
             server_command_queue_depth: runner_diagnostics
                 .map_or(0, |diagnostics| diagnostics.command_queue_depth),

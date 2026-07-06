@@ -1,5 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod availability;
 pub mod clock;
 mod frame;
 mod gpu;
@@ -9,6 +10,7 @@ mod queue;
 mod schema;
 mod stage;
 
+pub use availability::DiagnosticLaneAvailability;
 pub use frame::{
     ConservationViolationCounts, FrameAccountingConfig, FrameAccumulator, FrameObservation,
     FrameSummaryReport, HeadroomSummary, OverBudgetTiers, PercentileMethod, PercentileRing,

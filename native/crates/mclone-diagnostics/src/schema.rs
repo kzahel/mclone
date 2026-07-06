@@ -5,7 +5,7 @@ use crate::{
     StageSpan, WorstFrameDetail,
 };
 
-pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 5;
+pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -14,7 +14,7 @@ use mclone_protocol::PROTOCOL_VERSION;
 use mclone_server::IntegratedServer;
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
-use crate::session::DedicatedSession;
+use crate::session::{DedicatedSession, DedicatedSessionDiagnostics};
 use crate::websocket_bridge::{WebSocketBridgeMode, run_websocket_bridge};
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
@@ -356,6 +356,8 @@ fn run_server_loop_inner(
     mode: ServerRunMode,
 ) -> Result<()> {
     let mut sessions = BTreeMap::<DedicatedConnectionId, DedicatedSession>::new();
+    let mut session_command_counts = BTreeMap::<DedicatedConnectionId, usize>::new();
+    let mut summary = DedicatedServerSummary::default();
     #[cfg(test)]
     let mut completed_connections = 0_usize;
 
@@ -364,6 +366,7 @@ fn run_server_loop_inner(
             DedicatedNetworkEvent::Connected { id, peer_addr } => {
                 let player_id = server.add_dedicated_player();
                 sessions.insert(id, DedicatedSession::new(player_id));
+                session_command_counts.insert(id, 0);
                 log::info!("accepted dedicated client {id} from {peer_addr}");
             }
             DedicatedNetworkEvent::Command {
@@ -378,15 +381,38 @@ fn run_server_loop_inner(
                     log::warn!("{message}");
                     continue;
                 };
-                match session.handle_client_command(server, command) {
+                let result = session.handle_client_command(server, command);
+                let diagnostics = session.last_diagnostics();
+                match result {
                     Ok(updates) => {
                         let update_count = updates.len();
                         if response.send(Ok(updates)).is_err() {
                             remove_session_player(server, &mut sessions, id);
+                            let command_count =
+                                session_command_counts.remove(&id).unwrap_or_default();
+                            println!(
+                                "{}",
+                                summary.marker_line("final", id, command_count, sessions.len())
+                            );
                             log::warn!(
                                 "dedicated client {id} {peer_addr} disconnected before receiving {update_count} updates"
                             );
                         } else {
+                            summary.record_command(diagnostics, update_count);
+                            let connection_command_count =
+                                session_command_counts.entry(id).or_default();
+                            *connection_command_count = connection_command_count.saturating_add(1);
+                            if should_emit_active_summary(*connection_command_count) {
+                                println!(
+                                    "{}",
+                                    summary.marker_line(
+                                        "active",
+                                        id,
+                                        *connection_command_count,
+                                        sessions.len()
+                                    )
+                                );
+                            }
                             log::debug!(
                                 "served dedicated client {id} {peer_addr} with {update_count} updates"
                             );
@@ -396,6 +422,7 @@ fn run_server_loop_inner(
                         let message = format!("{err:#}");
                         let _ = response.send(Err(message.clone()));
                         remove_session_player(server, &mut sessions, id);
+                        session_command_counts.remove(&id);
                         if mode == ServerRunMode::ServeOnce {
                             return Err(err)
                                 .with_context(|| format!("failed to serve {id} {peer_addr}"));
@@ -411,6 +438,12 @@ fn run_server_loop_inner(
                 reason,
             } => {
                 remove_session_player(server, &mut sessions, id);
+                let connection_command_count =
+                    session_command_counts.remove(&id).unwrap_or(command_count);
+                println!(
+                    "{}",
+                    summary.marker_line("final", id, connection_command_count, sessions.len())
+                );
                 #[cfg(test)]
                 if command_count > 0 {
                     completed_connections += 1;
@@ -453,6 +486,102 @@ fn run_server_loop_inner(
             }
         }
     }
+}
+
+#[derive(Clone, Debug, Default)]
+struct DedicatedServerSummary {
+    command_count: usize,
+    update_batches: usize,
+    updates_sent: usize,
+    max_update_batch: usize,
+    total_tick_us: u128,
+    max_tick_us: u128,
+    total_scheduler_tick_us: u128,
+    total_scheduler_publish_completed_us: u128,
+    completed_feature_jobs_drained: usize,
+    feature_chunks_published: usize,
+    feature_chunks_skipped: usize,
+    completed_light_statuses_drained: usize,
+    light_statuses_published: usize,
+    light_statuses_skipped: usize,
+    last: DedicatedSessionDiagnostics,
+}
+
+impl DedicatedServerSummary {
+    fn record_command(&mut self, diagnostics: DedicatedSessionDiagnostics, update_count: usize) {
+        self.command_count = self.command_count.saturating_add(1);
+        self.update_batches = self.update_batches.saturating_add(1);
+        self.updates_sent = self.updates_sent.saturating_add(update_count);
+        self.max_update_batch = self.max_update_batch.max(update_count);
+        self.total_tick_us = self.total_tick_us.saturating_add(diagnostics.tick_total_us);
+        self.max_tick_us = self.max_tick_us.max(diagnostics.tick_total_us);
+        self.total_scheduler_tick_us = self
+            .total_scheduler_tick_us
+            .saturating_add(diagnostics.scheduler_tick_us);
+        self.total_scheduler_publish_completed_us = self
+            .total_scheduler_publish_completed_us
+            .saturating_add(diagnostics.scheduler_publish_completed_us);
+        self.completed_feature_jobs_drained = self
+            .completed_feature_jobs_drained
+            .saturating_add(diagnostics.publication.completed_feature_jobs_drained);
+        self.feature_chunks_published = self
+            .feature_chunks_published
+            .saturating_add(diagnostics.publication.feature_chunks_published);
+        self.feature_chunks_skipped = self
+            .feature_chunks_skipped
+            .saturating_add(diagnostics.publication.feature_chunks_skipped);
+        self.completed_light_statuses_drained = self
+            .completed_light_statuses_drained
+            .saturating_add(diagnostics.publication.completed_light_statuses_drained);
+        self.light_statuses_published = self
+            .light_statuses_published
+            .saturating_add(diagnostics.publication.light_statuses_published);
+        self.light_statuses_skipped = self
+            .light_statuses_skipped
+            .saturating_add(diagnostics.publication.light_statuses_skipped);
+        self.last = diagnostics;
+    }
+
+    fn marker_line(
+        &self,
+        phase: &str,
+        connection_id: DedicatedConnectionId,
+        connection_command_count: usize,
+        active_sessions: usize,
+    ) -> String {
+        format!(
+            "MCLONE_DEDICATED_SERVER_SUMMARY phase={phase} connection={connection_id} connection_commands={connection_command_count} commands={} update_batches={} updates_sent={} max_update_batch={} tick_total_ms={:.3} tick_max_ms={:.3} scheduler_tick_ms={:.3} scheduler_publish_completed_ms={:.3} completed_feature_jobs_drained={} feature_chunks_published={} feature_chunks_skipped={} completed_light_statuses_drained={} light_statuses_published={} light_statuses_skipped={} pending_jobs={} pending_publications={} pending_worldgen_publication_jobs={} pending_worldgen_publication_chunks={} pending_light_publications={} active_sessions={} last_simulation_tick={}",
+            self.command_count,
+            self.update_batches,
+            self.updates_sent,
+            self.max_update_batch,
+            micros_to_ms(self.total_tick_us),
+            micros_to_ms(self.max_tick_us),
+            micros_to_ms(self.total_scheduler_tick_us),
+            micros_to_ms(self.total_scheduler_publish_completed_us),
+            self.completed_feature_jobs_drained,
+            self.feature_chunks_published,
+            self.feature_chunks_skipped,
+            self.completed_light_statuses_drained,
+            self.light_statuses_published,
+            self.light_statuses_skipped,
+            self.last.pending_jobs_after,
+            self.last.pending_publications_after,
+            self.last.publication.pending_worldgen_publication_jobs,
+            self.last.publication.pending_worldgen_publication_chunks,
+            self.last.publication.pending_light_publications,
+            active_sessions,
+            self.last.simulation_tick
+        )
+    }
+}
+
+fn should_emit_active_summary(connection_command_count: usize) -> bool {
+    connection_command_count == 1 || connection_command_count % 16 == 0
+}
+
+fn micros_to_ms(value: u128) -> f64 {
+    value as f64 / 1000.0
 }
 
 fn remove_session_player(
@@ -599,6 +728,48 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("--transient cannot be combined"));
+    }
+
+    #[test]
+    fn dedicated_server_summary_marker_reports_host_side_scheduler_fields() {
+        let mut summary = DedicatedServerSummary::default();
+        summary.record_command(
+            DedicatedSessionDiagnostics {
+                simulation_tick: 7,
+                tick_total_us: 2_500,
+                scheduler_tick_us: 1_250,
+                scheduler_publish_completed_us: 750,
+                publication: mclone_server::ChunkSchedulerPublicationDiagnostics {
+                    completed_feature_jobs_drained: 2,
+                    feature_chunks_published: 3,
+                    feature_chunks_skipped: 1,
+                    completed_light_statuses_drained: 4,
+                    light_statuses_published: 5,
+                    light_statuses_skipped: 1,
+                    pending_worldgen_publication_jobs: 6,
+                    pending_worldgen_publication_chunks: 7,
+                    pending_light_publications: 8,
+                    ..Default::default()
+                },
+                pending_jobs_after: 9,
+                pending_publications_after: 10,
+            },
+            11,
+        );
+
+        let line = summary.marker_line("active", DedicatedConnectionId::test_new(12), 1, 0);
+
+        assert!(line.starts_with("MCLONE_DEDICATED_SERVER_SUMMARY "));
+        assert!(line.contains("phase=active"));
+        assert!(line.contains("connection=#12"));
+        assert!(line.contains("commands=1"));
+        assert!(line.contains("updates_sent=11"));
+        assert!(line.contains("tick_total_ms=2.500"));
+        assert!(line.contains("scheduler_tick_ms=1.250"));
+        assert!(line.contains("feature_chunks_published=3"));
+        assert!(line.contains("light_statuses_published=5"));
+        assert!(line.contains("pending_worldgen_publication_chunks=7"));
+        assert!(line.contains("last_simulation_tick=7"));
     }
 
     #[test]

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use mclone_diagnostics::{
-    CriticalPathLabel, FramePipelineReport, QueueAgeReport, QueueId, StageId,
+    CriticalPathLabel, DiagnosticLaneAvailability, FramePipelineReport, QueueAgeReport, QueueId,
+    StageId,
 };
 
 use crate::{Color, Font, GuiDrawList, GuiScale, Rect};
@@ -320,7 +321,7 @@ fn render_queue_row(
     let label_width = 88.0;
     let bar = Rect::new(content.x + label_width, y + 1.0, 54.0, 5.0);
     draw.fill(bar, BAR_BG);
-    if queue.depth > 0 {
+    if queue.availability == DiagnosticLaneAvailability::Local && queue.depth > 0 {
         draw.fill(
             Rect::new(
                 bar.x,
@@ -338,14 +339,7 @@ fn render_queue_row(
     font.draw_shadow_atlas(draw, queue_label(&queue.queue), content.x, y, TEXT_MUTED);
     font.draw_shadow_atlas(
         draw,
-        &format!(
-            "D{} AGE {}",
-            queue.depth,
-            queue
-                .oldest_age_ms
-                .map(|age| format!("{age:.0}"))
-                .unwrap_or_else(|| "-".to_owned())
-        ),
+        &queue_status_line(queue),
         bar.right() + 6.0,
         y,
         TEXT_MUTED,
@@ -402,6 +396,21 @@ fn queue_label(queue: &QueueId) -> &'static str {
         QueueId::HostPublication => "PUBLISH",
         QueueId::RenderCompileJobs => "COMPILE",
         QueueId::Custom(_) => "CUSTOM",
+    }
+}
+
+fn queue_status_line(queue: &QueueAgeReport) -> String {
+    match queue.availability {
+        DiagnosticLaneAvailability::Local => format!(
+            "D{} AGE {}",
+            queue.depth,
+            queue
+                .oldest_age_ms
+                .map(|age| format!("{age:.0}"))
+                .unwrap_or_else(|| "-".to_owned())
+        ),
+        DiagnosticLaneAvailability::RemoteHost => "REMOTE HOST".to_owned(),
+        DiagnosticLaneAvailability::Unsupported => "UNSUPPORTED".to_owned(),
     }
 }
 
@@ -463,6 +472,17 @@ mod tests {
         assert_eq!(one_digit.chars().count(), no_budget.chars().count());
         assert_eq!(one_digit, "BUDGET APP  9.8 WAIT  0.9 HEAD  +9.8 TGT 16.0");
         assert!(Font::default().width(&one_digit) <= PANEL_WIDTH - PANEL_MARGIN * 2.0);
+    }
+
+    #[test]
+    fn queue_status_line_marks_remote_host_lanes() {
+        let local =
+            QueueAgeReport::snapshot(QueueId::HostPublication, 3, 1, 2, Some(12.0), 12.0, 0);
+        let remote = QueueAgeReport::snapshot(QueueId::HostPublication, 0, 0, 0, None, 0.0, 0)
+            .with_availability(DiagnosticLaneAvailability::RemoteHost);
+
+        assert_eq!(queue_status_line(&local), "D2 AGE 12");
+        assert_eq!(queue_status_line(&remote), "REMOTE HOST");
     }
 
     #[test]

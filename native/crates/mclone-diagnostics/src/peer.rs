@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::DiagnosticLaneAvailability;
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PeerThreadId {
@@ -14,6 +16,8 @@ pub enum PeerThreadId {
 #[serde(rename_all = "camelCase")]
 pub struct PeerThreadActivityReport {
     pub lane: PeerThreadId,
+    #[serde(default)]
+    pub availability: DiagnosticLaneAvailability,
     pub active: bool,
     pub pending_jobs: u64,
     pub request_frames: u64,
@@ -33,6 +37,7 @@ impl PeerThreadActivityReport {
     pub fn new(lane: PeerThreadId) -> Self {
         Self {
             lane,
+            availability: DiagnosticLaneAvailability::Local,
             active: false,
             pending_jobs: 0,
             request_frames: 0,
@@ -101,6 +106,11 @@ impl PeerThreadActivityReport {
         self.conservation_violations = conservation_violations;
         self
     }
+
+    pub fn with_availability(mut self, availability: DiagnosticLaneAvailability) -> Self {
+        self.availability = availability;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -140,5 +150,39 @@ mod tests {
         assert_eq!(report.request_frames, 2);
         assert_eq!(report.response_frames, 1);
         assert_eq!(report.last_request_ms, Some(1.25));
+    }
+
+    #[test]
+    fn peer_activity_can_mark_remote_host_ownership() {
+        let report = PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
+            .with_availability(DiagnosticLaneAvailability::RemoteHost);
+
+        assert_eq!(report.availability, DiagnosticLaneAvailability::RemoteHost);
+        assert!(!report.active);
+    }
+
+    #[test]
+    fn peer_activity_deserializes_missing_availability_as_local() {
+        let report: PeerThreadActivityReport = serde_json::from_str(
+            r#"{
+                "lane": "server-runner",
+                "active": false,
+                "pendingJobs": 0,
+                "requestFrames": 0,
+                "responseFrames": 0,
+                "requestBytes": 0,
+                "responseBytes": 0,
+                "maxPendingFrames": 0,
+                "busyMs": null,
+                "idleMs": null,
+                "lastRequestMs": null,
+                "totalRequestMs": 0.0,
+                "maxRequestMs": 0.0,
+                "conservationViolations": 0
+            }"#,
+        )
+        .expect("peer report without availability");
+
+        assert_eq!(report.availability, DiagnosticLaneAvailability::Local);
     }
 }

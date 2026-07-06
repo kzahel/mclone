@@ -264,13 +264,18 @@ sink's formatting code is a defect. The logs remain the benchmark authority
 and the overlay stays a thin view because all three are projections of the
 same data, not because of discipline alone.
 
-As of Slice 7 of tactical 144, schema v5 carries the shared frame summary,
-queue panel, local peer-thread panel, GPU timestamp panel, and latest-frame
-fields consumed by the debug overlay. Desktop startup-streaming JSON,
-Quest/Android XR perf markers, accounting-smoke JSON, and the desktop flat
-overlay use the same report structs and render-admission/upload stage names for
-completed-result acceptance, dirty/ready scan, request build, worker submit,
-prepared-record maintenance, admission remainder, and upload apply.
+As of Slice 2 of tactical 149, schema v6 carries per-lane availability on
+queue and peer-thread reports (`local`, `remote-host`, `unsupported`). Remote
+dedicated sessions must mark server-owned lanes as `remote-host` instead of
+rendering unavailable host counters as local zeros; client-paid lanes such as
+inbound updates, update apply, upload work, render compile, and completed
+results remain local. Schema v5 introduced the shared frame summary, queue
+panel, local peer-thread panel, GPU timestamp panel, and latest-frame fields
+consumed by the debug overlay. Desktop startup-streaming JSON, Quest/Android XR
+perf markers, accounting-smoke JSON, and the desktop flat overlay use the same
+report structs and render-admission/upload stage names for completed-result
+acceptance, dirty/ready scan, request build, worker submit, prepared-record
+maintenance, admission remainder, and upload apply.
 
 ### Per-Lane Time-Source Authority
 

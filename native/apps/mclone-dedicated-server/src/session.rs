@@ -5,7 +5,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use mclone_protocol::{ClientCommand, MovePlayerCommand, ServerUpdate};
-use mclone_server::{IntegratedServer, ServerPlayerId};
+use mclone_server::{
+    ChunkSchedulerPublicationDiagnostics, IntegratedServer, ServerPlayerId,
+    ServerSimulationTickReport,
+};
 
 #[cfg(test)]
 use mclone_net::{try_read_client_command_frame, write_server_update_batch};
@@ -25,6 +28,7 @@ pub(crate) fn serve_connection(
 pub(crate) struct DedicatedSession {
     player_id: ServerPlayerId,
     connection: DedicatedConnectionState,
+    last_diagnostics: DedicatedSessionDiagnostics,
 }
 
 impl DedicatedSession {
@@ -32,11 +36,16 @@ impl DedicatedSession {
         Self {
             player_id,
             connection: DedicatedConnectionState::default(),
+            last_diagnostics: DedicatedSessionDiagnostics::default(),
         }
     }
 
     pub(crate) const fn player_id(&self) -> ServerPlayerId {
         self.player_id
+    }
+
+    pub(crate) const fn last_diagnostics(&self) -> DedicatedSessionDiagnostics {
+        self.last_diagnostics
     }
 
     #[cfg(test)]
@@ -83,12 +92,46 @@ impl DedicatedSession {
     }
 
     fn tick(&mut self, server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
-        let updates = server
+        let report = server
             .try_simulation_tick_report_for_player(self.player_id)
-            .context("failed to tick dedicated server session")?
-            .updates;
+            .context("failed to tick dedicated server session")?;
+        self.last_diagnostics = DedicatedSessionDiagnostics::from_report(
+            &report,
+            server.pending_job_count(),
+            server.pending_publication_count(),
+        );
+        let updates = report.updates;
         self.connection.mark_tick_boundary();
         Ok(updates)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct DedicatedSessionDiagnostics {
+    pub simulation_tick: u64,
+    pub tick_total_us: u128,
+    pub scheduler_tick_us: u128,
+    pub scheduler_publish_completed_us: u128,
+    pub publication: ChunkSchedulerPublicationDiagnostics,
+    pub pending_jobs_after: usize,
+    pub pending_publications_after: usize,
+}
+
+impl DedicatedSessionDiagnostics {
+    fn from_report(
+        report: &ServerSimulationTickReport,
+        pending_jobs_after: usize,
+        pending_publications_after: usize,
+    ) -> Self {
+        Self {
+            simulation_tick: report.simulation_tick,
+            tick_total_us: report.timing.total_us,
+            scheduler_tick_us: report.timing.scheduler_tick_us,
+            scheduler_publish_completed_us: report.timing.scheduler_publish_completed_us,
+            publication: report.scheduler_publication,
+            pending_jobs_after,
+            pending_publications_after,
+        }
     }
 }
 

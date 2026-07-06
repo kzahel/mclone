@@ -31,7 +31,7 @@ use mclone_app_runtime::frame_render::{
     render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot,
     render_view_with_underwater_effect,
 };
-use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
+use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostMode};
 use mclone_app_runtime::local_single_view::{
     LocalSingleViewSceneOptions, LocalSingleViewStartupPump, LocalSingleViewStartupStep,
     NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
@@ -762,6 +762,7 @@ pub struct XrTerrainEyeRenderTiming {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XrTerrainUploadSummary {
+    pub host_mode: XrTerrainHostMode,
     pub poll_changed: bool,
     pub poll_total_ms: f64,
     pub poll_drain_updates_ms: f64,
@@ -882,6 +883,35 @@ pub struct XrTerrainUploadSummary {
     pub visibility_graph_build_count: usize,
     pub visibility_graph_total_ms: f64,
     pub visibility_graph_worst_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum XrTerrainHostMode {
+    #[default]
+    LocalIntegrated,
+    RemoteDedicated,
+}
+
+impl XrTerrainHostMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LocalIntegrated => "local-integrated",
+            Self::RemoteDedicated => "remote-dedicated",
+        }
+    }
+
+    pub const fn server_owned_lanes_are_remote(self) -> bool {
+        matches!(self, Self::RemoteDedicated)
+    }
+}
+
+impl From<SingleViewHostMode> for XrTerrainHostMode {
+    fn from(value: SingleViewHostMode) -> Self {
+        match value {
+            SingleViewHostMode::LocalIntegrated => Self::LocalIntegrated,
+            SingleViewHostMode::RemoteDedicated => Self::RemoteDedicated,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3635,6 +3665,7 @@ where
         } else {
             let upload_queue = self.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
+                host_mode: self.runtime_host_mode(),
                 queued_upload_section_count: upload_queue.queued_upload_sections,
                 queued_upload_removed_section_count: upload_queue.queued_removed_sections,
                 queued_upload_lifecycle_item_count: upload_queue.queued_lifecycle_items,
@@ -3654,7 +3685,10 @@ where
                 .as_ref()
                 .expect("runtime presence checked before poll");
             (
-                xr_poll_diagnostics_upload_summary(runtime.last_poll_diagnostics()),
+                xr_poll_diagnostics_upload_summary(
+                    runtime.host_mode().into(),
+                    runtime.last_poll_diagnostics(),
+                ),
                 runtime.has_pending_render_work(camera_position),
             )
         };
@@ -4114,6 +4148,7 @@ where
         });
         let upload_queue = self.section_uploads.stats();
         XrTerrainUploadSummary {
+            host_mode: self.runtime_host_mode(),
             pending_render_chunks_before: pending_render_chunks,
             pending_render_chunks_after: pending_render_chunks,
             pending_compile_jobs_before: pending_compile_jobs,
@@ -4130,6 +4165,14 @@ where
             record_cache: self.draw.record_cache_stats(),
             ..XrTerrainUploadSummary::default()
         }
+    }
+
+    fn runtime_host_mode(&self) -> XrTerrainHostMode {
+        self.runtime
+            .as_ref()
+            .map_or(XrTerrainHostMode::LocalIntegrated, |runtime| {
+                runtime.host_mode().into()
+            })
     }
 
     fn underwater_overlays(
@@ -6027,9 +6070,11 @@ where
 }
 
 fn xr_poll_diagnostics_upload_summary(
+    host_mode: XrTerrainHostMode,
     diagnostics: RuntimePollDiagnostics,
 ) -> XrTerrainUploadSummary {
     XrTerrainUploadSummary {
+        host_mode,
         poll_total_ms: diagnostics.poll_total_ms,
         poll_drain_updates_ms: diagnostics.drain_updates_ms,
         poll_producer_read_ms: diagnostics.producer_read_ms,

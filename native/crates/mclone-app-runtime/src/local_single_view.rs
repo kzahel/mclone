@@ -1520,6 +1520,7 @@ where
             Self::RemoteDedicated(_) => None,
         };
         self.core().stats(
+            self.host_mode(),
             runner_diagnostics.as_ref(),
             self.render_compile_pending_job_count(),
         )

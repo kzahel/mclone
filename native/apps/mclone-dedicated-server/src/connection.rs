@@ -16,6 +16,13 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DedicatedConnectionId(u64);
 
+#[cfg(test)]
+impl DedicatedConnectionId {
+    pub(crate) const fn test_new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
 impl fmt::Display for DedicatedConnectionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "#{}", self.0)

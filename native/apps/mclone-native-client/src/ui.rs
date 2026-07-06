@@ -230,6 +230,7 @@ mod tests {
             on_ground: true,
             seed: 12345,
             runtime: WindowRuntimeStats {
+                host_mode: mclone_app_runtime::host_mode::SingleViewHostMode::LocalIntegrated,
                 server_runner_kind: Some(mclone_server::ServerRunnerKind::NativeThread),
                 server_command_queue_depth: 1,
                 server_update_queue_depth: 2,
