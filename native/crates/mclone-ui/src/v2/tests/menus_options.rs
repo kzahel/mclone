@@ -55,7 +55,9 @@ fn options_layout_includes_conditional_rows_from_frame_state() {
     surface.set_scale(GuiScale::from_pixels(960, 540));
     surface.set_render_state(GameUiRenderState {
         crosshair_visible: None,
-        xr_turn_mode: Some(GameXrTurnMode::Snap15),
+        collision_mode: Some(GameCollisionMode::Normal),
+        travel_assist_mode: Some(GameTravelAssistMode::Off),
+        turn_mode: Some(GameTurnMode::Snap15),
         touch_controls_mode: Some(TouchControlsMode::Auto),
         touch_settings: Some(GameTouchSettings::new(2.0, 1.0, 5.0)),
         server_cadence: Some(GameSimulationCadence::default()),
@@ -65,7 +67,9 @@ fn options_layout_includes_conditional_rows_from_frame_state() {
     let layout = surface.layout();
 
     assert!(layout.widget(UI_V2_OPTIONS_CROSSHAIR).is_none());
-    assert!(layout.widget(UI_V2_OPTIONS_XR_TURN_MODE).is_some());
+    assert!(layout.widget(UI_V2_OPTIONS_COLLISION_MODE).is_some());
+    assert!(layout.widget(UI_V2_OPTIONS_TRAVEL_ASSIST).is_some());
+    assert!(layout.widget(UI_V2_OPTIONS_TURN_MODE).is_some());
     assert!(layout.widget(UI_V2_OPTIONS_TOUCH_CONTROLS).is_some());
     assert!(layout.widget(UI_V2_OPTIONS_TOUCH_LOOK).is_some());
     assert!(layout.widget(UI_V2_OPTIONS_SERVER_SETTINGS).is_some());
@@ -120,7 +124,9 @@ fn options_buttons_emit_expected_actions_from_committed_rects() {
     }));
     surface.set_scale(GuiScale::from_pixels(960, 540));
     surface.set_render_state(GameUiRenderState {
-        xr_turn_mode: Some(GameXrTurnMode::Snap15),
+        collision_mode: Some(GameCollisionMode::Normal),
+        travel_assist_mode: Some(GameTravelAssistMode::Off),
+        turn_mode: Some(GameTurnMode::Snap15),
         server_cadence: Some(GameSimulationCadence::default()),
         ..GameUiRenderState::default()
     });
@@ -139,10 +145,20 @@ fn options_buttons_emit_expected_actions_from_committed_rects() {
         .widget(UI_V2_OPTIONS_SERVER_SETTINGS)
         .expect("server settings row")
         .rect;
-    let xr_turn = surface
+    let collision = surface
         .layout()
-        .widget(UI_V2_OPTIONS_XR_TURN_MODE)
-        .expect("XR turn row")
+        .widget(UI_V2_OPTIONS_COLLISION_MODE)
+        .expect("collision row")
+        .rect;
+    let travel_assist = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TRAVEL_ASSIST)
+        .expect("travel assist row")
+        .rect;
+    let turn = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TURN_MODE)
+        .expect("turn row")
         .rect;
     let frame_metrics = surface
         .layout()
@@ -162,7 +178,15 @@ fn options_buttons_emit_expected_actions_from_committed_rects() {
             server_settings,
             GameUiAction::OpenServerSettings(GameOptionsParent::Pause),
         ),
-        (xr_turn, GameUiAction::SetXrTurnMode(GameXrTurnMode::Snap30)),
+        (
+            collision,
+            GameUiAction::SetCollisionMode(GameCollisionMode::NoClip),
+        ),
+        (
+            travel_assist,
+            GameUiAction::SetTravelAssistMode(GameTravelAssistMode::Blink),
+        ),
+        (turn, GameUiAction::SetTurnMode(GameTurnMode::Snap30)),
         (frame_metrics, GameUiAction::ToggleFramePipelineOverlay),
         (
             controls,

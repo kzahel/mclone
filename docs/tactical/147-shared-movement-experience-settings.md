@@ -240,23 +240,36 @@ Landed behavior:
 
 ## Slice A2: UI Actions And Render Projection
 
-- [ ] Add shared UI actions/effects for `Collision`, `Travel Assist`, and
+Status: landed 2026-07-06.
+
+- [x] Add shared UI actions/effects for `Collision`, `Travel Assist`, and
   shared `Turn`.
-- [ ] Extend `GameUiRenderState` and the options layout with the new rows,
+- [x] Extend `GameUiRenderState` and the options layout with the new rows,
   using profile/state capability projection for hidden or disabled rows.
-- [ ] Update `ClientExperienceSettingsController::apply_ui_action` to call the
+- [x] Update `ClientExperienceSettingsController::apply_ui_action` to call the
   shared reducer for menu actions.
-- [ ] Keep old labels/effects shimmed where needed so existing flat and XR
+- [x] Keep old labels/effects shimmed where needed so existing flat and XR
   settings still render.
-- [ ] Add unit tests that menu actions, shortcuts, and direct reducer calls all
+- [x] Add unit tests that menu actions, shortcuts, and direct reducer calls all
   produce the same corrected setting state.
 
-Exit criteria:
+Landed behavior:
 
-- Existing flat and XR settings still render.
-- Invalid combinations are corrected or rejected by shared policy, not by XR
-  frame code.
-- No platform adapter owns compatibility rules.
+- `GameUiAction` and `ClientExperienceSettingEffect` now have shared
+  `SetCollisionMode`, `SetTravelAssistMode`, and `SetTurnMode` variants.
+- Optional `GameUiRenderState` rows let profiles expose the settings when their
+  adapter is ready, without forking the options surface.
+- The options panel renders `Collision`, `Travel Assist`, and `Turn` rows from
+  shared state; `Turn` replaces the user-facing `XR Turn` label while the
+  legacy XR turn slot remains a compatibility bridge.
+- Menu actions for the new rows route through the shared movement-experience
+  reducer and emit corrected setting effects.
+- Existing flat/web/Android/XR adapters compile as consumers. They do not own
+  compatibility policy; hidden rows are profile-gated as unsupported until an
+  adapter supplies real behavior, while XR maps shared `Turn` to the existing
+  turn policy.
+- Focused UI/app-runtime tests cover optional rows, shared actions, capability
+  projection, and corrected effects.
 
 ## Slice B: Split Fly From No-Clip
 

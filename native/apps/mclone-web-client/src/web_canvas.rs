@@ -3374,6 +3374,9 @@ impl WebChunkRenderSession {
                 }
                 ClientExperienceSettingEffect::SetFarLod { .. }
                 | ClientExperienceSettingEffect::ClearFarLod
+                | ClientExperienceSettingEffect::SetCollisionMode(_)
+                | ClientExperienceSettingEffect::SetTravelAssistMode(_)
+                | ClientExperienceSettingEffect::SetTurnMode(_)
                 | ClientExperienceSettingEffect::SetXrTurnMode(_)
                 | ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(_)
                 | ClientExperienceSettingEffect::CycleFramePacing
@@ -3522,6 +3525,9 @@ impl WebChunkRenderSession {
                 | GameUiAction::ToggleFramePipelineOverlay
                 | GameUiAction::SetPlayerModel(_)
                 | GameUiAction::SetMovementMode(_)
+                | GameUiAction::SetCollisionMode(_)
+                | GameUiAction::SetTravelAssistMode(_)
+                | GameUiAction::SetTurnMode(_)
                 | GameUiAction::SetXrTurnMode(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
@@ -3663,6 +3669,9 @@ impl WebChunkRenderSession {
             frame_pipeline_overlay_visible: false,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
+            collision_mode: None,
+            travel_assist_mode: None,
+            turn_mode: None,
             xr_turn_mode: None,
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -5383,6 +5392,9 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleFramePipelineOverlay => "toggleFramePipelineOverlay",
         GameUiAction::SetPlayerModel(_) => "setPlayerModel",
         GameUiAction::SetMovementMode(_) => "setMovementMode",
+        GameUiAction::SetCollisionMode(_) => "setCollisionMode",
+        GameUiAction::SetTravelAssistMode(_) => "setTravelAssistMode",
+        GameUiAction::SetTurnMode(_) => "setTurnMode",
         GameUiAction::SetXrTurnMode(_) => "setXrTurnMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",
@@ -5917,6 +5929,9 @@ fn write_active_session_to_js_object(
 fn web_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
     settings.far_lod = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.collision_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;

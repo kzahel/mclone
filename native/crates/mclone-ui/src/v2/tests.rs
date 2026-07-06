@@ -1,9 +1,9 @@
 use super::*;
 use crate::{
-    EMPTY_BLOCK_PALETTE_ENTRIES, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameSimulationCadence,
-    GameTouchSettings, GameXrTurnMode, GuiDrawCommand, GuiTextureUv, LoadingProgressCell,
-    LoadingProgressCellStatus, render_flat_hud, render_loading_progress_overlay,
-    render_loading_progress_panel_at,
+    EMPTY_BLOCK_PALETTE_ENTRIES, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameCollisionMode,
+    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameXrTurnMode,
+    GuiDrawCommand, GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus, render_flat_hud,
+    render_loading_progress_overlay, render_loading_progress_panel_at,
 };
 use mclone_input::{InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 

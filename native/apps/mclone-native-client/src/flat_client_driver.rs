@@ -1220,6 +1220,9 @@ impl FlatClientDriver {
                     let movement_mode = self.camera.movement_mode();
                     log::info!("player movement mode {}", movement_mode.label());
                 }
+                ClientExperienceSettingEffect::SetCollisionMode(_)
+                | ClientExperienceSettingEffect::SetTravelAssistMode(_)
+                | ClientExperienceSettingEffect::SetTurnMode(_) => {}
                 ClientExperienceSettingEffect::SetXrTurnMode(_) => {}
                 ClientExperienceSettingEffect::CycleFramePacing => {
                     result.host_action = Some(FlatClientHostAction::CycleFramePacing);
@@ -1502,6 +1505,9 @@ impl FlatClientDriver {
                 GameUiAction::SetRenderDistance(_)
                     | GameUiAction::SetFlySpeed(_)
                     | GameUiAction::SetMovementSpeed(_)
+                    | GameUiAction::SetCollisionMode(_)
+                    | GameUiAction::SetTravelAssistMode(_)
+                    | GameUiAction::SetTurnMode(_)
                     | GameUiAction::SetXrTurnMode(_)
                     | GameUiAction::SetTouchLookSensitivity(_)
                     | GameUiAction::SetTouchControlsMode(_)
@@ -2562,6 +2568,9 @@ impl FlatClientDriver {
 
 fn desktop_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
+    settings.collision_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -2585,6 +2594,9 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         crosshair_visible: Some(options.crosshair_visible),
         player_model: options.player_model,
         movement_mode: options.movement_mode,
+        collision_mode: None,
+        travel_assist_mode: None,
+        turn_mode: None,
         xr_turn_mode: None,
         fly_speed_multiplier: options.fly_speed_multiplier,
         min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,

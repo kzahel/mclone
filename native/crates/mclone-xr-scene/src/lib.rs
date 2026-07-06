@@ -4550,6 +4550,9 @@ where
             frame_pipeline_overlay_visible: false,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
+            collision_mode: None,
+            travel_assist_mode: None,
+            turn_mode: Some(self.turn_policy.game_mode().into()),
             xr_turn_mode: Some(self.turn_policy.game_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -5732,6 +5735,13 @@ where
                     let movement_mode = self.camera.movement_mode();
                     log::info!("XR player movement mode {}", movement_mode.label());
                 }
+                ClientExperienceSettingEffect::SetCollisionMode(_)
+                | ClientExperienceSettingEffect::SetTravelAssistMode(_) => {}
+                ClientExperienceSettingEffect::SetTurnMode(turn_mode) => {
+                    let turn_mode = GameXrTurnMode::from(turn_mode);
+                    self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
+                    log::info!("XR turn mode {}", turn_mode.label());
+                }
                 ClientExperienceSettingEffect::SetXrTurnMode(turn_mode) => {
                     self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
                     log::info!("XR turn mode {}", turn_mode.label());
@@ -6219,6 +6229,8 @@ fn normalized_xr_remote_addr(addr: &str) -> String {
 fn xr_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = ClientExperienceSettingsProfile::all_supported();
     settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.collision_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
         "Frame pipeline overlay needs the XR world-panel projection",
     );

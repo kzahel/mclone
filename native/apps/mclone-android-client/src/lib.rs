@@ -1540,6 +1540,9 @@ mod android {
                             movement_mode.label()
                         );
                     }
+                    ClientExperienceSettingEffect::SetCollisionMode(_)
+                    | ClientExperienceSettingEffect::SetTravelAssistMode(_)
+                    | ClientExperienceSettingEffect::SetTurnMode(_) => {}
                     ClientExperienceSettingEffect::SetXrTurnMode(_) => {
                         self.session_status = StatusOverlay::new(
                             "XR turn mode is unavailable on flat Android",
@@ -1678,6 +1681,9 @@ mod android {
                 frame_pipeline_overlay_visible: false,
                 player_model: self.player_model,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
+                collision_mode: None,
+                travel_assist_mode: None,
+                turn_mode: None,
                 xr_turn_mode: None,
                 fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
                 min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -2339,6 +2345,15 @@ mod android {
         let mut settings = ClientExperienceSettingsProfile::all_supported();
         settings.far_lod =
             ClientExperienceCapabilityStatus::Unsupported("Far LOD is unavailable on flat Android");
+        settings.collision_mode = ClientExperienceCapabilityStatus::Unsupported(
+            "Collision mode is unavailable on flat Android",
+        );
+        settings.travel_assist = ClientExperienceCapabilityStatus::Unsupported(
+            "Travel assist is unavailable on flat Android",
+        );
+        settings.turn_mode = ClientExperienceCapabilityStatus::Unsupported(
+            "Turn mode is unavailable on flat Android",
+        );
         settings.xr_turn = ClientExperienceCapabilityStatus::Unsupported(
             "XR turn mode is unavailable on flat Android",
         );

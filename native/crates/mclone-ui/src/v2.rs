@@ -1,20 +1,21 @@
 use crate::{
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
-    GameScreen, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv,
-    HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect, Slider, WidgetId,
-    WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect,
-    block_palette_slot_rect, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
-    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
-    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
-    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
-    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
-    render_flat_hud_debug_layer, render_flat_hud_frame_pipeline_layer,
-    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
-    render_flat_hud_status_layer, render_flat_hud_transient_layers,
-    render_loading_progress_overlay, render_loading_progress_panel_at,
-    render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
-    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
+    GameScreen, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
+    GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect,
+    Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
+    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
+    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
+    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
+    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
+    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
+    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
+    render_flat_hud_frame_pipeline_layer, render_flat_hud_hotbar_layer,
+    render_flat_hud_prompt_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
+    render_flat_hud_transient_layers, render_loading_progress_overlay,
+    render_loading_progress_panel_at, render_palette_slot_contents, render_touch_panel,
+    touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
+    touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -2059,6 +2060,9 @@ impl GameUiHost {
             | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
+            | GameUiAction::SetCollisionMode(_)
+            | GameUiAction::SetTravelAssistMode(_)
+            | GameUiAction::SetTurnMode(_)
             | GameUiAction::SetXrTurnMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
@@ -2251,8 +2255,10 @@ const UI_V2_OPTIONS_TOUCH_LOOK: UiWidgetId = UiWidgetId(116);
 const UI_V2_OPTIONS_CONTROLS: UiWidgetId = UiWidgetId(117);
 const UI_V2_OPTIONS_SERVER_SETTINGS: UiWidgetId = UiWidgetId(118);
 const UI_V2_OPTIONS_BACK: UiWidgetId = UiWidgetId(119);
-const UI_V2_OPTIONS_XR_TURN_MODE: UiWidgetId = UiWidgetId(120);
+const UI_V2_OPTIONS_TURN_MODE: UiWidgetId = UiWidgetId(120);
 const UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY: UiWidgetId = UiWidgetId(121);
+const UI_V2_OPTIONS_COLLISION_MODE: UiWidgetId = UiWidgetId(122);
+const UI_V2_OPTIONS_TRAVEL_ASSIST: UiWidgetId = UiWidgetId(123);
 const UI_V2_SERVER_SETTINGS_HOST_RATE: UiWidgetId = UiWidgetId(701);
 const UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE: UiWidgetId = UiWidgetId(702);
 const UI_V2_SERVER_SETTINGS_PHYSICS_RATE: UiWidgetId = UiWidgetId(703);
@@ -2807,14 +2813,39 @@ fn options_layout(
         GameUiAction::SetMovementMode(state.movement_mode.next()),
     );
     right_y += 22.0;
-    if let Some(turn_mode) = state.xr_turn_mode {
+    if let Some(collision_mode) = state.collision_mode {
         push_cycle(
             &mut layout,
-            UI_V2_OPTIONS_XR_TURN_MODE,
+            UI_V2_OPTIONS_COLLISION_MODE,
             Rect::new(right_x, right_y, column_width, 20.0),
-            "XR Turn",
+            "Collision",
+            collision_mode.label(),
+            GameUiAction::SetCollisionMode(collision_mode.next()),
+        );
+        right_y += 22.0;
+    }
+    if let Some(travel_assist_mode) = state.travel_assist_mode {
+        push_cycle(
+            &mut layout,
+            UI_V2_OPTIONS_TRAVEL_ASSIST,
+            Rect::new(right_x, right_y, column_width, 20.0),
+            "Travel Assist",
+            travel_assist_mode.label(),
+            GameUiAction::SetTravelAssistMode(travel_assist_mode.next()),
+        );
+        right_y += 22.0;
+    }
+    let turn_mode = state
+        .turn_mode
+        .or_else(|| state.xr_turn_mode.map(GameTurnMode::from));
+    if let Some(turn_mode) = turn_mode {
+        push_cycle(
+            &mut layout,
+            UI_V2_OPTIONS_TURN_MODE,
+            Rect::new(right_x, right_y, column_width, 20.0),
+            "Turn",
             turn_mode.label(),
-            GameUiAction::SetXrTurnMode(turn_mode.next()),
+            GameUiAction::SetTurnMode(turn_mode.next()),
         );
         right_y += 22.0;
     }
@@ -3026,7 +3057,9 @@ fn options_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {
         ) * 22.0
         + 48.0;
     let right_rows_height = (8
-        + usize::from(state.xr_turn_mode.is_some())
+        + usize::from(state.collision_mode.is_some())
+        + usize::from(state.travel_assist_mode.is_some())
+        + usize::from(state.turn_mode.is_some() || state.xr_turn_mode.is_some())
         + usize::from(state.touch_settings.is_some())) as f32
         * 22.0;
     let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);

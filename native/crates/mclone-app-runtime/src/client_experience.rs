@@ -126,6 +126,9 @@ impl ClientExperienceController {
             | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
+            | GameUiAction::SetCollisionMode(_)
+            | GameUiAction::SetTravelAssistMode(_)
+            | GameUiAction::SetTurnMode(_)
             | GameUiAction::SetXrTurnMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
@@ -291,6 +294,9 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::ToggleFramePipelineOverlay => self.frame_pipeline_overlay,
             ClientExperienceActionKind::SetPlayerModel => self.player_model,
             ClientExperienceActionKind::SetMovementMode => self.movement_mode,
+            ClientExperienceActionKind::SetCollisionMode => self.collision_mode,
+            ClientExperienceActionKind::SetTravelAssistMode => self.travel_assist,
+            ClientExperienceActionKind::SetTurnMode => self.turn_mode,
             ClientExperienceActionKind::SetXrTurnMode => self.xr_turn,
             ClientExperienceActionKind::CycleFramePacing => self.frame_pacing,
             ClientExperienceActionKind::CycleFpsCap => self.fps_cap,
@@ -389,6 +395,16 @@ impl ClientExperienceSettingsController {
         self.state = state;
     }
 
+    fn apply_movement_experience_change(
+        &mut self,
+        change: ClientExperienceMovementSettingChange,
+        effects: &mut ClientExperienceSettingsEffects,
+    ) {
+        let before = self.state;
+        self.state.apply_movement_experience_change(change);
+        effects.push_movement_experience_diff(before, self.state);
+    }
+
     pub fn apply_ui_action(
         &mut self,
         action: GameUiAction,
@@ -475,10 +491,37 @@ impl ClientExperienceSettingsController {
                     .push(ClientExperienceSettingEffect::SyncPlayerAppearance);
             }
             GameUiAction::SetMovementMode(mode) => {
-                self.state.movement_mode = mode;
-                effects
-                    .setting_effects
-                    .push(ClientExperienceSettingEffect::SetMovementMode(mode));
+                self.apply_movement_experience_change(
+                    ClientExperienceMovementSettingChange::MovementMode(mode),
+                    &mut effects,
+                );
+            }
+            GameUiAction::SetCollisionMode(mode) => {
+                self.apply_movement_experience_change(
+                    ClientExperienceMovementSettingChange::CollisionMode(mode),
+                    &mut effects,
+                );
+            }
+            GameUiAction::SetTravelAssistMode(mode) => {
+                self.apply_movement_experience_change(
+                    ClientExperienceMovementSettingChange::TravelAssistMode(mode),
+                    &mut effects,
+                );
+            }
+            GameUiAction::SetTurnMode(mode) => {
+                if self.state.turn_mode.is_none() {
+                    effects.capability_projection.push(
+                        kind,
+                        ClientExperienceCapabilityStatus::Unsupported(
+                            "Turn mode is unavailable for this profile",
+                        ),
+                    );
+                    return effects;
+                }
+                self.apply_movement_experience_change(
+                    ClientExperienceMovementSettingChange::TurnMode(Some(mode)),
+                    &mut effects,
+                );
             }
             GameUiAction::SetXrTurnMode(mode) => {
                 let Some(turn_mode) = self.state.xr_turn_mode.as_mut() else {
@@ -491,6 +534,7 @@ impl ClientExperienceSettingsController {
                     return effects;
                 };
                 *turn_mode = mode;
+                self.state.turn_mode = Some(GameTurnMode::from(mode));
                 effects
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetXrTurnMode(mode));
@@ -627,6 +671,15 @@ impl ClientExperienceSettingsController {
                 ClientExperienceActionKind::SetMovementMode,
                 profile.movement_mode,
             ),
+            (
+                ClientExperienceActionKind::SetCollisionMode,
+                profile.collision_mode,
+            ),
+            (
+                ClientExperienceActionKind::SetTravelAssistMode,
+                profile.travel_assist,
+            ),
+            (ClientExperienceActionKind::SetTurnMode, profile.turn_mode),
             (ClientExperienceActionKind::SetXrTurnMode, profile.xr_turn),
             (
                 ClientExperienceActionKind::CycleFramePacing,
@@ -671,6 +724,14 @@ impl ClientExperienceSettingsController {
                 ClientExperienceActionKind::SetXrTurnMode,
                 ClientExperienceCapabilityStatus::Unsupported(
                     "XR turn mode is unavailable for this profile",
+                ),
+            );
+        }
+        if profile.turn_mode.is_supported() && self.state.turn_mode.is_none() {
+            projection.push(
+                ClientExperienceActionKind::SetTurnMode,
+                ClientExperienceCapabilityStatus::Unsupported(
+                    "Turn mode is unavailable for this profile",
                 ),
             );
         }
@@ -776,9 +837,15 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             frame_pipeline_overlay_visible: state.frame_pipeline_overlay_visible,
             player_model: state.player_model,
             movement_mode: state.movement_mode,
-            collision_mode: legacy_collision_mode_for_movement(state.movement_mode),
-            travel_assist_mode: GameTravelAssistMode::Off,
-            turn_mode: state.xr_turn_mode.map(GameTurnMode::from),
+            collision_mode: state
+                .collision_mode
+                .unwrap_or_else(|| legacy_collision_mode_for_movement(state.movement_mode)),
+            travel_assist_mode: state
+                .travel_assist_mode
+                .unwrap_or(GameTravelAssistMode::Off),
+            turn_mode: state
+                .turn_mode
+                .or_else(|| state.xr_turn_mode.map(GameTurnMode::from)),
             xr_turn_mode: state.xr_turn_mode,
             fly_speed_multiplier: state.fly_speed_multiplier,
             min_fly_speed_multiplier: state.min_fly_speed_multiplier,
@@ -812,6 +879,9 @@ impl ClientExperienceSettingsState {
         state.frame_pipeline_overlay_visible = self.frame_pipeline_overlay_visible;
         state.player_model = self.player_model;
         state.movement_mode = self.movement_mode;
+        state.collision_mode = Some(self.collision_mode);
+        state.travel_assist_mode = Some(self.travel_assist_mode);
+        state.turn_mode = self.turn_mode;
         // The current render state still exposes the legacy XR-specific turn
         // slot. Keep it synchronized until the UI row is renamed.
         state.xr_turn_mode = self
@@ -964,6 +1034,37 @@ impl ClientExperienceSettingsEffects {
         self == &Self::default()
     }
 
+    fn push_movement_experience_diff(
+        &mut self,
+        before: ClientExperienceSettingsState,
+        after: ClientExperienceSettingsState,
+    ) {
+        if before.movement_mode != after.movement_mode {
+            self.setting_effects
+                .push(ClientExperienceSettingEffect::SetMovementMode(
+                    after.movement_mode,
+                ));
+        }
+        if before.collision_mode != after.collision_mode {
+            self.setting_effects
+                .push(ClientExperienceSettingEffect::SetCollisionMode(
+                    after.collision_mode,
+                ));
+        }
+        if before.travel_assist_mode != after.travel_assist_mode {
+            self.setting_effects
+                .push(ClientExperienceSettingEffect::SetTravelAssistMode(
+                    after.travel_assist_mode,
+                ));
+        }
+        if before.turn_mode != after.turn_mode {
+            if let Some(turn_mode) = after.turn_mode {
+                self.setting_effects
+                    .push(ClientExperienceSettingEffect::SetTurnMode(turn_mode));
+            }
+        }
+    }
+
     fn push_far_lod(&mut self, enabled: bool, range_chunks: i32) {
         let extra_radius_chunks = u32::try_from(range_chunks)
             .unwrap_or(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
@@ -997,6 +1098,9 @@ pub enum ClientExperienceSettingEffect {
     SetPlayerModel(GamePlayerModel),
     SyncPlayerAppearance,
     SetMovementMode(GameMovementMode),
+    SetCollisionMode(GameCollisionMode),
+    SetTravelAssistMode(GameTravelAssistMode),
+    SetTurnMode(GameTurnMode),
     SetXrTurnMode(GameXrTurnMode),
     CycleFramePacing,
     CycleFpsCap,
@@ -1064,6 +1168,9 @@ pub enum ClientExperienceActionKind {
     ToggleFramePipelineOverlay,
     SetPlayerModel,
     SetMovementMode,
+    SetCollisionMode,
+    SetTravelAssistMode,
+    SetTurnMode,
     SetXrTurnMode,
     CycleFramePacing,
     CycleFpsCap,
@@ -1118,6 +1225,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         }
         GameUiAction::SetPlayerModel(_) => ClientExperienceActionKind::SetPlayerModel,
         GameUiAction::SetMovementMode(_) => ClientExperienceActionKind::SetMovementMode,
+        GameUiAction::SetCollisionMode(_) => ClientExperienceActionKind::SetCollisionMode,
+        GameUiAction::SetTravelAssistMode(_) => ClientExperienceActionKind::SetTravelAssistMode,
+        GameUiAction::SetTurnMode(_) => ClientExperienceActionKind::SetTurnMode,
         GameUiAction::SetXrTurnMode(_) => ClientExperienceActionKind::SetXrTurnMode,
         GameUiAction::CycleFramePacing => ClientExperienceActionKind::CycleFramePacing,
         GameUiAction::CycleFpsCap => ClientExperienceActionKind::CycleFpsCap,
@@ -1161,6 +1271,8 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::ToggleFirstPersonPlayer
         | ClientExperienceActionKind::SetPlayerModel
         | ClientExperienceActionKind::SetMovementMode
+        | ClientExperienceActionKind::SetCollisionMode
+        | ClientExperienceActionKind::SetTravelAssistMode
         | ClientExperienceActionKind::SetFlySpeed
         | ClientExperienceActionKind::SetMovementSpeed => {
             ClientExperienceActionClassification::CoreAction
@@ -1169,6 +1281,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetFarLodRange
         | ClientExperienceActionKind::ToggleCrosshair
         | ClientExperienceActionKind::ToggleFramePipelineOverlay
+        | ClientExperienceActionKind::SetTurnMode
         | ClientExperienceActionKind::SetXrTurnMode
         | ClientExperienceActionKind::CycleFramePacing
         | ClientExperienceActionKind::CycleFpsCap
@@ -1274,6 +1387,9 @@ mod tests {
             GameUiAction::ToggleFramePipelineOverlay,
             GameUiAction::SetPlayerModel(GamePlayerModel::UprightBear),
             GameUiAction::SetMovementMode(GameMovementMode::Fly),
+            GameUiAction::SetCollisionMode(GameCollisionMode::NoClip),
+            GameUiAction::SetTravelAssistMode(GameTravelAssistMode::Blink),
+            GameUiAction::SetTurnMode(GameTurnMode::Snap30),
             GameUiAction::SetXrTurnMode(GameXrTurnMode::Snap30),
             GameUiAction::CycleFramePacing,
             GameUiAction::CycleFpsCap,
@@ -1286,7 +1402,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 44);
+        assert_eq!(samples.len(), 47);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -1621,6 +1737,78 @@ mod tests {
 
         assert_eq!(state.turn_mode, Some(GameTurnMode::Smooth));
         assert_eq!(state.xr_turn_mode, Some(GameXrTurnMode::Smooth));
+    }
+
+    #[test]
+    fn movement_experience_menu_actions_emit_shared_corrections() {
+        let mut settings = ClientExperienceSettingsController::new(ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Walk,
+            collision_mode: GameCollisionMode::NoClip,
+            travel_assist_mode: GameTravelAssistMode::Off,
+            turn_mode: Some(GameTurnMode::Snap15),
+            ..ClientExperienceSettingsState::default()
+        });
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetTravelAssistMode(GameTravelAssistMode::Blink),
+            ClientExperienceSettingsProfile::default(),
+        );
+
+        assert_eq!(settings.state().collision_mode, GameCollisionMode::Normal);
+        assert_eq!(
+            effects.setting_effects,
+            vec![
+                ClientExperienceSettingEffect::SetCollisionMode(GameCollisionMode::Normal),
+                ClientExperienceSettingEffect::SetTravelAssistMode(GameTravelAssistMode::Blink),
+            ]
+        );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetMovementMode(GameMovementMode::Fly),
+            ClientExperienceSettingsProfile::default(),
+        );
+
+        assert_eq!(settings.state().movement_mode, GameMovementMode::Fly);
+        assert_eq!(
+            settings.state().travel_assist_mode,
+            GameTravelAssistMode::Off
+        );
+        assert_eq!(
+            effects.setting_effects,
+            vec![
+                ClientExperienceSettingEffect::SetMovementMode(GameMovementMode::Fly),
+                ClientExperienceSettingEffect::SetTravelAssistMode(GameTravelAssistMode::Off),
+            ]
+        );
+    }
+
+    #[test]
+    fn set_turn_mode_uses_shared_turn_capability() {
+        let profile = ClientExperienceSettingsProfile {
+            turn_mode: ClientExperienceCapabilityStatus::Unsupported(
+                "Turn mode is unavailable for this profile",
+            ),
+            ..ClientExperienceSettingsProfile::default()
+        };
+        let mut settings = ClientExperienceSettingsController::new(ClientExperienceSettingsState {
+            turn_mode: Some(GameTurnMode::Snap15),
+            xr_turn_mode: Some(GameXrTurnMode::Snap15),
+            ..ClientExperienceSettingsState::default()
+        });
+
+        let effects =
+            settings.apply_ui_action(GameUiAction::SetTurnMode(GameTurnMode::Snap30), profile);
+
+        assert_eq!(settings.state().turn_mode, Some(GameTurnMode::Snap15));
+        assert_eq!(
+            effects.capability_projection.actions,
+            vec![ClientExperienceActionAvailability {
+                kind: ClientExperienceActionKind::SetTurnMode,
+                status: ClientExperienceCapabilityStatus::Unsupported(
+                    "Turn mode is unavailable for this profile"
+                ),
+            }]
+        );
     }
 
     #[test]
