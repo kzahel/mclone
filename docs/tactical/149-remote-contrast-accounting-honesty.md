@@ -1,7 +1,8 @@
 # 149: Remote/Dedicated Contrast Accounting Honesty
 
-Status: active; Slice 1 code landed 2026-07-06, Quest churn evidence pending
-(no ADB device attached during implementation). Drafted 2026-07-06 as the
+Status: active; Slice 1 `SendOnly` code and Quest evidence landed 2026-07-06.
+Remote contrast is still blocked by Slice 2 host-mode-honest projection and by
+the new remote interest-commit stall recorded below. Drafted 2026-07-06 as the
 gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
@@ -139,11 +140,95 @@ existing `ANDROID_REMOTE_ADDR_NONE_SENTINEL` /
 - GPU timestamp sites: 1 existing shared-render hit
   (`native/crates/mclone-render/src/gpu_timestamps.rs`).
 
-Quest churn evidence: not captured in this session because `adb devices`
-reported no attached device. Remaining Slice 1 exit work is to run the
-local-integrated RD5 churn and remote `--adb-reverse --start-server` RD5 churn
-on a Quest and record whether command-send stalls stay under one frame period
-and local-integrated A/B remains within noise.
+Quest churn evidence captured 2026-07-06 on Meta Quest 3
+`2G0YC1ZF93041Z`, APK built from `5d367b90`:
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-sendonly-local-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-sendonly-local-20260706-logcat.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+```bash
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --skip-build --skip-assets \
+  --adb-reverse \
+  --start-server \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-churn-rd5-sendonly-remote-20260706-summary.txt \
+  --log /tmp/mclone-quest-openxr-churn-rd5-sendonly-remote-20260706-logcat.txt \
+  --server-log /tmp/mclone-quest-openxr-churn-rd5-sendonly-remote-20260706-server.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time
+```
+
+Summary:
+
+| Mode | Settle | FPS | Runtime skipped | App avg | App p50 | App p95 | App p99 | App max | Headroom avg | App over-period | Over 2x / 4x |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| local integrated | `32.349s` | `68.41` | `0` | `9.859ms` | `9.852ms` | `17.470ms` | `19.217ms` | `21.028ms` | `+4.030ms` | `953 / 3079` (`31.0%`) | `2 / 0` |
+| remote dedicated, `--adb-reverse --start-server` | `5.005s` | `37.90` | `0` | `21.710ms` | `9.656ms` | `24.180ms` | `28.821ms` | `5887.223ms` | `-7.821ms` | `651 / 1706` (`38.2%`) | `31 / 16` |
+
+Local integrated still ran without skipped runtime frames and with app-work max
+near the 2026-07-05 row (`21.028ms` vs `21.738ms`), but average/p95 were
+higher on this run. Treat that as enough to prove no catastrophic local A/B
+regression from the `SendOnly` fix, not as a fresh local performance baseline.
+
+Remote result:
+
+- The original `SendOnly` command-send/update-drain stall is fixed in the
+  report surface: no `remote dedicated session still ignores SendOnly` warning,
+  and `MCLONE_ANDROID_XR_PERF_LOCOMOTION_COMMAND` reported
+  `max_send_ms=0.000`, `max_drain_updates_ms=0.000`,
+  `max_apply_updates_ms=0.000`, and zero updates.
+- A different remote frame-loop stall remains: worst frame `142` had
+  `app_work_ms=5887.223`, `locomotion_ms=5875.345`, and
+  `commit_interest_ms=5875.280`, while command timing stayed zero. This means
+  the old transport/update-drain archaeology problem is gone, but the remote
+  churn lane still cannot be used as a "server work moved off headset" contrast
+  row.
+- Remote client reports still render server/scheduler counters as zeros
+  (`MCLONE_ANDROID_XR_PERF_QUEUE_MAX` all zero; `MCLONE_ANDROID_XR_PERF_RUNTIME_MAX`
+  update counters all zero), and the dedicated server log only records startup
+  (`mclone dedicated server listening ...`) with no labeled server-side
+  summary. That is the intended Slice 2 gap.
+
+Next implementation step before durable contrast rows: fix or isolate the
+remote `commit_interest` stall, then do Slice 2's host-mode-honest report
+projection so remote client/server halves stop presenting unavailable counters
+as zeros.
 
 ## Slice 2: Host-Mode-Honest Report Projection
 
