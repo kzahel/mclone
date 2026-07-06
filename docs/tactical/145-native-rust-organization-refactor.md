@@ -1,7 +1,7 @@
 # 145: Native Rust Organization Refactor
 
-Status: active parent; ORG-02B baseline gate repair landed. Next slice:
-ORG-03. The Gate State section below is the authoritative expected result for
+Status: active parent; ORG-03 render-session split landed. Next slice:
+ORG-04. The Gate State section below is the authoritative expected result for
 every gate command; older per-slice logs are historical.
 Opened 2026-07-06. This tactical is the current implementation tracker for
 reducing oversized native Rust modules while preserving behavior, public
@@ -343,8 +343,8 @@ with a desktop-only smoke silently.
 | ORG-01: test relocation pass | move large inline tests out of production files | landed 2026-07-06; ORG-01D complete |
 | ORG-02: crate-root and facade cleanup | thin roots and module-local test facades | landed 2026-07-06 |
 | ORG-02B: baseline gate repair | fix the two known `mclone-server` test failures so `cargo test` is green | landed 2026-07-06 |
-| ORG-03: `mclone-render-session` split | render-section session ownership modules | next |
-| ORG-04: `mclone-xr-scene` non-render split | options, timing, locomotion, tracking, UI math | open |
+| ORG-03: `mclone-render-session` split | render-section session ownership modules | completed |
+| ORG-04: `mclone-xr-scene` non-render split | options, timing, locomotion, tracking, UI math | next |
 | ORG-05: `mclone-xr-scene` render/state split | terrain state, stereo/multiview render paths, overlay rendering | open |
 | ORG-06: Android XR adapter split | activity/startup/frame-loop/perf/target modules | open |
 | ORG-07: Web canvas adapter split | wasm exports, compiler session, render session, catalog bridge, JS codecs | open |
@@ -1084,12 +1084,60 @@ pnpm native:mesh-cpu:perf
 pnpm native:startup-streaming:persisted:perf
 pnpm native:timedemo:perf
 pnpm native:web:build
+pnpm native:perf:smoke
+pnpm native:xr:check
 git diff --check
 ```
 
 Log:
 
-- Pending.
+- Completed 2026-07-06 as a move-only crate-internal split. `lib.rs` is now a
+  facade with private sibling modules plus root `pub use` re-exports preserving
+  existing `mclone_render_session::...` public paths.
+- New modules: `mesh_inputs`, `section_cache`, `upload`, `dirty`,
+  `ready_plan`, `compile_queue`, `camera`, `server_updates`, and `session`.
+  Existing `src/tests.rs` and `src/tests/**` stayed in place with no test
+  edits.
+- `section_cache` gathered the previously split `CachedTexturedRenderSections`
+  struct and bottom-of-file impl. `compile_queue` gathered compile requests,
+  sync-plan helpers, pending request state, packed report codecs, and compiler
+  traits from the four original regions.
+- No public item was tightened or moved behind a new downstream path. The
+  crate-local promotions needed after module boundaries were:
+  `EngineCameraController::player`,
+  `EngineServerUpdateDirtyBatch` plus its fields and `collect`,
+  `RenderSectionDirtyState::section_revisions`,
+  `CachedTexturedRenderSections::{has_dirty_sections, dirty_section_count,
+  dirty_section_keys, mark_section_dirty, clear_section_dirty}`,
+  `ENGINE_DEBUG_HAND_SPHERE_SEGMENTS`, and
+  `hand_push_emulation_direction`. The expected geometry-helper and
+  `glam_quat_from_entity_rotation` promotions were avoided by module
+  ownership: geometry stayed inside `ready_plan`, and the quaternion helper
+  stayed inside `mesh_inputs`.
+- Pre-flight every-slice gates matched the Gate State table before edits:
+  `cargo fmt --manifest-path native/Cargo.toml --all --check`, `git diff
+  --check`, `cargo test --manifest-path native/Cargo.toml`, `pnpm
+  native:web:build`, `pnpm native:xr:check`, and `pnpm native:perf:smoke`
+  all passed.
+- Post-change validation passed:
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-render-session`
+  - `cargo test --manifest-path native/Cargo.toml`
+  - `pnpm native:web:build`
+  - `pnpm native:xr:check`
+  - `pnpm native:mesh-cpu:perf`
+  - `pnpm native:startup-streaming:persisted:perf`
+  - `pnpm native:timedemo:perf`
+  - `pnpm native:perf:smoke`
+  - `git diff --check`
+- Release perf reports stayed within expected move-only noise: mesh CPU perf
+  built `8,464` sections at `813.265` sections/sec; persisted startup
+  streaming reported `0` over-budget frames, `5.522ms` average frame time, and
+  first full-view readiness at `1019.885ms`; timedemo perf reported
+  `2.889ms` average frame time over `240` frames.
+- Validation produced only pre-existing warnings: Android XR dead-code warnings
+  during native tests and the `with_unload_hysteresis_chunks` dead-code warning
+  during web build.
 
 ## ORG-04: `mclone-xr-scene` Non-Render Split
 
