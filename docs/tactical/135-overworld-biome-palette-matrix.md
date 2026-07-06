@@ -30,7 +30,7 @@ Java-shaped `BROWN_MUSHROOM_TAIGA` / `RED_MUSHROOM_TAIGA` and counted
 giant-taiga mushroom table wiring, with Java-shaped small-mushroom
 survival/light/substrate gating, and deterministic low-visibility fixtures for
 plains/forest/birch/dark-forest/taiga/snowy,
-mushroom-field/mushroom-shore/giant-taiga/mountain, and
+mushroom-field/mushroom-shore/giant-taiga/mountain/savanna/jungle, and
 sunflower-plains/ice-spikes small mushrooms plus savanna/sunflower-plains
 exposed default spring water/lava placements, visible pumpkins on grass across
 swamp/stone-shore, river/beach, desert/badlands, swamp-hills, and
@@ -173,9 +173,9 @@ notes.
 | 18 | `minecraft:wooded_hills` | forest | forest hill grass and oak/birch tree family checked; `FOREST_FLOWER_VEGETATION`, default flowers, count-2 forest grass, normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `1` chunk `(-1,-11)`; bee-side-effects gap | seed `2`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 19 | `minecraft:taiga_hills` | taiga | taiga hill grass plus spruce/fern and sweet berry bushes checked; taiga/normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `2` chunk `(-12,12)` | seed `29`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 20 | `minecraft:mountain_edge` | mountains | tint checked; Java 1.17 final layered source appears not to emit this registered ID | no B/S fixture | `[ ] B [x] T [ ] S [ ] F` |
-| 21 | `minecraft:jungle` | jungle | grass tint/surface, jungle log/leaves tree family, visible cocoa/directional vine states, and visible Java-shaped jungle-bush skirt checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired | seed `61`, chunk `(1,2)` | `[x] B [x] T [x] S [x] F` |
-| 22 | `minecraft:jungle_hills` | jungle | jungle hill surface/tint and jungle log/leaves tree family checked; normal/mega jungle tree vine decorators, mega-jungle 2x2 trunk/branch/foliage shape, jungle-bush foliage rows, and normal jungle cocoa decorator wired; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact tree-count gap | seed `146`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface and lower-density jungle log/leaves tree family checked; normal jungle cocoa/directional-vine decorator path and jungle-bush foliage rows wired; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact low-density tree-count gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 21 | `minecraft:jungle` | jungle | grass tint/surface, jungle log/leaves tree family, visible cocoa/directional vine states, and visible Java-shaped jungle-bush skirt checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; visible small-mushroom fixture at seed `1` chunk `(12,1)` | seed `61`, chunk `(1,2)` | `[x] B [x] T [x] S [x] F` |
+| 22 | `minecraft:jungle_hills` | jungle | jungle hill surface/tint and jungle log/leaves tree family checked; normal/mega jungle tree vine decorators, mega-jungle 2x2 trunk/branch/foliage shape, jungle-bush foliage rows, and normal jungle cocoa decorator wired; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; visible small-mushroom fixture at seed `1` chunk `(15,2)`; exact tree-count gap | seed `146`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface and lower-density jungle log/leaves tree family checked; normal jungle cocoa/directional-vine decorator path and jungle-bush foliage rows wired; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; visible small-mushroom fixture at seed `149` chunk `(4,13)`; exact low-density tree-count gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 24 | `minecraft:deep_ocean` | ocean-default | deep water checked; seagrass/kelp water plants checked | seed `4`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 25 | `minecraft:stone_shore` | mountains | stone shore plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `74739` chunk `(3,5)`; steep coast/structure-context gap | seed `74739`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water plus default sugar-cane extras checked; normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `2805` chunk `(14,6)` | seed `5006`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -187,8 +187,8 @@ notes.
 | 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt surface plus giant spruce/mega pine log/leaves family checked; `FOREST_ROCK` mossy-cobblestone boulders fixture at origin; counted giant-taiga/normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `19` chunk `(-12,-12)` | seed `132`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 33 | `minecraft:giant_tree_taiga_hills` | giant-tree-taiga | giant taiga hill podzol/coarse dirt plus giant spruce/mega pine log/leaves family checked; `FOREST_ROCK` table slot wired; counted giant-taiga/normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `19` chunk `(-12,-7)` | seed `305`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 34 | `minecraft:wooded_mountains` | mountains | mountain surface and wooded mountain oak/spruce tree family checked; normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `3` chunk `(0,-1)`; emerald/infested-stone gap | seed `58`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 35 | `minecraft:savanna` | savanna | dry grass tint/surface and acacia tree family checked; `PATCH_TALL_GRASS`, `FLOWER_WARM`, count-20 savanna grass, normal mushroom, default extra, and spring table slots wired; exposed default spring water/lava fixture at seed `62` chunk `(3,1)` | seed `33`, chunk `(-2,-4)` | `[x] B [x] T [x] S [x] F` |
-| 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau tint/surface and acacia tree family checked; `PATCH_TALL_GRASS`, `FLOWER_WARM`, count-20 savanna grass, normal mushroom, default extra, and spring table slots wired | seed `126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 35 | `minecraft:savanna` | savanna | dry grass tint/surface and acacia tree family checked; `PATCH_TALL_GRASS`, `FLOWER_WARM`, count-20 savanna grass, normal mushroom, default extra, and spring table slots wired; exposed default spring water/lava fixture at seed `62` chunk `(3,1)`; visible small-mushroom fixture at seed `33` chunk `(-10,-14)` | seed `33`, chunk `(-2,-4)` | `[x] B [x] T [x] S [x] F` |
+| 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau tint/surface and acacia tree family checked; `PATCH_TALL_GRASS`, `FLOWER_WARM`, count-20 savanna grass, normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `38` chunk `(-3,-15)` | seed `126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `2336` chunk `(-5,-7)` | seed `28`, chunk `(-2,-8)` | `[x] B [x] T [x] S [x] F` |
 | 38 | `minecraft:wooded_badlands_plateau` | badlands | wooded plateau terracotta/red sand plus Java `TREES_BADLANDS` oak, `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `1248` chunk `(-6,8)` | seed `4764`, chunk `(6,-3)` | `[x] B [x] T [x] S [x] F` |
 | 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand plus Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `653` chunk `(-5,6)` | seed `947`, chunk `(-6,-2)` | `[x] B [x] T [x] S [x] F` |
@@ -206,8 +206,8 @@ notes.
 | 133 | `minecraft:taiga_mountains` | taiga | taiga mountain grass plus spruce/fern and sweet berry bushes checked; taiga/normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `201` chunk `(1,-6)` | seed `6126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 134 | `minecraft:swamp_hills` | swamp | swamp-hills tint/surface plus native swamp subset, blue orchids, mushroom blocks, sugar cane, and lily pads checked; small/normal mushroom, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `3407` chunk `(7,-2)`; hill fossil/seagrass gap | seed `89335`, chunk `(5,4)` | `[x] B [x] T [x] S [x] F` |
 | 140 | `minecraft:ice_spikes` | frozen-land | snow/ice-spikes surface plus packed-ice spike/patch coverage checked; normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `59` chunk `(-12,-11)`; exact spike/patch shape gap | seed `59`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 149 | `minecraft:modified_jungle` | jungle | jungle tint/surface and jungle log/leaves tree family checked; normal/mega jungle tree vine decorators, mega-jungle 2x2 trunk/branch/foliage shape, jungle-bush foliage rows, and normal jungle cocoa decorator wired; normal mushroom, default extra, and spring table slots wired; exact dense-jungle tree-count gap | seed `1374`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 151 | `minecraft:modified_jungle_edge` | jungle-edge | jungle-edge tint/surface and sparse jungle tree block spillover checked; normal jungle cocoa/directional-vine decorator path and jungle-bush foliage rows wired; normal mushroom, default extra, and spring table slots wired; exact low-density tree-count gap | seed `314096`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 149 | `minecraft:modified_jungle` | jungle | jungle tint/surface and jungle log/leaves tree family checked; normal/mega jungle tree vine decorators, mega-jungle 2x2 trunk/branch/foliage shape, jungle-bush foliage rows, and normal jungle cocoa decorator wired; normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `102` chunk `(-13,-12)`; exact dense-jungle tree-count gap | seed `1374`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 151 | `minecraft:modified_jungle_edge` | jungle-edge | jungle-edge tint/surface and sparse jungle tree block spillover checked; normal jungle cocoa/directional-vine decorator path and jungle-bush foliage rows wired; normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `8201` chunk `(6,-8)`; exact low-density tree-count gap | seed `314096`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 155 | `minecraft:tall_birch_forest` | birch | birch tint/surface and tall-birch selector log/leaves family checked; normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `39` chunk `(5,-12)` | seed `48`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 156 | `minecraft:tall_birch_hills` | birch | birch hill tint/surface and tall-birch selector log/leaves family checked; normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `32` chunk `(-6,4)` | seed `1557`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 157 | `minecraft:dark_forest_hills` | dark-forest | dark-forest tint/surface, dark oak canopy, and huge mushroom family checked; forest-flower vegetation, glow lichen, count-2 forest grass, normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `123` chunk `(1,7)` | seed `410`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
@@ -215,13 +215,13 @@ notes.
 | 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | podzol/coarse dirt surface plus giant spruce log/leaves family checked; `FOREST_ROCK` table slot wired; counted giant-taiga/normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `132` chunk `(10,0)` | seed `6232`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 161 | `minecraft:giant_spruce_taiga_hills` | giant-spruce-taiga | giant spruce hill podzol/coarse dirt plus giant spruce log/leaves family checked; `FOREST_ROCK` table slot wired; counted giant-taiga/normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `93` chunk `(-11,-10)` | seed `282`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 162 | `minecraft:modified_gravelly_mountains` | mountains | modified gravelly mountain surface plus sparse oak/spruce tree family checked; normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `9` chunk `(9,9)`; emerald/infested-stone gap | seed `1831`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface and acacia tree family checked; default flowers, count-5 shattered grass, normal mushroom, default extra, and spring table slots wired | seed `68`, chunk `(-6,0)` | `[x] B [x] T [x] S [x] F` |
-| 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau surface and acacia tree family checked; default flowers, count-5 shattered grass, normal mushroom, default extra, and spring table slots wired | seed `153`, chunk `(-8,-2)` | `[x] B [x] T [x] S [x] F` |
+| 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface and acacia tree family checked; default flowers, count-5 shattered grass, normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `68` chunk `(-6,3)` | seed `68`, chunk `(-6,0)` | `[x] B [x] T [x] S [x] F` |
+| 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau surface and acacia tree family checked; default flowers, count-5 shattered grass, normal mushroom, default extra, and spring table slots wired; visible small-mushroom fixture at seed `126` chunk `(13,14)` | seed `153`, chunk `(-8,-2)` | `[x] B [x] T [x] S [x] F` |
 | 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface plus exact Java tall-pillar surface oracle at chunk `(8,-6)`; Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `85720` chunk `(11,5)` | seed `868`, chunk `(7,-8)`; pillar oracle chunk `(8,-6)` | `[x] B [x] T [x] S [x] F` |
 | 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | modified wooded plateau surface plus Java `TREES_BADLANDS` oak, `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `13518` chunk `(10,-3)` | seed `12115`, chunk `(0,-1)` | `[x] B [x] T [x] S [x] F` |
 | 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau plus Java `PATCH_GRASS_BADLANDS`, count-20 dead bush, normal mushroom, badlands sugar-cane/cactus, `PATCH_PUMPKIN`, and spring table slots wired; visible pumpkin fixture at seed `168856` chunk `(4,10)` | seed `1150`, chunk `(-7,1)` | `[x] B [x] T [x] S [x] F` |
-| 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, mega-jungle 2x2 trunk/branch/foliage, jungle-bush foliage rows, and vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact tree-count gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, mega-jungle 2x2 trunk/branch/foliage, jungle-bush foliage rows, and vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; exact tree-count gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 168 | `minecraft:bamboo_jungle` | jungle | jungle tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, mega-jungle 2x2 trunk/branch/foliage, jungle-bush foliage rows, and vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; visible small-mushroom fixture at seed `71` chunk `(9,0)`; exact tree-count gap | seed `1263`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 169 | `minecraft:bamboo_jungle_hills` | jungle | jungle hill tint/surface, bamboo stalks/top leaf states, jungle log/leaves vegetation, mega-jungle 2x2 trunk/branch/foliage, jungle-bush foliage rows, and vine decorator path checked; normal mushroom, default extra, spring, and jungle `PATCH_MELON`/`VINES` table slots wired; visible small-mushroom fixture at seed `102` chunk `(-1,-16)`; exact tree-count gap | seed `1000`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 
 ## Notes And Early Gaps
 
@@ -391,8 +391,15 @@ Landed:
   `(1,-6)`, snowy seed `14` chunks `(-10,-12)`, `(-12,10)`, `(-12,-7)`,
   and `(-5,10)`, snowy-mountains seed `42` chunk `(-11,-6)`,
   gravelly-mountains seed `123` chunk `(-4,10)`, and ice-spikes seed `59`
-  chunk `(-12,-11)` require visible small mushroom blocks; jungle seed `61`
-  chunk `(1,2)` requires visible cocoa, directional
+  chunk `(-12,-11)` require visible small mushroom blocks; jungle seed `1`
+  chunks `(12,1)` and `(15,2)`, jungle-edge seed `149` chunk
+  `(4,13)`, modified-jungle seed `102` chunk `(-13,-12)`,
+  modified-jungle-edge seed `8201` chunk `(6,-8)`, bamboo-jungle seed `71`
+  chunk `(9,0)`, bamboo-jungle-hills seed `102` chunk `(-1,-16)`, savanna
+  seed `33` chunk `(-10,-14)`, savanna-plateau seed `38` chunk `(-3,-15)`,
+  shattered-savanna seed `68` chunk `(-6,3)`, and shattered-savanna-plateau
+  seed `126` chunk `(13,14)` require visible small mushroom blocks; jungle
+  seed `61` chunk `(1,2)` requires visible cocoa, directional
   vine states, and a jungle-log/oak-leaf bush-skirt shape; savanna seed `62`
   chunk `(3,1)` and sunflower-plains seed `43` chunk `(-1,1)` require exposed
   scheduled spring positions that still contain water and lava blocks; swamp
@@ -444,11 +451,12 @@ Documented gaps from this slice:
   remain owned by later `103` work.
 - Java savanna now has the high-signal acacia selector path represented, plus
   `PATCH_TALL_GRASS`, `FLOWER_WARM`, count-20 `PATCH_GRASS_SAVANNA`, shattered
-  count-5 `PATCH_GRASS_NORMAL`, and normal mushroom table slots wired. Exact
-  decorated parity is still incomplete: exact warm-flower/tall-grass visibility
-  fixtures, exact normal mushroom/default-extra visibility and count parity,
-  full light-engine parity, villages/outposts, and exact tree-count mismatch
-  buckets remain owned by later `103` work.
+  count-5 `PATCH_GRASS_NORMAL`, normal mushroom table slots, and visible
+  small-mushroom fixtures for all four savanna rows. Exact decorated parity is
+  still incomplete: exact warm-flower/tall-grass visibility fixtures, exact
+  normal mushroom/default-extra count parity, full light-engine parity,
+  villages/outposts, and exact tree-count mismatch buckets remain owned by
+  later `103` work.
 - Java jungle and bamboo jungle now have high-signal jungle log/leaves and
   bamboo stalk coverage plus normal mushroom table slots, and the Java
   `PATCH_MELON` / `VINES` jungle extra vegetation slots are wired with broad
@@ -460,10 +468,11 @@ Documented gaps from this slice:
   bush-skirt fixture at seed `61` chunk `(1,2)`. Bamboo generation now emits
   Java-shaped `leaves=small`, `leaves=large`, and final `stage=1` large top
   states, and the mesh catalog composes the stem plus leaf multipart models for
-  those states. Exact parity is still incomplete: exact tree-count/selector
-  visibility buckets are not checked here, exact normal mushroom/default-extra
-  visibility/count parity and full light-engine parity are not checked here,
-  and exact decorated mismatch buckets remain later `103` work.
+  those states. All seven jungle-family rows now also have visible
+  small-mushroom fixtures. Exact parity is still incomplete: exact
+  tree-count/selector visibility buckets are not checked here, exact normal
+  mushroom/default-extra count parity and full light-engine parity are not
+  checked here, and exact decorated mismatch buckets remain later `103` work.
 - Java normal/cold/lukewarm ocean water-plant tables are represented by broad
   seagrass/kelp checks, and warm ocean now has seagrass, live coral blocks,
   live coral plant/floor-fan/wall-fan sidecars, and sea pickles. Native still
@@ -601,18 +610,18 @@ vegetation and springs are table-wired for the current main land lanes, the
 small-mushroom survival gate is no longer over-permissive, savanna/forest
 flower and grass table distinctions are wired, low-visibility mushroom fixtures
 now cover plains, forest, birch, dark-forest, taiga, snowy, mushroom-field,
-mushroom-shore, giant-taiga, mountain, sunflower-plains, and ice-spikes rows,
-exposed-spring fixtures are pinned, and jungle extra melon/vine slots plus
-jungle cocoa/directional vines are represented. Move the next chunk to either
-the remaining low-visibility fixture breadth or a visible row-specific feature
-slice:
+mushroom-shore, giant-taiga, mountain, savanna, jungle, sunflower-plains, and
+ice-spikes rows, exposed-spring fixtures are pinned, and jungle extra
+melon/vine slots plus jungle cocoa/directional vines are represented. Move the
+next chunk to either the remaining low-visibility fixture breadth or a visible
+row-specific feature slice:
 
 1. Re-read `BiomeDefaultFeatures` / `VanillaBiomes` and decide whether to wire
    default mushroom table slots into desert and ocean builders now, or leave
    them with `103` exact decorated parity because they are usually non-visible
    in current palette fixtures.
 2. Add row-specific visible fixtures for already-wired low-visibility slots:
-   remaining small-mushroom/default-extra rows in savanna, jungle, river,
-   beach/shore, swamp, badlands, and default-extra-heavy land variants.
+   remaining small-mushroom/default-extra rows in river, beach/shore, swamp,
+   badlands, and default-extra-heavy land variants.
 3. Pick one missing high-signal family outside the broad table slots: exact
    jungle tree selector/count visibility buckets if staying in jungle rows.
