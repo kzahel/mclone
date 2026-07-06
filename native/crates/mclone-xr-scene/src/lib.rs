@@ -113,7 +113,8 @@ pub const XR_DEFAULT_SNAP_TURN_DEGREES: f32 = 15.0;
 pub const XR_SNAP_TURN_ENGAGE_THRESHOLD: f32 = 0.65;
 pub const XR_SNAP_TURN_RECENTER_THRESHOLD: f32 = 0.25;
 pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
-pub const XR_BLINK_TELEPORT_STICK_THRESHOLD: f32 = 0.5;
+pub const XR_BLINK_TELEPORT_STICK_THRESHOLD: f32 = 0.75;
+pub const XR_BLINK_TELEPORT_HEADING_STICK_THRESHOLD: f32 = 0.9;
 pub const XR_AUTOMATED_ORBIT_RADIUS_BLOCKS: f64 = 16.0;
 pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
 pub const XR_UI_FPS_CAP: u32 = 90;
@@ -2875,7 +2876,7 @@ where
         let blink_engaged = xr_left_stick_blink_engaged(controllers);
         if blink_engaged {
             if !self.blink_teleport.active {
-                self.begin_xr_blink_teleport(controllers, views, transform);
+                self.begin_xr_blink_teleport(views, transform);
             }
             self.submit_xr_blink_teleport_request(controllers, transform)?;
             self.poll_xr_blink_teleport_worker();
@@ -2896,12 +2897,7 @@ where
         })
     }
 
-    fn begin_xr_blink_teleport(
-        &mut self,
-        controllers: &[XrControllerSnapshot],
-        views: &[xr::View],
-        transform: XrStageToWorld,
-    ) {
+    fn begin_xr_blink_teleport(&mut self, views: &[xr::View], transform: XrStageToWorld) {
         if self.runtime.is_none() {
             self.clear_xr_blink_teleport();
             return;
@@ -2922,8 +2918,7 @@ where
         self.blink_teleport.preview_request_id = None;
         self.blink_teleport.base_yaw_degrees = base_yaw_degrees;
         self.blink_teleport.target_yaw_degrees = base_yaw_degrees;
-        self.blink_teleport.activation_left_stick_angle_radians =
-            xr_left_stick_heading_angle_radians(controllers);
+        self.blink_teleport.activation_left_stick_angle_radians = None;
         self.blink_teleport.last_submitted_intent = None;
         log::info!("XR Blink teleport preview armed");
     }
@@ -3081,15 +3076,18 @@ where
         Ok(())
     }
 
-    fn xr_blink_teleport_target_yaw_degrees(&self, controllers: &[XrControllerSnapshot]) -> f64 {
+    fn xr_blink_teleport_target_yaw_degrees(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+    ) -> f64 {
         let base_yaw_degrees = self.blink_teleport.base_yaw_degrees;
-        let Some(start_angle) = self.blink_teleport.activation_left_stick_angle_radians else {
-            return base_yaw_degrees;
-        };
-        let Some(current_angle) = xr_left_stick_heading_angle_radians(controllers) else {
-            return base_yaw_degrees;
-        };
-        target_yaw_degrees_from_stick_delta(base_yaw_degrees, start_angle, current_angle)
+        let previous_target_yaw_degrees = self.blink_teleport.target_yaw_degrees;
+        xr_blink_teleport_target_yaw_degrees_from_stick(
+            base_yaw_degrees,
+            previous_target_yaw_degrees,
+            &mut self.blink_teleport.activation_left_stick_angle_radians,
+            xr_left_stick_raw_axis(controllers),
+        )
     }
 
     pub fn apply_automated_flight_input(
@@ -6700,12 +6698,22 @@ fn xr_headset_player_yaw_degrees_from_views(
     xr_headset_world_yaw_from_views(views, transform).map(|yaw| -f64::from(yaw).to_degrees())
 }
 
-fn xr_left_stick_heading_angle_radians(controllers: &[XrControllerSnapshot]) -> Option<f64> {
-    let axis = xr_left_stick_raw_axis(controllers);
-    if axis.length_squared() <= f32::EPSILON {
-        return None;
+fn xr_blink_teleport_target_yaw_degrees_from_stick(
+    base_yaw_degrees: f64,
+    previous_target_yaw_degrees: f64,
+    activation_angle_radians: &mut Option<f64>,
+    axis: Vec2,
+) -> f64 {
+    if !axis.is_finite() || axis.length() <= XR_BLINK_TELEPORT_HEADING_STICK_THRESHOLD {
+        return previous_target_yaw_degrees;
     }
-    Some(f64::from(axis.y.atan2(axis.x)))
+    let current_angle_radians = f64::from(axis.y.atan2(axis.x));
+    let start_angle_radians = *activation_angle_radians.get_or_insert(current_angle_radians);
+    target_yaw_degrees_from_stick_delta(
+        base_yaw_degrees,
+        start_angle_radians,
+        current_angle_radians,
+    )
 }
 
 fn target_yaw_degrees_from_stick_delta(
@@ -7857,6 +7865,7 @@ mod tests {
 
     #[test]
     fn xr_blink_teleport_engages_only_past_left_stick_threshold() {
+        assert_eq!(XR_BLINK_TELEPORT_STICK_THRESHOLD, 0.75);
         assert!(!xr_left_stick_blink_engaged(&[test_controller(
             XrHand::Left,
             Vec2::new(XR_BLINK_TELEPORT_STICK_THRESHOLD, 0.0),
@@ -7872,6 +7881,46 @@ mod tests {
             Vec2::new(0.0, -(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01)),
             false,
         )]));
+    }
+
+    #[test]
+    fn xr_blink_heading_only_changes_past_heading_threshold() {
+        assert_eq!(XR_BLINK_TELEPORT_HEADING_STICK_THRESHOLD, 0.9);
+        let base_yaw_degrees = 17.0;
+        let mut activation_angle = None;
+
+        let below_heading_threshold = xr_blink_teleport_target_yaw_degrees_from_stick(
+            base_yaw_degrees,
+            base_yaw_degrees,
+            &mut activation_angle,
+            Vec2::new(0.0, XR_BLINK_TELEPORT_HEADING_STICK_THRESHOLD),
+        );
+
+        assert!((below_heading_threshold - base_yaw_degrees).abs() < 1.0e-9);
+        assert!(activation_angle.is_none());
+
+        let armed_heading = xr_blink_teleport_target_yaw_degrees_from_stick(
+            base_yaw_degrees,
+            base_yaw_degrees,
+            &mut activation_angle,
+            Vec2::new(1.0, 0.0),
+        );
+        let rotated_heading = xr_blink_teleport_target_yaw_degrees_from_stick(
+            base_yaw_degrees,
+            armed_heading,
+            &mut activation_angle,
+            Vec2::new(0.0, 1.0),
+        );
+        let release_noise_heading = xr_blink_teleport_target_yaw_degrees_from_stick(
+            base_yaw_degrees,
+            rotated_heading,
+            &mut activation_angle,
+            Vec2::new(-0.6, 0.5),
+        );
+
+        assert!((armed_heading - base_yaw_degrees).abs() < 1.0e-9);
+        assert!((rotated_heading + 73.0).abs() < 1.0e-5);
+        assert!((release_noise_heading - rotated_heading).abs() < 1.0e-9);
     }
 
     #[test]
