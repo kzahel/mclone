@@ -7,6 +7,7 @@ publish.workspace = true
 
 [features]
 default = []
+perf-diagnostics = ["mclone-app-runtime/perf-diagnostics"]
 physics-rapier = ["mclone-server/physics-rapier"]
 xr = [
     "dep:libloading",

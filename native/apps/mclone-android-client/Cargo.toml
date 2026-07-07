@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+perf-diagnostics = ["mclone-app-runtime/perf-diagnostics"]
+
 [target.'cfg(target_os = "android")'.dependencies]
 anyhow.workspace = true
 glam.workspace = true

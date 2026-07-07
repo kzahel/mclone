@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+perf-diagnostics = []
+
 [dependencies]
 anyhow.workspace = true
 glam.workspace = true

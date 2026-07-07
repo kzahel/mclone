@@ -32,6 +32,8 @@ pub use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
 };
 
+pub const RENDER_COMPILE_WORKER_TIMING_COMPILED: bool = cfg!(feature = "perf-diagnostics");
+
 #[derive(Clone, Debug)]
 pub struct SceneTexturedSections {
     pub sections: Vec<TexturedRenderSectionMesh>,
@@ -101,11 +103,54 @@ struct RenderSectionCompileWorkerMetrics {
     max_task_us: u128,
 }
 
+#[cfg(feature = "perf-diagnostics")]
 impl RenderSectionCompileWorkerMetrics {
     fn record_task(&mut self, elapsed_us: u128) {
         self.completed_tasks = self.completed_tasks.saturating_add(1);
         self.total_busy_us = self.total_busy_us.saturating_add(elapsed_us);
         self.max_task_us = self.max_task_us.max(elapsed_us);
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct RenderSectionCompileWorkerMetricsStore {
+    #[cfg(feature = "perf-diagnostics")]
+    inner: Arc<Mutex<RenderSectionCompileWorkerMetrics>>,
+}
+
+impl RenderSectionCompileWorkerMetricsStore {
+    fn new() -> Self {
+        #[cfg(feature = "perf-diagnostics")]
+        {
+            Self {
+                inner: Arc::new(Mutex::new(RenderSectionCompileWorkerMetrics::default())),
+            }
+        }
+        #[cfg(not(feature = "perf-diagnostics"))]
+        {
+            Self {}
+        }
+    }
+
+    fn snapshot(&self) -> RenderSectionCompileWorkerMetrics {
+        #[cfg(feature = "perf-diagnostics")]
+        {
+            self.inner
+                .lock()
+                .map(|metrics| *metrics)
+                .unwrap_or_default()
+        }
+        #[cfg(not(feature = "perf-diagnostics"))]
+        {
+            RenderSectionCompileWorkerMetrics::default()
+        }
+    }
+
+    #[cfg(feature = "perf-diagnostics")]
+    fn record_task(&self, elapsed_us: u128) {
+        if let Ok(mut metrics) = self.inner.lock() {
+            metrics.record_task(elapsed_us);
+        }
     }
 }
 
@@ -258,7 +303,7 @@ pub struct RenderSectionCompileWorker {
     pending_jobs: usize,
     max_pending_jobs: usize,
     worker_count: usize,
-    metrics: Arc<Mutex<RenderSectionCompileWorkerMetrics>>,
+    metrics: RenderSectionCompileWorkerMetricsStore,
 }
 
 #[derive(Debug)]
@@ -413,11 +458,13 @@ impl RenderSectionCompileWorker {
                 "render section compile max pending jobs ({max_pending_jobs}) must be at least worker count ({worker_count})"
             );
         }
+        #[cfg(not(feature = "perf-diagnostics"))]
+        let _ = worker_timing_enabled;
 
         let queue = Arc::new(RenderSectionCompileQueue::new(max_pending_jobs));
         let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
         let mut handles = Vec::with_capacity(worker_count + 1);
-        let metrics = Arc::new(Mutex::new(RenderSectionCompileWorkerMetrics::default()));
+        let metrics = RenderSectionCompileWorkerMetricsStore::new();
 
         {
             let queue = Arc::clone(&queue);
@@ -432,7 +479,8 @@ impl RenderSectionCompileWorker {
             let catalog = catalog.clone();
             let queue = Arc::clone(&queue);
             let result_sender = result_sender.clone();
-            let worker_metrics = Arc::clone(&metrics);
+            #[cfg(feature = "perf-diagnostics")]
+            let worker_metrics = metrics.clone();
             let thread_name = if worker_count == 1 {
                 "mclone-render-compile".to_string()
             } else {
@@ -442,17 +490,18 @@ impl RenderSectionCompileWorker {
                 .name(thread_name)
                 .spawn(move || {
                     while let Some(request) = queue.take_next() {
+                        #[cfg(feature = "perf-diagnostics")]
                         let result = if worker_timing_enabled {
                             let compile_start = Instant::now();
                             let result = compile_render_section_request(&catalog, request);
                             let compile_us = compile_start.elapsed().as_micros();
-                            if let Ok(mut metrics) = worker_metrics.lock() {
-                                metrics.record_task(compile_us);
-                            }
+                            worker_metrics.record_task(compile_us);
                             result
                         } else {
                             compile_render_section_request(&catalog, request)
                         };
+                        #[cfg(not(feature = "perf-diagnostics"))]
+                        let result = compile_render_section_request(&catalog, request);
                         if result_sender.send(result).is_err() {
                             break;
                         }
@@ -492,10 +541,7 @@ impl RenderSectionCompileWorker {
     }
 
     fn metrics_snapshot(&self) -> RenderSectionCompileWorkerMetrics {
-        self.metrics
-            .lock()
-            .map(|metrics| *metrics)
-            .unwrap_or_default()
+        self.metrics.snapshot()
     }
 }
 
@@ -1211,6 +1257,44 @@ mod tests {
         assert_eq!(worker.completed_compile_task_count(), 0);
         assert_eq!(worker.total_compile_worker_busy_us(), 0);
         assert_eq!(worker.max_compile_worker_task_us(), 0);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(not(feature = "perf-diagnostics"))]
+    fn render_compile_worker_timing_defaults_to_compiled_out() -> Result<()> {
+        let mut worker =
+            RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs_and_timing(
+                TexturedMeshCatalog::default(),
+                1,
+                1,
+                true,
+            )?;
+        worker.submit(empty_compile_request())?;
+
+        let completed = wait_for_completed_result(&mut worker)?;
+        assert_eq!(completed.len(), 1);
+        assert_eq!(worker.completed_compile_task_count(), 0);
+        assert_eq!(worker.total_compile_worker_busy_us(), 0);
+        assert_eq!(worker.max_compile_worker_task_us(), 0);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "perf-diagnostics")]
+    fn render_compile_worker_timing_records_when_compiled_in() -> Result<()> {
+        let mut worker =
+            RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs_and_timing(
+                TexturedMeshCatalog::default(),
+                1,
+                1,
+                true,
+            )?;
+        worker.submit(empty_compile_request())?;
+
+        let completed = wait_for_completed_result(&mut worker)?;
+        assert_eq!(completed.len(), 1);
+        assert_eq!(worker.completed_compile_task_count(), 1);
         Ok(())
     }
 

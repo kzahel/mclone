@@ -1806,9 +1806,20 @@ impl StartupStreamingPerfReport {
             self.options.scene.render_compile_max_pending_jobs,
             true,
         );
+        let render_compile_worker_timing_compiled =
+            mclone_app_runtime::render_assets::RENDER_COMPILE_WORKER_TIMING_COMPILED;
+        println!(
+            "  \"render_compile_worker_timing_requested\": {},",
+            self.options.scene.render_compile_worker_timing_enabled
+        );
+        println!(
+            "  \"render_compile_worker_timing_compiled\": {},",
+            render_compile_worker_timing_compiled
+        );
         println!(
             "  \"render_compile_worker_timing_enabled\": {},",
             self.options.scene.render_compile_worker_timing_enabled
+                && render_compile_worker_timing_compiled
         );
         println!(
             "  \"simulation_cadence\": {{ \"host_hz\": {}, \"gameplay_hz\": {}, \"physics_hz\": {} }},",
