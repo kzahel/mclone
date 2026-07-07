@@ -18,8 +18,9 @@ chunk snapshot payload drops landed and removed the Quest unload client-apply
 tail while making cleanup cost explicit in poll diagnostics; Slice 3K native
 deferred payload drop worker landed and moved that cleanup off the app frame;
 remote `SendOnly` and response-readiness fixes landed under tactical 149;
-focused native remote inbound-queue work is split to tactical 151; web bus
-convergence and broader terrain coordinator lifecycle remain active
+focused native/web remote inbound-queue work completed under tactical 151;
+server-push protocol broadening and broader terrain coordinator lifecycle
+remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -116,7 +117,8 @@ ordered queue behind a common policy boundary.
 - The local `NativeSingleViewSessionRuntime::set_chunk_view` wrapper now
   preserves that deferred-update local path instead of routing through the
   default immediate-drain gameplay helper. Remote dedicated now honors
-  `SendOnly` too, but still has a paired response-batch transport shape.
+  `SendOnly` too. Its wire protocol is still paired response batches, but the
+  app/runtime-facing boundary is the shared `ClientConnection` queue.
 - `LocalSingleViewSceneRuntime::poll` applies updates in strict receive order
   under the default elapsed-time budget, while startup and `poll_until_idle`
   use an explicit unlimited pump.
@@ -133,12 +135,14 @@ ordered queue behind a common policy boundary.
   Slice 2 must keep undrained updates observable (leave them in the channel)
   so idle and startup/bootstrap semantics stay correct.
 - Native remote TCP no longer drains remote `SendOnly` responses inside the
-  command send path, and normal remote `poll()` first checks TCP readiness
-  before draining. Once a response batch is ready, the runtime thread still
-  reads and decodes the whole batch. Tactical 151 owns moving that ready-batch
-  read/decode to a client IO actor and inbound queue.
-- Web remote WebSocket is event-driven underneath, but the Rust-facing session
-  is still shaped as command exchange.
+  command send path. Desktop, Android, and Android XR remote wrappers hold
+  `NativeClientIoSession`, whose IO actor owns the TCP stream, response reads,
+  and decode. Normal remote `poll()` drains decoded queued updates through the
+  shared app-runtime pump.
+- Web integrated and web remote WebSocket adapters implement the same
+  `ClientConnection` boundary. Worker/WebSocket async mechanics stay in the web
+  app crate, while normal Rust runtime frame polling drains queued decoded
+  updates through the shared pump.
 
 ## Slices
 
@@ -911,16 +915,16 @@ scans, resident dirty-set insertion, entity cleanup scans, old chunk snapshot
 destruction in the unload apply bucket, or deferred cleanup inside the app-frame
 poll. Keep receive order; any additional divergence should stop between
 ordered update records or make oversized lifecycle batches splittable instead
-of reordering them. This tactical's remaining bus work is still remote TCP and
-web convergence. Local integrated performance follow-up should move primarily
-back to the terrain dirty-to-drawable coordinator (`128`): upload apply,
+of reordering them. This tactical's remaining bus work is server-push protocol
+broadening. Local integrated performance follow-up should move primarily back
+to the terrain dirty-to-drawable coordinator (`128`): upload apply,
 ready-section admission/publication, per-eye encode/submit, and sustained
 worker-backlog monitoring if movement patterns get more aggressive than the
 current churn lane.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
-Status: superseded by focused tactical
+Status: completed by focused tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md)
 after the 2026-07-06 remote `SendOnly` and TCP-readiness fixes in tactical
 149 exposed the remaining ready-batch drain/decode stall.
@@ -939,10 +943,14 @@ Goal: make native remote dedicated follow the same client bus shape.
 - Decide whether the dedicated server needs a server-push wire mode before
   remote clients can receive updates without sending commands.
 
-Success means desktop/Android native remote paths no longer block the app frame
-inside command exchange.
+Result: desktop/Android native remote paths use `NativeClientIoSession` plus
+the shared `ClientConnection` pump. Normal frame polling no longer blocks the
+app frame inside command exchange or ready-batch decode.
 
 ### Slice 5 - Web Bus Convergence
+
+Status: completed by focused tactical
+[`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 
 Goal: preserve browser async mechanics while sharing the same policy.
 
@@ -953,8 +961,9 @@ Goal: preserve browser async mechanics while sharing the same policy.
 - Keep JS promises, `web_sys::WebSocket`, worker startup, and browser lifecycle
   in the web app crate.
 
-Success means web-specific async remains a transport adapter detail, not a
-different engine/runtime model.
+Result: web-specific async remains a transport adapter detail, not a different
+engine/runtime model. Web integrated worker/inline and web remote WebSocket
+normal-frame polling drain through the shared `ClientConnection` pump.
 
 ### Slice 6 - Server-Push Protocol Broadening
 
@@ -984,9 +993,10 @@ another doc, explicitly decide where these remaining valuable items live:
   ownership remain valuable `128` work before the dirty-to-drawable pipeline is
   truly Java-shaped.
 - Deferred payload cleanup outside native local integrated play: Slice 3K adds
-  a native local-runtime worker handoff. When remote TCP and web bus convergence
-  resume, decide whether those paths need the same old-snapshot drop handoff or
-  whether their unload/update cadence keeps inline/fallback cleanup acceptable.
+  a native local-runtime worker handoff. Native remote and web now share the
+  client ingress; decide in a future measured cleanup slice whether those paths
+  need the same old-snapshot drop handoff or whether their unload/update cadence
+  keeps inline/fallback cleanup acceptable.
 - Exact oldest pending update age: current diagnostics expose applied update
   age and queued bytes/depth, but the mpsc-backed runner still cannot peek the
   oldest pending update without a transport-side metadata queue.
@@ -1000,11 +1010,10 @@ another doc, explicitly decide where these remaining valuable items live:
   run). Keep this note as the easy-to-find place to retune the cleanup budget
   or split payload items further if sustained movement shows memory/backlog
   pressure.
-- Remote TCP session actor: native remote still needs a real inbound update
-  bus and producer-side decode so ready response batches do not read/decode on
-  the runtime frame. This is now tracked in tactical 151.
-- Web bus convergence: browser WebSocket/worker callbacks should feed the same
-  ordered inbound queue behind the shared policy.
+- Server-push protocol broadening: native TCP and WebSocket server paths still
+  emit one response batch per command. Tactical 151 finished the client inbound
+  boundary; this tactical's remaining remote bus work is deciding whether and
+  how updates can arrive without a paired command response.
 - Correction latency fast-lane: keep this only as the recorded escalation path
   if measured queue age proves corrections/lifecycle updates need it. Do not
   introduce chunk-stream priority classes for local play.

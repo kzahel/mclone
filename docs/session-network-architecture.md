@@ -7,10 +7,10 @@ decoded update queue landed; Slice 3C local integrated chunk-interest unload
 hysteresis landed; Slice 3D resident cached-section dirty flags landed; revised
 2026-07-03 to adopt the vanilla ordered-stream update model (thin apply plus a
 frame-budget stall) and drop the earlier priority-class design; native remote
-`SendOnly` and TCP-readiness fixes landed 2026-07-06; shared
-`ClientConnection` plus focused remote inbound queue work is tracked in
+`SendOnly` and TCP-readiness fixes landed 2026-07-06; shared `ClientConnection`
+plus focused remote inbound queue work completed 2026-07-07 under
 [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md),
-with broader bus convergence tracked in
+with remaining server-push/protocol broadening tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -126,25 +126,26 @@ integrated Java-shaped views keep a one-chunk unload hysteresis margin so
 boundary oscillation can retain the trailing edge instead of immediately
 unloading and reloading it.
 
-Native remote dedicated has the first two request/response escapes but is still
-batch-shaped at the client boundary. `SendOnly` commands now write the command
-and leave the paired response for the poll pump, and `poll` uses
-`try_drain_command_updates` so the runtime no longer waits for a response that
-is not ready. Once a response is ready, though, the app/runtime thread still
-reads and decodes the whole response batch before applying it. The 2026-07-06
-Quest RD5 remote churn run recorded the remaining shape as one frame with
-`drain_updates_ms=253.930`, `apply_updates_ms=9.344`, and `updates=402`.
+Native remote dedicated now uses the shared client connection boundary. Desktop,
+Android, and Android XR remote adapters hold `NativeClientIoSession`, whose IO
+actor owns the TCP stream, writes queued commands, blocks on paired responses,
+decodes response batches producer-side, and publishes ordered update batches to
+the runtime-facing queue. The app/runtime thread drains that queue through
+`pump_client_connection_updates_report` under `RuntimeUpdatePumpBudget`. The
+wire protocol is still one response batch per command, so
+`pending_response_batches` remains adapter bookkeeping for response pairing, but
+normal frame polling no longer owns socket reads or ready-batch decode.
 
 Server-side native dedicated is already threaded: an accept thread spawns a
 connection thread per client, the connection thread reads commands and waits on
 the authoritative server loop for the response, then writes one update batch.
-The missing piece is the client-side receive actor/queue. Today the client
-runtime still owns the socket at the moment a ready batch is drained.
+Server-push broadening is still future work owned by tactical 133; it is not
+required for the current shared client ingress.
 
-Web remote uses browser WebSocket callbacks underneath, but the Rust-facing
-session still presents command exchange as "send frame, await response." Web
-worker integrated play is closer to the desired queue shape, but its async
-mechanics are still app-local instead of a shared session bus contract.
+Web integrated inline/worker play and web remote WebSocket play also implement
+the shared `ClientConnection` path. Browser worker or WebSocket callbacks remain
+web adapter mechanics, but normal-frame Rust runtime polling enqueues commands
+separately from draining already decoded queued updates.
 
 ## Target Topology
 
@@ -186,15 +187,24 @@ frame-driven on all platforms.
 
 ## Shared Boundary
 
-Exact names can change, but the shared contract should look like this:
+The current shared contract lives in `mclone-app-runtime/src/client_connection.rs`:
 
 ```text
 trait ClientConnection {
-  fn enqueue_command(&mut self, command: ClientCommand, policy: CommandQueuePolicy) -> Result<()>;
-  fn drain_update(&mut self) -> Result<Option<QueuedServerUpdate>>;
-  fn drain_updates(&mut self, budget: UpdateDrainBudget) -> Result<ConnectionUpdateDrain>;
-  fn diagnostics(&self) -> ConnectionDiagnostics;
+  fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
+  fn drain_next_update(
+    &mut self,
+    mode: ConnectionUpdateDrainMode,
+  ) -> Result<ClientConnectionDrainResult>;
+  fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics>;
 }
+
+pump_client_connection_updates_report(
+  core: &mut SingleViewRuntime,
+  connection: &mut impl ClientConnection,
+  budget: RuntimeUpdatePumpBudget,
+  drain_mode: ConnectionUpdateDrainMode,
+) -> Result<RuntimeUpdatePumpReport>
 ```
 
 `ClientConnection` is the shared client-facing analogue to Java's
@@ -322,17 +332,15 @@ Local integrated:
 
 Native remote TCP:
 
-- Move `TcpStream` ownership to a session/network thread; that thread owns
-  blocking socket reads and payload decode.
+- `NativeClientIoSession` owns TCP stream IO on a client actor thread; that
+  actor owns blocking socket reads and payload decode.
 - The app thread enqueues `ClientCommand` frames and drains decoded
   `ServerUpdate`s from queues.
-- The first implementation can keep the current wire codec and blocking socket
-  reads in the IO thread.
-- The first implementation can also keep one response batch per command on the
-  wire: the important boundary change is that a ready batch becomes queued
-  decoded updates before the runtime pump sees it.
-- Server-push wire changes can come later; the app/runtime boundary should be
-  ready before the wire protocol is broadened.
+- The current implementation keeps the TCP frame codec and one response batch
+  per command on the wire. The boundary change is complete: a ready batch
+  becomes queued decoded updates before the runtime pump sees it.
+- Server-push wire changes remain tactical 133 work; the app/runtime boundary
+  no longer needs another rewrite for that broadening.
 
 Android XR and flat Android should consume the same native bus boundary. The
 Android app crates should own platform lifecycle and launch arguments, not
@@ -340,13 +348,15 @@ private transport semantics.
 
 ## Web Implementation Shape
 
-Web should converge on the same bus semantics while preserving browser-owned
+Web converges on the same bus semantics while preserving browser-owned
 async mechanics:
 
-- WebSocket `message` callbacks or WebRTC data-channel callbacks push decoded
-  updates onto the same inbound queue in receive order.
+- WebSocket `message` callbacks push decoded updates onto the same inbound
+  queue in receive order. Future WebRTC data-channel callbacks should do the
+  same.
 - A worker-integrated server publishes updates through the same logical queue.
-- The Rust runtime drains updates on its normal frame/update cadence.
+- The Rust runtime drains updates on its normal frame/update cadence through
+  `ClientConnection`.
 - Hot paths can later use `SharedArrayBuffer`/atomics, but the policy remains
   the same as native: command enqueue and update drain are separate operations.
 
@@ -403,4 +413,4 @@ stay event-driven.
   records the remote `SendOnly` and readiness evidence that exposed the
   remaining ready-batch drain.
 - [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md)
-  tracks the focused native remote inbound queue implementation.
+  closed the focused native/web remote inbound queue implementation.

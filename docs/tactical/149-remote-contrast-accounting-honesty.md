@@ -8,8 +8,8 @@ response-readiness poll fix. Tactical 151's Quest rebaseline proved the
 single-batch remote drain/apply stall moved out of runtime `poll()`, and Slice
 4A then removed the send-side stall where `SendOnly` waited behind the
 response-paired IO actor. Remote client/server reports now identify
-remote-host-owned lanes explicitly. Web shared-ingress convergence remains
-tracked in tactical
+remote-host-owned lanes explicitly. Web shared-ingress convergence completed in
+tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 Drafted 2026-07-06 as the gap-9 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
@@ -760,7 +760,7 @@ lines in the host logs. `pnpm native:remote:smoke` saved valid screenshots to
   [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md);
   native remote receive/decode and command-send decoupling completed there.
 - Broader remote transport performance work (server push, batching,
-  compression, WebSocket/web convergence) — tactical
+  compression, protocol broadening) — tactical
   [`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md).
 - Multiplayer correctness/authority work.
 

@@ -1,17 +1,16 @@
 # 151: Remote Inbound Update Pipeline
 
-Status: active; Slice 0 documentation baseline completed 2026-07-06; Slice 1
-shared `ClientConnection` runtime seam completed 2026-07-06; Slice 2 native
-TCP client IO actor completed 2026-07-06; Slice 3 remote runtime budget and
-diagnostics completed 2026-07-06; Slice 4 Quest remote chunk-view churn
+Status: closed 2026-07-07; Slice 0 documentation baseline completed 2026-07-06;
+Slice 1 shared `ClientConnection` runtime boundary completed 2026-07-06; Slice
+2 native TCP client IO actor completed 2026-07-06; Slice 3 remote runtime budget
+and diagnostics completed 2026-07-06; Slice 4 Quest remote chunk-view churn
 rebaseline completed 2026-07-06; Slice 4A remote command enqueue decoupling
 completed 2026-07-06. Slice 5 was re-planned 2026-07-07 into 5A-5D because the
-native `ClientConnection` seam still lives inside the single-view scene module;
-Slice 5A shared contract promotion completed 2026-07-07; Slice 5B web
+native `ClientConnection` boundary still lived inside the single-view scene
+module; Slice 5A shared contract promotion completed 2026-07-07; Slice 5B web
 integrated shared ingress completed 2026-07-07; Slice 5C web remote shared
-ingress completed 2026-07-07; Slice 5D close-out audit is next. This is the
-focused remote
-connection successor to tactical
+ingress completed 2026-07-07; Slice 5D close-out audit completed 2026-07-07.
+This is the focused remote connection successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 and a convergence slice for tactical 133's shared bus shape. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
@@ -1227,6 +1226,8 @@ ingress regression.
 
 ## Slice 5D: Close-Out Audit
 
+Status: completed 2026-07-07.
+
 Goal: close tactical 151 once native and web all use one runtime-facing
 connection ingress.
 
@@ -1262,6 +1263,75 @@ client connection ingress is used by native local, native remote, web
 integrated, and web remote normal-frame paths; remaining server-push or protocol
 broadening ideas are handed to tactical 133 or a new tactical.
 
+Results:
+
+- Ran the full duplicate-shape audit across shared app-runtime, native net,
+  native desktop/Android/Android XR wrappers, and web adapters.
+- Confirmed one normal-frame runtime pump:
+  `pump_client_connection_updates_report` in
+  `mclone-app-runtime/src/client_connection.rs`.
+- Confirmed native local, native remote TCP, web integrated inline/worker, and
+  web remote WebSocket normal-frame paths all implement and drain through
+  `ClientConnection`.
+- Confirmed desktop, Android, and Android XR remote app wrappers hold
+  `NativeClientIoSession`; `NativeClientSession` remains only the low-level
+  native-net compatibility/test helper and the standalone native remote-player
+  visual smoke helper.
+- Confirmed remaining web `exchange_command` hits are
+  `WebIntegratedServerRunner` compatibility/probe helpers. Normal web runtime
+  frame polling uses queued updates through `WebRuntimeHost`'s
+  `ClientConnection` implementation.
+- Confirmed remaining `pending_response_batches` is adapter bookkeeping for
+  the current one-response-per-command wire protocol, not runtime-thread socket
+  ownership.
+- Updated `session-network-architecture.md`, tactical 133, tactical 149, this
+  tactical, and the tactical index with the final state.
+- Classified remaining response-paired protocol head-of-line/server-push
+  broadening as tactical 133 Slice 6 work, not tactical 151 work.
+
+Final audit classification:
+
+- `mclone-app-runtime/src/client_connection.rs`: canonical shared
+  `ClientConnection`, `QueuedServerUpdate`, drain result/metrics, drain mode,
+  wasm-safe pump timing, shared budgeted pump helper, and pump tests.
+- `mclone-app-runtime/src/local_single_view.rs`: native local and remote
+  adapter implementations plus normal runtime call sites using the shared pump.
+  `try_recv_update` is local integrated adapter receive of already decoded
+  runner updates.
+- `mclone-net`: `NativeClientIoSession` is the normal native TCP client IO
+  actor; `NativeClientSession` and legacy drain helpers remain low-level
+  compatibility/test helpers.
+- Native desktop, Android, and Android XR app wrappers: remote sessions hold
+  `NativeClientIoSession` and implement the shared remote-session trait used by
+  app-runtime's `RemoteDedicatedConnection`.
+- `native/apps/mclone-web-client/src/lib.rs`: `WebRuntimeHost` is the web host
+  adapter and implements `ClientConnection` for inline, worker, and remote
+  WebSocket hosts.
+- `native/apps/mclone-web-client/src/web_remote_session.rs`: WebSocket callback
+  adapter queues decoded updates and exposes drain metrics; no
+  `exchange_command`/`WebSocketExchange` normal path remains.
+- `native/apps/mclone-web-client/src/web_server_worker.rs`: remaining
+  `exchange_command`, `try_recv_update`, and `drain_updates` hits are worker
+  compatibility/probe helpers, not normal runtime frame polling.
+- `pump_pending_remote_update_batches_report`: no remaining hits.
+
+Validation completed 2026-07-07:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+rg -n "ClientConnection|QueuedServerUpdate|WebRuntimeHost|exchange_command|NativeClientSession|NativeClientIoSession|try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-web-client native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+git diff --check
+```
+
+Known unchanged warnings: native app checks still report the existing Android
+XR unused sentinel/helper warnings; wasm web check/smoke still reports the
+existing `with_unload_hysteresis_chunks` dead-code warning.
+
 ## Out Of Scope
 
 - Server-push protocol broadening. Keep it in tactical 133 Slice 6 after the
@@ -1275,14 +1345,10 @@ broadening ideas are handed to tactical 133 or a new tactical.
 
 ## Open Questions
 
-- Should the first native IO actor queue decoded `ServerUpdate`s directly, or
-  queue encoded per-update frames and decode under a producer budget on the IO
-  actor? Default answer: decode on the IO actor first, because local integrated
-  already queues decoded updates and the current stall is measured as
-  runtime-side ready-batch drain/decode.
-- Should the queue be bounded by bytes or by updates? Default answer: expose
-  both; fail or disconnect only after a conservative byte cap is added with a
-  clear error path.
-- Does the response-paired wire protocol force head-of-line blocking that
-  matters after the client IO actor lands? Measure first; server-push belongs
-  to a later slice only if the new queue still shows source-shaped bursts.
+- Native IO actor queue shape: resolved in this tactical by queuing decoded
+  updates with byte/age/read/decode metadata before the runtime pump.
+- Queue bounding: depth and bytes are exposed; hard caps remain future work and
+  should land only with a clear disconnect/error path.
+- Response-paired wire protocol: handed to tactical 133 Slice 6. Tactical 151
+  intentionally stopped at a shared client ingress over the current wire
+  protocol.
