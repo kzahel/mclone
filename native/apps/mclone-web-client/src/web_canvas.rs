@@ -104,7 +104,6 @@ const CANVAS_CONFIGURED_BIT: u32 = 1 << 2;
 const CANVAS_WIDTH_SHIFT: u32 = 8;
 const CANVAS_HEIGHT_SHIFT: u32 = 20;
 const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
-const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
 const WEB_MIN_RENDER_DISTANCE: i32 = 1;
 const WEB_MAX_RENDER_DISTANCE: i32 = 16;
 const WEB_DEFAULT_RENDER_DISTANCE: u32 = 3;
@@ -4218,7 +4217,7 @@ impl WebChunkRenderSession {
 
     fn sync_camera_pose_to_server_deferred(&mut self) -> Result<(), String> {
         self.runtime
-            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .drain_pending_runner_updates_frame()
             .map_err(|error| format!("failed to drain browser camera updates: {error}"))?;
         self.apply_pending_camera_position_updates_deferred()?;
         if let Some(report) = self.camera.next_pose_sync_command() {
@@ -4227,7 +4226,7 @@ impl WebChunkRenderSession {
                 .map_err(|error| format!("failed to queue browser camera pose: {error}"))?;
         }
         self.runtime
-            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .drain_pending_runner_updates_frame()
             .map_err(|error| format!("failed to drain browser camera updates: {error}"))?;
         self.apply_pending_camera_position_updates_deferred()?;
         Ok(())
@@ -4471,7 +4470,7 @@ impl WebChunkRenderSession {
         }
 
         self.runtime
-            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .drain_pending_runner_updates_frame()
             .map_err(|error| format!("failed to drain web server updates: {error}"))?;
 
         self.finish_render_streaming_frame(frame_camera, center, camera_position, radius_chunks)
@@ -4499,7 +4498,7 @@ impl WebChunkRenderSession {
         // 2. Drain runner updates so freshly published snapshots are marked render-dirty
         //    (ALL policy) before this frame's streaming plan runs.
         self.runtime
-            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .drain_pending_runner_updates_frame()
             .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;
 
         self.finish_render_streaming_frame(frame_camera, center, camera_position, radius_chunks)
@@ -4767,8 +4766,7 @@ impl WebChunkRenderSession {
         let drain_result = if count_mesh_build {
             self.runtime.drain_pending_runner_updates()
         } else {
-            self.runtime
-                .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            self.runtime.drain_pending_runner_updates_frame()
         };
         drain_result
             .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;

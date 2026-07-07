@@ -1,12 +1,19 @@
 #![deny(unsafe_code)]
 
-use mclone_app_runtime::host_mode::update_drain_exchange;
+use std::collections::VecDeque;
+
+use mclone_app_runtime::client_connection::{
+    ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
+    ConnectionUpdateDrainMode, QueuedServerUpdate, pump_client_connection_updates_report,
+};
 #[cfg(target_arch = "wasm32")]
 use mclone_app_runtime::host_mode::{
-    RemoteDedicatedExchangeReport, command_exchange, deferred_command_exchange,
-    diagnostics_command_update_queues_drained, resolve_remote_dedicated_exchange_report,
+    RemoteDedicatedExchangeReport, command_exchange, diagnostics_command_update_queues_drained,
+    resolve_remote_dedicated_exchange_report,
 };
-use mclone_app_runtime::{RuntimeExchange, RuntimeStepReport, SingleViewRuntime};
+use mclone_app_runtime::{
+    RuntimeExchange, RuntimeStepReport, RuntimeUpdatePumpBudget, SingleViewRuntime,
+};
 use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::{ChunkPos, ChunkSnapshot};
 use mclone_net::LocalTransport;
@@ -16,8 +23,6 @@ use mclone_protocol::{
 };
 use mclone_render::RenderBackend;
 use mclone_render_session::{EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler};
-#[cfg(target_arch = "wasm32")]
-use mclone_server::IntegratedServerRunner;
 use mclone_server::{IntegratedServer, ServerRunnerDiagnostics, ServerRunnerKind};
 
 #[cfg(target_arch = "wasm32")]
@@ -166,8 +171,8 @@ impl WebRuntime {
         chunk_tracking_radius: u32,
     ) -> ProtocolCodecResult<WebRuntimeStepReport> {
         let command = self.chunk_view_command(center, render_distance, chunk_tracking_radius);
-        let exchange = self.host.exchange(command)?;
-        Ok(self.apply_exchange(exchange))
+        self.send_and_drain_immediately(command)
+            .map_err(|_| ProtocolCodecError::InvalidData("web runtime command failed"))
     }
 
     pub async fn request_chunk_view_async(
@@ -181,8 +186,7 @@ impl WebRuntime {
         if matches!(self.host, WebRuntimeHost::RemoteWebSocket(_)) {
             return self.exchange_remote_websocket_command_async(command).await;
         }
-        let exchange = self.host.exchange_async(command).await?;
-        Ok(self.apply_exchange(exchange))
+        self.send_and_drain_immediately_async(command).await
     }
 
     pub fn request_chunk_view_deferred(
@@ -192,7 +196,7 @@ impl WebRuntime {
         chunk_tracking_radius: u32,
     ) -> Result<WebRuntimeStepReport, String> {
         let command = self.chunk_view_command(center, render_distance, chunk_tracking_radius);
-        let exchange = self.host.send_deferred(command)?;
+        let exchange = self.host.enqueue_command(command)?;
         Ok(self.apply_exchange(exchange))
     }
 
@@ -200,8 +204,8 @@ impl WebRuntime {
         &mut self,
         command: ClientCommand,
     ) -> ProtocolCodecResult<WebRuntimeStepReport> {
-        let exchange = self.host.exchange(command)?;
-        Ok(self.apply_exchange(exchange))
+        self.send_and_drain_immediately(command)
+            .map_err(|_| ProtocolCodecError::InvalidData("web runtime command failed"))
     }
 
     pub async fn send_gameplay_command_async(
@@ -212,31 +216,43 @@ impl WebRuntime {
         if matches!(self.host, WebRuntimeHost::RemoteWebSocket(_)) {
             return self.exchange_remote_websocket_command_async(command).await;
         }
-        let exchange = self.host.exchange_async(command).await?;
-        Ok(self.apply_exchange(exchange))
+        self.send_and_drain_immediately_async(command).await
     }
 
     pub fn send_gameplay_command_deferred(
         &mut self,
         command: ClientCommand,
     ) -> Result<WebRuntimeStepReport, String> {
-        let exchange = self.host.send_deferred(command)?;
+        let exchange = self.host.enqueue_command(command)?;
         Ok(self.apply_exchange(exchange))
     }
 
     pub fn drain_pending_runner_updates(&mut self) -> Result<WebRuntimeStepReport, String> {
-        let exchange = self.host.drain_pending_updates()?;
-        Ok(self.apply_exchange(exchange))
+        self.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())
     }
 
-    pub fn drain_pending_runner_updates_budgeted(
+    pub fn drain_pending_runner_updates_frame(&mut self) -> Result<WebRuntimeStepReport, String> {
+        self.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::default())
+    }
+
+    pub fn drain_pending_runner_updates_with_budget(
         &mut self,
-        max_update_frames: usize,
+        budget: RuntimeUpdatePumpBudget,
     ) -> Result<WebRuntimeStepReport, String> {
-        let exchange = self
-            .host
-            .drain_pending_updates_budgeted(max_update_frames)?;
-        Ok(self.apply_exchange(exchange))
+        let pump_report = pump_client_connection_updates_report(
+            &mut self.core,
+            &mut self.host,
+            budget,
+            ConnectionUpdateDrainMode::ReadyOnly,
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(WebRuntimeStepReport {
+            command_count: 0,
+            update_count: pump_report.apply_report.updates,
+            loaded_chunk_count: self.core.client().loaded_chunk_count(),
+            protocol_codec_roundtrip: true,
+            transport_drained: self.host.command_update_queues_drained(),
+        })
     }
 
     fn chunk_view_command(
@@ -256,6 +272,43 @@ impl WebRuntime {
 
     fn apply_exchange(&mut self, exchange: RuntimeExchange) -> WebRuntimeStepReport {
         self.core.apply_exchange(exchange)
+    }
+
+    fn send_and_drain_immediately(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<WebRuntimeStepReport, String> {
+        let command_exchange = self.host.enqueue_command(command)?;
+        let drain_report =
+            self.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())?;
+        let command_report =
+            self.apply_immediate_command_accounting(command_exchange, drain_report);
+        Ok(combine_step_reports(command_report, drain_report))
+    }
+
+    async fn send_and_drain_immediately_async(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<WebRuntimeStepReport, String> {
+        let command_exchange = self.host.enqueue_command_async(command).await?;
+        let drain_report =
+            self.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())?;
+        let command_report =
+            self.apply_immediate_command_accounting(command_exchange, drain_report);
+        Ok(combine_step_reports(command_report, drain_report))
+    }
+
+    fn apply_immediate_command_accounting(
+        &mut self,
+        command_exchange: RuntimeExchange,
+        drain_report: WebRuntimeStepReport,
+    ) -> WebRuntimeStepReport {
+        self.apply_exchange(RuntimeExchange::new(
+            Vec::new(),
+            command_exchange.command_count,
+            command_exchange.protocol_codec_roundtrip,
+            drain_report.transport_drained,
+        ))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -404,25 +457,14 @@ enum WebRuntimeHost {
 }
 
 impl WebRuntimeHost {
-    fn exchange(&mut self, command: ClientCommand) -> ProtocolCodecResult<RuntimeExchange> {
+    fn enqueue_command(&mut self, command: ClientCommand) -> Result<RuntimeExchange, String> {
         match self {
-            Self::Inline(host) => host.exchange(command),
+            Self::Inline(host) => host
+                .queue_command(command)
+                .map(command_deferred_exchange)
+                .map_err(|error| error.to_string()),
             #[cfg(target_arch = "wasm32")]
-            Self::Worker(_) | Self::RemoteWebSocket(_) => Err(ProtocolCodecError::InvalidData(
-                "browser transport runtime requires async exchange",
-            )),
-        }
-    }
-
-    fn send_deferred(&mut self, command: ClientCommand) -> Result<RuntimeExchange, String> {
-        match self {
-            Self::Inline(host) => host.exchange(command).map_err(|error| error.to_string()),
-            #[cfg(target_arch = "wasm32")]
-            Self::Worker(host) => {
-                host.send_command(command)
-                    .map_err(|error| error.to_string())?;
-                Ok(deferred_command_exchange())
-            }
+            Self::Worker(host) => host.queue_command(command).map(command_deferred_exchange),
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(_) => Err(
                 "deferred commands are not implemented for remote websocket web runtime".to_owned(),
@@ -430,56 +472,23 @@ impl WebRuntimeHost {
         }
     }
 
-    async fn exchange_async(&mut self, command: ClientCommand) -> Result<RuntimeExchange, String> {
-        match self {
-            Self::Inline(host) => host.exchange(command).map_err(|error| error.to_string()),
-            #[cfg(target_arch = "wasm32")]
-            Self::Worker(host) => {
-                let exchange = host.exchange_command(command).await?;
-                Ok(command_exchange(
-                    exchange.updates,
-                    exchange.protocol_codec_roundtrip,
-                    exchange.transport_drained,
-                ))
-            }
-            #[cfg(target_arch = "wasm32")]
-            Self::RemoteWebSocket(host) => {
-                let exchange = host.exchange_command(command).await?;
-                Ok(command_exchange(
-                    exchange.updates,
-                    exchange.protocol_codec_roundtrip,
-                    exchange.transport_drained,
-                ))
-            }
-        }
-    }
-
-    fn drain_pending_updates(&mut self) -> Result<RuntimeExchange, String> {
-        self.drain_pending_updates_budgeted(usize::MAX)
-    }
-
-    fn drain_pending_updates_budgeted(
+    async fn enqueue_command_async(
         &mut self,
-        _max_update_frames: usize,
+        command: ClientCommand,
     ) -> Result<RuntimeExchange, String> {
         match self {
-            Self::Inline(_) => Ok(update_drain_exchange(Vec::new(), true)),
+            Self::Inline(host) => host
+                .queue_command(command)
+                .map(command_deferred_exchange)
+                .map_err(|error| error.to_string()),
             #[cfg(target_arch = "wasm32")]
-            Self::Worker(host) => {
-                let updates = host.drain_decoded_updates_budgeted(_max_update_frames)?;
-                let diagnostics = host.diagnostics();
-                Ok(update_drain_exchange(
-                    updates,
-                    diagnostics_command_update_queues_drained(&diagnostics),
-                ))
-            }
+            Self::Worker(host) => host
+                .send_command_acknowledged(command)
+                .await
+                .map(command_deferred_exchange),
             #[cfg(target_arch = "wasm32")]
-            Self::RemoteWebSocket(host) => {
-                let diagnostics = host.diagnostics();
-                Ok(update_drain_exchange(
-                    Vec::new(),
-                    diagnostics_command_update_queues_drained(&diagnostics),
-                ))
+            Self::RemoteWebSocket(_) => {
+                Err("async enqueue is not implemented for remote websocket web runtime".to_owned())
             }
         }
     }
@@ -496,15 +505,23 @@ impl WebRuntimeHost {
 
     fn runner_diagnostics(&self) -> ServerRunnerDiagnostics {
         match self {
-            Self::Inline(host) => ServerRunnerDiagnostics::initial(
-                ServerRunnerKind::InlineFallback,
-                host.seed(),
-                host.day_time(),
-            ),
+            Self::Inline(host) => host.diagnostics(),
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => host.diagnostics(),
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(host) => host.diagnostics(),
+        }
+    }
+
+    fn command_update_queues_drained(&self) -> bool {
+        match self {
+            Self::Inline(host) => host.command_update_queues_drained(),
+            #[cfg(target_arch = "wasm32")]
+            Self::Worker(host) => diagnostics_command_update_queues_drained(&host.diagnostics()),
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(host) => {
+                diagnostics_command_update_queues_drained(&host.diagnostics())
+            }
         }
     }
 
@@ -532,10 +549,68 @@ impl WebRuntimeHost {
     }
 }
 
+impl ClientConnection for WebRuntimeHost {
+    fn send_command_only(&mut self, command: ClientCommand) -> anyhow::Result<()> {
+        self.enqueue_command(command)
+            .map(|_| ())
+            .map_err(anyhow::Error::msg)
+    }
+
+    fn drain_next_update(
+        &mut self,
+        _mode: ConnectionUpdateDrainMode,
+    ) -> anyhow::Result<ClientConnectionDrainResult> {
+        match self {
+            Self::Inline(host) => host.drain_next_update().map_err(anyhow::Error::msg),
+            #[cfg(target_arch = "wasm32")]
+            Self::Worker(host) => host.drain_next_queued_update().map_err(anyhow::Error::msg),
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(_) => Ok(ClientConnectionDrainResult::default()),
+        }
+    }
+
+    fn pending_update_metrics(&mut self) -> anyhow::Result<ClientConnectionQueueMetrics> {
+        Ok(match self {
+            Self::Inline(host) => host.queued_update_metrics(),
+            #[cfg(target_arch = "wasm32")]
+            Self::Worker(host) => host.queued_update_metrics(),
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(host) => {
+                let diagnostics = host.diagnostics();
+                ClientConnectionQueueMetrics::new(diagnostics.update_queue_depth, 0)
+            }
+        })
+    }
+}
+
+fn command_deferred_exchange(protocol_codec_roundtrip: bool) -> RuntimeExchange {
+    RuntimeExchange::new(Vec::new(), 1, protocol_codec_roundtrip, false)
+}
+
+fn combine_step_reports(
+    command_report: WebRuntimeStepReport,
+    drain_report: WebRuntimeStepReport,
+) -> WebRuntimeStepReport {
+    WebRuntimeStepReport {
+        command_count: command_report
+            .command_count
+            .saturating_add(drain_report.command_count),
+        update_count: command_report
+            .update_count
+            .saturating_add(drain_report.update_count),
+        loaded_chunk_count: drain_report.loaded_chunk_count,
+        protocol_codec_roundtrip: command_report.protocol_codec_roundtrip
+            && drain_report.protocol_codec_roundtrip,
+        transport_drained: drain_report.transport_drained,
+    }
+}
+
 #[derive(Debug)]
 struct WebLoopbackHost {
     server: IntegratedServer,
     transport: LocalTransport,
+    queued_updates: VecDeque<(ServerUpdate, usize)>,
+    queued_update_bytes: usize,
 }
 
 impl WebLoopbackHost {
@@ -543,6 +618,8 @@ impl WebLoopbackHost {
         Self {
             server: IntegratedServer::local_integrated(seed),
             transport: LocalTransport::new(),
+            queued_updates: VecDeque::new(),
+            queued_update_bytes: 0,
         }
     }
 
@@ -554,14 +631,31 @@ impl WebLoopbackHost {
         self.server.seed()
     }
 
-    fn exchange(&mut self, command: ClientCommand) -> ProtocolCodecResult<RuntimeExchange> {
+    fn diagnostics(&self) -> ServerRunnerDiagnostics {
+        let mut diagnostics = ServerRunnerDiagnostics::initial(
+            ServerRunnerKind::InlineFallback,
+            self.seed(),
+            self.day_time(),
+        );
+        diagnostics.command_queue_depth = self.transport.pending_client_command_count();
+        diagnostics.update_queue_depth = self.queued_updates.len();
+        diagnostics.update_queue_bytes = self.queued_update_bytes;
+        diagnostics.pending_jobs = self.server.pending_job_count();
+        diagnostics.pending_publications = self.server.pending_publication_count();
+        diagnostics.pending_persistence_loads =
+            self.server.scheduler().pending_persistence_load_count();
+        diagnostics.pending_persistence_saves =
+            self.server.scheduler().pending_persistence_save_count();
+        diagnostics
+    }
+
+    fn queue_command(&mut self, command: ClientCommand) -> ProtocolCodecResult<bool> {
         let encoded_command = encode_client_command(&command)?;
         let decoded_command = decode_client_command(&encoded_command)?;
         let mut protocol_codec_roundtrip = decoded_command == command;
         self.transport.send_client_command(decoded_command);
 
         let commands = self.transport.drain_client_commands();
-        let command_count = commands.len();
         for command in commands {
             for update in self.server.handle_command(command) {
                 self.send_roundtripped_update(update, &mut protocol_codec_roundtrip)?;
@@ -587,16 +681,33 @@ impl WebLoopbackHost {
         }
         self.poll_server_updates(&mut protocol_codec_roundtrip)?;
 
-        let updates = self.transport.drain_server_updates();
-        let transport_drained = self.transport.pending_client_command_count() == 0
-            && self.transport.pending_server_update_count() == 0;
+        Ok(protocol_codec_roundtrip)
+    }
 
-        Ok(RuntimeExchange {
-            updates,
-            command_count,
-            protocol_codec_roundtrip,
-            transport_drained,
-        })
+    fn drain_next_update(&mut self) -> Result<ClientConnectionDrainResult, String> {
+        let Some((update, encoded_len)) = self.queued_updates.pop_front() else {
+            return Ok(ClientConnectionDrainResult::default());
+        };
+        self.queued_update_bytes = self.queued_update_bytes.saturating_sub(encoded_len);
+        let transport_drained = self.command_update_queues_drained();
+        Ok(ClientConnectionDrainResult::with_update(
+            QueuedServerUpdate::single(
+                update,
+                encoded_len,
+                std::time::Duration::ZERO,
+                transport_drained,
+            ),
+            self.queued_updates.len(),
+            self.queued_update_bytes,
+        ))
+    }
+
+    fn queued_update_metrics(&self) -> ClientConnectionQueueMetrics {
+        ClientConnectionQueueMetrics::new(self.queued_updates.len(), self.queued_update_bytes)
+    }
+
+    fn command_update_queues_drained(&self) -> bool {
+        self.transport.pending_client_command_count() == 0 && self.queued_updates.is_empty()
     }
 
     fn poll_server_updates(
@@ -615,9 +726,11 @@ impl WebLoopbackHost {
         protocol_codec_roundtrip: &mut bool,
     ) -> ProtocolCodecResult<()> {
         let encoded_update = encode_server_update(&update)?;
+        let encoded_len = encoded_update.len();
         let decoded_update = decode_server_update(&encoded_update)?;
         *protocol_codec_roundtrip &= decoded_update == update;
-        self.transport.send_server_update(decoded_update);
+        self.queued_updates.push_back((decoded_update, encoded_len));
+        self.queued_update_bytes = self.queued_update_bytes.saturating_add(encoded_len);
         Ok(())
     }
 }

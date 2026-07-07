@@ -24,3 +24,6 @@ mclone-worldgen.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true

@@ -1,4 +1,6 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 use anyhow::Result;
 use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -144,15 +146,18 @@ pub fn pump_client_connection_updates_report<C>(
 where
     C: ClientConnection + ?Sized,
 {
-    let pump_start = Instant::now();
+    let pump_start = pump_timing_start();
     let mut report = RuntimeUpdatePumpReport::default();
     loop {
-        let drain_start = Instant::now();
+        let drain_start = pump_timing_start();
         let drain = connection.drain_next_update(drain_mode)?;
-        report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
+        report.drain_updates_ms += pump_elapsed_ms(drain_start);
         let Some(queued_update) = drain.update else {
             report.remaining_queue_depth = drain.remaining_queue_depth;
             report.remaining_queue_bytes = drain.remaining_queue_bytes;
+            if drain.remaining_queue_depth > 0 {
+                core.apply_exchange_report(update_drain_exchange(Vec::new(), false));
+            }
             return Ok(report);
         };
 
@@ -162,10 +167,8 @@ where
         let producer_read_ms = queued_update.producer_read_ms;
         let producer_decode_ms = queued_update.producer_decode_ms;
         let response_sequence = queued_update.response_sequence;
-        let exchange_report = core.apply_exchange_report(update_drain_exchange(
-            queued_update.into_updates(),
-            transport_drained,
-        ));
+        let exchange_report =
+            core.apply_exchange_report(update_drain_exchange(queued_update.into_updates(), true));
         report.apply_report.accumulate(exchange_report.update_apply);
         report.producer_read_ms += producer_read_ms;
         report.producer_decode_ms += producer_decode_ms;
@@ -176,7 +179,7 @@ where
             .oldest_applied_update_age_ms
             .max(elapsed_ms(queued_age));
 
-        if budget.exhausted_after_update(pump_start.elapsed(), &report.apply_report) {
+        if budget.exhausted_after_update(pump_elapsed(pump_start), &report.apply_report) {
             let metrics = connection.pending_update_metrics()?;
             report.remaining_queue_depth = metrics.update_depth;
             report.remaining_queue_bytes = metrics.update_bytes;
@@ -184,9 +187,47 @@ where
                 report.stalled = true;
                 report.stall_count = 1;
             }
+            if metrics.update_depth > 0 || !transport_drained {
+                core.apply_exchange_report(update_drain_exchange(Vec::new(), false));
+            }
             return Ok(report);
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type PumpTimingSample = Instant;
+
+#[cfg(target_arch = "wasm32")]
+type PumpTimingSample = f64;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pump_timing_start() -> PumpTimingSample {
+    Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pump_timing_start() -> PumpTimingSample {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pump_elapsed(start: PumpTimingSample) -> Duration {
+    start.elapsed()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pump_elapsed(start: PumpTimingSample) -> Duration {
+    let elapsed_ms = (js_sys::Date::now() - start).max(0.0);
+    if elapsed_ms.is_finite() {
+        Duration::from_secs_f64(elapsed_ms / 1000.0)
+    } else {
+        Duration::ZERO
+    }
+}
+
+fn pump_elapsed_ms(start: PumpTimingSample) -> f64 {
+    elapsed_ms(pump_elapsed(start))
 }
 
 #[cfg(test)]
@@ -323,5 +364,48 @@ mod tests {
         assert_eq!(second_report.remaining_queue_depth, 0);
         assert_eq!(core.day_time(), 300);
         assert!(!second_report.stalled);
+    }
+
+    #[test]
+    fn shared_connection_pump_preserves_drained_state_after_complete_response() {
+        let center = ChunkPos::new(0, 0);
+        let mut core = SingleViewRuntime::remote_dedicated(
+            center,
+            0,
+            chunk_tracking_radius_for_render_distance(0),
+        );
+        let mut connection = ScriptedClientConnection::new(vec![
+            QueuedServerUpdate::single(
+                ServerUpdate::TimeUpdate { day_time: 100 },
+                11,
+                Duration::from_millis(3),
+                false,
+            ),
+            QueuedServerUpdate::single(
+                ServerUpdate::TimeUpdate { day_time: 200 },
+                13,
+                Duration::from_millis(5),
+                false,
+            ),
+            QueuedServerUpdate::single(
+                ServerUpdate::TimeUpdate { day_time: 300 },
+                17,
+                Duration::from_millis(7),
+                true,
+            ),
+        ]);
+
+        let report = pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::unlimited(),
+            ConnectionUpdateDrainMode::ReadyOnly,
+        )
+        .unwrap();
+
+        assert_eq!(report.apply_report.updates, 3);
+        assert_eq!(report.remaining_queue_depth, 0);
+        assert_eq!(core.day_time(), 300);
+        assert!(core.transport_drained());
     }
 }

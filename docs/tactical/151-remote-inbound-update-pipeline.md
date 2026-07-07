@@ -8,7 +8,8 @@ rebaseline completed 2026-07-06; Slice 4A remote command enqueue decoupling
 completed 2026-07-06. Slice 5 was re-planned 2026-07-07 into 5A-5D because the
 native `ClientConnection` seam still lives inside the single-view scene module;
 Slice 5A shared contract promotion completed 2026-07-07; Slice 5B web
-integrated shared ingress is next. This is the focused remote
+integrated shared ingress completed 2026-07-07; Slice 5C web remote shared
+ingress is next. This is the focused remote
 connection successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 and a convergence slice for tactical 133's shared bus shape. Architecture target:
@@ -17,11 +18,11 @@ Umbrella bus work: tactical
 [`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md).
 
 Workstream: native Rust shared session/runtime boundary, native TCP transport,
-Android XR validation. Goal: introduce one shared client-facing connection
-abstraction for local integrated, native remote, and web transports, then make
-remote dedicated inbound updates arrive through that same budgetable update
-boundary without making the runtime/render frame read and decode TCP response
-batches.
+native web/WASM adapters, Android XR validation. Goal: introduce one shared
+client-facing connection abstraction for local integrated, native remote, and
+web transports, then make remote dedicated inbound updates arrive through that
+same budgetable update boundary without making the runtime/render frame read and
+decode TCP response batches.
 
 ## Problem
 
@@ -100,13 +101,10 @@ abstraction.
 
 As of 2026-07-07, `ClientConnection`, `QueuedServerUpdate`,
 `ClientConnectionDrainResult`, `ClientConnectionQueueMetrics`, and the shared
-budgeted drain helper are still private to
-`mclone-app-runtime/src/local_single_view.rs`. Native desktop, Android, and
-Android XR reach them through `NativeSingleViewSessionRuntime`, so the native
-behavioral fix is shared there. The placement is still wrong for the intended
-contract: web and future non-single-view runtime shells cannot adopt a private
-single-view helper without either copying it or growing another parallel
-ingress shape. Slice 5A fixes placement first.
+budgeted drain helper live in
+`mclone-app-runtime/src/client_connection.rs`. Native local/remote adapters and
+web integrated inline/worker adapters use that shared contract. Web remote
+WebSocket still uses its existing `exchange_command` path until Slice 5C.
 
 ## Target Shape
 
@@ -984,6 +982,8 @@ git diff --check
 
 ## Slice 5B: Web Integrated Shared Ingress
 
+Status: completed 2026-07-07.
+
 Goal: make web integrated inline/worker play feed the shared
 `ClientConnection` ingress without requiring native OS threads.
 
@@ -1017,6 +1017,82 @@ git diff --check
 Exit criteria: web integrated normal-frame updates drain through the shared
 connection path; remaining `exchange_command` hits are adapter/startup/test
 helpers and are classified in this document.
+
+Results:
+
+- Implemented `ClientConnection` for `WebRuntimeHost`, with web inline and
+  worker hosts queueing commands separately from draining decoded updates.
+- Changed web integrated inline host to queue ordered `QueuedServerUpdate`
+  envelopes with byte-depth diagnostics instead of returning command/update
+  batches directly.
+- Changed web integrated worker host to keep response frames as the producer
+  queue, expose one-frame drains as `QueuedServerUpdate` envelopes, and report
+  queued update bytes in diagnostics.
+- Routed normal web integrated frame drains through
+  `pump_client_connection_updates_report` using `RuntimeUpdatePumpBudget::default()`;
+  removed the web-only `WEB_FRAME_UPDATE_DRAIN_BUDGET` count cap.
+- Preserved startup/explicit immediate behavior by enqueueing commands, running
+  an explicit unlimited shared pump, then applying command accounting with the
+  final drained state.
+- Kept web remote WebSocket behavior unchanged for Slice 5C.
+- Made the shared pump timing wasm-safe with a wasm-only `js-sys::Date::now()`
+  timing source, preserving elapsed-budget behavior without using
+  `std::time::Instant` in the browser.
+- Added
+  `client_connection::tests::shared_connection_pump_preserves_drained_state_after_complete_response`
+  so complete multi-update drains keep old batch-level drained semantics, while
+  the existing budget-stall test still covers stalled drains.
+
+Preflight completed 2026-07-07 before editing:
+
+```bash
+git status --short
+rg -n "trait ClientConnection|struct QueuedServerUpdate|pump_client_connection_updates_report|WebRuntimeHost|exchange_command|try_recv_update|drain_updates" native/crates/mclone-app-runtime native/apps/mclone-web-client
+rg -n "NativeClientSession|NativeClientIoSession|try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+git diff --check
+```
+
+Post-5B audit classification:
+
+- `mclone-app-runtime/src/client_connection.rs`: owns the shared
+  `ClientConnection` contract, `QueuedServerUpdate`, drain result/metrics, drain
+  mode, wasm-safe shared pump timing, pump helper, and pump regression tests.
+- `mclone-app-runtime/src/local_single_view.rs`: remaining
+  `ClientConnection`/`QueuedServerUpdate`/pump hits are native local/remote
+  adapter implementations and runtime call sites using the shared pump.
+- `native/apps/mclone-web-client/src/lib.rs`: `WebRuntimeHost` is the web host
+  adapter and now implements `ClientConnection`; `RemoteWebSocket` arms remain
+  compatibility placeholders for Slice 5C.
+- `native/apps/mclone-web-client/src/web_server_worker.rs`: remaining
+  `exchange_command` hits are compatibility/probe helpers; normal web
+  integrated runtime/frame draining uses queued updates and the shared pump.
+- `native/apps/mclone-web-client/src/web_remote_session.rs`: remaining
+  `exchange_command` is the unchanged web remote path for Slice 5C.
+- Remaining `drain_updates` hits are app-runtime diagnostics fields, native
+  local/remote runtime drain accounting, and the web worker `IntegratedServerRunner`
+  compatibility method; normal web integrated frame polling no longer drains by
+  applying an `exchange_command` batch.
+
+Validation completed 2026-07-07:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+rg -n "WebRuntimeHost|exchange_command|ClientConnection|QueuedServerUpdate|drain_updates" native/apps/mclone-web-client native/crates/mclone-app-runtime
+git diff --check
+```
+
+Known unchanged warning: wasm `mclone-server` check/smoke still reports the
+`with_unload_hysteresis_chunks` dead-code warning.
 
 ## Slice 5C: Web Remote Shared Ingress
 

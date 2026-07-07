@@ -6,6 +6,9 @@ use std::rc::Rc;
 use js_sys::{
     Array, Atomics, Function, Int32Array, Object, Promise, Reflect, SharedArrayBuffer, Uint8Array,
 };
+use mclone_app_runtime::client_connection::{
+    ClientConnectionDrainResult, ClientConnectionQueueMetrics, QueuedServerUpdate,
+};
 use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
 use mclone_core::ChunkPos;
 use mclone_protocol::{
@@ -285,7 +288,10 @@ impl WebIntegratedServerRunner {
 
     pub fn diagnostics(&self) -> ServerRunnerDiagnostics {
         let mut diagnostics = self.diagnostics.borrow().clone();
-        diagnostics.update_queue_depth = self.update_frames.borrow().len();
+        let frames = self.update_frames.borrow();
+        diagnostics.update_queue_depth = frames.len();
+        diagnostics.update_queue_bytes = queued_frame_bytes(&frames);
+        drop(frames);
         diagnostics.runner_frame_metrics = *self.runner_frame_metrics.borrow();
         diagnostics
             .runner_frame_metrics
@@ -297,6 +303,33 @@ impl WebIntegratedServerRunner {
         &mut self,
         command: ClientCommand,
     ) -> Result<WebWorkerExchange, String> {
+        let protocol_codec_roundtrip = self.send_command_acknowledged(command).await?;
+        let updates = self.drain_decoded_updates()?;
+        let diagnostics = self.diagnostics();
+        Ok(WebWorkerExchange {
+            updates,
+            protocol_codec_roundtrip,
+            transport_drained: diagnostics_worker_exchange_drained(&diagnostics),
+        })
+    }
+
+    pub fn queue_command(&mut self, command: ClientCommand) -> Result<bool, String> {
+        if self.shutdown_requested {
+            return Err("integrated server worker is shut down".to_owned());
+        }
+        let frame =
+            encode_client_command(&command).map_err(|error| format!("encode command: {error}"))?;
+        let protocol_codec_roundtrip = decode_client_command(&frame)
+            .map(|decoded| decoded == command)
+            .unwrap_or(false);
+        self.post_command_frame_fire_and_forget(frame)?;
+        Ok(protocol_codec_roundtrip)
+    }
+
+    pub async fn send_command_acknowledged(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<bool, String> {
         if self.shutdown_requested {
             return Err("integrated server worker is shut down".to_owned());
         }
@@ -306,13 +339,35 @@ impl WebIntegratedServerRunner {
             .map(|decoded| decoded == command)
             .unwrap_or(false);
         self.post_command_frame(frame).await?;
-        let updates = self.drain_decoded_updates()?;
+        Ok(protocol_codec_roundtrip)
+    }
+
+    pub fn drain_next_queued_update(&mut self) -> Result<ClientConnectionDrainResult, String> {
+        let Some(frame) = self.drain_update_frames_budgeted(1).into_iter().next() else {
+            return Ok(ClientConnectionDrainResult::default());
+        };
+        let encoded_len = frame.len();
+        let update = decode_server_update(&frame)
+            .map_err(|error| format!("decode worker server update: {error}"))?;
         let diagnostics = self.diagnostics();
-        Ok(WebWorkerExchange {
-            updates,
-            protocol_codec_roundtrip,
-            transport_drained: diagnostics_worker_exchange_drained(&diagnostics),
-        })
+        Ok(ClientConnectionDrainResult::with_update(
+            QueuedServerUpdate::single(
+                update,
+                encoded_len,
+                std::time::Duration::ZERO,
+                diagnostics_worker_exchange_drained(&diagnostics),
+            ),
+            diagnostics.update_queue_depth,
+            diagnostics.update_queue_bytes,
+        ))
+    }
+
+    pub fn queued_update_metrics(&self) -> ClientConnectionQueueMetrics {
+        let diagnostics = self.diagnostics();
+        ClientConnectionQueueMetrics::new(
+            diagnostics.update_queue_depth,
+            diagnostics.update_queue_bytes,
+        )
     }
 
     pub fn drain_decoded_updates(&mut self) -> Result<Vec<ServerUpdate>, String> {
@@ -691,7 +746,9 @@ impl WebIntegratedServerRunner {
         } else {
             frames.drain(0..max_frames).collect()
         };
-        self.diagnostics.borrow_mut().update_queue_depth = frames.len();
+        let mut diagnostics = self.diagnostics.borrow_mut();
+        diagnostics.update_queue_depth = frames.len();
+        diagnostics.update_queue_bytes = queued_frame_bytes(&frames);
         drained
     }
 }
@@ -702,6 +759,10 @@ impl Drop for WebIntegratedServerRunner {
         let _ = &self.message_closure;
         let _ = &self.error_closure;
     }
+}
+
+fn queued_frame_bytes(frames: &[Vec<u8>]) -> usize {
+    frames.iter().map(Vec::len).sum()
 }
 
 impl IntegratedServerRunner for WebIntegratedServerRunner {
@@ -1227,7 +1288,9 @@ fn handle_runner_message(
                 drop(metrics);
                 let mut queued = update_frames.borrow_mut();
                 queued.extend(frames);
-                diagnostics.borrow_mut().update_queue_depth = queued.len();
+                let mut diagnostics = diagnostics.borrow_mut();
+                diagnostics.update_queue_depth = queued.len();
+                diagnostics.update_queue_bytes = queued_frame_bytes(&queued);
             }
         }
         Err(error) => {
