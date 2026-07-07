@@ -964,6 +964,23 @@ age is not a new queue-depth regression: prior accepted overlap/adaptive churn
 artifacts already showed render-compile queue max age `606.756-781.323ms`; the
 single `deadline_skipped_requests=1` row did not reproduce.
 
+Remaining follow-ups after the queue-depth baseline (2026-07-07):
+
+- desktop worker-count ladder: keep max-pending `4` as the promoted baseline,
+  then test desktop `--render-compile-workers 1/2/4` with RD10/RD15 startup
+  streaming and frame-budget checks before considering any desktop-only worker
+  default change;
+- render upload/accept tuning: treat GPU upload and completed-result accept
+  budgeting as a separate optimization pass. The static XR `2/16/64` lane
+  values remain explicit benchmark/guardrail args, not shipped defaults, until
+  an adaptive or per-lane policy has evidence across RD7 orbit and RD5 churn;
+- Quest soak: run a longer mixed orbit/churn validation with the promoted
+  max-pending `4` default to separate deterministic renderer behavior from
+  thermal/compositor dropped-frame variance;
+- baseline interpretation: the committed default is a conservative throughput
+  baseline (`workers=1`, `max-pending=4`) and not a claim that worker
+  parallelism or GPU upload/accept throughput have been fully optimized.
+
 ## Slice 5: Config Surface, Soak, And Close-Out
 
 Deliverables:
