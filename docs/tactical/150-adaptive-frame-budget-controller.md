@@ -683,6 +683,52 @@ budgets updated to point here.
   `FramePipelineReport` still emits an empty `budgetDecisionPanel`, and Quest
   churn still lacks an aggregate chunks/sec/decision-trace field.
 
+2026-07-07 Slice 3 diagnostics-detour checkpoint:
+
+- Named detour: the 2026-07-06 promotion checkpoint could not close the
+  cadence and Quest churn decisions from existing report fields. The scalar
+  scheduler budget/spend fields showed the controller was active, but flat
+  `FramePipelineReport` emitted an empty `budgetDecisionPanel`; the Quest churn
+  summary exposed max per-sample publication counters, but not aggregate
+  publication units/sec, and it had no logged decision trace. These were the
+  fields consulted and the reason they could not answer the named decisions.
+- Carried the real scheduler `BudgetDecisionPanelReport` through
+  `ChunkSchedulerPublicationDiagnostics`, `ServerRunnerDiagnostics`,
+  `RuntimePollDiagnostics`, desktop flat frame accounting, startup-streaming
+  perf JSON, desktop XR reports, and Android XR reports. App-runtime now
+  depends directly on `mclone-diagnostics` for the shared report type; no
+  controller math, loop ordering, or default policy changed.
+- Added runner-owned cumulative feature/light publication diagnostics and
+  projected them through XR upload summaries. Android XR perf logs now include
+  `MCLONE_ANDROID_XR_PERF_PUBLICATION` with feature chunks/sec, light
+  statuses/sec, and total publication units/sec, plus
+  `MCLONE_ANDROID_XR_PERF_BUDGET_DECISION` lines for each reported controller
+  decision.
+- Short desktop verification smokes recorded in
+  [`../performance-records.md`](../performance-records.md): default cadence
+  RD5/60-frame adaptive startup emitted `3` budget decisions (feature/light
+  publication and feature-job admission), with feature/light at max units `4`
+  and real per-unit estimates; a non-default `60/10/60` cadence smoke emitted
+  target period `100.0ms`, non-empty decisions, and `0` over-budget frames.
+  These smokes verify diagnostics plumbing only; they are not the full RD10
+  cadence compatibility row.
+- Validation passed:
+  `cargo fmt --manifest-path native/Cargo.toml --all --check`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-server`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_parses_adaptive_chunk_publication_budget_flag`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-native-client --features xr`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-server --target wasm32-unknown-unknown`,
+  `cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime --lib --target wasm32-unknown-unknown`,
+  `pnpm native:xr:check`, `pnpm native:android-xr:apk`, and `git diff --check`.
+  A full `cargo check -p mclone-app-runtime --target wasm32-unknown-unknown`
+  still fails in the existing `terrain_texture_coverage` bin because native
+  asset helpers are cfg-gated out on wasm; the app-runtime library check passed.
+- Status: Slice 3 promotion exit is still not complete. Defaults remain off.
+  The next measurements can now consume real decision traces and aggregate
+  Quest publication cadence, but the missing native-window desktop run, live
+  desktop-XR smoke, full cadence compatibility row, and Quest churn rerun with
+  the new publication/decision fields are still required before default-on.
+
 ## Slice 4: Candidate B — Render Admission And Workers
 
 Why: after publication opens, the desktop trailing edge is the paced render

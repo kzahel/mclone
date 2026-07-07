@@ -3,9 +3,9 @@ use std::sync::Arc;
 use mclone_app_runtime::frame_render::RenderStreamStats;
 use mclone_app_runtime::{RenderSectionSyncTiming, SingleViewRuntimeStats};
 use mclone_diagnostics::{
-    DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator, FrameObservation,
-    FramePipelineReport, QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
-    StageSpan,
+    BudgetDecisionPanelReport, DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator,
+    FrameObservation, FramePipelineReport, QueueAgeReport, QueueAgeTracker, QueueId,
+    QueuePanelReport, StageId, StageSpan,
 };
 
 #[derive(Clone, Debug)]
@@ -70,6 +70,7 @@ impl DesktopFramePipelineAccounting {
         surface_present_ms: f64,
         runtime_stats: Option<SingleViewRuntimeStats>,
         render_stats: RenderStreamStats,
+        budget_decision_panel: BudgetDecisionPanelReport,
     ) {
         let present_wait_ms = sanitize_ms(surface_acquire_ms)
             + sanitize_ms(surface_submit_ms)
@@ -90,7 +91,8 @@ impl DesktopFramePipelineAccounting {
             return;
         };
         self.accumulator.record_frame(observation);
-        let report = FramePipelineReport::new(self.accumulator.summary_report(), queue_panel);
+        let report = FramePipelineReport::new(self.accumulator.summary_report(), queue_panel)
+            .with_budget_decision_panel(budget_decision_panel);
         self.revision = self.revision.saturating_add(1);
         self.latest_report = Some(Arc::new(report));
     }
@@ -273,6 +275,7 @@ mod tests {
                 last_completed_compile_section_count: 1,
                 ..RenderStreamStats::default()
             },
+            BudgetDecisionPanelReport::empty(),
         );
 
         let (report, revision) = accounting.latest_report().expect("report");
@@ -303,6 +306,7 @@ mod tests {
                 mclone_app_runtime::host_mode::SingleViewHostMode::RemoteDedicated,
             )),
             RenderStreamStats::default(),
+            BudgetDecisionPanelReport::empty(),
         );
 
         let (report, _) = accounting.latest_report().expect("report");

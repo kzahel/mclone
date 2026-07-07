@@ -29,6 +29,7 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, ChunkPos, ChunkSnapshot, ChunkStatus, block_to_section_coord,
     local_block_coord, local_section_block_coord,
 };
+use mclone_diagnostics::BudgetDecisionPanelReport;
 use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMesh};
 use mclone_protocol::{
     ChunkView, ClientCommand, HOTBAR_SLOT_COUNT_USIZE, PlayerAppearance, PlayerModelKind,
@@ -878,7 +879,7 @@ pub struct RuntimeExchangeApplyReport {
     pub update_apply: RuntimeUpdateApplyReport,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuntimePollDiagnostics {
     pub server_runner_kind: Option<ServerRunnerKind>,
     pub server_command_queue_depth: usize,
@@ -914,6 +915,7 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_purge_stale_tickets_ms: f64,
     pub scheduler_reconcile_holders_ms: f64,
     pub scheduler_publish_completed_ms: f64,
+    pub scheduler_budget_decision_panel: BudgetDecisionPanelReport,
     pub scheduler_adaptive_publication_budget_enabled: bool,
     pub scheduler_feature_publish_budget_min_units: usize,
     pub scheduler_feature_publish_budget_max_units: usize,
@@ -940,6 +942,8 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_light_statuses_published: usize,
     pub scheduler_light_statuses_skipped: usize,
     pub scheduler_light_snapshot_ready_events: usize,
+    pub scheduler_cumulative_feature_chunks_published: u64,
+    pub scheduler_cumulative_light_statuses_published: u64,
     pub scheduler_pending_worldgen_publication_jobs: usize,
     pub scheduler_pending_worldgen_publication_chunks: usize,
     pub scheduler_pending_light_publications: usize,
@@ -1209,8 +1213,8 @@ impl SingleViewRuntime {
         self.transport_drained
     }
 
-    pub const fn last_poll_diagnostics(&self) -> RuntimePollDiagnostics {
-        self.last_poll_diagnostics
+    pub fn last_poll_diagnostics(&self) -> RuntimePollDiagnostics {
+        self.last_poll_diagnostics.clone()
     }
 
     pub fn deferred_client_chunk_drop_item_count(&self) -> usize {
@@ -1400,7 +1404,7 @@ impl SingleViewRuntime {
         if let Some(runner_diagnostics) = runner_diagnostics {
             self.apply_runner_diagnostics(runner_diagnostics, &mut diagnostics);
         }
-        self.last_poll_diagnostics = diagnostics;
+        self.last_poll_diagnostics = diagnostics.clone();
         diagnostics
     }
 
@@ -2392,7 +2396,7 @@ impl SingleViewRuntime {
         runner_diagnostics: &ServerRunnerDiagnostics,
         diagnostics: &mut RuntimePollDiagnostics,
     ) {
-        let tick = runner_diagnostics.last_tick;
+        let tick = &runner_diagnostics.last_tick;
         diagnostics.server_runner_kind = Some(runner_diagnostics.kind);
         diagnostics.server_command_queue_depth = runner_diagnostics.command_queue_depth;
         diagnostics.server_update_queue_depth = runner_diagnostics.update_queue_depth;
@@ -2416,6 +2420,8 @@ impl SingleViewRuntime {
             micros_to_ms(tick.timing.scheduler_reconcile_holders_us);
         diagnostics.scheduler_publish_completed_ms =
             micros_to_ms(tick.timing.scheduler_publish_completed_us);
+        diagnostics.scheduler_budget_decision_panel =
+            tick.scheduler_publication.budget_decision_panel.clone();
         diagnostics.scheduler_adaptive_publication_budget_enabled =
             tick.scheduler_publication.adaptive_budget_enabled;
         diagnostics.scheduler_feature_publish_budget_min_units =
@@ -2472,6 +2478,10 @@ impl SingleViewRuntime {
             tick.scheduler_publication.light_statuses_skipped;
         diagnostics.scheduler_light_snapshot_ready_events =
             tick.scheduler_publication.light_snapshot_ready_events;
+        diagnostics.scheduler_cumulative_feature_chunks_published =
+            runner_diagnostics.cumulative_feature_chunks_published;
+        diagnostics.scheduler_cumulative_light_statuses_published =
+            runner_diagnostics.cumulative_light_statuses_published;
         diagnostics.scheduler_pending_worldgen_publication_jobs =
             tick.scheduler_publication.pending_worldgen_publication_jobs;
         diagnostics.scheduler_pending_worldgen_publication_chunks = tick

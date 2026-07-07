@@ -59,7 +59,7 @@ use mclone_client::{
     view_vector_from_rot_degrees,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
-use mclone_diagnostics::FramePipelineReport;
+use mclone_diagnostics::{BudgetDecisionPanelReport, FramePipelineReport};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
@@ -2185,6 +2185,17 @@ where
             record_cache: self.draw.record_cache_stats(),
             ..XrTerrainUploadSummary::default()
         }
+    }
+
+    pub fn latest_budget_decision_panel(&self) -> BudgetDecisionPanelReport {
+        self.runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .last_poll_diagnostics()
+                    .scheduler_budget_decision_panel
+            })
+            .unwrap_or_default()
     }
 
     fn runtime_host_mode(&self) -> XrTerrainHostMode {

@@ -101,6 +101,30 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 3 Budget Decision Panel Smoke
+
+Commit: this diagnostics checkpoint commit. Host: `kmacbook`, Apple M4 Pro,
+macOS `26.5.1` build `25F80`.
+
+Raw JSON artifacts were captured under `/tmp`:
+`/tmp/mclone-150-slice3-budget-panel-smoke.json` and
+`/tmp/mclone-150-slice3-budget-panel-cadence-smoke.json`.
+
+Both rows used
+`--startup-streaming-perf --startup-streaming-frames 60 --render-distance 5 --target-hz 60 --adaptive-chunk-publication-budget true --debug-passive-showcase false`.
+The second row also used `--simulation-cadence 60/10/60`.
+
+| Lane | Cadence | Decisions | Feature decision | Light decision | Over budget | Max pending publication chunks |
+|---|---:|---:|---|---|---:|---:|
+| budget panel smoke | `60/20/60` | `3` | `hold-at-cap`, max units `4`, grant `10.000ms`, per-unit `0.352ms` | `hold-at-cap`, max units `4`, grant `10.000ms`, per-unit `0.108ms` | `0` | `108` |
+| cadence smoke | `60/10/60` | `3` | `hold-hysteresis`, target `100.0ms`, grant `14.000ms`, max units `4`, per-unit `0.353ms` | `hold-hysteresis`, target `100.0ms`, grant `14.000ms`, max units `4`, per-unit `0.109ms` | `0` | `112` |
+
+Interpretation: the startup-streaming JSON `frame_pipeline_accounting`
+`budgetDecisionPanel` is now populated with the scheduler's real publication
+decisions. The non-default cadence row verifies the trace records the
+`100.0ms` gameplay period, but it is a short diagnostics smoke, not the full
+RD10 cadence-compatibility promotion row.
+
 ### 2026-07-06 - Tactical 150 Slice 3 Adaptive Publication Desktop Checkpoint
 
 Commit: this checkpoint commit (benchmarks captured from the same worktree

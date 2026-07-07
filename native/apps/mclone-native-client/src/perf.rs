@@ -13,9 +13,10 @@ use mclone_app_runtime::{RenderSectionSyncTiming, RuntimeUpdatePumpBudget};
 use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
-    FrameAccountingConfig, FrameAccumulator, FrameObservation, FramePipelineReport,
-    FrameSummaryReport, PeerThreadActivityReport, PeerThreadId, PeerThreadPanelReport,
-    PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport, StageId, StageSpan,
+    BudgetDecisionPanelReport, FrameAccountingConfig, FrameAccumulator, FrameObservation,
+    FramePipelineReport, FrameSummaryReport, PeerThreadActivityReport, PeerThreadId,
+    PeerThreadPanelReport, PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
+    StageSpan,
 };
 use mclone_mesh::{VisibilityGraphBuildStats, quad_face_count_from_indices};
 use mclone_render::chunk::{
@@ -434,6 +435,7 @@ pub(crate) struct StartupStreamingPerfReport {
     streaming_wall_ms: f64,
     headless: mclone_render::headless::HeadlessFrameLoopReport,
     frames: Vec<StartupStreamingFrameReport>,
+    budget_decision_panel: BudgetDecisionPanelReport,
     first_full_view_ready_frame: Option<usize>,
     first_full_view_ready_ms: Option<f64>,
     first_render_quiescent_frame: Option<usize>,
@@ -1139,6 +1141,7 @@ impl FrameBudgetProbeReport {
             pipeline_frame_accounting,
             QueuePanelReport::new(Vec::new()),
             PeerThreadPanelReport::empty(),
+            BudgetDecisionPanelReport::empty(),
             true,
         );
         println!("  \"frame_reports\": [");
@@ -1966,6 +1969,7 @@ impl StartupStreamingPerfReport {
             &frame_accounting,
             startup_streaming_queue_panel(&self.frames),
             startup_streaming_peer_panel(&self.frames),
+            self.budget_decision_panel.clone(),
             true,
         );
         let sampled_frames = self
@@ -2555,10 +2559,12 @@ fn print_frame_accounting_json_field(
     summary: &FrameSummaryReport,
     queue_panel: QueuePanelReport,
     peer_thread_panel: PeerThreadPanelReport,
+    budget_decision_panel: BudgetDecisionPanelReport,
     trailing_comma: bool,
 ) {
     let report = FramePipelineReport::new(summary.clone(), queue_panel)
-        .with_peer_thread_panel(peer_thread_panel);
+        .with_peer_thread_panel(peer_thread_panel)
+        .with_budget_decision_panel(budget_decision_panel);
     let json = serde_json::to_string_pretty(&report).expect("frame accounting report serializes");
     let lines = json.lines().collect::<Vec<_>>();
     let suffix = if trailing_comma { "," } else { "" };
@@ -3223,7 +3229,7 @@ pub(crate) fn run_startup_streaming_perf(
     let render_options = options.render_options;
     let streaming_start = Instant::now();
 
-    let (headless, _state) = run_headless_frame_loop(
+    let (headless, state) = run_headless_frame_loop(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
@@ -3489,6 +3495,10 @@ pub(crate) fn run_startup_streaming_perf(
     )?;
     let (first_render_quiescent_frame, first_render_quiescent_ms) =
         first_stable_startup_streaming_render_quiescent(&frame_reports);
+    let budget_decision_panel = state
+        .runtime
+        .last_poll_diagnostics()
+        .scheduler_budget_decision_panel;
 
     Ok(StartupStreamingPerfReport {
         options: options.clone(),
@@ -3504,6 +3514,7 @@ pub(crate) fn run_startup_streaming_perf(
         streaming_wall_ms: elapsed_ms(streaming_start.elapsed()),
         headless,
         frames: frame_reports,
+        budget_decision_panel,
         first_full_view_ready_frame,
         first_full_view_ready_ms,
         first_render_quiescent_frame,

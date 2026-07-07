@@ -1421,6 +1421,7 @@ dependencies = [
  "mclone-assets",
  "mclone-client",
  "mclone-core",
+ "mclone-diagnostics",
  "mclone-input",
  "mclone-mesh",
  "mclone-protocol",

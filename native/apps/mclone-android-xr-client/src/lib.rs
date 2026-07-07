@@ -47,10 +47,11 @@ mod android {
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_diagnostics::{
-        CriticalPathLabel, DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator,
+        BudgetDecisionFamily, BudgetDecisionPanelReport, BudgetDecisionReason, CriticalPathLabel,
+        DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator, FrameHostKind,
         FrameObservation, FramePipelineReport, FrameSummaryReport, PeerThreadActivityReport,
         PeerThreadId, PeerThreadPanelReport, PercentileMethod, QueueAgeReport, QueueAgeTracker,
-        QueueId, QueuePanelReport, StageId, StageSpan, percentile_sorted_ms,
+        QueueId, QueuePanelReport, StageId, StageSpan, WorkWindow, percentile_sorted_ms,
     };
     use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
     use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -3487,8 +3488,9 @@ mod android {
                 frame_timing.thread_cpu_ms = (end_ms - start_ms).max(0.0);
                 frame_timing.thread_cpu_valid = true;
             }
+            let budget_decision_panel = terrain.latest_budget_decision_panel();
             let (frame_pipeline_report, frame_pipeline_revision) = frame_pipeline_reporter
-                .record_frame(
+                .record_frame_with_budget_decision_panel(
                     XrFramePipelineHostTiming {
                         frame_wall_ms: frame_timing.frame_wall_ms,
                         wait_frame_ms: frame_timing.wait_frame_ms,
@@ -3499,10 +3501,16 @@ mod android {
                             .then_some(frame_timing.thread_cpu_ms),
                     },
                     rendered_frame.map(|rendered| rendered.summary),
+                    budget_decision_panel.clone(),
                 );
             terrain.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
             if !perf_started_after_ready {
-                perf_probe.record_frame(frame_timing, frame_stats, rendered_frame);
+                perf_probe.record_frame(
+                    frame_timing,
+                    frame_stats,
+                    rendered_frame,
+                    budget_decision_panel,
+                );
             }
             if rendered_frame.is_some() {
                 if let Some(probe) = performance_metrics_probe.as_mut() {
@@ -4084,7 +4092,16 @@ mod android {
                 record_rebuild_total_ms: 0.0,
                 record_rebuild_max_ms: 0.0,
                 frame_details: Vec::new(),
+                start_scheduler_cumulative_feature_chunks_published: rendered
+                    .summary
+                    .upload
+                    .poll_scheduler_cumulative_feature_chunks_published,
+                start_scheduler_cumulative_light_statuses_published: rendered
+                    .summary
+                    .upload
+                    .poll_scheduler_cumulative_light_statuses_published,
                 latest_summary: rendered.summary,
+                latest_budget_decision_panel: BudgetDecisionPanelReport::empty(),
             });
             true
         }
@@ -4150,11 +4167,12 @@ mod android {
             timing: AndroidXrFrameTiming,
             frame_stats: XrFrameStats,
             rendered: Option<AndroidXrRenderedFrame>,
+            budget_decision_panel: BudgetDecisionPanelReport,
         ) {
             let Some(active) = self.active.as_mut() else {
                 return;
             };
-            active.record_frame(timing, rendered);
+            active.record_frame(timing, rendered, budget_decision_panel);
             if active.started.elapsed() >= active.requested {
                 active.log_summary(frame_stats);
                 self.completed = true;
@@ -4205,7 +4223,10 @@ mod android {
         record_rebuild_total_ms: f64,
         record_rebuild_max_ms: f64,
         frame_details: Vec<AndroidXrWorstFrameSnapshot>,
+        start_scheduler_cumulative_feature_chunks_published: u64,
+        start_scheduler_cumulative_light_statuses_published: u64,
         latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
+        latest_budget_decision_panel: BudgetDecisionPanelReport,
     }
 
     impl AndroidXrActivePerfProbe {
@@ -4213,7 +4234,9 @@ mod android {
             &mut self,
             timing: AndroidXrFrameTiming,
             rendered: Option<AndroidXrRenderedFrame>,
+            budget_decision_panel: BudgetDecisionPanelReport,
         ) {
+            self.latest_budget_decision_panel = budget_decision_panel;
             let sample_frame = self.frame_details.len() as u64 + 1;
             if let Some(frame_accounting) = self.frame_accounting.as_mut() {
                 frame_accounting.record_frame(android_xr_frame_observation(
@@ -4278,7 +4301,8 @@ mod android {
             let peer_thread_panel = android_xr_peer_thread_panel(&self.frame_details);
             let frame_pipeline_report =
                 FramePipelineReport::new(frame_accounting.clone(), queue_panel)
-                    .with_peer_thread_panel(peer_thread_panel);
+                    .with_peer_thread_panel(peer_thread_panel)
+                    .with_budget_decision_panel(self.latest_budget_decision_panel.clone());
             let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = frame_accounting.frames;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
@@ -4317,6 +4341,20 @@ mod android {
             let flight_distance_blocks =
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
+            let feature_publications_delta = latest_upload
+                .poll_scheduler_cumulative_feature_chunks_published
+                .saturating_sub(self.start_scheduler_cumulative_feature_chunks_published);
+            let light_publications_delta = latest_upload
+                .poll_scheduler_cumulative_light_statuses_published
+                .saturating_sub(self.start_scheduler_cumulative_light_statuses_published);
+            let publication_units_delta =
+                feature_publications_delta.saturating_add(light_publications_delta);
+            let feature_publications_per_second =
+                per_second_u64(feature_publications_delta, sample_seconds);
+            let light_publications_per_second =
+                per_second_u64(light_publications_delta, sample_seconds);
+            let publication_units_per_second =
+                per_second_u64(publication_units_delta, sample_seconds);
             let record_cache_delta = self
                 .latest_record_cache
                 .sample_delta(self.start_record_cache);
@@ -4377,6 +4415,21 @@ mod android {
                 headroom.average_ms,
                 frame_accounting.app_over_period_frames,
                 frame_accounting.app_over_period_pct
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_PUBLICATION sample_seconds={:.3} mode={} render_path={} adaptive_chunk_publication_budget={} feature_chunks_delta={} light_statuses_delta={} publication_units_delta={} feature_chunks_per_second={:.3} light_statuses_per_second={:.3} publication_units_per_second={:.3} latest_feature_cumulative={} latest_light_cumulative={}",
+                sample_seconds,
+                self.mode_label,
+                self.render_path.label(),
+                self.adaptive_chunk_publication_budget,
+                feature_publications_delta,
+                light_publications_delta,
+                publication_units_delta,
+                feature_publications_per_second,
+                light_publications_per_second,
+                publication_units_per_second,
+                latest_upload.poll_scheduler_cumulative_feature_chunks_published,
+                latest_upload.poll_scheduler_cumulative_light_statuses_published
             );
             log_android_xr_frame_pipeline_report(&frame_pipeline_report);
             log::info!(
@@ -5503,12 +5556,13 @@ mod android {
 
     fn log_android_xr_frame_pipeline_report(report: &FramePipelineReport) {
         log::info!(
-            "MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE schema_version={} frames={} queues={} peers={} stages={}",
+            "MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE schema_version={} frames={} queues={} peers={} stages={} budget_decisions={}",
             report.schema_version,
             report.frame_summary.frames,
             report.queue_panel.queues.len(),
             report.peer_thread_panel.peers.len(),
-            report.stage_spans.len()
+            report.stage_spans.len(),
+            report.budget_decision_panel.decisions.len()
         );
         for queue in &report.queue_panel.queues {
             log::info!(
@@ -5552,10 +5606,38 @@ mod android {
                 format_optional_f64(span.thread_cpu_ms)
             );
         }
+        for decision in &report.budget_decision_panel.decisions {
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_BUDGET_DECISION family={} host={} window={} stage={} reason={} grant_ms={:.3} min_units={} max_units={} max_pending_units={} target_period_ms={:.3} queue_depth={} oldest_queue_age_ms={} per_unit_cost_ms={} previous_max_units={} clean_windows={}",
+                budget_decision_family_label(decision.family),
+                frame_host_kind_label(decision.address.host_kind),
+                work_window_label(decision.address.work_window),
+                stage_id_label(decision.address.stage),
+                budget_decision_reason_label(decision.trace.reason),
+                decision.grant.elapsed_ms,
+                decision.grant.min_units,
+                decision.grant.max_units,
+                format_optional_u32(decision.grant.max_pending_units),
+                decision.trace.input_snapshot.target_period_ms,
+                decision.trace.input_snapshot.queue_depth,
+                format_optional_f64(decision.trace.input_snapshot.oldest_queue_age_ms),
+                format_optional_f64(decision.trace.input_snapshot.per_unit_cost_ms),
+                decision.trace.previous_max_units,
+                decision.trace.consecutive_clean_windows
+            );
+        }
     }
 
     fn perf_budget_ms(target_hz: f64) -> f64 {
         1000.0 / target_hz.max(1.0)
+    }
+
+    fn per_second_u64(count: u64, seconds: f64) -> f64 {
+        if seconds > 0.0 {
+            count as f64 / seconds
+        } else {
+            0.0
+        }
     }
 
     fn format_optional_hz(rate: Option<f32>) -> String {
@@ -5581,6 +5663,12 @@ mod android {
             .unwrap_or_else(|| "none".to_owned())
     }
 
+    fn format_optional_u32(value: Option<u32>) -> String {
+        value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned())
+    }
+
     fn usize_to_u64(value: usize) -> u64 {
         value.try_into().unwrap_or(u64::MAX)
     }
@@ -5596,6 +5684,57 @@ mod android {
             CriticalPathLabel::ParallelCpuPeer => "parallel-cpu-peer",
             CriticalPathLabel::RemoteHostWork => "remote-host-work",
             CriticalPathLabel::QueuedBackpressured => "queued-backpressured",
+        }
+    }
+
+    fn budget_decision_family_label(family: BudgetDecisionFamily) -> &'static str {
+        match family {
+            BudgetDecisionFamily::FeaturePublication => "feature-publication",
+            BudgetDecisionFamily::LightPublication => "light-publication",
+            BudgetDecisionFamily::FeatureJobAdmission => "feature-job-admission",
+            BudgetDecisionFamily::RenderAdmission => "render-admission",
+            BudgetDecisionFamily::CompletedResultAcceptance => "completed-result-acceptance",
+            BudgetDecisionFamily::SectionUpload => "section-upload",
+            BudgetDecisionFamily::RenderCompileWorkers => "render-compile-workers",
+        }
+    }
+
+    fn budget_decision_reason_label(reason: BudgetDecisionReason) -> &'static str {
+        match reason {
+            BudgetDecisionReason::ColdStartFloor => "cold-start-floor",
+            BudgetDecisionReason::MissingInputFloor => "missing-input-floor",
+            BudgetDecisionReason::TargetPeriodChangedFloor => "target-period-changed-floor",
+            BudgetDecisionReason::CutFrameMiss => "cut-frame-miss",
+            BudgetDecisionReason::CutNegativeHeadroom => "cut-negative-headroom",
+            BudgetDecisionReason::CutQueueAge => "cut-queue-age",
+            BudgetDecisionReason::RaiseSustainedHeadroom => "raise-sustained-headroom",
+            BudgetDecisionReason::HoldHysteresis => "hold-hysteresis",
+            BudgetDecisionReason::HoldAtCap => "hold-at-cap",
+        }
+    }
+
+    fn frame_host_kind_label(host: FrameHostKind) -> &'static str {
+        match host {
+            FrameHostKind::DesktopFlatWinit => "desktop-flat-winit",
+            FrameHostKind::FlatAndroidWinit => "flat-android-winit",
+            FrameHostKind::WebRafWorkers => "web-raf-workers",
+            FrameHostKind::AndroidXrOpenXr => "android-xr-open-xr",
+            FrameHostKind::DesktopXrOpenXr => "desktop-xr-open-xr",
+            FrameHostKind::HeadlessOffscreenPerf => "headless-offscreen-perf",
+            FrameHostKind::IntegratedServerRunner => "integrated-server-runner",
+            FrameHostKind::DedicatedServerCommandLoop => "dedicated-server-command-loop",
+        }
+    }
+
+    fn work_window_label(window: WorkWindow) -> &'static str {
+        match window {
+            WorkWindow::BeforeRender => "before-render",
+            WorkWindow::PostSubmitOverlapSlack => "post-submit-overlap-slack",
+            WorkWindow::GameplayTick => "gameplay-tick",
+            WorkWindow::TickSlack => "tick-slack",
+            WorkWindow::WorkerPoll => "worker-poll",
+            WorkWindow::OffscreenStep => "offscreen-step",
+            WorkWindow::CommandTick => "command-tick",
         }
     }
 
@@ -6362,6 +6501,12 @@ mod android {
             poll_scheduler_light_snapshot_ready_events: a
                 .poll_scheduler_light_snapshot_ready_events
                 .max(b.poll_scheduler_light_snapshot_ready_events),
+            poll_scheduler_cumulative_feature_chunks_published: a
+                .poll_scheduler_cumulative_feature_chunks_published
+                .max(b.poll_scheduler_cumulative_feature_chunks_published),
+            poll_scheduler_cumulative_light_statuses_published: a
+                .poll_scheduler_cumulative_light_statuses_published
+                .max(b.poll_scheduler_cumulative_light_statuses_published),
             poll_scheduler_pending_worldgen_publication_jobs: a
                 .poll_scheduler_pending_worldgen_publication_jobs
                 .max(b.poll_scheduler_pending_worldgen_publication_jobs),

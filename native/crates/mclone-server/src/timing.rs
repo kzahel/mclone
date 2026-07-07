@@ -8,12 +8,14 @@
 use std::time::Instant;
 
 use mclone_core::{ChunkPos, Vec3d};
+use mclone_frame_budget::BudgetDecisionPanelReport;
 use mclone_protocol::ServerUpdate;
 
 use crate::{ChunkSchedulerEvent, PlayerChunkTrackingDiagnostics};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ChunkSchedulerPublicationDiagnostics {
+    pub budget_decision_panel: BudgetDecisionPanelReport,
     pub adaptive_budget_enabled: bool,
     pub feature_publish_budget_min_units: usize,
     pub feature_publish_budget_max_units: usize,

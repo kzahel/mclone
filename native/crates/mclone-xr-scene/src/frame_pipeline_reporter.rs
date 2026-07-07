@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use mclone_diagnostics::{
-    DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator, FrameObservation,
-    FramePipelineReport, PeerThreadActivityReport, PeerThreadId, PeerThreadPanelReport,
-    PercentileMethod, QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
-    StageSpan,
+    BudgetDecisionPanelReport, DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator,
+    FrameObservation, FramePipelineReport, PeerThreadActivityReport, PeerThreadId,
+    PeerThreadPanelReport, PercentileMethod, QueueAgeReport, QueueAgeTracker, QueueId,
+    QueuePanelReport, StageId, StageSpan,
 };
 
 use crate::{
@@ -60,6 +60,19 @@ impl XrFramePipelineReporter {
         host: XrFramePipelineHostTiming,
         summary: Option<XrTerrainFrameSummary>,
     ) -> (Arc<FramePipelineReport>, u64) {
+        self.record_frame_with_budget_decision_panel(
+            host,
+            summary,
+            BudgetDecisionPanelReport::empty(),
+        )
+    }
+
+    pub fn record_frame_with_budget_decision_panel(
+        &mut self,
+        host: XrFramePipelineHostTiming,
+        summary: Option<XrTerrainFrameSummary>,
+        budget_decision_panel: BudgetDecisionPanelReport,
+    ) -> (Arc<FramePipelineReport>, u64) {
         self.now_ms += sanitize_ms(host.frame_wall_ms);
         let frame_index = self.accumulator.len() as u64 + 1;
         let app_work_ms =
@@ -88,7 +101,8 @@ impl XrFramePipelineReporter {
         let queue_panel = self.queue_trackers.report(upload, self.now_ms);
         let peer_thread_panel = xr_frame_pipeline_peer_thread_panel(upload);
         let report = FramePipelineReport::new(self.accumulator.summary_report(), queue_panel)
-            .with_peer_thread_panel(peer_thread_panel);
+            .with_peer_thread_panel(peer_thread_panel)
+            .with_budget_decision_panel(budget_decision_panel);
         self.revision = self.revision.saturating_add(1);
         let report = Arc::new(report);
         self.latest_report = Some(report.clone());

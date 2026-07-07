@@ -310,6 +310,8 @@ pub struct XrTerrainUploadSummary {
     pub poll_scheduler_light_statuses_published: usize,
     pub poll_scheduler_light_statuses_skipped: usize,
     pub poll_scheduler_light_snapshot_ready_events: usize,
+    pub poll_scheduler_cumulative_feature_chunks_published: u64,
+    pub poll_scheduler_cumulative_light_statuses_published: u64,
     pub poll_scheduler_pending_worldgen_publication_jobs: usize,
     pub poll_scheduler_pending_worldgen_publication_chunks: usize,
     pub poll_scheduler_pending_light_publications: usize,
@@ -579,6 +581,10 @@ pub(crate) fn xr_poll_diagnostics_upload_summary(
         poll_scheduler_light_statuses_skipped: diagnostics.scheduler_light_statuses_skipped,
         poll_scheduler_light_snapshot_ready_events: diagnostics
             .scheduler_light_snapshot_ready_events,
+        poll_scheduler_cumulative_feature_chunks_published: diagnostics
+            .scheduler_cumulative_feature_chunks_published,
+        poll_scheduler_cumulative_light_statuses_published: diagnostics
+            .scheduler_cumulative_light_statuses_published,
         poll_scheduler_pending_worldgen_publication_jobs: diagnostics
             .scheduler_pending_worldgen_publication_jobs,
         poll_scheduler_pending_worldgen_publication_chunks: diagnostics

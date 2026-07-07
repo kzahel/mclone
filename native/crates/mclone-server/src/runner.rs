@@ -211,7 +211,7 @@ impl WorkerFrameMetrics {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ServerRunnerTickDiagnostics {
     pub simulation_tick: u64,
     pub chunk_tick: u64,
@@ -242,7 +242,7 @@ impl ServerRunnerTickDiagnostics {
             entity_tick_chunks: report.entity_tick_chunks,
             pending_unloads_processed: report.pending_unloads_processed,
             scheduler_event_count: report.scheduler_event_count,
-            scheduler_publication: report.scheduler_publication,
+            scheduler_publication: report.scheduler_publication.clone(),
             fluid_due_ticks: report.fluid_due_ticks,
             fluid_ticks_executed: report.fluid_ticks_executed,
             deferred_fluid_ticks: report.deferred_fluid_ticks,
@@ -289,6 +289,8 @@ pub struct ServerRunnerDiagnostics {
     pub diagnostics_detail_refreshes: u64,
     pub diagnostics_detail_age_ms: f64,
     pub last_tick: ServerRunnerTickDiagnostics,
+    pub cumulative_feature_chunks_published: u64,
+    pub cumulative_light_statuses_published: u64,
     pub last_error: Option<String>,
     diagnostics_detail_refreshed_at: Option<std::time::Instant>,
 }
@@ -325,6 +327,8 @@ impl ServerRunnerDiagnostics {
             diagnostics_detail_refreshes: 0,
             diagnostics_detail_age_ms: 0.0,
             last_tick: ServerRunnerTickDiagnostics::default(),
+            cumulative_feature_chunks_published: 0,
+            cumulative_light_statuses_published: 0,
             last_error: None,
             diagnostics_detail_refreshed_at: None,
         }
@@ -1359,6 +1363,12 @@ mod native {
             diagnostics.awaiting_tick = awaiting_tick;
         }
         if let Some(tick) = tick {
+            diagnostics.cumulative_feature_chunks_published = diagnostics
+                .cumulative_feature_chunks_published
+                .saturating_add(tick.scheduler_publication.feature_chunks_published as u64);
+            diagnostics.cumulative_light_statuses_published = diagnostics
+                .cumulative_light_statuses_published
+                .saturating_add(tick.scheduler_publication.light_statuses_published as u64);
             diagnostics.last_tick = tick;
         }
         if let Some(last_error) = last_error {

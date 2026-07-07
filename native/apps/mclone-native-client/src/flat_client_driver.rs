@@ -450,6 +450,15 @@ impl FlatClientDriver {
         self.frame_timing
             .record_surface_frame(render_ms, acquire_ms, encode_ms, submit_ms, present_ms);
         let runtime_stats = self.runtime.as_ref().map(WindowSceneRuntime::stats);
+        let budget_decision_panel = self
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .last_poll_diagnostics()
+                    .scheduler_budget_decision_panel
+            })
+            .unwrap_or_default();
         self.frame_pipeline_accounting.finish_frame(
             render_ms,
             acquire_ms,
@@ -457,6 +466,7 @@ impl FlatClientDriver {
             present_ms,
             runtime_stats,
             self.render_stats,
+            budget_decision_panel,
         );
     }
 

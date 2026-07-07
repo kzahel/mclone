@@ -590,8 +590,9 @@ fn run_smoke_frames(
         }
 
         if let Some(mclone) = &mut mclone {
+            let budget_decision_panel = mclone.latest_budget_decision_panel();
             let (frame_pipeline_report, frame_pipeline_revision) = frame_pipeline_reporter
-                .record_frame(
+                .record_frame_with_budget_decision_panel(
                     XrFramePipelineHostTiming {
                         frame_wall_ms: elapsed_ms(frame_wall_start.elapsed()),
                         wait_frame_ms: wait_begin_ms,
@@ -600,6 +601,7 @@ fn run_smoke_frames(
                         thread_cpu_ms: None,
                     },
                     rendered_summary,
+                    budget_decision_panel,
                 );
             mclone.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
         }

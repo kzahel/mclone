@@ -846,6 +846,7 @@ impl ChunkScheduler {
             )
             .with_costs(self.publication_budget.estimator.estimates);
         let panel = self.publication_budget.controller.decide(&input);
+        diagnostics.budget_decision_panel = panel.clone();
         let feature_decision =
             decision_for(&panel.decisions, BudgetDecisionFamily::FeaturePublication);
         let light_decision = decision_for(&panel.decisions, BudgetDecisionFamily::LightPublication);
