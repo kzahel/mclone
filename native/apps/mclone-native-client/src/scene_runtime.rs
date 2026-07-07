@@ -96,7 +96,8 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
     build_remote_dedicated_client_runtime(
         SingleViewHostOptions::new(center, render_distance)
-            .with_render_compile_worker_count(scene.render_compile_worker_count),
+            .with_render_compile_worker_count(scene.render_compile_worker_count)
+            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs),
         &mut session,
     )
 }
@@ -113,7 +114,8 @@ fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewScen
     .with_debug_passive_showcase(scene.debug_passive_showcase)
     .with_lighting_enabled(scene.lighting_enabled)
     .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget)
-    .with_render_compile_worker_count(scene.render_compile_worker_count);
+    .with_render_compile_worker_count(scene.render_compile_worker_count)
+    .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs);
     if let Some(world_dir) = &scene.world_dir {
         options = options.with_persistent_world_dir(world_dir.clone());
     }
@@ -143,7 +145,8 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
     let session = RemoteServerSession::connect(remote_addr.as_str())?;
     NativeWindowSceneRuntime::remote_dedicated_with_mesh_assets(
         SingleViewHostOptions::new(center, render_distance)
-            .with_render_compile_worker_count(scene.render_compile_worker_count),
+            .with_render_compile_worker_count(scene.render_compile_worker_count)
+            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs),
         session,
         mesh_assets,
     )

@@ -37,6 +37,7 @@ pub struct SingleViewHostOptions {
     pub render_distance: u32,
     pub chunk_tracking_radius: u32,
     pub render_compile_worker_count: usize,
+    pub render_compile_max_pending_jobs: Option<usize>,
 }
 
 impl SingleViewHostOptions {
@@ -46,6 +47,7 @@ impl SingleViewHostOptions {
             render_distance,
             chunk_tracking_radius: chunk_tracking_radius_for_render_distance(render_distance),
             render_compile_worker_count: crate::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            render_compile_max_pending_jobs: None,
         }
     }
 
@@ -59,6 +61,14 @@ impl SingleViewHostOptions {
         render_compile_worker_count: usize,
     ) -> Self {
         self.render_compile_worker_count = render_compile_worker_count;
+        self
+    }
+
+    pub const fn with_render_compile_max_pending_jobs(
+        mut self,
+        render_compile_max_pending_jobs: Option<usize>,
+    ) -> Self {
+        self.render_compile_max_pending_jobs = render_compile_max_pending_jobs;
         self
     }
 

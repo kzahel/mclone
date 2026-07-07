@@ -216,6 +216,12 @@ impl MovementPerfReport {
             "  \"render_compile_workers\": {},",
             self.options.scene.render_compile_worker_count
         );
+        print_optional_usize_json(
+            "  ",
+            "render_compile_max_pending_jobs",
+            self.options.scene.render_compile_max_pending_jobs,
+            true,
+        );
         println!(
             "  \"adaptive_chunk_publication_budget\": {},",
             self.options.scene.adaptive_chunk_publication_budget
@@ -1071,6 +1077,12 @@ impl FrameBudgetProbeReport {
             "  \"render_compile_workers\": {},",
             self.options.scene.render_compile_worker_count
         );
+        print_optional_usize_json(
+            "  ",
+            "render_compile_max_pending_jobs",
+            self.options.scene.render_compile_max_pending_jobs,
+            true,
+        );
         println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
@@ -1763,6 +1775,12 @@ impl StartupStreamingPerfReport {
         println!(
             "  \"render_compile_workers\": {},",
             self.options.scene.render_compile_worker_count
+        );
+        print_optional_usize_json(
+            "  ",
+            "render_compile_max_pending_jobs",
+            self.options.scene.render_compile_max_pending_jobs,
+            true,
         );
         println!(
             "  \"simulation_cadence\": {{ \"host_hz\": {}, \"gameplay_hz\": {}, \"physics_hz\": {} }},",
@@ -2491,6 +2509,12 @@ impl LoadingSettlePerfReport {
             "  \"render_compile_workers\": {},",
             self.options.scene.render_compile_worker_count
         );
+        print_optional_usize_json(
+            "  ",
+            "render_compile_max_pending_jobs",
+            self.options.scene.render_compile_max_pending_jobs,
+            true,
+        );
         println!(
             "  \"simulation_cadence\": {{ \"host_hz\": {}, \"gameplay_hz\": {}, \"physics_hz\": {} }},",
             self.options.scene.simulation_cadence.host_rate_hz,
@@ -2633,6 +2657,14 @@ fn print_optional_f64_json(indent: &str, key: &str, value: Option<f64>, trailing
     let suffix = if trailing_comma { "," } else { "" };
     match value {
         Some(value) => println!("{indent}\"{key}\": {value:.3}{suffix}"),
+        None => println!("{indent}\"{key}\": null{suffix}"),
+    }
+}
+
+fn print_optional_usize_json(indent: &str, key: &str, value: Option<usize>, trailing_comma: bool) {
+    let suffix = if trailing_comma { "," } else { "" };
+    match value {
+        Some(value) => println!("{indent}\"{key}\": {value}{suffix}"),
         None => println!("{indent}\"{key}\": null{suffix}"),
     }
 }

@@ -895,9 +895,17 @@ rebuilt sections `4029`, post-full-view non-target rebuilt sections `0`, and
 deadline-skipped compile requests `0`. That reconciles the earlier ambiguity:
 the final `pending_render_chunks=88` is edge/non-target bookkeeping, but the
 long marker delay is real target render mesh progression, not merely a global
-quiescence-definition artifact. Candidate B remains unpromoted; do not advance
-render admission, worker, XR accept/upload, or Quest defaults until a measured
-target render progression lever exists.
+quiescence-definition artifact. A follow-up opt-in compile in-flight cap
+(`--render-compile-max-pending-jobs`, omitted = cap equals worker count) tested
+workers `1` with max-pending `4`: first full view `9722.828ms`, target render
+quiescent `50139.993ms`, p95/p99/max frame `7.525/8.468/11.238ms`, `0`
+over-budget frames, `8161` submitted compile sections, `8156` completed,
+`3178` uploaded, `562` post-full-view target rebuilt sections, and `0`
+deadline skips. The cap changes work distribution but does not improve the
+acceptance metric, so it is retained only as an opt-in benchmark lever.
+Candidate B remains unpromoted; do not advance render admission, worker count,
+in-flight cap, XR accept/upload, or Quest defaults until a measured target
+render progression lever exists.
 
 ## Slice 5: Config Surface, Soak, And Close-Out
 

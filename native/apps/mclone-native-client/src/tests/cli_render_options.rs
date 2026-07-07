@@ -29,6 +29,8 @@ fn cli_parses_render_compile_workers() {
         "--movement-perf".to_owned(),
         "--render-compile-workers".to_owned(),
         "2".to_owned(),
+        "--render-compile-max-pending-jobs".to_owned(),
+        "6".to_owned(),
     ])
     .unwrap();
 
@@ -38,6 +40,7 @@ fn cli_parses_render_compile_workers() {
             options: MovementPerfOptions {
                 scene: SceneOptions {
                     render_compile_worker_count: 2,
+                    render_compile_max_pending_jobs: Some(6),
                     ..SceneOptions::default()
                 },
                 ..MovementPerfOptions::default()

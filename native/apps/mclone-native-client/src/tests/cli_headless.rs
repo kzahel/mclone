@@ -373,6 +373,7 @@ fn cli_parses_screenshot_scene_options() {
                 render_distance: DEFAULT_RENDER_DISTANCE,
                 render_compile_worker_count:
                     mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+                render_compile_max_pending_jobs: None,
                 remote_addr: None,
                 world_root: SceneOptions::default().world_root,
                 world_dir: None,

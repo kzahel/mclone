@@ -61,6 +61,7 @@ pub struct LocalSingleViewSceneOptions {
     pub adaptive_chunk_publication_budget: bool,
     pub world_storage: NativeIntegratedServerWorldStorage,
     pub render_compile_worker_count: usize,
+    pub render_compile_max_pending_jobs: Option<usize>,
 }
 
 impl LocalSingleViewSceneOptions {
@@ -77,6 +78,7 @@ impl LocalSingleViewSceneOptions {
             adaptive_chunk_publication_budget: false,
             world_storage: NativeIntegratedServerWorldStorage::Transient,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            render_compile_max_pending_jobs: None,
         }
     }
 
@@ -130,6 +132,14 @@ impl LocalSingleViewSceneOptions {
         render_compile_worker_count: usize,
     ) -> Self {
         self.render_compile_worker_count = render_compile_worker_count;
+        self
+    }
+
+    pub const fn with_render_compile_max_pending_jobs(
+        mut self,
+        render_compile_max_pending_jobs: Option<usize>,
+    ) -> Self {
+        self.render_compile_max_pending_jobs = render_compile_max_pending_jobs;
         self
     }
 
@@ -550,10 +560,14 @@ impl LocalSingleViewSceneRuntime {
         options: LocalSingleViewSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let render_compile_dispatcher = NativeRenderSectionCompileDispatcher::with_worker_count(
-            mesh_assets.catalog.clone(),
-            options.render_compile_worker_count,
-        )?;
+        let render_compile_dispatcher =
+            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs(
+                mesh_assets.catalog.clone(),
+                options.render_compile_worker_count,
+                options
+                    .render_compile_max_pending_jobs
+                    .unwrap_or(options.render_compile_worker_count),
+            )?;
         let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
             .context("failed to start local single-view integrated server runner")?;
         let mut scene = Self {
@@ -1905,10 +1919,14 @@ where
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         let mut connection = RemoteDedicatedConnection::new(session);
-        let render_compile_dispatcher = NativeRenderSectionCompileDispatcher::with_worker_count(
-            mesh_assets.catalog.clone(),
-            options.render_compile_worker_count,
-        )?;
+        let render_compile_dispatcher =
+            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs(
+                mesh_assets.catalog.clone(),
+                options.render_compile_worker_count,
+                options
+                    .render_compile_max_pending_jobs
+                    .unwrap_or(options.render_compile_worker_count),
+            )?;
         let mut core = SingleViewRuntime::remote_dedicated(
             options.center,
             options.render_distance,

@@ -253,8 +253,20 @@ impl NativeRenderSectionCompileDispatcher {
     }
 
     pub fn with_worker_count(catalog: TexturedMeshCatalog, worker_count: usize) -> Result<Self> {
+        Self::with_worker_count_and_max_pending_jobs(catalog, worker_count, worker_count)
+    }
+
+    pub fn with_worker_count_and_max_pending_jobs(
+        catalog: TexturedMeshCatalog,
+        worker_count: usize,
+        max_pending_jobs: usize,
+    ) -> Result<Self> {
         Ok(Self {
-            worker: RenderSectionCompileWorker::with_worker_count(catalog, worker_count)?,
+            worker: RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs(
+                catalog,
+                worker_count,
+                max_pending_jobs,
+            )?,
         })
     }
 
@@ -318,11 +330,27 @@ impl RenderSectionCompileWorker {
     }
 
     pub fn with_worker_count(catalog: TexturedMeshCatalog, worker_count: usize) -> Result<Self> {
+        Self::with_worker_count_and_max_pending_jobs(catalog, worker_count, worker_count)
+    }
+
+    pub fn with_worker_count_and_max_pending_jobs(
+        catalog: TexturedMeshCatalog,
+        worker_count: usize,
+        max_pending_jobs: usize,
+    ) -> Result<Self> {
         if worker_count == 0 {
             bail!("render section compile worker count must be greater than zero");
         }
+        if max_pending_jobs == 0 {
+            bail!("render section compile max pending jobs must be greater than zero");
+        }
+        if max_pending_jobs < worker_count {
+            bail!(
+                "render section compile max pending jobs ({max_pending_jobs}) must be at least worker count ({worker_count})"
+            );
+        }
 
-        let queue = Arc::new(RenderSectionCompileQueue::new(worker_count));
+        let queue = Arc::new(RenderSectionCompileQueue::new(max_pending_jobs));
         let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
         let mut handles = Vec::with_capacity(worker_count + 1);
 
@@ -363,7 +391,7 @@ impl RenderSectionCompileWorker {
             receiver,
             handles,
             pending_jobs: 0,
-            max_pending_jobs: worker_count,
+            max_pending_jobs,
         })
     }
 
@@ -1000,6 +1028,17 @@ mod tests {
     }
 
     #[test]
+    fn render_compile_worker_rejects_queue_smaller_than_workers() {
+        let error = RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs(
+            TexturedMeshCatalog::default(),
+            2,
+            1,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must be at least worker count"));
+    }
+
+    #[test]
     fn render_compile_worker_exposes_bounded_capacity() -> Result<()> {
         let mut worker =
             RenderSectionCompileWorker::with_worker_count(TexturedMeshCatalog::default(), 2)?;
@@ -1010,6 +1049,28 @@ mod tests {
         worker.submit(empty_compile_request())?;
         worker.submit(empty_compile_request())?;
         assert_eq!(worker.pending_job_count(), 2);
+        assert_eq!(worker.available_pending_job_slots(), 0);
+
+        let error = worker.submit(empty_compile_request()).unwrap_err();
+        assert!(error.to_string().contains("no free compile slots"));
+        Ok(())
+    }
+
+    #[test]
+    fn render_compile_worker_can_queue_beyond_worker_count() -> Result<()> {
+        let mut worker = RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs(
+            TexturedMeshCatalog::default(),
+            1,
+            3,
+        )?;
+        assert_eq!(worker.pending_job_count(), 0);
+        assert_eq!(worker.max_pending_job_count(), 3);
+        assert_eq!(worker.available_pending_job_slots(), 3);
+
+        worker.submit(empty_compile_request())?;
+        worker.submit(empty_compile_request())?;
+        worker.submit(empty_compile_request())?;
+        assert_eq!(worker.pending_job_count(), 3);
         assert_eq!(worker.available_pending_job_slots(), 0);
 
         let error = worker.submit(empty_compile_request()).unwrap_err();

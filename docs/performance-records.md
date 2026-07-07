@@ -101,6 +101,53 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 4 Render Compile Queue-Depth Candidate
+
+Commit reported by benchmark JSON: `72659d86`.
+
+Note: `git_dirty=true` because this was captured while adding the opt-in
+`--render-compile-max-pending-jobs` benchmark/config flag. The default remains
+unchanged: when the flag is omitted, the compile in-flight cap equals
+`--render-compile-workers`.
+
+Command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 6000 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --debug-passive-showcase false > /tmp/mclone-150-slice4-rd10-queue4.json
+```
+
+RD10 startup-streaming, adaptive publication default on, workers `1`,
+compile max-pending jobs `4`, 60 Hz budget:
+
+| Metric | Value |
+|---|---:|
+| startup playable | 529.048 ms |
+| first full view ready | 9722.828 ms |
+| first render quiescent (legacy global suffix) | 50139.993 ms |
+| first target render quiescent | 50139.993 ms |
+| average frame | 5.732 ms |
+| p95 / p99 frame | 7.525 / 8.468 ms |
+| max frame | 11.238 ms |
+| over-budget frames | 0 |
+| over-2x-budget frames | 0 |
+| submitted compile sections | 8161 |
+| completed compile sections | 8156 |
+| uploaded sections | 3178 |
+| target rebuilt sections | 8156 |
+| non-target rebuilt sections | 0 |
+| post-full-view target rebuilt sections | 562 |
+| post-full-view non-target rebuilt sections | 0 |
+| deadline-skipped compile requests | 0 |
+
+Decision: compile in-flight depth `4` is not a promotion lever for Candidate B.
+It preserves clean frame pacing but leaves target render quiescence at
+`50139.993ms`, effectively unchanged from the prior workers-1 target-tail row
+(`50148.741ms`). The deeper queue changes work distribution, but it does not
+meet the RD10 fresh quiescence acceptance target (`<= 14s`) and does not prove
+worker starvation was the bound. Keep the flag as an opt-in benchmark lever;
+do not advance render-admission, worker-count, in-flight-cap, XR accept/upload,
+or Quest defaults from this evidence.
+
 ### 2026-07-07 - Tactical 150 Slice 4 Target Render Tail Follow-up
 
 Commit reported by benchmark JSON: `962bcfc5`.

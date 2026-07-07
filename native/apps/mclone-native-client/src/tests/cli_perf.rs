@@ -99,6 +99,8 @@ fn cli_parses_startup_streaming_perf_options() {
         "20".to_owned(),
         "--render-compile-workers".to_owned(),
         "2".to_owned(),
+        "--render-compile-max-pending-jobs".to_owned(),
+        "8".to_owned(),
         "--width".to_owned(),
         "1024".to_owned(),
         "--height".to_owned(),
@@ -115,6 +117,7 @@ fn cli_parses_startup_streaming_perf_options() {
                 scene: SceneOptions {
                     render_distance: 20,
                     render_compile_worker_count: 2,
+                    render_compile_max_pending_jobs: Some(8),
                     debug_passive_showcase: false,
                     ..SceneOptions::default()
                 },
@@ -233,6 +236,21 @@ fn cli_allows_startup_streaming_target_hz_before_mode_flag() {
             },
         }
     );
+}
+
+#[test]
+fn cli_rejects_render_compile_max_pending_jobs_below_worker_count() {
+    let err = Cli::parse([
+        "--startup-streaming-perf".to_owned(),
+        "--render-compile-workers".to_owned(),
+        "2".to_owned(),
+        "--render-compile-max-pending-jobs".to_owned(),
+        "1".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("must be at least --render-compile-workers"));
 }
 
 #[test]
