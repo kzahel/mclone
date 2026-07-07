@@ -194,6 +194,17 @@ impl EngineCameraCollisionMode {
     }
 }
 
+fn player_dimensions_for_movement_mode(
+    movement_mode: EngineCameraMovementMode,
+) -> LocalPlayerDimensions {
+    match movement_mode {
+        EngineCameraMovementMode::HandPush => LocalPlayerDimensions::HAND_PUSH,
+        EngineCameraMovementMode::Walking | EngineCameraMovementMode::Fly => {
+            LocalPlayerDimensions::STANDING
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EngineCameraViewMode {
     #[default]
@@ -422,11 +433,12 @@ impl EngineCameraController {
     }
 
     pub fn set_eye_pose(&mut self, eye: Vec3d, yaw_radians: f64, pitch_radians: f64) {
+        let dimensions = self.player.dimensions();
         self.player.set_pose(LocalPlayerPose::from_eye_position(
             eye,
             -yaw_radians.to_degrees(),
             -pitch_radians.to_degrees(),
-            LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+            dimensions.eye_height,
         ));
         self.reset_room_scale_body_follow();
     }
@@ -489,8 +501,16 @@ impl EngineCameraController {
             self.hand_push_emulation_phase = 0.0;
         }
         self.movement_mode = movement_mode;
+        self.set_player_dimensions_for_movement_mode();
         if self.movement_mode == EngineCameraMovementMode::HandPush {
             self.set_collision_mode(EngineCameraCollisionMode::Normal);
+        }
+    }
+
+    fn set_player_dimensions_for_movement_mode(&mut self) {
+        let dimensions = player_dimensions_for_movement_mode(self.movement_mode);
+        if self.player.dimensions() != dimensions {
+            self.player.set_dimensions(dimensions);
         }
     }
 
@@ -1115,7 +1135,7 @@ pub fn engine_debug_world_lines(
     if options.player_collision_box {
         push_aabb_wire_lines(
             &mut lines,
-            camera.player().pose().bounding_box(),
+            camera.player().bounding_box(),
             ENGINE_DEBUG_PLAYER_BOX_COLOR,
         );
         if let Some(reconciliation) = camera.last_room_scale_reconciliation() {

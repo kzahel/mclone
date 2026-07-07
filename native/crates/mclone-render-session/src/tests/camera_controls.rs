@@ -60,19 +60,45 @@ fn engine_camera_controller_applies_mouse_look_and_sprint_boost() {
 #[test]
 fn engine_camera_controller_toggles_movement_mode() {
     let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+    let standing_eye = camera.snapshot().eye;
 
     assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
+    assert_eq!(
+        camera.player().dimensions(),
+        LocalPlayerDimensions::STANDING
+    );
     assert_eq!(camera.toggle_movement_mode(), EngineCameraMovementMode::Fly);
     assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::NoClip);
+    assert_eq!(
+        camera.player().dimensions(),
+        LocalPlayerDimensions::STANDING
+    );
     assert_eq!(
         camera.toggle_movement_mode(),
         EngineCameraMovementMode::HandPush
     );
     assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
     assert_eq!(
+        camera.player().dimensions(),
+        LocalPlayerDimensions::HAND_PUSH
+    );
+    assert_eq!(
+        camera.player().bounding_box(),
+        camera
+            .player()
+            .pose()
+            .bounding_box_with_dimensions(LocalPlayerDimensions::HAND_PUSH)
+    );
+    assert!(camera.snapshot().eye.y < standing_eye.y);
+    assert_eq!(
         camera.toggle_movement_mode(),
         EngineCameraMovementMode::Walking
     );
+    assert_eq!(
+        camera.player().dimensions(),
+        LocalPlayerDimensions::STANDING
+    );
+    assert_eq!(camera.snapshot().eye, standing_eye);
     assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
     assert_eq!(EngineCameraMovementMode::Fly.label(), "FLY");
     assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
@@ -440,6 +466,29 @@ fn engine_camera_controller_sets_explicit_eye_pose() {
     assert_eq!(snapshot.chunk_pos, ChunkPos::new(1, -1));
     assert!((snapshot.yaw_radians - 0.25).abs() < 1.0e-12);
     assert!((snapshot.pitch_radians + 0.125).abs() < 1.0e-12);
+}
+
+#[test]
+fn engine_camera_controller_set_eye_pose_preserves_active_hand_push_dimensions() {
+    let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+    camera.set_movement_mode(EngineCameraMovementMode::HandPush);
+    let eye = Vec3d::new(16.25, 72.0, -0.5);
+
+    camera.set_eye_pose(eye, 0.25, -0.125);
+
+    assert_eq!(
+        camera.player().dimensions(),
+        LocalPlayerDimensions::HAND_PUSH
+    );
+    assert_eq!(camera.snapshot().eye, eye);
+    assert_eq!(
+        camera.player().pose().position,
+        Vec3d::new(
+            16.25,
+            72.0 - LocalPlayerDimensions::HAND_PUSH.eye_height,
+            -0.5
+        )
+    );
 }
 
 #[test]

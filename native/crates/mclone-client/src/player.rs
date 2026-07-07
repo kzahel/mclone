@@ -13,6 +13,9 @@ pub const MOVING_SLOW_FACTOR: f32 = 0.3;
 pub const LOCAL_PLAYER_STANDING_EYE_HEIGHT: f64 = 1.62;
 pub const LOCAL_PLAYER_STANDING_WIDTH: f64 = 0.6;
 pub const LOCAL_PLAYER_STANDING_HEIGHT: f64 = 1.8;
+pub const LOCAL_PLAYER_HAND_PUSH_EYE_HEIGHT: f64 = 0.6;
+pub const LOCAL_PLAYER_HAND_PUSH_WIDTH: f64 = 0.4;
+pub const LOCAL_PLAYER_HAND_PUSH_HEIGHT: f64 = 0.6;
 pub const LOCAL_PLAYER_X_ROT_LIMIT_DEGREES: f64 = 90.0;
 pub const LOCAL_PLAYER_TICKS_PER_SECOND: f64 = 20.0;
 pub const LOCAL_PLAYER_BASE_MOVEMENT_SPEED: f64 = 0.1;
@@ -523,6 +526,65 @@ impl HandPushLocomotionController {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LocalPlayerDimensions {
+    pub width: f64,
+    pub height: f64,
+    pub eye_height: f64,
+}
+
+impl LocalPlayerDimensions {
+    pub const STANDING: Self = Self {
+        width: LOCAL_PLAYER_STANDING_WIDTH,
+        height: LOCAL_PLAYER_STANDING_HEIGHT,
+        eye_height: LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    };
+
+    pub const HAND_PUSH: Self = Self {
+        width: LOCAL_PLAYER_HAND_PUSH_WIDTH,
+        height: LOCAL_PLAYER_HAND_PUSH_HEIGHT,
+        eye_height: LOCAL_PLAYER_HAND_PUSH_EYE_HEIGHT,
+    };
+
+    pub const fn new(width: f64, height: f64, eye_height: f64) -> Self {
+        Self {
+            width,
+            height,
+            eye_height,
+        }
+    }
+
+    fn sanitized(self) -> Self {
+        let fallback = Self::STANDING;
+        let width = if self.width.is_finite() && self.width > 0.0 {
+            self.width
+        } else {
+            fallback.width
+        };
+        let height = if self.height.is_finite() && self.height > 0.0 {
+            self.height
+        } else {
+            fallback.height
+        };
+        let eye_height = if self.eye_height.is_finite() {
+            self.eye_height.clamp(0.0, height)
+        } else {
+            fallback.eye_height.min(height)
+        };
+        Self {
+            width,
+            height,
+            eye_height,
+        }
+    }
+}
+
+impl Default for LocalPlayerDimensions {
+    fn default() -> Self {
+        Self::STANDING
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LocalPlayerPose {
     pub position: Vec3d,
     pub y_rot_degrees: f64,
@@ -617,13 +679,18 @@ impl LocalPlayerPose {
     }
 
     pub fn bounding_box(self) -> Aabb {
+        self.bounding_box_with_dimensions(LocalPlayerDimensions::STANDING)
+    }
+
+    pub fn bounding_box_with_dimensions(self, dimensions: LocalPlayerDimensions) -> Aabb {
+        let dimensions = dimensions.sanitized();
         Aabb::new(
-            self.position.x - LOCAL_PLAYER_STANDING_WIDTH / 2.0,
+            self.position.x - dimensions.width / 2.0,
             self.position.y,
-            self.position.z - LOCAL_PLAYER_STANDING_WIDTH / 2.0,
-            self.position.x + LOCAL_PLAYER_STANDING_WIDTH / 2.0,
-            self.position.y + LOCAL_PLAYER_STANDING_HEIGHT,
-            self.position.z + LOCAL_PLAYER_STANDING_WIDTH / 2.0,
+            self.position.z - dimensions.width / 2.0,
+            self.position.x + dimensions.width / 2.0,
+            self.position.y + dimensions.height,
+            self.position.z + dimensions.width / 2.0,
         )
     }
 
@@ -660,6 +727,7 @@ impl LocalPlayerPose {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalPlayerController {
     pose: LocalPlayerPose,
+    dimensions: LocalPlayerDimensions,
     keys: PlayerInputKeys,
     input: PlayerInput,
     move_sync: LocalPlayerMoveSync,
@@ -678,6 +746,7 @@ impl Default for LocalPlayerController {
     fn default() -> Self {
         Self {
             pose: LocalPlayerPose::default(),
+            dimensions: LocalPlayerDimensions::default(),
             keys: PlayerInputKeys::default(),
             input: PlayerInput::default(),
             move_sync: LocalPlayerMoveSync::default(),
@@ -803,6 +872,14 @@ impl LocalPlayerController {
         self.pose
     }
 
+    pub const fn dimensions(&self) -> LocalPlayerDimensions {
+        self.dimensions
+    }
+
+    pub fn bounding_box(&self) -> Aabb {
+        self.pose.bounding_box_with_dimensions(self.dimensions)
+    }
+
     pub const fn horizontal_collision(&self) -> bool {
         self.horizontal_collision
     }
@@ -844,6 +921,13 @@ impl LocalPlayerController {
 
     pub fn set_pose(&mut self, pose: LocalPlayerPose) {
         self.pose = pose;
+    }
+
+    pub fn set_dimensions(&mut self, dimensions: LocalPlayerDimensions) {
+        let dimensions = dimensions.sanitized();
+        self.dimensions = dimensions;
+        self.pose.eye_height = dimensions.eye_height;
+        self.clear_water_contact();
     }
 
     pub fn next_move_player_command(&mut self) -> Option<ClientCommand> {
@@ -1208,11 +1292,11 @@ impl LocalPlayerController {
             return false;
         }
 
-        can_auto_jump_over(client, self.pose.bounding_box(), candidate_movement)
+        can_auto_jump_over(client, self.bounding_box(), candidate_movement)
     }
 
     fn update_water_contact(&mut self, client: &ClientRuntime) -> WaterContact {
-        let contact = water_contact_at_pose(client, self.pose);
+        let contact = water_contact_at_pose(client, self.pose, self.dimensions);
         self.touching_water = contact.touching;
         self.eye_in_water = contact.eye_in_water;
         self.water_height = contact.height;
@@ -1230,7 +1314,7 @@ impl LocalPlayerController {
         client: &ClientRuntime,
         requested: Vec3d,
     ) -> CollisionMovementResult {
-        let traveled = collide_movement(client, self.pose.bounding_box(), requested);
+        let traveled = collide_movement(client, self.bounding_box(), requested);
         if traveled.length_sqr() > COLLISION_EPSILON * COLLISION_EPSILON {
             self.pose.move_by(traveled);
         }
@@ -1282,8 +1366,15 @@ fn can_auto_jump_over(client: &ClientRuntime, bounding_box: Aabb, movement: Vec3
         && raised_movement.length_sqr() >= movement.length_sqr() * 0.5
 }
 
-fn water_contact_at_pose(client: &ClientRuntime, pose: LocalPlayerPose) -> WaterContact {
-    let body = water_contact_in_aabb(client, deflate_aabb(pose.bounding_box(), 0.001));
+fn water_contact_at_pose(
+    client: &ClientRuntime,
+    pose: LocalPlayerPose,
+    dimensions: LocalPlayerDimensions,
+) -> WaterContact {
+    let body = water_contact_in_aabb(
+        client,
+        deflate_aabb(pose.bounding_box_with_dimensions(dimensions), 0.001),
+    );
     let eye = pose.eye_position();
     let eye_probe = Vec3d::new(eye.x, eye.y - 0.11111111, eye.z);
     WaterContact {
@@ -2423,6 +2514,28 @@ mod tests {
         };
 
         assert_eq!(pose.bounding_box(), Aabb::new(0.2, 2.0, 0.2, 0.8, 3.8, 0.8));
+    }
+
+    #[test]
+    fn local_player_controller_uses_active_dimensions_for_collision_box() {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 2.0, 0.5),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            controller.bounding_box(),
+            Aabb::new(0.2, 2.0, 0.2, 0.8, 3.8, 0.8)
+        );
+
+        controller.set_dimensions(LocalPlayerDimensions::HAND_PUSH);
+
+        assert_eq!(controller.pose().eye_position(), Vec3d::new(0.5, 2.6, 0.5));
+        assert_eq!(
+            controller.bounding_box(),
+            Aabb::new(0.3, 2.0, 0.3, 0.7, 2.6, 0.7)
+        );
     }
 
     #[test]

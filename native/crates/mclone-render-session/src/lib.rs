@@ -10,8 +10,8 @@ use mclone_client::{
     ClientRuntime, CollisionMovementResult, FlyingMovementStep, HAND_PUSH_DEFAULT_HAND_RADIUS,
     HandPushLocomotionController, HandPushMovementStep, HandPushPose,
     LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND,
-    LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
-    WalkingMovementStep,
+    LocalPlayerController, LocalPlayerDimensions, LocalPlayerPose, NoClipMovementStep,
+    PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME,

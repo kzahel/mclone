@@ -41,13 +41,15 @@ pub use player::{
     HAND_PUSH_DEFAULT_UNSTICK_DISTANCE, HAND_PUSH_DEFAULT_VELOCITY_HISTORY_SIZE,
     HAND_PUSH_DEFAULT_VELOCITY_LIMIT, HandPushLocomotionController, HandPushLocomotionSettings,
     HandPushMovementResult, HandPushMovementStep, HandPushPose, LOCAL_PLAYER_AIR_SPEED,
-    LOCAL_PLAYER_BASE_MOVEMENT_SPEED, LOCAL_PLAYER_GRAVITY, LOCAL_PLAYER_JUMP_POWER,
+    LOCAL_PLAYER_BASE_MOVEMENT_SPEED, LOCAL_PLAYER_GRAVITY, LOCAL_PLAYER_HAND_PUSH_EYE_HEIGHT,
+    LOCAL_PLAYER_HAND_PUSH_HEIGHT, LOCAL_PLAYER_HAND_PUSH_WIDTH, LOCAL_PLAYER_JUMP_POWER,
     LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_STANDING_WIDTH,
     LOCAL_PLAYER_TICKS_PER_SECOND, LOCAL_PLAYER_VERTICAL_DRAG, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES,
-    LocalPlayerController, LocalPlayerPose, MOVING_SLOW_FACTOR, NO_CLIP_BOOST_MULTIPLIER,
-    NoClipMovementStep, PlayerInput, PlayerInputKey, PlayerInputKeys, WalkingMovementResult,
-    WalkingMovementStep, collide_movement, flying_displacement, no_clip_displacement,
-    sphere_intersects_solid_blocks, view_vector, view_vector_from_rot_degrees,
+    LocalPlayerController, LocalPlayerDimensions, LocalPlayerPose, MOVING_SLOW_FACTOR,
+    NO_CLIP_BOOST_MULTIPLIER, NoClipMovementStep, PlayerInput, PlayerInputKey, PlayerInputKeys,
+    WalkingMovementResult, WalkingMovementStep, collide_movement, flying_displacement,
+    no_clip_displacement, sphere_intersects_solid_blocks, view_vector,
+    view_vector_from_rot_degrees,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use teleport::{
