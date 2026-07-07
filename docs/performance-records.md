@@ -101,6 +101,45 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Render Compile Timing Compile-Feature A/B
+
+Commit reported by benchmark JSON: `7ec12fe3`, `git_dirty=false`.
+
+Code change under test: the render-compile worker busy timer/counter is behind
+the `perf-diagnostics` Cargo feature. Normal production-shaped builds compile
+out that worker-task timer and metrics store. Feature builds can still request
+or disable the worker timing at runtime. Startup JSON reports the three states
+separately: requested, compiled, and effective.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-meter-rd10-persisted-compiled-out.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --features perf-diagnostics --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --render-compile-worker-timing false --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-meter-rd10-persisted-feature-on-timing-off.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --features perf-diagnostics --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-meter-rd10-persisted-feature-on-timing-on.json
+```
+
+| Build | Requested / compiled / effective | Full view | Target quiescent | p95 / max frame | Over / over-2x | Completed / uploaded sections | Render compile busy |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| compiled out | `true / false / false` | `1030.771ms` | `4929.208ms` | `10.793 / 13.455ms` | `0 / 0` | `7040 / 2143` | `0.000ms` |
+| feature on, timing off | `false / true / false` | `1038.059ms` | `4920.899ms` | `10.913 / 17.923ms` | `1 / 0` | `7040 / 2143` | `0.000ms` |
+| feature on, timing on | `true / true / true` | `1019.664ms` | `4926.331ms` | `10.732 / 33.613ms` | `1 / 1` | `7040 / 2143` | `1537.414ms` |
+
+Measured deltas versus compiled-out:
+
+| Build | Full-view delta | Target-quiescent delta | Decision |
+|---|---:|---:|---|
+| feature on, timing off | `+7.288ms` / `+0.707%` | `-8.309ms` / `-0.169%` | no worker busy meter cost; branch-off shape is not a lever-ranking signal |
+| feature on, timing on | `-11.107ms` / `-1.077%` | `-2.877ms` / `-0.058%` | worker busy attribution records correctly; p95 stays in family, with one max-frame outlier |
+
+Interpretation: the compile feature cleanly separates human attribution from
+budget/accounting inputs. Render-compile worker busy attribution is now opt-in
+diagnostics; queue/submit timings that feed frame accounting remain always on.
+For production-shaped releases, leave `perf-diagnostics` off. For capacity
+studies, build with `--features perf-diagnostics` and choose
+`--render-compile-worker-timing true|false` depending on whether worker busy
+time is part of the question.
+
 ### 2026-07-07 - Tactical 153 Render Compile Timing Meter-Tax A/B
 
 Commit reported by benchmark JSON: `30e80fbf`, `git_dirty=false`.

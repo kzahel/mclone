@@ -291,6 +291,22 @@ Slice 0's lever ranking. Treat exact per-section compile costs as workload plus
 meter tax, and keep the stage order: fresh startup is still light-bound, while
 persisted/Quest churn still expose the render-compile tail.
 
+Compile-feature follow-up on clean commit `7ec12fe3` put that worker busy
+timer/counter behind the `perf-diagnostics` Cargo feature. Startup streaming now
+reports requested, compiled, and effective timing states separately. Normal
+release builds compile out the worker-task timer and metrics store; diagnostics
+builds can still toggle the runtime branch.
+
+| RD10 persisted frozen build | Requested / compiled / effective | Full view | Target quiescent | p95 / max frame | Over / over-2x | Render compile busy |
+|---|---:|---:|---:|---:|---:|---:|
+| compiled out | `true / false / false` | `1030.771ms` | `4929.208ms` | `10.793 / 13.455ms` | `0 / 0` | `0.000ms` |
+| feature on, timing off | `false / true / false` | `1038.059ms` | `4920.899ms` | `10.913 / 17.923ms` | `1 / 0` | `0.000ms` |
+| feature on, timing on | `true / true / true` | `1019.664ms` | `4926.331ms` | `10.732 / 33.613ms` | `1 / 1` | `1537.414ms` |
+
+This distinguishes observability from budget policy: render-compile worker
+busy time is a human attribution diagnostic and can compile out; submit/queue
+timings that feed frame accounting stay always on.
+
 Lever order implied by Slice 0:
 
 1. **Slice 1: render compile capacity.** This remains next because it is the
