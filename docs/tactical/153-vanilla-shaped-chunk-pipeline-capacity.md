@@ -1,10 +1,11 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 2 light sub-cost profiling has landed. Changed-block rechecks are
-the binding light-status bucket, and the follow-up classifier shows most queued
-rechecks are raw block-id replacements that do not change current
-opacity/emission facts. The next narrow step is a parity-checked sparse
-changed-block filter before any parallel-light divergence is considered.
+Status: Slice 2 sparse changed-block filtering has landed. The retained-light
+path now enqueues replacement rechecks only when current opacity/emission facts
+change, cutting clean RD10/RD15 changed-block recheck time by about `90%` and
+light compute by `54-56%` while the lighting fixtures remain byte-identical.
+The next narrow step is to re-rank the remaining fresh-startup bottleneck before
+starting another lighting sub-slice.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -518,6 +519,20 @@ queued `5550167` raw changed-block checks; only `374161` (`6.7%`) changed
 current opacity/emission facts, while `5176006` (`93.3%`) were raw-only. That
 strongly supports a vanilla-shaped filter mirroring `ProtoChunk#setBlockState`'s
 light-relevance gate as the next parity-neutral Slice 2 implementation.
+
+The sparse filter then landed in `62b5d666`. It keeps counting all raw
+replacement diffs, but only enqueues `check_block` for opacity/emission changes.
+Clean release `scheduler_loading_perf` rows:
+
+| Lane | View ready | Settled | Light compute | Compute / status | Raw checks | Enqueued checks | Changed-block recheck | Sky graph |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `7896.782ms` | `8911.949ms` | `4807.892ms` | `7.693ms` | `5550167` | `374161` (`6.7%`) | `590.608ms` (`-90.4%`) | `3554.838ms` |
+| RD15 server-only | `20865.423ms` | `23170.166ms` | `9386.362ms` | `7.662ms` | `10843350` | `684067` (`6.3%`) | `1177.668ms` (`-90.8%`) | `6857.777ms` |
+
+This satisfies the first option-A win: changed-block recheck is no longer the
+dominant light bucket. Remaining serial light time is now mostly sky graph drain,
+so the next decision should be made from a fresh whole-pipeline re-rank rather
+than assuming more retained-diff work is still the best lever.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages

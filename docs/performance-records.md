@@ -101,6 +101,41 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Slice 2 Sparse Changed-Block Filter
+
+Commit reported by benchmark JSON: `62b5d666`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: retained initial-light replacements still count every raw block
+diff, but `check_block` is enqueued only for current opacity/emission changes.
+Lighting oracle fixtures and full server tests passed before this run.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 10 --max-seconds 180 > /tmp/mclone-153-light-filter-clean-rd10.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 15 --max-seconds 240 > /tmp/mclone-153-light-filter-clean-rd15.json
+```
+
+Result:
+
+| Lane | Target chunks | View ready | Settled | Light statuses / batches | Light compute | Compute / status | Changed-block recheck | Run updates | Sky graph |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `529` | `7896.782ms` | `8911.949ms` | `625 / 73` | `4807.892ms` | `7.693ms` | `590.608ms` | `3811.223ms` | `3554.838ms` |
+| RD15 server-only | `1089` | `20865.423ms` | `23170.166ms` | `1225 / 144` | `9386.362ms` | `7.662ms` | `1177.668ms` | `7411.957ms` | `6857.777ms` |
+
+Changed-block filter counters:
+
+| Lane | Input chunks | Inserted | Replaced | Unchanged | Raw block checks | Enqueued checks | Raw-only changes |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `4726` | `729` | `1224` | `2773` | `5550167` | `374161` (`6.7%`) | `5176006` |
+| RD15 server-only | `9508` | `1369` | `2418` | `5721` | `10843350` | `684067` (`6.3%`) | `10159283` |
+
+Compared with the clean sub-cost baseline below, changed-block recheck time fell
+`90.4%` on RD10 and `90.8%` on RD15. Total light compute fell `54.2%` on RD10
+and `55.9%` on RD15. The remaining light bucket is now sky graph drain, not
+retained replacement diff enqueueing.
+
 ### 2026-07-07 - Tactical 153 Slice 2 Changed-Block Diff Classification
 
 Commit reported by benchmark JSON: `999c78b0`, `git_dirty=true`,
