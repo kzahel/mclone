@@ -1,11 +1,12 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 2 sparse changed-block filtering has landed. The retained-light
-path now enqueues replacement rechecks only when current opacity/emission facts
-change, cutting clean RD10/RD15 changed-block recheck time by about `90%` and
-light compute by `54-56%` while the lighting fixtures remain byte-identical.
-The next narrow step is to re-rank the remaining fresh-startup bottleneck before
-starting another lighting sub-slice.
+Status: Slice 2 sparse changed-block filtering and post-filter re-rank have
+landed. The retained-light path now enqueues replacement rechecks only when
+current opacity/emission facts change, cutting clean RD10/RD15 changed-block
+recheck time by about `90%` and light compute by `54-56%` while the lighting
+fixtures remain byte-identical. Fresh startup moved `26-29%`, and the next
+narrow step is to decide between a sky-graph scout and publication-valve age,
+not to start a broad lighting rewrite.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -533,6 +534,21 @@ This satisfies the first option-A win: changed-block recheck is no longer the
 dominant light bucket. Remaining serial light time is now mostly sky graph drain,
 so the next decision should be made from a fresh whole-pipeline re-rank rather
 than assuming more retained-diff work is still the best lever.
+
+The clean post-filter fresh startup-streaming re-rank on `0e5c2525` kept the
+Slice 0 comparison knobs (`workers=1`, `max-pending=4`, frozen fluids):
+
+| Lane | Full view | Target quiescent | Delta vs Slice 0 full / target | p95 / max frame | Over / over-2x | Host publication max age | Render compile queue max age |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `7167.876ms` | `8201.012ms` | `-26.1%` / `-26.7%` | `10.340 / 18.045ms` | `1 / 0` | `1728.144ms` | `47.660ms` |
+| RD15 fresh frozen | `14326.097ms` | `15726.106ms` | `-28.1%` / `-28.5%` | `10.475 / 13.096ms` | `0 / 0` | `2555.977ms` | `47.569ms` |
+
+Re-rank interpretation: render compile did not become the fresh-startup
+bottleneck; queue age is tiny and target render work is drained at quiescence.
+The remaining visible pressure is the still-serial light lane (now mostly sky
+graph drain) plus host publication age at roughly the same scale as Slice 0.
+The next slice should scout those two narrow levers before selecting another
+implementation change.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages

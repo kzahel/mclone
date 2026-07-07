@@ -101,6 +101,46 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Post-Light-Filter Whole-Pipeline Re-rank
+
+Commit reported by benchmark JSON: `0e5c2525`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: sparse retained-light changed-block filter plus recorded
+documentation. This reruns the comparable Slice 0 fresh startup-streaming lanes
+with explicit `render-compile-workers=1`, `render-compile-max-pending-jobs=4`,
+frozen scheduled fluids, and `debug-passive-showcase=false`.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-post-lightfilter-rd10-fresh-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 15 --startup-streaming-frames 2400 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-post-lightfilter-rd15-fresh-frozen.json
+```
+
+Whole-pipeline result:
+
+| Lane | Full view | Target quiescent | Delta vs Slice 0 full / target | p95 / max frame | Over / over-2x | Completed compile / uploaded sections |
+|---|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `7167.876ms` | `8201.012ms` | `-26.1%` / `-26.7%` | `10.340 / 18.045ms` | `1 / 0` | `7136 / 2179` |
+| RD15 fresh frozen | `14326.097ms` | `15726.106ms` | `-28.1%` / `-28.5%` | `10.475 / 13.096ms` | `0 / 0` | `15472 / 4848` |
+
+Re-rank counters:
+
+| Lane | Worldgen busy | Light busy | Host publication max age | Render compile queue max age | Max light mailbox pending | Max pending light pubs | Final target pending render chunks |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `2102.952ms` | `5280.467ms` | `1728.144ms` | `47.660ms` | `11` | `8` | `0` |
+| RD15 fresh frozen | `4393.798ms` | `10179.111ms` | `2555.977ms` | `47.569ms` | `18` | `11` | `0` |
+
+Interpretation: the sparse filter moved the whole-pipeline fresh lanes by
+`26-29%`, but it did not make render compile the fresh-startup bottleneck.
+Render compile queue age is tiny in this lane, and target render work is drained
+by quiescence. The remaining pressure is serial light work, now mostly sky graph
+drain per the server-only rows, plus host-publication age that remains around
+the old Slice 0 scale. The next slice should not be a broad lighting rewrite;
+use a narrow scout of sky graph work versus publication valve age before picking
+another implementation lever.
+
 ### 2026-07-07 - Tactical 153 Slice 2 Sparse Changed-Block Filter
 
 Commit reported by benchmark JSON: `62b5d666`, `git_dirty=false`,
