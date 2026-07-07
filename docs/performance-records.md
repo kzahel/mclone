@@ -101,6 +101,82 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 3 Promotion Closure Measurements
+
+Benchmarked commit: `9da26f88` (`Fix app-runtime wasm all-target coverage bin`),
+clean tree before doc edits. Host: `kmacbook`, Apple M4 Pro, macOS `26.5.1`
+build `25F80`.
+
+Raw artifacts were captured under `/tmp`:
+
+- `/tmp/mclone-150-slice3-cadence-rd10.json`
+- `/tmp/mclone-150-slice3-desktop-xr-smoke.log`
+- `/tmp/mclone-150-slice3-native-window-smoke.log`
+
+Full RD10 cadence-compatibility row:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml \
+  -p mclone-native-client --bin mclone-native-client -- \
+  --startup-streaming-perf --render-distance 10 \
+  --startup-streaming-frames 6000 --target-hz 60 \
+  --simulation-cadence 60/10/60 \
+  --adaptive-chunk-publication-budget true \
+  --debug-passive-showcase false
+```
+
+JSON reported `git_commit=9da26f88`, `git_dirty=false`,
+`debug_assertions=false`.
+
+| Lane | Cadence | Frames / Hz | Playable | Full view | Render quiescent | Over budget | Over 2x | p95 / p99 / max | Feature/light published | Max publish | Max pending publication chunks |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 cadence compatibility | `60/10/60` | `6000 / 60` | `1.265s` | `15.936s` | `113.925s` | `0` | `0` | `8.907 / 10.782 / 12.955ms` | `3264 / 3335` | `2.762ms` | `156` |
+
+Decision trace:
+
+| Family | Host/window/stage | Reason | Target period | Grant | Max units | Per-unit estimate |
+|---|---|---|---:|---:|---:|---:|
+| feature publication | integrated-server-runner / gameplay-tick / scheduler-publication | `hold-at-cap` | `100.0ms` | `20.000ms` | `4` | `0.356ms` |
+| light publication | integrated-server-runner / gameplay-tick / scheduler-publication | `hold-at-cap` | `100.0ms` | `20.000ms` | `4` | `0.143ms` |
+| feature-job admission | integrated-server-runner / gameplay-tick / terrain-generation | `hold-at-cap` | `100.0ms` | `0.000ms` | `1`, cap `256` pending units | n/a |
+
+Interpretation: the full diagnostic cadence row now has a real populated
+budget-decision trace and confirms the controller reads the configured
+`100.0ms` gameplay period instead of using a baked `50ms` period. It stayed
+inside the 60 Hz frame budget, but the lower gameplay rate materially changes
+streaming semantics and render quiescence, so this row is compatibility
+evidence, not a default-cadence acceptance row.
+
+Desktop XR functional smoke:
+
+```sh
+bash ./scripts/start-xr.sh --runtime wivrn --wivrn-usb --smoke mclone \
+  --frames 120 --view-pose 0,120,-96,180 \
+  --adaptive-chunk-publication-budget true \
+  --debug-passive-showcase false
+```
+
+Result: passed. WiVRn over USB selected the Quest 3 headset, submitted `120`
+frames (`runtime_frames=121`, `skipped=1`), and printed
+`desktop OpenXR mclone smoke complete: frames=120`. The final Mclone XR frame
+summary reported `frames=71`, `sections=59`, `drawn_sections=41`,
+`indices=258120`, `drawn_indices=119736`.
+
+Native-window functional smoke:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml \
+  -p mclone-native-client --bin mclone-native-client -- \
+  --start-in-world true --transient --startup-wait playable \
+  --render-distance 10 --adaptive-chunk-publication-budget true \
+  --debug-passive-showcase false
+```
+
+The bounded live-window run reached playable startup and streamed to the RD10
+target (`loaded=529` chunks) without logged render errors. The current
+interactive window CLI does not emit quantitative present-path frame timing, so
+this is a winit/swapchain functional smoke, not a full present-pacing gate row.
+
 ### 2026-07-07 - Tactical 150 Slice 3 Budget Decision Panel Smoke
 
 Commit: this diagnostics checkpoint commit. Host: `kmacbook`, Apple M4 Pro,

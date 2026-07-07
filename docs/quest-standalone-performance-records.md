@@ -109,6 +109,85 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 3 Churn Diagnostics Rerun
+
+Benchmarked commit: `9da26f88` (`Fix app-runtime wasm all-target coverage
+bin`), clean tree before doc edits. Release APK build was up to date.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+
+Command:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
+  --render-compile-workers 2 \
+  --xr-render-completed-result-accept-budget 2 \
+  --xr-render-section-upload-budget 16 \
+  --xr-render-section-accept-budget 64 \
+  --perf-seconds 45 \
+  --perf-chunk-view-churn \
+  --perf-churn-interval-seconds 3 \
+  --perf-churn-offset-chunks 16 \
+  --perf-metrics \
+  --wait-seconds 210 \
+  --perf-summary /tmp/mclone-quest-openxr-perf-churn-rd5-adaptive-diagnostics.txt \
+  --log /tmp/mclone-quest-openxr-perf-churn-rd5-adaptive-diagnostics-logcat.txt \
+  --view-pose 0,120,-96,180 \
+  --seed 12345 \
+  --chunk-x 0 \
+  --chunk-z 0 \
+  --render-distance 5 \
+  --day-time 6000 \
+  --freeze-time \
+  --adaptive-chunk-publication-budget true
+```
+
+The Android XR startup logs and perf markers reported
+`adaptive_chunk_publication_budget=true`. The new publication/decision markers
+were present.
+
+| Lane | Config | Skipped | Dropped delta | App p95 / p99 | Headroom avg / p05 | App over-period | Over 2x | Queue / oldest age | Pump stalls | Pending publication chunks | Publication cadence |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD5 chunk-view churn | workers `2`, accept/upload `2/16/64` | `0` | `15` | `9.361 / 10.402ms` | `+8.945 / +4.528ms` | `0.1%` | `0` | `287 / 164.177ms` | `1` | `100` | `23.412` feature chunks/s, `13.239` light statuses/s, `36.651` units/s |
+
+Budget decision trace:
+
+| Family | Host/window/stage | Reason | Target period | Grant | Max units | Per-unit estimate |
+|---|---|---|---:|---:|---:|---:|
+| feature publication | integrated-server-runner / gameplay-tick / scheduler-publication | `hold-at-cap` | `50.000ms` | `10.000ms` | `3` | `2.519ms` |
+| light publication | integrated-server-runner / gameplay-tick / scheduler-publication | `hold-at-cap` | `50.000ms` | `10.000ms` | `4` | `0.289ms` |
+| feature-job admission | integrated-server-runner / gameplay-tick / terrain-generation | `hold-at-cap` | `50.000ms` | `0.000ms` | `1`, cap `256` pending units | n/a |
+
+Interpretation:
+
+- The churn safety fields remain inside the Slice 1 overlap churn envelope:
+  app p95/p99 are below both the Slice 1 churn baseline (`9.897 / 11.521ms`)
+  and the 2026-07-06 adaptive churn row (`9.957 / 10.908ms`), dropped delta
+  `15` remains below the RD5 gate limit `17`, app-over-period remains `0.1%`,
+  and over-2x frames are `0`.
+- Update queue depth and oldest-applied age are materially unchanged from the
+  prior adaptive churn row (`287 / 164.701ms`), and the single update-pump
+  stall matches the established churn lane shape.
+- The shared controller converged differently on Quest than on the desktop
+  cadence row: feature publication capped at `3` units from measured
+  `2.519ms` per-unit cost, while desktop stayed at `4` units from a much lower
+  measured cost. This is the expected input-driven difference, not a
+  platform-local policy branch.
+
+Raw artifacts:
+
+- `/tmp/mclone-quest-openxr-perf-churn-rd5-adaptive-diagnostics.txt`
+- `/tmp/mclone-quest-openxr-perf-churn-rd5-adaptive-diagnostics-logcat.txt`
+
 ### 2026-07-06 - Tactical 150 Slice 3 Adaptive Publication Quest Checkpoint
 
 Commit: this checkpoint commit (release APK built from the same worktree

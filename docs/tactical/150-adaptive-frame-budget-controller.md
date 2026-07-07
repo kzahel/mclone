@@ -4,7 +4,10 @@ Status: active implementation plan; Slice 0 guardrail hygiene/baselines
 captured 2026-07-06 on clean commit `bc55076c`; Slice 1 Quest frame-shape
 default flipped 2026-07-06; Slice 1.5 frame-loop work-window contract landed
 2026-07-06 as docs plus inert diagnostics vocabulary, before any controller
-work; Slice 2 sans-I/O controller core landed 2026-07-06 with no engine wiring.
+work; Slice 2 sans-I/O controller core landed 2026-07-06 with no engine wiring;
+Slice 3 Candidate A publication controller landed 2026-07-06 behind an opt-in
+flag, with promotion measurements through 2026-07-07 and defaults still off
+pending quantitative native-window present-path pacing evidence.
 Drafted 2026-07-06 as the gap-10 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
@@ -728,6 +731,53 @@ budgets updated to point here.
   Quest publication cadence, but the missing native-window desktop run, live
   desktop-XR smoke, full cadence compatibility row, and Quest churn rerun with
   the new publication/decision fields are still required before default-on.
+
+2026-07-07 Slice 3 promotion-closure measurement checkpoint:
+
+- Recorded the full RD10 cadence-compatibility row in
+  [`../performance-records.md`](../performance-records.md): release
+  `60/10/60` startup-streaming on commit `9da26f88`, `git_dirty=false`, reached
+  full view in `15.936s`, render quiescence in `113.925s`, and had `0`
+  over-budget frames. The populated decision trace reported the configured
+  `100.0ms` gameplay period; feature/light publication both held at max units
+  `4` from measured costs (`0.356ms` / `0.143ms`) and a `20.000ms` elapsed
+  grant. This closes the cadence diagnostic row, but it remains diagnostic-only
+  because changing gameplay rate changes streaming semantics.
+- Recorded a desktop XR functional smoke with the controller active:
+  `scripts/start-xr.sh --runtime wivrn --wivrn-usb --smoke mclone --frames 120`
+  plus `--adaptive-chunk-publication-budget true` completed successfully,
+  submitted `120` frames, and ended with
+  `desktop OpenXR mclone smoke complete: frames=120`.
+- Reran the Quest RD5 churn lane with the new publication and decision fields;
+  the row is in
+  [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
+  It reported `skipped=0`, dropped delta `15`, app p95/p99
+  `9.361 / 10.402ms`, headroom avg/p05 `+8.945 / +4.528ms`, app-over-period
+  `0.1%`, over-2x `0`, update queue/oldest age `287 / 164.177ms`, one pump
+  stall, and pending publication `100`. Aggregate publication cadence was
+  `23.412` feature chunks/sec, `13.239` light statuses/sec, `36.651` total
+  publication units/sec. The decision trace showed Quest feature publication
+  at max units `3` from measured `2.519ms` per-unit cost while light remained
+  at `4`, demonstrating input-driven convergence different from desktop under
+  the shared controller path.
+- Ran a bounded release native-window smoke with
+  `--start-in-world true --transient --startup-wait playable --render-distance 10`
+  and `--adaptive-chunk-publication-budget true`. It entered the winit
+  window/swapchain path, reached playable startup, streamed to the RD10 target
+  (`loaded=529` chunks), and logged no render errors before the bounded stop.
+  The current interactive window CLI does not emit quantitative present-path
+  frame timing, so this is recorded as a functional native-window smoke rather
+  than full present-pacing evidence.
+- Validation/run commands completed in this measurement session:
+  release RD10 cadence startup-streaming, desktop XR WiVRn Mclone smoke,
+  Android XR release APK RD5 churn validation, and the bounded release
+  native-window smoke. No engine code or default policy changed.
+- Status: Slice 3 promotion exit is still not complete. Defaults remain off,
+  and 142's publish-budget throttle rows still point to the opt-in controller
+  as pending promotion. The remaining blocker is the native-window
+  present-path pacing gate: the functional smoke proves the adaptive path runs
+  in the winit host, but a quantitative finite native-window timing row or
+  equivalent present-pacing evidence is still needed before default-on.
 
 ## Slice 4: Candidate B — Render Admission And Workers
 
