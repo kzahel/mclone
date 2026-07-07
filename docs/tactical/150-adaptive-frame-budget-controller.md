@@ -1067,6 +1067,45 @@ not as a perf row.
 - Making Quest RD7 settled-orbit clean (render/draw-cost bound; 117/119).
 - Any new fixed global default as a "temporary" policy.
 
+## Post-Close-Out Follow-Up Thread
+
+This tactical's useful outcome is baseline stabilization, not completion of
+the full multi-stage render budget system. Preserve that interpretation after
+Slice 5 closes. The landed baseline fixes the misleading seed-`12345`
+fluid-tail metric, adds the frozen-fluid startup lane, records the
+initial-target-render-complete marker, and promotes the conservative render
+compile in-flight baseline (`workers=1`, `max-pending=4`). That is real
+throughput progress, but it is intentionally not a claim that worker
+parallelism, completed-result acceptance, or GPU upload/apply have been fully
+optimized.
+
+Current control boundaries:
+
+- local-integrated publication is controlled by the existing adaptive chunk
+  publication budget before render meshing sees the data;
+- render compile admission has diagnostics and an opt-in desktop/local
+  adaptive grant (`elapsed_budget` plus `max_compile_requests`), but the
+  promoted shipped default from Slice 4 is the fixed in-flight cap
+  (`max-pending=4`), not a default-on adaptive render admission controller;
+- remote clients still benefit from the render compile queue cap, but desktop
+  remote sessions currently reject `--adaptive-render-admission-budget`;
+- completed-result acceptance is measured and has budget plumbing, but desktop
+  default sync still passes `None` for the accept budget;
+- desktop GPU upload/apply is measured in frame accounting but not separately
+  adaptively budgeted;
+- XR has explicit static accept/upload lane args (`2/16/64`) for benchmark
+  guardrails, but those values are not promoted defaults.
+
+After Slice 5, open a separate tactical for per-stage render pipeline
+budgeting instead of stretching this close-out. That follow-up should own:
+desktop worker-count laddering (`1/2/4`), adaptive render admission promotion
+if still desired, completed-result acceptance budgeting, GPU upload/apply
+budgeting, XR accept/upload policy replacement for static lane args, and
+remote/local host-mode treatment. The goal is a staged allocator across
+admission -> completed results -> upload/apply -> publication/visibility, with
+queue-age and frame-headroom evidence for each stage, not just a larger
+upstream compile queue.
+
 ## Close Conditions
 
 All measured on clean commits, default config, controller on:
