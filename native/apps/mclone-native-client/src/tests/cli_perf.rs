@@ -155,6 +155,18 @@ fn cli_parses_adaptive_chunk_publication_budget_flag() {
             },
         }
     );
+
+    let cli = Cli::parse([
+        "--startup-streaming-perf".to_owned(),
+        "--adaptive-chunk-publication-budget".to_owned(),
+        "false".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::StartupStreamingPerf { options } = cli else {
+        panic!("expected startup streaming perf");
+    };
+    assert!(!options.scene.adaptive_chunk_publication_budget);
 }
 
 #[test]
@@ -384,6 +396,7 @@ fn cli_parses_remote_addr() {
             "/tmp/mclone-frame.png",
             SceneOptions {
                 remote_addr: Some("127.0.0.1:25565".to_owned()),
+                adaptive_chunk_publication_budget: false,
                 ..SceneOptions::default()
             },
             TexturedSectionRenderOptions::default(),

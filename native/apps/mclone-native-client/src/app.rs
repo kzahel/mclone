@@ -566,6 +566,7 @@ fn runtime_scheduler_json(diagnostics: RuntimePollDiagnostics) -> Value {
 }
 
 impl ChunkApp {
+    #[cfg(test)]
     fn new(
         scene: SceneOptions,
         assets: WindowSceneAssets,

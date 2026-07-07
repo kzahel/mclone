@@ -363,7 +363,7 @@ impl Default for SceneOptions {
             first_person_player_visible: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
-            adaptive_chunk_publication_budget: false,
+            adaptive_chunk_publication_budget: true,
             far_lod: FarTerrainLodConfig::default(),
         }
     }
@@ -405,7 +405,7 @@ impl SceneOptions {
             first_person_player_visible: false,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
-            adaptive_chunk_publication_budget: false,
+            adaptive_chunk_publication_budget: true,
             far_lod: FarTerrainLodConfig::default(),
         })
     }
@@ -543,7 +543,7 @@ impl Cli {
         let mut xr_debug_ui_screen = None;
         let mut rebuild_render_scale = None;
         let mut far_lod = FarTerrainLodConfig::default();
-        let mut adaptive_chunk_publication_budget = false;
+        let mut adaptive_chunk_publication_budget = None;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -883,8 +883,10 @@ impl Cli {
                     };
                 }
                 "--adaptive-chunk-publication-budget" => {
-                    adaptive_chunk_publication_budget =
-                        parse_bool_arg("--adaptive-chunk-publication-budget", args.next())?;
+                    adaptive_chunk_publication_budget = Some(parse_bool_arg(
+                        "--adaptive-chunk-publication-budget",
+                        args.next(),
+                    )?);
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
@@ -1065,13 +1067,14 @@ impl Cli {
         scene.first_person_player_visible = first_person_player_visible;
         scene.simulation_cadence = simulation_cadence;
         scene.far_lod = far_lod;
-        scene.adaptive_chunk_publication_budget = adaptive_chunk_publication_budget;
+        scene.adaptive_chunk_publication_budget =
+            adaptive_chunk_publication_budget.unwrap_or(scene.remote_addr.is_none());
         scene.world_root = startup_storage.world_root_or_default(Some(default_native_world_root()));
         scene.world_dir = startup_storage.world_dir;
         if simulation_cadence_explicit && scene.remote_addr.is_some() {
             bail!("--simulation-cadence applies only to local integrated worlds");
         }
-        if adaptive_chunk_publication_budget && scene.remote_addr.is_some() {
+        if scene.adaptive_chunk_publication_budget && scene.remote_addr.is_some() {
             bail!("--adaptive-chunk-publication-budget applies only to local integrated worlds");
         }
         if scene.world_dir.is_some() && scene.remote_addr.is_some() {
@@ -1663,6 +1666,6 @@ fn print_help() {
            mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-        Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --window-frame-report to run the live winit/swapchain path for N rendered frames, write surface acquire/encode/submit/present timing JSON, then exit. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --adaptive-chunk-publication-budget true to enable the experimental shared scheduler publication controller for local integrated worlds. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
+        Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --window-frame-report to run the live winit/swapchain path for N rendered frames, write surface acquire/encode/submit/present timing JSON, then exit. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. The shared scheduler publication controller is the local-integrated default; use --adaptive-chunk-publication-budget false to force the fixed floor for comparison, and remote dedicated sessions keep it off. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
     );
 }

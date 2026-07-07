@@ -75,7 +75,7 @@ impl Default for XrSceneOptions {
             freeze_time: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
-            adaptive_chunk_publication_budget: false,
+            adaptive_chunk_publication_budget: true,
             far_lod: FarTerrainLodConfig::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,

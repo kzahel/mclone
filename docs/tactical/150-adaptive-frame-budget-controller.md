@@ -6,8 +6,8 @@ default flipped 2026-07-06; Slice 1.5 frame-loop work-window contract landed
 2026-07-06 as docs plus inert diagnostics vocabulary, before any controller
 work; Slice 2 sans-I/O controller core landed 2026-07-06 with no engine wiring;
 Slice 3 Candidate A publication controller landed 2026-07-06 behind an opt-in
-flag, with promotion measurements through 2026-07-07 and defaults still off
-pending quantitative native-window present-path pacing evidence.
+flag, then promoted to the desktop/native-XR/Android-XR local-integrated
+default 2026-07-07 after the native-window present-path A/B row.
 Drafted 2026-07-06 as the gap-10 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
@@ -778,6 +778,48 @@ budgets updated to point here.
   present-path pacing gate: the functional smoke proves the adaptive path runs
   in the winit host, but a quantitative finite native-window timing row or
   equivalent present-pacing evidence is still needed before default-on.
+
+2026-07-07 Slice 3 default-on checkpoint:
+
+- Added a finite native-window frame report harness in the native client
+  (`--window-frame-report PATH`, `--window-frame-report-frames N`) to consume
+  existing `FrameTimingStats`, `SurfaceFrameReport`, and runtime stats from the
+  live winit/swapchain path. This was the named native-window present-path
+  blocker from the previous checkpoint; it did not add budget math, scheduler
+  counters, or loop policy.
+- Recorded the quantitative native-window A/B in
+  [`../performance-records.md`](../performance-records.md) on clean harness
+  commit `c1ac218b`: `3600` presented frames, VSync `fifo`, `120Hz`
+  (`8.333ms` target), no skipped/reconfigured surface frames. Adaptive reached
+  `529/529` RD10 chunks with `0` pending jobs and `0` pending publications;
+  fixed-floor control reached only `233/529` chunks and still had `11` pending
+  jobs plus `34` pending publications. Adaptive had frame p50/p95/p99/max
+  `8.335 / 9.394 / 9.600 / 37.736ms`, over-2x/4x `3 / 1`; fixed-floor control
+  had `8.333 / 8.694 / 9.504 / 36.618ms`, over-2x/4x `7 / 1`. Excluding the
+  first `120` warmup frames, adaptive had `2` over-2x and `0` over-4x frames
+  while control had `6` over-2x and `0` over-4x frames.
+- Interpreted the strict live-window `>8.333ms` over-budget count as a
+  non-binding 120Hz VSync threshold-jitter field for this specific present
+  gate: both rows put roughly half of frames microseconds over the nominal
+  period, while severe hitches and surface-present timings were not worse under
+  adaptive. The adaptive row closed the named native-window blocker because it
+  filled the RD10 view inside the finite window and did not add severe
+  present-path hitches relative to fixed-floor control.
+- Promoted Candidate A for local-integrated worlds: native desktop CLI and
+  desktop-XR/Android-XR scene defaults now enable the shared scheduler
+  publication controller by default, while `--adaptive-chunk-publication-budget
+  false` remains an explicit fixed-floor comparison override. Remote dedicated
+  sessions keep the local-only controller off; explicit `true` with remote is
+  still rejected in startup parsing.
+- Updated 142's throttle inventory rows for the feature/light publish budgets
+  to point at the Slice 3 controller default and fixed `1` unit floors.
+- Validation completed after the default flip:
+  `cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-android-xr-client`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`, and
+  `pnpm native:android-xr:apk` to compile the Android-only XR module.
+- Status: Slice 3 Candidate A promotion is complete for desktop/native-XR and
+  Android-XR local-integrated worlds. Candidate B remains the next slice.
 
 ## Slice 4: Candidate B — Render Admission And Workers
 

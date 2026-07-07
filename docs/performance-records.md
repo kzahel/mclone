@@ -112,6 +112,8 @@ Raw artifacts were captured under `/tmp`:
 - `/tmp/mclone-150-slice3-cadence-rd10.json`
 - `/tmp/mclone-150-slice3-desktop-xr-smoke.log`
 - `/tmp/mclone-150-slice3-native-window-smoke.log`
+- `/tmp/mclone-150-slice3-native-window-present.json`
+- `/tmp/mclone-150-slice3-native-window-control.json`
 
 Full RD10 cadence-compatibility row:
 
@@ -176,6 +178,43 @@ The bounded live-window run reached playable startup and streamed to the RD10
 target (`loaded=529` chunks) without logged render errors. The current
 interactive window CLI does not emit quantitative present-path frame timing, so
 this is a winit/swapchain functional smoke, not a full present-pacing gate row.
+
+Native-window quantitative present-path A/B:
+
+```sh
+cargo run --release --manifest-path native/Cargo.toml \
+  -p mclone-native-client --bin mclone-native-client -- \
+  --window-frame-report /tmp/mclone-150-slice3-native-window-present.json \
+  --window-frame-report-frames 3600 \
+  --start-in-world true --transient --startup-wait playable \
+  --render-distance 10 --simulation-cadence 60/10/60 \
+  --adaptive-chunk-publication-budget true \
+  --debug-passive-showcase false
+```
+
+Control used the same command with
+`--window-frame-report /tmp/mclone-150-slice3-native-window-control.json` and
+`--adaptive-chunk-publication-budget false`.
+
+Both rows were measured on harness commit `c1ac218b`
+(`Add native window frame report`), `git_dirty=false`, release build, VSync
+`fifo` on a `120Hz` monitor (`8.333ms` target), and `3600` presented frames
+with no skipped or reconfigured surface frames.
+
+| Native-window row | Loaded / target chunks | Pending jobs / publications | Strict over budget | Over 2x / 4x | Frame p50 / p95 / p99 / max | Render p95 / p99 | Surface present p95 / p99 / max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| adaptive publication | `529 / 529` | `0 / 0` | `1802` | `3 / 1` | `8.335 / 9.394 / 9.600 / 37.736ms` | `8.289 / 8.479ms` | `0.006 / 0.011 / 0.030ms` |
+| fixed publish floor control | `233 / 529` | `11 / 34` | `1794` | `7 / 1` | `8.333 / 8.694 / 9.504 / 36.618ms` | `8.250 / 8.918ms` | `0.008 / 0.028 / 0.066ms` |
+
+Warmup-excluding the first `120` samples removed the startup-only `>4x` frame:
+adaptive had `2` over-2x and `0` over-4x frames with frame
+p95/p99/max `9.396 / 9.600 / 17.826ms`; the fixed-floor control had `6`
+over-2x and `0` over-4x frames with `8.691 / 9.294 / 17.070ms`. The strict
+single-budget count is not a useful pass/fail field for live 120Hz VSync
+because half the samples sit a few microseconds over `8.333ms`; severe hitches
+and present-call timing are the useful comparison. Adaptive reached the full
+RD10 view in the finite window, left no server publication backlog, and did
+not add severe present-path hitches relative to fixed-floor control.
 
 ### 2026-07-07 - Tactical 150 Slice 3 Budget Decision Panel Smoke
 

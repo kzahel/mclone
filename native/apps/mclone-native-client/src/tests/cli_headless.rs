@@ -248,6 +248,7 @@ fn cli_parses_full_frame_screenshot_options() {
                 height: 540,
                 scene: SceneOptions {
                     remote_addr: Some("127.0.0.1:25565".to_owned()),
+                    adaptive_chunk_publication_budget: false,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions {
@@ -382,7 +383,7 @@ fn cli_parses_screenshot_scene_options() {
                 first_person_player_visible: false,
                 debug_passive_showcase: true,
                 lighting_enabled: true,
-                adaptive_chunk_publication_budget: false,
+                adaptive_chunk_publication_budget: true,
                 far_lod: Default::default(),
             },
             TexturedSectionRenderOptions::default(),

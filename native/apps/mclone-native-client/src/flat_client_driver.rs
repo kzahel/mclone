@@ -1639,6 +1639,7 @@ impl FlatClientDriver {
         let mut scene = self.scene.clone();
         scene.remote_addr = Some(remote_addr);
         scene.world_dir = None;
+        scene.adaptive_chunk_publication_budget = false;
         scene
     }
 

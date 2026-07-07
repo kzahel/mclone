@@ -315,8 +315,8 @@ shorthand for the four render-admission substage `StageId`s.
 
 | Throttle | Default | Owner | Host/window/stage address | Why it exists | Plan |
 |---|---|---|---|---|---|
-| `DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET` | `1`/gameplay tick | `mclone-server/src/scheduler.rs` | `IntegratedServerRunner` `GameplayTick` / `DedicatedServerCommandLoop` `CommandTick` / `WebRafWorkers` `WorkerPoll`; `SchedulerPublication` | publication hitch slicing (`030`) | 150 Slice 3 opt-in controller floor; fixed default remains until promotion |
-| `DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET` | `1`/gameplay tick | `mclone-server/src/scheduler.rs` | same host windows; `SchedulerPublication` plus `LightComputeStatus` dependency | same | 150 Slice 3 opt-in controller floor; fixed default remains until promotion |
+| `DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET` | fixed floor `1`/gameplay tick; local-integrated desktop/XR defaults use 150 Slice 3 controller | `mclone-server/src/scheduler.rs` plus app startup defaults | `IntegratedServerRunner` `GameplayTick` / `DedicatedServerCommandLoop` `CommandTick` / `WebRafWorkers` `WorkerPoll`; `SchedulerPublication` | publication hitch slicing (`030`) | 150 Slice 3 promoted: shared elapsed controller is default for measured local-integrated desktop/native-XR/Android-XR lanes; remote and unwired hosts stay on the fixed floor |
+| `DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET` | fixed floor `1`/gameplay tick; local-integrated desktop/XR defaults use 150 Slice 3 controller | `mclone-server/src/scheduler.rs` plus app startup defaults | same host windows; `SchedulerPublication` plus `LightComputeStatus` dependency | same | 150 Slice 3 promoted with the same local-integrated/remote split as feature publication |
 | Single in-flight feature job; next job gated on full publication | structural | `scheduler.rs` (`has_incomplete_feature_status_job`, `mark_job_complete`) | same server host windows; `TerrainGeneration` -> `SchedulerPublication` handoff | job bookkeeping simplicity | 150 Slice 3 opt-in decouples pipeline completion from publication under controller backlog cap; fixed default unchanged until promotion |
 | Worldgen / light-status workers | `1` thread each | `worldgen_mailbox.rs`, `light_mailbox.rs` | `IntegratedServerRunner` / `DedicatedServerCommandLoop` / `WebRafWorkers` `WorkerPoll`; `TerrainGeneration`, `LightComputeStatus` | bring-up shape | only if generation becomes the measured limit after A |
 | `DEFAULT_RENDER_CHUNK_MESH_BUDGET` | `1` chunk/sync call | `mclone-app-runtime/src/lib.rs` | display hosts `BeforeRender`, XR overlap `PostSubmitOverlapSlack`, headless `OffscreenStep`; `RenderSectionAdmission` and `RenderAdmission*` | Quest frame safety | Candidate B |
@@ -588,8 +588,11 @@ instrumentation to watch it:
   [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
   with schema v6 availability markers, Quest local-vs-remote contrast rows, and
   dedicated-server summaries.
-- [ ] Implement Candidate A as a shared budget calculation and run the full
-  promotion loop, including the Quest streaming check.
+- [x] Implement Candidate A as a shared budget calculation and run the full
+  promotion loop, including the Quest streaming check: completed in
+  [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
+  Slice 3, with local-integrated desktop/native-XR/Android-XR defaults promoted
+  after the native-window present-path A/B row.
 
 ## Cost Questions To Resolve First
 

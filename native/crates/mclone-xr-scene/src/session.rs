@@ -402,6 +402,7 @@ where
     pub(crate) fn remote_session_options(&self) -> XrSceneOptions {
         let mut scene = self.scene.clone();
         scene.world_dir = None;
+        scene.adaptive_chunk_publication_budget = false;
         if let Some(runtime) = &self.runtime {
             scene.render_distance = runtime.render_distance();
         }

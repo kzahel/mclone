@@ -492,7 +492,7 @@ mod android {
         );
         let mut underwater_detection_mode = XrUnderwaterDetectionMode::default();
         let mut debug_ui_screen = None;
-        let mut adaptive_chunk_publication_budget = false;
+        let mut adaptive_chunk_publication_budget = None;
         let mut argv = argv.into_iter();
         while let Some(arg) = argv.next() {
             if shared_args.parse_next_arg(
@@ -610,13 +610,13 @@ mod android {
                     )?;
                 }
                 "--adaptive-chunk-publication-budget" => {
-                    adaptive_chunk_publication_budget = parse_bool_arg(
+                    adaptive_chunk_publication_budget = Some(parse_bool_arg(
                         "--adaptive-chunk-publication-budget",
                         Some(parse_next_string(
                             &mut argv,
                             "--adaptive-chunk-publication-budget",
                         )?),
-                    )?;
+                    )?);
                 }
                 "--multiview-proof" => {
                     options.multiview_proof = true;
@@ -714,7 +714,8 @@ mod android {
         scene.underwater_detection_mode = underwater_detection_mode;
         scene.debug_ui_screen = debug_ui_screen;
         scene.skip_actors = options.skip_actors;
-        scene.adaptive_chunk_publication_budget = adaptive_chunk_publication_budget;
+        scene.adaptive_chunk_publication_budget =
+            adaptive_chunk_publication_budget.unwrap_or(options.remote_addr.is_none());
         if options.remote_addr.is_some() && scene.world_dir.is_some() {
             bail!("--world-dir applies only to local integrated worlds");
         }
@@ -912,7 +913,7 @@ mod android {
             freeze_time: scene.freeze_time,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
-            adaptive_chunk_publication_budget: false,
+            adaptive_chunk_publication_budget: true,
             far_lod: Default::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
@@ -1138,7 +1139,6 @@ mod android {
         {
             startup_options.scene.world_root = android_xr_world_root(&app);
         }
-        let scene_options = startup_options.scene.clone();
         let startup_view_pose =
             match parse_android_xr_startup_view_pose(startup_view_pose_property.as_deref()) {
                 Ok(value) => value,
@@ -1152,6 +1152,10 @@ mod android {
             .remote_addr
             .clone()
             .or_else(|| legacy_remote_addr.clone());
+        if remote_addr.is_some() {
+            startup_options.scene.adaptive_chunk_publication_budget = false;
+        }
+        let scene_options = startup_options.scene.clone();
         if let Some(remote_addr) = startup_options.remote_addr.as_deref() {
             log::info!(
                 "Android XR remote dedicated address from {STARTUP_ARGV_INTENT_EXTRA}: {remote_addr}"
