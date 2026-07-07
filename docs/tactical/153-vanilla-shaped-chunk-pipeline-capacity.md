@@ -285,11 +285,11 @@ time, proving the switch removes the measured path.
 | RD10 persisted frozen full view | `1027.058ms` | `1016.075ms` | `+10.983ms` / `+1.081%` | `0 / 0` over/over-2x both rows |
 | RD10 persisted frozen target quiescent | `4941.937ms` | `4921.454ms` | `+20.483ms` / `+0.416%` | completed compile sections `7040` both rows |
 
-Conclusion: the render-compile worker timing meter is visible but well below
-the row-to-row noise needed to change Slice 0's lever ranking. Treat exact
-per-section compile costs as workload plus meter tax, but keep the stage order:
-fresh startup is still light-bound, and persisted/Quest churn still expose the
-render-compile tail.
+Conclusion: the render-compile worker timing meter is visible and measurable,
+but the observed wall-clock tax is below the decision threshold for changing
+Slice 0's lever ranking. Treat exact per-section compile costs as workload plus
+meter tax, and keep the stage order: fresh startup is still light-bound, while
+persisted/Quest churn still expose the render-compile tail.
 
 Lever order implied by Slice 0:
 
