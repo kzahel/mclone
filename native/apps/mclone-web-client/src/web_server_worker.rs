@@ -299,6 +299,11 @@ impl WebIntegratedServerRunner {
         diagnostics
     }
 
+    /// Compatibility/probe helper for tests and browser smoke diagnostics.
+    ///
+    /// Normal web runtime frames call `queue_command` and
+    /// `drain_next_queued_update` through `WebRuntimeHost`'s
+    /// `ClientConnection` implementation instead of command exchange.
     pub async fn exchange_command(
         &mut self,
         command: ClientCommand,
@@ -779,6 +784,9 @@ impl IntegratedServerRunner for WebIntegratedServerRunner {
             .map_err(ServerRunnerError::ThreadStart)
     }
 
+    // Compatibility surface for the generic integrated-runner trait. The web
+    // runtime's normal frame path drains through WebRuntimeHost's
+    // ClientConnection implementation.
     fn try_recv_update(&mut self) -> ServerRunnerResult<Option<ServerUpdateEnvelope>> {
         let Some(frame) = self.drain_update_frames_budgeted(1).into_iter().next() else {
             return Ok(None);
@@ -791,6 +799,8 @@ impl IntegratedServerRunner for WebIntegratedServerRunner {
         }))
     }
 
+    // Unlimited compatibility drain for startup/probe callers, not the normal
+    // web frame ingress path.
     fn drain_updates(&mut self) -> ServerRunnerResult<Vec<ServerUpdate>> {
         let mut updates = Vec::new();
         for frame in self.drain_update_frames() {

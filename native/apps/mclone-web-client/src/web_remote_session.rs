@@ -26,6 +26,10 @@ pub struct WebSocketServerSession {
     url: String,
     socket: WebSocket,
     pending_raw_response: Rc<RefCell<Option<PendingWebSocketResponse>>>,
+    // Current WebSocket transport is still response-paired at the wire level.
+    // Normal frame polling drains decoded `queued_updates` through
+    // `WebRuntimeHost: ClientConnection`; this only tracks outstanding
+    // response bookkeeping.
     pending_response_batches: Rc<RefCell<usize>>,
     sent_sequence: Rc<RefCell<u64>>,
     received_sequence: Rc<RefCell<u64>>,

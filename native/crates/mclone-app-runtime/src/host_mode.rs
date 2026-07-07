@@ -83,6 +83,13 @@ impl SingleViewHostOptions {
     }
 }
 
+/// Runtime-facing remote session adapter over the current response-paired wire
+/// protocol.
+///
+/// Implementors may still expose `drain_command_updates` names because native
+/// TCP and WebSocket servers currently emit one update batch per command, but
+/// normal frame polling wraps this trait in `ClientConnection` and drains
+/// queued updates through the shared pump.
 pub trait RemoteDedicatedServerSession {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
     fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>>;

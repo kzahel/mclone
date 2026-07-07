@@ -427,6 +427,13 @@ mod native_tcp {
         }
     }
 
+    /// Low-level request/response TCP client helper.
+    ///
+    /// Normal app runtimes should use `NativeClientIoSession`, which owns socket
+    /// reads on an IO actor and exposes queued update batches to the shared
+    /// `ClientConnection` pump. This type remains for protocol tests and
+    /// standalone smoke/probe tools that intentionally exercise the legacy
+    /// synchronous shape.
     #[derive(Debug)]
     pub struct NativeClientSession {
         stream: TcpStream,
@@ -717,6 +724,9 @@ mod native_tcp {
             }
         }
 
+        // Compatibility names for the current one-response-per-command wire
+        // protocol. App runtimes call these through the shared remote adapter,
+        // then drain queued updates via `ClientConnection`.
         pub fn drain_command_updates(&mut self) -> NativeTransportResult<Vec<ServerUpdate>> {
             self.drain_update_batch()
                 .map(NativeServerUpdateBatch::into_updates)

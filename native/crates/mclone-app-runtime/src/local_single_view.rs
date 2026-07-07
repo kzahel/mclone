@@ -1620,6 +1620,10 @@ pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
 #[derive(Debug)]
 struct RemoteDedicatedConnection<S> {
     session: S,
+    // Current native/WebSocket wire protocols still pair one response batch
+    // with each sent command. This counter tracks those outstanding batches
+    // before their decoded updates are queued for the shared ClientConnection
+    // pump; it is not runtime-thread socket ownership.
     pending_response_batches: usize,
     queued_updates: VecDeque<QueuedServerUpdate>,
     queued_update_bytes: usize,

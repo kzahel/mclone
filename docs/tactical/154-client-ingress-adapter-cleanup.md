@@ -2,9 +2,10 @@
 
 Status: active; drafted 2026-07-07 as the narrow follow-up to tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
-Slice 0 audit/classification completed 2026-07-07; Slice 1 helper quarantine is
-next. This tactical is cleanup and guardrail work only; it must not change
-runtime behavior.
+Slice 0 audit/classification completed 2026-07-07; Slice 1 helper quarantine
+completed 2026-07-07; Slice 2 native remote wrapper sharing decision is next.
+This tactical is cleanup and guardrail work only; it must not change runtime
+behavior.
 
 Workstream: native Rust shared session/runtime boundary, native web/WASM
 adapters, native desktop/Android/Android XR remote adapters.
@@ -166,6 +167,8 @@ git diff --check
 
 ## Slice 1: Quarantine Compatibility And Probe Helpers
 
+Status: completed 2026-07-07.
+
 Goal: make non-normal-path helpers self-identifying.
 
 Likely edits:
@@ -196,6 +199,38 @@ git diff --check
 
 Exit criteria: the old-shape helpers remain functional, but their declarations
 make it clear they are not the preferred normal-frame ingress.
+
+Results:
+
+- Added a doc comment to `mclone-net::NativeClientSession` identifying it as a
+  low-level request/response protocol helper for tests and standalone
+  smoke/probe tools; normal app runtimes should use `NativeClientIoSession`.
+- Added a compatibility note beside `NativeClientIoSession`'s old
+  `drain_command_updates` names. The names remain because they describe the
+  current response-paired wire protocol, while app runtimes still drain through
+  the shared `ClientConnection` pump.
+- Added a trait-level note to `RemoteDedicatedServerSession` explaining that it
+  adapts response-paired transport sessions into the shared runtime pump.
+- Added clarifying comments beside native and web `pending_response_batches`
+  fields: these counters are wire bookkeeping, not runtime-thread socket
+  ownership.
+- Added comments to web integrated `exchange_command`, `try_recv_update`, and
+  `drain_updates` identifying them as compatibility/probe or startup surfaces;
+  normal web frame ingress remains `WebRuntimeHost`'s `ClientConnection`
+  implementation.
+- No renames and no behavior changes.
+
+Validation completed 2026-07-07:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+git diff --check
+```
 
 ## Slice 2: Native Remote Wrapper Sharing Decision
 
