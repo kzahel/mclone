@@ -9,6 +9,7 @@ fn cli_defaults_to_window() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 }
@@ -22,6 +23,7 @@ fn cli_parses_window_menu_start_intent() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 
@@ -32,6 +34,7 @@ fn cli_parses_window_menu_start_intent() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 }
@@ -45,6 +48,7 @@ fn cli_parses_startup_wait_policy() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::Idle,
+            frame_report: None,
         }
     );
 
@@ -55,6 +59,7 @@ fn cli_parses_startup_wait_policy() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::Progress,
+            frame_report: None,
         }
     );
 
@@ -113,6 +118,7 @@ fn cli_parses_local_world_dir() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 }
@@ -131,6 +137,7 @@ fn cli_parses_world_root_and_transient_catalog_mode() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 
@@ -145,8 +152,49 @@ fn cli_parses_world_root_and_transient_catalog_mode() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
+}
+
+#[test]
+fn cli_parses_window_frame_report_options() {
+    assert_eq!(
+        Cli::parse([
+            "--window-frame-report".to_owned(),
+            "/tmp/mclone-window-report.json".to_owned(),
+            "--window-frame-report-frames".to_owned(),
+            "120".to_owned(),
+        ])
+        .unwrap(),
+        Cli::Window {
+            scene: SceneOptions::default(),
+            render_options: TexturedSectionRenderOptions::default(),
+            start_intent: WindowStartIntent::InWorld,
+            startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: Some(WindowFrameReportOptions {
+                path: PathBuf::from("/tmp/mclone-window-report.json"),
+                frames: 120,
+            }),
+        }
+    );
+}
+
+#[test]
+fn cli_rejects_window_frame_report_for_non_window_modes() {
+    let err = Cli::parse([
+        "--window-frame-report".to_owned(),
+        "/tmp/mclone-window-report.json".to_owned(),
+        "--startup-streaming-perf".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("applies only to window mode"));
+
+    let err = Cli::parse(["--window-frame-report-frames".to_owned(), "120".to_owned()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("requires --window-frame-report"));
 }
 
 #[test]

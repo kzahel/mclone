@@ -1,8 +1,9 @@
+use std::fs;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use mclone_app_runtime::{debug_block_palette_overlay, debug_hotbar_icons};
+use mclone_app_runtime::{RuntimePollDiagnostics, debug_block_palette_overlay, debug_hotbar_icons};
 use mclone_assets::AssetSource;
 #[cfg(test)]
 use mclone_core::Vec3d;
@@ -17,6 +18,7 @@ use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameHelpParent, GameScreen, GameUiAction,
     GameUiHost, GuiKey, GuiScale, Point, StatusOverlay,
 };
+use serde_json::{Value, json};
 use winit::application::ApplicationHandler;
 use winit::event::{
     DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
@@ -26,7 +28,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::MAX_RENDER_DISTANCE;
-use crate::cli::{SceneOptions, StartupWaitPolicy, WindowStartIntent};
+use crate::cli::{SceneOptions, StartupWaitPolicy, WindowFrameReportOptions, WindowStartIntent};
 use crate::flat_client_driver::{
     DesktopBlinkDebugCommitStatus, FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver,
     FlatClientHostAction, FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
@@ -37,7 +39,9 @@ use crate::frame_pacing::{
     next_capped_redraw_deadline, redraw_schedule,
 };
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump};
+use crate::scene_runtime::{
+    WindowRuntimeStats, WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump,
+};
 use crate::ui::DebugPaneStats;
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 
@@ -56,6 +60,7 @@ pub(crate) fn run_window(
     render_options: TexturedSectionRenderOptions,
     start_intent: WindowStartIntent,
     startup_wait: StartupWaitPolicy,
+    frame_report: Option<WindowFrameReportOptions>,
 ) -> Result<()> {
     let assets = WindowSceneAssets::load()?;
     log::info!(
@@ -83,7 +88,14 @@ pub(crate) fn run_window(
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = ChunkApp::new(scene, assets, render_options, start_intent, startup_wait);
+    let mut app = ChunkApp::new_with_frame_report(
+        scene,
+        assets,
+        render_options,
+        start_intent,
+        startup_wait,
+        frame_report,
+    );
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -195,6 +207,362 @@ struct ChunkApp {
     next_redraw_at: Option<Instant>,
     start_intent: WindowStartIntent,
     startup_wait: StartupWaitPolicy,
+    frame_report: Option<WindowFrameReportRecorder>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WindowFrameSample {
+    status: &'static str,
+    frame_wall_ms: f64,
+    budget_ms: Option<f64>,
+    runtime_poll_ms: f64,
+    remesh_ms: f64,
+    upload_ms: f64,
+    render_ms: f64,
+    surface_acquire_ms: f64,
+    surface_encode_ms: f64,
+    surface_submit_ms: f64,
+    surface_present_ms: f64,
+}
+
+impl WindowFrameSample {
+    fn json(self) -> Value {
+        json!({
+            "status": self.status,
+            "frame_wall_ms": self.frame_wall_ms,
+            "budget_ms": self.budget_ms,
+            "runtime_poll_ms": self.runtime_poll_ms,
+            "remesh_ms": self.remesh_ms,
+            "upload_ms": self.upload_ms,
+            "render_ms": self.render_ms,
+            "surface_acquire_ms": self.surface_acquire_ms,
+            "surface_encode_ms": self.surface_encode_ms,
+            "surface_submit_ms": self.surface_submit_ms,
+            "surface_present_ms": self.surface_present_ms,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct WindowFrameReportRecorder {
+    options: WindowFrameReportOptions,
+    start: Instant,
+    frames: Vec<WindowFrameSample>,
+}
+
+impl WindowFrameReportRecorder {
+    fn new(options: WindowFrameReportOptions) -> Self {
+        Self {
+            frames: Vec::with_capacity(options.frames),
+            options,
+            start: Instant::now(),
+        }
+    }
+
+    fn record(&mut self, sample: WindowFrameSample) -> bool {
+        self.frames.push(sample);
+        self.frames.len() >= self.options.frames
+    }
+
+    fn write(&self, app: &ChunkApp) -> Result<()> {
+        let report = self.json(app);
+        if let Some(parent) = self
+            .options
+            .path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create window frame report directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        let bytes = serde_json::to_vec_pretty(&report)
+            .context("failed to serialize window frame report")?;
+        fs::write(&self.options.path, bytes).with_context(|| {
+            format!(
+                "failed to write window frame report {}",
+                self.options.path.display()
+            )
+        })?;
+        log::info!(
+            "window frame report wrote {} frames to {}",
+            self.frames.len(),
+            self.options.path.display()
+        );
+        Ok(())
+    }
+
+    fn json(&self, app: &ChunkApp) -> Value {
+        let budget_counts = window_frame_budget_counts(&self.frames);
+        let frame_pacing = app.frame_pacing.debug_stats();
+        let scene = &app.driver.scene;
+        let render_options = app.driver.render_options;
+        let final_timing = app.driver.frame_timing;
+        let scene_json = json!({
+            "seed": scene.seed,
+            "chunk_x": scene.chunk_x,
+            "chunk_z": scene.chunk_z,
+            "render_distance": scene.render_distance,
+            "render_compile_workers": scene.render_compile_worker_count,
+            "remote_addr": &scene.remote_addr,
+            "world_root": scene.world_root.as_ref().map(|path| path.display().to_string()),
+            "world_dir": scene.world_dir.as_ref().map(|path| path.display().to_string()),
+            "lighting_enabled": scene.lighting_enabled,
+            "adaptive_chunk_publication_budget": scene.adaptive_chunk_publication_budget,
+            "debug_passive_showcase": scene.debug_passive_showcase,
+            "startup_wait": format!("{:?}", app.startup_wait),
+            "simulation_cadence": {
+                "host_rate_hz": scene.simulation_cadence.host_rate_hz,
+                "gameplay_rate_hz": scene.simulation_cadence.gameplay_rate_hz,
+                "physics_rate_hz": scene.simulation_cadence.physics_rate_hz,
+            },
+        });
+        let render_options_json = json!({
+            "section_occlusion_culling": render_options.section_occlusion_culling,
+            "force_fullbright": render_options.force_fullbright,
+            "sky_darken": render_options.sky_darken,
+            "fog": format!("{:?}", render_options.fog),
+            "color_profile": render_options.color_profile.as_str(),
+        });
+        let surface_json = app.surface.as_ref().map(|surface| {
+            json!({
+                "width": surface.config.width,
+                "height": surface.config.height,
+            })
+        });
+        let frame_pacing_json = json!({
+            "mode": frame_pacing.mode.label(),
+            "fps_cap": frame_pacing.fps_cap,
+            "monitor_name": &app.frame_pacing.monitor_name,
+            "monitor_refresh_hz": frame_pacing.monitor_refresh_hz,
+            "target_frame_ms": frame_pacing.target_frame_ms,
+            "active_present_mode": frame_pacing.active_present_mode_label,
+        });
+        let final_frame_timing_json = json!({
+            "frame_count": final_timing.frame_count,
+            "over_budget_count": final_timing.over_budget_count,
+            "double_budget_count": final_timing.double_budget_count,
+            "quad_budget_count": final_timing.quad_budget_count,
+            "worst_frame_ms": final_timing.worst_frame_ms,
+            "budget_ms": final_timing.budget_ms,
+        });
+        let final_runtime_json = app
+            .driver
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime_stats_json(runtime.stats()));
+        let final_scheduler_json = app
+            .driver
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime_scheduler_json(runtime.last_poll_diagnostics()));
+        let samples_json = self
+            .frames
+            .iter()
+            .copied()
+            .map(WindowFrameSample::json)
+            .collect::<Vec<_>>();
+        json!({
+            "benchmark": "native_window_frame_report",
+            "recorded_unix_seconds": crate::current_unix_seconds(),
+            "git_commit": crate::git_short_commit(),
+            "git_dirty": crate::git_dirty(),
+            "debug_assertions": cfg!(debug_assertions),
+            "requested_frames": self.options.frames,
+            "frames": self.frames.len(),
+            "elapsed_wall_ms": elapsed_ms(self.start.elapsed()),
+            "scene": scene_json,
+            "render_options": render_options_json,
+            "surface": surface_json,
+            "frame_pacing": frame_pacing_json,
+            "budgeted_frames": budget_counts.budgeted_frames,
+            "over_budget_frames": budget_counts.over_budget_frames,
+            "over_2x_budget_frames": budget_counts.over_2x_budget_frames,
+            "over_4x_budget_frames": budget_counts.over_4x_budget_frames,
+            "status_counts": window_frame_status_counts(&self.frames),
+            "frame_wall": window_series_summary(self.frames.iter().map(|sample| sample.frame_wall_ms)),
+            "runtime_poll": window_series_summary(self.frames.iter().map(|sample| sample.runtime_poll_ms)),
+            "remesh": window_series_summary(self.frames.iter().map(|sample| sample.remesh_ms)),
+            "upload": window_series_summary(self.frames.iter().map(|sample| sample.upload_ms)),
+            "render": window_series_summary(self.frames.iter().map(|sample| sample.render_ms)),
+            "surface_acquire": window_series_summary(self.frames.iter().map(|sample| sample.surface_acquire_ms)),
+            "surface_encode": window_series_summary(self.frames.iter().map(|sample| sample.surface_encode_ms)),
+            "surface_submit": window_series_summary(self.frames.iter().map(|sample| sample.surface_submit_ms)),
+            "surface_present": window_series_summary(self.frames.iter().map(|sample| sample.surface_present_ms)),
+            "final_frame_timing": final_frame_timing_json,
+            "final_runtime": final_runtime_json,
+            "final_scheduler": final_scheduler_json,
+            "samples": samples_json,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct WindowFrameBudgetCounts {
+    budgeted_frames: usize,
+    over_budget_frames: usize,
+    over_2x_budget_frames: usize,
+    over_4x_budget_frames: usize,
+}
+
+fn surface_frame_status_label(status: SurfaceFrameStatus) -> &'static str {
+    match status {
+        SurfaceFrameStatus::Presented => "presented",
+        SurfaceFrameStatus::Reconfigured => "reconfigured",
+        SurfaceFrameStatus::Skipped => "skipped",
+    }
+}
+
+fn window_frame_budget_counts(frames: &[WindowFrameSample]) -> WindowFrameBudgetCounts {
+    let mut counts = WindowFrameBudgetCounts::default();
+    for frame in frames {
+        let Some(budget_ms) = frame.budget_ms.filter(|budget_ms| *budget_ms > 0.0) else {
+            continue;
+        };
+        counts.budgeted_frames += 1;
+        if frame.frame_wall_ms > budget_ms {
+            counts.over_budget_frames += 1;
+        }
+        if frame.frame_wall_ms > budget_ms * 2.0 {
+            counts.over_2x_budget_frames += 1;
+        }
+        if frame.frame_wall_ms > budget_ms * 4.0 {
+            counts.over_4x_budget_frames += 1;
+        }
+    }
+    counts
+}
+
+fn window_frame_status_counts(frames: &[WindowFrameSample]) -> Value {
+    let mut presented = 0usize;
+    let mut reconfigured = 0usize;
+    let mut skipped = 0usize;
+    for frame in frames {
+        match frame.status {
+            "presented" => presented += 1,
+            "reconfigured" => reconfigured += 1,
+            "skipped" => skipped += 1,
+            _ => {}
+        }
+    }
+    json!({
+        "presented": presented,
+        "reconfigured": reconfigured,
+        "skipped": skipped,
+    })
+}
+
+fn window_series_summary(values: impl IntoIterator<Item = f64>) -> Value {
+    let mut values = values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    values.sort_by(f64::total_cmp);
+    if values.is_empty() {
+        return json!({
+            "count": 0,
+        });
+    }
+    let sum = values.iter().sum::<f64>();
+    json!({
+        "count": values.len(),
+        "average_ms": sum / values.len() as f64,
+        "min_ms": values[0],
+        "p50_ms": window_percentile(&values, 0.50),
+        "p95_ms": window_percentile(&values, 0.95),
+        "p99_ms": window_percentile(&values, 0.99),
+        "max_ms": values[values.len() - 1],
+    })
+}
+
+fn window_percentile(sorted_values: &[f64], quantile: f64) -> f64 {
+    let last_index = sorted_values.len().saturating_sub(1);
+    let index = (last_index as f64 * quantile)
+        .ceil()
+        .clamp(0.0, last_index as f64) as usize;
+    sorted_values[index]
+}
+
+fn runtime_stats_json(stats: WindowRuntimeStats) -> Value {
+    json!({
+        "host_mode": format!("{:?}", stats.host_mode),
+        "server_runner_kind": stats.server_runner_kind.map(|kind| format!("{:?}", kind)),
+        "server_command_queue_depth": stats.server_command_queue_depth,
+        "server_update_queue_depth": stats.server_update_queue_depth,
+        "server_update_queue_bytes": stats.server_update_queue_bytes,
+        "interest_center": {
+            "x": stats.interest_center.x,
+            "z": stats.interest_center.z,
+        },
+        "render_distance": stats.render_distance,
+        "chunk_tracking_radius": stats.chunk_tracking_radius,
+        "loaded_chunks": stats.loaded_chunks,
+        "pending_jobs": stats.pending_jobs,
+        "pending_publications": stats.pending_publications,
+        "pending_render_chunks": stats.pending_render_chunks,
+        "pending_render_compile_jobs": stats.pending_render_compile_jobs,
+        "inflight_render_sections": stats.inflight_render_sections,
+        "client_visible_chunks": stats.client_visible_chunks,
+        "active_ticket_chunks": stats.active_ticket_chunks,
+        "loading_progress": stats.loading_progress.map(|progress| json!({
+            "center": {
+                "x": progress.center.x,
+                "z": progress.center.z,
+            },
+            "target_radius": progress.target_radius,
+            "target_status": format!("{:?}", progress.target_status),
+            "target_chunk_count": progress.target_chunk_count,
+            "target_ready_chunks": progress.target_ready_chunks,
+            "playable_chunk": {
+                "x": progress.playable_chunk.x,
+                "z": progress.playable_chunk.z,
+            },
+            "playable_gate_radius": progress.playable_gate_radius,
+            "playable_gate_chunk_count": progress.playable_gate_chunk_count,
+            "playable_gate_ready_chunks": progress.playable_gate_ready_chunks,
+            "playable_chunk_ready": progress.playable_chunk_ready,
+        })),
+        "tracked_players": stats.tracked_players,
+        "player_visible_chunks": stats.player_visible_chunks,
+        "aggregate_player_ticket_chunks": stats.aggregate_player_ticket_chunks,
+        "player_outbound_queue_depth": stats.player_outbound_queue_depth,
+        "max_player_visible_chunks": stats.max_player_visible_chunks,
+        "max_player_outbound_queue_depth": stats.max_player_outbound_queue_depth,
+        "pending_unload_chunks": stats.pending_unload_chunks,
+        "block_ticking_chunks": stats.block_ticking_chunks,
+        "entity_ticking_chunks": stats.entity_ticking_chunks,
+        "last_tick": stats.last_tick,
+        "last_simulation_tick": stats.last_simulation_tick,
+        "last_simulation_scheduler_tick_ms": stats.last_simulation_scheduler_tick_ms,
+        "last_simulation_block_tick_ms": stats.last_simulation_block_tick_ms,
+        "last_simulation_fluid_tick_ms": stats.last_simulation_fluid_tick_ms,
+        "last_simulation_entity_tick_ms": stats.last_simulation_entity_tick_ms,
+    })
+}
+
+fn runtime_scheduler_json(diagnostics: RuntimePollDiagnostics) -> Value {
+    json!({
+        "server_update_queue_depth": diagnostics.server_update_queue_depth,
+        "server_update_queue_bytes": diagnostics.server_update_queue_bytes,
+        "server_pending_jobs": diagnostics.server_pending_jobs,
+        "server_pending_publications": diagnostics.server_pending_publications,
+        "adaptive_publication_budget_enabled": diagnostics.scheduler_adaptive_publication_budget_enabled,
+        "feature_publish_budget_min_units": diagnostics.scheduler_feature_publish_budget_min_units,
+        "feature_publish_budget_max_units": diagnostics.scheduler_feature_publish_budget_max_units,
+        "feature_publish_budget_ms": diagnostics.scheduler_feature_publish_budget_ms,
+        "feature_publish_spent_units": diagnostics.scheduler_feature_publish_spent_units,
+        "feature_publish_spent_ms": diagnostics.scheduler_feature_publish_spent_ms,
+        "feature_publish_estimated_unit_ms": diagnostics.scheduler_feature_publish_estimated_unit_ms,
+        "light_publish_budget_min_units": diagnostics.scheduler_light_publish_budget_min_units,
+        "light_publish_budget_max_units": diagnostics.scheduler_light_publish_budget_max_units,
+        "light_publish_budget_ms": diagnostics.scheduler_light_publish_budget_ms,
+        "light_publish_spent_units": diagnostics.scheduler_light_publish_spent_units,
+        "light_publish_spent_ms": diagnostics.scheduler_light_publish_spent_ms,
+        "light_publish_estimated_unit_ms": diagnostics.scheduler_light_publish_estimated_unit_ms,
+    })
 }
 
 impl ChunkApp {
@@ -204,6 +572,24 @@ impl ChunkApp {
         render_options: TexturedSectionRenderOptions,
         start_intent: WindowStartIntent,
         startup_wait: StartupWaitPolicy,
+    ) -> Self {
+        Self::new_with_frame_report(
+            scene,
+            assets,
+            render_options,
+            start_intent,
+            startup_wait,
+            None,
+        )
+    }
+
+    fn new_with_frame_report(
+        scene: SceneOptions,
+        assets: WindowSceneAssets,
+        render_options: TexturedSectionRenderOptions,
+        start_intent: WindowStartIntent,
+        startup_wait: StartupWaitPolicy,
+        frame_report: Option<WindowFrameReportOptions>,
     ) -> Self {
         let mut ui = match start_intent {
             WindowStartIntent::InWorld => GameUiHost::new_ingame(),
@@ -238,6 +624,7 @@ impl ChunkApp {
             next_redraw_at: None,
             start_intent,
             startup_wait,
+            frame_report: frame_report.map(WindowFrameReportRecorder::new),
         }
     }
 
@@ -274,6 +661,33 @@ impl ChunkApp {
             self.next_redraw_at = None;
         }
         self.schedule_next_redraw(event_loop);
+    }
+
+    fn record_window_frame_report_sample(&mut self, status: SurfaceFrameStatus) -> bool {
+        let Some(recorder) = &mut self.frame_report else {
+            return false;
+        };
+        let timing = self.driver.frame_timing;
+        recorder.record(WindowFrameSample {
+            status: surface_frame_status_label(status),
+            frame_wall_ms: timing.last_frame_ms,
+            budget_ms: timing.budget_ms,
+            runtime_poll_ms: timing.last_runtime_poll_ms,
+            remesh_ms: timing.last_remesh_ms,
+            upload_ms: timing.last_upload_ms,
+            render_ms: timing.last_render_ms,
+            surface_acquire_ms: timing.last_surface_acquire_ms,
+            surface_encode_ms: timing.last_surface_encode_ms,
+            surface_submit_ms: timing.last_surface_submit_ms,
+            surface_present_ms: timing.last_surface_present_ms,
+        })
+    }
+
+    fn write_window_frame_report(&self) -> Result<()> {
+        let Some(recorder) = &self.frame_report else {
+            return Ok(());
+        };
+        recorder.write(self)
     }
 
     fn window_camera_view(&self) -> FlatClientCameraView {
@@ -1396,12 +1810,28 @@ impl ApplicationHandler for ChunkApp {
                             report.submit_ms,
                             report.present_ms,
                         );
+                        let frame_report_ready =
+                            self.record_window_frame_report_sample(report.status);
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
                                 self.finish_pending_session_start();
+                                if frame_report_ready {
+                                    if let Err(err) = self.write_window_frame_report() {
+                                        log::error!("failed to write window frame report: {err:#}");
+                                    }
+                                    event_loop.exit();
+                                    return;
+                                }
                                 self.finish_redraw(event_loop, frame_start);
                             }
                             SurfaceFrameStatus::Reconfigured => {
+                                if frame_report_ready {
+                                    if let Err(err) = self.write_window_frame_report() {
+                                        log::error!("failed to write window frame report: {err:#}");
+                                    }
+                                    event_loop.exit();
+                                    return;
+                                }
                                 self.schedule_next_redraw(event_loop);
                             }
                         }

@@ -34,6 +34,8 @@ const MAX_ACTOR_WALK_REVIEW_CYCLES: f32 = 16.0;
 const DEFAULT_XR_CLEAR_SMOKE_FRAMES: u32 = 120;
 const MAX_XR_SMOKE_FRAMES: u32 = 4096;
 const MAX_SIMULATION_CADENCE_RATE_HZ: u32 = 240;
+const DEFAULT_WINDOW_FRAME_REPORT_FRAMES: usize = 3600;
+const MAX_WINDOW_FRAME_REPORT_FRAMES: usize = 72000;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SceneOptions {
@@ -282,6 +284,12 @@ pub(crate) enum StartupWaitPolicy {
     Frames(u32),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WindowFrameReportOptions {
+    pub(crate) path: PathBuf,
+    pub(crate) frames: usize,
+}
+
 impl StartupWaitPolicy {
     pub(crate) const DESKTOP_DEFAULT: Self = Self::Playable;
     pub(crate) const OFFSCREEN_SCREENSHOT_DEFAULT: Self = Self::Idle;
@@ -410,6 +418,7 @@ pub(crate) enum Cli {
         render_options: TexturedSectionRenderOptions,
         start_intent: WindowStartIntent,
         startup_wait: StartupWaitPolicy,
+        frame_report: Option<WindowFrameReportOptions>,
     },
     HeadlessClear {
         path: PathBuf,
@@ -500,6 +509,9 @@ impl Cli {
         let mut simulation_cadence_explicit = false;
         let mut window_start_intent = WindowStartIntent::InWorld;
         let mut startup_wait = None;
+        let mut window_frame_report_path = None;
+        let mut window_frame_report_frames = DEFAULT_WINDOW_FRAME_REPORT_FRAMES;
+        let mut window_frame_report_frames_explicit = false;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
@@ -851,6 +863,18 @@ impl Cli {
                 "--startup-wait" => {
                     startup_wait = Some(parse_startup_wait_arg("--startup-wait", args.next())?);
                 }
+                "--window-frame-report" => {
+                    window_frame_report_path = Some(
+                        args.next()
+                            .map(PathBuf::from)
+                            .context("--window-frame-report requires an output JSON path")?,
+                    );
+                }
+                "--window-frame-report-frames" => {
+                    window_frame_report_frames_explicit = true;
+                    window_frame_report_frames =
+                        parse_window_frame_report_frames_arg(&arg, args.next())?;
+                }
                 "--far-lod" => {
                     far_lod = if parse_bool_arg("--far-lod", args.next())? {
                         FarTerrainLodConfig::enabled()
@@ -973,6 +997,14 @@ impl Cli {
         }
         if (xr_clear_smoke || xr_mclone_smoke) && (mode.is_some() || perf_mode_count > 0) {
             bail!("XR smoke modes cannot be combined with headless or perf modes");
+        }
+        if window_frame_report_path.is_some()
+            && (mode.is_some() || perf_mode_count > 0 || xr_clear_smoke || xr_mclone_smoke)
+        {
+            bail!("--window-frame-report applies only to window mode");
+        }
+        if window_frame_report_frames_explicit && window_frame_report_path.is_none() {
+            bail!("--window-frame-report-frames requires --window-frame-report");
         }
         if window_start_intent == WindowStartIntent::Menu
             && (mode.is_some() || perf_mode_count > 0 || xr_clear_smoke || xr_mclone_smoke)
@@ -1207,6 +1239,10 @@ impl Cli {
                 render_options,
                 start_intent: window_start_intent,
                 startup_wait: startup_wait.unwrap_or(StartupWaitPolicy::DESKTOP_DEFAULT),
+                frame_report: window_frame_report_path.map(|path| WindowFrameReportOptions {
+                    path,
+                    frames: window_frame_report_frames,
+                }),
             }),
         }
     }
@@ -1316,6 +1352,17 @@ fn parse_timedemo_frames_arg(flag: &str, value: Option<String>) -> Result<usize>
         .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
     if !(1..=MAX_TIMEDEMO_FRAMES).contains(&parsed) {
         bail!("{flag} must be between 1 and {MAX_TIMEDEMO_FRAMES}");
+    }
+    Ok(parsed)
+}
+
+fn parse_window_frame_report_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<usize>()
+        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
+    if !(1..=MAX_WINDOW_FRAME_REPORT_FRAMES).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_WINDOW_FRAME_REPORT_FRAMES}");
     }
     Ok(parsed)
 }
@@ -1599,7 +1646,7 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
@@ -1616,6 +1663,6 @@ fn print_help() {
            mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-        Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --adaptive-chunk-publication-budget true to enable the experimental shared scheduler publication controller for local integrated worlds. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
+        Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --window-frame-report to run the live winit/swapchain path for N rendered frames, write surface acquire/encode/submit/present timing JSON, then exit. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --adaptive-chunk-publication-budget true to enable the experimental shared scheduler publication controller for local integrated worlds. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
     );
 }

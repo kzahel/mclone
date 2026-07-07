@@ -32,8 +32,8 @@ use crate::cli::{
     HeadlessActorWalkReviewOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
     HeadlessScreenshotUi, LoadingSettlePerfOptions, MovementPerfOptions,
     RemotePlayerVisualSmokeOptions, RendererRebuildSmokeOptions, SceneOptions,
-    StartupStreamingPerfOptions, TimedemoOptions, TorchLightProbeOptions, WindowStartIntent,
-    XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
+    StartupStreamingPerfOptions, TimedemoOptions, TorchLightProbeOptions, WindowFrameReportOptions,
+    WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
     parse_screenshot_ui_arg,
 };
 use crate::headless::{
@@ -296,7 +296,14 @@ fn main() -> Result<()> {
             render_options,
             start_intent,
             startup_wait,
-        } => run_window(scene, render_options, start_intent, startup_wait),
+            frame_report,
+        } => run_window(
+            scene,
+            render_options,
+            start_intent,
+            startup_wait,
+            frame_report,
+        ),
     }
 }
 
@@ -318,13 +325,13 @@ fn print_benchmark_metadata(name: &str, indent: &str, trailing_comma: bool) {
     );
 }
 
-fn current_unix_seconds() -> u64 {
+pub(crate) fn current_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs())
 }
 
-fn git_short_commit() -> String {
+pub(crate) fn git_short_commit() -> String {
     Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
@@ -336,7 +343,7 @@ fn git_short_commit() -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-fn git_dirty() -> bool {
+pub(crate) fn git_dirty() -> bool {
     Command::new("git")
         .args(["status", "--porcelain"])
         .output()

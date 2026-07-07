@@ -243,6 +243,7 @@ fn cli_parses_fullbright_toggle() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 }
@@ -292,6 +293,7 @@ fn cli_parses_lighting_false_as_runtime_bypass() {
             },
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 
@@ -313,6 +315,7 @@ fn cli_parses_lighting_false_as_runtime_bypass() {
             render_options: TexturedSectionRenderOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            frame_report: None,
         }
     );
 }
