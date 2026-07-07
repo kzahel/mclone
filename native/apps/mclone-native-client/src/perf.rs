@@ -18,10 +18,7 @@ use mclone_diagnostics::{
     PeerThreadPanelReport, PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
     StageSpan,
 };
-use mclone_frame_budget::{
-    RenderCompileCapacityInput, RenderCompileMeshFootprint, RenderCompileThreadReservation,
-    derive_render_compile_capacity,
-};
+use mclone_frame_budget::RenderCompileMeshFootprint;
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkVertex, VisibilityGraphBuildStats, quad_face_count_from_indices,
 };
@@ -52,6 +49,10 @@ use crate::cli::{
 use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
 use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
 use crate::render_cache::load_asset_source;
+use crate::render_compile_capacity::{
+    RenderCompileCapacityHostKind, preflight_render_compile_capacity_report,
+    render_compile_capacity_report,
+};
 use crate::scene_runtime::{
     WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, build_scene_textured_sections,
     chunk_tracking_radius_for_render_distance, local_single_view_options,
@@ -227,6 +228,10 @@ impl MovementPerfReport {
             "render_compile_max_pending_jobs",
             self.options.scene.render_compile_max_pending_jobs,
             true,
+        );
+        println!(
+            "  \"render_compile_capacity_mode\": \"{}\",",
+            self.options.scene.render_compile_capacity_mode.as_str()
         );
         println!(
             "  \"adaptive_chunk_publication_budget\": {},",
@@ -1100,6 +1105,10 @@ impl FrameBudgetProbeReport {
             true,
         );
         println!(
+            "  \"render_compile_capacity_mode\": \"{}\",",
+            self.options.scene.render_compile_capacity_mode.as_str()
+        );
+        println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
         );
@@ -1813,6 +1822,10 @@ impl StartupStreamingPerfReport {
             "render_compile_max_pending_jobs",
             self.options.scene.render_compile_max_pending_jobs,
             true,
+        );
+        println!(
+            "  \"render_compile_capacity_mode\": \"{}\",",
+            self.options.scene.render_compile_capacity_mode.as_str()
         );
         println!(
             "  \"render_compile_capacity_advisory\": {},",
@@ -2646,6 +2659,10 @@ impl LoadingSettlePerfReport {
             true,
         );
         println!(
+            "  \"render_compile_capacity_mode\": \"{}\",",
+            self.options.scene.render_compile_capacity_mode.as_str()
+        );
+        println!(
             "  \"simulation_cadence\": {{ \"host_hz\": {}, \"gameplay_hz\": {}, \"physics_hz\": {} }},",
             self.options.scene.simulation_cadence.host_rate_hz,
             self.options.scene.simulation_cadence.gameplay_rate_hz,
@@ -2775,27 +2792,21 @@ fn startup_streaming_render_compile_capacity_advisory_json(
     scene: &SceneOptions,
     frames: &[StartupStreamingFrameReport],
 ) -> serde_json::Value {
-    let available_parallelism = std::thread::available_parallelism()
-        .ok()
-        .map(|value| value.get());
     let mesh_footprint = startup_streaming_render_compile_mesh_footprint(frames);
-    let report = derive_render_compile_capacity(
-        RenderCompileCapacityInput::new(
-            available_parallelism,
-            host_total_memory_bytes(),
-            RenderCompileThreadReservation::local_integrated_flat(),
-            mesh_footprint,
-        )
-        .with_floors(
-            mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
-        ),
-    );
+    let report =
+        render_compile_capacity_report(RenderCompileCapacityHostKind::Flat, mesh_footprint);
+    let applied_derived = (scene.render_compile_capacity_mode
+        == crate::cli::RenderCompileCapacityMode::DerivedApplied)
+        .then(|| preflight_render_compile_capacity_report(RenderCompileCapacityHostKind::Flat));
 
     serde_json::json!({
-        "applied": false,
+        "mode": scene.render_compile_capacity_mode.as_str(),
+        "applied": applied_derived.is_some(),
         "activeWorkers": scene.render_compile_worker_count,
         "activeMaxPendingJobs": scene.render_compile_max_pending_jobs,
+        "appliedFootprintSource": if applied_derived.is_some() { "preflightEstimate" } else { "none" },
+        "advisoryFootprintSource": "measuredFrameReports",
+        "appliedDerived": applied_derived,
         "derived": report,
     })
 }
@@ -2836,52 +2847,6 @@ fn non_zero_usize_to_u64(value: usize) -> Option<u64> {
 
 fn textured_chunk_vertex_byte_size() -> u64 {
     std::mem::size_of::<TexturedChunkVertex>() as u64
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn host_total_memory_bytes() -> Option<u64> {
-    let mut value = 0_u64;
-    let mut value_len = std::mem::size_of::<u64>();
-    let name = b"hw.memsize\0";
-    // SAFETY: sysctlbyname reads into a valid u64 buffer and the C string is
-    // statically NUL-terminated for the duration of the call.
-    let result = unsafe {
-        libc::sysctlbyname(
-            name.as_ptr().cast(),
-            (&mut value as *mut u64).cast(),
-            &mut value_len,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    (result == 0 && value_len == std::mem::size_of::<u64>() && value > 0).then_some(value)
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-fn host_total_memory_bytes() -> Option<u64> {
-    // SAFETY: sysconf is thread-safe for these read-only process constants and
-    // does not dereference caller-owned pointers.
-    let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
-    // SAFETY: same as above.
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    if pages <= 0 || page_size <= 0 {
-        return None;
-    }
-    u64::try_from(pages)
-        .ok()
-        .zip(u64::try_from(page_size).ok())
-        .map(|(pages, page_size)| pages.saturating_mul(page_size))
-        .filter(|bytes| *bytes > 0)
-}
-
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "android"
-)))]
-fn host_total_memory_bytes() -> Option<u64> {
-    None
 }
 
 fn target_frame_ms(target_hz: f64) -> f64 {

@@ -41,6 +41,7 @@ fn cli_parses_render_compile_workers() {
                 scene: SceneOptions {
                     render_compile_worker_count: 2,
                     render_compile_max_pending_jobs: Some(6),
+                    render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Manual,
                     ..SceneOptions::default()
                 },
                 ..MovementPerfOptions::default()

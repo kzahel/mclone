@@ -389,6 +389,19 @@ stayed `0 / 0`. Decision: do not flip the global default from advisory data
 alone. Next implementation should add an explicit opt-in or context-gated
 derived-capacity path, then rerun these rows plus Quest.
 
+Follow-up implementation added the explicit opt-in path without changing
+defaults: `--render-compile-capacity derived` applies the shared derived
+worker/max-pending result before startup, while omitted flags still use today's
+`1/4`. Manual `--render-compile-workers` and
+`--render-compile-max-pending-jobs` override the derived fields individually.
+Because applied mode runs before frame reports can provide a measured mesh
+footprint, the applied path uses a conservative preflight pack estimate; the
+startup-streaming JSON now reports `render_compile_capacity_mode` plus the
+advisory object's applied preflight result and measured post-run advisory result
+separately. A short release RD2 persisted smoke on the dirty implementation
+worktree resolved `derivedApplied` to `7/14`, with worker timing still compiled
+out in the normal release build.
+
 Gates (inner loop per iteration; promotion before default flip):
 
 - inner: RD10 persisted frozen + movement-frame probe + Quest RD5 orbit;

@@ -8,13 +8,16 @@ use mclone_app_runtime::render_assets::{
 };
 use mclone_app_runtime::startup_args::{
     RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_bool_arg, parse_i32_arg,
-    parse_u32_arg, parse_u64_arg,
+    parse_render_compile_worker_count_arg, parse_u32_arg, parse_u64_arg,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render_session::{ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, EngineCameraViewMode};
 use mclone_server::SimulationCadenceConfig;
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
+use crate::render_compile_capacity::{
+    RenderCompileCapacityHostKind, preflight_render_compile_capacity_report,
+};
 use crate::{
     DEFAULT_CHUNK_X, DEFAULT_CHUNK_Z, DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
     DEFAULT_FRAME_BUDGET_TARGET_HZ, DEFAULT_MOVEMENT_PERF_PATH_RADIUS, DEFAULT_MOVEMENT_PERF_STEPS,
@@ -47,6 +50,7 @@ pub(crate) struct SceneOptions {
     pub(crate) render_distance: i32,
     pub(crate) render_compile_worker_count: usize,
     pub(crate) render_compile_max_pending_jobs: Option<usize>,
+    pub(crate) render_compile_capacity_mode: RenderCompileCapacityMode,
     pub(crate) render_compile_worker_timing_enabled: bool,
     pub(crate) remote_addr: Option<String>,
     pub(crate) world_root: Option<PathBuf>,
@@ -70,6 +74,31 @@ pub(crate) struct SceneOptions {
     pub(crate) adaptive_render_admission_budget: bool,
     /// Experimental, opt-in far surface LOD shell. Disabled by default.
     pub(crate) far_lod: FarTerrainLodConfig,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum RenderCompileCapacityMode {
+    #[default]
+    Default,
+    Manual,
+    DerivedApplied,
+}
+
+impl RenderCompileCapacityMode {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Manual => "manual",
+            Self::DerivedApplied => "derivedApplied",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum RenderCompileCapacityRequest {
+    #[default]
+    Default,
+    Derived,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -361,6 +390,7 @@ impl Default for SceneOptions {
             render_distance: DEFAULT_RENDER_DISTANCE,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
+            render_compile_capacity_mode: RenderCompileCapacityMode::Default,
             render_compile_worker_timing_enabled: true,
             remote_addr: None,
             world_root: Some(default_native_world_root()),
@@ -407,6 +437,7 @@ impl SceneOptions {
                 .context("desktop render distance does not fit i32")?,
             render_compile_worker_count: scene.render_compile_worker_count,
             render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
+            render_compile_capacity_mode: RenderCompileCapacityMode::Default,
             render_compile_worker_timing_enabled: true,
             remote_addr: scene.remote_addr,
             world_root: Some(default_native_world_root()),
@@ -560,6 +591,8 @@ impl Cli {
         let mut far_lod = FarTerrainLodConfig::default();
         let mut adaptive_chunk_publication_budget = None;
         let mut adaptive_render_admission_budget = None;
+        let mut render_compile_capacity_request = RenderCompileCapacityRequest::Default;
+        let mut render_compile_worker_count = None;
         let mut render_compile_max_pending_jobs = None;
         let mut render_compile_worker_timing_enabled = None;
         let mut args = args.into_iter();
@@ -922,6 +955,14 @@ impl Cli {
                         args.next(),
                     )?);
                 }
+                "--render-compile-capacity" => {
+                    render_compile_capacity_request =
+                        parse_render_compile_capacity_arg(&arg, args.next())?;
+                }
+                "--render-compile-workers" => {
+                    render_compile_worker_count =
+                        Some(parse_render_compile_worker_count_arg(&arg, args.next())?);
+                }
                 "--render-compile-max-pending-jobs" => {
                     render_compile_max_pending_jobs = Some(
                         parse_render_compile_max_pending_jobs_arg(&arg, args.next())?,
@@ -1115,8 +1156,37 @@ impl Cli {
         scene.adaptive_chunk_publication_budget =
             adaptive_chunk_publication_budget.unwrap_or(scene.remote_addr.is_none());
         scene.adaptive_render_admission_budget = adaptive_render_admission_budget.unwrap_or(false);
+        if matches!(
+            render_compile_capacity_request,
+            RenderCompileCapacityRequest::Derived
+        ) {
+            let host_kind = if xr_mclone_smoke {
+                RenderCompileCapacityHostKind::Xr
+            } else {
+                RenderCompileCapacityHostKind::Flat
+            };
+            let report = preflight_render_compile_capacity_report(host_kind);
+            scene.render_compile_worker_count = report.derived_worker_count;
+            scene.render_compile_max_pending_jobs = Some(report.derived_max_pending_jobs);
+            scene.render_compile_capacity_mode = RenderCompileCapacityMode::DerivedApplied;
+        }
+        if let Some(worker_count) = render_compile_worker_count {
+            scene.render_compile_worker_count = worker_count;
+            if !matches!(
+                scene.render_compile_capacity_mode,
+                RenderCompileCapacityMode::DerivedApplied
+            ) {
+                scene.render_compile_capacity_mode = RenderCompileCapacityMode::Manual;
+            }
+        }
         if let Some(max_pending_jobs) = render_compile_max_pending_jobs {
             scene.render_compile_max_pending_jobs = Some(max_pending_jobs);
+            if !matches!(
+                scene.render_compile_capacity_mode,
+                RenderCompileCapacityMode::DerivedApplied
+            ) {
+                scene.render_compile_capacity_mode = RenderCompileCapacityMode::Manual;
+            }
         }
         if let Some(enabled) = render_compile_worker_timing_enabled {
             scene.render_compile_worker_timing_enabled = enabled;
@@ -1138,6 +1208,13 @@ impl Cli {
         }
         if scene.adaptive_render_admission_budget && scene.remote_addr.is_some() {
             bail!("--adaptive-render-admission-budget applies only to local integrated worlds");
+        }
+        if matches!(
+            render_compile_capacity_request,
+            RenderCompileCapacityRequest::Derived
+        ) && scene.remote_addr.is_some()
+        {
+            bail!("--render-compile-capacity derived applies only to local integrated worlds");
         }
         if scene.world_dir.is_some() && scene.remote_addr.is_some() {
             bail!("--world-dir applies only to local integrated worlds");
@@ -1466,6 +1543,18 @@ fn parse_render_compile_max_pending_jobs_arg(flag: &str, value: Option<String>) 
     Ok(parsed)
 }
 
+fn parse_render_compile_capacity_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<RenderCompileCapacityRequest> {
+    let value = value.with_context(|| format!("{flag} requires default or derived"))?;
+    match value.as_str() {
+        "default" | "off" | "false" => Ok(RenderCompileCapacityRequest::Default),
+        "derived" | "auto" | "on" | "true" => Ok(RenderCompileCapacityRequest::Derived),
+        _ => bail!("{flag} must be default or derived, got `{value}`"),
+    }
+}
+
 fn parse_actor_walk_review_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
     let value = value.with_context(|| format!("{flag} requires a value"))?;
     let parsed = value
@@ -1723,7 +1812,7 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
@@ -1736,10 +1825,10 @@ fn print_help() {
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--frame-accounting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--frame-accounting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-          mclone-native-client --startup-streaming-perf [--startup-streaming-persisted-world] [--freeze-scheduled-fluid-ticks] [--width 1280] [--height 720] [--seed 12345] [--render-distance 20] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--render-compile-worker-timing true|false] [--startup-streaming-frames 2400] [--target-hz 120] [--simulation-cadence 20/20/60] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --startup-streaming-perf [--startup-streaming-persisted-world] [--freeze-scheduled-fluid-ticks] [--width 1280] [--height 720] [--seed 12345] [--render-distance 20] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--render-compile-worker-timing true|false] [--startup-streaming-frames 2400] [--target-hz 120] [--simulation-cadence 20/20/60] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-        Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --window-frame-report to run the live winit/swapchain path for N rendered frames, write surface acquire/encode/submit/present timing JSON, then exit. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. The shared scheduler publication controller is the local-integrated default; use --adaptive-chunk-publication-budget false to force the fixed floor for comparison, and remote dedicated sessions keep it off. Use --adaptive-render-admission-budget true to test the shared render admission controller on the live local-integrated desktop path. Render compile in-flight capacity defaults to 4 jobs; use --render-compile-max-pending-jobs to override it, including setting it to --render-compile-workers for the old worker-tied behavior. Use --render-compile-worker-timing false only for meter-tax A/B perf captures; it disables render compile worker busy counters without changing queueing or compile work. Use --freeze-scheduled-fluid-ticks only in startup-streaming perf to isolate initial render-streaming from water/lava scheduled tick mutation. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
+        Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --window-frame-report to run the live winit/swapchain path for N rendered frames, write surface acquire/encode/submit/present timing JSON, then exit. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. The shared scheduler publication controller is the local-integrated default; use --adaptive-chunk-publication-budget false to force the fixed floor for comparison, and remote dedicated sessions keep it off. Use --adaptive-render-admission-budget true to test the shared render admission controller on the live local-integrated desktop path. Render compile in-flight capacity defaults to 4 jobs; use --render-compile-capacity derived to apply the shared host-derived worker/max-pending capacity before startup, or use --render-compile-workers and --render-compile-max-pending-jobs as manual overrides. Use --render-compile-worker-timing false only for meter-tax A/B perf captures; it disables render compile worker busy counters without changing queueing or compile work. Use --freeze-scheduled-fluid-ticks only in startup-streaming perf to isolate initial render-streaming from water/lava scheduled tick mutation. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
     );
 }

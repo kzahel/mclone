@@ -70,6 +70,7 @@ fn cli_parses_loading_settle_perf_options() {
                 scene: SceneOptions {
                     seed: 99,
                     render_compile_worker_count: 2,
+                    render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Manual,
                     debug_passive_showcase: false,
                     ..SceneOptions::default()
                 },
@@ -134,6 +135,7 @@ fn cli_parses_startup_streaming_perf_options() {
                     render_distance: 20,
                     render_compile_worker_count: 2,
                     render_compile_max_pending_jobs: Some(8),
+                    render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Manual,
                     render_compile_worker_timing_enabled: false,
                     debug_passive_showcase: false,
                     ..SceneOptions::default()
@@ -243,6 +245,110 @@ fn cli_rejects_adaptive_render_admission_budget_for_remote_sessions() {
     assert!(
         err.to_string()
             .contains("--adaptive-render-admission-budget applies only to local integrated worlds")
+    );
+}
+
+#[test]
+fn cli_applies_derived_render_compile_capacity() {
+    let expected = crate::render_compile_capacity::preflight_render_compile_capacity_report(
+        crate::render_compile_capacity::RenderCompileCapacityHostKind::Flat,
+    );
+    let cli = Cli::parse([
+        "--startup-streaming-perf".to_owned(),
+        "--render-compile-capacity".to_owned(),
+        "derived".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::StartupStreamingPerf { options } = cli else {
+        panic!("expected startup streaming perf");
+    };
+    assert_eq!(
+        options.scene.render_compile_capacity_mode,
+        crate::cli::RenderCompileCapacityMode::DerivedApplied
+    );
+    assert_eq!(
+        options.scene.render_compile_worker_count,
+        expected.derived_worker_count
+    );
+    assert_eq!(
+        options.scene.render_compile_max_pending_jobs,
+        Some(expected.derived_max_pending_jobs)
+    );
+}
+
+#[test]
+fn cli_manual_render_compile_flags_override_derived_capacity_fields() {
+    let cli = Cli::parse([
+        "--startup-streaming-perf".to_owned(),
+        "--render-compile-capacity".to_owned(),
+        "derived".to_owned(),
+        "--render-compile-workers".to_owned(),
+        "2".to_owned(),
+        "--render-compile-max-pending-jobs".to_owned(),
+        "6".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::StartupStreamingPerf { options } = cli else {
+        panic!("expected startup streaming perf");
+    };
+    assert_eq!(
+        options.scene.render_compile_capacity_mode,
+        crate::cli::RenderCompileCapacityMode::DerivedApplied
+    );
+    assert_eq!(options.scene.render_compile_worker_count, 2);
+    assert_eq!(options.scene.render_compile_max_pending_jobs, Some(6));
+}
+
+#[test]
+fn cli_marks_manual_render_compile_capacity_mode() {
+    let cli = Cli::parse([
+        "--startup-streaming-perf".to_owned(),
+        "--render-compile-workers".to_owned(),
+        "2".to_owned(),
+        "--render-compile-max-pending-jobs".to_owned(),
+        "6".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::StartupStreamingPerf { options } = cli else {
+        panic!("expected startup streaming perf");
+    };
+    assert_eq!(
+        options.scene.render_compile_capacity_mode,
+        crate::cli::RenderCompileCapacityMode::Manual
+    );
+    assert_eq!(options.scene.render_compile_worker_count, 2);
+    assert_eq!(options.scene.render_compile_max_pending_jobs, Some(6));
+}
+
+#[test]
+fn cli_rejects_invalid_render_compile_capacity_mode() {
+    let err = Cli::parse([
+        "--startup-streaming-perf".to_owned(),
+        "--render-compile-capacity".to_owned(),
+        "maybe".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("--render-compile-capacity must be default or derived"));
+}
+
+#[test]
+fn cli_rejects_derived_render_compile_capacity_for_remote_sessions() {
+    let err = Cli::parse([
+        "--remote-addr".to_owned(),
+        "127.0.0.1:25565".to_owned(),
+        "--render-compile-capacity".to_owned(),
+        "derived".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.contains("--render-compile-capacity derived applies only to local integrated worlds")
     );
 }
 

@@ -308,6 +308,7 @@ impl WindowFrameReportRecorder {
             "render_distance": scene.render_distance,
             "render_compile_workers": scene.render_compile_worker_count,
             "render_compile_max_pending_jobs": scene.render_compile_max_pending_jobs,
+            "render_compile_capacity_mode": scene.render_compile_capacity_mode.as_str(),
             "remote_addr": &scene.remote_addr,
             "world_root": scene.world_root.as_ref().map(|path| path.display().to_string()),
             "world_dir": scene.world_dir.as_ref().map(|path| path.display().to_string()),
