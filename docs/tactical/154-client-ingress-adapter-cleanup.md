@@ -1,9 +1,10 @@
 # 154: Client Ingress Adapter Cleanup
 
-Status: drafted 2026-07-07 as the narrow follow-up to tactical
+Status: active; drafted 2026-07-07 as the narrow follow-up to tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
-Slice 0 audit/classification is next. This tactical is cleanup and guardrail
-work only; it must not change runtime behavior.
+Slice 0 audit/classification completed 2026-07-07; Slice 1 helper quarantine is
+next. This tactical is cleanup and guardrail work only; it must not change
+runtime behavior.
 
 Workstream: native Rust shared session/runtime boundary, native web/WASM
 adapters, native desktop/Android/Android XR remote adapters.
@@ -101,6 +102,8 @@ written reason in the tactical that owns the change.
 
 ## Slice 0: Audit And Guardrail Baseline
 
+Status: completed 2026-07-07.
+
 Goal: record the exact remaining old-shape affordances after 151 and decide
 which are worth touching.
 
@@ -122,6 +125,44 @@ git diff --check
 
 Exit criteria: this tactical contains the current audit table and every
 remaining old-shape hit has a target classification before any code edits.
+
+Audit results:
+
+| Hit group | Classification | Slice 0 decision |
+| --- | --- | --- |
+| `mclone-app-runtime/src/client_connection.rs` `ClientConnection`, `QueuedServerUpdate`, drain metrics/result/mode, and `pump_client_connection_updates_report` | canonical shared path | Keep as the preferred normal-frame ingress. |
+| `mclone-app-runtime/src/local_single_view.rs` `LocalIntegratedConnection` and `RemoteDedicatedConnection` `ClientConnection` impls | normal adapter implementation | Keep. These are native local/remote adapters over the shared pump, not competing pumps. |
+| `mclone-app-runtime/src/local_single_view.rs` `pending_response_batches` | normal adapter bookkeeping | Keep for current one-response-per-command wire pairing; Slice 1 should add a clarifying declaration comment. |
+| `mclone-app-runtime/src/host_mode.rs` `RemoteServerSession::{drain_command_updates, try_drain_command_updates}` | normal remote adapter trait with old name | Keep names for now. Renaming would cross desktop/Android/Android XR and test helpers without improving behavior. Slice 1 can document the trait's post-151 role. |
+| `mclone-net::NativeClientIoSession` and its drain methods | normal native TCP IO actor | Keep. This is the blessed native remote session used by app wrappers. |
+| `mclone-net::NativeClientSession` and its drain methods | low-level protocol/compatibility helper | Keep but quarantine by comments/docs. Normal app runtimes must not use it. |
+| `mclone-net` tests using `NativeClientSession` | test-only | Keep. They exercise low-level native transport behavior. |
+| `native/apps/mclone-native-client/src/remote_session.rs` | normal desktop adapter | Keep. It wraps `NativeClientIoSession` and implements app-runtime's remote-session trait. |
+| `native/apps/mclone-android-client/src/lib.rs` remote session wrapper | normal flat Android adapter | Keep. It wraps `NativeClientIoSession` and owns Android app lifecycle glue. |
+| `native/apps/mclone-android-xr-client/src/lib.rs` remote session wrapper | normal Android XR adapter | Keep. It wraps `NativeClientIoSession` and owns XR/Android app lifecycle glue. |
+| `native/apps/mclone-native-client/src/remote_player_visual_smoke.rs` `NativeClientSession` | smoke/probe helper | Keep. It is standalone visual-smoke support, not runtime ingress. |
+| `native/apps/mclone-web-client/src/lib.rs` `WebRuntimeHost: ClientConnection` | normal web adapter implementation | Keep as the web inline/worker/remote host adapter over the shared pump. |
+| `native/apps/mclone-web-client/src/web_remote_session.rs` `pending_response_batches` | normal web adapter bookkeeping | Keep for current WebSocket response-paired wire accounting; Slice 1 should add a clarifying declaration comment. |
+| `native/apps/mclone-web-client/src/web_server_worker.rs` `exchange_command`, `try_recv_update`, and `drain_updates` | compatibility/probe helper | Keep but quarantine by comments/docs. Normal web runtime polling drains queued updates through `WebRuntimeHost`. |
+| `pump_pending_remote_update_batches_report` | retired old pump | No hits. Keep this as the quick regression grep. |
+
+Preferred path check: the "Preferred Client Ingress Path" section above still
+matches the code. The shared pump is in `client_connection.rs`; native adapters
+enter through `local_single_view.rs`; normal native remote apps hold
+`NativeClientIoSession`; web inline/worker/remote hosts enter through
+`WebRuntimeHost`.
+
+Slice 1 direction: keep it to declaration comments and doc comments. Do not
+rename `drain_command_updates`, `try_drain_command_updates`, or
+`exchange_command` in Slice 1 unless a pre-edit call graph proves the rename is
+small enough to stay mechanical.
+
+Validation completed 2026-07-07:
+
+```bash
+rg -n "ClientConnection|QueuedServerUpdate|WebRuntimeHost|exchange_command|NativeClientSession|NativeClientIoSession|try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-web-client native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+git diff --check
+```
 
 ## Slice 1: Quarantine Compatibility And Probe Helpers
 
