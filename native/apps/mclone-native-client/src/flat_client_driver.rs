@@ -24,6 +24,7 @@ use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
 };
+use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::local_single_view::LocalSingleViewStartupStep;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
@@ -43,6 +44,14 @@ use mclone_client::{
     TeleportPreviewResult, TeleportValidityReason,
 };
 use mclone_core::{BlockStateId, Vec3d};
+use mclone_diagnostics::{
+    BudgetDecisionFamily, BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind,
+    FramePipelineReport, QueueId, WorkWindow,
+};
+use mclone_frame_budget::{
+    BudgetController, BudgetControllerInput, BudgetTelemetryWindow, DEFAULT_COST_EWMA_ALPHA,
+    EwmaCostEstimator, decision_for_family, render_frame_budget_controller_config,
+};
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode,
     keyboard_turn_mouse_delta,
@@ -159,6 +168,8 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
     frame_pipeline_accounting: DesktopFramePipelineAccounting,
+    latest_target_frame_ms: Option<f64>,
+    render_budget: DesktopRenderBudgetController,
     world_catalog: Option<NativeWorldCatalog>,
     client_experience: ClientExperienceController,
     status_overlay: StatusOverlay,
@@ -166,6 +177,89 @@ pub(crate) struct FlatClientDriver {
     desktop_blink_debug_worker: Option<NativeTeleportPreviewWorker>,
     underwater_effect: UnderwaterEffectState,
     seed_reroll_state: u64,
+}
+
+#[derive(Clone, Debug)]
+struct DesktopRenderBudgetController {
+    controller: BudgetController,
+    estimator: EwmaCostEstimator,
+    last_panel: BudgetDecisionPanelReport,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DesktopRenderAdmissionGrant {
+    elapsed_budget: Duration,
+    max_compile_requests: usize,
+}
+
+impl Default for DesktopRenderBudgetController {
+    fn default() -> Self {
+        Self {
+            controller: BudgetController::new(render_frame_budget_controller_config(
+                FrameHostKind::DesktopFlatWinit,
+                WorkWindow::BeforeRender,
+            )),
+            estimator: EwmaCostEstimator::new(DEFAULT_COST_EWMA_ALPHA),
+            last_panel: BudgetDecisionPanelReport::empty(),
+        }
+    }
+}
+
+impl DesktopRenderBudgetController {
+    fn decide(
+        &mut self,
+        target_period_ms: Option<f64>,
+        latest_report: Option<&FramePipelineReport>,
+        host_mode: BudgetHostMode,
+    ) -> Option<DesktopRenderAdmissionGrant> {
+        let Some(target_period_ms) = target_period_ms.and_then(finite_positive_ms) else {
+            self.last_panel = BudgetDecisionPanelReport::empty();
+            return None;
+        };
+        let mut input = BudgetControllerInput::new(target_period_ms);
+        input.host_mode = host_mode;
+        input.costs = self.estimator.estimates;
+        if let Some(report) = latest_report {
+            input = input.with_window(desktop_render_budget_window(report, target_period_ms));
+        }
+        self.last_panel = self.controller.decide(&input);
+        let decision =
+            decision_for_family(&self.last_panel, BudgetDecisionFamily::RenderAdmission)?;
+        Some(DesktopRenderAdmissionGrant {
+            elapsed_budget: duration_from_ms(decision.grant.elapsed_ms),
+            max_compile_requests: (decision.grant.max_units as usize).max(1),
+        })
+    }
+
+    fn observe_sync(
+        &mut self,
+        target_period_ms: Option<f64>,
+        update: &mclone_app_runtime::TimedRenderSectionCacheUpdate,
+    ) {
+        let Some(target_period_ms) = target_period_ms.and_then(finite_positive_ms) else {
+            return;
+        };
+        self.estimator.observe_for_target_period(
+            target_period_ms,
+            BudgetDecisionFamily::RenderAdmission,
+            render_admission_observed_ms(update.timing),
+            usize_to_u32(update.timing.submit_request_count),
+        );
+        self.estimator.observe_for_target_period(
+            target_period_ms,
+            BudgetDecisionFamily::CompletedResultAcceptance,
+            update.timing.completed_result_accept_ms,
+            usize_to_u32(update.cache_update.accepted_compile_result_count),
+        );
+    }
+
+    fn panel(&self) -> &BudgetDecisionPanelReport {
+        &self.last_panel
+    }
+
+    fn clear_panel(&mut self) {
+        self.last_panel = BudgetDecisionPanelReport::empty();
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -375,6 +469,8 @@ impl FlatClientDriver {
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
             frame_pipeline_accounting: DesktopFramePipelineAccounting::default(),
+            latest_target_frame_ms: None,
+            render_budget: DesktopRenderBudgetController::default(),
             world_catalog: scene.world_root.clone().map(NativeWorldCatalog::new),
             client_experience: ClientExperienceController::new(desktop_client_experience_profile()),
             status_overlay: StatusOverlay::hidden(),
@@ -419,6 +515,7 @@ impl FlatClientDriver {
 
     pub(crate) fn tick_frame_timing(&mut self, frame_ms: f64, target_frame_ms: Option<f64>) {
         self.render_stats.last_frame_ms = frame_ms as f32;
+        self.latest_target_frame_ms = target_frame_ms;
         self.frame_timing.begin_frame(frame_ms, target_frame_ms);
         self.frame_pipeline_accounting
             .begin_frame(frame_ms, target_frame_ms);
@@ -459,6 +556,8 @@ impl FlatClientDriver {
                     .scheduler_budget_decision_panel
             })
             .unwrap_or_default();
+        let budget_decision_panel =
+            merged_budget_decision_panel(budget_decision_panel, self.render_budget.panel());
         self.frame_pipeline_accounting.finish_frame(
             render_ms,
             acquire_ms,
@@ -2172,14 +2271,44 @@ impl FlatClientDriver {
         elapsed_ms: impl FnOnce(std::time::Duration) -> f64,
     ) -> anyhow::Result<Option<FlatClientSectionSync>> {
         let camera_view = self.camera_view();
+        let latest_report = self
+            .frame_pipeline_accounting
+            .latest_report()
+            .map(|(report, _)| report);
+        let host_mode = self
+            .runtime
+            .as_ref()
+            .map(runtime_budget_host_mode)
+            .unwrap_or(BudgetHostMode::LocalIntegrated);
+        let render_grant = if self.scene.adaptive_render_admission_budget {
+            self.render_budget.decide(
+                self.latest_target_frame_ms,
+                latest_report.as_deref(),
+                host_mode,
+            )
+        } else {
+            self.render_budget.clear_panel();
+            None
+        };
         let Some(runtime) = &mut self.runtime else {
             return Ok(None);
         };
         let remesh_start = std::time::Instant::now();
-        let timed_update = runtime.sync_render_sections_with_completed_result_acceptance_timed(
-            camera_view.render_eye,
-            None,
-        )?;
+        let timed_update = if let Some(grant) = render_grant {
+            runtime.sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+                camera_view.render_eye,
+                Instant::now() + grant.elapsed_budget,
+                grant.max_compile_requests,
+                None,
+            )?
+        } else {
+            runtime.sync_render_sections_with_completed_result_acceptance_timed(
+                camera_view.render_eye,
+                None,
+            )?
+        };
+        self.render_budget
+            .observe_sync(self.latest_target_frame_ms, &timed_update);
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let loaded_chunk_count = runtime.client().loaded_chunk_count();
         Ok(Some(FlatClientSectionSync {
@@ -2615,11 +2744,99 @@ impl FlatClientDriver {
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
         self.frame_pipeline_accounting = DesktopFramePipelineAccounting::default();
+        self.latest_target_frame_ms = None;
+        self.render_budget = DesktopRenderBudgetController::default();
         self.underwater_effect.reset();
         if let Some(runtime) = &mut self.runtime {
             runtime.clear_far_lod();
         }
     }
+}
+
+fn desktop_render_budget_window(
+    report: &FramePipelineReport,
+    target_period_ms: f64,
+) -> BudgetTelemetryWindow {
+    let summary = &report.frame_summary;
+    let (queue_depth, oldest_queue_age_ms) = render_queue_pressure(report);
+    let mut window =
+        BudgetTelemetryWindow::new(FrameHostKind::DesktopFlatWinit, WorkWindow::BeforeRender)
+            .with_app_work_p95_ms(summary.latest_app_work_ms);
+    if let Some(headroom_ms) = summary.latest_headroom_ms {
+        window = window.with_headroom_p05_ms(headroom_ms);
+    }
+    window.app_over_period_pct = if summary.latest_app_work_ms > target_period_ms {
+        100.0
+    } else {
+        0.0
+    };
+    window.missed_frames = u64::from(summary.latest_frame_wall_ms > target_period_ms);
+    window.over_2x_frames = u64::from(summary.latest_frame_wall_ms > target_period_ms * 2.0);
+    window.queue_depth = queue_depth;
+    window.oldest_queue_age_ms = oldest_queue_age_ms;
+    window
+}
+
+fn render_queue_pressure(report: &FramePipelineReport) -> (u64, Option<f64>) {
+    let mut depth = 0_u64;
+    let mut oldest = None;
+    for queue in &report.queue_panel.queues {
+        if matches!(
+            &queue.queue,
+            QueueId::RenderCompileJobs | QueueId::CompletedRenderResults | QueueId::UploadWork
+        ) {
+            depth = depth.saturating_add(queue.depth);
+            oldest = max_optional_ms(oldest, queue.oldest_age_ms);
+        }
+    }
+    (depth, oldest)
+}
+
+fn render_admission_observed_ms(timing: mclone_app_runtime::RenderSectionSyncTiming) -> f64 {
+    let dirty_ready_scan_ms = timing.dirty_seed_ms + timing.prepare_ms;
+    let request_build_ms = timing.submit_snapshot_ms + timing.submit_request_build_ms;
+    let worker_submit_ms = timing.submit_compiler_ms;
+    let prepared_record_ms = timing.submit_mark_inflight_ms
+        + timing.submit_apply_ready_plan_ms
+        + timing.submit_ready_update_ms;
+    dirty_ready_scan_ms + request_build_ms + worker_submit_ms + prepared_record_ms
+}
+
+fn runtime_budget_host_mode(runtime: &WindowSceneRuntime) -> BudgetHostMode {
+    match runtime.stats().host_mode {
+        SingleViewHostMode::LocalIntegrated => BudgetHostMode::LocalIntegrated,
+        SingleViewHostMode::RemoteDedicated => BudgetHostMode::RemoteHost,
+    }
+}
+
+fn merged_budget_decision_panel(
+    scheduler: BudgetDecisionPanelReport,
+    render: &BudgetDecisionPanelReport,
+) -> BudgetDecisionPanelReport {
+    let mut decisions = scheduler.decisions;
+    decisions.extend(render.decisions.iter().cloned());
+    BudgetDecisionPanelReport::new(decisions)
+}
+
+fn duration_from_ms(ms: f64) -> Duration {
+    Duration::from_secs_f64(finite_positive_ms(ms).unwrap_or(0.0) / 1_000.0)
+}
+
+fn finite_positive_ms(ms: f64) -> Option<f64> {
+    (ms.is_finite() && ms > 0.0).then_some(ms)
+}
+
+fn max_optional_ms(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    match (left, right.and_then(finite_positive_ms)) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
+fn usize_to_u32(value: usize) -> u32 {
+    value.try_into().unwrap_or(u32::MAX)
 }
 
 fn desktop_client_experience_profile() -> ClientExperienceProfile {

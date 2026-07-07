@@ -819,7 +819,9 @@ budgets updated to point here.
   `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`, and
   `pnpm native:android-xr:apk` to compile the Android-only XR module.
 - Status: Slice 3 Candidate A promotion is complete for desktop/native-XR and
-  Android-XR local-integrated worlds. Candidate B remains the next slice.
+  Android-XR local-integrated worlds. Candidate B now has an opt-in desktop
+  render-admission path, but its worker/default-promotion gate is falsified
+  below.
 
 ## Slice 4: Candidate B — Render Admission And Workers
 
@@ -875,6 +877,24 @@ Acceptance: RD10 fresh quiescent `<= 14s`; persisted RD10 actionable idle
 which stage bounds it and why the controller cannot move it (that outcome
 re-scopes the remainder to a named follow-up, it does not extend this
 tactical); Quest gates green with queue ages bounded.
+
+Status (2026-07-07): Candidate B is not promoted. The shared frame-budget crate
+now has a render-side controller config and the live desktop path has an
+opt-in `--adaptive-render-admission-budget` flag that routes render admission
+through the existing deadline API with a controller unit cap; the default stays
+on the fixed floor path. The desktop worker default remains `1`: same-host RD10
+startup-streaming A/B with adaptive publication on measured workers `1` vs `2`
+as first full view `9712.257ms` vs `9221.628ms`, first render quiescent
+`50136.512ms` vs `50124.487ms`, total remesh `439.307ms` vs `820.441ms`, and
+deadline-skipped compile requests `0` in both lanes. This falsifies workers `2`
+as a default-promotion lever for the current startup-streaming gate. Existing
+queue samples show the long tail is not worker-capacity-bound: by ~14.7s the
+view is fully loaded with no pending compile jobs, `pending_render_chunks=88`,
+and `ready_render_work_pending=false`; the 15s-50.1s interval only submits 6
+sections and uploads 13. The remaining Slice 4 work is therefore a named
+follow-up: reconcile the live-window controller path with the headless
+startup-streaming quiescence definition/readiness tail before any worker,
+render-admission, XR accept/upload, or Quest default promotion.
 
 ## Slice 5: Config Surface, Soak, And Close-Out
 

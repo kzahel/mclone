@@ -418,6 +418,22 @@ impl WindowSceneRuntime {
             )
     }
 
+    pub(crate) fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        max_compile_requests: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        self.scene
+            .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+                camera_position,
+                deadline,
+                max_compile_requests,
+                completed_result_accept_budget,
+            )
+    }
+
     pub(crate) fn sync_all_render_sections(
         &mut self,
         camera_position: Vec3,

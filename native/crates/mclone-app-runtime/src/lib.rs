@@ -1972,6 +1972,52 @@ impl SingleViewRuntime {
     where
         C: RenderSectionCompileDispatcher,
     {
+        self.sync_render_sections_until_deadline_with_admission_limit_and_completed_result_acceptance_targeted_snapshots_timed(
+            compiler,
+            camera_position,
+            deadline,
+            None,
+            completed_result_accept_budget,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_targeted_snapshots_timed<
+        C,
+    >(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        deadline: Instant,
+        max_compile_requests: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompileDispatcher,
+    {
+        self.sync_render_sections_until_deadline_with_admission_limit_and_completed_result_acceptance_targeted_snapshots_timed(
+            compiler,
+            camera_position,
+            deadline,
+            Some(max_compile_requests.max(1)),
+            completed_result_accept_budget,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn sync_render_sections_until_deadline_with_admission_limit_and_completed_result_acceptance_targeted_snapshots_timed<
+        C,
+    >(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        deadline: Instant,
+        max_compile_requests: Option<usize>,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompileDispatcher,
+    {
         let mut combined = RenderSectionCacheUpdate::default();
         let mut combined_timing = RenderSectionSyncTiming::default();
         let mut submitted_request_count = 0_usize;
@@ -2023,6 +2069,18 @@ impl SingleViewRuntime {
             }
             combined.merge(update);
 
+            if max_compile_requests.is_some_and(|limit| submitted_request_count >= limit) {
+                if compiler.has_pending_job_capacity()
+                    && self.has_ready_pending_render_work(camera_position)
+                {
+                    combined.deadline_skipped_compile_request_count += 1;
+                }
+                combined.pending_compile_jobs = compiler.pending_job_count();
+                return Ok(TimedRenderSectionCacheUpdate {
+                    cache_update: combined,
+                    timing: combined_timing,
+                });
+            }
             if compiler.pending_job_count() == 0
                 && !self.has_ready_pending_render_work(camera_position)
             {

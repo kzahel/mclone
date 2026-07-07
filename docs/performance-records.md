@@ -101,6 +101,56 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 4 Render Worker Check
+
+Commit reported by benchmark JSON: `e48245db`.
+
+Note: `git_dirty=true` because this was captured while adding the opt-in live
+desktop render-admission controller wiring. The startup-streaming lane below is
+used for the render-worker default decision; it does not exercise the live
+window-only `--adaptive-render-admission-budget` flag.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 6000 --target-hz 60 --render-compile-workers 1 --debug-passive-showcase false > /tmp/mclone-150-slice4-rd10-workers1.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 6000 --target-hz 60 --render-compile-workers 2 --debug-passive-showcase false > /tmp/mclone-150-slice4-rd10-workers2.json
+```
+
+RD10 startup-streaming, adaptive publication default on, 60 Hz budget:
+
+| Metric | Workers 1 | Workers 2 |
+|---|---:|---:|
+| startup playable | 527.186 ms | 545.541 ms |
+| first full view ready | 9712.257 ms | 9221.628 ms |
+| first render quiescent | 50136.512 ms | 50124.487 ms |
+| average frame | 5.469 ms | 5.615 ms |
+| p95 / p99 frame | 7.076 / 7.439 ms | 7.205 / 7.845 ms |
+| max frame | 9.298 ms | 10.052 ms |
+| over-budget frames | 0 | 0 |
+| total remesh | 439.307 ms | 820.441 ms |
+| total upload | 177.954 ms | 190.278 ms |
+| total render | 4163.235 ms | 4235.862 ms |
+| submitted compile sections | 7380 | 7759 |
+| completed compile sections | 7393 | 7772 |
+| uploaded sections | 2446 | 2804 |
+| deadline-skipped compile requests | 0 | 0 |
+
+Decision: workers `2` does not reproduce the earlier live quiescence win on
+this clean RD10 startup-streaming check. Full-view readiness improves by about
+5%, but render quiescence is unchanged at ~50.1s and remesh/frame tails are
+worse. Do not promote the desktop render compile worker default from `1` to `2`
+from this evidence.
+
+Tail attribution from existing queue samples: by ~14.7s the view is fully loaded
+and reports no pending compile jobs, but `pending_render_chunks` remains at `88`
+with `ready_render_work_pending=false`; the 15s-50.1s interval only submits 6
+sections and uploads 13, with no deadline skips. The long quiescence tail is
+therefore not bounded by compile-worker count or deadline admission capacity in
+this lane. It appears to be sporadic render-neighbor/readiness invalidation or a
+quiescence-definition issue and needs a separate named follow-up before worker
+promotion.
+
 ### 2026-07-07 - Tactical 150 Slice 3 Promotion Closure Measurements
 
 Benchmarked commit: `9da26f88` (`Fix app-runtime wasm all-target coverage bin`),

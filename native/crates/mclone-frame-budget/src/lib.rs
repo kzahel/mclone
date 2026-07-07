@@ -10,6 +10,7 @@ pub use mclone_diagnostics::{
 use serde::{Deserialize, Serialize};
 
 const TARGET_PERIOD_EPSILON_MS: f64 = 0.001;
+pub const DEFAULT_COST_EWMA_ALPHA: f64 = 0.25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -362,6 +363,73 @@ impl Default for BudgetControllerConfig {
             ],
         }
     }
+}
+
+pub fn render_frame_budget_controller_config(
+    host_kind: FrameHostKind,
+    admission_window: WorkWindow,
+) -> BudgetControllerConfig {
+    use BudgetDecisionFamily::*;
+    use WorkWindow::*;
+
+    BudgetControllerConfig {
+        raise_after_clean_windows: 3,
+        over_period_pct_cut_threshold: 0.0,
+        queue_age_limit_ms: Some(250.0),
+        queue_depth_limit: Some(1_000),
+        families: vec![
+            FamilyBudgetConfig::new(
+                RenderAdmission,
+                BudgetDecisionAddress::new(
+                    host_kind,
+                    admission_window,
+                    StageId::RenderSectionAdmission,
+                ),
+                1,
+                4,
+                0.02,
+                0.20,
+            ),
+            FamilyBudgetConfig::new(
+                BudgetDecisionFamily::CompletedResultAcceptance,
+                BudgetDecisionAddress::new(
+                    host_kind,
+                    admission_window,
+                    StageId::CompletedResultAcceptance,
+                ),
+                1,
+                16,
+                0.02,
+                0.20,
+            ),
+            FamilyBudgetConfig::new(
+                SectionUpload,
+                BudgetDecisionAddress::new(host_kind, admission_window, StageId::UploadApply),
+                1,
+                16,
+                0.02,
+                0.20,
+            ),
+            FamilyBudgetConfig::new(
+                RenderCompileWorkers,
+                BudgetDecisionAddress::new(host_kind, WorkerPoll, StageId::CpuMeshCompile),
+                1,
+                4,
+                0.0,
+                0.0,
+            ),
+        ],
+    }
+}
+
+pub fn decision_for_family(
+    panel: &BudgetDecisionPanelReport,
+    family: BudgetDecisionFamily,
+) -> Option<&BudgetDecisionReport> {
+    panel
+        .decisions
+        .iter()
+        .find(|decision| decision.family == family)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1032,6 +1100,33 @@ mod tests {
                 .reason,
             BudgetDecisionReason::CutQueueAge
         );
+    }
+
+    #[test]
+    fn render_frame_budget_config_addresses_lane_without_changing_floors() {
+        let config = render_frame_budget_controller_config(
+            FrameHostKind::AndroidXrOpenXr,
+            WorkWindow::PostSubmitOverlapSlack,
+        );
+        let mut controller = BudgetController::new(config);
+        let panel = controller.decide(&BudgetControllerInput::new(11.1));
+
+        let render = decision(&panel, BudgetDecisionFamily::RenderAdmission);
+        assert_eq!(render.address.host_kind, FrameHostKind::AndroidXrOpenXr);
+        assert_eq!(
+            render.address.work_window,
+            WorkWindow::PostSubmitOverlapSlack
+        );
+        assert_eq!(render.address.stage, StageId::RenderSectionAdmission);
+        assert_eq!(render.grant.min_units, 1);
+        assert_eq!(render.grant.max_units, 1);
+
+        let workers = decision(&panel, BudgetDecisionFamily::RenderCompileWorkers);
+        assert_eq!(workers.address.host_kind, FrameHostKind::AndroidXrOpenXr);
+        assert_eq!(workers.address.work_window, WorkWindow::WorkerPoll);
+        assert_eq!(workers.address.stage, StageId::CpuMeshCompile);
+        assert_eq!(workers.grant.min_units, 1);
+        assert_eq!(workers.grant.max_units, 1);
     }
 
     #[test]

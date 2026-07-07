@@ -968,6 +968,24 @@ impl LocalSingleViewSceneRuntime {
             )
     }
 
+    pub fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        max_compile_requests: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        let render_compile_dispatcher = &mut self.render_compile_dispatcher;
+        self.core
+            .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_targeted_snapshots_timed(
+                render_compile_dispatcher,
+                camera_position,
+                deadline,
+                max_compile_requests,
+                completed_result_accept_budget,
+            )
+    }
+
     pub fn sync_all_render_sections(
         &mut self,
         camera_position: Vec3,
@@ -1404,6 +1422,31 @@ where
                 .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
                     camera_position,
                     deadline,
+                    completed_result_accept_budget,
+                ),
+        }
+    }
+
+    pub fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        max_compile_requests: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => scene
+                .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+                    camera_position,
+                    deadline,
+                    max_compile_requests,
+                    completed_result_accept_budget,
+                ),
+            Self::RemoteDedicated(scene) => scene
+                .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+                    camera_position,
+                    deadline,
+                    max_compile_requests,
                     completed_result_accept_budget,
                 ),
         }
@@ -2231,6 +2274,28 @@ where
 
     pub fn sun_angle(&self) -> f32 {
         self.core.sun_angle()
+    }
+}
+
+impl<S> RemoteDedicatedSingleViewSceneRuntime<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    pub fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        max_compile_requests: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        self.core
+            .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_targeted_snapshots_timed(
+                &mut self.render_compile_dispatcher,
+                camera_position,
+                deadline,
+                max_compile_requests,
+                completed_result_accept_budget,
+            )
     }
 }
 

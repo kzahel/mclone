@@ -384,6 +384,7 @@ fn cli_parses_screenshot_scene_options() {
                 debug_passive_showcase: true,
                 lighting_enabled: true,
                 adaptive_chunk_publication_budget: true,
+                adaptive_render_admission_budget: false,
                 far_lod: Default::default(),
             },
             TexturedSectionRenderOptions::default(),

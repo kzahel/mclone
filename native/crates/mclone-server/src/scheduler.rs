@@ -19,8 +19,8 @@ use mclone_core::{
 };
 use mclone_frame_budget::{
     BudgetController, BudgetControllerConfig, BudgetControllerInput, BudgetDecisionAddress,
-    BudgetDecisionFamily, BudgetDecisionReport, BudgetTelemetryWindow, EwmaCostEstimator,
-    FamilyBudgetConfig, FrameHostKind, StageId, WorkWindow,
+    BudgetDecisionFamily, BudgetDecisionReport, BudgetTelemetryWindow, DEFAULT_COST_EWMA_ALPHA,
+    EwmaCostEstimator, FamilyBudgetConfig, FrameHostKind, StageId, WorkWindow,
 };
 use mclone_protocol::{ChunkView, SectionBlockUpdate};
 use mclone_worldgen::block::{
@@ -514,7 +514,7 @@ impl ChunkPublicationBudgetState {
         Self {
             config,
             controller: BudgetController::new(chunk_publication_budget_controller_config()),
-            estimator: EwmaCostEstimator::new(DEFAULT_PUBLICATION_COST_EWMA_ALPHA),
+            estimator: EwmaCostEstimator::new(DEFAULT_COST_EWMA_ALPHA),
             last_pending_worldgen_publication_chunk_limit:
                 DEFAULT_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT,
         }
@@ -4220,7 +4220,6 @@ const DEFAULT_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT: usize =
     STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT + BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT;
 const MAX_PENDING_WORLDGEN_PUBLICATION_CHUNK_LIMIT: usize =
     BACKGROUND_FEATURE_JOB_TARGET_CHUNK_LIMIT * 2;
-const DEFAULT_PUBLICATION_COST_EWMA_ALPHA: f64 = 0.25;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;
 
 fn chunk_publication_budget_controller_config() -> BudgetControllerConfig {

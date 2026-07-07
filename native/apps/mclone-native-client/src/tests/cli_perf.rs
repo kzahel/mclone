@@ -170,6 +170,46 @@ fn cli_parses_adaptive_chunk_publication_budget_flag() {
 }
 
 #[test]
+fn cli_parses_adaptive_render_admission_budget_flag() {
+    let cli = Cli::parse([
+        "--adaptive-render-admission-budget".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::Window { scene, .. } = cli else {
+        panic!("expected window mode");
+    };
+    assert!(scene.adaptive_render_admission_budget);
+
+    let cli = Cli::parse([
+        "--adaptive-render-admission-budget".to_owned(),
+        "false".to_owned(),
+    ])
+    .unwrap();
+    let Cli::Window { scene, .. } = cli else {
+        panic!("expected window mode");
+    };
+    assert!(!scene.adaptive_render_admission_budget);
+}
+
+#[test]
+fn cli_rejects_adaptive_render_admission_budget_for_remote_sessions() {
+    let err = Cli::parse([
+        "--remote-addr".to_owned(),
+        "127.0.0.1:25565".to_owned(),
+        "--adaptive-render-admission-budget".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("--adaptive-render-admission-budget applies only to local integrated worlds")
+    );
+}
+
+#[test]
 fn cli_allows_startup_streaming_target_hz_before_mode_flag() {
     let cli = Cli::parse([
         "--target-hz".to_owned(),

@@ -312,6 +312,7 @@ impl WindowFrameReportRecorder {
             "world_dir": scene.world_dir.as_ref().map(|path| path.display().to_string()),
             "lighting_enabled": scene.lighting_enabled,
             "adaptive_chunk_publication_budget": scene.adaptive_chunk_publication_budget,
+            "adaptive_render_admission_budget": scene.adaptive_render_admission_budget,
             "debug_passive_showcase": scene.debug_passive_showcase,
             "startup_wait": format!("{:?}", app.startup_wait),
             "simulation_cadence": {
