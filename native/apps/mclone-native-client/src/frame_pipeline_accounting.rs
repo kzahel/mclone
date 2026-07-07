@@ -127,6 +127,9 @@ impl DesktopFramePipelineAccounting {
 struct DesktopFrameQueueTrackers {
     inbound_updates: QueueAgeTracker,
     host_publication: QueueAgeTracker,
+    host_publication_runner: QueueAgeTracker,
+    host_publication_worldgen: QueueAgeTracker,
+    host_publication_light: QueueAgeTracker,
     render_compile_jobs: QueueAgeTracker,
     completed_results: QueueAgeTracker,
     upload_work: QueueAgeTracker,
@@ -137,6 +140,9 @@ impl DesktopFrameQueueTrackers {
         Self {
             inbound_updates: QueueAgeTracker::new(QueueId::InboundUpdates),
             host_publication: QueueAgeTracker::new(QueueId::HostPublication),
+            host_publication_runner: QueueAgeTracker::new(QueueId::HostPublicationRunner),
+            host_publication_worldgen: QueueAgeTracker::new(QueueId::HostPublicationWorldgen),
+            host_publication_light: QueueAgeTracker::new(QueueId::HostPublicationLight),
             render_compile_jobs: QueueAgeTracker::new(QueueId::RenderCompileJobs),
             completed_results: QueueAgeTracker::new(QueueId::CompletedRenderResults),
             upload_work: QueueAgeTracker::new(QueueId::UploadWork),
@@ -157,11 +163,26 @@ impl DesktopFrameQueueTrackers {
             runtime.is_some_and(|stats| stats.host_mode.server_owned_lanes_are_remote());
         if host_publication_remote {
             self.host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+            self.host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
+            self.host_publication_worldgen = QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
+            self.host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
         } else {
-            self.host_publication.reconcile_depth(
-                usize_to_u64(runtime.map_or(0, |stats| stats.pending_publications)),
-                now_ms,
-            );
+            let runner_depth = runtime.map_or(0, |stats| stats.pending_publications);
+            let worldgen_depth = runtime.map_or(0, |stats| {
+                stats.scheduler_pending_worldgen_publication_chunks
+            });
+            let light_depth = runtime.map_or(0, |stats| stats.scheduler_pending_light_publications);
+            let publication_depth = runner_depth
+                .saturating_add(worldgen_depth)
+                .saturating_add(light_depth);
+            self.host_publication
+                .reconcile_depth(usize_to_u64(publication_depth), now_ms);
+            self.host_publication_runner
+                .reconcile_depth(usize_to_u64(runner_depth), now_ms);
+            self.host_publication_worldgen
+                .reconcile_depth(usize_to_u64(worldgen_depth), now_ms);
+            self.host_publication_light
+                .reconcile_depth(usize_to_u64(light_depth), now_ms);
         }
         self.render_compile_jobs.reconcile_depth(
             usize_to_u64(runtime.map_or(render.last_pending_compile_jobs, |stats| {
@@ -181,6 +202,21 @@ impl DesktopFrameQueueTrackers {
                 remote_host_queue_report(QueueId::HostPublication)
             } else {
                 self.host_publication.report(now_ms)
+            },
+            if host_publication_remote {
+                remote_host_queue_report(QueueId::HostPublicationRunner)
+            } else {
+                self.host_publication_runner.report(now_ms)
+            },
+            if host_publication_remote {
+                remote_host_queue_report(QueueId::HostPublicationWorldgen)
+            } else {
+                self.host_publication_worldgen.report(now_ms)
+            },
+            if host_publication_remote {
+                remote_host_queue_report(QueueId::HostPublicationLight)
+            } else {
+                self.host_publication_light.report(now_ms)
             },
             self.inbound_updates.report(now_ms),
             self.render_compile_jobs.report(now_ms),
@@ -283,7 +319,7 @@ mod tests {
         assert_eq!(report.frame_summary.latest_frame_wall_ms, 16.0);
         assert_eq!(report.frame_summary.latest_app_work_ms, 16.0);
         assert_eq!(report.stage_spans.len(), 4);
-        assert_eq!(report.queue_panel.queues.len(), 5);
+        assert_eq!(report.queue_panel.queues.len(), 8);
         assert!(
             report
                 .queue_panel
@@ -350,6 +386,8 @@ mod tests {
             loaded_chunks: 0,
             pending_jobs: 0,
             pending_publications: 7,
+            scheduler_pending_worldgen_publication_chunks: 3,
+            scheduler_pending_light_publications: 4,
             pending_render_chunks: 0,
             pending_render_compile_jobs: 0,
             inflight_render_sections: 0,

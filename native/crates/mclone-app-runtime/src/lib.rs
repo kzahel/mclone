@@ -1046,6 +1046,8 @@ pub struct SingleViewRuntimeStats {
     pub loaded_chunks: usize,
     pub pending_jobs: usize,
     pub pending_publications: usize,
+    pub scheduler_pending_worldgen_publication_chunks: usize,
+    pub scheduler_pending_light_publications: usize,
     pub pending_render_chunks: usize,
     pub pending_render_compile_jobs: usize,
     pub inflight_render_sections: usize,
@@ -2557,6 +2559,21 @@ impl SingleViewRuntime {
             pending_jobs: runner_diagnostics.map_or(0, |diagnostics| diagnostics.pending_jobs),
             pending_publications: runner_diagnostics
                 .map_or(0, |diagnostics| diagnostics.pending_publications),
+            scheduler_pending_worldgen_publication_chunks: runner_diagnostics.map_or(
+                0,
+                |diagnostics| {
+                    diagnostics
+                        .last_tick
+                        .scheduler_publication
+                        .pending_worldgen_publication_chunks
+                },
+            ),
+            scheduler_pending_light_publications: runner_diagnostics.map_or(0, |diagnostics| {
+                diagnostics
+                    .last_tick
+                    .scheduler_publication
+                    .pending_light_publications
+            }),
             pending_render_chunks: self.pending_render_chunk_count(),
             pending_render_compile_jobs,
             inflight_render_sections: self.render_session().dirty().inflight_sections.len(),

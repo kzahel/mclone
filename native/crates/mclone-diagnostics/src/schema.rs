@@ -5,7 +5,7 @@ use crate::{
     QueuePanelReport, StageSpan, WorstFrameDetail,
 };
 
-pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 7;
+pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

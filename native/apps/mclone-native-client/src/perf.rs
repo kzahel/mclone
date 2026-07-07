@@ -3038,6 +3038,9 @@ fn startup_streaming_queue_panel(frames: &[StartupStreamingFrameReport]) -> Queu
     let mut completed_results = QueueAgeTracker::new(QueueId::CompletedRenderResults);
     let mut upload_work = QueueAgeTracker::new(QueueId::UploadWork);
     let mut host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+    let mut host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
+    let mut host_publication_worldgen = QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
+    let mut host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
     let mut render_compile_jobs = QueueAgeTracker::new(QueueId::RenderCompileJobs);
 
     for frame in frames {
@@ -3058,11 +3061,16 @@ fn startup_streaming_queue_panel(frames: &[StartupStreamingFrameReport]) -> Queu
             upload_work.dequeue(uploaded, now_ms);
         }
 
-        let publication_depth = frame
-            .pending_publications
-            .saturating_add(frame.scheduler_pending_worldgen_publication_chunks)
-            .saturating_add(frame.scheduler_pending_light_publications);
+        let runner_publication_depth = frame.pending_publications;
+        let worldgen_publication_depth = frame.scheduler_pending_worldgen_publication_chunks;
+        let light_publication_depth = frame.scheduler_pending_light_publications;
+        let publication_depth = runner_publication_depth
+            .saturating_add(worldgen_publication_depth)
+            .saturating_add(light_publication_depth);
         host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
+        host_publication_runner.reconcile_depth(usize_to_u64(runner_publication_depth), now_ms);
+        host_publication_worldgen.reconcile_depth(usize_to_u64(worldgen_publication_depth), now_ms);
+        host_publication_light.reconcile_depth(usize_to_u64(light_publication_depth), now_ms);
         render_compile_jobs
             .reconcile_depth(usize_to_u64(frame.pending_render_compile_jobs), now_ms);
     }
@@ -3073,6 +3081,9 @@ fn startup_streaming_queue_panel(frames: &[StartupStreamingFrameReport]) -> Queu
         completed_results.report(report_at_ms),
         upload_work.report(report_at_ms),
         host_publication.report(report_at_ms),
+        host_publication_runner.report(report_at_ms),
+        host_publication_worldgen.report(report_at_ms),
+        host_publication_light.report(report_at_ms),
         render_compile_jobs.report(report_at_ms),
     ])
 }

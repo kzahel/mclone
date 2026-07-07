@@ -1,13 +1,14 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 2 sparse changed-block filtering, post-filter re-rank, and
-vanilla comparison scout have landed. The retained-light path now enqueues
-replacement rechecks only when current opacity/emission facts change, cutting
-clean RD10/RD15 changed-block recheck time by about `90%` and light compute by
-`54-56%` while the lighting fixtures remain byte-identical. Fresh startup moved
-`26-29%`. The scout did not find a missing vanilla initial-light batching
-algorithm; the next narrow implementation should split publication age from
-serial sky-graph drain and only then pick a valve or solver win.
+Status: Slice 2 sparse changed-block filtering, post-filter re-rank, vanilla
+comparison scout, and publication-age source split have landed. The retained
+light path now enqueues replacement rechecks only when current opacity/emission
+facts change, cutting clean RD10/RD15 changed-block recheck time by about `90%`
+and light compute by `54-56%` while the lighting fixtures remain byte-identical.
+Fresh startup moved `26-29%`. The scout did not find a missing vanilla
+initial-light batching algorithm; schema v8 now splits `host-publication` age
+into runner/worldgen/light component rows so the next narrow implementation can
+choose a publication valve or sky-graph solver win from source-level evidence.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -570,6 +571,19 @@ is fixed. The next implementation slice should add just enough age/source
 attribution to decide whether the remaining `host-publication` age is real
 publication backlog or a proxy for serial sky-graph work, then land the
 corresponding smallest change.
+
+The source split then landed as frame-pipeline schema v8. Startup-streaming,
+desktop live accounting, shared XR scene accounting, and Android XR perf export
+now keep the legacy aggregate `host-publication` row and add
+`host-publication-runner`, `host-publication-worldgen`, and
+`host-publication-light`. `SingleViewRuntimeStats` now carries the scheduler
+worldgen/light publication depths so flat desktop reports the same vocabulary as
+startup and XR. A short RD2 startup-streaming smoke wrote
+`/tmp/mclone-153-publication-split-smoke.json` and verified schema `8` plus all
+four publication rows; in that smoke the component depths were runner `41`,
+worldgen `55`, and light `0`, proving the split can distinguish publication
+valve backlog from light-publication backlog. This smoke is a wiring check, not
+a replacement for the RD10/RD15 decision rows.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages

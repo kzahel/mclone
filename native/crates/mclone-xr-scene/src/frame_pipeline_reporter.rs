@@ -165,6 +165,9 @@ struct XrFramePipelineQueueTrackers {
     completed_results: QueueAgeTracker,
     upload_work: QueueAgeTracker,
     host_publication: QueueAgeTracker,
+    host_publication_runner: QueueAgeTracker,
+    host_publication_worldgen: QueueAgeTracker,
+    host_publication_light: QueueAgeTracker,
     render_compile_jobs: QueueAgeTracker,
 }
 
@@ -175,6 +178,9 @@ impl XrFramePipelineQueueTrackers {
             completed_results: QueueAgeTracker::new(QueueId::CompletedRenderResults),
             upload_work: QueueAgeTracker::new(QueueId::UploadWork),
             host_publication: QueueAgeTracker::new(QueueId::HostPublication),
+            host_publication_runner: QueueAgeTracker::new(QueueId::HostPublicationRunner),
+            host_publication_worldgen: QueueAgeTracker::new(QueueId::HostPublicationWorldgen),
+            host_publication_light: QueueAgeTracker::new(QueueId::HostPublicationLight),
             render_compile_jobs: QueueAgeTracker::new(QueueId::RenderCompileJobs),
         }
     }
@@ -201,13 +207,25 @@ impl XrFramePipelineQueueTrackers {
 
             if upload.host_mode.server_owned_lanes_are_remote() {
                 self.host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+                self.host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
+                self.host_publication_worldgen =
+                    QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
+                self.host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
             } else {
-                let publication_depth = upload
-                    .server_pending_publications
-                    .saturating_add(upload.poll_scheduler_pending_worldgen_publication_chunks)
-                    .saturating_add(upload.poll_scheduler_pending_light_publications);
+                let runner_depth = upload.server_pending_publications;
+                let worldgen_depth = upload.poll_scheduler_pending_worldgen_publication_chunks;
+                let light_depth = upload.poll_scheduler_pending_light_publications;
+                let publication_depth = runner_depth
+                    .saturating_add(worldgen_depth)
+                    .saturating_add(light_depth);
                 self.host_publication
                     .reconcile_depth(usize_to_u64(publication_depth), now_ms);
+                self.host_publication_runner
+                    .reconcile_depth(usize_to_u64(runner_depth), now_ms);
+                self.host_publication_worldgen
+                    .reconcile_depth(usize_to_u64(worldgen_depth), now_ms);
+                self.host_publication_light
+                    .reconcile_depth(usize_to_u64(light_depth), now_ms);
             }
             self.render_compile_jobs
                 .reconcile_depth(usize_to_u64(upload.pending_compile_jobs_after), now_ms);
@@ -221,12 +239,30 @@ impl XrFramePipelineQueueTrackers {
         } else {
             self.host_publication.report(now_ms)
         };
+        let host_publication_runner = if host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublicationRunner)
+        } else {
+            self.host_publication_runner.report(now_ms)
+        };
+        let host_publication_worldgen = if host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublicationWorldgen)
+        } else {
+            self.host_publication_worldgen.report(now_ms)
+        };
+        let host_publication_light = if host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublicationLight)
+        } else {
+            self.host_publication_light.report(now_ms)
+        };
 
         QueuePanelReport::new(vec![
             self.inbound_updates.report(now_ms),
             self.completed_results.report(now_ms),
             self.upload_work.report(now_ms),
             host_publication,
+            host_publication_runner,
+            host_publication_worldgen,
+            host_publication_light,
             self.render_compile_jobs.report(now_ms),
         ])
     }
@@ -393,7 +429,7 @@ mod tests {
         );
         assert_eq!(revision, 1);
         assert_eq!(report.frame_summary.frames, 1);
-        assert_eq!(report.queue_panel.queues.len(), 5);
+        assert_eq!(report.queue_panel.queues.len(), 8);
         assert!(report.stage_spans.iter().any(|span| {
             span.stage == StageId::GpuExecutionPresentationWait && span.elapsed_ms == 2.0
         }));
@@ -445,6 +481,20 @@ mod tests {
             DiagnosticLaneAvailability::RemoteHost
         );
         assert_eq!(host_publication.depth, 0);
+        for queue_id in [
+            QueueId::HostPublicationRunner,
+            QueueId::HostPublicationWorldgen,
+            QueueId::HostPublicationLight,
+        ] {
+            let queue = report
+                .queue_panel
+                .queues
+                .iter()
+                .find(|queue| queue.queue == queue_id)
+                .expect("host publication component queue");
+            assert_eq!(queue.availability, DiagnosticLaneAvailability::RemoteHost);
+            assert_eq!(queue.depth, 0);
+        }
         let inbound_updates = report
             .queue_panel
             .queues

@@ -11,6 +11,9 @@ pub enum QueueId {
     CompletedRenderResults,
     UploadWork,
     HostPublication,
+    HostPublicationRunner,
+    HostPublicationWorldgen,
+    HostPublicationLight,
     RenderCompileJobs,
     Custom(String),
 }

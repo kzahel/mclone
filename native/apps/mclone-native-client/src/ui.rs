@@ -241,6 +241,8 @@ mod tests {
                 loaded_chunks: 9,
                 pending_jobs: 1,
                 pending_publications: 2,
+                scheduler_pending_worldgen_publication_chunks: 1,
+                scheduler_pending_light_publications: 1,
                 pending_render_chunks: 3,
                 pending_render_compile_jobs: 1,
                 inflight_render_sections: 4,

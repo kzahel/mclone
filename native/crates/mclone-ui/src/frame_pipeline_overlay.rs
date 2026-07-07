@@ -394,6 +394,9 @@ fn queue_label(queue: &QueueId) -> &'static str {
         QueueId::CompletedRenderResults => "COMPLETE",
         QueueId::UploadWork => "UPLOAD",
         QueueId::HostPublication => "PUBLISH",
+        QueueId::HostPublicationRunner => "PUB RUN",
+        QueueId::HostPublicationWorldgen => "PUB GEN",
+        QueueId::HostPublicationLight => "PUB LIT",
         QueueId::RenderCompileJobs => "COMPILE",
         QueueId::Custom(_) => "CUSTOM",
     }

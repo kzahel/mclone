@@ -305,17 +305,20 @@ sink's formatting code is a defect. The logs remain the benchmark authority
 and the overlay stays a thin view because all three are projections of the
 same data, not because of discipline alone.
 
-As of Slice 2 of tactical 149, schema v6 carries per-lane availability on
-queue and peer-thread reports (`local`, `remote-host`, `unsupported`). Remote
-dedicated sessions must mark server-owned lanes as `remote-host` instead of
-rendering unavailable host counters as local zeros; client-paid lanes such as
-inbound updates, update apply, upload work, render compile, and completed
-results remain local. Schema v5 introduced the shared frame summary, queue
-panel, local peer-thread panel, GPU timestamp panel, and latest-frame fields
-consumed by the debug overlay. Desktop startup-streaming JSON, Quest/Android XR
-perf markers, accounting-smoke JSON, and the desktop flat overlay use the same
-report structs and render-admission/upload stage names for completed-result
-acceptance, dirty/ready scan, request build, worker submit, prepared-record
+As of Tactical 153's publication-age split, schema v8 keeps the legacy
+`host-publication` queue and adds component rows for
+`host-publication-runner`, `host-publication-worldgen`, and
+`host-publication-light`. Schema v6 carries per-lane availability on queue and
+peer-thread reports (`local`, `remote-host`, `unsupported`). Remote dedicated
+sessions must mark server-owned lanes as `remote-host` instead of rendering
+unavailable host counters as local zeros; client-paid lanes such as inbound
+updates, update apply, upload work, render compile, and completed results remain
+local. Schema v5 introduced the shared frame summary, queue panel, local
+peer-thread panel, GPU timestamp panel, and latest-frame fields consumed by the
+debug overlay. Desktop startup-streaming JSON, Quest/Android XR perf markers,
+accounting-smoke JSON, and the desktop flat overlay use the same report structs
+and render-admission/upload stage names for completed-result acceptance,
+dirty/ready scan, request build, worker submit, prepared-record
 maintenance, admission remainder, and upload apply.
 
 ### Per-Lane Time-Source Authority
@@ -427,8 +430,9 @@ The debug UI should eventually show the same pipeline model that the logs record
 - frame budget bar: app work, wait, headroom, over-period status;
 - stacked current-frame waterfall: input/pose, update apply, terrain runtime,
   upload, records, cull/encode, GPU/poll wait;
-- queue panel: host publication, inbound updates, dirty sections, compile jobs,
-  completed results, upload queue, oldest age;
+- queue panel: host publication and its runner/worldgen/light components,
+  inbound updates, dirty sections, compile jobs, completed results, upload queue,
+  oldest age;
 - local integrated peer panel: worldgen/light/server runner thread activity and
   backlog;
 - readiness panel: playable gate, target chunks ready, render actionable idle,

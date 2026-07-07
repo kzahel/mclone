@@ -5437,6 +5437,9 @@ mod android {
         let mut completed_results = QueueAgeTracker::new(QueueId::CompletedRenderResults);
         let mut upload_work = QueueAgeTracker::new(QueueId::UploadWork);
         let mut host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+        let mut host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
+        let mut host_publication_worldgen = QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
+        let mut host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
         let mut render_compile_jobs = QueueAgeTracker::new(QueueId::RenderCompileJobs);
         let mut now_ms = 0.0;
 
@@ -5464,11 +5467,16 @@ mod android {
             );
 
             if !upload.host_mode.server_owned_lanes_are_remote() {
-                let publication_depth = upload
-                    .server_pending_publications
-                    .saturating_add(upload.poll_scheduler_pending_worldgen_publication_chunks)
-                    .saturating_add(upload.poll_scheduler_pending_light_publications);
+                let runner_depth = upload.server_pending_publications;
+                let worldgen_depth = upload.poll_scheduler_pending_worldgen_publication_chunks;
+                let light_depth = upload.poll_scheduler_pending_light_publications;
+                let publication_depth = runner_depth
+                    .saturating_add(worldgen_depth)
+                    .saturating_add(light_depth);
                 host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
+                host_publication_runner.reconcile_depth(usize_to_u64(runner_depth), now_ms);
+                host_publication_worldgen.reconcile_depth(usize_to_u64(worldgen_depth), now_ms);
+                host_publication_light.reconcile_depth(usize_to_u64(light_depth), now_ms);
             }
             render_compile_jobs
                 .reconcile_depth(usize_to_u64(upload.pending_compile_jobs_after), now_ms);
@@ -5484,12 +5492,30 @@ mod android {
         } else {
             host_publication.report(now_ms)
         };
+        let host_publication_runner = if latest_host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublicationRunner)
+        } else {
+            host_publication_runner.report(now_ms)
+        };
+        let host_publication_worldgen = if latest_host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublicationWorldgen)
+        } else {
+            host_publication_worldgen.report(now_ms)
+        };
+        let host_publication_light = if latest_host_mode.server_owned_lanes_are_remote() {
+            remote_host_queue_report(QueueId::HostPublicationLight)
+        } else {
+            host_publication_light.report(now_ms)
+        };
 
         QueuePanelReport::new(vec![
             inbound_updates.report(now_ms),
             completed_results.report(now_ms),
             upload_work.report(now_ms),
             host_publication,
+            host_publication_runner,
+            host_publication_worldgen,
+            host_publication_light,
             render_compile_jobs.report(now_ms),
         ])
     }
@@ -5863,6 +5889,9 @@ mod android {
             QueueId::CompletedRenderResults => "completed-render-results",
             QueueId::UploadWork => "upload-work",
             QueueId::HostPublication => "host-publication",
+            QueueId::HostPublicationRunner => "host-publication-runner",
+            QueueId::HostPublicationWorldgen => "host-publication-worldgen",
+            QueueId::HostPublicationLight => "host-publication-light",
             QueueId::RenderCompileJobs => "render-compile-jobs",
             QueueId::Custom(label) => label.as_str(),
         }
