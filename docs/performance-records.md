@@ -101,6 +101,48 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Slice 2 Light Sub-Cost Attribution
+
+Commit reported by benchmark JSON: `db8a9e49`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: shared native light-status instrumentation only. This is the
+server-only `scheduler_loading_perf` ceiling lane, so it includes scheduler
+job admission, retained light-status compute, and light publication handoff, but
+not client update pump, CPU mesh, GPU upload, or frame pacing.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 10 --max-seconds 180 > /tmp/mclone-153-slice2-clean-scheduler-rd10-light-subcosts.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 15 --max-seconds 240 > /tmp/mclone-153-slice2-clean-scheduler-rd15-light-subcosts.json
+```
+
+Light-status attribution:
+
+| Lane | Target chunks | View ready | Settled | Light statuses / batches | Light compute | Compute / status | Changed-block recheck | Sky graph | Block graph | Storage swap | Collect sections | Publication handoff |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `529` | `12680.208ms` | `14626.262ms` | `625 / 73` | `10500.835ms` | `16.801ms` | `6153.664ms` / `58.6%` | `3693.568ms` / `35.2%` | `203.333ms` / `1.9%` | `51.482ms` / `0.5%` | `24.983ms` / `0.2%` | `61.974ms` / `0.6%` |
+| RD15 server-only | `1089` | `31744.605ms` | `35435.749ms` | `1225 / 144` | `21303.616ms` | `17.391ms` | `12831.490ms` / `60.2%` | `7116.344ms` / `33.4%` | `376.064ms` / `1.8%` | `200.390ms` / `0.9%` | `50.575ms` / `0.2%` | `124.053ms` / `0.6%` |
+
+Graph counters:
+
+| Lane | Sky nodes | Block nodes | Sky source updates | Storage affected sections | Max sky queue before |
+|---|---:|---:|---:|---:|---:|
+| RD10 server-only | `5428213` | `307814` | `1253` | `134490` | `13522` |
+| RD15 server-only | `9978387` | `535659` | `2363` | `253683` | `13522` |
+
+Interpretation: the binding serial-light work is not section-map copying or
+publication handoff. Changed-block rechecks dominate at `58.6-60.2%` of light
+compute (`9.846-10.475ms/status`), followed by sky graph propagation at
+`33.4-35.2%` (`5.809-5.910ms/status`). Section setup, storage swaps, collection,
+and publication handoff are each low single-digit or sub-1% shares in this lane.
+The next Tactical 153 Slice 2 implementation should stay in option A and target
+parity-neutral reduction of changed-block recheck work before considering any
+parallel-light divergence. The native-thread server lane has no status/bridge
+serialization; web/worker bridge overhead remains represented by worker frame
+metrics rather than this server-only benchmark.
+
 ### 2026-07-07 - Tactical 153 Applied Derived Render Compile Capacity
 
 Commit reported by benchmark JSON: `b3147f4e`, `git_dirty=false`,

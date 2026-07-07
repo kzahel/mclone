@@ -494,6 +494,26 @@ Deliverables:
 - either way: light stage rate, busy fraction, and queue age re-measured
   into the Slice 0 table format.
 
+First Slice 2 profiling landed in `db8a9e49` as shared instrumentation, not a
+solver change. The clean release `scheduler_loading_perf` rows show the native
+server-only light ceiling is dominated by changed-block rechecks, then sky graph
+propagation:
+
+| Lane | Light statuses / batches | Light compute | Compute / status | Changed-block recheck | Sky graph | Block graph | Storage swap | Publication handoff |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `625 / 73` | `10500.835ms` | `16.801ms` | `6153.664ms` / `58.6%` | `3693.568ms` / `35.2%` | `203.333ms` / `1.9%` | `51.482ms` / `0.5%` | `61.974ms` / `0.6%` |
+| RD15 server-only | `1225 / 144` | `21303.616ms` | `17.391ms` | `12831.490ms` / `60.2%` | `7116.344ms` / `33.4%` | `376.064ms` / `1.8%` | `200.390ms` / `0.9%` | `124.053ms` / `0.6%` |
+
+Graph counters reinforce that ranking: RD10 processed `5428213` sky nodes and
+`307814` block nodes; RD15 processed `9978387` sky nodes and `535659` block
+nodes. Storage affected sections grew from `134490` to `253683`, but storage
+swap time stayed below `1%` of light compute. The native-thread
+`scheduler_loading_perf` lane has no status/bridge serialization; worker bridge
+cost stays in `WorkerFrameMetrics` for web/worker paths. Decision: remain in
+option A. The next code slice should reduce redundant changed-block rechecks
+or make them sparse/dirty-set based while preserving byte-identical lighting
+fixtures, before any option-B parallel-light divergence is considered.
+
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages
 watched), movement probe. Acceptance: light stage ceiling raised to at
