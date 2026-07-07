@@ -1,8 +1,8 @@
 use crate::{
     BlockLightSectionStorage, BlockPosKey, DataLayer, Direction, DynamicGraphCallbacks,
-    DynamicGraphMinFixedPoint, DynamicGraphRunReport, NeighborCheck, SectionPosKey,
-    block_pos_get_x, block_pos_get_y, block_pos_get_z, block_pos_offset, block_to_section_key,
-    section_relative,
+    DynamicGraphMinFixedPoint, LightEngineRunReport, NeighborCheck, SectionPosKey, block_pos_get_x,
+    block_pos_get_y, block_pos_get_z, block_pos_offset, block_to_section_key, section_relative,
+    timing_elapsed_us, timing_start,
 };
 
 pub trait BlockLightWorld {
@@ -116,7 +116,8 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
         self.run_updates_report(budget).0
     }
 
-    pub fn run_updates_report(&mut self, budget: usize) -> (usize, DynamicGraphRunReport) {
+    pub fn run_updates_report(&mut self, budget: usize) -> (usize, LightEngineRunReport) {
+        let graph_start = timing_start();
         let remaining = {
             let mut delegate = BlockLightGraphDelegate {
                 storage: &mut self.storage,
@@ -124,8 +125,20 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
             };
             self.graph.run_updates_report(&mut delegate, budget)
         };
-        self.storage.swap_section_map();
-        remaining
+        let graph_us = timing_elapsed_us(graph_start);
+        let swap_start = timing_start();
+        let affected_sections = self.storage.swap_section_map().len();
+        let storage_swap_us = timing_elapsed_us(swap_start);
+        (
+            remaining.0,
+            LightEngineRunReport {
+                graph: remaining.1,
+                graph_us,
+                storage_swap_us,
+                affected_sections,
+                ..LightEngineRunReport::default()
+            },
+        )
     }
 
     pub fn has_work(&self) -> bool {

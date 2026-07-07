@@ -131,8 +131,11 @@ pub struct ChunkSchedulerMetrics {
     pub total_light_status_block_source_scan_us: u128,
     pub total_light_status_engine_init_us: u128,
     pub total_light_status_section_setup_us: u128,
+    pub total_light_status_section_status_update_us: u128,
+    pub total_light_status_sky_column_enable_us: u128,
     pub total_light_status_sky_source_enqueue_us: u128,
     pub total_light_status_block_source_enqueue_us: u128,
+    pub total_light_status_changed_block_check_us: u128,
     pub total_light_status_run_updates_us: u128,
     pub total_light_status_run_update_iterations: usize,
     pub total_light_status_block_run_update_calls: usize,
@@ -145,7 +148,18 @@ pub struct ChunkSchedulerMetrics {
     pub final_light_status_sky_run_update_queue_after: usize,
     pub total_light_status_block_run_updates_us: u128,
     pub total_light_status_sky_run_updates_us: u128,
+    pub total_light_status_sky_source_update_count: usize,
+    pub total_light_status_sky_source_updates_us: u128,
+    pub total_light_status_block_run_update_graph_us: u128,
+    pub total_light_status_sky_run_update_graph_us: u128,
+    pub total_light_status_block_run_update_storage_swap_us: u128,
+    pub total_light_status_sky_run_update_storage_swap_us: u128,
+    pub total_light_status_block_run_update_affected_sections: usize,
+    pub total_light_status_sky_run_update_affected_sections: usize,
     pub total_light_status_collect_sections_us: u128,
+    pub total_light_status_publication_us: u128,
+    pub max_light_status_publication_us: u128,
+    pub total_light_status_publication_units: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -474,6 +488,9 @@ pub struct ChunkScheduler {
     completed_light_batches: usize,
     total_light_status_compute_us: u128,
     max_light_status_compute_us: u128,
+    total_light_status_publication_us: u128,
+    max_light_status_publication_us: u128,
+    total_light_status_publication_units: usize,
     light_status_timing: LevelLightComputationTiming,
     pending_block_deltas: BTreeMap<(ChunkPos, i32), BTreeMap<usize, BlockStateId>>,
     pending_runtime_light_snapshots: VecDeque<ChunkSnapshot>,
@@ -702,6 +719,9 @@ impl ChunkScheduler {
             completed_light_batches: 0,
             total_light_status_compute_us: 0,
             max_light_status_compute_us: 0,
+            total_light_status_publication_us: 0,
+            max_light_status_publication_us: 0,
+            total_light_status_publication_units: 0,
             light_status_timing: LevelLightComputationTiming::default(),
             pending_block_deltas: BTreeMap::new(),
             pending_runtime_light_snapshots: VecDeque::new(),
@@ -747,6 +767,9 @@ impl ChunkScheduler {
             completed_light_batches: 0,
             total_light_status_compute_us: 0,
             max_light_status_compute_us: 0,
+            total_light_status_publication_us: 0,
+            max_light_status_publication_us: 0,
+            total_light_status_publication_units: 0,
             light_status_timing: LevelLightComputationTiming::default(),
             pending_block_deltas: BTreeMap::new(),
             pending_runtime_light_snapshots: VecDeque::new(),
@@ -1386,12 +1409,19 @@ impl ChunkScheduler {
             total_light_status_block_source_scan_us: self.light_status_timing.block_source_scan_us,
             total_light_status_engine_init_us: self.light_status_timing.engine_init_us,
             total_light_status_section_setup_us: self.light_status_timing.section_setup_us,
+            total_light_status_section_status_update_us: self
+                .light_status_timing
+                .section_status_update_us,
+            total_light_status_sky_column_enable_us: self.light_status_timing.sky_column_enable_us,
             total_light_status_sky_source_enqueue_us: self
                 .light_status_timing
                 .sky_source_enqueue_us,
             total_light_status_block_source_enqueue_us: self
                 .light_status_timing
                 .block_source_enqueue_us,
+            total_light_status_changed_block_check_us: self
+                .light_status_timing
+                .changed_block_check_us,
             total_light_status_run_updates_us: self.light_status_timing.run_updates_us,
             total_light_status_run_update_iterations: self
                 .light_status_timing
@@ -1420,7 +1450,34 @@ impl ChunkScheduler {
                 .final_sky_run_update_queue_after,
             total_light_status_block_run_updates_us: self.light_status_timing.block_run_updates_us,
             total_light_status_sky_run_updates_us: self.light_status_timing.sky_run_updates_us,
+            total_light_status_sky_source_update_count: self
+                .light_status_timing
+                .sky_source_update_count,
+            total_light_status_sky_source_updates_us: self
+                .light_status_timing
+                .sky_source_updates_us,
+            total_light_status_block_run_update_graph_us: self
+                .light_status_timing
+                .block_run_update_graph_us,
+            total_light_status_sky_run_update_graph_us: self
+                .light_status_timing
+                .sky_run_update_graph_us,
+            total_light_status_block_run_update_storage_swap_us: self
+                .light_status_timing
+                .block_run_update_storage_swap_us,
+            total_light_status_sky_run_update_storage_swap_us: self
+                .light_status_timing
+                .sky_run_update_storage_swap_us,
+            total_light_status_block_run_update_affected_sections: self
+                .light_status_timing
+                .block_run_update_affected_sections,
+            total_light_status_sky_run_update_affected_sections: self
+                .light_status_timing
+                .sky_run_update_affected_sections,
             total_light_status_collect_sections_us: self.light_status_timing.collect_sections_us,
+            total_light_status_publication_us: self.total_light_status_publication_us,
+            max_light_status_publication_us: self.max_light_status_publication_us,
+            total_light_status_publication_units: self.total_light_status_publication_units,
         }
     }
 
@@ -2936,6 +2993,16 @@ impl ChunkScheduler {
         let spent_us = simulation_timing_elapsed_us(publish_start);
         diagnostics.light_publish_spent_units = spent_units;
         diagnostics.light_publish_spent_us = spent_us;
+        if spent_units > 0 {
+            self.total_light_status_publication_us = self
+                .total_light_status_publication_us
+                .saturating_add(spent_us);
+            self.max_light_status_publication_us =
+                self.max_light_status_publication_us.max(spent_us);
+            self.total_light_status_publication_units = self
+                .total_light_status_publication_units
+                .saturating_add(spent_units);
+        }
         self.observe_publication_spend(
             BudgetDecisionFamily::LightPublication,
             spent_us,

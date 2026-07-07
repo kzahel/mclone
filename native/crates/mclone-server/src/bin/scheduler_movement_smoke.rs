@@ -615,12 +615,24 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         micros_to_ms(metrics.total_light_status_section_setup_us)
     );
     println!(
+        "{indent}    \"section_status_update\": {:.3},",
+        micros_to_ms(metrics.total_light_status_section_status_update_us)
+    );
+    println!(
+        "{indent}    \"sky_column_enable\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_column_enable_us)
+    );
+    println!(
         "{indent}    \"sky_source_enqueue\": {:.3},",
         micros_to_ms(metrics.total_light_status_sky_source_enqueue_us)
     );
     println!(
         "{indent}    \"block_source_enqueue\": {:.3},",
         micros_to_ms(metrics.total_light_status_block_source_enqueue_us)
+    );
+    println!(
+        "{indent}    \"changed_block_check\": {:.3},",
+        micros_to_ms(metrics.total_light_status_changed_block_check_us)
     );
     println!(
         "{indent}    \"run_updates\": {:.3},",
@@ -635,8 +647,32 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         micros_to_ms(metrics.total_light_status_sky_run_updates_us)
     );
     println!(
-        "{indent}    \"collect_sections\": {:.3}",
+        "{indent}    \"sky_source_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_source_updates_us)
+    );
+    println!(
+        "{indent}    \"block_run_update_graph\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_run_update_graph_us)
+    );
+    println!(
+        "{indent}    \"sky_run_update_graph\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_run_update_graph_us)
+    );
+    println!(
+        "{indent}    \"block_run_update_storage_swap\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_run_update_storage_swap_us)
+    );
+    println!(
+        "{indent}    \"sky_run_update_storage_swap\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_run_update_storage_swap_us)
+    );
+    println!(
+        "{indent}    \"collect_sections\": {:.3},",
         micros_to_ms(metrics.total_light_status_collect_sections_us)
+    );
+    println!(
+        "{indent}    \"publication_handoff\": {:.3}",
+        micros_to_ms(metrics.total_light_status_publication_us)
     );
     println!("{indent}  }},");
     println!("{indent}  \"light_status_graph\": {{");
@@ -659,6 +695,18 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
     println!(
         "{indent}    \"sky_processed_nodes\": {},",
         metrics.total_light_status_sky_run_update_processed_nodes
+    );
+    println!(
+        "{indent}    \"sky_source_update_count\": {},",
+        metrics.total_light_status_sky_source_update_count
+    );
+    println!(
+        "{indent}    \"block_affected_sections\": {},",
+        metrics.total_light_status_block_run_update_affected_sections
+    );
+    println!(
+        "{indent}    \"sky_affected_sections\": {},",
+        metrics.total_light_status_sky_run_update_affected_sections
     );
     println!(
         "{indent}    \"max_block_queue_before\": {},",

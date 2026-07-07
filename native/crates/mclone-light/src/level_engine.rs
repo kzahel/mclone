@@ -1,38 +1,19 @@
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
-
 use crate::{
     BlockLightEngine, BlockLightWorld, BlockPosKey, DataLayer, DynamicGraphRunReport, LightLayer,
-    SectionPosKey, SkyLightEngine, SkyLightWorld,
+    SectionPosKey, SkyLightEngine, SkyLightWorld, timing_elapsed_us, timing_start,
 };
 
 pub const MAX_SOURCE_LEVEL: u8 = 15;
 pub const LIGHT_SECTION_PADDING: i32 = 1;
 
-#[cfg(not(target_arch = "wasm32"))]
-type TimingSample = Instant;
-
-#[cfg(target_arch = "wasm32")]
-type TimingSample = ();
-
-#[cfg(not(target_arch = "wasm32"))]
-fn timing_start() -> Option<TimingSample> {
-    Some(Instant::now())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn timing_start() -> Option<TimingSample> {
-    None
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn timing_elapsed_us(start: Option<TimingSample>) -> u128 {
-    start.map_or(0, |start| start.elapsed().as_micros())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn timing_elapsed_us(_start: Option<TimingSample>) -> u128 {
-    0
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LightEngineRunReport {
+    pub graph: DynamicGraphRunReport,
+    pub source_update_count: usize,
+    pub source_updates_us: u128,
+    pub graph_us: u128,
+    pub storage_swap_us: u128,
+    pub affected_sections: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -42,15 +23,25 @@ pub struct LightLayerRunReport {
     pub queue_before: usize,
     pub queue_after: usize,
     pub run_updates_us: u128,
+    pub source_update_count: usize,
+    pub source_updates_us: u128,
+    pub graph_us: u128,
+    pub storage_swap_us: u128,
+    pub affected_sections: usize,
 }
 
 impl LightLayerRunReport {
-    fn record_call(&mut self, graph: DynamicGraphRunReport, run_updates_us: u128) {
-        self.queue_before = self.queue_before.max(graph.queue_before);
+    fn record_call(&mut self, report: LightEngineRunReport, run_updates_us: u128) {
+        self.queue_before = self.queue_before.max(report.graph.queue_before);
         self.calls += 1;
-        self.processed_nodes += graph.processed_nodes;
-        self.queue_after = graph.queue_after;
+        self.processed_nodes += report.graph.processed_nodes;
+        self.queue_after = report.graph.queue_after;
         self.run_updates_us += run_updates_us;
+        self.source_update_count += report.source_update_count;
+        self.source_updates_us += report.source_updates_us;
+        self.graph_us += report.graph_us;
+        self.storage_swap_us += report.storage_swap_us;
+        self.affected_sections += report.affected_sections;
     }
 
     fn add_assign(&mut self, other: Self) {
@@ -59,6 +50,11 @@ impl LightLayerRunReport {
         self.processed_nodes += other.processed_nodes;
         self.queue_after = other.queue_after;
         self.run_updates_us += other.run_updates_us;
+        self.source_update_count += other.source_update_count;
+        self.source_updates_us += other.source_updates_us;
+        self.graph_us += other.graph_us;
+        self.storage_swap_us += other.storage_swap_us;
+        self.affected_sections += other.affected_sections;
     }
 }
 

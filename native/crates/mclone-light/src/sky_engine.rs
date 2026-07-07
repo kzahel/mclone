@@ -1,9 +1,9 @@
 use crate::{
     BlockPosKey, DataLayer, Direction, DynamicGraphCallbacks, DynamicGraphMinFixedPoint,
-    DynamicGraphRunReport, LIGHT_ONLY, NeighborCheck, SectionPosKey, SkyLightSectionStorage,
+    LIGHT_ONLY, LightEngineRunReport, NeighborCheck, SectionPosKey, SkyLightSectionStorage,
     SkySourceUpdateKind, block_pos_as_long, block_pos_flat_index, block_pos_get_x, block_pos_get_y,
     block_pos_get_z, block_pos_offset, block_to_section_key, section_offset, section_relative,
-    section_x, section_y, section_z,
+    section_x, section_y, section_z, timing_elapsed_us, timing_start,
 };
 
 pub trait SkyLightWorld {
@@ -106,8 +106,11 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
         self.run_updates_report(budget).0
     }
 
-    pub fn run_updates_report(&mut self, budget: usize) -> (usize, DynamicGraphRunReport) {
-        self.apply_source_updates();
+    pub fn run_updates_report(&mut self, budget: usize) -> (usize, LightEngineRunReport) {
+        let source_start = timing_start();
+        let source_update_count = self.apply_source_updates();
+        let source_updates_us = timing_elapsed_us(source_start);
+        let graph_start = timing_start();
         let remaining = {
             let mut delegate = SkyLightGraphDelegate {
                 storage: &mut self.storage,
@@ -115,8 +118,21 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
             };
             self.graph.run_updates_report(&mut delegate, budget)
         };
-        self.storage.swap_section_map();
-        remaining
+        let graph_us = timing_elapsed_us(graph_start);
+        let swap_start = timing_start();
+        let affected_sections = self.storage.swap_section_map().len();
+        let storage_swap_us = timing_elapsed_us(swap_start);
+        (
+            remaining.0,
+            LightEngineRunReport {
+                graph: remaining.1,
+                source_update_count,
+                source_updates_us,
+                graph_us,
+                storage_swap_us,
+                affected_sections,
+            },
+        )
     }
 
     pub fn has_work(&self) -> bool {
@@ -148,11 +164,12 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
             })
     }
 
-    fn apply_source_updates(&mut self) {
+    fn apply_source_updates(&mut self) -> usize {
         let updates = self.storage.drain_source_updates();
         if updates.is_empty() {
-            return;
+            return 0;
         }
+        let update_count = updates.len();
 
         let mut delegate = SkyLightGraphDelegate {
             storage: &mut self.storage,
@@ -173,6 +190,7 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
                 }
             }
         }
+        update_count
     }
 }
 

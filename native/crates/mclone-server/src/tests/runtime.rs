@@ -146,6 +146,14 @@ fn integrated_server_publishes_interested_chunks() {
                 .scheduler()
                 .metrics()
                 .total_light_status_section_setup_us,
+            total_light_status_section_status_update_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_section_status_update_us,
+            total_light_status_sky_column_enable_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_sky_column_enable_us,
             total_light_status_sky_source_enqueue_us: server
                 .scheduler()
                 .metrics()
@@ -154,6 +162,10 @@ fn integrated_server_publishes_interested_chunks() {
                 .scheduler()
                 .metrics()
                 .total_light_status_block_source_enqueue_us,
+            total_light_status_changed_block_check_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_changed_block_check_us,
             total_light_status_run_updates_us: server
                 .scheduler()
                 .metrics()
@@ -202,10 +214,54 @@ fn integrated_server_publishes_interested_chunks() {
                 .scheduler()
                 .metrics()
                 .total_light_status_sky_run_updates_us,
+            total_light_status_sky_source_update_count: server
+                .scheduler()
+                .metrics()
+                .total_light_status_sky_source_update_count,
+            total_light_status_sky_source_updates_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_sky_source_updates_us,
+            total_light_status_block_run_update_graph_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_block_run_update_graph_us,
+            total_light_status_sky_run_update_graph_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_sky_run_update_graph_us,
+            total_light_status_block_run_update_storage_swap_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_block_run_update_storage_swap_us,
+            total_light_status_sky_run_update_storage_swap_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_sky_run_update_storage_swap_us,
+            total_light_status_block_run_update_affected_sections: server
+                .scheduler()
+                .metrics()
+                .total_light_status_block_run_update_affected_sections,
+            total_light_status_sky_run_update_affected_sections: server
+                .scheduler()
+                .metrics()
+                .total_light_status_sky_run_update_affected_sections,
             total_light_status_collect_sections_us: server
                 .scheduler()
                 .metrics()
                 .total_light_status_collect_sections_us,
+            total_light_status_publication_us: server
+                .scheduler()
+                .metrics()
+                .total_light_status_publication_us,
+            max_light_status_publication_us: server
+                .scheduler()
+                .metrics()
+                .max_light_status_publication_us,
+            total_light_status_publication_units: server
+                .scheduler()
+                .metrics()
+                .total_light_status_publication_units,
         }
     );
     assert_eq!(server.scheduler().job_count(), 1);

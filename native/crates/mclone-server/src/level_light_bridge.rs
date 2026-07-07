@@ -35,8 +35,11 @@ pub(crate) struct LevelLightComputationTiming {
     pub(crate) block_source_scan_us: u128,
     pub(crate) engine_init_us: u128,
     pub(crate) section_setup_us: u128,
+    pub(crate) section_status_update_us: u128,
+    pub(crate) sky_column_enable_us: u128,
     pub(crate) sky_source_enqueue_us: u128,
     pub(crate) block_source_enqueue_us: u128,
+    pub(crate) changed_block_check_us: u128,
     pub(crate) run_updates_us: u128,
     pub(crate) run_update_iterations: usize,
     pub(crate) block_run_update_calls: usize,
@@ -49,6 +52,14 @@ pub(crate) struct LevelLightComputationTiming {
     pub(crate) final_sky_run_update_queue_after: usize,
     pub(crate) block_run_updates_us: u128,
     pub(crate) sky_run_updates_us: u128,
+    pub(crate) sky_source_update_count: usize,
+    pub(crate) sky_source_updates_us: u128,
+    pub(crate) block_run_update_graph_us: u128,
+    pub(crate) sky_run_update_graph_us: u128,
+    pub(crate) block_run_update_storage_swap_us: u128,
+    pub(crate) sky_run_update_storage_swap_us: u128,
+    pub(crate) block_run_update_affected_sections: usize,
+    pub(crate) sky_run_update_affected_sections: usize,
     pub(crate) collect_sections_us: u128,
 }
 
@@ -61,8 +72,11 @@ impl LevelLightComputationTiming {
         self.block_source_scan_us += other.block_source_scan_us;
         self.engine_init_us += other.engine_init_us;
         self.section_setup_us += other.section_setup_us;
+        self.section_status_update_us += other.section_status_update_us;
+        self.sky_column_enable_us += other.sky_column_enable_us;
         self.sky_source_enqueue_us += other.sky_source_enqueue_us;
         self.block_source_enqueue_us += other.block_source_enqueue_us;
+        self.changed_block_check_us += other.changed_block_check_us;
         self.run_updates_us += other.run_updates_us;
         self.run_update_iterations += other.run_update_iterations;
         self.block_run_update_calls += other.block_run_update_calls;
@@ -83,6 +97,14 @@ impl LevelLightComputationTiming {
         }
         self.block_run_updates_us += other.block_run_updates_us;
         self.sky_run_updates_us += other.sky_run_updates_us;
+        self.sky_source_update_count += other.sky_source_update_count;
+        self.sky_source_updates_us += other.sky_source_updates_us;
+        self.block_run_update_graph_us += other.block_run_update_graph_us;
+        self.sky_run_update_graph_us += other.sky_run_update_graph_us;
+        self.block_run_update_storage_swap_us += other.block_run_update_storage_swap_us;
+        self.sky_run_update_storage_swap_us += other.sky_run_update_storage_swap_us;
+        self.block_run_update_affected_sections += other.block_run_update_affected_sections;
+        self.sky_run_update_affected_sections += other.sky_run_update_affected_sections;
         self.collect_sections_us += other.collect_sections_us;
     }
 }
@@ -131,14 +153,18 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     let mut engine = LevelLightEngine::new(world.clone(), world);
     timing.engine_init_us = start.elapsed().as_micros();
 
+    let setup_start = Instant::now();
     let start = Instant::now();
     for (section, is_empty) in active_sections {
         engine.update_section_status(section, is_empty);
     }
+    timing.section_status_update_us = start.elapsed().as_micros();
+    let start = Instant::now();
     for chunk_pos in chunk_positions {
         engine.enable_light_sources(section_as_long(chunk_pos.x, 0, chunk_pos.z), true);
     }
-    timing.section_setup_us = start.elapsed().as_micros();
+    timing.sky_column_enable_us = start.elapsed().as_micros();
+    timing.section_setup_us = setup_start.elapsed().as_micros();
     timing.sky_source_scan_us = 0;
     timing.sky_source_enqueue_us = 0;
     let start = Instant::now();
@@ -160,6 +186,14 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     timing.final_sky_run_update_queue_after = run_report.sky.queue_after;
     timing.block_run_updates_us = run_report.block.run_updates_us;
     timing.sky_run_updates_us = run_report.sky.run_updates_us;
+    timing.sky_source_update_count = run_report.sky.source_update_count;
+    timing.sky_source_updates_us = run_report.sky.source_updates_us;
+    timing.block_run_update_graph_us = run_report.block.graph_us;
+    timing.sky_run_update_graph_us = run_report.sky.graph_us;
+    timing.block_run_update_storage_swap_us = run_report.block.storage_swap_us;
+    timing.sky_run_update_storage_swap_us = run_report.sky.storage_swap_us;
+    timing.block_run_update_affected_sections = run_report.block.affected_sections;
+    timing.sky_run_update_affected_sections = run_report.sky.affected_sections;
 
     let start = Instant::now();
     let min_section_y = block_to_section_coord(min_y);

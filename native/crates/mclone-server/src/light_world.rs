@@ -82,25 +82,31 @@ impl RetainedInitialLightState {
             .block_emission_sources_for(&changed_chunks);
         timing.block_source_scan_us = timing_elapsed_us(start);
 
+        let setup_start = timing_start();
         let start = timing_start();
         for (section, is_empty) in active_sections {
             self.engine.update_section_status(section, is_empty);
         }
+        timing.section_status_update_us = timing_elapsed_us(start);
+        let start = timing_start();
         for chunk_pos in &changed_chunks {
             self.engine
                 .enable_light_sources(section_as_long(chunk_pos.x, 0, chunk_pos.z), true);
         }
-        timing.section_setup_us = timing_elapsed_us(start);
+        timing.sky_column_enable_us = timing_elapsed_us(start);
+        timing.section_setup_us = timing_elapsed_us(setup_start);
         timing.sky_source_scan_us = 0;
         timing.sky_source_enqueue_us = 0;
         let start = timing_start();
         for (source, emission) in block_sources {
             self.engine.on_block_emission_increase(source, emission);
         }
+        timing.block_source_enqueue_us = timing_elapsed_us(start);
+        let start = timing_start();
         for block in changed_blocks {
             self.engine.check_block(block);
         }
-        timing.block_source_enqueue_us = timing_elapsed_us(start);
+        timing.changed_block_check_us = timing_elapsed_us(start);
         let start = timing_start();
         let run_report = self.engine.run_all_updates_report();
         timing.run_updates_us = timing_elapsed_us(start);
@@ -115,6 +121,14 @@ impl RetainedInitialLightState {
         timing.final_sky_run_update_queue_after = run_report.sky.queue_after;
         timing.block_run_updates_us = run_report.block.run_updates_us;
         timing.sky_run_updates_us = run_report.sky.run_updates_us;
+        timing.sky_source_update_count = run_report.sky.source_update_count;
+        timing.sky_source_updates_us = run_report.sky.source_updates_us;
+        timing.block_run_update_graph_us = run_report.block.graph_us;
+        timing.sky_run_update_graph_us = run_report.sky.graph_us;
+        timing.block_run_update_storage_swap_us = run_report.block.storage_swap_us;
+        timing.sky_run_update_storage_swap_us = run_report.sky.storage_swap_us;
+        timing.block_run_update_affected_sections = run_report.block.affected_sections;
+        timing.sky_run_update_affected_sections = run_report.sky.affected_sections;
 
         let start = timing_start();
         let min_section_y = block_to_section_coord(min_y);

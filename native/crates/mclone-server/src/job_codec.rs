@@ -626,8 +626,11 @@ impl FrameWriter {
         self.write_u128(timing.block_source_scan_us);
         self.write_u128(timing.engine_init_us);
         self.write_u128(timing.section_setup_us);
+        self.write_u128(timing.section_status_update_us);
+        self.write_u128(timing.sky_column_enable_us);
         self.write_u128(timing.sky_source_enqueue_us);
         self.write_u128(timing.block_source_enqueue_us);
+        self.write_u128(timing.changed_block_check_us);
         self.write_u128(timing.run_updates_us);
         self.write_u64(timing.run_update_iterations as u64);
         self.write_u64(timing.block_run_update_calls as u64);
@@ -640,6 +643,14 @@ impl FrameWriter {
         self.write_u64(timing.final_sky_run_update_queue_after as u64);
         self.write_u128(timing.block_run_updates_us);
         self.write_u128(timing.sky_run_updates_us);
+        self.write_u64(timing.sky_source_update_count as u64);
+        self.write_u128(timing.sky_source_updates_us);
+        self.write_u128(timing.block_run_update_graph_us);
+        self.write_u128(timing.sky_run_update_graph_us);
+        self.write_u128(timing.block_run_update_storage_swap_us);
+        self.write_u128(timing.sky_run_update_storage_swap_us);
+        self.write_u64(timing.block_run_update_affected_sections as u64);
+        self.write_u64(timing.sky_run_update_affected_sections as u64);
         self.write_u128(timing.collect_sections_us);
     }
 }
@@ -1010,8 +1021,11 @@ impl<'a> FrameReader<'a> {
             block_source_scan_us: self.read_u128()?,
             engine_init_us: self.read_u128()?,
             section_setup_us: self.read_u128()?,
+            section_status_update_us: self.read_u128()?,
+            sky_column_enable_us: self.read_u128()?,
             sky_source_enqueue_us: self.read_u128()?,
             block_source_enqueue_us: self.read_u128()?,
+            changed_block_check_us: self.read_u128()?,
             run_updates_us: self.read_u128()?,
             run_update_iterations: self.read_u64()? as usize,
             block_run_update_calls: self.read_u64()? as usize,
@@ -1024,6 +1038,14 @@ impl<'a> FrameReader<'a> {
             final_sky_run_update_queue_after: self.read_u64()? as usize,
             block_run_updates_us: self.read_u128()?,
             sky_run_updates_us: self.read_u128()?,
+            sky_source_update_count: self.read_u64()? as usize,
+            sky_source_updates_us: self.read_u128()?,
+            block_run_update_graph_us: self.read_u128()?,
+            sky_run_update_graph_us: self.read_u128()?,
+            block_run_update_storage_swap_us: self.read_u128()?,
+            sky_run_update_storage_swap_us: self.read_u128()?,
+            block_run_update_affected_sections: self.read_u64()? as usize,
+            sky_run_update_affected_sections: self.read_u64()? as usize,
             collect_sections_us: self.read_u128()?,
         })
     }
