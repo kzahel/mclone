@@ -271,6 +271,26 @@ workers `2`, max-pending `4`, accept/upload caps `2/16/64`, and
 | peer busy totals | worldgen `15896.635ms`, light `57526.172ms`, render compile `24722.366ms` |
 | render compile cost | `1.173ms`/completed section (`24722.366ms / 21085`) |
 
+Meter-tax A/B follow-up on clean commit `30e80fbf` added
+`--render-compile-worker-timing false`, which disables only the
+render-compile worker busy timer/counter around each compile task while leaving
+queueing, worker count, max-pending, and compile work unchanged. The timing-off
+rows still completed compile work and reported zero render-compile peer busy
+time, proving the switch removes the measured path.
+
+| Lane | Timing on | Timing off | Delta | Frame result |
+|---|---:|---:|---:|---|
+| RD10 fresh frozen full view | `9699.018ms` | `9682.238ms` | `+16.780ms` / `+0.173%` | `0 / 0` over/over-2x both rows |
+| RD10 fresh frozen target quiescent | `11078.662ms` | `11048.769ms` | `+29.893ms` / `+0.271%` | completed compile sections `7152` vs `7168` |
+| RD10 persisted frozen full view | `1027.058ms` | `1016.075ms` | `+10.983ms` / `+1.081%` | `0 / 0` over/over-2x both rows |
+| RD10 persisted frozen target quiescent | `4941.937ms` | `4921.454ms` | `+20.483ms` / `+0.416%` | completed compile sections `7040` both rows |
+
+Conclusion: the render-compile worker timing meter is visible but well below
+the row-to-row noise needed to change Slice 0's lever ranking. Treat exact
+per-section compile costs as workload plus meter tax, but keep the stage order:
+fresh startup is still light-bound, and persisted/Quest churn still expose the
+render-compile tail.
+
 Lever order implied by Slice 0:
 
 1. **Slice 1: render compile capacity.** This remains next because it is the

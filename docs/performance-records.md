@@ -101,6 +101,45 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Render Compile Timing Meter-Tax A/B
+
+Commit reported by benchmark JSON: `30e80fbf`, `git_dirty=false`.
+
+Code change under test: `--render-compile-worker-timing false` disables the
+render-compile worker busy timer/counter around each compile task. It does not
+change render compile worker count, max-pending admission, queueing, or compile
+work. Timing-off rows should still complete compile work while reporting zero
+render-compile peer busy time.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-meter-rd10-fresh-timing-on.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --render-compile-worker-timing false --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-meter-rd10-fresh-timing-off.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-meter-rd10-persisted-timing-on.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --render-compile-worker-timing false --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-meter-rd10-persisted-timing-off.json
+```
+
+| Lane | Timing | Full view | Target quiescent | p95 / max frame | Over / over-2x | Completed / uploaded sections | Render compile busy |
+|---|---|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | on | `9699.018ms` | `11078.662ms` | `11.114 / 13.026ms` | `0 / 0` | `7152 / 2184` | `1294.390ms` |
+| RD10 fresh frozen | off | `9682.238ms` | `11048.769ms` | `10.370 / 14.053ms` | `0 / 0` | `7168 / 2190` | `0.000ms` |
+| RD10 persisted frozen | on | `1027.058ms` | `4941.937ms` | `10.746 / 12.839ms` | `0 / 0` | `7040 / 2143` | `1550.942ms` |
+| RD10 persisted frozen | off | `1016.075ms` | `4921.454ms` | `10.841 / 13.445ms` | `0 / 0` | `7040 / 2143` | `0.000ms` |
+
+Measured timing-on deltas versus timing-off:
+
+| Lane | Full-view delta | Target-quiescent delta | Decision |
+|---|---:|---:|---|
+| RD10 fresh frozen | `+16.780ms` / `+0.173%` | `+29.893ms` / `+0.271%` | below lever-ranking significance |
+| RD10 persisted frozen | `+10.983ms` / `+1.081%` | `+20.483ms` / `+0.416%` | below lever-ranking significance |
+
+Interpretation: the meter is not free, but its observed wall-clock tax is
+small relative to the Slice 0 stage signals. The timing-off rows prove the
+counter path can be removed for future A/B work. Keep using the Slice 0 lever
+order; treat exact render compile per-section costs as including a small meter
+tax.
+
 ### 2026-07-07 - Tactical 153 Slice 0 Whole-Pipeline Attribution
 
 Commit reported by benchmark JSON: `1c8a0743`, `git_dirty=false`.
