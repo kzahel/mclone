@@ -872,11 +872,13 @@ Deliverables:
   after.
 
 Gates: same inner/promotion loop as Slice 3, plus the persisted lanes.
-Acceptance: RD10 fresh quiescent `<= 14s`; persisted RD10 actionable idle
-`<= 15s` **or** a recorded falsification with sub-stage attribution saying
-which stage bounds it and why the controller cannot move it (that outcome
-re-scopes the remainder to a named follow-up, it does not extend this
-tactical); Quest gates green with queue ages bounded.
+Acceptance: RD10 fresh initial target render completion `<= 14s`; persisted
+RD10 actionable idle `<= 15s` **or** a recorded falsification with sub-stage
+attribution saying which stage bounds it and why the controller cannot move it
+(that outcome re-scopes the remainder to a named follow-up, it does not extend
+this tactical); Quest gates green with queue ages bounded. Do not use total
+target render quiescence as the Candidate B promotion gate unless
+simulation-caused dirty work is frozen or split out.
 
 Status (2026-07-07): Candidate B is not promoted. The shared frame-budget crate
 now has a render-side controller config and the live desktop path has an
@@ -886,8 +888,9 @@ on the fixed floor path. The desktop worker default remains `1`: same-host RD10
 startup-streaming A/B with adaptive publication on measured workers `1` vs `2`
 as first full view `9712.257ms` vs `9221.628ms`, first render quiescent
 `50136.512ms` vs `50124.487ms`, total remesh `439.307ms` vs `820.441ms`, and
-deadline-skipped compile requests `0` in both lanes. This falsifies workers `2`
-as a default-promotion lever for the current startup-streaming gate. The
+deadline-skipped compile requests `0` in both lanes. Under the then-current
+startup-streaming quiescence gate, workers `2` did not qualify for default
+promotion. The
 follow-up target-render diagnostics split landed 2026-07-07 and remeasured the
 workers `1` lane: first full view `9711.712ms`, legacy render quiescent
 `50148.741ms`, target render quiescent `50148.741ms`, post-full-view target
@@ -901,11 +904,26 @@ workers `1` with max-pending `4`: first full view `9722.828ms`, target render
 quiescent `50139.993ms`, p95/p99/max frame `7.525/8.468/11.238ms`, `0`
 over-budget frames, `8161` submitted compile sections, `8156` completed,
 `3178` uploaded, `562` post-full-view target rebuilt sections, and `0`
-deadline skips. The cap changes work distribution but does not improve the
-acceptance metric, so it is retained only as an opt-in benchmark lever.
-Candidate B remains unpromoted; do not advance render admission, worker count,
-in-flight cap, XR accept/upload, or Quest defaults until a measured target
-render progression lever exists.
+deadline skips. The cap changes work distribution but does not improve that
+quiescence metric, so it is retained only as an opt-in benchmark lever.
+
+Measurement correction (2026-07-07): the ~50.1s RD10 target-render-quiescent
+tail is now attributed to vanilla scheduled fluid mutation, not initial render
+streaming. Temporary instrumentation showed the last mutating fluid tick near
+sim tick `1013` (`~50.65s`), matching the quiescence marker within one frame.
+Therefore the existing marker is a world-settled metric: it waits for late
+water/lava block updates that re-dirty render sections, so it can mask real
+Candidate B render-streaming wins. Candidate B remains unpromoted, but the
+render-side knobs are not considered finally falsified until they are rerun
+against a corrected gate.
+
+Next implementing pass: add a benchmark-lane way to freeze scheduled fluid
+ticks for startup-streaming isolation, and add a durable metric such as
+`first_initial_target_render_complete_ms` that records when every target
+render section has completed its initial mesh/upload without waiting for later
+simulation-caused dirty work. Re-run the Candidate B ladder and confirm that
+with fluids frozen, the existing quiescence marker and the new initial-render
+completion marker converge.
 
 ## Slice 5: Config Surface, Soak, And Close-Out
 
