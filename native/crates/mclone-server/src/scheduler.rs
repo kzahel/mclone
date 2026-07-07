@@ -598,13 +598,27 @@ impl PublicationGrant {
         }
     }
 
-    fn from_decision(decision: Option<&BudgetDecisionReport>, fallback_units: usize) -> Self {
+    fn from_decision(
+        decision: Option<&BudgetDecisionReport>,
+        fallback_units: usize,
+        estimated_unit_us: Option<u128>,
+    ) -> Self {
         decision.map_or_else(
             || Self::fixed(fallback_units),
-            |decision| Self {
-                min_units: decision.grant.min_units as usize,
-                max_units: decision.grant.max_units as usize,
-                elapsed_us: elapsed_ms_to_us(decision.grant.elapsed_ms),
+            |decision| {
+                let min_units = decision.grant.min_units as usize;
+                let decision_max_units = decision.grant.max_units as usize;
+                let elapsed_us = elapsed_ms_to_us(decision.grant.elapsed_ms);
+                Self {
+                    min_units,
+                    max_units: publication_max_units_from_elapsed_cost(
+                        min_units,
+                        decision_max_units,
+                        elapsed_us,
+                        estimated_unit_us,
+                    ),
+                    elapsed_us,
+                }
             },
         )
     }
@@ -618,6 +632,24 @@ impl PublicationGrant {
         }
         self.elapsed_us == 0 || simulation_timing_elapsed_us(start) < self.elapsed_us
     }
+}
+
+fn publication_max_units_from_elapsed_cost(
+    min_units: usize,
+    cold_estimator_max_units: usize,
+    elapsed_us: u128,
+    estimated_unit_us: Option<u128>,
+) -> usize {
+    let fallback_units = cold_estimator_max_units.max(min_units);
+    let Some(unit_us) = estimated_unit_us.filter(|unit_us| *unit_us > 0) else {
+        return fallback_units;
+    };
+    if elapsed_us == 0 {
+        return fallback_units;
+    }
+    let elapsed_units = elapsed_us / unit_us;
+    let elapsed_units = elapsed_units.min(usize::MAX as u128) as usize;
+    elapsed_units.max(min_units)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -909,29 +941,33 @@ impl ChunkScheduler {
         self.publication_budget
             .last_pending_worldgen_publication_chunk_limit =
             pending_worldgen_publication_chunk_limit;
+        let feature_estimated_unit_us = self
+            .publication_budget
+            .estimator
+            .estimates
+            .feature_publish_ms
+            .map(elapsed_ms_to_us);
+        let light_estimated_unit_us = self
+            .publication_budget
+            .estimator
+            .estimates
+            .light_publish_ms
+            .map(elapsed_ms_to_us);
         let grants = PublicationBudgetGrants {
             adaptive_enabled: true,
             feature: PublicationGrant::from_decision(
                 feature_decision,
                 DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET,
+                feature_estimated_unit_us,
             ),
             light: PublicationGrant::from_decision(
                 light_decision,
                 DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET,
+                light_estimated_unit_us,
             ),
             pending_worldgen_publication_chunk_limit,
-            feature_estimated_unit_us: self
-                .publication_budget
-                .estimator
-                .estimates
-                .feature_publish_ms
-                .map(elapsed_ms_to_us),
-            light_estimated_unit_us: self
-                .publication_budget
-                .estimator
-                .estimates
-                .light_publish_ms
-                .map(elapsed_ms_to_us),
+            feature_estimated_unit_us,
+            light_estimated_unit_us,
         };
         diagnostics.record_budget_grants(grants);
         grants
@@ -3889,6 +3925,38 @@ mod tests {
                 (-radius..=radius).map(move |x| ChunkPos::new(center.x + x, center.z + z))
             })
             .collect()
+    }
+
+    #[test]
+    fn publication_elapsed_cost_estimate_can_exceed_cold_unit_cap() {
+        assert_eq!(
+            publication_max_units_from_elapsed_cost(1, 4, 10_000, Some(250)),
+            40
+        );
+    }
+
+    #[test]
+    fn publication_elapsed_cost_keeps_cold_unit_cap_without_estimate() {
+        assert_eq!(
+            publication_max_units_from_elapsed_cost(1, 4, 10_000, None),
+            4
+        );
+        assert_eq!(
+            publication_max_units_from_elapsed_cost(1, 4, 10_000, Some(0)),
+            4
+        );
+    }
+
+    #[test]
+    fn publication_elapsed_cost_floor_honors_min_units() {
+        assert_eq!(
+            publication_max_units_from_elapsed_cost(1, 4, 1_000, Some(2_500)),
+            1
+        );
+        assert_eq!(
+            publication_max_units_from_elapsed_cost(3, 1, 1_000, Some(2_500)),
+            3
+        );
     }
 
     #[test]
