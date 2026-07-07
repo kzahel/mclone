@@ -101,6 +101,63 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Applied Derived Render Compile Capacity
+
+Commit reported by benchmark JSON: `b3147f4e`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: no default flip. These rows use the explicit desktop opt-in
+`--render-compile-capacity derived`, which applied the shared preflight capacity
+derivation before startup. Manual worker/max-pending flags were omitted. On this
+host the applied preflight result and measured post-run advisory both resolved
+to `workers=7`, `max_pending=14`; normal release builds kept render-compile
+worker busy timing compiled out.
+
+Commands used the same release binary shape as the previous ladder, replacing
+the manual `--render-compile-workers 7 --render-compile-max-pending-jobs 14`
+pair with:
+
+```bash
+--render-compile-capacity derived
+```
+
+Raw JSON stayed in:
+
+- `/tmp/mclone-153-derived-rd10-persisted-frozen.json`
+- `/tmp/mclone-153-derived-rd10-fresh-frozen.json`
+- `/tmp/mclone-153-derived-rd15-fresh-frozen.json`
+- `/tmp/mclone-153-derived-frame-budget.json`
+- `/tmp/mclone-153-derived-movement-frame.json`
+
+Desktop startup rows:
+
+| Lane | Applied workers / pending | Full view | Target quiescent | p95 / max frame | Over / over-2x | Completed / uploaded sections | Post-full target rebuilds |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 persisted frozen | `7 / 14` | `1030.945ms` | `1395.463ms` | `10.858 / 13.510ms` | `0 / 0` | `7040 / 2143` | `1888` |
+| RD10 fresh frozen | `7 / 14` | `9228.328ms` | `10829.479ms` | `10.465 / 11.991ms` | `0 / 0` | `7168 / 2190` | `0` |
+| RD15 fresh frozen | `7 / 14` | `19420.072ms` | `21611.805ms` | `10.799 / 14.671ms` | `0 / 0` | `15504 / 4860` | `0` |
+
+120 Hz probe rows:
+
+| Probe | Applied workers / pending | Top-level p95 / max | Top-level over / over-2x | Frame-accounting p95 / max | Frame-accounting over / over-2x |
+|---|---:|---:|---:|---:|---:|
+| frame-budget stress orbit | `7 / 14` | `4.913 / 18.828ms` | `1 / 1` | `2.692 / 5.824ms` | `0 / 0` |
+| movement-frame walk | `7 / 14` | `3.352 / 18.277ms` | `1 / 1` | `1.789 / 5.671ms` | `0 / 0` |
+
+Interpretation: the applied flag reproduces the manual ladder's persisted
+benefit (`1.395s` target quiescence, under the `<=3s` gate) with clean 60 Hz
+frame pacing. Fresh startup remains neutral because light/status is still the
+binding stage, not mesh capacity. The 120 Hz top-level probes still show one
+over-2x outlier while the shared frame-accounting rows stay green, so this is a
+good explicit opt-in and persisted-world lever, but still not a global default.
+
+Quest was not measured in this applied-capacity row. `adb devices` showed the
+Quest connected, but Android XR startup parsing only accepts the manual
+`--render-compile-workers` / `--render-compile-max-pending-jobs` flags today;
+it would reject `--render-compile-capacity derived`. The next narrow slice is to
+wire the same capacity request through the Android/shared startup path, then run
+the Quest RD5 orbit/churn guardrails with the derived value actually applied.
+
 ### 2026-07-07 - Tactical 153 Slice 1 Render Compile Capacity Ladder
 
 Commit reported by benchmark JSON: `67f47a53`, `git_dirty=false`.

@@ -4,7 +4,10 @@ Status: Slice 0 whole-pipeline attribution landed and recorded 2026-07-07 as
 the named follow-up to tactical
 [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
 (close-out commits `42d3e43a`/`01147cd7`). Slice 1 (render compile capacity)
-is next. This tactical absorbs 150's "per-stage render pipeline budgeting"
+has landed the shared derivation, advisory report, and desktop explicit
+derived-capacity opt-in; the next narrow step is Android/shared startup wiring
+so Quest can run the same derived request instead of manual worker counts.
+This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
 its cores, by porting the vanilla 1.17.1 scheduling/capacity shape instead
@@ -401,6 +404,23 @@ advisory object's applied preflight result and measured post-run advisory result
 separately. A short release RD2 persisted smoke on the dirty implementation
 worktree resolved `derivedApplied` to `7/14`, with worker timing still compiled
 out in the normal release build.
+
+Clean-commit applied ladder on `b3147f4e` then reproduced the manual result
+using only `--render-compile-capacity derived`. RD10 persisted frozen resolved
+to `7/14` and reached target quiescence in `1395.463ms` with `0 / 0`
+over/over-2x frames. RD10 fresh frozen was `10829.479ms` and RD15 fresh frozen
+was `21611.805ms`, both neutral against the manual ladder and both `0 / 0`.
+The 120 Hz frame-budget and movement-frame probes still showed `1 / 1`
+top-level over/over-2x with `7/14`, while frame-accounting stayed `0 / 0`.
+Decision is unchanged: explicit applied capacity is useful for persisted
+local-integrated startup, but the default is not promoted.
+
+Quest was not a fair applied-capacity row yet. The device was connected, but
+Android XR startup parsing does not currently accept
+`--render-compile-capacity derived`; it only accepts manual worker/max-pending
+flags. The next implementation slice is therefore startup wiring for Android
+and shared app-runtime capacity requests, followed by Quest RD5 orbit/churn with
+the derived value active.
 
 Gates (inner loop per iteration; promotion before default flip):
 
