@@ -29,7 +29,7 @@ use crate::persistence::ScheduledTickRecord;
 use crate::timing::{timing_elapsed_us, timing_start};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
-use crate::{LightStatusMailboxKind, WorkerFrameMetrics};
+use crate::{LightStatusMailboxKind, LightStatusMailboxMetrics, WorkerFrameMetrics};
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
@@ -97,7 +97,7 @@ impl LightStatusMailbox {
             return;
         }
         self.pending_count = self.pending_count.saturating_add(batch.target_count());
-        self.backend.enqueue_batch(batch);
+        self.backend.enqueue_batch(batch, self.pending_count);
     }
 
     pub(crate) fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
@@ -121,6 +121,10 @@ impl LightStatusMailbox {
     pub(crate) fn frame_metrics(&self) -> WorkerFrameMetrics {
         self.backend.frame_metrics()
     }
+
+    pub(crate) fn mailbox_metrics(&self) -> LightStatusMailboxMetrics {
+        self.backend.mailbox_metrics()
+    }
 }
 
 impl fmt::Debug for LightStatusMailbox {
@@ -138,6 +142,7 @@ struct LightStatusMailboxBackend {
     worker: Option<WasmJobWorker>,
     light_state: RetainedInitialLightState,
     completed: VecDeque<CompletedLightStatus>,
+    mailbox_metrics: LightStatusMailboxMetrics,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -151,6 +156,7 @@ impl LightStatusMailboxBackend {
             worker,
             light_state: RetainedInitialLightState::new(),
             completed: VecDeque::new(),
+            mailbox_metrics: LightStatusMailboxMetrics::default(),
         }
     }
 
@@ -168,7 +174,19 @@ impl LightStatusMailboxBackend {
             .map_or_else(WorkerFrameMetrics::default, WasmJobWorker::frame_metrics)
     }
 
-    fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
+    fn mailbox_metrics(&self) -> LightStatusMailboxMetrics {
+        self.mailbox_metrics
+    }
+
+    fn enqueue_batch(&mut self, batch: PendingLightStatusBatch, pending_statuses: usize) {
+        let batch_statuses = batch.target_count();
+        let pending_batches = self
+            .mailbox_metrics
+            .enqueued_batches
+            .saturating_sub(self.mailbox_metrics.completed_batches)
+            .saturating_add(1);
+        self.mailbox_metrics
+            .record_enqueue(batch_statuses, pending_batches, pending_statuses);
         if let Some(worker) = &mut self.worker {
             let frame = encode_light_status_request(batch)
                 .expect("failed to encode wasm light-status worker request");
@@ -178,10 +196,15 @@ impl LightStatusMailboxBackend {
             return;
         }
 
+        let start = timing_start();
         self.completed.extend(CompletedLightStatus::from_batch(
             &mut self.light_state,
             batch,
         ));
+        let compute_us = timing_elapsed_us(start);
+        self.mailbox_metrics.record_worker_start(0);
+        self.mailbox_metrics
+            .record_compute(batch_statuses, compute_us);
     }
 
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
@@ -211,10 +234,11 @@ impl LightStatusMailboxBackend {
 #[cfg(not(target_arch = "wasm32"))]
 struct LightStatusMailboxBackend {
     sender: mpsc::Sender<LightStatusRequest>,
-    completion_receiver: mpsc::Receiver<CompletedLightStatus>,
-    completed: VecDeque<CompletedLightStatus>,
+    completion_receiver: mpsc::Receiver<CompletedLightStatusMessage>,
+    completed: VecDeque<CompletedLightStatusMessage>,
     worker: Option<thread::JoinHandle<()>>,
     metrics: Arc<Mutex<WorkerFrameMetrics>>,
+    mailbox_metrics: Arc<Mutex<LightStatusMailboxMetrics>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -231,30 +255,49 @@ impl fmt::Debug for LightStatusMailboxBackend {
 impl LightStatusMailboxBackend {
     fn new(_config: Option<()>) -> Self {
         let (sender, receiver) = mpsc::channel::<LightStatusRequest>();
-        let (completion_sender, completion_receiver) = mpsc::channel::<CompletedLightStatus>();
+        let (completion_sender, completion_receiver) =
+            mpsc::channel::<CompletedLightStatusMessage>();
         let metrics = Arc::new(Mutex::new(WorkerFrameMetrics::message_transfer()));
         let worker_metrics = Arc::clone(&metrics);
+        let mailbox_metrics = Arc::new(Mutex::new(LightStatusMailboxMetrics::default()));
+        let worker_mailbox_metrics = Arc::clone(&mailbox_metrics);
         let worker = thread::Builder::new()
             .name("mclone-light-status".to_owned())
             .spawn(move || {
                 let mut light_state = RetainedInitialLightState::new();
                 while let Ok(request) = receiver.recv() {
                     match request {
-                        LightStatusRequest::ComputeBatch(batch) => {
-                            if let Ok(mut metrics) = worker_metrics.lock() {
-                                metrics.record_request(0);
+                        LightStatusRequest::ComputeBatch(request) => {
+                            let queue_wait_us = request.enqueued_at.elapsed().as_micros();
+                            if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
+                                metrics.record_worker_start(queue_wait_us);
                             }
                             let request_start = Instant::now();
-                            for completed in
-                                CompletedLightStatus::from_batch(&mut light_state, batch)
-                            {
-                                if completion_sender.send(completed).is_err() {
+                            let completed =
+                                CompletedLightStatus::from_batch(&mut light_state, request.batch);
+                            let compute_us = request_start.elapsed().as_micros();
+                            let completed_at = Instant::now();
+                            for completed in completed {
+                                if completion_sender
+                                    .send(CompletedLightStatusMessage {
+                                        completed,
+                                        completed_at,
+                                    })
+                                    .is_err()
+                                {
                                     return;
                                 }
                             }
                             if let Ok(mut metrics) = worker_metrics.lock() {
                                 metrics.record_response(0);
-                                metrics.record_request_time_us(request_start.elapsed().as_micros());
+                                metrics.record_request_time_us(compute_us);
+                                let pending_frames = metrics
+                                    .request_frames
+                                    .saturating_sub(metrics.response_frames);
+                                metrics.observe_pending_frames(pending_frames);
+                            }
+                            if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
+                                metrics.record_compute(request.target_count, compute_us);
                             }
                         }
                         LightStatusRequest::Shutdown => break,
@@ -269,6 +312,7 @@ impl LightStatusMailboxBackend {
             completed: VecDeque::new(),
             worker: Some(worker),
             metrics,
+            mailbox_metrics,
         }
     }
 
@@ -283,16 +327,53 @@ impl LightStatusMailboxBackend {
             .unwrap_or_default()
     }
 
-    fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
+    fn mailbox_metrics(&self) -> LightStatusMailboxMetrics {
+        self.mailbox_metrics
+            .lock()
+            .map(|metrics| *metrics)
+            .unwrap_or_default()
+    }
+
+    fn enqueue_batch(&mut self, batch: PendingLightStatusBatch, pending_statuses: usize) {
+        let batch_statuses = batch.target_count();
+        let enqueued_at = Instant::now();
+        if let Ok(mut metrics) = self.metrics.lock() {
+            metrics.record_request(0);
+            let pending_frames = metrics
+                .request_frames
+                .saturating_sub(metrics.response_frames);
+            metrics.observe_pending_frames(pending_frames);
+            if let Ok(mut mailbox_metrics) = self.mailbox_metrics.lock() {
+                mailbox_metrics.record_enqueue(batch_statuses, pending_frames, pending_statuses);
+            }
+        }
         self.sender
-            .send(LightStatusRequest::ComputeBatch(batch))
+            .send(LightStatusRequest::ComputeBatch(
+                LightStatusComputeRequest {
+                    batch,
+                    enqueued_at,
+                    target_count: batch_statuses,
+                },
+            ))
             .expect("native light status worker stopped before receiving job");
     }
 
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
-        let mut completed = self.completed.drain(..).collect::<Vec<_>>();
-        while let Ok(job) = self.completion_receiver.try_recv() {
-            completed.push(job);
+        let mut messages = self.completed.drain(..).collect::<Vec<_>>();
+        while let Ok(message) = self.completion_receiver.try_recv() {
+            messages.push(message);
+        }
+        let now = Instant::now();
+        let mut completed = Vec::with_capacity(messages.len());
+        if let Ok(mut metrics) = self.mailbox_metrics.lock() {
+            for message in messages {
+                metrics.record_completion_drain_wait(
+                    now.duration_since(message.completed_at).as_micros(),
+                );
+                completed.push(message.completed);
+            }
+        } else {
+            completed.extend(messages.into_iter().map(|message| message.completed));
         }
         completed
     }
@@ -324,6 +405,19 @@ impl Drop for LightStatusMailboxBackend {
 
 #[cfg(not(target_arch = "wasm32"))]
 enum LightStatusRequest {
-    ComputeBatch(PendingLightStatusBatch),
+    ComputeBatch(LightStatusComputeRequest),
     Shutdown,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct LightStatusComputeRequest {
+    batch: PendingLightStatusBatch,
+    enqueued_at: Instant,
+    target_count: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct CompletedLightStatusMessage {
+    completed: CompletedLightStatus,
+    completed_at: Instant,
 }

@@ -68,8 +68,8 @@ use crate::worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 use crate::{
     CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState, ChunkResidency, ChunkStatusStep, ChunkTicketKey,
     ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus,
-    LightStatusMailboxKind, MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics,
-    WorldBlockPos, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
+    LightStatusMailboxKind, LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL,
+    WorkerFrameMetrics, WorldBlockPos, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1371,6 +1371,10 @@ impl ChunkScheduler {
 
     pub fn light_status_mailbox_frame_metrics(&self) -> WorkerFrameMetrics {
         self.light_mailbox.frame_metrics()
+    }
+
+    pub fn light_status_mailbox_metrics(&self) -> LightStatusMailboxMetrics {
+        self.light_mailbox.mailbox_metrics()
     }
 
     pub fn metrics(&self) -> ChunkSchedulerMetrics {

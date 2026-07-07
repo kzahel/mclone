@@ -36,7 +36,9 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::{actor_instances_from_presentations, render_section_chunk_pos};
-use mclone_server::{SqliteWorldStore, WorkerFrameMetrics, initial_spawn_center_for_seed};
+use mclone_server::{
+    LightStatusMailboxMetrics, SqliteWorldStore, WorkerFrameMetrics, initial_spawn_center_for_seed,
+};
 use mclone_ui::{GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiScale};
 
 use crate::camera::{
@@ -602,6 +604,7 @@ struct StartupStreamingFrameReport {
     runner_frame_metrics: WorkerFrameMetrics,
     worldgen_job_frame_metrics: WorkerFrameMetrics,
     light_status_job_frame_metrics: WorkerFrameMetrics,
+    light_status_mailbox_metrics: LightStatusMailboxMetrics,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2103,6 +2106,12 @@ impl StartupStreamingPerfReport {
             "  \"max_scheduler_light_mailbox_pending_statuses\": {},",
             max_scheduler_light_mailbox_pending_statuses
         );
+        print_light_status_mailbox_metrics_json(
+            "  ",
+            "light_status_mailbox_metrics",
+            final_frame.light_status_mailbox_metrics,
+            true,
+        );
         println!("  \"total_remesh_ms\": {:.3},", total_remesh_ms);
         println!("  \"total_upload_ms\": {:.3},", total_upload_ms);
         println!("  \"total_render_ms\": {:.3},", total_render_ms);
@@ -2573,8 +2582,14 @@ impl StartupStreamingPerfReport {
             final_frame.scheduler_worldgen_mailbox_pending_jobs
         );
         println!(
-            "    \"scheduler_light_mailbox_pending_statuses\": {}",
+            "    \"scheduler_light_mailbox_pending_statuses\": {},",
             final_frame.scheduler_light_mailbox_pending_statuses
+        );
+        print_light_status_mailbox_metrics_json(
+            "    ",
+            "light_status_mailbox_metrics",
+            final_frame.light_status_mailbox_metrics,
+            false,
         );
         println!("  }}");
         println!("}}");
@@ -2875,6 +2890,81 @@ fn print_optional_usize_json(indent: &str, key: &str, value: Option<usize>, trai
         Some(value) => println!("{indent}\"{key}\": {value}{suffix}"),
         None => println!("{indent}\"{key}\": null{suffix}"),
     }
+}
+
+fn print_light_status_mailbox_metrics_json(
+    indent: &str,
+    key: &str,
+    metrics: LightStatusMailboxMetrics,
+    trailing_comma: bool,
+) {
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}\"{key}\": {{");
+    println!(
+        "{indent}  \"enqueued_batches\": {},",
+        metrics.enqueued_batches
+    );
+    println!(
+        "{indent}  \"enqueued_statuses\": {},",
+        metrics.enqueued_statuses
+    );
+    println!(
+        "{indent}  \"completed_batches\": {},",
+        metrics.completed_batches
+    );
+    println!(
+        "{indent}  \"completed_statuses\": {},",
+        metrics.completed_statuses
+    );
+    println!(
+        "{indent}  \"max_pending_batches\": {},",
+        metrics.max_pending_batches
+    );
+    println!(
+        "{indent}  \"max_pending_statuses\": {},",
+        metrics.max_pending_statuses
+    );
+    println!(
+        "{indent}  \"max_batch_statuses\": {},",
+        metrics.max_batch_statuses
+    );
+    println!(
+        "{indent}  \"last_queue_wait_ms\": {:.3},",
+        micros_to_ms(metrics.last_queue_wait_us)
+    );
+    println!(
+        "{indent}  \"total_queue_wait_ms\": {:.3},",
+        micros_to_ms(metrics.total_queue_wait_us)
+    );
+    println!(
+        "{indent}  \"max_queue_wait_ms\": {:.3},",
+        micros_to_ms(metrics.max_queue_wait_us)
+    );
+    println!(
+        "{indent}  \"last_compute_ms\": {:.3},",
+        micros_to_ms(metrics.last_compute_us)
+    );
+    println!(
+        "{indent}  \"total_compute_ms\": {:.3},",
+        micros_to_ms(metrics.total_compute_us)
+    );
+    println!(
+        "{indent}  \"max_compute_ms\": {:.3},",
+        micros_to_ms(metrics.max_compute_us)
+    );
+    println!(
+        "{indent}  \"last_completion_drain_wait_ms\": {:.3},",
+        micros_to_ms(metrics.last_completion_drain_wait_us)
+    );
+    println!(
+        "{indent}  \"total_completion_drain_wait_ms\": {:.3},",
+        micros_to_ms(metrics.total_completion_drain_wait_us)
+    );
+    println!(
+        "{indent}  \"max_completion_drain_wait_ms\": {:.3}",
+        micros_to_ms(metrics.max_completion_drain_wait_us)
+    );
+    println!("{indent}}}{suffix}");
 }
 
 fn headless_frame_accounting_report(
@@ -3874,6 +3964,7 @@ pub(crate) fn run_startup_streaming_perf(
             report.runner_frame_metrics = poll_diagnostics.runner_frame_metrics;
             report.worldgen_job_frame_metrics = poll_diagnostics.worldgen_job_frame_metrics;
             report.light_status_job_frame_metrics = poll_diagnostics.light_status_job_frame_metrics;
+            report.light_status_mailbox_metrics = poll_diagnostics.light_status_mailbox_metrics;
 
             if state.runtime.has_pending_render_work(spectator.position) {
                 let update =

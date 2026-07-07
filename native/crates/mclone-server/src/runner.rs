@@ -74,6 +74,62 @@ impl WorkerFrameTransportKind {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LightStatusMailboxMetrics {
+    pub enqueued_batches: usize,
+    pub enqueued_statuses: usize,
+    pub completed_batches: usize,
+    pub completed_statuses: usize,
+    pub max_pending_batches: usize,
+    pub max_pending_statuses: usize,
+    pub max_batch_statuses: usize,
+    pub last_queue_wait_us: u128,
+    pub total_queue_wait_us: u128,
+    pub max_queue_wait_us: u128,
+    pub last_compute_us: u128,
+    pub total_compute_us: u128,
+    pub max_compute_us: u128,
+    pub last_completion_drain_wait_us: u128,
+    pub total_completion_drain_wait_us: u128,
+    pub max_completion_drain_wait_us: u128,
+}
+
+impl LightStatusMailboxMetrics {
+    pub fn record_enqueue(
+        &mut self,
+        batch_statuses: usize,
+        pending_batches: usize,
+        pending_statuses: usize,
+    ) {
+        self.enqueued_batches = self.enqueued_batches.saturating_add(1);
+        self.enqueued_statuses = self.enqueued_statuses.saturating_add(batch_statuses);
+        self.max_pending_batches = self.max_pending_batches.max(pending_batches);
+        self.max_pending_statuses = self.max_pending_statuses.max(pending_statuses);
+        self.max_batch_statuses = self.max_batch_statuses.max(batch_statuses);
+    }
+
+    pub fn record_worker_start(&mut self, queue_wait_us: u128) {
+        self.last_queue_wait_us = queue_wait_us;
+        self.total_queue_wait_us = self.total_queue_wait_us.saturating_add(queue_wait_us);
+        self.max_queue_wait_us = self.max_queue_wait_us.max(queue_wait_us);
+    }
+
+    pub fn record_compute(&mut self, batch_statuses: usize, compute_us: u128) {
+        self.completed_batches = self.completed_batches.saturating_add(1);
+        self.completed_statuses = self.completed_statuses.saturating_add(batch_statuses);
+        self.last_compute_us = compute_us;
+        self.total_compute_us = self.total_compute_us.saturating_add(compute_us);
+        self.max_compute_us = self.max_compute_us.max(compute_us);
+    }
+
+    pub fn record_completion_drain_wait(&mut self, wait_us: u128) {
+        self.last_completion_drain_wait_us = wait_us;
+        self.total_completion_drain_wait_us =
+            self.total_completion_drain_wait_us.saturating_add(wait_us);
+        self.max_completion_drain_wait_us = self.max_completion_drain_wait_us.max(wait_us);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct WorkerFrameMetrics {
     pub transport_kind: WorkerFrameTransportKind,
     pub request_frames: usize,
@@ -281,6 +337,7 @@ pub struct ServerRunnerDiagnostics {
     pub runner_frame_metrics: WorkerFrameMetrics,
     pub worldgen_job_frame_metrics: WorkerFrameMetrics,
     pub light_status_job_frame_metrics: WorkerFrameMetrics,
+    pub light_status_mailbox_metrics: LightStatusMailboxMetrics,
     pub scheduler_metrics: ChunkSchedulerMetrics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub loading_progress: Option<ChunkLoadingProgressStats>,
@@ -319,6 +376,7 @@ impl ServerRunnerDiagnostics {
             runner_frame_metrics: WorkerFrameMetrics::default(),
             worldgen_job_frame_metrics: WorkerFrameMetrics::default(),
             light_status_job_frame_metrics: WorkerFrameMetrics::default(),
+            light_status_mailbox_metrics: LightStatusMailboxMetrics::default(),
             scheduler_metrics: ChunkSchedulerMetrics::default(),
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
             loading_progress: None,
@@ -479,6 +537,7 @@ mod native {
         light_status_mailbox_pending_statuses: usize,
         worldgen_job_frame_metrics: WorkerFrameMetrics,
         light_status_job_frame_metrics: WorkerFrameMetrics,
+        light_status_mailbox_metrics: LightStatusMailboxMetrics,
         scheduler_metrics: ChunkSchedulerMetrics,
         chunk_tracking: PlayerChunkTrackingDiagnostics,
         loading_progress: Option<ChunkLoadingProgressStats>,
@@ -499,6 +558,7 @@ mod native {
                 light_status_job_frame_metrics: server
                     .scheduler()
                     .light_status_mailbox_frame_metrics(),
+                light_status_mailbox_metrics: server.scheduler().light_status_mailbox_metrics(),
                 scheduler_metrics: server.scheduler().metrics(),
                 chunk_tracking: server.chunk_tracking_diagnostics(),
                 loading_progress: server.loading_progress_stats(),
@@ -1356,6 +1416,7 @@ mod native {
             diagnostics.worldgen_job_frame_metrics = detail_snapshot.worldgen_job_frame_metrics;
             diagnostics.light_status_job_frame_metrics =
                 detail_snapshot.light_status_job_frame_metrics;
+            diagnostics.light_status_mailbox_metrics = detail_snapshot.light_status_mailbox_metrics;
             diagnostics.scheduler_metrics = detail_snapshot.scheduler_metrics;
             diagnostics.chunk_tracking = detail_snapshot.chunk_tracking;
             diagnostics.loading_progress = detail_snapshot.loading_progress;
@@ -1600,6 +1661,37 @@ mod native {
                 WorkerFrameTransportKind::SharedMemory
             );
             assert_eq!(shared.transport_kind.label(), "shared-memory");
+        }
+
+        #[test]
+        fn light_status_mailbox_metrics_track_queue_compute_and_drain_wait() {
+            let mut metrics = LightStatusMailboxMetrics::default();
+
+            metrics.record_enqueue(5, 1, 5);
+            metrics.record_enqueue(3, 2, 8);
+            metrics.record_worker_start(1_250);
+            metrics.record_compute(5, 10_000);
+            metrics.record_completion_drain_wait(750);
+            metrics.record_worker_start(2_500);
+            metrics.record_compute(3, 6_000);
+            metrics.record_completion_drain_wait(1_500);
+
+            assert_eq!(metrics.enqueued_batches, 2);
+            assert_eq!(metrics.enqueued_statuses, 8);
+            assert_eq!(metrics.completed_batches, 2);
+            assert_eq!(metrics.completed_statuses, 8);
+            assert_eq!(metrics.max_pending_batches, 2);
+            assert_eq!(metrics.max_pending_statuses, 8);
+            assert_eq!(metrics.max_batch_statuses, 5);
+            assert_eq!(metrics.last_queue_wait_us, 2_500);
+            assert_eq!(metrics.total_queue_wait_us, 3_750);
+            assert_eq!(metrics.max_queue_wait_us, 2_500);
+            assert_eq!(metrics.last_compute_us, 6_000);
+            assert_eq!(metrics.total_compute_us, 16_000);
+            assert_eq!(metrics.max_compute_us, 10_000);
+            assert_eq!(metrics.last_completion_drain_wait_us, 1_500);
+            assert_eq!(metrics.total_completion_drain_wait_us, 2_250);
+            assert_eq!(metrics.max_completion_drain_wait_us, 1_500);
         }
 
         #[test]
