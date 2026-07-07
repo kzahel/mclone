@@ -77,7 +77,11 @@ pub(crate) fn xr_head_comfort_target(
     reconciliation: Option<EngineRoomScaleReconciliation>,
     headset_world_position: Vec3,
     client: &mclone_client::ClientRuntime,
+    collision_mode: EngineCameraCollisionMode,
 ) -> XrHeadComfortTarget {
+    if collision_mode == EngineCameraCollisionMode::NoClip {
+        return XrHeadComfortTarget::default();
+    }
     let horizontal_residual = reconciliation
         .map(|reconciliation| reconciliation.residual_horizontal_length_sqr().sqrt())
         .unwrap_or(0.0);
@@ -93,6 +97,21 @@ pub(crate) fn xr_head_comfort_target_from_inputs(
     horizontal_residual: f64,
     head_penetrating: bool,
 ) -> XrHeadComfortTarget {
+    xr_head_comfort_target_from_inputs_for_collision_mode(
+        horizontal_residual,
+        head_penetrating,
+        EngineCameraCollisionMode::Normal,
+    )
+}
+
+pub(crate) fn xr_head_comfort_target_from_inputs_for_collision_mode(
+    horizontal_residual: f64,
+    head_penetrating: bool,
+    collision_mode: EngineCameraCollisionMode,
+) -> XrHeadComfortTarget {
+    if collision_mode == EngineCameraCollisionMode::NoClip {
+        return XrHeadComfortTarget::default();
+    }
     let blocked_residual = horizontal_residual.is_finite()
         && horizontal_residual > XR_HEAD_COMFORT_RESIDUAL_DEAD_ZONE_BLOCKS;
     let mut alpha = xr_head_comfort_residual_alpha(horizontal_residual);
@@ -146,6 +165,7 @@ where
             self.camera.last_room_scale_reconciliation(),
             headset_world_position,
             runtime.client(),
+            self.camera.collision_mode(),
         );
         self.head_comfort.update(target, dt_seconds);
         Ok(())

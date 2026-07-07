@@ -2786,6 +2786,17 @@ mod tests {
     }
 
     #[test]
+    fn xr_head_comfort_noclip_suppresses_collision_fade() {
+        let target = xr_head_comfort_target_from_inputs_for_collision_mode(
+            XR_HEAD_COMFORT_RESIDUAL_FULL_BLOCKS,
+            true,
+            EngineCameraCollisionMode::NoClip,
+        );
+
+        assert_eq!(target, XrHeadComfortTarget::default());
+    }
+
+    #[test]
     fn xr_head_comfort_state_smooths_in_and_out() {
         let mut state = XrHeadComfortState::default();
         state.update(
