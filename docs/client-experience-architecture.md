@@ -697,14 +697,15 @@ policy module fails fast with a clear owner instead of deep inside the web
 app build:
 
 ```bash
-cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime --lib \
-  --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime \
+  --target wasm32-unknown-unknown --all-targets
 ```
 
-`--lib` is required: `mclone-app-runtime` also ships native-only diagnostic
-binaries (for example `terrain_texture_coverage`) that legitimately do not
-build for wasm32; the gate covers the policy library, which passes today
-(verified 2026-07-05, including its `mclone-server` dependency chain).
+`--all-targets` is intentional: `mclone-app-runtime` also ships native-only
+diagnostic binaries (for example `terrain_texture_coverage`), and those
+binaries keep their native implementation behind target cfgs so the wasm gate
+still catches target-gating drift. This passes today (verified 2026-07-07,
+including its `mclone-server` dependency chain).
 
 Add this as a named `pnpm` script alongside the existing `native:web:*` lanes
 and run it in the same gate set as `cargo test -p mclone-app-runtime`. When a

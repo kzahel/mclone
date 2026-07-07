@@ -720,9 +720,9 @@ budgets updated to point here.
   `cargo check --manifest-path native/Cargo.toml -p mclone-server --target wasm32-unknown-unknown`,
   `cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime --lib --target wasm32-unknown-unknown`,
   `pnpm native:xr:check`, `pnpm native:android-xr:apk`, and `git diff --check`.
-  A full `cargo check -p mclone-app-runtime --target wasm32-unknown-unknown`
-  still fails in the existing `terrain_texture_coverage` bin because native
-  asset helpers are cfg-gated out on wasm; the app-runtime library check passed.
+  The earlier full wasm all-target app-runtime check failure in
+  `terrain_texture_coverage` was resolved on 2026-07-07 by target-gating the
+  native CLI implementation behind a wasm no-op main.
 - Status: Slice 3 promotion exit is still not complete. Defaults remain off.
   The next measurements can now consume real decision traces and aggregate
   Quest publication cadence, but the missing native-window desktop run, live
