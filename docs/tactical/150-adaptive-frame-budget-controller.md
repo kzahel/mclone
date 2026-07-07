@@ -1158,6 +1158,16 @@ admission -> completed results -> upload/apply -> publication/visibility, with
 queue-age and frame-headroom evidence for each stage, not just a larger
 upstream compile queue.
 
+2026-07-07 update: that follow-up is drafted as
+[`153-vanilla-shaped-chunk-pipeline-capacity.md`](153-vanilla-shaped-chunk-pipeline-capacity.md),
+which absorbs the staged-budgeting list above (worker ladder in its Slice 1,
+render admission/accept/upload and XR lane-arg policy in its Slice 3) and
+widens the scope to the measured capacity problem this close-out exposed:
+the fresh pipeline is rate-bound near the single-thread light/mesh ceilings,
+so 153 pairs the budgeting work with vanilla-shaped, resource-derived stage
+capacity under the same Quest gate set. Remote/local host-mode treatment
+stays with 151.
+
 ## Close Conditions
 
 All measured on clean commits, default config, controller on:

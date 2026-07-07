@@ -5,8 +5,10 @@ shared `ClientConnection` runtime seam completed 2026-07-06; Slice 2 native
 TCP client IO actor completed 2026-07-06; Slice 3 remote runtime budget and
 diagnostics completed 2026-07-06; Slice 4 Quest remote chunk-view churn
 rebaseline completed 2026-07-06; Slice 4A remote command enqueue decoupling
-completed 2026-07-06. Slice 5 web shared ingress adoption is next. This is the
-focused remote connection successor to tactical
+completed 2026-07-06. Slice 5 was re-planned 2026-07-07 into 5A-5D because the
+native `ClientConnection` seam still lives inside the single-view scene module;
+Slice 5A shared contract promotion is next. This is the focused remote
+connection successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 and a convergence slice for tactical 133's shared bus shape. Architecture target:
 [`../session-network-architecture.md`](../session-network-architecture.md).
@@ -95,6 +97,16 @@ client. The remaining pieces are host-mode-honest diagnostics projection in
 tactical 149 and web callback adoption behind the same client-facing connection
 abstraction.
 
+As of 2026-07-07, `ClientConnection`, `QueuedServerUpdate`,
+`ClientConnectionDrainResult`, `ClientConnectionQueueMetrics`, and the shared
+budgeted drain helper are still private to
+`mclone-app-runtime/src/local_single_view.rs`. Native desktop, Android, and
+Android XR reach them through `NativeSingleViewSessionRuntime`, so the native
+behavioral fix is shared there. The placement is still wrong for the intended
+contract: web and future non-single-view runtime shells cannot adopt a private
+single-view helper without either copying it or growing another parallel
+ingress shape. Slice 5A fixes placement first.
+
 ## Target Shape
 
 Shared client-facing target:
@@ -176,11 +188,118 @@ queue, or a second local-vs-remote runtime interface. The reference requirement
 is one connection-shaped command/update surface with ordered producer-side
 decode and client-runtime-side apply.
 
+## Contract For Implementing Agents
+
+Read this section, the active slice, the reference-shape section above,
+[`../session-network-architecture.md`](../session-network-architecture.md),
+tactical
+[`133-session-network-bus-and-update-pacing.md`](133-session-network-bus-and-update-pacing.md),
+and the relevant code before writing code. If context is compressed mid-task,
+re-read this section before continuing.
+
+1. **One client connection contract.** Local integrated, native remote TCP, web
+   integrated worker/inline, web remote WebSocket, desktop, Android, Android XR,
+   and future session shells converge on the same command/update boundary.
+   Transport internals may differ; runtime-facing ingress must not.
+2. **The contract is not view-owned.** `ClientConnection` and its update
+   envelope are a session/app-runtime boundary, not a single-view, XR, desktop,
+   web, or renderer detail. A new copy in an app crate or view runtime is a
+   defect.
+3. **Vanilla-shaped ownership.** Producer-side code owns transport, framing,
+   packet/update decode, queue metadata, and disconnect/error reporting.
+   Runtime/client-thread code drains ordered decoded updates and applies them.
+   Rendering, dirty-section admission, meshing, and GPU upload remain downstream
+   systems.
+4. **Slice 5A is refactor-only.** Promoting the contract out of
+   `local_single_view.rs` must not change wire protocol, queue ordering,
+   budgets, default flags, worker counts, startup behavior, reconnect behavior,
+   or diagnostics meaning.
+5. **Receive order is binding.** Snapshot -> block update -> unload and paired
+   remote responses must preserve receive order across budget stalls, startup
+   drains, reconnect/resync, and web callback/promise boundaries.
+6. **Normal frame polling is nonblocking.** Normal `poll()` may drain already
+   queued decoded updates under `RuntimeUpdatePumpBudget`; it must not wait for
+   socket reads, WebSocket promises, worker messages, response pairing, or
+   ready-batch decode. `DrainImmediately`, startup, and idle waits are explicit
+   exceptions.
+7. **Budget semantics stay shared.** `RuntimeUpdatePumpBudget` is the only
+   runtime update-apply pacing surface in this tactical. Web must adopt the
+   shared drain semantics instead of adding a web-only update throttle.
+8. **Diagnostics are honest.** Producer read/decode, queue depth, bytes, age,
+   response sequence, stalls, and conservation fields keep their current
+   meanings. Unavailable host-side counters are reported as unavailable, never
+   zero.
+9. **No diagnostics drift without a named detour.** Add counters only when a
+   named gate or slice decision cannot be made from existing fields, record the
+   missing evidence in this document, and name the consuming decision before
+   adding the counter.
+10. **No adjacent workstreams.** Do not take server-push protocol broadening,
+    compression, binary protocol redesign, mesh/render admission, GPU upload
+    policy, chunk streaming priority lanes, authority/correctness redesign, or
+    platform lifecycle rewrites in this tactical.
+11. **Web mechanics stay behind the adapter.** Browser promises, WebSocket
+    callbacks, worker construction, `SharedArrayBuffer`, JS glue, and browser
+    lifecycle code may remain web-specific. The runtime-facing command/update
+    shape may not.
+12. **No async infection of the shared runtime.** It is acceptable for a
+    producer adapter to be async/evented internally. The shared runtime boundary
+    remains frame-driven and synchronously drained.
+
+## Slice 5 Preflight Gate Check
+
+Run this before starting any Slice 5A-5D implementation. If a preflight gate is
+already red, classify it before editing. Do not hide an existing failure inside
+the slice diff.
+
+```bash
+git status --short
+rg -n "trait ClientConnection|struct QueuedServerUpdate|pump_client_connection_updates_report|WebRuntimeHost|exchange_command|try_recv_update|drain_updates" native/crates/mclone-app-runtime native/apps/mclone-web-client
+rg -n "NativeClientSession|NativeClientIoSession|try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+git diff --check
+```
+
+Preflight interpretation:
+
+- `ClientConnection` hits in `local_single_view.rs` are expected before Slice
+  5A and disallowed after Slice 5A except for adapter implementations/tests.
+- `WebRuntimeHost` and `exchange_command` hits are expected before Slice 5B and
+  Slice 5C. After web adoption, remaining hits must be explicit adapter,
+  startup, compatibility, or test paths, not normal frame update polling.
+- `NativeClientSession` and legacy drain hits are allowed only as low-level
+  compatibility helpers, tests, or adapter internals. Normal desktop, Android,
+  and Android XR remote sessions must stay on `NativeClientIoSession`.
+- If `pnpm native:web:smoke` is already red, Slice 5B/5C cannot close until the
+  failure is fixed or recorded as an unrelated blocker with user agreement.
+- Quest rebaseline is not required for Slice 5A if the diff is a pure move and
+  the native checks stay green. Re-run the Quest remote churn lane if native
+  remote enqueue/drain semantics change.
+
+Tripwires that stop the slice and require a document update before continuing:
+
+- The implementation needs a second runtime-facing local-vs-remote or
+  native-vs-web connection interface.
+- A normal frame path must await a web promise, read a socket, or decode a
+  ready response batch to make progress.
+- The shared runtime boundary has to become async to compile.
+- A counter changes from unavailable to zero, or producer time is double-counted
+  between batch totals and per-update metadata.
+- Web adoption requires a broad worker lifecycle or `SharedArrayBuffer`
+  redesign before the shared ingress can be represented.
+- A validation command fails after edits and cannot be explained by an
+  explicitly recorded pre-existing failure.
+
 ## Slice Rules
 
 - One slice per session.
 - At the end of each slice: update this document with status/evidence, run the
-  named validation, commit, and state the next step.
+  named validation, commit the slice files, and state the next step. If the
+  worktree has unrelated dirty files, leave them untouched and call them out.
 - Preserve receive order. Do not add priority lanes or coalescing for chunk
   streaming here.
 - Do not add another runtime-facing local-vs-remote session interface. Local
@@ -735,43 +854,158 @@ node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
   --freeze-time
 ```
 
-## Slice 5: Web Shared Ingress Adoption
+## Slice 5A: Promote ClientConnection To Shared App-Runtime Contract
 
-Goal: make web integrated and web remote feed the same wasm-compatible
-`ClientConnection` ingress used by native local/remote, without requiring native
-OS threads. Web worker, `SharedArrayBuffer`, promise, and WebSocket callback
-mechanics are producer/adapter details; the runtime-facing command/update shape
-must be shared.
+Goal: make the native 151 seam a real shared contract before web adoption.
+This is a move/refactor slice only.
 
 Deliverables:
 
-- Move the shared `ClientConnection` contract, `QueuedServerUpdate` envelope,
-  and budgeted drain/apply helper to a wasm-compatible shared module if they
-  still live in native-only runtime code.
-- Adapt web integrated worker/local-host paths so worker or
-  `SharedArrayBuffer` internals feed the same ordered inbound envelope queue as
-  native integrated.
-- Adapt web remote WebSocket paths so `message` callbacks, promise plumbing, or
-  a future web worker feed the same ordered inbound envelope queue as native
-  remote.
-- Delete or demote duplicate web command-response apply paths such as
-  host-specific `exchange_command` / `WebRuntimeHost` drains where practical.
-  Remaining compatibility helpers must be explicitly isolated from normal frame
-  polling.
-- Keep browser lifecycle, promises, JS glue, WebSocket setup, and worker
-  construction in the web app/adapter behind the shared ingress boundary.
-- Add web integrated and web remote smokes proving command enqueue, producer
-  decode/queue, and inbound update application are separate runtime operations
-  using the shared budgeted drain path.
+- Move `ClientConnection`, `QueuedServerUpdate`,
+  `ClientConnectionDrainResult`, `ClientConnectionQueueMetrics`, drain mode,
+  and the budgeted drain/apply helper out of `local_single_view.rs` into a
+  wasm-compatible shared app-runtime module such as
+  `mclone-app-runtime/src/client_connection.rs`.
+- Make the API public or crate-visible exactly as needed for native scene
+  runtimes and web adapters to use the same type/trait definitions. Do not make
+  app crates define their own duplicate trait.
+- Keep `LocalIntegratedConnection` and `RemoteDedicatedConnection` as native
+  adapter implementations if that remains the smallest safe move; the contract
+  and pump must no longer be private single-view helpers.
+- Preserve all existing local integrated, native remote, desktop, Android, and
+  Android XR behavior. No new queue, wire, reconnect, startup, or budget policy
+  in this slice.
+- Preserve and, if needed, relocate the existing tests for receive-order
+  preservation across budget stalls and remote `SendOnly` behavior.
+- Update this document with the exact module placement and the post-move audit
+  classification.
 
 Validation:
 
 ```bash
 cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
-pnpm native:web:smoke
+rg -n "trait ClientConnection|struct QueuedServerUpdate|pump_client_connection_updates_report|WebRuntimeHost|exchange_command|try_recv_update|drain_updates" native/crates/mclone-app-runtime native/apps/mclone-web-client
 git diff --check
 ```
+
+Exit criteria: shared contract module exists; `local_single_view.rs` no longer
+owns the contract or pump; native local/remote behavior tests remain green;
+web still compiles for wasm; remaining web divergence is classified for Slice
+5B/5C.
+
+## Slice 5B: Web Integrated Shared Ingress
+
+Goal: make web integrated inline/worker play feed the shared
+`ClientConnection` ingress without requiring native OS threads.
+
+Deliverables:
+
+- Adapt web integrated inline and worker/local-host paths so producer-side
+  worker, inline host, or `SharedArrayBuffer` mechanics queue ordered
+  `QueuedServerUpdate` envelopes.
+- Route normal web integrated frame polling through the shared budgeted drain
+  helper. Do not apply normal-frame updates directly from a returned
+  `exchange_command` batch.
+- Keep browser lifecycle, worker creation, JS glue, and any promise plumbing in
+  the web adapter. The runtime-facing operation is enqueue command, then drain
+  already queued decoded updates.
+- Preserve startup and idle waits as explicit unlimited-drain paths.
+- Add or update web integrated smoke/regression coverage proving command
+  enqueue, producer queueing, and runtime update application are separate
+  operations.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+rg -n "WebRuntimeHost|exchange_command|ClientConnection|QueuedServerUpdate|drain_updates" native/apps/mclone-web-client native/crates/mclone-app-runtime
+git diff --check
+```
+
+Exit criteria: web integrated normal-frame updates drain through the shared
+connection path; remaining `exchange_command` hits are adapter/startup/test
+helpers and are classified in this document.
+
+## Slice 5C: Web Remote Shared Ingress
+
+Goal: make web remote WebSocket sessions feed the same shared ingress as native
+remote TCP.
+
+Deliverables:
+
+- Adapt web remote WebSocket message/promise callbacks so producer-side code
+  decodes or receives `ServerUpdate`s, attaches queue metadata where available,
+  and queues ordered `QueuedServerUpdate` envelopes.
+- Route normal web remote frame polling through the shared budgeted drain
+  helper. A normal frame must not await a WebSocket response promise to apply
+  updates.
+- Preserve disconnect/error reporting and reconnect behavior. If a host-side
+  metric is unavailable in web remote, report it as unavailable rather than
+  zero.
+- Keep the current wire protocol unless a blocker is recorded and user-reviewed;
+  server-push broadening remains tactical 133.
+- Add or update web remote smoke/regression coverage for command enqueue,
+  producer queueing, ordered apply, and a held/delayed response that does not
+  block normal frame polling.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+rg -n "WebRuntimeHost|exchange_command|ClientConnection|QueuedServerUpdate|drain_updates" native/apps/mclone-web-client native/crates/mclone-app-runtime
+git diff --check
+```
+
+Exit criteria: web remote normal-frame updates drain through the shared
+connection path; no normal frame path awaits response decode/apply; remaining
+web compatibility helpers are classified.
+
+## Slice 5D: Close-Out Audit
+
+Goal: close tactical 151 once native and web all use one runtime-facing
+connection ingress.
+
+Deliverables:
+
+- Run the full audit for duplicate normal-frame connection shapes:
+  `ClientConnection`, `QueuedServerUpdate`, `WebRuntimeHost`,
+  `exchange_command`, `NativeClientSession`, legacy drain helpers, and
+  `pending_response_batches`.
+- Confirm every remaining duplicate-looking hit is adapter internals, startup,
+  compatibility, or test code. No normal frame runtime pump may use a
+  host-specific command-response apply path.
+- Update `session-network-architecture.md`, tactical 133, tactical 149 if
+  needed, this tactical, and the tactical index with the final state.
+- Decide whether any remaining response-paired protocol head-of-line blocking
+  belongs in tactical 133, not this tactical.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+rg -n "ClientConnection|QueuedServerUpdate|WebRuntimeHost|exchange_command|NativeClientSession|NativeClientIoSession|try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-web-client native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+git diff --check
+```
+
+Exit criteria: tactical 151 status marked closed with evidence; one shared
+client connection ingress is used by native local, native remote, web
+integrated, and web remote normal-frame paths; remaining server-push or protocol
+broadening ideas are handed to tactical 133 or a new tactical.
 
 ## Out Of Scope
 

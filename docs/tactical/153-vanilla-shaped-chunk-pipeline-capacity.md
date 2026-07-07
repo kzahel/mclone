@@ -1,0 +1,517 @@
+# 153: Vanilla-Shaped Chunk Pipeline Capacity
+
+Status: drafted 2026-07-07 as the named follow-up to tactical
+[`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
+(close-out commits `42d3e43a`/`01147cd7`). Slice 0 (whole-pipeline
+attribution) is next. This tactical absorbs 150's "per-stage render pipeline
+budgeting" follow-up list and widens it to the real goal: raise the
+end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
+its cores, by porting the vanilla 1.17.1 scheduling/capacity shape instead
+of inventing constants.
+
+Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
+Strategy lineage:
+[`142-throughput-policy-with-quest-rd5-guardrail.md`](142-throughput-policy-with-quest-rd5-guardrail.md)
+(gates, falsified levers),
+[`150`](150-adaptive-frame-budget-controller.md) (controller, floors,
+promoted queue-depth baseline),
+[`062-shared-threading-topology.md`](062-shared-threading-topology.md)
+(worker topology parent).
+
+Workstream: native Rust shared performance/architecture.
+
+Goal: after 150, the publication valve is measured-elapsed and the pipeline
+runs at the structural ceiling of its single-threaded stages
+(~`48-58` chunks/sec fresh at RD10/RD15/RD20 — a rate signature, not a
+pacing one). Worldgen itself is not the bottleneck (raw `551-1243`
+chunks/sec on one thread); the post-generation pipeline is: light
+(~`60`/sec ceiling), CPU meshing (~`50-90`/sec at workers `1`), then the
+publication unit cap (`80`/sec at 20 Hz). This tactical raises those stage
+ceilings the way vanilla does — resource-derived capacity, serial actors
+where vanilla is serial, parallel stages where vanilla is parallel, bounded
+admission everywhere — while the Quest RD5/RD7/churn gate set stays green
+and **no capacity constant is tuned to a specific host**. Desktop and Quest
+resolve to different capacity numbers because their queried resources and
+measured inputs differ, never because a constant was picked on one machine.
+
+## Why Vanilla Shape, Stated Once
+
+Vanilla 1.17.1 encodes hard-won answers to exactly the problems this
+tactical touches:
+
+1. **Capacity comes from resource formulas, not tuned counts.** The shared
+   worker pool is `clamp(cores - 1, 1, 7)`; the mesh buffer pool is
+   `max(1, min(is64bit ? cores : min(cores, 4), heapBudget/bufferSize))`.
+   Both scale up on big hosts and degrade on small ones with no per-host
+   profile.
+2. **Serial where correctness demands, parallel where it is free.**
+   Feature placement and lighting are single-consumer actors (serialization
+   *is* the cross-chunk race-safety mechanism); noise fill and mesh
+   compilation fork wide onto the pool.
+3. **Bounded admission at every stage boundary** — buffer packs, light
+   `taskPerBatch`, the compile frame deadline, server tick slack — so no
+   stage can flood a frame regardless of how much capacity exists.
+4. **One shared pool** so idle stages donate cores to busy ones instead of
+   pinning one thread per stage.
+5. **Priority by player relevance** (ticket-level sorter, distance-sorted
+   compile queue) so capacity is spent near the player first.
+
+150 already ported (3) as the budget controller. This tactical ports (1)
+and (2), re-measures the promoted valves against the higher ceilings,
+and makes an explicit evidence-gated decision on (4). (5) exists in the
+compile queue (tactical 034) and is not re-opened.
+
+## Sequencing
+
+- Tactical 150 is closed; its re-pinned gate set and close-out baselines
+  are the falsification anchors here.
+- Coordinate with [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md):
+  151 owns remote/dedicated lanes and host-mode ingress. This tactical is
+  local-integrated capacity only; remote sessions stay on fail-safe floors
+  and their budget shaping remains 151-or-later business.
+- [`152`](152-xr-room-scale-body-follow-hysteresis.md) is orthogonal.
+- One slice per session, in order. Between slices the user reviews.
+- Slice 0 is measurement-only (144 invariant 1 applies). Slices 1-4 are
+  candidates: land behind flags/derived-default plumbing, promote through
+  the gate loop, one policy family per measured comparison.
+
+## Fixed Reference Numbers
+
+All from the 150 close-out on clean commits `42d3e43a`/`c1ac218b` and the
+142 ceiling split (Mac host `kmacbook`, Quest 3, seed `12345` unless
+stated). If Slice 0 recapture disagrees materially, re-pin in Slice 0.
+
+| Anchor | Value |
+|---|---|
+| Desktop RD10 fresh frozen-fluids, defaults (`workers=1`, `max-pending=4`) | full view `9183.072/9137.523ms`, target quiescent `10744.258/10853.328ms`, `0` over-budget |
+| Desktop RD15 fresh frozen | full view `19429.505ms` (`2.9x` vs 150 Slice 0) |
+| Desktop RD10 persisted frozen | full view `1014.642ms`, target quiescent `4924.696ms`, post-full-view target rebuilds `5696` |
+| Contrasting seed `74739` RD10 frozen | full view `8157.360ms`, quiescent `9601.381ms` |
+| RD20 long live (120 Hz backlog watch) | full view `34864.820ms`; max pending publication `208`, pump stalls `0` |
+| Raw / server-only / server+light ceilings (142) | `551.5` (`1243.2` warm) / `126.7` / `40.6` chunks/sec |
+| Implied stage costs (re-derive in Slice 0) | light ~`17ms`/chunk; mesh ~`1.3ms`/section (`11.037s` / `8464` RD10 sections CPU-only); GPU upload `0.133s` / `360MB` |
+| Effective fresh pipeline rate | RD10 ~`58`/s, RD15 ~`49`/s, RD20 ~`48`/s — production-bound |
+| Quest RD5 orbit (workers `2`, caps `2/16/64`) | skipped `0`, dropped delta `15`, app p95 `12.040ms`, headroom avg `+3.172ms`, over-period `0.0%` |
+| Quest RD7 orbit (shipping defaults) | skipped `0`, dropped delta `16`, app p95 `12.755ms`, over-period `0.9%` |
+| Quest RD5 churn (workers `2`, caps `2/16/64`) | skipped `0`, dropped delta `16`, app p95 `9.771ms`, over-period `0.0%`, compile queue age `531.182ms` |
+| Quest churn publication cadence | `23.412` feature chunks/sec, `13.239` light statuses/sec, `36.651` units/sec |
+| Movement-frame caveat (open from 150) | two clean repeats each with `1` over-budget / `1` over-2x legacy frame (`~18ms` max), unattributed |
+| Quest 15-min churn soak (open from 150) | app-work safe but not clean: submitted FPS `41.79`, dropped deltas `219 -> 358`, compile queue age `1558.614ms`, battery `35.0C -> 43.0C` |
+
+## Java Reference Anchors (1.17.1)
+
+Verified against `reference/minecraft-1.17.1/src/` on 2026-07-07. Read the
+listed source before implementing the consuming slice; drift from the
+reference is a decision, not an accident. 150's anchors (compile deadline,
+`compileChunksUntil` per-unit break, tick-slack `haveTime()`,
+`processUnloads` floors/backlog, 3-tick task age, `FrameTimer`) carry over
+unchanged and are not repeated.
+
+| Mechanism | Reference | Shape |
+|---|---|---|
+| Shared worker pool sizing | `Util.java` `makeExecutor` (105-130), `backgroundExecutor` (136) | one ForkJoinPool `Mth.clamp(availableProcessors() - 1, 1, 7)`, threads `Worker-Main-N`; client and server share it in singleplayer |
+| Serial actor primitive | `util/thread/ProcessorMailbox.java` (38-95, 112-124) | `SCHEDULED_BIT` CAS allows one in-flight `run()`; exactly one task per activation, then re-registers on the pool — serial semantics, fair interleave, no pinned thread |
+| Chunk pipeline orchestration | `server/level/ChunkMap.java` (113-115, 150-158, 450-470, 512-543) | `worldgen`/`main`/`light` mailboxes wrapped by `ChunkTaskPriorityQueueSorter` (ticket-level priority, `Integer.MAX_VALUE` backlog); `scheduleChunkGeneration` assembles the neighbor-range future then runs `ChunkStatus.generate` **on the worldgen mailbox** |
+| Serial generation bodies | `world/level/chunk/ChunkStatus.java` (39-163) | structure starts/references, biomes, surface, carvers, liquid carvers, **features**, spawn all run inline in the worldgen-mailbox task — globally serialized; FEATURES writes into neighbors via `WorldGenRegion` radius `1`, and the serialization is the race-safety mechanism |
+| The one parallel gen stage | `world/level/levelgen/NoiseBasedChunkGenerator.java` `fillFromNoise` (317-349) | ignores the mailbox executor; `supplyAsync(doFill, Util.backgroundExecutor())` with per-section `acquire()/release()` — noise fills run concurrently across chunks |
+| Dependency pyramid | `ChunkStatus.java` `STATUS_BY_RANGE` (164-176), `ChunkMap.getDependencyStatus` (555-564) | FULL needs r1 FEATURES, r2 LIQUID_CARVERS, r3-10 STRUCTURE_STARTS — the generation frontier is wide and status-staggered |
+| Serial light actor | `server/level/ThreadedLevelLightEngine.java` (32, 117-196) | single mailbox; `scheduled` CAS; per activation: up to `taskPerBatch = 5` PRE_UPDATE chunk tasks (section statuses, enable sources, seed emissions), then `runUpdates(Integer.MAX_VALUE, true, true)` drains the whole propagation graph, then POST_UPDATE completions |
+| Mesh capacity formula + admission | `client/renderer/chunk/ChunkRenderDispatcher.java` (71-103, 109-136) | pack count = `max(1, min(is64bit ? cores : min(cores, 4), (maxMemory*0.3)/(sum(bufferSizes)*4) - 1))`; serial admission mailbox pairs one queued task with one free `ChunkBufferBuilderPack` and **forks `doTask` onto the shared pool**; pack returns via mailbox and re-arms admission; `pC/pU/aB` counters (138-140) |
+| Client meshing shares the pool | `client/renderer/LevelRenderer.java` (702-704) | dispatcher is constructed with `Util.backgroundExecutor()` — mesh compile contends with server worldgen/light on the same pool in singleplayer, bounded only by packs |
+| Chunk NBT load | `ChunkMap.scheduleChunkLoad` (472-501) | runs on the server main-thread executor under tick slack in 1.17.1 — vanilla treats disk load as cheap; mclone's persisted path already beats this shape |
+
+What vanilla does **not** have — the divergence ledger this tactical
+maintains:
+
+- **No parallel lighting.** The light engine is a serial actor. Any mclone
+  light parallelism (Slice 2 option B) is a recorded divergence and must
+  prove output equality against the serial engine, not just gate-greenness.
+- **No parallel feature placement.** A feature-generation worker pool is
+  explicitly *not* vanilla-shaped and is out of scope; mclone's single
+  worldgen actor already matches the reference and is ~10x faster than the
+  downstream stages.
+- **No publication valve.** Vanilla's client applies everything; pacing
+  lives at compile admission and tick slack. mclone's budgeted publication
+  and update pump are previously recorded divergences (133/150) and stay.
+- **No adaptation.** Vanilla's formulas are static resource formulas; 150's
+  controller adds measured adaptation on top. The layering rule below keeps
+  those roles separate.
+- **Period constants.** The `7`-thread cap and the `is64bit` branch are
+  2016-era host assumptions. We adopt the *formula shape* (clamped,
+  resource-derived) and choose clamp bounds by cross-host measurement in
+  Slice 1, recording the justification — see contract rule C.
+
+## Contract For Implementing Agents
+
+Rules 1-10 of 150's contract apply verbatim (one shared calculation;
+fail-safe floors = today's shipped defaults; sans-I/O policy math;
+traceable decisions; diagnostics-detour rule; definition of progress;
+pinned absolute gates; A/B discipline; no adjacent workstreams; no new
+platform-local budget policy). Read them there. Additional rules:
+
+- **A. Capacity vs spend separation.** Structural capacity (worker counts,
+  in-flight pools, backlog bounds) is derived from queried host resources
+  and static footprint math — the vanilla formulas. Frame-time spending
+  (what runs this frame/tick) is the 150 controller's business — elapsed
+  grants from measured headroom. A capacity value must never be derived
+  from frame headroom, and a budget must never be derived from core count.
+  Keeping these separate is what lets weak hardware degrade to floors and
+  future hardware scale without retuning.
+- **B. No tuned capacity constants (anti-knob rule).** Every shipped
+  capacity default must be traceable to: queried resources
+  (`std::thread::available_parallelism`, measured buffer footprints),
+  a structural reservation (threads the engine actually pins), a
+  controller decision trace, or a fail-safe floor equal to today's shipped
+  default. A bare integer default that is none of those is a defect. CLI
+  flags remain as explicit overrides and benchmark/lane args only.
+- **C. Clamp bounds need cross-host evidence.** Where a derivation needs a
+  clamp (vanilla's `1..7`), the bounds are chosen where measured scaling
+  flattens on **both** the desktop ladder and the Quest gate set, plus a
+  written safety argument (memory bound, reserved-thread bound). Record
+  the evidence next to the constant. A clamp bound justified by one host
+  is rule-B defect.
+- **D. Reference-first.** Each slice names its Java anchors; read those
+  sources before writing the port. Divergences go to the ledger above with
+  scope, reason, and the path back to parity.
+- **E. Parity is falsifiable.** Any change to light execution must keep
+  light output byte-identical on the existing lighting fixtures and a
+  contrasting seed; any change to mesh scheduling must keep mesh output
+  identical for identical inputs (order-independence proof). Perf gates do
+  not substitute for output equality.
+- **F. Host-neutral contracts.** New shared code compiles for
+  `wasm32-unknown-unknown`. Resource inputs enter as parameters so the web
+  adapter can supply browser values when 062/067 wiring lands; web ships
+  on floors until then (behind on wiring is acceptable; forked on policy
+  is not).
+
+## Slice 0: Whole-Pipeline Attribution Row
+
+Why: every ceiling number above is stitched from rows measured on
+different commits and lanes. Lever order must come from one table on one
+commit, or this tactical tunes the wrong stage. This is the "understand
+the whole pipeline" deliverable and it is measurement-only.
+
+Deliverables:
+
+- one clean-commit run set: RD10 fresh frozen, RD15 fresh frozen, RD10
+  persisted frozen, plus one Quest RD5 churn row for contrast;
+- a per-stage table covering worldgen job -> light -> publication ->
+  client apply -> mesh admission -> mesh compile -> GPU upload -> visible,
+  with, per stage: measured throughput (chunks or sections/sec), busy
+  fraction of its owning thread, queue depth and oldest-age at the stage
+  boundary, and per-unit cost (EWMA where the controller already tracks
+  it);
+- busy-fraction counters for the worldgen and light mailbox threads and
+  the render compile worker(s) if not already reported — named consuming
+  decision: the Slice 1-3 lever ranking below; this is 144-style
+  measurement, no policy change;
+- re-derive the implied stage costs in the anchor table (light ms/chunk,
+  mesh ms/section) from this commit and re-pin if materially different;
+- record the ranked lever order this table implies, in this section, with
+  the expected ceiling after each lever (the falsification target for
+  Slices 1-3).
+
+Exit criteria: table recorded in
+[`../performance-records.md`](../performance-records.md) (and the Quest row
+in the Quest records doc); anchors re-pinned; lever ranking written here;
+no engine behavior change.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server -p mclone-diagnostics
+pnpm native:accounting:smoke
+pnpm native:startup-streaming:perf
+git diff --check
+```
+
+## Slice 1: Render Compile Capacity (Vanilla Pack-Pool Shape)
+
+Why: CPU meshing is the client-side ceiling (~`1.3ms`/section, workers
+`1`), and it is the stage vanilla explicitly scales with cores. mclone
+already has the pack-bound half (promoted `max-pending=4`); the worker
+half is a fixed `1`. 150's post-close-out thread named the worker ladder;
+this slice lands it as a derived capacity, not a picked number.
+
+Java anchors: `ChunkRenderDispatcher` (pack formula, admission mailbox,
+fork-per-task), `LevelRenderer` deadline admission (150 table).
+
+Deliverables:
+
+- a shared capacity derivation (working home: a sans-I/O module in
+  `mclone-frame-budget` next to the floors/caps config; record if review
+  moves it) producing render-compile worker count and in-flight bound
+  from: `available_parallelism`, a structural reservation for pinned
+  engine threads (main, render, worldgen actor, light actor, XR loop
+  where applicable), and a memory term from measured mesh buffer
+  footprint — the vanilla pack formula with mclone's real numbers.
+  Floors: today's `workers=1`, `max-pending=4`. Flags become overrides;
+- desktop ladder measured at derived vs `1/2/4` (and `8` if the
+  derivation can reach it): RD10/RD15 fresh frozen, RD10 persisted frozen,
+  frame-budget probe, movement-frame probe. The persisted lane is the
+  clean mesh-bound signal (`4.92s` quiescent baseline);
+- Quest gate set with the same derivation active (its reservation-heavy
+  formula should resolve low; if it does not and a gate regresses, the
+  remedy is a corrected structural input or clamp bound with cross-host
+  evidence — rule C — never a Quest-only constant);
+- upload-drain decision: vanilla drains all pending uploads every frame;
+  mclone keeps measured accept/upload seams. Record whether the higher
+  compile rate makes upload/accept pacing measurable on desktop, feeding
+  Slice 3;
+- mesh output equality check across worker counts (rule E).
+
+Gates (inner loop per iteration; promotion before default flip):
+
+- inner: RD10 persisted frozen + movement-frame probe + Quest RD5 orbit;
+- promotion: RD10/RD15 fresh frozen reproduced, RD7 pressure, RD5 churn,
+  one native-window `--window-frame-report` run, desktop-XR functional
+  smoke, `pnpm native:xr:check`;
+- acceptance: persisted RD10 target quiescent `<= 3s`; fresh lanes not
+  worse; `0` over-budget frames at 60 Hz lanes; movement probe not worse
+  than the pinned caveat (`1` over/over-2x); Quest envelopes green with
+  compile queue ages not materially worse.
+
+Exit criteria: derived defaults promoted for desktop and Quest
+local-integrated (or falsified with the ladder evidence); derivation and
+clamp-bound evidence recorded; 142 throttle inventory rows updated.
+
+## Slice 2: Light Stage Throughput
+
+Why: light is the binding fresh-generation stage (~`17ms`/chunk implies
+the ~`60`/sec pipeline ceiling the close-out lanes sit at). Vanilla offers
+no parallel precedent — its light engine is a serial actor — so this
+slice is explicitly: optimize first (parity-neutral), then make the
+divergence decision with evidence, not by default.
+
+Java anchors: `ThreadedLevelLightEngine` (batch shape, full-graph drain,
+PRE/POST task split); mclone history 045-049 (initial light batch,
+retained light world, graph drain instrumentation — prior large wins).
+
+Deliverables:
+
+- profile the per-chunk light cost on the Slice 0 commit into named
+  sub-costs (sky column init, propagation drain, section storage,
+  status/bridge serialization, publication handoff) — detour-rule scope:
+  the consuming decision is option A vs B below;
+- **option A (default): serial solver optimization.** Land the top
+  measured parity-neutral wins (batching shape vs vanilla `taskPerBatch`,
+  storage/allocation hot spots, redundant column work). Output must stay
+  byte-identical on lighting fixtures + contrasting seed (rule E);
+- **option B (divergence, only if A leaves light binding below the
+  Slice 0 target rate):** parallel light across chunk-disjoint regions
+  (tiled/checkerboard with halo ordering), N light workers derived by the
+  Slice 1 capacity module, serial actor semantics preserved per region.
+  Requires: ledger entry (scope, reason, parity-recovery path), byte-equal
+  output vs the serial engine on fixtures + contrasting seed + a live
+  RD10 world diff, and the same gate loop as every candidate;
+- either way: light stage rate, busy fraction, and queue age re-measured
+  into the Slice 0 table format.
+
+Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
+them), Quest RD5 orbit + churn (light publication cadence and queue ages
+watched), movement probe. Acceptance: light stage ceiling raised to at
+least the Slice 0 ranked target with parity proofs green, or option-B
+declined with the measured reason recorded and the tactical's close
+conditions re-scoped accordingly.
+
+Exit criteria: decision recorded (A sufficed / B landed / B declined with
+evidence); ledger updated; anchors re-pinned.
+
+## Slice 3: Count Knobs To Measured Valves
+
+Why: with capacity raised, the remaining fixed counts become the valve.
+The publication family cap is pinned at the sweep-knee `4`/tick (`80`
+chunks/sec at 20 Hz) — a number swept on the *old* single-thread pipeline.
+Vanilla has no unit cap at all at this seam: admission is elapsed
+(`haveTime()`, compile deadline) with unit estimation only to bound
+overshoot. The XR accept/upload lane args (`2/16/64`) are the same class
+of knob, already refused promotion twice in 150.
+
+Java anchors: `MinecraftServer.haveTime()` tick-slack drain;
+`LevelRenderer.compileChunksUntil` per-unit break (both in 150's table).
+
+Deliverables:
+
+- publication family caps derived, not pinned: max units per grant =
+  elapsed grant / EWMA per-unit cost (the controller already computes
+  both; the fixed `4` becomes a floor-side safety only if the estimator is
+  cold). Re-run the cadence-compatibility probe (150 Slice 3 shape) to
+  prove the grant stays period-relative;
+- backlog bound (`pending publication` cap) rederived from queue-age and
+  memory terms instead of a fixed N; RD20-long watches peak memory as in
+  150 Slice 5;
+- adaptive render admission promotion decision: with Slice 1 capacity in
+  place, re-A/B `--adaptive-render-admission-budget` default-on for
+  desktop local-integrated against the fixed-floor path — promote or
+  falsify with rows (this closes 150's deferred item);
+- XR accept/upload: replace the static `2/16/64` lane args with controller
+  outputs on Quest lanes, gated by RD5/RD7/churn; if the controller cannot
+  beat unbounded defaults (the 150 queue-depth finding), record that and
+  delete the lane args from guardrail configs rather than keeping a dead
+  knob.
+
+Gates: full inner/promotion loop as Slice 1, plus Quest churn publication
+cadence `>=` Slice 0 baseline and update-queue oldest-age not materially
+worse. Acceptance: no shipped count-shaped default remains in the
+publication/admission/upload path that is not a floor — audited against
+rule B; decision traces show caps tracking measured cost across desktop
+vs Quest (the "different numbers from shared code" assertion from 150).
+
+Exit criteria: promotions/falsifications recorded; 142 throttle inventory
+updated; rule-B audit of the shipped defaults written into this section.
+
+## Slice 4: Shared Pool Topology Decision
+
+Why: vanilla runs one pool so idle stages donate cores; mclone pins one
+thread per stage plus N mesh workers. After Slices 1-3, dedicated threads
+may oversubscribe small hosts (Quest: pinned main/render/XR + gen + light
++ mesh workers) or leave desktop cores idle between stage bursts. But the
+unification is a real refactor (062's parent scope), and it must be
+pulled by evidence, not by symmetry with vanilla.
+
+Deliverables:
+
+- decision input, from the Slice 1-3 gate artifacts: named contention or
+  idleness signals (Quest app-work p95 pressure with mesh workers active,
+  scheduler/runner spike markers, desktop busy-fraction gaps while a
+  neighbor stage is saturated);
+- if the signals are present: a bounded first step only — move the
+  worldgen and light actors onto the shared worker pool as serial actors
+  (ProcessorMailbox semantics: CAS-guarded, one activation at a time,
+  re-register), keeping every ordering and parity guarantee, under the
+  full gate loop. The full 062 convergence (web workers, render worker
+  trait unification) stays in 062;
+- if not: record the measured "no contention at current capacity" result
+  here and hand the topology work back to 062 as sequenced-later, with
+  the Slice 0/1 tables as its starting evidence.
+
+Exit criteria: decision recorded with the signal rows either way; no
+half-migrated topology.
+
+## Slice 5: Soak, Contrasting Seed, Close-Out
+
+Deliverables:
+
+- Quest mixed soak: add validator support to combine orbit + churn phases
+  in one `>= 15 min` run (named blocker from 150 Slice 5), run it with
+  the promoted defaults; record thermal note, dropped-frame drift,
+  compile/update queue ages. The 150 partial-soak numbers are the
+  comparison row;
+- desktop RD20 long run re-checked for backlog/memory with the new
+  capacity (peak pending publication vs the `208` baseline);
+- contrasting seed RD10 row re-run (`74739` or ocean-heavy);
+- movement-frame caveat: rerun the probe; if the `~18ms` spike persists,
+  attribute it with the shared stage accounting now that worker counts
+  changed the suspect set, or record it as a named open item with the
+  fields consulted;
+- docs closure: update 142 (throttle inventory, gate states), the law
+  doc's follow-up paragraph, [`../topics/performance.md`](../topics/performance.md)
+  priority queue, durable rows to both performance-records docs, and
+  150's post-close-out pointer.
+
+Exit criteria: close conditions below green or explicitly falsified with
+evidence; tactical closed.
+
+## Validating Capacity Derivations
+
+How we know a derived capacity is right and not a laundered knob:
+
+1. **Trace or formula for every value.** Each shipped capacity default is
+   reproducible from logged inputs: queried parallelism, reservations,
+   measured footprints — emitted once at startup into the existing report
+   schema alongside the controller's decision panel. If a value cannot be
+   recomputed from its logged inputs, that is a rule-B defect.
+2. **Cross-host convergence assertion.** The same derivation code runs on
+   desktop and Quest and resolves to materially different numbers from
+   inputs alone (150's controller assertion, extended to capacity).
+3. **Scaling-knee evidence for clamps.** Every clamp bound cites the
+   ladder rows (both hosts) where scaling flattened plus the safety term
+   that caps it.
+4. **Floors under failure.** Missing/absurd resource inputs (unknown
+   parallelism, zero memory estimate) degrade to today's shipped defaults
+   exactly — asserted in unit tests, same pattern as the controller's
+   cold-start floor.
+5. **The gates.** RD5/RD7/churn and the desktop lane set stay green in
+   default config on clean commits, reproduced per the 142 A/B rules.
+
+## Desktop XR Role
+
+Unchanged from 150: Quest standalone lanes are the numeric authority;
+desktop XR (Mac WiVRn / Windows VDXR) is functional rot insurance — one
+live smoke per promotion proving the XR frame loop with the new
+capacity/valve defaults reaches `FOCUSED`, submits frames with `0`
+skipped, and emits the decision panel. `pnpm native:xr:check` per
+candidate.
+
+## Non-Goals
+
+- Parallel feature/worldgen workers (not vanilla-shaped; gen is not the
+  bottleneck — the ledger records this explicitly).
+- Web worker wiring for the new capacity paths (062/067 own it; web stays
+  on floors behind the same contracts).
+- Remote/dedicated budget shaping and host-mode treatment (151).
+- Thread priority/niceness (130), CPU/GPU overlap internals (117/131),
+  upload buffer/arena lifetime (128), cadence semantics (116), far-LOD
+  budgets (121), XR HUD panels (148), wgpu upgrades.
+- The flat-client frame-interior hoist (named follow-up in 150's
+  non-goals; still deferred).
+- Making Quest RD7 settled-orbit perfectly clean (render/draw-cost bound;
+  117/119).
+- Any new fixed global default as a "temporary" policy — floors only.
+
+## Close Conditions
+
+All measured on clean commits, default config (derived capacities and
+valves on), reproduced per 142 A/B rules:
+
+- desktop end-to-end fresh pipeline rate at RD10 `>= 2x` the Slice 0
+  attribution row, with `0` over-budget frames at the 60 Hz target —
+  the rate form is primary so the condition survives host changes;
+  on `kmacbook` today that implies full view `<= ~5.5s`;
+- desktop RD15 fresh full view `>= 2x` vs the `19429.505ms` anchor;
+- desktop RD10 persisted target quiescent `<= 3s`;
+- movement-frame probe not worse than the pinned caveat, with the spike
+  either attributed or recorded as a named open item;
+- Quest RD5 orbit, RD7 pressure, RD5 churn green against the 150
+  close-out envelopes; churn publication cadence `>=` Slice 0 baseline;
+  compile/update queue ages not materially worse; mixed soak recorded
+  (clean, or falsified with attribution);
+- rule-B audit green: no shipped capacity/valve default in the touched
+  paths that is not formula-derived, controller-derived, or a floor;
+- parity proofs green for every touched execution path (light
+  byte-equality, mesh order-independence);
+- wasm32 checks green for every touched shared crate; remote sessions
+  still on floors.
+
+If Slice 2 declines the light divergence and optimization alone cannot
+reach the rate target, the close conditions re-scope to the measured
+light-bound ceiling in the same PR that records the falsification — the
+tactical then closes on honest numbers, not on stretch.
+
+## Open Questions
+
+- Clamp upper bounds for mesh workers on big desktops (rule C evidence
+  needed at `8+`).
+- Whether serial-light optimization alone clears the target rate, making
+  the parallel-light divergence unnecessary.
+- Whether the shared-pool topology signals appear at all at these
+  capacities (Slice 4 gate), and if so whether Quest or desktop shows
+  them first.
+- Where the mixed-soak validator support should permanently live
+  (validator script vs perf harness).
+
+## Links
+
+- [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
+  — controller, floors, promoted baseline, carried contract rules.
+- [`142-throughput-policy-with-quest-rd5-guardrail.md`](142-throughput-policy-with-quest-rd5-guardrail.md)
+  — gate discipline, throttle inventory, ceiling split.
+- [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md)
+  — the meter; Slice 0 follows its measurement-only invariant.
+- [`062-shared-threading-topology.md`](062-shared-threading-topology.md)
+  — worker topology parent; Slice 4 hands off or draws from it.
+- [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md) —
+  law doc.
+- `reference/minecraft-1.17.1/src/` — all anchors verified against this
+  tree; see the table above for files and line ranges.
