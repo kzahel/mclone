@@ -807,6 +807,10 @@ impl EngineCameraController {
             self.last_room_scale_reconciliation = Some(result);
             return result;
         }
+        if self.movement_mode == EngineCameraMovementMode::HandPush {
+            self.reset_room_scale_body_follow();
+            return EngineRoomScaleReconciliation::no_op(body_eye_before, headset_world_position);
+        }
 
         let requested_body_movement = Vec3d::new(
             headset_world_position.x - body_eye_before.x,

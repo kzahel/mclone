@@ -222,6 +222,21 @@ audit hand-push ownership separately. Likely options:
 - Or teach hand-push about consumed room-scale body movement so its stored
   previous head/hand/player positions and velocity history remain coherent.
 
+2026-07-07 audit result:
+
+- `HandPush` mode now suppresses room-scale body-follow reconciliation inside
+  `EngineCameraController::reconcile_room_scale_headset`.
+- XR tracking can keep calling the reconciliation hook, but the shared camera
+  controller returns zero consumed body movement, clears room-scale follow state,
+  and leaves the hand-push collider for hand-push locomotion to own for that
+  frame.
+- This keeps stale blocked residuals out of comfort/debug consumers while
+  avoiding the same-frame player-position mutation that could pollute
+  hand-push velocity history.
+- Future headset tuning may still add a post-solve capsule-near-head constraint
+  for `HandPush`; this slice intentionally avoids pre-solving the body before
+  hand collision input is applied.
+
 ## Validation
 
 Required before closing:

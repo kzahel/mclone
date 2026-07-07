@@ -362,6 +362,54 @@ fn room_scale_reconciliation_does_not_auto_step_from_vertical_hmd_offset() {
 }
 
 #[test]
+fn room_scale_reconciliation_does_not_move_hand_push_body() {
+    let client = ClientRuntime::local_integrated();
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 2.62, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+    camera.set_movement_mode(EngineCameraMovementMode::HandPush);
+
+    let result = camera.reconcile_room_scale_headset(&client, Vec3d::new(0.85, 2.62, 0.3));
+
+    assert_eq!(result.requested_body_movement, Vec3d::ZERO);
+    assert_eq!(result.consumed_body_movement, Vec3d::ZERO);
+    assert_close(result.residual_head_offset.x, 0.35);
+    assert_close(result.residual_head_offset.z, -0.2);
+    assert_close(camera.player().pose().eye_position().x, 0.5);
+    assert_close(camera.player().pose().eye_position().z, 0.5);
+    assert_eq!(camera.last_room_scale_reconciliation(), None);
+}
+
+#[test]
+fn hand_push_reconciliation_clears_stale_blocked_residual() {
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+        ChunkPos::new(0, 0),
+        BlockPos::new(1, 1, 0),
+        BlockStateId(7),
+    )));
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 2.62, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+    let blocked = camera.reconcile_room_scale_headset(&client, Vec3d::new(1.5, 2.62, 0.5));
+    assert!(blocked.collision.horizontal_collision);
+    assert!(camera.last_room_scale_reconciliation().is_some());
+
+    camera.set_movement_mode(EngineCameraMovementMode::HandPush);
+    let hand_push = camera.reconcile_room_scale_headset(&client, Vec3d::new(1.5, 2.62, 0.5));
+
+    assert_eq!(hand_push.requested_body_movement, Vec3d::ZERO);
+    assert_eq!(hand_push.consumed_body_movement, Vec3d::ZERO);
+    assert_eq!(camera.last_room_scale_reconciliation(), None);
+}
+
+#[test]
 fn room_scale_reconciliation_preserves_grounded_jump_input() {
     let mut client = ClientRuntime::local_integrated();
     client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
