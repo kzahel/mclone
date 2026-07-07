@@ -384,6 +384,7 @@ impl SceneOptions {
             render_distance: u32::try_from(self.render_distance)
                 .expect("desktop default render distance is non-negative"),
             render_compile_worker_count: self.render_compile_worker_count,
+            render_compile_max_pending_jobs: self.render_compile_max_pending_jobs,
             remote_addr: self.remote_addr.clone(),
             day_time_override: self.day_time_override,
             freeze_time: self.freeze_time,
@@ -401,7 +402,7 @@ impl SceneOptions {
             render_distance: i32::try_from(scene.render_distance)
                 .context("desktop render distance does not fit i32")?,
             render_compile_worker_count: scene.render_compile_worker_count,
-            render_compile_max_pending_jobs: None,
+            render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
             remote_addr: scene.remote_addr,
             world_root: Some(default_native_world_root()),
             world_dir: None,

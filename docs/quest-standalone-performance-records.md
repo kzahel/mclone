@@ -109,6 +109,74 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Queue-Depth Candidate Quest Pass
+
+Benchmarked worktree: dirty on `a89dc699` while adding Android XR
+`--render-compile-max-pending-jobs` plumbing and this record. The commit
+containing this row carries the same runtime code. Release APK was rebuilt for
+the first lane, then reused with staged assets for the remaining lanes.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+
+Commands:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --render-compile-max-pending-jobs 4 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-150-quest-rd5-orbit-queue4.txt --log /tmp/mclone-150-quest-rd5-orbit-queue4-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-max-pending-jobs 4 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-150-quest-rd7-orbit-queue4.txt --log /tmp/mclone-150-quest-rd7-orbit-queue4-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-workers 2 --render-compile-max-pending-jobs 4 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-150-quest-rd5-churn-queue4.txt --log /tmp/mclone-150-quest-rd5-churn-queue4-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+```
+
+All three startup argv logs included `--render-compile-max-pending-jobs 4`,
+and each marker block reported `max_pending_jobs=4` in
+`MCLONE_ANDROID_XR_PERF_COMPILE_MAX`.
+
+| Lane | Config | Skipped | Dropped delta | App p95 / p99 | Headroom avg / p05 | App over-period | Compile queue max age | Deadline skips |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| RD5 settled orbit | workers `2`, max pending `4`, accept/upload `2/16/64` | `0` | `16` | `11.923 / 12.584ms` | `+3.296 / +1.966ms` | `0.0%` | `168.645ms` | `0` |
+| RD7 settled orbit | workers `1`, max pending `4`, unbounded accept/upload | `0` | `16` | `12.407 / 13.769ms` | `+2.895 / +1.482ms` | `0.8%` | `114.569ms` | `0` |
+| RD5 chunk-view churn | workers `2`, max pending `4`, accept/upload `2/16/64` | `0` | `16` | `9.639 / 10.595ms` | `+8.740 / +4.250ms` | `0.1%` | `678.520ms` | `1` |
+
+Additional queue and upload markers:
+
+| Lane | Upload-work max age | Host-publication max age | Server update queue / age | Upload limited | Update pump stalls |
+|---|---:|---:|---:|---|---:|
+| RD5 settled orbit | `107.686ms` | `475.548ms` | `0 / 26.218ms` | `true` | `0` |
+| RD7 settled orbit | `0.000ms` | `926.904ms` | `19 / 25.472ms` | `false` | `1` |
+| RD5 chunk-view churn | `208.969ms` | `1899.507ms` | `287 / 172.884ms` | `true` | `1` |
+
+Interpretation:
+
+- The candidate now reaches Quest correctly; the validator passes the shared
+  startup flag through, and the perf markers prove the render compiler saw a
+  `4`-job in-flight cap.
+- RD5 orbit and RD5 churn app pacing remain inside the established overlap
+  envelope (`0` skipped frames, app p95 under the Slice 1 rows, dropped delta
+  `16`).
+- Do not promote defaults from this pass alone. RD7 app-over-period rose to
+  `0.8%` versus the older `0.5%` overlap pressure row, and churn's compile-max
+  marker reported `deadline_skipped_requests=1` with a `678.520ms`
+  render-compile queue max age. The next pass should repeat RD7 with the
+  accept/upload policy under decision and attribute the churn
+  queue-age/deadline-skip row before shipping max-pending `4` by default.
+
+Raw artifacts:
+
+- `/tmp/mclone-150-quest-rd5-orbit-queue4.txt`
+- `/tmp/mclone-150-quest-rd5-orbit-queue4-logcat.txt`
+- `/tmp/mclone-150-quest-rd7-orbit-queue4.txt`
+- `/tmp/mclone-150-quest-rd7-orbit-queue4-logcat.txt`
+- `/tmp/mclone-150-quest-rd5-churn-queue4.txt`
+- `/tmp/mclone-150-quest-rd5-churn-queue4-logcat.txt`
+
 ### 2026-07-07 - Tactical 150 Slice 3 Churn Diagnostics Rerun
 
 Benchmarked commit: `9da26f88` (`Fix app-runtime wasm all-target coverage

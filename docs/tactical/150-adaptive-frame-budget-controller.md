@@ -922,6 +922,26 @@ lever. Do not change shipped defaults from this row alone: persisted lanes,
 Quest RD5/RD7/churn gates, and XR accept/upload decisions still need the
 promotion loop.
 
+Promotion-loop continuation (2026-07-07): the shared startup option surface now
+carries optional render compile max-pending jobs through Android, Android XR,
+desktop XR, local-integrated, and remote-host scene options, and the Quest
+validator accepts `--render-compile-max-pending-jobs`. Persisted RD10 with
+scheduled fluids frozen moved from default initial target completion
+`19744.089ms` to queue-depth `4` completion `4889.199ms`, with old target
+quiescence matching the corrected marker and `0` over-budget frames. Quest
+queue-depth `4` hardware rows all launched and sampled successfully: RD5 orbit
+workers `2` plus pinned accept/upload budgets reported app p95 `11.923ms`,
+headroom avg `+3.296ms`, dropped delta `16`, and `0.0%` app-over-period; RD7
+orbit workers `1` reported app p95 `12.407ms`, headroom avg `+2.895ms`,
+dropped delta `16`, and `0.8%` app-over-period; RD5 churn workers `2` plus
+pinned accept/upload budgets reported app p95 `9.639ms`, headroom avg
+`+8.740ms`, dropped delta `16`, and `0.1%` app-over-period. Candidate B is
+still not promoted to defaults: the RD7 over-period row is slightly above the
+older overlap pressure row, and churn's compile-max marker reported
+`deadline_skipped_requests=1` plus a render-compile queue max age of
+`678.520ms`. Next work is a repeat/decision pass for RD7 accept/upload policy
+and churn queue-age/deadline-skip attribution before changing shipped defaults.
+
 ## Slice 5: Config Surface, Soak, And Close-Out
 
 Deliverables:

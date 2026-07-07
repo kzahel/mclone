@@ -101,6 +101,48 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Persisted RD10 Queue-Depth Follow-Up
+
+Commit reported by benchmark JSON: `a89dc699`.
+
+Note: `git_dirty=true` because this was captured while adding the shared
+Android/XR max-pending startup plumbing and docs. Defaults are unchanged:
+omitting `--render-compile-max-pending-jobs` still caps in-flight render
+compile work at the worker count.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-persisted-rd10-frozen-default.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-persisted-rd10-frozen-queue4.json
+```
+
+RD10 persisted startup-streaming, scheduled fluids frozen, adaptive publication
+default on, workers `1`, 60 Hz budget:
+
+| Metric | Frozen default | Frozen queue 4 |
+|---|---:|---:|
+| prewarm total / storage | `11591.353ms` / `34.4 MB` | `11500.504ms` / `34.4 MB` |
+| startup playable | `125.045ms` | `123.775ms` |
+| first full view ready | `1015.418ms` | `1028.074ms` |
+| first initial target render complete | `19744.089ms` | `4889.199ms` |
+| first target render quiescent | `19744.089ms` | `4889.199ms` |
+| p95 / p99 frame | `7.072 / 7.467ms` | `7.181 / 7.593ms` |
+| max frame | `8.028ms` | `10.465ms` |
+| over-budget / over-2x frames | `0 / 0` | `0 / 0` |
+| submitted / completed compile sections | `7040 / 7040` | `7024 / 7040` |
+| uploaded sections | `2143` | `2143` |
+| total remesh / upload / render | `177.960 / 179.835 / 2474.734ms` | `99.324 / 133.219 / 2610.277ms` |
+| deadline-skipped compile requests | `0` | `0` |
+| final target pending render chunks | `0` | `0` |
+
+Decision: persisted-world render streaming confirms the queue-depth lever. With
+the simulation tail frozen, the legacy quiescence marker equals
+`first_initial_target_render_complete_ms`; queue depth `4` cuts persisted RD10
+initial render completion from `19.744s` to `4.889s` without frame-budget
+misses. This satisfies the desktop persisted slice gate, but it is still not a
+shipping default decision until the Quest repeat/accept-upload loop is closed.
+
 ### 2026-07-07 - Tactical 150 Slice 4 Corrected Render Gate
 
 Commit reported by benchmark JSON: `4ed7f77b`.

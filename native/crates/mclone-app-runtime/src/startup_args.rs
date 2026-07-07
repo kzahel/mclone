@@ -15,6 +15,7 @@ pub const ARG_CHUNK_X: &str = "--chunk-x";
 pub const ARG_CHUNK_Z: &str = "--chunk-z";
 pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
 pub const ARG_RENDER_COMPILE_WORKERS: &str = "--render-compile-workers";
+pub const ARG_RENDER_COMPILE_MAX_PENDING_JOBS: &str = "--render-compile-max-pending-jobs";
 pub const ARG_REMOTE_ADDR: &str = "--remote-addr";
 pub const ARG_WORLD_DIR: &str = "--world-dir";
 pub const ARG_WORLD_ROOT: &str = "--world-root";
@@ -35,6 +36,7 @@ pub const QUERY_CHUNK_X: &str = "chunkX";
 pub const QUERY_CHUNK_Z: &str = "chunkZ";
 pub const QUERY_RENDER_DISTANCE: &str = "renderDistance";
 pub const QUERY_RENDER_COMPILE_WORKERS: &str = "renderCompileWorkers";
+pub const QUERY_RENDER_COMPILE_MAX_PENDING_JOBS: &str = "renderCompileMaxPendingJobs";
 pub const QUERY_REMOTE_WS_URL: &str = "remoteWsUrl";
 pub const QUERY_DAY_TIME: &str = "dayTime";
 pub const QUERY_FREEZE_TIME: &str = "freezeTime";
@@ -53,6 +55,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_CHUNK_Z,
     QUERY_RENDER_DISTANCE,
     QUERY_RENDER_COMPILE_WORKERS,
+    QUERY_RENDER_COMPILE_MAX_PENDING_JOBS,
     QUERY_REMOTE_WS_URL,
     QUERY_DAY_TIME,
     QUERY_FREEZE_TIME,
@@ -90,6 +93,7 @@ pub struct StartupSceneOptions {
     pub chunk_z: i32,
     pub render_distance: u32,
     pub render_compile_worker_count: usize,
+    pub render_compile_max_pending_jobs: Option<usize>,
     pub remote_addr: Option<String>,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
@@ -106,6 +110,7 @@ impl Default for StartupSceneOptions {
             chunk_z: DEFAULT_STARTUP_CHUNK_Z,
             render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            render_compile_max_pending_jobs: None,
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
@@ -193,6 +198,13 @@ impl StartupArgState {
             ARG_RENDER_COMPILE_WORKERS => {
                 self.scene.render_compile_worker_count =
                     parse_render_compile_worker_count_arg(ARG_RENDER_COMPILE_WORKERS, args.next())?;
+            }
+            ARG_RENDER_COMPILE_MAX_PENDING_JOBS => {
+                self.scene.render_compile_max_pending_jobs =
+                    Some(parse_render_compile_worker_count_arg(
+                        ARG_RENDER_COMPILE_MAX_PENDING_JOBS,
+                        args.next(),
+                    )?);
             }
             ARG_REMOTE_ADDR => {
                 self.scene.remote_addr = parse_remote_addr_arg(args.next())?;
@@ -296,6 +308,13 @@ impl StartupArgState {
             QUERY_RENDER_COMPILE_WORKERS => {
                 self.scene.render_compile_worker_count =
                     parse_render_compile_worker_count_arg(QUERY_RENDER_COMPILE_WORKERS, value)?;
+            }
+            QUERY_RENDER_COMPILE_MAX_PENDING_JOBS => {
+                self.scene.render_compile_max_pending_jobs =
+                    Some(parse_render_compile_worker_count_arg(
+                        QUERY_RENDER_COMPILE_MAX_PENDING_JOBS,
+                        value,
+                    )?);
             }
             QUERY_REMOTE_WS_URL => {
                 self.scene.remote_addr = parse_remote_addr_value(QUERY_REMOTE_WS_URL, value)?;
@@ -525,6 +544,7 @@ mod tests {
                 chunk_z: 0,
                 render_distance: 5,
                 render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+                render_compile_max_pending_jobs: None,
                 remote_addr: None,
                 day_time_override: None,
                 freeze_time: false,
@@ -560,6 +580,8 @@ mod tests {
             "5",
             ARG_RENDER_COMPILE_WORKERS,
             "2",
+            ARG_RENDER_COMPILE_MAX_PENDING_JOBS,
+            "6",
             ARG_DAY_TIME,
             "6000",
             ARG_FREEZE_TIME,
@@ -582,6 +604,7 @@ mod tests {
                 chunk_z: -3,
                 render_distance: 5,
                 render_compile_worker_count: 2,
+                render_compile_max_pending_jobs: Some(6),
                 remote_addr: Some("127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,
@@ -713,6 +736,7 @@ mod tests {
             (QUERY_CHUNK_Z, "-3"),
             (QUERY_RENDER_DISTANCE, "6"),
             (QUERY_RENDER_COMPILE_WORKERS, "3"),
+            (QUERY_RENDER_COMPILE_MAX_PENDING_JOBS, "5"),
             (QUERY_REMOTE_WS_URL, "ws://127.0.0.1:25565"),
             (QUERY_DAY_TIME, "6000"),
             (QUERY_FREEZE_TIME, ""),
@@ -746,6 +770,7 @@ mod tests {
                 chunk_z: -3,
                 render_distance: 6,
                 render_compile_worker_count: 3,
+                render_compile_max_pending_jobs: Some(5),
                 remote_addr: Some("ws://127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,

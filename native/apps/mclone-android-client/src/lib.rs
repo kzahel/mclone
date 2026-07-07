@@ -2153,6 +2153,7 @@ mod android {
         center: ChunkPos,
         render_distance: u32,
         render_compile_worker_count: usize,
+        render_compile_max_pending_jobs: Option<usize>,
         movement_speed_multiplier: f32,
         day_time_override: Option<u64>,
         freeze_time: bool,
@@ -2170,11 +2171,13 @@ mod android {
                 .with_debug_passive_showcase(self.debug_passive_showcase)
                 .with_lighting_enabled(self.lighting_enabled)
                 .with_render_compile_worker_count(self.render_compile_worker_count)
+                .with_render_compile_max_pending_jobs(self.render_compile_max_pending_jobs)
         }
 
         fn host_options(&self) -> SingleViewHostOptions {
             SingleViewHostOptions::new(self.center, self.render_distance)
                 .with_render_compile_worker_count(self.render_compile_worker_count)
+                .with_render_compile_max_pending_jobs(self.render_compile_max_pending_jobs)
         }
 
         fn validated(self) -> Result<Self> {
@@ -2197,6 +2200,13 @@ mod android {
                     "Android movement speed multiplier must be between {min} and {max}, got {}",
                     self.movement_speed_multiplier
                 );
+            }
+            if let Some(max_pending_jobs) = self.render_compile_max_pending_jobs {
+                if max_pending_jobs < self.render_compile_worker_count {
+                    bail!(
+                        "Android render compile max pending jobs must be at least the worker count"
+                    );
+                }
             }
             Ok(self)
         }
@@ -2252,6 +2262,7 @@ mod android {
             chunk_z: 0,
             render_distance: 5,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            render_compile_max_pending_jobs: None,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             remote_addr: None,
             day_time_override: Some(6000),
@@ -2267,6 +2278,7 @@ mod android {
             center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             render_distance: scene.render_distance,
             render_compile_worker_count: scene.render_compile_worker_count,
+            render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
             movement_speed_multiplier: scene.movement_speed_multiplier,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
@@ -2967,12 +2979,13 @@ mod android {
             log::info!("Mclone Android remote dedicated address: <none>");
         }
         log::info!(
-            "Mclone Android scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} day_time={:?} freeze_time={} movement_speed={:.2}x lighting={}",
+            "Mclone Android scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} render_compile_max_pending_jobs={:?} day_time={:?} freeze_time={} movement_speed={:.2}x lighting={}",
             startup_options.scene.seed,
             startup_options.scene.center.x,
             startup_options.scene.center.z,
             startup_options.scene.render_distance,
             startup_options.scene.render_compile_worker_count,
+            startup_options.scene.render_compile_max_pending_jobs,
             startup_options.scene.day_time_override,
             startup_options.scene.freeze_time,
             startup_options.scene.movement_speed_multiplier,

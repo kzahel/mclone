@@ -47,6 +47,7 @@ pub struct XrSceneOptions {
     pub chunk_z: i32,
     pub render_distance: u32,
     pub render_compile_worker_count: usize,
+    pub render_compile_max_pending_jobs: Option<usize>,
     pub movement_speed_multiplier: f32,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
@@ -70,6 +71,7 @@ impl Default for XrSceneOptions {
             render_distance: DEFAULT_XR_RENDER_DISTANCE,
             render_compile_worker_count:
                 mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            render_compile_max_pending_jobs: None,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             day_time_override: None,
             freeze_time: false,
@@ -100,6 +102,11 @@ impl XrSceneOptions {
         }
         if self.render_compile_worker_count == 0 {
             bail!("XR render compile worker count must be greater than zero");
+        }
+        if let Some(max_pending_jobs) = self.render_compile_max_pending_jobs {
+            if max_pending_jobs < self.render_compile_worker_count {
+                bail!("XR render compile max pending jobs must be at least the worker count");
+            }
         }
         let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
         let max = ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32;
