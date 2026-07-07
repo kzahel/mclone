@@ -38,8 +38,9 @@ use mclone_protocol::{
 use mclone_render_session::{
     EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileDispatcher,
     RenderSectionRemovalMode, RenderSectionSession, build_client_textured_sections,
-    render_section_chunk_pos, render_section_near_camera_readiness_columns,
-    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
+    render_section_chunk_pos, render_section_keys_for_snapshot,
+    render_section_near_camera_readiness_columns, render_section_neighbor_readiness,
+    snapshot_contains_render_section, sort_chunk_positions_by_distance,
     sort_dirty_section_chunks_by_distance,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -1042,6 +1043,13 @@ pub struct SingleViewRuntimeStats {
     pub last_simulation_deferred_fluid_ticks: usize,
     pub last_simulation_fluid_mutated_blocks: usize,
     pub scheduled_fluid_ticks: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TargetRenderWorkStats {
+    pub pending_render_chunks: usize,
+    pub ready_render_work_pending: bool,
+    pub inflight_render_sections: usize,
 }
 
 #[derive(Debug)]
@@ -2235,11 +2243,138 @@ impl SingleViewRuntime {
     }
 
     pub fn render_section_within_render_distance(&self, key: RenderSectionKey) -> bool {
+        self.render_chunk_within_render_distance(render_section_chunk_pos(key))
+    }
+
+    pub fn target_render_work_stats(&self, camera_position: Vec3) -> TargetRenderWorkStats {
+        TargetRenderWorkStats {
+            pending_render_chunks: self.target_pending_render_chunk_count(),
+            ready_render_work_pending: self.target_ready_pending_dirty_work(camera_position),
+            inflight_render_sections: self
+                .render_session()
+                .dirty()
+                .inflight_sections
+                .iter()
+                .filter(|key| self.render_section_within_render_distance(**key))
+                .count(),
+        }
+    }
+
+    fn render_chunk_within_render_distance(&self, pos: ChunkPos) -> bool {
         let distance = i32::try_from(self.render_distance).unwrap_or(i32::MAX);
-        (key.chunk_x - self.interest_center.x)
+        (pos.x - self.interest_center.x)
             .abs()
-            .max((key.chunk_z - self.interest_center.z).abs())
+            .max((pos.z - self.interest_center.z).abs())
             <= distance
+    }
+
+    fn target_pending_render_chunk_count(&self) -> usize {
+        let mut pending = self
+            .render_session()
+            .dirty()
+            .dirty_chunks
+            .iter()
+            .filter(|pos| {
+                self.render_chunk_within_render_distance(**pos)
+                    && (self.client().chunk_snapshot(**pos).is_some()
+                        || self.render_session().contains_chunk(**pos))
+            })
+            .copied()
+            .collect::<BTreeSet<_>>();
+        pending.extend(
+            self.render_session()
+                .dirty()
+                .dirty_sections
+                .iter()
+                .copied()
+                .filter(|key| {
+                    self.render_section_within_render_distance(*key) && {
+                        let pos = render_section_chunk_pos(*key);
+                        self.client().chunk_snapshot(pos).is_some()
+                            || self.render_session().contains_section(*key)
+                    }
+                })
+                .map(render_section_chunk_pos),
+        );
+        pending.extend(
+            self.render_session()
+                .resident_dirty_section_keys()
+                .filter(|key| {
+                    self.render_section_within_render_distance(*key) && {
+                        let pos = render_section_chunk_pos(*key);
+                        self.client().chunk_snapshot(pos).is_some()
+                            || self.render_session().contains_section(*key)
+                    }
+                })
+                .map(render_section_chunk_pos),
+        );
+        pending.extend(
+            self.render_session()
+                .dirty()
+                .inflight_sections
+                .iter()
+                .copied()
+                .filter(|key| self.render_section_within_render_distance(*key))
+                .map(render_section_chunk_pos),
+        );
+        pending.len()
+    }
+
+    fn target_ready_pending_dirty_work(&self, camera_position: Vec3) -> bool {
+        let dirty = self.render_session().dirty();
+        let dirty_chunk_ready = dirty
+            .dirty_chunks
+            .iter()
+            .copied()
+            .filter(|pos| self.render_chunk_within_render_distance(*pos))
+            .any(|pos| {
+                if self.render_session().contains_chunk(pos)
+                    && self.client().chunk_snapshot(pos).is_none()
+                {
+                    return true;
+                }
+                let Some(snapshot) = self.client().chunk_snapshot(pos) else {
+                    return false;
+                };
+                render_section_keys_for_snapshot(snapshot)
+                    .into_iter()
+                    .any(|key| self.target_dirty_section_is_ready(key, camera_position))
+            });
+        if dirty_chunk_ready {
+            return true;
+        }
+        dirty
+            .dirty_sections
+            .iter()
+            .copied()
+            .any(|key| self.target_dirty_section_is_ready(key, camera_position))
+            || self
+                .render_session()
+                .resident_dirty_section_keys()
+                .any(|key| self.target_dirty_section_is_ready(key, camera_position))
+    }
+
+    fn target_dirty_section_is_ready(&self, key: RenderSectionKey, camera_position: Vec3) -> bool {
+        if !self.render_section_within_render_distance(key)
+            || self
+                .render_session()
+                .dirty()
+                .inflight_sections
+                .contains(&key)
+        {
+            return false;
+        }
+
+        let pos = render_section_chunk_pos(key);
+        if self.render_session().contains_section(key)
+            && self.client().chunk_snapshot(pos).is_none()
+        {
+            return true;
+        }
+        self.client()
+            .chunk_snapshot(pos)
+            .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+            && render_section_neighbor_readiness(self.client(), key, camera_position).is_ready()
     }
 
     pub fn has_pending_render_work(

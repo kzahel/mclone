@@ -101,6 +101,63 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 4 Target Render Tail Follow-up
+
+Commit reported by benchmark JSON: `962bcfc5`.
+
+Note: `git_dirty=true` because this was captured while adding the target
+render-work diagnostics split to the startup-streaming JSON. This is the one
+allowed Candidate B diagnostics detour: the worker check below could not
+distinguish target render work from non-target edge bookkeeping after the full
+view became ready, and the consuming decision is whether Candidate B can be
+promoted or remains falsified.
+
+Command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 6000 --target-hz 60 --render-compile-workers 1 --debug-passive-showcase false > /tmp/mclone-150-slice4-followup-rd10-target-split.json
+```
+
+RD10 startup-streaming, adaptive publication default on, workers `1`, 60 Hz
+budget:
+
+| Metric | Value |
+|---|---:|
+| startup playable | 537.341 ms |
+| first full view ready | 9711.712 ms |
+| first render quiescent (legacy global suffix) | 50148.741 ms |
+| first target render quiescent | 50148.741 ms |
+| average frame | 5.555 ms |
+| p95 / p99 frame | 7.199 / 7.628 ms |
+| max frame | 9.927 ms |
+| over-budget frames | 0 |
+| submitted compile sections | 7407 |
+| completed compile sections | 7386 |
+| uploaded sections | 2449 |
+| target rebuilt sections | 7386 |
+| non-target rebuilt sections | 0 |
+| post-full-view target rebuilt sections | 4029 |
+| post-full-view non-target rebuilt sections | 0 |
+| deadline-skipped compile requests | 0 |
+| final target pending render chunks | 0 |
+| final global pending render chunks | 88 |
+
+Interpretation: the long RD10 startup-streaming render tail is target render
+work, not only edge-neighbor bookkeeping or a global quiescence-definition
+artifact. The target-scoped quiescent marker lands on the same frame/time as
+the legacy suffix marker, and all rebuilt sections after full-view readiness are
+inside the render target (`4029` target, `0` non-target). The final `88` global
+pending render chunks are still edge/non-target bookkeeping, but they are not
+what delays the marker.
+
+This keeps Candidate B falsified for promotion. The headless startup-streaming
+lane already uses the existing deadline-shaped render sync path, has no
+deadline-skipped compile requests, and still reaches target render quiescence
+at ~50.1s. The live desktop opt-in render-admission controller remains useful
+plumbing, but this gate cannot promote render admission, workers, XR
+accept/upload, or Quest defaults until there is a measured lever for target
+render mesh progression.
+
 ### 2026-07-07 - Tactical 150 Slice 4 Render Worker Check
 
 Commit reported by benchmark JSON: `e48245db`.
@@ -142,14 +199,10 @@ this clean RD10 startup-streaming check. Full-view readiness improves by about
 worse. Do not promote the desktop render compile worker default from `1` to `2`
 from this evidence.
 
-Tail attribution from existing queue samples: by ~14.7s the view is fully loaded
-and reports no pending compile jobs, but `pending_render_chunks` remains at `88`
-with `ready_render_work_pending=false`; the 15s-50.1s interval only submits 6
-sections and uploads 13, with no deadline skips. The long quiescence tail is
-therefore not bounded by compile-worker count or deadline admission capacity in
-this lane. It appears to be sporadic render-neighbor/readiness invalidation or a
-quiescence-definition issue and needs a separate named follow-up before worker
-promotion.
+Tail attribution note: the target-split follow-up above supersedes the earlier
+interpretation from coarse queue samples. The tail is target render work after
+full-view readiness, while the final `88` global pending render chunks are
+edge/non-target bookkeeping.
 
 ### 2026-07-07 - Tactical 150 Slice 3 Promotion Closure Measurements
 

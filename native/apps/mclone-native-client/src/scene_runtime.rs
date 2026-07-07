@@ -13,7 +13,7 @@ use mclone_app_runtime::local_single_view::{
 };
 use mclone_app_runtime::{
     GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
-    SingleViewRuntimeStats, TimedRenderSectionCacheUpdate,
+    SingleViewRuntimeStats, TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
 };
 #[cfg(test)]
 use mclone_app_runtime::{camera_position_inside_water_block, snapshot_block_state_at_world};
@@ -481,6 +481,10 @@ impl WindowSceneRuntime {
 
     pub(crate) fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
         self.scene.has_pending_render_work(camera_position)
+    }
+
+    pub(crate) fn target_render_work_stats(&self, camera_position: Vec3) -> TargetRenderWorkStats {
+        self.scene.target_render_work_stats(camera_position)
     }
 
     #[cfg(test)]

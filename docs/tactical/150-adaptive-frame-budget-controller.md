@@ -887,14 +887,17 @@ startup-streaming A/B with adaptive publication on measured workers `1` vs `2`
 as first full view `9712.257ms` vs `9221.628ms`, first render quiescent
 `50136.512ms` vs `50124.487ms`, total remesh `439.307ms` vs `820.441ms`, and
 deadline-skipped compile requests `0` in both lanes. This falsifies workers `2`
-as a default-promotion lever for the current startup-streaming gate. Existing
-queue samples show the long tail is not worker-capacity-bound: by ~14.7s the
-view is fully loaded with no pending compile jobs, `pending_render_chunks=88`,
-and `ready_render_work_pending=false`; the 15s-50.1s interval only submits 6
-sections and uploads 13. The remaining Slice 4 work is therefore a named
-follow-up: reconcile the live-window controller path with the headless
-startup-streaming quiescence definition/readiness tail before any worker,
-render-admission, XR accept/upload, or Quest default promotion.
+as a default-promotion lever for the current startup-streaming gate. The
+follow-up target-render diagnostics split landed 2026-07-07 and remeasured the
+workers `1` lane: first full view `9711.712ms`, legacy render quiescent
+`50148.741ms`, target render quiescent `50148.741ms`, post-full-view target
+rebuilt sections `4029`, post-full-view non-target rebuilt sections `0`, and
+deadline-skipped compile requests `0`. That reconciles the earlier ambiguity:
+the final `pending_render_chunks=88` is edge/non-target bookkeeping, but the
+long marker delay is real target render mesh progression, not merely a global
+quiescence-definition artifact. Candidate B remains unpromoted; do not advance
+render admission, worker, XR accept/upload, or Quest defaults until a measured
+target render progression lever exists.
 
 ## Slice 5: Config Surface, Soak, And Close-Out
 

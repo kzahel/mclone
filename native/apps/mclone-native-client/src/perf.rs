@@ -18,7 +18,7 @@ use mclone_diagnostics::{
     PeerThreadPanelReport, PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
     StageSpan,
 };
-use mclone_mesh::{VisibilityGraphBuildStats, quad_face_count_from_indices};
+use mclone_mesh::{RenderSectionKey, VisibilityGraphBuildStats, quad_face_count_from_indices};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionUploadReport,
     textured_section_visibility_stats_with_options_and_ready_sections,
@@ -32,7 +32,7 @@ use mclone_render::headless::{
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
-use mclone_render_session::actor_instances_from_presentations;
+use mclone_render_session::{actor_instances_from_presentations, render_section_chunk_pos};
 use mclone_server::{SqliteWorldStore, WorkerFrameMetrics, initial_spawn_center_for_seed};
 use mclone_ui::{GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiScale};
 
@@ -440,6 +440,8 @@ pub(crate) struct StartupStreamingPerfReport {
     first_full_view_ready_ms: Option<f64>,
     first_render_quiescent_frame: Option<usize>,
     first_render_quiescent_ms: Option<f64>,
+    first_target_render_quiescent_frame: Option<usize>,
+    first_target_render_quiescent_ms: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -534,8 +536,11 @@ struct StartupStreamingFrameReport {
     pending_publications: usize,
     pending_render_chunks: usize,
     ready_render_work_pending: bool,
+    target_pending_render_chunks: usize,
+    target_ready_render_work_pending: bool,
     pending_render_compile_jobs: usize,
     inflight_render_sections: usize,
+    target_inflight_render_sections: usize,
     section_sync_timing: RenderSectionSyncTiming,
     submitted_compile_sections: usize,
     accepted_compile_results: usize,
@@ -543,6 +548,10 @@ struct StartupStreamingFrameReport {
     completed_compile_sections: usize,
     uploaded_sections: usize,
     upload_removed_sections: usize,
+    target_rebuilt_sections: usize,
+    non_target_rebuilt_sections: usize,
+    target_removed_sections: usize,
+    non_target_removed_sections: usize,
     deadline_skipped_compile_requests: usize,
     update_pump_stalled: bool,
     server_update_queue_depth: usize,
@@ -834,6 +843,10 @@ struct FrameBudgetProbeSectionTiming {
     stale_compile_sections: usize,
     uploaded_sections: usize,
     upload_removed_sections: usize,
+    target_rebuilt_sections: usize,
+    non_target_rebuilt_sections: usize,
+    target_removed_sections: usize,
+    non_target_removed_sections: usize,
     uploaded_vertices: u32,
     uploaded_indices: u32,
 }
@@ -1683,6 +1696,46 @@ impl StartupStreamingPerfReport {
             .iter()
             .map(|frame| frame.uploaded_sections)
             .sum::<usize>();
+        let total_target_rebuilt_sections = self
+            .frames
+            .iter()
+            .map(|frame| frame.target_rebuilt_sections)
+            .sum::<usize>();
+        let total_non_target_rebuilt_sections = self
+            .frames
+            .iter()
+            .map(|frame| frame.non_target_rebuilt_sections)
+            .sum::<usize>();
+        let total_target_removed_sections = self
+            .frames
+            .iter()
+            .map(|frame| frame.target_removed_sections)
+            .sum::<usize>();
+        let total_non_target_removed_sections = self
+            .frames
+            .iter()
+            .map(|frame| frame.non_target_removed_sections)
+            .sum::<usize>();
+        let post_full_view_frames = self
+            .first_full_view_ready_frame
+            .map(|frame| self.frames.iter().skip(frame))
+            .into_iter()
+            .flatten();
+        let post_full_view_target_rebuilt_sections = post_full_view_frames
+            .clone()
+            .map(|frame| frame.target_rebuilt_sections)
+            .sum::<usize>();
+        let post_full_view_non_target_rebuilt_sections = post_full_view_frames
+            .clone()
+            .map(|frame| frame.non_target_rebuilt_sections)
+            .sum::<usize>();
+        let post_full_view_target_removed_sections = post_full_view_frames
+            .clone()
+            .map(|frame| frame.target_removed_sections)
+            .sum::<usize>();
+        let post_full_view_non_target_removed_sections = post_full_view_frames
+            .map(|frame| frame.non_target_removed_sections)
+            .sum::<usize>();
         let total_deadline_skipped_compile_requests = self
             .frames
             .iter()
@@ -1855,6 +1908,14 @@ impl StartupStreamingPerfReport {
             Some(ms) => println!("  \"first_render_quiescent_ms\": {ms:.3},"),
             None => println!("  \"first_render_quiescent_ms\": null,"),
         }
+        match self.first_target_render_quiescent_frame {
+            Some(frame) => println!("  \"first_target_render_quiescent_frame\": {frame},"),
+            None => println!("  \"first_target_render_quiescent_frame\": null,"),
+        }
+        match self.first_target_render_quiescent_ms {
+            Some(ms) => println!("  \"first_target_render_quiescent_ms\": {ms:.3},"),
+            None => println!("  \"first_target_render_quiescent_ms\": null,"),
+        }
         println!("  \"over_budget_frames\": {},", over_budget);
         println!(
             "  \"{}\": {},",
@@ -1956,6 +2017,38 @@ impl StartupStreamingPerfReport {
         println!(
             "  \"total_uploaded_sections\": {},",
             total_uploaded_sections
+        );
+        println!(
+            "  \"total_target_rebuilt_sections\": {},",
+            total_target_rebuilt_sections
+        );
+        println!(
+            "  \"total_non_target_rebuilt_sections\": {},",
+            total_non_target_rebuilt_sections
+        );
+        println!(
+            "  \"total_target_removed_sections\": {},",
+            total_target_removed_sections
+        );
+        println!(
+            "  \"total_non_target_removed_sections\": {},",
+            total_non_target_removed_sections
+        );
+        println!(
+            "  \"post_full_view_target_rebuilt_sections\": {},",
+            post_full_view_target_rebuilt_sections
+        );
+        println!(
+            "  \"post_full_view_non_target_rebuilt_sections\": {},",
+            post_full_view_non_target_rebuilt_sections
+        );
+        println!(
+            "  \"post_full_view_target_removed_sections\": {},",
+            post_full_view_target_removed_sections
+        );
+        println!(
+            "  \"post_full_view_non_target_removed_sections\": {},",
+            post_full_view_non_target_removed_sections
         );
         println!(
             "  \"total_deadline_skipped_compile_requests\": {},",
@@ -2137,8 +2230,20 @@ impl StartupStreamingPerfReport {
                 frame.ready_render_work_pending
             );
             println!(
+                "      \"target_pending_render_chunks\": {},",
+                frame.target_pending_render_chunks
+            );
+            println!(
+                "      \"target_ready_render_work_pending\": {},",
+                frame.target_ready_render_work_pending
+            );
+            println!(
                 "      \"pending_render_compile_jobs\": {},",
                 frame.pending_render_compile_jobs
+            );
+            println!(
+                "      \"target_inflight_render_sections\": {},",
+                frame.target_inflight_render_sections
             );
             println!(
                 "      \"submitted_compile_sections\": {},",
@@ -2148,7 +2253,23 @@ impl StartupStreamingPerfReport {
                 "      \"completed_compile_sections\": {},",
                 frame.completed_compile_sections
             );
-            println!("      \"uploaded_sections\": {}", frame.uploaded_sections);
+            println!("      \"uploaded_sections\": {},", frame.uploaded_sections);
+            println!(
+                "      \"target_rebuilt_sections\": {},",
+                frame.target_rebuilt_sections
+            );
+            println!(
+                "      \"non_target_rebuilt_sections\": {},",
+                frame.non_target_rebuilt_sections
+            );
+            println!(
+                "      \"target_removed_sections\": {},",
+                frame.target_removed_sections
+            );
+            println!(
+                "      \"non_target_removed_sections\": {}",
+                frame.non_target_removed_sections
+            );
             println!("    }}{suffix}");
         }
         println!("  ],");
@@ -2179,12 +2300,24 @@ impl StartupStreamingPerfReport {
             final_frame.ready_render_work_pending
         );
         println!(
+            "    \"target_pending_render_chunks\": {},",
+            final_frame.target_pending_render_chunks
+        );
+        println!(
+            "    \"target_ready_render_work_pending\": {},",
+            final_frame.target_ready_render_work_pending
+        );
+        println!(
             "    \"pending_render_compile_jobs\": {},",
             final_frame.pending_render_compile_jobs
         );
         println!(
             "    \"inflight_render_sections\": {},",
             final_frame.inflight_render_sections
+        );
+        println!(
+            "    \"target_inflight_render_sections\": {},",
+            final_frame.target_inflight_render_sections
         );
         println!(
             "    \"server_update_queue_depth\": {},",
@@ -2609,6 +2742,28 @@ fn render_section_sync_stage_spans(
         ),
         StageSpan::new(StageId::RenderSectionAdmission, unattributed_ms),
     ]
+}
+
+fn render_section_in_target(
+    key: RenderSectionKey,
+    interest_center: ChunkPos,
+    render_distance: u32,
+) -> bool {
+    let distance = i32::try_from(render_distance).unwrap_or(i32::MAX);
+    let pos = render_section_chunk_pos(key);
+    (pos.x - interest_center.x)
+        .abs()
+        .max((pos.z - interest_center.z).abs())
+        <= distance
+}
+
+fn count_target_section_keys(
+    keys: impl Iterator<Item = RenderSectionKey>,
+    interest_center: ChunkPos,
+    render_distance: u32,
+) -> usize {
+    keys.filter(|key| render_section_in_target(*key, interest_center, render_distance))
+        .count()
 }
 
 fn startup_streaming_frame_accounting_report(
@@ -3135,20 +3290,50 @@ fn startup_streaming_frame_render_quiescent(frame: &StartupStreamingFrameReport)
         && frame.uploaded_sections == 0
 }
 
-fn first_stable_startup_streaming_render_quiescent(
+fn startup_streaming_frame_target_render_quiescent(frame: &StartupStreamingFrameReport) -> bool {
+    frame.target_chunk_count > 0
+        && frame.target_ready_chunks == frame.target_chunk_count
+        && frame.pending_jobs == 0
+        && frame.pending_publications == 0
+        && !frame.target_ready_render_work_pending
+        && frame.target_inflight_render_sections == 0
+        && frame.target_rebuilt_sections == 0
+        && frame.target_removed_sections == 0
+}
+
+fn first_stable_startup_streaming_render_quiescent_with(
     frames: &[StartupStreamingFrameReport],
+    mut is_quiescent: impl FnMut(&StartupStreamingFrameReport) -> bool,
 ) -> (Option<usize>, Option<f64>) {
     let mut suffix_quiescent = true;
     let mut first_frame = None;
     let mut first_ms = None;
     for (index, frame) in frames.iter().enumerate().rev() {
-        suffix_quiescent &= startup_streaming_frame_render_quiescent(frame);
+        suffix_quiescent &= is_quiescent(frame);
         if suffix_quiescent {
             first_frame = Some(index);
             first_ms = Some(frame.elapsed_ms);
         }
     }
     (first_frame, first_ms)
+}
+
+fn first_stable_startup_streaming_render_quiescent(
+    frames: &[StartupStreamingFrameReport],
+) -> (Option<usize>, Option<f64>) {
+    first_stable_startup_streaming_render_quiescent_with(
+        frames,
+        startup_streaming_frame_render_quiescent,
+    )
+}
+
+fn first_stable_startup_streaming_target_render_quiescent(
+    frames: &[StartupStreamingFrameReport],
+) -> (Option<usize>, Option<f64>) {
+    first_stable_startup_streaming_render_quiescent_with(
+        frames,
+        startup_streaming_frame_target_render_quiescent,
+    )
 }
 
 pub(crate) fn run_startup_streaming_perf(
@@ -3379,6 +3564,10 @@ pub(crate) fn run_startup_streaming_perf(
                 report.completed_compile_sections = update.completed_compile_sections;
                 report.uploaded_sections = update.uploaded_sections;
                 report.upload_removed_sections = update.upload_removed_sections;
+                report.target_rebuilt_sections = update.target_rebuilt_sections;
+                report.non_target_rebuilt_sections = update.non_target_rebuilt_sections;
+                report.target_removed_sections = update.target_removed_sections;
+                report.non_target_removed_sections = update.non_target_removed_sections;
                 report.deadline_skipped_compile_requests = update.deadline_skipped_compile_requests;
             }
 
@@ -3482,6 +3671,10 @@ pub(crate) fn run_startup_streaming_perf(
                 state.runtime.has_pending_render_work(spectator.position);
             report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
             report.inflight_render_sections = stats.inflight_render_sections;
+            let target_render_work = state.runtime.target_render_work_stats(spectator.position);
+            report.target_pending_render_chunks = target_render_work.pending_render_chunks;
+            report.target_ready_render_work_pending = target_render_work.ready_render_work_pending;
+            report.target_inflight_render_sections = target_render_work.inflight_render_sections;
 
             let full_view_ready = report.target_chunk_count > 0
                 && report.target_ready_chunks == report.target_chunk_count;
@@ -3495,6 +3688,8 @@ pub(crate) fn run_startup_streaming_perf(
     )?;
     let (first_render_quiescent_frame, first_render_quiescent_ms) =
         first_stable_startup_streaming_render_quiescent(&frame_reports);
+    let (first_target_render_quiescent_frame, first_target_render_quiescent_ms) =
+        first_stable_startup_streaming_target_render_quiescent(&frame_reports);
     let budget_decision_panel = state
         .runtime
         .last_poll_diagnostics()
@@ -3519,6 +3714,8 @@ pub(crate) fn run_startup_streaming_perf(
         first_full_view_ready_ms,
         first_render_quiescent_frame,
         first_render_quiescent_ms,
+        first_target_render_quiescent_frame,
+        first_target_render_quiescent_ms,
     })
 }
 
@@ -3593,6 +3790,22 @@ fn probe_sync_upload_sections(
         )
         .context("failed to upload frame-budget probe section updates")?;
     let upload_ms = elapsed_ms(upload_start.elapsed());
+    let runtime_stats = state.runtime.stats();
+    let target_rebuilt_sections = count_target_section_keys(
+        section_update
+            .rebuilt_sections
+            .iter()
+            .map(|section| section.key),
+        runtime_stats.interest_center,
+        runtime_stats.render_distance,
+    );
+    let target_removed_sections = count_target_section_keys(
+        section_update.removed_section_keys.iter().copied(),
+        runtime_stats.interest_center,
+        runtime_stats.render_distance,
+    );
+    let rebuilt_section_count = section_update.rebuilt_section_count();
+    let removed_section_count = section_update.removed_section_count();
     state
         .runtime
         .release_render_compile_jobs(section_update.accepted_compile_result_count);
@@ -3621,6 +3834,10 @@ fn probe_sync_upload_sections(
         stale_compile_sections: section_update.stale_compile_section_count,
         uploaded_sections: upload_report.uploaded_section_count,
         upload_removed_sections: upload_report.removed_section_count,
+        target_rebuilt_sections,
+        non_target_rebuilt_sections: rebuilt_section_count.saturating_sub(target_rebuilt_sections),
+        target_removed_sections,
+        non_target_removed_sections: removed_section_count.saturating_sub(target_removed_sections),
         uploaded_vertices: upload_report.uploaded_vertex_count,
         uploaded_indices: upload_report.uploaded_index_count,
     })
@@ -4143,6 +4360,37 @@ mod tests {
         assert_eq!(summary.over_budget.double_period_frames(), 2);
         assert_eq!(summary.over_budget.quad_period_frames(), 1);
         assert_eq!(summary.frame_wall.p95_ms, 35.0);
+    }
+
+    #[test]
+    fn startup_streaming_target_quiescence_ignores_non_target_edge_uploads() {
+        let frame = |elapsed_ms, target_rebuilt_sections, non_target_rebuilt_sections| {
+            StartupStreamingFrameReport {
+                elapsed_ms,
+                target_ready_chunks: 1,
+                target_chunk_count: 1,
+                uploaded_sections: target_rebuilt_sections + non_target_rebuilt_sections,
+                target_rebuilt_sections,
+                non_target_rebuilt_sections,
+                ..StartupStreamingFrameReport::default()
+            }
+        };
+        let frames = [frame(1.0, 0, 1), frame(2.0, 0, 1), frame(3.0, 0, 0)];
+
+        assert_eq!(
+            first_stable_startup_streaming_render_quiescent(&frames),
+            (Some(2), Some(3.0))
+        );
+        assert_eq!(
+            first_stable_startup_streaming_target_render_quiescent(&frames),
+            (Some(0), Some(1.0))
+        );
+
+        let target_frames = [frame(1.0, 0, 0), frame(2.0, 1, 0), frame(3.0, 0, 0)];
+        assert_eq!(
+            first_stable_startup_streaming_target_render_quiescent(&target_frames),
+            (Some(2), Some(3.0))
+        );
     }
 
     #[test]

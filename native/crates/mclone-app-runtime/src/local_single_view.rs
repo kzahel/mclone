@@ -40,7 +40,7 @@ use crate::{
     DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET, DEFAULT_RENDER_CHUNK_MESH_BUDGET,
     GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimePollTiming,
     RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget, RuntimeUpdatePumpReport, SingleViewRuntime,
-    SingleViewRuntimeStats, TimedRenderSectionCacheUpdate,
+    SingleViewRuntimeStats, TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
     chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
@@ -1008,6 +1008,10 @@ impl LocalSingleViewSceneRuntime {
             .traversal_ready_render_section_keys(camera_position)
     }
 
+    pub fn target_render_work_stats(&self, camera_position: Vec3) -> TargetRenderWorkStats {
+        self.core.target_render_work_stats(camera_position)
+    }
+
     pub fn sky_clear_color(&self) -> wgpu::Color {
         mclone_render::sky::overworld_clear_color(self.core.time_of_day())
     }
@@ -1509,6 +1513,10 @@ where
     pub fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
         self.core()
             .has_pending_render_work(self.render_compile_pending_job_count(), camera_position)
+    }
+
+    pub fn target_render_work_stats(&self, camera_position: Vec3) -> TargetRenderWorkStats {
+        self.core().target_render_work_stats(camera_position)
     }
 
     pub fn render_compile_pending_job_count(&self) -> usize {
@@ -2262,6 +2270,10 @@ where
     ) -> BTreeSet<RenderSectionKey> {
         self.core
             .traversal_ready_render_section_keys(camera_position)
+    }
+
+    pub fn target_render_work_stats(&self, camera_position: Vec3) -> TargetRenderWorkStats {
+        self.core.target_render_work_stats(camera_position)
     }
 
     pub fn sky_clear_color(&self) -> wgpu::Color {
