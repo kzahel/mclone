@@ -18,7 +18,13 @@ use mclone_diagnostics::{
     PeerThreadPanelReport, PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
     StageSpan,
 };
-use mclone_mesh::{RenderSectionKey, VisibilityGraphBuildStats, quad_face_count_from_indices};
+use mclone_frame_budget::{
+    RenderCompileCapacityInput, RenderCompileMeshFootprint, RenderCompileThreadReservation,
+    derive_render_compile_capacity,
+};
+use mclone_mesh::{
+    RenderSectionKey, TexturedChunkVertex, VisibilityGraphBuildStats, quad_face_count_from_indices,
+};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionUploadReport,
     textured_section_visibility_stats_with_options_and_ready_sections,
@@ -556,6 +562,8 @@ struct StartupStreamingFrameReport {
     queued_completed_compile_results: usize,
     completed_compile_sections: usize,
     uploaded_sections: usize,
+    uploaded_vertices: u32,
+    uploaded_indices: u32,
     upload_removed_sections: usize,
     target_rebuilt_sections: usize,
     non_target_rebuilt_sections: usize,
@@ -1806,6 +1814,14 @@ impl StartupStreamingPerfReport {
             self.options.scene.render_compile_max_pending_jobs,
             true,
         );
+        println!(
+            "  \"render_compile_capacity_advisory\": {},",
+            serde_json::to_string(&startup_streaming_render_compile_capacity_advisory_json(
+                &self.options.scene,
+                &self.frames
+            ))
+            .expect("render compile capacity advisory JSON serialization should not fail")
+        );
         let render_compile_worker_timing_compiled =
             mclone_app_runtime::render_assets::RENDER_COMPILE_WORKER_TIMING_COMPILED;
         println!(
@@ -2753,6 +2769,119 @@ impl LoadingSettlePerfReport {
         println!("  ]");
         println!("}}");
     }
+}
+
+fn startup_streaming_render_compile_capacity_advisory_json(
+    scene: &SceneOptions,
+    frames: &[StartupStreamingFrameReport],
+) -> serde_json::Value {
+    let available_parallelism = std::thread::available_parallelism()
+        .ok()
+        .map(|value| value.get());
+    let mesh_footprint = startup_streaming_render_compile_mesh_footprint(frames);
+    let report = derive_render_compile_capacity(
+        RenderCompileCapacityInput::new(
+            available_parallelism,
+            host_total_memory_bytes(),
+            RenderCompileThreadReservation::local_integrated_flat(),
+            mesh_footprint,
+        )
+        .with_floors(
+            mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
+        ),
+    );
+
+    serde_json::json!({
+        "applied": false,
+        "activeWorkers": scene.render_compile_worker_count,
+        "activeMaxPendingJobs": scene.render_compile_max_pending_jobs,
+        "derived": report,
+    })
+}
+
+fn startup_streaming_render_compile_mesh_footprint(
+    frames: &[StartupStreamingFrameReport],
+) -> RenderCompileMeshFootprint {
+    let compile_request_bytes = frames
+        .iter()
+        .map(|frame| {
+            frame
+                .section_sync_timing
+                .submit_request_estimated_payload_bytes_worst
+        })
+        .max()
+        .and_then(non_zero_usize_to_u64);
+    let mesh_vertex_bytes = frames
+        .iter()
+        .map(|frame| u64::from(frame.uploaded_vertices) * textured_chunk_vertex_byte_size())
+        .max()
+        .filter(|bytes| *bytes > 0);
+    let mesh_index_bytes = frames
+        .iter()
+        .map(|frame| u64::from(frame.uploaded_indices) * std::mem::size_of::<u32>() as u64)
+        .max()
+        .filter(|bytes| *bytes > 0);
+
+    RenderCompileMeshFootprint {
+        compile_request_bytes,
+        mesh_vertex_bytes,
+        mesh_index_bytes,
+    }
+}
+
+fn non_zero_usize_to_u64(value: usize) -> Option<u64> {
+    (value > 0).then(|| u64::try_from(value).unwrap_or(u64::MAX))
+}
+
+fn textured_chunk_vertex_byte_size() -> u64 {
+    std::mem::size_of::<TexturedChunkVertex>() as u64
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn host_total_memory_bytes() -> Option<u64> {
+    let mut value = 0_u64;
+    let mut value_len = std::mem::size_of::<u64>();
+    let name = b"hw.memsize\0";
+    // SAFETY: sysctlbyname reads into a valid u64 buffer and the C string is
+    // statically NUL-terminated for the duration of the call.
+    let result = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr().cast(),
+            (&mut value as *mut u64).cast(),
+            &mut value_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (result == 0 && value_len == std::mem::size_of::<u64>() && value > 0).then_some(value)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn host_total_memory_bytes() -> Option<u64> {
+    // SAFETY: sysconf is thread-safe for these read-only process constants and
+    // does not dereference caller-owned pointers.
+    let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
+    // SAFETY: same as above.
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if pages <= 0 || page_size <= 0 {
+        return None;
+    }
+    u64::try_from(pages)
+        .ok()
+        .zip(u64::try_from(page_size).ok())
+        .map(|(pages, page_size)| pages.saturating_mul(page_size))
+        .filter(|bytes| *bytes > 0)
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "android"
+)))]
+fn host_total_memory_bytes() -> Option<u64> {
+    None
 }
 
 fn target_frame_ms(target_hz: f64) -> f64 {
@@ -3781,6 +3910,8 @@ pub(crate) fn run_startup_streaming_perf(
                 report.queued_completed_compile_results = update.queued_completed_compile_results;
                 report.completed_compile_sections = update.completed_compile_sections;
                 report.uploaded_sections = update.uploaded_sections;
+                report.uploaded_vertices = update.uploaded_vertices;
+                report.uploaded_indices = update.uploaded_indices;
                 report.upload_removed_sections = update.upload_removed_sections;
                 report.target_rebuilt_sections = update.target_rebuilt_sections;
                 report.non_target_rebuilt_sections = update.non_target_rebuilt_sections;

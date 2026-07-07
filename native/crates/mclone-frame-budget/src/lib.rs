@@ -432,6 +432,219 @@ pub fn decision_for_family(
         .find(|decision| decision.family == family)
 }
 
+pub const DEFAULT_RENDER_COMPILE_CAPACITY_WORKER_FLOOR: usize = 1;
+pub const DEFAULT_RENDER_COMPILE_CAPACITY_MAX_PENDING_FLOOR: usize = 4;
+pub const VANILLA_RENDER_COMPILE_BACKGROUND_WORKER_CAP: usize = 7;
+pub const VANILLA_RENDER_COMPILE_MEMORY_BUDGET_FRACTION: f64 = 0.30;
+pub const VANILLA_RENDER_COMPILE_BUFFER_SAFETY_MULTIPLIER: u64 = 4;
+pub const VANILLA_RENDER_COMPILE_RESERVED_BUFFER_PACKS: usize = 1;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderCompileThreadReservation {
+    pub frame_thread_count: usize,
+    pub server_runner_count: usize,
+    pub worldgen_actor_count: usize,
+    pub light_actor_count: usize,
+    pub xr_runtime_count: usize,
+    pub extra_reserved_count: usize,
+}
+
+impl RenderCompileThreadReservation {
+    pub const fn local_integrated_flat() -> Self {
+        Self {
+            frame_thread_count: 1,
+            server_runner_count: 1,
+            worldgen_actor_count: 1,
+            light_actor_count: 1,
+            xr_runtime_count: 0,
+            extra_reserved_count: 0,
+        }
+    }
+
+    pub const fn local_integrated_xr() -> Self {
+        Self {
+            xr_runtime_count: 1,
+            ..Self::local_integrated_flat()
+        }
+    }
+
+    pub const fn total(self) -> usize {
+        self.frame_thread_count
+            + self.server_runner_count
+            + self.worldgen_actor_count
+            + self.light_actor_count
+            + self.xr_runtime_count
+            + self.extra_reserved_count
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderCompileMeshFootprint {
+    pub compile_request_bytes: Option<u64>,
+    pub mesh_vertex_bytes: Option<u64>,
+    pub mesh_index_bytes: Option<u64>,
+}
+
+impl RenderCompileMeshFootprint {
+    pub fn total_pack_bytes(self) -> Option<u64> {
+        let total = self
+            .compile_request_bytes
+            .unwrap_or(0)
+            .saturating_add(self.mesh_vertex_bytes.unwrap_or(0))
+            .saturating_add(self.mesh_index_bytes.unwrap_or(0));
+        (total > 0).then_some(total)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderCompileCapacityInput {
+    pub available_parallelism: Option<usize>,
+    pub total_memory_bytes: Option<u64>,
+    pub reservation: RenderCompileThreadReservation,
+    pub mesh_footprint: RenderCompileMeshFootprint,
+    pub worker_floor: usize,
+    pub max_pending_floor: usize,
+}
+
+impl RenderCompileCapacityInput {
+    pub const fn new(
+        available_parallelism: Option<usize>,
+        total_memory_bytes: Option<u64>,
+        reservation: RenderCompileThreadReservation,
+        mesh_footprint: RenderCompileMeshFootprint,
+    ) -> Self {
+        Self {
+            available_parallelism,
+            total_memory_bytes,
+            reservation,
+            mesh_footprint,
+            worker_floor: DEFAULT_RENDER_COMPILE_CAPACITY_WORKER_FLOOR,
+            max_pending_floor: DEFAULT_RENDER_COMPILE_CAPACITY_MAX_PENDING_FLOOR,
+        }
+    }
+
+    pub const fn with_floors(mut self, worker_floor: usize, max_pending_floor: usize) -> Self {
+        self.worker_floor = worker_floor;
+        self.max_pending_floor = max_pending_floor;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RenderCompileCapacityFallbackReason {
+    MissingParallelism,
+    MissingMemoryBudgetOrFootprint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderCompileCapacityReport {
+    pub available_parallelism: Option<usize>,
+    pub reserved_parallelism: usize,
+    pub usable_parallelism: Option<usize>,
+    pub cpu_worker_cap: usize,
+    pub cpu_pack_cap: Option<usize>,
+    pub total_memory_bytes: Option<u64>,
+    pub memory_budget_fraction: f64,
+    pub memory_budget_bytes: Option<u64>,
+    pub mesh_footprint: RenderCompileMeshFootprint,
+    pub mesh_buffer_pack_bytes: Option<u64>,
+    pub memory_pack_cap: Option<usize>,
+    pub worker_floor: usize,
+    pub max_pending_floor: usize,
+    pub derived_worker_count: usize,
+    pub derived_max_pending_jobs: usize,
+    pub fallback_reason: Option<RenderCompileCapacityFallbackReason>,
+}
+
+pub fn derive_render_compile_capacity(
+    input: RenderCompileCapacityInput,
+) -> RenderCompileCapacityReport {
+    let worker_floor = input.worker_floor.max(1);
+    let max_pending_floor = input.max_pending_floor.max(worker_floor);
+    let available_parallelism = input.available_parallelism.filter(|value| *value > 0);
+    let reserved_parallelism = input.reservation.total();
+    let usable_parallelism = available_parallelism.map(|available| {
+        available
+            .saturating_sub(reserved_parallelism)
+            .max(worker_floor)
+    });
+    let cpu_worker_cap = usable_parallelism
+        .map(|usable| {
+            usable.clamp(
+                worker_floor,
+                VANILLA_RENDER_COMPILE_BACKGROUND_WORKER_CAP.max(worker_floor),
+            )
+        })
+        .unwrap_or(worker_floor);
+    let cpu_pack_cap = available_parallelism.map(|available| {
+        if usize::BITS >= 64 {
+            available.max(worker_floor)
+        } else {
+            available.min(4).max(worker_floor)
+        }
+    });
+    let memory_budget_bytes = input
+        .total_memory_bytes
+        .filter(|value| *value > 0)
+        .map(|bytes| (bytes as f64 * VANILLA_RENDER_COMPILE_MEMORY_BUDGET_FRACTION) as u64)
+        .filter(|value| *value > 0);
+    let mesh_buffer_pack_bytes = input.mesh_footprint.total_pack_bytes();
+    let memory_pack_cap = memory_budget_bytes
+        .zip(mesh_buffer_pack_bytes)
+        .and_then(|(budget, pack)| {
+            let guarded_pack = pack.saturating_mul(VANILLA_RENDER_COMPILE_BUFFER_SAFETY_MULTIPLIER);
+            (guarded_pack > 0).then_some(budget / guarded_pack)
+        })
+        .map(|raw_packs| {
+            usize::try_from(raw_packs)
+                .unwrap_or(usize::MAX)
+                .saturating_sub(VANILLA_RENDER_COMPILE_RESERVED_BUFFER_PACKS)
+                .max(worker_floor)
+        });
+    let fallback_reason = if available_parallelism.is_none() {
+        Some(RenderCompileCapacityFallbackReason::MissingParallelism)
+    } else if memory_pack_cap.is_none() {
+        Some(RenderCompileCapacityFallbackReason::MissingMemoryBudgetOrFootprint)
+    } else {
+        None
+    };
+    let (derived_worker_count, derived_max_pending_jobs) = if fallback_reason.is_none() {
+        let pack_count = cpu_pack_cap
+            .zip(memory_pack_cap)
+            .map(|(cpu, memory)| cpu.min(memory).max(worker_floor))
+            .unwrap_or(worker_floor);
+        let worker_count = cpu_worker_cap.min(pack_count).max(worker_floor);
+        let max_pending_jobs = max_pending_floor.max(worker_count).max(pack_count);
+        (worker_count, max_pending_jobs)
+    } else {
+        (worker_floor, max_pending_floor)
+    };
+
+    RenderCompileCapacityReport {
+        available_parallelism,
+        reserved_parallelism,
+        usable_parallelism,
+        cpu_worker_cap,
+        cpu_pack_cap,
+        total_memory_bytes: input.total_memory_bytes.filter(|value| *value > 0),
+        memory_budget_fraction: VANILLA_RENDER_COMPILE_MEMORY_BUDGET_FRACTION,
+        memory_budget_bytes,
+        mesh_footprint: input.mesh_footprint,
+        mesh_buffer_pack_bytes,
+        memory_pack_cap,
+        worker_floor,
+        max_pending_floor,
+        derived_worker_count,
+        derived_max_pending_jobs,
+        fallback_reason,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BudgetController {
     config: BudgetControllerConfig,
@@ -1127,6 +1340,71 @@ mod tests {
         assert_eq!(workers.address.stage, StageId::CpuMeshCompile);
         assert_eq!(workers.grant.min_units, 1);
         assert_eq!(workers.grant.max_units, 1);
+    }
+
+    #[test]
+    fn render_compile_capacity_missing_inputs_stays_on_shipped_floors() {
+        let report = derive_render_compile_capacity(RenderCompileCapacityInput::new(
+            None,
+            None,
+            RenderCompileThreadReservation::local_integrated_flat(),
+            RenderCompileMeshFootprint::default(),
+        ));
+
+        assert_eq!(report.derived_worker_count, 1);
+        assert_eq!(report.derived_max_pending_jobs, 4);
+        assert_eq!(
+            report.fallback_reason,
+            Some(RenderCompileCapacityFallbackReason::MissingParallelism)
+        );
+    }
+
+    #[test]
+    fn render_compile_capacity_derives_from_cpu_reservation_and_memory() {
+        let footprint = RenderCompileMeshFootprint {
+            compile_request_bytes: Some(256 * 1024),
+            mesh_vertex_bytes: Some(512 * 1024),
+            mesh_index_bytes: Some(128 * 1024),
+        };
+        let report = derive_render_compile_capacity(RenderCompileCapacityInput::new(
+            Some(12),
+            Some(8 * 1024 * 1024 * 1024),
+            RenderCompileThreadReservation::local_integrated_flat(),
+            footprint,
+        ));
+
+        assert_eq!(report.reserved_parallelism, 4);
+        assert_eq!(report.usable_parallelism, Some(8));
+        assert_eq!(report.cpu_worker_cap, 7);
+        assert_eq!(report.derived_worker_count, 7);
+        assert!(report.derived_max_pending_jobs >= report.derived_worker_count);
+        assert_eq!(report.fallback_reason, None);
+    }
+
+    #[test]
+    fn render_compile_capacity_memory_can_limit_workers_but_not_pending_floor() {
+        let footprint = RenderCompileMeshFootprint {
+            compile_request_bytes: Some(128 * 1024),
+            mesh_vertex_bytes: Some(128 * 1024),
+            mesh_index_bytes: Some(64 * 1024),
+        };
+        let guarded_pack = footprint
+            .total_pack_bytes()
+            .unwrap()
+            .saturating_mul(VANILLA_RENDER_COMPILE_BUFFER_SAFETY_MULTIPLIER);
+        let two_pack_budget = guarded_pack * 3;
+        let total_memory =
+            (two_pack_budget as f64 / VANILLA_RENDER_COMPILE_MEMORY_BUDGET_FRACTION) as u64;
+        let report = derive_render_compile_capacity(RenderCompileCapacityInput::new(
+            Some(16),
+            Some(total_memory),
+            RenderCompileThreadReservation::local_integrated_flat(),
+            footprint,
+        ));
+
+        assert_eq!(report.memory_pack_cap, Some(2));
+        assert_eq!(report.derived_worker_count, 2);
+        assert_eq!(report.derived_max_pending_jobs, 4);
     }
 
     #[test]

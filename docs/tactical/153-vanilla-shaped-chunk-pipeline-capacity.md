@@ -364,6 +364,16 @@ Deliverables:
   Slice 3;
 - mesh output equality check across worker counts (rule E).
 
+First implementation slice: the shared derivation now lives in
+`mclone-frame-budget` and startup-streaming JSON surfaces it as
+`render_compile_capacity_advisory`. It is deliberately non-applied
+(`"applied": false`): active workers/max-pending remain the existing CLI/default
+settings. The advisory logs the formula inputs and result: available
+parallelism, structural reservation, measured compile request and uploaded
+mesh-buffer footprint, memory budget, memory pack cap, derived worker count, and
+derived max-pending jobs. Missing parallelism or missing memory/footprint input
+falls back to today's `1/4` floors, with unit coverage for that rule.
+
 Gates (inner loop per iteration; promotion before default flip):
 
 - inner: RD10 persisted frozen + movement-frame probe + Quest RD5 orbit;

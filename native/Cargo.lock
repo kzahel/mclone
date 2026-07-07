@@ -1548,6 +1548,7 @@ dependencies = [
  "env_logger",
  "glam 0.30.10",
  "image",
+ "libc",
  "libloading 0.8.9",
  "log",
  "mclone-app-runtime",
