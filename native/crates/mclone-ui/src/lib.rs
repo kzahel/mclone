@@ -1191,6 +1191,7 @@ pub enum GameTurnMode {
     #[default]
     Snap15,
     Snap30,
+    Snap45,
     Smooth,
 }
 
@@ -1199,6 +1200,7 @@ impl GameTurnMode {
         match self {
             Self::Snap15 => "Snap 15",
             Self::Snap30 => "Snap 30",
+            Self::Snap45 => "Snap 45",
             Self::Smooth => "Smooth",
         }
     }
@@ -1206,7 +1208,8 @@ impl GameTurnMode {
     pub const fn next(self) -> Self {
         match self {
             Self::Snap15 => Self::Snap30,
-            Self::Snap30 => Self::Smooth,
+            Self::Snap30 => Self::Snap45,
+            Self::Snap45 => Self::Smooth,
             Self::Smooth => Self::Snap15,
         }
     }
@@ -1217,6 +1220,7 @@ pub enum GameXrTurnMode {
     #[default]
     Snap15,
     Snap30,
+    Snap45,
     Smooth,
 }
 
@@ -1225,6 +1229,7 @@ impl GameXrTurnMode {
         match self {
             Self::Snap15 => "Snap 15",
             Self::Snap30 => "Snap 30",
+            Self::Snap45 => "Snap 45",
             Self::Smooth => "Smooth",
         }
     }
@@ -1232,7 +1237,8 @@ impl GameXrTurnMode {
     pub const fn next(self) -> Self {
         match self {
             Self::Snap15 => Self::Snap30,
-            Self::Snap30 => Self::Smooth,
+            Self::Snap30 => Self::Snap45,
+            Self::Snap45 => Self::Smooth,
             Self::Smooth => Self::Snap15,
         }
     }
@@ -1243,6 +1249,7 @@ impl From<GameXrTurnMode> for GameTurnMode {
         match value {
             GameXrTurnMode::Snap15 => Self::Snap15,
             GameXrTurnMode::Snap30 => Self::Snap30,
+            GameXrTurnMode::Snap45 => Self::Snap45,
             GameXrTurnMode::Smooth => Self::Smooth,
         }
     }
@@ -1253,6 +1260,7 @@ impl From<GameTurnMode> for GameXrTurnMode {
         match value {
             GameTurnMode::Snap15 => Self::Snap15,
             GameTurnMode::Snap30 => Self::Snap30,
+            GameTurnMode::Snap45 => Self::Snap45,
             GameTurnMode::Smooth => Self::Smooth,
         }
     }

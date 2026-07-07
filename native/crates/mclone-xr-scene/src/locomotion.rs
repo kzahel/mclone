@@ -40,6 +40,9 @@ impl XrTurnPolicy {
             Self::Snap { degrees } if (degrees - 30.0).abs() < f32::EPSILON => {
                 GameXrTurnMode::Snap30
             }
+            Self::Snap { degrees } if (degrees - 45.0).abs() < f32::EPSILON => {
+                GameXrTurnMode::Snap45
+            }
             Self::Snap { .. } => GameXrTurnMode::Snap15,
             Self::Smooth => GameXrTurnMode::Smooth,
         }
@@ -49,6 +52,7 @@ impl XrTurnPolicy {
         match mode {
             GameXrTurnMode::Snap15 => Self::Snap { degrees: 15.0 },
             GameXrTurnMode::Snap30 => Self::Snap { degrees: 30.0 },
+            GameXrTurnMode::Snap45 => Self::Snap { degrees: 45.0 },
             GameXrTurnMode::Smooth => Self::Smooth,
         }
     }

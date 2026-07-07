@@ -148,7 +148,8 @@ fn movement_experience_modes_have_stable_labels_and_cycles() {
 
     assert_eq!(GameTurnMode::Snap15.label(), "Snap 15");
     assert_eq!(GameTurnMode::Snap15.next(), GameTurnMode::Snap30);
-    assert_eq!(GameTurnMode::Snap30.next(), GameTurnMode::Smooth);
+    assert_eq!(GameTurnMode::Snap30.next(), GameTurnMode::Snap45);
+    assert_eq!(GameTurnMode::Snap45.next(), GameTurnMode::Smooth);
     assert_eq!(GameTurnMode::Smooth.next(), GameTurnMode::Snap15);
     assert_eq!(
         GameTurnMode::from(GameXrTurnMode::Smooth),
@@ -157,6 +158,10 @@ fn movement_experience_modes_have_stable_labels_and_cycles() {
     assert_eq!(
         GameXrTurnMode::from(GameTurnMode::Snap30),
         GameXrTurnMode::Snap30
+    );
+    assert_eq!(
+        GameXrTurnMode::from(GameTurnMode::Snap45),
+        GameXrTurnMode::Snap45
     );
 }
 

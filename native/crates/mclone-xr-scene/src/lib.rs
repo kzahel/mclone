@@ -3387,6 +3387,10 @@ mod tests {
             XrTurnPolicy::Snap { degrees: 30.0 }
         );
         assert_eq!(
+            XrTurnPolicy::from_game_mode(GameXrTurnMode::Snap45),
+            XrTurnPolicy::Snap { degrees: 45.0 }
+        );
+        assert_eq!(
             XrTurnPolicy::from_game_mode(GameXrTurnMode::Smooth),
             XrTurnPolicy::Smooth
         );
