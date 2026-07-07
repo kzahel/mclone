@@ -414,3 +414,6 @@ stay event-driven.
   remaining ready-batch drain.
 - [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md)
   closed the focused native/web remote inbound queue implementation.
+- [`tactical/154-client-ingress-adapter-cleanup.md`](./tactical/154-client-ingress-adapter-cleanup.md)
+  tracks post-151 cleanup that quarantines compatibility/probe helpers without
+  changing the shared client ingress behavior.

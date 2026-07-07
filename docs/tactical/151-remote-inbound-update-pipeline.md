@@ -1336,6 +1336,9 @@ existing `with_unload_hysteresis_chunks` dead-code warning.
 
 - Server-push protocol broadening. Keep it in tactical 133 Slice 6 after the
   client inbound boundary exists.
+- Post-closeout adapter naming/quarantine cleanup. Keep it in tactical
+  [`154-client-ingress-adapter-cleanup.md`](154-client-ingress-adapter-cleanup.md)
+  so this closed tactical remains the implementation/evidence record.
 - Compression or binary protocol redesign.
 - Chunk meshing, GPU upload, render admission, or terrain coordinator policy.
   Those remain in tactical 128 and related performance trackers.
