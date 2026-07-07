@@ -1,10 +1,11 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: drafted 2026-07-07 as the named follow-up to tactical
+Status: Slice 0 whole-pipeline attribution landed and recorded 2026-07-07 as
+the named follow-up to tactical
 [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
-(close-out commits `42d3e43a`/`01147cd7`). Slice 0 (whole-pipeline
-attribution) is next. This tactical absorbs 150's "per-stage render pipeline
-budgeting" follow-up list and widens it to the real goal: raise the
+(close-out commits `42d3e43a`/`01147cd7`). Slice 1 (render compile capacity)
+is next. This tactical absorbs 150's "per-stage render pipeline budgeting"
+follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
 its cores, by porting the vanilla 1.17.1 scheduling/capacity shape instead
 of inventing constants.
@@ -83,18 +84,18 @@ stated). If Slice 0 recapture disagrees materially, re-pin in Slice 0.
 
 | Anchor | Value |
 |---|---|
-| Desktop RD10 fresh frozen-fluids, defaults (`workers=1`, `max-pending=4`) | full view `9183.072/9137.523ms`, target quiescent `10744.258/10853.328ms`, `0` over-budget |
-| Desktop RD15 fresh frozen | full view `19429.505ms` (`2.9x` vs 150 Slice 0) |
-| Desktop RD10 persisted frozen | full view `1014.642ms`, target quiescent `4924.696ms`, post-full-view target rebuilds `5696` |
+| Desktop RD10 fresh frozen-fluids, defaults (`workers=1`, `max-pending=4`) | Slice 0 recapture: full view `9699.848ms`, target quiescent `11186.276ms`, `0 / 0` over/over-2x |
+| Desktop RD15 fresh frozen | Slice 0 recapture: full view `19930.189ms`, target quiescent `21998.543ms`, `0 / 0` over/over-2x |
+| Desktop RD10 persisted frozen | Slice 0 recapture: full view `1022.791ms`, target quiescent `4940.262ms`, post-full-view target rebuilds `5696` |
 | Contrasting seed `74739` RD10 frozen | full view `8157.360ms`, quiescent `9601.381ms` |
 | RD20 long live (120 Hz backlog watch) | full view `34864.820ms`; max pending publication `208`, pump stalls `0` |
 | Raw / server-only / server+light ceilings (142) | `551.5` (`1243.2` warm) / `126.7` / `40.6` chunks/sec |
-| Implied stage costs (re-derive in Slice 0) | light ~`17ms`/chunk; mesh ~`1.3ms`/section (`11.037s` / `8464` RD10 sections CPU-only); GPU upload `0.133s` / `360MB` |
-| Effective fresh pipeline rate | RD10 ~`58`/s, RD15 ~`49`/s, RD20 ~`48`/s — production-bound |
+| Implied startup stage costs | desktop fresh worldgen `1.56-1.70ms`/chunk, light `7.44-9.38ms`/status, render compile `0.181-0.188ms`/section; RD10 persisted render compile `0.217ms`/section; Quest churn render compile `1.173ms`/section |
+| Effective fresh stage rates | RD10: feature `113.7`/s, light `105.0`/s, compile `639.4` sections/s, upload `195.2` sections/s; RD15: feature `130.9`/s, light `133.2`/s, compile `705.5` sections/s, upload `221.2` sections/s |
 | Quest RD5 orbit (workers `2`, caps `2/16/64`) | skipped `0`, dropped delta `15`, app p95 `12.040ms`, headroom avg `+3.172ms`, over-period `0.0%` |
 | Quest RD7 orbit (shipping defaults) | skipped `0`, dropped delta `16`, app p95 `12.755ms`, over-period `0.9%` |
-| Quest RD5 churn (workers `2`, caps `2/16/64`) | skipped `0`, dropped delta `16`, app p95 `9.771ms`, over-period `0.0%`, compile queue age `531.182ms` |
-| Quest churn publication cadence | `23.412` feature chunks/sec, `13.239` light statuses/sec, `36.651` units/sec |
+| Quest RD5 churn (workers `2`, caps `2/16/64`) | skipped `0`, dropped delta `16`, app p95 `8.919ms`, over-period `0.0%`, compile queue age `581.685ms`, render compile busy `24722.366ms` |
+| Quest churn publication cadence | `23.419` feature chunks/sec, `11.509` light statuses/sec, `34.928` units/sec |
 | Movement-frame caveat (open from 150) | two clean repeats each with `1` over-budget / `1` over-2x legacy frame (`~18ms` max), unattributed |
 | Quest 15-min churn soak (open from 150) | app-work safe but not clean: submitted FPS `41.79`, dropped deltas `219 -> 358`, compile queue age `1558.614ms`, battery `35.0C -> 43.0C` |
 
@@ -186,6 +187,10 @@ platform-local budget policy). Read them there. Additional rules:
 
 ## Slice 0: Whole-Pipeline Attribution Row
 
+Status: complete on clean runtime commit `1c8a0743`. Records:
+[`../performance-records.md`](../performance-records.md) and
+[`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
+
 Why: every ceiling number above is stitched from rows measured on
 different commits and lanes. Lever order must come from one table on one
 commit, or this tactical tunes the wrong stage. This is the "understand
@@ -225,6 +230,68 @@ pnpm native:accounting:smoke
 pnpm native:startup-streaming:perf
 git diff --check
 ```
+
+### Slice 0 Recorded Results
+
+Desktop rows were captured from clean commit `1c8a0743`, `git_dirty=false`,
+with explicit `--render-compile-workers 1 --render-compile-max-pending-jobs 4`.
+Rates below divide by target render quiescence, matching the user-visible
+startup completion window. Worker busy percentages are therefore load-window
+busy fractions, not whole-process CPU utilization.
+
+| Lane | Full view | Target quiescent | p95 / max frame | Over / over-2x | Feature rate | Light rate | Compile rate | Upload rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `9699.848ms` | `11186.276ms` | `11.924 / 15.384ms` | `0 / 0` | `113.7` chunks/s | `105.0` statuses/s | `639.4` sections/s | `195.2` sections/s |
+| RD15 fresh frozen | `19930.189ms` | `21998.543ms` | `11.583 / 12.920ms` | `0 / 0` | `130.9` chunks/s | `133.2` statuses/s | `705.5` sections/s | `221.2` sections/s |
+| RD10 persisted frozen | `1022.791ms` | `4940.262ms` | `11.947 / 14.663ms` | `0 / 0` | n/a | n/a | `1425.0` sections/s | `433.8` sections/s |
+
+| Stage | RD10 fresh attribution | RD15 fresh attribution | RD10 persisted attribution | Boundary evidence |
+|---|---:|---:|---:|---|
+| worldgen job | `2161.554ms` busy, `19.3%`, `1.70ms`/chunk | `4482.406ms` busy, `20.4%`, `1.56ms`/chunk | idle | mailbox pending max `1`; not the current ceiling |
+| light status | `11009.006ms` busy, `98.4%`, `9.38ms`/status | `21810.817ms` busy, `99.1%`, `7.44ms`/status | idle | light mailbox pending max `155` / `348`; fresh-startup ceiling |
+| publication | host-publication max age `1546.781ms` | host-publication max age `2586.359ms` | idle | publication follows light backlog; controller cost traces stayed at cap |
+| client apply | no inbound-update queue in local desktop lane | no inbound-update queue in local desktop lane | no inbound-update queue | still needs remote/151 attribution, not a local startup lever |
+| mesh admission | compile-jobs max age `23.806ms`, pending `4` | max age `21.315ms`, pending `4` | max age `23.936ms`, pending `3` | admission is bounded and green on desktop |
+| mesh compile | `1297.312ms` busy, `11.6%`, `0.181ms`/section | `2916.281ms` busy, `13.3%`, `0.188ms`/section | `1525.197ms` busy, `30.9%`, `0.217ms`/section | persisted lane is the clean desktop mesh-capacity signal |
+| GPU upload -> visible | upload queue max age `0.000ms`; `2184` uploaded | max age `0.000ms`; `4866` uploaded | max age `0.000ms`; `2143` uploaded | upload not the desktop startup ceiling yet |
+
+Quest RD5 chunk-view churn was captured on the same runtime commit with
+workers `2`, max-pending `4`, accept/upload caps `2/16/64`, and
+`45.007s` sample after `15.878s` settle:
+
+| Field | Value |
+|---|---:|
+| submitted/runtime/skipped | `3239 / 3239 / 0` |
+| Meta dropped-frame delta | `16` |
+| app p95 / p99 / max | `8.919 / 9.678 / 15.518ms` |
+| headroom avg / p05 / min | `+8.651 / +4.969 / -1.629ms` |
+| app over-period frames / pct | `1 / 0.0%` |
+| publication rates | feature `23.419`/s, light `11.509`/s, total `34.928`/s |
+| queue max ages | inbound `133.188ms`, upload `254.848ms`, host-publication `1872.731ms`, render-compile `581.685ms` |
+| peer busy totals | worldgen `15896.635ms`, light `57526.172ms`, render compile `24722.366ms` |
+| render compile cost | `1.173ms`/completed section (`24722.366ms / 21085`) |
+
+Lever order implied by Slice 0:
+
+1. **Slice 1: render compile capacity.** This remains next because it is the
+   vanilla-shaped shared capacity slice, it has a clean persisted desktop
+   signal (`4.940s` quiescence with `5696` post-full-view target rebuilds),
+   and Quest churn now shows real render-compile work (`24.7s` busy,
+   `581.7ms` queue age). Falsification target: RD10 persisted quiescence
+   should materially fall without introducing frame misses, and Quest churn
+   compile queue age must not regress.
+2. **Slice 2: light/status throughput or light-publication boundary.** Fresh
+   RD10/RD15 light is effectively saturated (`98-99%` busy) while worldgen
+   is not. After Slice 1 removes the mesh-only tail, fresh-startup targets
+   should be judged against this light ceiling first.
+3. **Slice 3: publication/client-apply/upload pacing.** Host-publication age
+   is already `1.55-2.59s` on desktop and `1.87s` on Quest churn, but desktop
+   upload is not yet aged. Promote this only after upstream capacity makes
+   publication/upload the visible tail.
+4. **Shared pool topology remains evidence-gated.** The current row proves
+   fixed per-stage threads leave worldgen underused while light is saturated,
+   but it does not yet justify a pool rewrite ahead of the focused vanilla
+   pack-pool render compile slice.
 
 ## Slice 1: Render Compile Capacity (Vanilla Pack-Pool Shape)
 

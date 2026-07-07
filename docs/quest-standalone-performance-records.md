@@ -109,6 +109,63 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Slice 0 RD5 Churn Attribution
+
+Benchmarked runtime commit: `1c8a0743`, clean worktree before docs edits.
+The release APK was rebuilt and installed for this row.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+
+Command:
+
+```sh
+pnpm native:android-xr:perf:churn:rd5:metrics
+```
+
+Expanded validator command:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-quest-openxr-perf-churn-rd5-metrics.txt --log /tmp/mclone-quest-openxr-perf-churn-rd5-metrics-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+```
+
+Primary row:
+
+| Lane | Config | Skipped | Dropped delta | App p95 / p99 / max | Headroom avg / p05 / min | App over-period | Compile queue max age |
+|---|---|---:|---:|---:|---:|---:|---:|
+| RD5 chunk-view churn | workers `2`, max pending `4`, accept/upload `2/16/64` | `0` | `16` | `8.919 / 9.678 / 15.518ms` | `+8.651 / +4.969 / -1.629ms` | `1` frame / `0.0%` | `581.685ms` |
+
+Publication, queue, and peer attribution:
+
+| Metric | Value |
+|---|---:|
+| sample / settle seconds | `45.007s` / `15.878s` |
+| frames / submitted / runtime | `3239 / 3239 / 3239` |
+| publication cadence | feature `23.419`/s, light `11.509`/s, units `34.928`/s |
+| queue max ages | inbound `133.188ms`, upload `254.848ms`, host-publication `1872.731ms`, render-compile `581.685ms` |
+| server/update queues | server update max `283`, oldest applied age `160.968ms`, pending light statuses `214` |
+| render compile peer | pending `4`, response frames `21085`, busy `24722.366ms`, max request `91.801ms` |
+| render compile cost | `1.173ms`/completed section |
+| light peer | pending `214`, response frames `141`, busy `57526.172ms`, max request `1271.172ms` |
+| worldgen peer | pending `1`, response frames `20`, busy `15896.635ms`, max request `1393.790ms` |
+| upload/apply caps | upload limited `true`, accept limited `true`, update pump stalls `1` |
+
+Interpretation: the Slice 0 instrumentation now reports nonzero XR
+render-compile worker busy time. The row stays green on app-work headroom while
+showing the same backlog shape as the Tactical 150 churn lane: host-publication
+age near `1.9s`, render-compile age around `0.6s`, and a saturated light peer.
+Use this as the Quest contrast row for Tactical 153 Slice 1; a render-compile
+capacity change must not worsen skipped frames, app p95, app over-period, or
+compile queue age.
+
 ### 2026-07-07 - Tactical 150 Slice 5 Clean Baseline Guardrails And Churn Soak
 
 Benchmarked commit: `42d3e43a`, clean worktree. The first row rebuilt and

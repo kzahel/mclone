@@ -101,6 +101,47 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Slice 0 Whole-Pipeline Attribution
+
+Commit reported by benchmark JSON: `1c8a0743`, `git_dirty=false`.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-slice0-rd10-fresh-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 15 --startup-streaming-frames 2400 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-slice0-rd15-fresh-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-slice0-rd10-persisted-frozen.json
+```
+
+Startup-streaming rows use frozen scheduled fluids, adaptive publication on,
+render compile workers `1`, and max-pending render compile jobs `4`.
+
+| Lane | Full view | Initial render complete | Target quiescent | p95 / max frame | Over / over-2x | Feature / light / compile / upload rate |
+|---|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `9699.848ms` | `9699.848ms` | `11186.276ms` | `11.924 / 15.384ms` | `0 / 0` | `113.7` chunks/s / `105.0` statuses/s / `639.4` sections/s / `195.2` sections/s |
+| RD15 fresh frozen | `19930.189ms` | `19930.189ms` | `21998.543ms` | `11.583 / 12.920ms` | `0 / 0` | `130.9` chunks/s / `133.2` statuses/s / `705.5` sections/s / `221.2` sections/s |
+| RD10 persisted frozen | `1022.791ms` | `4940.262ms` | `4940.262ms` | `11.947 / 14.663ms` | `0 / 0` | n/a / n/a / `1425.0` sections/s / `433.8` sections/s |
+
+Per-stage attribution:
+
+| Stage | RD10 fresh | RD15 fresh | RD10 persisted | Boundary markers |
+|---|---:|---:|---:|---|
+| worldgen | `2161.554ms` busy, `19.3%`, `1.70ms`/chunk | `4482.406ms` busy, `20.4%`, `1.56ms`/chunk | idle | mailbox pending max `1` |
+| light status | `11009.006ms` busy, `98.4%`, `9.38ms`/status | `21810.817ms` busy, `99.1%`, `7.44ms`/status | idle | mailbox pending max `155` / `348` |
+| publication | host-publication max age `1546.781ms` | host-publication max age `2586.359ms` | idle | fresh-startup backlog follows light |
+| client apply | no inbound update queue | no inbound update queue | no inbound update queue | local-integrated desktop lane |
+| mesh admission | compile queue max age `23.806ms`, pending `4` | `21.315ms`, pending `4` | `23.936ms`, pending `3` | bounded and drained |
+| mesh compile | `1297.312ms` busy, `11.6%`, `0.181ms`/section | `2916.281ms` busy, `13.3%`, `0.188ms`/section | `1525.197ms` busy, `30.9%`, `0.217ms`/section | persisted lane isolates mesh tail |
+| GPU upload -> visible | upload queue max age `0.000ms`; `2184` sections | `0.000ms`; `4866` sections | `0.000ms`; `2143` sections | not the desktop ceiling yet |
+
+Interpretation: fresh RD10/RD15 are light-status bound on this commit; the
+light worker is effectively saturated while worldgen is not. The persisted lane
+remains the clean mesh-capacity signal, with `5696` post-full-view target
+rebuilds and `4.940s` target quiescence. That keeps Tactical 153 Slice 1 on the
+vanilla-shaped render compile capacity work, followed by light/status
+throughput and then publication/upload pacing if queue ages become the visible
+tail.
+
 ### 2026-07-07 - Tactical 150 Slice 5 Clean Baseline Close-Out
 
 Commit reported by benchmark JSON: `42d3e43a`, `git_dirty=false`.
