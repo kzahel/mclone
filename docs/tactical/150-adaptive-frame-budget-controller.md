@@ -880,50 +880,47 @@ this tactical); Quest gates green with queue ages bounded. Do not use total
 target render quiescence as the Candidate B promotion gate unless
 simulation-caused dirty work is frozen or split out.
 
-Status (2026-07-07): Candidate B is not promoted. The shared frame-budget crate
-now has a render-side controller config and the live desktop path has an
-opt-in `--adaptive-render-admission-budget` flag that routes render admission
-through the existing deadline API with a controller unit cap; the default stays
-on the fixed floor path. The desktop worker default remains `1`: same-host RD10
-startup-streaming A/B with adaptive publication on measured workers `1` vs `2`
-as first full view `9712.257ms` vs `9221.628ms`, first render quiescent
-`50136.512ms` vs `50124.487ms`, total remesh `439.307ms` vs `820.441ms`, and
-deadline-skipped compile requests `0` in both lanes. Under the then-current
-startup-streaming quiescence gate, workers `2` did not qualify for default
-promotion. The
-follow-up target-render diagnostics split landed 2026-07-07 and remeasured the
-workers `1` lane: first full view `9711.712ms`, legacy render quiescent
-`50148.741ms`, target render quiescent `50148.741ms`, post-full-view target
-rebuilt sections `4029`, post-full-view non-target rebuilt sections `0`, and
-deadline-skipped compile requests `0`. That reconciles the earlier ambiguity:
-the final `pending_render_chunks=88` is edge/non-target bookkeeping, but the
-long marker delay is real target render mesh progression, not merely a global
-quiescence-definition artifact. A follow-up opt-in compile in-flight cap
-(`--render-compile-max-pending-jobs`, omitted = cap equals worker count) tested
-workers `1` with max-pending `4`: first full view `9722.828ms`, target render
-quiescent `50139.993ms`, p95/p99/max frame `7.525/8.468/11.238ms`, `0`
-over-budget frames, `8161` submitted compile sections, `8156` completed,
-`3178` uploaded, `562` post-full-view target rebuilt sections, and `0`
-deadline skips. The cap changes work distribution but does not improve that
-quiescence metric, so it is retained only as an opt-in benchmark lever.
+Status (2026-07-07): Candidate B is not promoted to defaults yet. The shared
+frame-budget crate now has a render-side controller config and the live desktop
+path has an opt-in `--adaptive-render-admission-budget` flag that routes render
+admission through the existing deadline API with a controller unit cap; the
+default stays on the fixed floor path. The desktop worker default remains `1`:
+same-host RD10 startup-streaming A/B with adaptive publication on measured
+workers `1` vs `2` as first full view `9712.257ms` vs `9221.628ms`, first
+render quiescent `50136.512ms` vs `50124.487ms`, total remesh `439.307ms` vs
+`820.441ms`, and deadline-skipped compile requests `0` in both lanes. Under
+the then-current startup-streaming quiescence gate, workers `2` did not qualify
+for default promotion. The follow-up target-render diagnostics split landed
+2026-07-07 and remeasured the workers `1` lane: first full view `9711.712ms`,
+legacy render quiescent `50148.741ms`, target render quiescent `50148.741ms`,
+post-full-view target rebuilt sections `4029`, post-full-view non-target
+rebuilt sections `0`, and deadline-skipped compile requests `0`. That
+reconciles the earlier ambiguity: the final `pending_render_chunks=88` is
+edge/non-target bookkeeping, but the long marker delay is real target render
+mesh progression.
 
 Measurement correction (2026-07-07): the ~50.1s RD10 target-render-quiescent
-tail is now attributed to vanilla scheduled fluid mutation, not initial render
-streaming. Temporary instrumentation showed the last mutating fluid tick near
-sim tick `1013` (`~50.65s`), matching the quiescence marker within one frame.
-Therefore the existing marker is a world-settled metric: it waits for late
-water/lava block updates that re-dirty render sections, so it can mask real
-Candidate B render-streaming wins. Candidate B remains unpromoted, but the
-render-side knobs are not considered finally falsified until they are rerun
-against a corrected gate.
+tail is now attributed to vanilla scheduled fluid mutation/world settling, not
+initial render streaming. Temporary instrumentation showed the last mutating
+fluid tick near sim tick `1013` (`~50.65s`), matching the quiescence marker
+within one frame. The benchmark now emits
+`first_initial_target_render_complete_ms` and has a startup-streaming-only
+`--freeze-scheduled-fluid-ticks` isolation flag. The old
+`first_target_render_quiescent_ms` marker remains useful as a world-settled
+marker, but it is no longer the Candidate B promotion gate.
 
-Next implementing pass: add a benchmark-lane way to freeze scheduled fluid
-ticks for startup-streaming isolation, and add a durable metric such as
-`first_initial_target_render_complete_ms` that records when every target
-render section has completed its initial mesh/upload without waiting for later
-simulation-caused dirty work. Re-run the Candidate B ladder and confirm that
-with fluids frozen, the existing quiescence marker and the new initial-render
-completion marker converge.
+Corrected desktop gate result (2026-07-07): live default workers `1` reached
+first full view `9729.518ms`, initial target render complete `23043.021ms`,
+and old target quiescence `50141.657ms`. With scheduled fluids frozen, default
+workers `1` converged old quiescence to initial render completion at
+`20058.747ms`, confirming the split. The opt-in in-flight cap
+`--render-compile-max-pending-jobs 4` with workers `1` reached initial target
+render complete at `9681.505ms` frozen and `9671.935ms` live, with `0`
+over-budget frames and `0` deadline-skipped compile requests. That passes the
+RD10 fresh corrected desktop acceptance target (`<= 14s`) for the queue-depth
+lever. Do not change shipped defaults from this row alone: persisted lanes,
+Quest RD5/RD7/churn gates, and XR accept/upload decisions still need the
+promotion loop.
 
 ## Slice 5: Config Surface, Soak, And Close-Out
 

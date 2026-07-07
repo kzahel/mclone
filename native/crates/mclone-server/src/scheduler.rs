@@ -270,6 +270,23 @@ impl FluidTickList {
         entries
     }
 
+    pub(crate) fn frozen_report(
+        &self,
+    ) -> (
+        FluidTickPhaseReport,
+        Vec<ChunkSchedulerEvent>,
+        Vec<WorldBlockPos>,
+    ) {
+        (
+            FluidTickPhaseReport {
+                scheduled_ticks: self.size(),
+                ..FluidTickPhaseReport::default()
+            },
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
     pub(crate) fn tick(
         &mut self,
         game_time: u64,

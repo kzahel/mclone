@@ -91,6 +91,7 @@ pub struct IntegratedServer {
     simulation_tick: u64,
     day_time: u64,
     day_time_frozen: bool,
+    scheduled_fluid_ticks_frozen: bool,
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
     initial_spawn_center: Option<ChunkPos>,
@@ -329,6 +330,7 @@ impl IntegratedServer {
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
             day_time_frozen: false,
+            scheduled_fluid_ticks_frozen: false,
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
             initial_spawn_center: None,
@@ -370,6 +372,12 @@ impl IntegratedServer {
     /// `day_time` unchanged (debug hook for inspecting a fixed time of day).
     pub fn set_day_time_frozen(&mut self, frozen: bool) {
         self.day_time_frozen = frozen;
+    }
+
+    /// Freeze or resume scheduled fluid ticks. While frozen, due water/lava
+    /// ticks remain queued but do not mutate blocks.
+    pub fn set_scheduled_fluid_ticks_frozen(&mut self, frozen: bool) {
+        self.scheduled_fluid_ticks_frozen = frozen;
     }
 
     pub fn set_debug_passive_showcase_enabled(&mut self, enabled: bool) {
@@ -753,11 +761,16 @@ impl IntegratedServer {
         let block_tick_us = simulation_timing_elapsed_us(block_tick_start);
 
         let fluid_tick_start = simulation_timing_start();
-        let (fluid_report, mut fluid_events, fluid_mutated_positions) = self.liquid_ticks.tick(
-            simulation_tick,
-            &tick_report.entity_ticking_chunks,
-            &mut self.scheduler,
-        );
+        let (fluid_report, mut fluid_events, fluid_mutated_positions) =
+            if self.scheduled_fluid_ticks_frozen {
+                self.liquid_ticks.frozen_report()
+            } else {
+                self.liquid_ticks.tick(
+                    simulation_tick,
+                    &tick_report.entity_ticking_chunks,
+                    &mut self.scheduler,
+                )
+            };
         let fluid_tick_us = simulation_timing_elapsed_us(fluid_tick_start);
         self.entities.on_blocks_changed(&fluid_mutated_positions);
         fluid_events.extend(self.scheduler.drain_pending_block_delta_events());

@@ -1,5 +1,18 @@
 use super::*;
 
+fn startup_streaming_defaults() -> StartupStreamingPerfOptions {
+    StartupStreamingPerfOptions {
+        scene: SceneOptions::default(),
+        render_options: TexturedSectionRenderOptions::default(),
+        width: 1280,
+        height: 720,
+        frames: DEFAULT_STARTUP_STREAMING_PERF_FRAMES,
+        target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
+        persisted_world: false,
+        freeze_scheduled_fluid_ticks: false,
+    }
+}
+
 #[test]
 fn cli_parses_movement_perf_options() {
     let cli = Cli::parse([
@@ -101,6 +114,7 @@ fn cli_parses_startup_streaming_perf_options() {
         "2".to_owned(),
         "--render-compile-max-pending-jobs".to_owned(),
         "8".to_owned(),
+        "--freeze-scheduled-fluid-ticks".to_owned(),
         "--width".to_owned(),
         "1024".to_owned(),
         "--height".to_owned(),
@@ -127,6 +141,22 @@ fn cli_parses_startup_streaming_perf_options() {
                 frames: 30000,
                 target_hz: 120.0,
                 persisted_world: false,
+                freeze_scheduled_fluid_ticks: true,
+            },
+        }
+    );
+}
+
+#[test]
+fn cli_parses_startup_streaming_fluid_freeze_flag() {
+    let cli = Cli::parse(["--freeze-scheduled-fluid-ticks".to_owned()]).unwrap();
+
+    assert_eq!(
+        cli,
+        Cli::StartupStreamingPerf {
+            options: StartupStreamingPerfOptions {
+                freeze_scheduled_fluid_ticks: true,
+                ..startup_streaming_defaults()
             },
         }
     );
@@ -155,6 +185,7 @@ fn cli_parses_adaptive_chunk_publication_budget_flag() {
                 frames: DEFAULT_STARTUP_STREAMING_PERF_FRAMES,
                 target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
                 persisted_world: false,
+                freeze_scheduled_fluid_ticks: false,
             },
         }
     );
@@ -233,6 +264,7 @@ fn cli_allows_startup_streaming_target_hz_before_mode_flag() {
                 frames: 120,
                 target_hz: 90.0,
                 persisted_world: false,
+                freeze_scheduled_fluid_ticks: false,
             },
         }
     );
@@ -273,6 +305,7 @@ fn cli_parses_startup_streaming_persisted_world() {
                 frames: 120,
                 target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
                 persisted_world: true,
+                freeze_scheduled_fluid_ticks: false,
             },
         }
     );

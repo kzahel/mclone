@@ -56,6 +56,7 @@ pub struct LocalSingleViewSceneOptions {
     pub cadence: SimulationCadenceConfig,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
+    pub freeze_scheduled_fluid_ticks: bool,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
     pub adaptive_chunk_publication_budget: bool,
@@ -73,6 +74,7 @@ impl LocalSingleViewSceneOptions {
             cadence: SimulationCadenceConfig::new(20, 20, 60),
             day_time_override: None,
             freeze_time: false,
+            freeze_scheduled_fluid_ticks: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
             adaptive_chunk_publication_budget: false,
@@ -94,6 +96,11 @@ impl LocalSingleViewSceneOptions {
 
     pub const fn with_freeze_time(mut self, freeze_time: bool) -> Self {
         self.freeze_time = freeze_time;
+        self
+    }
+
+    pub const fn with_freeze_scheduled_fluid_ticks(mut self, freeze: bool) -> Self {
+        self.freeze_scheduled_fluid_ticks = freeze;
         self
     }
 
@@ -2394,6 +2401,7 @@ fn native_runner_config(
         .with_debug_passive_showcase(options.debug_passive_showcase)
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
+        .with_scheduled_fluid_ticks_frozen(options.freeze_scheduled_fluid_ticks)
         .with_local_integrated_chunk_tracking()
         .with_adaptive_chunk_publication_budget(options.adaptive_chunk_publication_budget)
         .with_world_storage(options.world_storage.clone())

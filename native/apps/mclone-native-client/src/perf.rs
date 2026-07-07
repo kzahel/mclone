@@ -48,8 +48,8 @@ use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{
     WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, build_scene_textured_sections,
-    chunk_tracking_radius_for_render_distance, poll_window_runtime_until_idle,
-    poll_window_runtime_until_idle_with_timeout, square_count,
+    chunk_tracking_radius_for_render_distance, local_single_view_options,
+    poll_window_runtime_until_idle, poll_window_runtime_until_idle_with_timeout, square_count,
 };
 use crate::{
     MAX_RENDER_DISTANCE, MAX_STARTUP_STREAMING_PERF_FRAMES, json_escape, print_benchmark_metadata,
@@ -444,6 +444,8 @@ pub(crate) struct StartupStreamingPerfReport {
     budget_decision_panel: BudgetDecisionPanelReport,
     first_full_view_ready_frame: Option<usize>,
     first_full_view_ready_ms: Option<f64>,
+    first_initial_target_render_complete_frame: Option<usize>,
+    first_initial_target_render_complete_ms: Option<f64>,
     first_render_quiescent_frame: Option<usize>,
     first_render_quiescent_ms: Option<f64>,
     first_target_render_quiescent_frame: Option<usize>,
@@ -537,6 +539,7 @@ struct StartupStreamingFrameReport {
     target_chunk_count: usize,
     target_percent: u8,
     loaded_chunks: usize,
+    simulation_tick: u64,
     cached_sections: usize,
     pending_jobs: usize,
     pending_publications: usize,
@@ -578,6 +581,11 @@ struct StartupStreamingFrameReport {
     scheduler_pending_light_publications: usize,
     scheduler_worldgen_mailbox_pending_jobs: usize,
     scheduler_light_mailbox_pending_statuses: usize,
+    poll_fluid_due_ticks: usize,
+    poll_fluid_executed_ticks: usize,
+    poll_fluid_deferred_ticks: usize,
+    poll_fluid_mutated_blocks: usize,
+    poll_scheduled_fluid_ticks: usize,
     runner_frame_metrics: WorkerFrameMetrics,
     worldgen_job_frame_metrics: WorkerFrameMetrics,
     light_status_job_frame_metrics: WorkerFrameMetrics,
@@ -1758,6 +1766,22 @@ impl StartupStreamingPerfReport {
             .iter()
             .filter(|frame| frame.update_pump_stalled)
             .count();
+        let total_fluid_mutated_blocks = self
+            .frames
+            .iter()
+            .map(|frame| frame.poll_fluid_mutated_blocks)
+            .sum::<usize>();
+        let total_fluid_executed_ticks = self
+            .frames
+            .iter()
+            .map(|frame| frame.poll_fluid_executed_ticks)
+            .sum::<usize>();
+        let last_fluid_mutation = self
+            .frames
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, frame)| frame.poll_fluid_mutated_blocks > 0);
         let final_frame = self.frames.last().copied().unwrap_or_default();
 
         println!("{{");
@@ -1791,6 +1815,10 @@ impl StartupStreamingPerfReport {
         println!(
             "  \"adaptive_chunk_publication_budget\": {},",
             self.options.scene.adaptive_chunk_publication_budget
+        );
+        println!(
+            "  \"freeze_scheduled_fluid_ticks\": {},",
+            self.options.freeze_scheduled_fluid_ticks
         );
         println!(
             "  \"section_occlusion_culling\": {},",
@@ -1917,6 +1945,16 @@ impl StartupStreamingPerfReport {
         match self.first_full_view_ready_ms {
             Some(ms) => println!("  \"first_full_view_ready_ms\": {ms:.3},"),
             None => println!("  \"first_full_view_ready_ms\": null,"),
+        }
+        match self.first_initial_target_render_complete_frame {
+            Some(frame) => {
+                println!("  \"first_initial_target_render_complete_frame\": {frame},")
+            }
+            None => println!("  \"first_initial_target_render_complete_frame\": null,"),
+        }
+        match self.first_initial_target_render_complete_ms {
+            Some(ms) => println!("  \"first_initial_target_render_complete_ms\": {ms:.3},"),
+            None => println!("  \"first_initial_target_render_complete_ms\": null,"),
         }
         match self.first_render_quiescent_frame {
             Some(frame) => println!("  \"first_render_quiescent_frame\": {frame},"),
@@ -2072,6 +2110,29 @@ impl StartupStreamingPerfReport {
             "  \"total_deadline_skipped_compile_requests\": {},",
             total_deadline_skipped_compile_requests
         );
+        println!(
+            "  \"total_fluid_executed_ticks\": {},",
+            total_fluid_executed_ticks
+        );
+        println!(
+            "  \"total_fluid_mutated_blocks\": {},",
+            total_fluid_mutated_blocks
+        );
+        match last_fluid_mutation {
+            Some((frame_index, frame)) => {
+                println!("  \"last_fluid_mutation_frame\": {frame_index},");
+                println!("  \"last_fluid_mutation_ms\": {:.3},", frame.elapsed_ms);
+                println!(
+                    "  \"last_fluid_mutation_simulation_tick\": {},",
+                    frame.simulation_tick
+                );
+            }
+            None => {
+                println!("  \"last_fluid_mutation_frame\": null,");
+                println!("  \"last_fluid_mutation_ms\": null,");
+                println!("  \"last_fluid_mutation_simulation_tick\": null,");
+            }
+        }
         println!(
             "  \"update_pump_stalled_frames\": {},",
             update_pump_stalled_frames
@@ -2239,6 +2300,27 @@ impl StartupStreamingPerfReport {
                 "      \"server_update_oldest_applied_age_ms\": {:.3},",
                 frame.server_update_oldest_applied_age_ms
             );
+            println!("      \"simulation_tick\": {},", frame.simulation_tick);
+            println!(
+                "      \"poll_fluid_due_ticks\": {},",
+                frame.poll_fluid_due_ticks
+            );
+            println!(
+                "      \"poll_fluid_executed_ticks\": {},",
+                frame.poll_fluid_executed_ticks
+            );
+            println!(
+                "      \"poll_fluid_deferred_ticks\": {},",
+                frame.poll_fluid_deferred_ticks
+            );
+            println!(
+                "      \"poll_fluid_mutated_blocks\": {},",
+                frame.poll_fluid_mutated_blocks
+            );
+            println!(
+                "      \"poll_scheduled_fluid_ticks\": {},",
+                frame.poll_scheduled_fluid_ticks
+            );
             println!(
                 "      \"pending_render_chunks\": {},",
                 frame.pending_render_chunks
@@ -2303,6 +2385,7 @@ impl StartupStreamingPerfReport {
         );
         println!("    \"target_percent\": {},", final_frame.target_percent);
         println!("    \"loaded_chunks\": {},", final_frame.loaded_chunks);
+        println!("    \"simulation_tick\": {},", final_frame.simulation_tick);
         println!("    \"cached_sections\": {},", final_frame.cached_sections);
         println!("    \"pending_jobs\": {},", final_frame.pending_jobs);
         println!(
@@ -2344,6 +2427,22 @@ impl StartupStreamingPerfReport {
         println!(
             "    \"server_update_queue_bytes\": {},",
             final_frame.server_update_queue_bytes
+        );
+        println!(
+            "    \"poll_fluid_due_ticks\": {},",
+            final_frame.poll_fluid_due_ticks
+        );
+        println!(
+            "    \"poll_fluid_executed_ticks\": {},",
+            final_frame.poll_fluid_executed_ticks
+        );
+        println!(
+            "    \"poll_fluid_mutated_blocks\": {},",
+            final_frame.poll_fluid_mutated_blocks
+        );
+        println!(
+            "    \"poll_scheduled_fluid_ticks\": {},",
+            final_frame.poll_scheduled_fluid_ticks
         );
         println!(
             "    \"poll_producer_read_ms\": {:.3},",
@@ -3333,6 +3432,30 @@ fn startup_streaming_frame_target_render_quiescent(frame: &StartupStreamingFrame
         && frame.target_removed_sections == 0
 }
 
+fn startup_streaming_frame_initial_target_render_complete(
+    frame: &StartupStreamingFrameReport,
+) -> bool {
+    frame.target_chunk_count > 0
+        && frame.target_ready_chunks == frame.target_chunk_count
+        && frame.target_pending_render_chunks == 0
+        && !frame.target_ready_render_work_pending
+        && frame.target_inflight_render_sections == 0
+        && frame.target_rebuilt_sections == 0
+        && frame.target_removed_sections == 0
+}
+
+fn first_startup_streaming_initial_target_render_complete(
+    frames: &[StartupStreamingFrameReport],
+) -> (Option<usize>, Option<f64>) {
+    frames
+        .iter()
+        .enumerate()
+        .find(|(_, frame)| startup_streaming_frame_initial_target_render_complete(frame))
+        .map_or((None, None), |(index, frame)| {
+            (Some(index), Some(frame.elapsed_ms))
+        })
+}
+
 fn first_stable_startup_streaming_render_quiescent_with(
     frames: &[StartupStreamingFrameReport],
     mut is_quiescent: impl FnMut(&StartupStreamingFrameReport) -> bool,
@@ -3402,7 +3525,10 @@ pub(crate) fn run_startup_streaming_perf(
     let spectator = SpectatorCamera::spawn_for_scene(&scene);
     let frame_duration = Duration::from_secs_f64(1.0 / options.target_hz.max(1.0));
 
-    let mut startup = WindowSceneStartupPump::new_local(&scene, &assets)?;
+    let startup_options = local_single_view_options(&scene)?
+        .with_initial_spawn_center()
+        .with_freeze_scheduled_fluid_ticks(options.freeze_scheduled_fluid_ticks);
+    let mut startup = WindowSceneStartupPump::with_local_options(startup_options, &assets)?;
     let startup_start = Instant::now();
     let mut startup_playable_frame = 0_usize;
     let playable_step = loop {
@@ -3539,6 +3665,11 @@ pub(crate) fn run_startup_streaming_perf(
                 poll_diagnostics.scheduler_light_publish_estimated_unit_ms;
             report.scheduler_pending_worldgen_publication_chunk_limit =
                 poll_diagnostics.scheduler_pending_worldgen_publication_chunk_limit;
+            report.poll_fluid_due_ticks = poll_diagnostics.fluid_due_ticks;
+            report.poll_fluid_executed_ticks = poll_diagnostics.fluid_executed_ticks;
+            report.poll_fluid_deferred_ticks = poll_diagnostics.fluid_deferred_ticks;
+            report.poll_fluid_mutated_blocks = poll_diagnostics.fluid_mutated_blocks;
+            report.poll_scheduled_fluid_ticks = poll_diagnostics.scheduled_fluid_ticks;
             report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
             report.poll_dirty_mark_ms = poll_diagnostics.dirty_mark_ms;
             report.poll_client_apply_updates_ms = poll_diagnostics.client_apply_updates_ms;
@@ -3695,6 +3826,7 @@ pub(crate) fn run_startup_streaming_perf(
                 .map_or(0, |progress| progress.percent());
             let stats = state.runtime.stats();
             report.loaded_chunks = stats.loaded_chunks;
+            report.simulation_tick = stats.last_simulation_tick;
             report.cached_sections = state.draw.section_count();
             report.pending_jobs = stats.pending_jobs;
             report.pending_publications = stats.pending_publications;
@@ -3722,6 +3854,8 @@ pub(crate) fn run_startup_streaming_perf(
         first_stable_startup_streaming_render_quiescent(&frame_reports);
     let (first_target_render_quiescent_frame, first_target_render_quiescent_ms) =
         first_stable_startup_streaming_target_render_quiescent(&frame_reports);
+    let (first_initial_target_render_complete_frame, first_initial_target_render_complete_ms) =
+        first_startup_streaming_initial_target_render_complete(&frame_reports);
     let budget_decision_panel = state
         .runtime
         .last_poll_diagnostics()
@@ -3744,6 +3878,8 @@ pub(crate) fn run_startup_streaming_perf(
         budget_decision_panel,
         first_full_view_ready_frame,
         first_full_view_ready_ms,
+        first_initial_target_render_complete_frame,
+        first_initial_target_render_complete_ms,
         first_render_quiescent_frame,
         first_render_quiescent_ms,
         first_target_render_quiescent_frame,
@@ -4401,6 +4537,8 @@ mod tests {
                 elapsed_ms,
                 target_ready_chunks: 1,
                 target_chunk_count: 1,
+                target_pending_render_chunks: 0,
+                target_inflight_render_sections: 0,
                 uploaded_sections: target_rebuilt_sections + non_target_rebuilt_sections,
                 target_rebuilt_sections,
                 non_target_rebuilt_sections,
@@ -4421,6 +4559,29 @@ mod tests {
         let target_frames = [frame(1.0, 0, 0), frame(2.0, 1, 0), frame(3.0, 0, 0)];
         assert_eq!(
             first_stable_startup_streaming_target_render_quiescent(&target_frames),
+            (Some(2), Some(3.0))
+        );
+    }
+
+    #[test]
+    fn startup_streaming_initial_target_render_complete_ignores_later_target_rebuilds() {
+        let frame = |elapsed_ms, target_rebuilt_sections| StartupStreamingFrameReport {
+            elapsed_ms,
+            target_ready_chunks: 1,
+            target_chunk_count: 1,
+            target_pending_render_chunks: 0,
+            target_inflight_render_sections: 0,
+            target_rebuilt_sections,
+            ..StartupStreamingFrameReport::default()
+        };
+        let frames = [frame(1.0, 0), frame(2.0, 1), frame(3.0, 0)];
+
+        assert_eq!(
+            first_startup_streaming_initial_target_render_complete(&frames),
+            (Some(0), Some(1.0))
+        );
+        assert_eq!(
+            first_stable_startup_streaming_target_render_quiescent(&frames),
             (Some(2), Some(3.0))
         );
     }

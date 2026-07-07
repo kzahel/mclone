@@ -919,3 +919,22 @@ fn scheduled_fluid_tick_waits_until_chunk_is_entity_ticking() {
     );
     assert_ne!(server.scheduler().block_at_world(below), Some(WATER));
 }
+
+#[test]
+fn frozen_scheduled_fluid_ticks_remain_pending_without_mutation() {
+    let mut server = new_liquid_oracle_server();
+    let source = WorldBlockPos::new(2, 84, 2);
+    let below = source.below();
+    server.scheduler_mut().set_block_at_world(source, WATER);
+    server.scheduler_mut().set_block_at_world(below, AIR);
+    server.schedule_fluid_tick(source, FluidKind::Water, 0);
+    let scheduled_before = server.scheduled_fluid_tick_count();
+
+    server.set_scheduled_fluid_ticks_frozen(true);
+    let report = server.simulation_tick_report();
+
+    assert_eq!(report.fluid_ticks_executed, 0);
+    assert_eq!(report.fluid_mutated_blocks, 0);
+    assert_eq!(server.scheduled_fluid_tick_count(), scheduled_before);
+    assert_ne!(server.scheduler().block_at_world(below), Some(WATER));
+}

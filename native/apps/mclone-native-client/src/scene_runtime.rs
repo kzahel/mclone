@@ -102,7 +102,9 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     )
 }
 
-fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewSceneOptions> {
+pub(crate) fn local_single_view_options(
+    scene: &SceneOptions,
+) -> Result<LocalSingleViewSceneOptions> {
     let mut options = LocalSingleViewSceneOptions::new(
         scene.seed,
         ChunkPos::new(scene.chunk_x, scene.chunk_z),
@@ -169,12 +171,19 @@ pub(crate) struct WindowSceneStartupPump {
 
 impl WindowSceneStartupPump {
     pub(crate) fn new_local(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
+        Self::with_local_options(
+            local_single_view_options(scene)?.with_initial_spawn_center(),
+            assets,
+        )
+    }
+
+    pub(crate) fn with_local_options(
+        options: LocalSingleViewSceneOptions,
+        assets: &WindowSceneAssets,
+    ) -> Result<Self> {
         Ok(Self {
-            pump: LocalSingleViewStartupPump::with_mesh_assets(
-                local_single_view_options(scene)?.with_initial_spawn_center(),
-                assets.mesh_assets.clone(),
-            )
-            .context("failed to create local world startup pump")?,
+            pump: LocalSingleViewStartupPump::with_mesh_assets(options, assets.mesh_assets.clone())
+                .context("failed to create local world startup pump")?,
             actor_textures: assets.actor_textures.clone(),
         })
     }

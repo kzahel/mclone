@@ -532,6 +532,7 @@ mod native {
         pub lighting_enabled: bool,
         pub day_time: Option<u64>,
         pub day_time_frozen: bool,
+        pub scheduled_fluid_ticks_frozen: bool,
         pub debug_passive_showcase: bool,
         pub tick_interval: Duration,
         pub cadence: SimulationCadenceConfig,
@@ -547,6 +548,7 @@ mod native {
                 lighting_enabled: true,
                 day_time: None,
                 day_time_frozen: false,
+                scheduled_fluid_ticks_frozen: false,
                 debug_passive_showcase: true,
                 tick_interval: Duration::from_millis(50),
                 cadence: SimulationCadenceConfig::new(20, 20, 60),
@@ -568,6 +570,11 @@ mod native {
 
         pub fn with_day_time_frozen(mut self, frozen: bool) -> Self {
             self.day_time_frozen = frozen;
+            self
+        }
+
+        pub fn with_scheduled_fluid_ticks_frozen(mut self, frozen: bool) -> Self {
+            self.scheduled_fluid_ticks_frozen = frozen;
             self
         }
 
@@ -934,6 +941,7 @@ mod native {
             ChunkPublicationBudgetConfig::disabled()
         });
         server.set_day_time_frozen(config.day_time_frozen);
+        server.set_scheduled_fluid_ticks_frozen(config.scheduled_fluid_ticks_frozen);
         server.set_debug_passive_showcase_enabled(config.debug_passive_showcase);
         if let Some(day_time) = config.day_time {
             server.set_day_time(day_time);

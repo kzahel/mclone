@@ -101,6 +101,58 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 4 Corrected Render Gate
+
+Commit reported by benchmark JSON: `4ed7f77b`.
+
+Note: `git_dirty=true` because this was captured while adding
+`first_initial_target_render_complete_ms` and the benchmark-only
+`--freeze-scheduled-fluid-ticks` startup-streaming flag. Defaults are unchanged:
+scheduled fluid ticks run normally unless the benchmark flag is present, and the
+render compile in-flight cap still equals `--render-compile-workers` unless
+`--render-compile-max-pending-jobs` is passed.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 6000 --target-hz 60 --debug-passive-showcase false > /tmp/mclone-150-corrected-rd10-live-default.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 3000 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-corrected-rd10-frozen-default.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 3000 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-corrected-rd10-frozen-queue4.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 3000 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --debug-passive-showcase false > /tmp/mclone-150-corrected-rd10-live-queue4.json
+```
+
+RD10 startup-streaming, adaptive publication default on, workers `1`, 60 Hz
+budget:
+
+| Metric | Live default | Frozen fluids default | Frozen fluids queue 4 | Live queue 4 |
+|---|---:|---:|---:|---:|
+| startup playable | 537.478 ms | 537.314 ms | 532.369 ms | 524.323 ms |
+| first full view ready | 9729.518 ms | 9227.596 ms | 9681.505 ms | 9671.935 ms |
+| first initial target render complete | 23043.021 ms | 20058.747 ms | 9681.505 ms | 9671.935 ms |
+| first target render quiescent | 50141.657 ms | 20058.747 ms | 10950.408 ms | 50135.632 ms |
+| total fluid executed ticks | 8476 | 0 | 0 | 7746 |
+| total fluid mutated blocks | 4419 | 0 | 0 | 4180 |
+| p95 / p99 frame | 7.088 / 7.443 ms | 7.075 / 7.485 ms | 7.086 / 7.496 ms | 8.041 / 9.194 ms |
+| max frame | 8.846 ms | 8.509 ms | 9.140 ms | 11.035 ms |
+| over-budget frames | 0 | 0 | 0 | 0 |
+| submitted / completed compile sections | 7395 / 7377 | 7136 / 7120 | 7168 / 7168 | 8212 / 8208 |
+| uploaded sections | 2440 | 2173 | 2190 | 3230 |
+| post-full-view target rebuilt sections | 4019 | 3952 | 0 | 604 |
+| deadline-skipped compile requests | 0 | 0 | 0 | 0 |
+
+Decision: the prior Candidate B queue-depth falsification was a measurement
+failure of the old quiescence gate, not evidence that the lever is ineffective.
+With fluids live, `first_target_render_quiescent_ms` remains ~`50.1s` because
+scheduled fluid mutation continues to dirty render sections. With scheduled
+fluids frozen, the old marker converges with the new initial-render marker in
+the default lane (`20058.747ms`). Against the corrected
+`first_initial_target_render_complete_ms` gate, queue depth `4` finishes at
+`9671.935ms` live and `9681.505ms` frozen, under the RD10 `<= 14s` acceptance
+target with no frame-budget misses. This is a desktop corrected-gate acceptance
+row for the queue-depth lever, not a default promotion: Quest/persisted/XR
+accept-upload gates still need their promotion loop before shipping defaults
+change.
+
 ### 2026-07-07 - Tactical 150 Slice 4 Render Compile Queue-Depth Candidate
 
 Commit reported by benchmark JSON: `72659d86`.
@@ -139,14 +191,11 @@ compile max-pending jobs `4`, 60 Hz budget:
 | post-full-view non-target rebuilt sections | 0 |
 | deadline-skipped compile requests | 0 |
 
-Decision: compile in-flight depth `4` is not a promotion lever for Candidate B.
-It preserves clean frame pacing but leaves target render quiescence at
-`50139.993ms`, effectively unchanged from the prior workers-1 target-tail row
-(`50148.741ms`). The deeper queue changes work distribution, but it does not
-meet the RD10 fresh quiescence acceptance target (`<= 14s`) and does not prove
-worker starvation was the bound. Keep the flag as an opt-in benchmark lever;
-do not advance render-admission, worker-count, in-flight-cap, XR accept/upload,
-or Quest defaults from this evidence.
+Superseded decision: this row used the old total target-render-quiescence gate
+and is superseded by the corrected render-gate row above. It remains useful as
+evidence that the old marker was fluid/world-settle dominated: queue depth `4`
+kept frame pacing clean but could not move `first_target_render_quiescent_ms`
+while scheduled fluids were still mutating the target view.
 
 ### 2026-07-07 - Tactical 150 Slice 4 Target Render Tail Follow-up
 
