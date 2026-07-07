@@ -5520,6 +5520,15 @@ mod android {
                 .with_frames(
                     usize_to_u64(submitted_compile_sections),
                     usize_to_u64(completed_compile_sections),
+                )
+                .with_request_timing_ms(
+                    None,
+                    latest_upload.dispatcher_total_compile_worker_busy_ms,
+                    latest_upload.dispatcher_max_compile_worker_task_ms,
+                )
+                .with_busy_idle_ms(
+                    Some(latest_upload.dispatcher_total_compile_worker_busy_ms),
+                    None,
                 ),
         ])
     }
@@ -5546,7 +5555,8 @@ mod android {
                 (last_request_us > 0).then_some(micros_to_ms(last_request_us)),
                 micros_to_ms(total_request_us),
                 micros_to_ms(max_request_us),
-            );
+            )
+            .with_busy_idle_ms(Some(micros_to_ms(total_request_us)), None);
         if server_lanes_remote {
             report.with_availability(DiagnosticLaneAvailability::RemoteHost)
         } else {
@@ -6615,6 +6625,18 @@ mod android {
             available_compile_slots_after: a
                 .available_compile_slots_after
                 .max(b.available_compile_slots_after),
+            dispatcher_compile_worker_count: a
+                .dispatcher_compile_worker_count
+                .max(b.dispatcher_compile_worker_count),
+            dispatcher_completed_compile_tasks: a
+                .dispatcher_completed_compile_tasks
+                .max(b.dispatcher_completed_compile_tasks),
+            dispatcher_total_compile_worker_busy_ms: a
+                .dispatcher_total_compile_worker_busy_ms
+                .max(b.dispatcher_total_compile_worker_busy_ms),
+            dispatcher_max_compile_worker_task_ms: a
+                .dispatcher_max_compile_worker_task_ms
+                .max(b.dispatcher_max_compile_worker_task_ms),
             rebuilt_section_count: a.rebuilt_section_count.max(b.rebuilt_section_count),
             removed_section_count: a.removed_section_count.max(b.removed_section_count),
             rebuilt_vertex_count: a.rebuilt_vertex_count.max(b.rebuilt_vertex_count),

@@ -625,6 +625,22 @@ pub trait RenderSectionCompiler {
         self.pending_job_count()
     }
 
+    fn compile_worker_count(&self) -> usize {
+        0
+    }
+
+    fn completed_compile_task_count(&self) -> usize {
+        0
+    }
+
+    fn total_compile_worker_busy_us(&self) -> u128 {
+        0
+    }
+
+    fn max_compile_worker_task_us(&self) -> u128 {
+        0
+    }
+
     fn release_completed_jobs(&mut self, _count: usize) -> usize {
         0
     }
@@ -640,6 +656,10 @@ pub struct RenderSectionCompileQueueHealth {
     pub max_pending_jobs: usize,
     pub available_job_slots: usize,
     pub queued_compile_tasks: usize,
+    pub compile_worker_count: usize,
+    pub completed_compile_tasks: usize,
+    pub total_compile_worker_busy_us: u128,
+    pub max_compile_worker_task_us: u128,
 }
 
 impl RenderSectionCompileQueueHealth {
@@ -654,6 +674,10 @@ impl RenderSectionCompileQueueHealth {
             max_pending_jobs,
             available_job_slots: max_pending_jobs.saturating_sub(pending_jobs),
             queued_compile_tasks: compiler.queued_compile_task_count(),
+            compile_worker_count: compiler.compile_worker_count(),
+            completed_compile_tasks: compiler.completed_compile_task_count(),
+            total_compile_worker_busy_us: compiler.total_compile_worker_busy_us(),
+            max_compile_worker_task_us: compiler.max_compile_worker_task_us(),
         }
     }
 }

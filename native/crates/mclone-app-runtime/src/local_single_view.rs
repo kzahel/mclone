@@ -13,7 +13,7 @@ use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_protocol::{ClientCommand, ServerUpdate, encode_server_update};
 use mclone_render::far_lod::FarTerrainLodMesh;
-use mclone_render_session::RenderSectionCacheUpdate;
+use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
     NativeIntegratedServerWorldStorage, ServerRunnerDiagnostics, ServerUpdateEnvelope,
@@ -538,6 +538,10 @@ impl LocalSingleViewSceneRuntime {
 
     pub fn release_render_compile_jobs(&mut self, count: usize) -> usize {
         self.render_compile_dispatcher.release_completed_jobs(count)
+    }
+
+    pub fn render_compile_queue_health(&self) -> RenderSectionCompileQueueHealth {
+        self.render_compile_dispatcher.queue_health()
     }
 
     pub const fn simulation_cadence(&self) -> SimulationCadenceConfig {
@@ -1433,6 +1437,13 @@ where
         }
     }
 
+    pub fn render_compile_queue_health(&self) -> RenderSectionCompileQueueHealth {
+        match self {
+            Self::Local(scene) => scene.render_compile_queue_health(),
+            Self::RemoteDedicated(scene) => scene.render_compile_queue_health(),
+        }
+    }
+
     pub fn pending_render_chunk_count(&self) -> usize {
         self.core().pending_render_chunk_count()
     }
@@ -1874,6 +1885,10 @@ where
 
     pub fn release_render_compile_jobs(&mut self, count: usize) -> usize {
         self.render_compile_dispatcher.release_completed_jobs(count)
+    }
+
+    pub fn render_compile_queue_health(&self) -> RenderSectionCompileQueueHealth {
+        self.render_compile_dispatcher.queue_health()
     }
 
     pub fn loaded_chunk_count(&self) -> usize {

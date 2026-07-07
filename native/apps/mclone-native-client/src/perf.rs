@@ -2140,7 +2140,7 @@ impl StartupStreamingPerfReport {
         print_frame_accounting_json_field(
             &frame_accounting,
             startup_streaming_queue_panel(&self.frames),
-            startup_streaming_peer_panel(&self.frames),
+            startup_streaming_peer_panel(&self.frames, self.streaming_wall_ms),
             self.budget_decision_panel.clone(),
             true,
         );
@@ -2968,7 +2968,10 @@ fn startup_streaming_queue_panel(frames: &[StartupStreamingFrameReport]) -> Queu
     ])
 }
 
-fn startup_streaming_peer_panel(frames: &[StartupStreamingFrameReport]) -> PeerThreadPanelReport {
+fn startup_streaming_peer_panel(
+    frames: &[StartupStreamingFrameReport],
+    wall_ms: f64,
+) -> PeerThreadPanelReport {
     let final_frame = frames.last().copied().unwrap_or_default();
     let server_busy_ms = frames
         .iter()
@@ -3002,6 +3005,29 @@ fn startup_streaming_peer_panel(frames: &[StartupStreamingFrameReport]) -> PeerT
         .iter()
         .map(|frame| frame.completed_compile_sections)
         .sum::<usize>();
+    let render_compile_busy_ms = frames
+        .iter()
+        .map(|frame| {
+            frame
+                .section_sync_timing
+                .dispatcher_total_compile_worker_busy_ms
+        })
+        .fold(0.0, f64::max);
+    let render_compile_max_task_ms = frames
+        .iter()
+        .map(|frame| {
+            frame
+                .section_sync_timing
+                .dispatcher_max_compile_worker_task_ms
+        })
+        .fold(0.0, f64::max);
+    let render_compile_worker_count = frames
+        .iter()
+        .map(|frame| frame.section_sync_timing.dispatcher_compile_worker_count)
+        .max()
+        .unwrap_or(0);
+    let render_compile_idle_ms =
+        worker_idle_ms(wall_ms, render_compile_worker_count, render_compile_busy_ms);
 
     PeerThreadPanelReport::new(vec![
         PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
@@ -3022,7 +3048,9 @@ fn startup_streaming_peer_panel(frames: &[StartupStreamingFrameReport]) -> PeerT
             .with_frames(
                 usize_to_u64(submitted_compile_sections),
                 usize_to_u64(completed_compile_sections),
-            ),
+            )
+            .with_request_timing_ms(None, render_compile_busy_ms, render_compile_max_task_ms)
+            .with_busy_idle_ms(Some(render_compile_busy_ms), render_compile_idle_ms),
     ])
 }
 
@@ -3047,6 +3075,18 @@ fn worker_metrics_peer_report(
             micros_to_ms(metrics.total_request_us),
             micros_to_ms(metrics.max_request_us),
         )
+        .with_busy_idle_ms(
+            Some(micros_to_ms(metrics.total_request_us)),
+            worker_idle_ms(0.0, 0, micros_to_ms(metrics.total_request_us)),
+        )
+}
+
+fn worker_idle_ms(wall_ms: f64, worker_count: usize, busy_ms: f64) -> Option<f64> {
+    if !wall_ms.is_finite() || wall_ms <= 0.0 || worker_count == 0 {
+        return None;
+    }
+    let capacity_ms = wall_ms * worker_count as f64;
+    (capacity_ms >= busy_ms).then_some((capacity_ms - busy_ms).max(0.0))
 }
 
 fn usize_to_u64(value: usize) -> u64 {

@@ -47,7 +47,7 @@ use mclone_app_runtime::world_catalog::{
 };
 use mclone_app_runtime::{
     GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics,
-    TraversalReadySectionCache, debug_block_palette_overlay, elapsed_ms,
+    TraversalReadySectionCache, debug_block_palette_overlay, elapsed_ms, micros_to_ms,
     set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::AssetSource;
@@ -1719,6 +1719,7 @@ where
                 .runtime
                 .as_ref()
                 .expect("runtime presence checked before poll");
+            let compile_health = runtime.render_compile_queue_health();
             let upload_queue = self.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
                 poll_changed,
@@ -1729,6 +1730,14 @@ where
                 max_pending_compile_jobs,
                 available_compile_slots_before,
                 available_compile_slots_after: runtime.render_compile_available_pending_job_slots(),
+                dispatcher_compile_worker_count: compile_health.compile_worker_count,
+                dispatcher_completed_compile_tasks: compile_health.completed_compile_tasks,
+                dispatcher_total_compile_worker_busy_ms: micros_to_ms(
+                    compile_health.total_compile_worker_busy_us,
+                ),
+                dispatcher_max_compile_worker_task_ms: micros_to_ms(
+                    compile_health.max_compile_worker_task_us,
+                ),
                 queued_completed_compile_result_count: runtime
                     .pending_completed_compile_result_count(),
                 queued_upload_section_count: upload_queue.queued_upload_sections,
@@ -1917,6 +1926,17 @@ where
             timed_section_update.timing.dispatcher_available_job_slots;
         timing.runtime_dispatcher_queued_compile_tasks =
             timed_section_update.timing.dispatcher_queued_compile_tasks;
+        timing.runtime_dispatcher_compile_worker_count =
+            timed_section_update.timing.dispatcher_compile_worker_count;
+        timing.runtime_dispatcher_completed_compile_tasks = timed_section_update
+            .timing
+            .dispatcher_completed_compile_tasks;
+        timing.runtime_dispatcher_total_compile_worker_busy_ms = timed_section_update
+            .timing
+            .dispatcher_total_compile_worker_busy_ms;
+        timing.runtime_dispatcher_max_compile_worker_task_ms = timed_section_update
+            .timing
+            .dispatcher_max_compile_worker_task_ms;
         let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();
@@ -1984,6 +2004,7 @@ where
             .runtime
             .as_ref()
             .expect("runtime presence checked before section sync");
+        let compile_health = runtime.render_compile_queue_health();
         self.render_stats.section_count = self.draw.section_count();
         self.render_stats.index_count = self.draw.index_count();
         self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
@@ -2018,6 +2039,14 @@ where
             max_pending_compile_jobs,
             available_compile_slots_before,
             available_compile_slots_after: runtime.render_compile_available_pending_job_slots(),
+            dispatcher_compile_worker_count: compile_health.compile_worker_count,
+            dispatcher_completed_compile_tasks: compile_health.completed_compile_tasks,
+            dispatcher_total_compile_worker_busy_ms: micros_to_ms(
+                compile_health.total_compile_worker_busy_us,
+            ),
+            dispatcher_max_compile_worker_task_ms: micros_to_ms(
+                compile_health.max_compile_worker_task_us,
+            ),
             rebuilt_section_count,
             removed_section_count,
             rebuilt_vertex_count,
@@ -2166,6 +2195,10 @@ where
         let available_compile_slots = self.runtime.as_ref().map_or(0, |runtime| {
             runtime.render_compile_available_pending_job_slots()
         });
+        let compile_health = self
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.render_compile_queue_health());
         let upload_queue = self.section_uploads.stats();
         XrTerrainUploadSummary {
             host_mode: self.runtime_host_mode(),
@@ -2176,6 +2209,16 @@ where
             max_pending_compile_jobs,
             available_compile_slots_before: available_compile_slots,
             available_compile_slots_after: available_compile_slots,
+            dispatcher_compile_worker_count: compile_health
+                .map_or(0, |health| health.compile_worker_count),
+            dispatcher_completed_compile_tasks: compile_health
+                .map_or(0, |health| health.completed_compile_tasks),
+            dispatcher_total_compile_worker_busy_ms: compile_health.map_or(0.0, |health| {
+                micros_to_ms(health.total_compile_worker_busy_us)
+            }),
+            dispatcher_max_compile_worker_task_ms: compile_health.map_or(0.0, |health| {
+                micros_to_ms(health.max_compile_worker_task_us)
+            }),
             queued_upload_section_count: upload_queue.queued_upload_sections,
             queued_upload_removed_section_count: upload_queue.queued_removed_sections,
             queued_upload_lifecycle_item_count: upload_queue.queued_lifecycle_items,

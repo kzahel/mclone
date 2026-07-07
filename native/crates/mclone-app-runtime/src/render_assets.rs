@@ -94,6 +94,21 @@ struct RenderSectionCompileQueueState {
     shutdown: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct RenderSectionCompileWorkerMetrics {
+    completed_tasks: usize,
+    total_busy_us: u128,
+    max_task_us: u128,
+}
+
+impl RenderSectionCompileWorkerMetrics {
+    fn record_task(&mut self, elapsed_us: u128) {
+        self.completed_tasks = self.completed_tasks.saturating_add(1);
+        self.total_busy_us = self.total_busy_us.saturating_add(elapsed_us);
+        self.max_task_us = self.max_task_us.max(elapsed_us);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct RenderSectionCompileQueueEnqueueTiming {
     lock_wait_ms: f64,
@@ -242,6 +257,8 @@ pub struct RenderSectionCompileWorker {
     handles: Vec<thread::JoinHandle<()>>,
     pending_jobs: usize,
     max_pending_jobs: usize,
+    worker_count: usize,
+    metrics: Arc<Mutex<RenderSectionCompileWorkerMetrics>>,
 }
 
 #[derive(Debug)]
@@ -321,6 +338,22 @@ impl RenderSectionCompiler for NativeRenderSectionCompileDispatcher {
         self.worker.queued_compile_task_count()
     }
 
+    fn compile_worker_count(&self) -> usize {
+        self.worker.compile_worker_count()
+    }
+
+    fn completed_compile_task_count(&self) -> usize {
+        self.worker.completed_compile_task_count()
+    }
+
+    fn total_compile_worker_busy_us(&self) -> u128 {
+        self.worker.total_compile_worker_busy_us()
+    }
+
+    fn max_compile_worker_task_us(&self) -> u128 {
+        self.worker.max_compile_worker_task_us()
+    }
+
     fn release_completed_jobs(&mut self, count: usize) -> usize {
         self.worker.release_completed_jobs(count)
     }
@@ -355,6 +388,7 @@ impl RenderSectionCompileWorker {
         let queue = Arc::new(RenderSectionCompileQueue::new(max_pending_jobs));
         let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
         let mut handles = Vec::with_capacity(worker_count + 1);
+        let metrics = Arc::new(Mutex::new(RenderSectionCompileWorkerMetrics::default()));
 
         {
             let queue = Arc::clone(&queue);
@@ -369,6 +403,7 @@ impl RenderSectionCompileWorker {
             let catalog = catalog.clone();
             let queue = Arc::clone(&queue);
             let result_sender = result_sender.clone();
+            let worker_metrics = Arc::clone(&metrics);
             let thread_name = if worker_count == 1 {
                 "mclone-render-compile".to_string()
             } else {
@@ -378,7 +413,12 @@ impl RenderSectionCompileWorker {
                 .name(thread_name)
                 .spawn(move || {
                     while let Some(request) = queue.take_next() {
+                        let compile_start = Instant::now();
                         let result = compile_render_section_request(&catalog, request);
+                        let compile_us = compile_start.elapsed().as_micros();
+                        if let Ok(mut metrics) = worker_metrics.lock() {
+                            metrics.record_task(compile_us);
+                        }
                         if result_sender.send(result).is_err() {
                             break;
                         }
@@ -394,6 +434,8 @@ impl RenderSectionCompileWorker {
             handles,
             pending_jobs: 0,
             max_pending_jobs,
+            worker_count,
+            metrics,
         })
     }
 
@@ -413,6 +455,13 @@ impl RenderSectionCompileWorker {
         let released = count.min(self.pending_jobs);
         self.pending_jobs -= released;
         released
+    }
+
+    fn metrics_snapshot(&self) -> RenderSectionCompileWorkerMetrics {
+        self.metrics
+            .lock()
+            .map(|metrics| *metrics)
+            .unwrap_or_default()
     }
 }
 
@@ -486,6 +535,22 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
 
     fn queued_compile_task_count(&self) -> usize {
         self.queue.queued_task_count()
+    }
+
+    fn compile_worker_count(&self) -> usize {
+        self.worker_count
+    }
+
+    fn completed_compile_task_count(&self) -> usize {
+        self.metrics_snapshot().completed_tasks
+    }
+
+    fn total_compile_worker_busy_us(&self) -> u128 {
+        self.metrics_snapshot().total_busy_us
+    }
+
+    fn max_compile_worker_task_us(&self) -> u128 {
+        self.metrics_snapshot().max_task_us
     }
 }
 

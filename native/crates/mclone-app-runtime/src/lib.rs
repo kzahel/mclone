@@ -127,6 +127,10 @@ pub struct RenderSectionSyncTiming {
     pub dispatcher_max_pending_jobs: usize,
     pub dispatcher_available_job_slots: usize,
     pub dispatcher_queued_compile_tasks: usize,
+    pub dispatcher_compile_worker_count: usize,
+    pub dispatcher_completed_compile_tasks: usize,
+    pub dispatcher_total_compile_worker_busy_ms: f64,
+    pub dispatcher_max_compile_worker_task_ms: f64,
 }
 
 impl RenderSectionSyncTiming {
@@ -142,6 +146,18 @@ impl RenderSectionSyncTiming {
         self.dispatcher_queued_compile_tasks = self
             .dispatcher_queued_compile_tasks
             .max(health.queued_compile_tasks);
+        self.dispatcher_compile_worker_count = self
+            .dispatcher_compile_worker_count
+            .max(health.compile_worker_count);
+        self.dispatcher_completed_compile_tasks = self
+            .dispatcher_completed_compile_tasks
+            .max(health.completed_compile_tasks);
+        self.dispatcher_total_compile_worker_busy_ms = self
+            .dispatcher_total_compile_worker_busy_ms
+            .max(micros_to_ms(health.total_compile_worker_busy_us));
+        self.dispatcher_max_compile_worker_task_ms = self
+            .dispatcher_max_compile_worker_task_ms
+            .max(micros_to_ms(health.max_compile_worker_task_us));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -311,6 +327,18 @@ impl RenderSectionSyncTiming {
         self.dispatcher_queued_compile_tasks = self
             .dispatcher_queued_compile_tasks
             .max(other.dispatcher_queued_compile_tasks);
+        self.dispatcher_compile_worker_count = self
+            .dispatcher_compile_worker_count
+            .max(other.dispatcher_compile_worker_count);
+        self.dispatcher_completed_compile_tasks = self
+            .dispatcher_completed_compile_tasks
+            .max(other.dispatcher_completed_compile_tasks);
+        self.dispatcher_total_compile_worker_busy_ms = self
+            .dispatcher_total_compile_worker_busy_ms
+            .max(other.dispatcher_total_compile_worker_busy_ms);
+        self.dispatcher_max_compile_worker_task_ms = self
+            .dispatcher_max_compile_worker_task_ms
+            .max(other.dispatcher_max_compile_worker_task_ms);
     }
 }
 

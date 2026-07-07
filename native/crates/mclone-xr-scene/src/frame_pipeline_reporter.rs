@@ -280,7 +280,13 @@ fn xr_frame_pipeline_peer_thread_panel(
             .with_frames(
                 usize_to_u64(upload.submitted_compile_section_count),
                 usize_to_u64(upload.completed_compile_section_count),
-            ),
+            )
+            .with_request_timing_ms(
+                None,
+                upload.dispatcher_total_compile_worker_busy_ms,
+                upload.dispatcher_max_compile_worker_task_ms,
+            )
+            .with_busy_idle_ms(Some(upload.dispatcher_total_compile_worker_busy_ms), None),
     ])
 }
 
@@ -326,7 +332,8 @@ fn worker_metrics_peer_report(
             (last_request_us > 0).then_some(micros_to_ms(last_request_us)),
             micros_to_ms(total_request_us),
             micros_to_ms(max_request_us),
-        );
+        )
+        .with_busy_idle_ms(Some(micros_to_ms(total_request_us)), None);
     if server_lanes_remote {
         report.with_availability(DiagnosticLaneAvailability::RemoteHost)
     } else {
