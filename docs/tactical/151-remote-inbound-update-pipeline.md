@@ -9,7 +9,8 @@ completed 2026-07-06. Slice 5 was re-planned 2026-07-07 into 5A-5D because the
 native `ClientConnection` seam still lives inside the single-view scene module;
 Slice 5A shared contract promotion completed 2026-07-07; Slice 5B web
 integrated shared ingress completed 2026-07-07; Slice 5C web remote shared
-ingress is next. This is the focused remote
+ingress completed 2026-07-07; Slice 5D close-out audit is next. This is the
+focused remote
 connection successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 and a convergence slice for tactical 133's shared bus shape. Architecture target:
@@ -104,7 +105,8 @@ As of 2026-07-07, `ClientConnection`, `QueuedServerUpdate`,
 budgeted drain helper live in
 `mclone-app-runtime/src/client_connection.rs`. Native local/remote adapters and
 web integrated inline/worker adapters use that shared contract. Web remote
-WebSocket still uses its existing `exchange_command` path until Slice 5C.
+WebSocket callbacks now decode response batches into ordered queued updates and
+normal-frame web remote polling drains through the same shared contract.
 
 ## Target Shape
 
@@ -1096,6 +1098,8 @@ Known unchanged warning: wasm `mclone-server` check/smoke still reports the
 
 ## Slice 5C: Web Remote Shared Ingress
 
+Status: completed 2026-07-07.
+
 Goal: make web remote WebSocket sessions feed the same shared ingress as native
 remote TCP.
 
@@ -1130,6 +1134,96 @@ git diff --check
 Exit criteria: web remote normal-frame updates drain through the shared
 connection path; no normal frame path awaits response decode/apply; remaining
 web compatibility helpers are classified.
+
+Results:
+
+- Refactored `WebSocketServerSession` so WebSocket message callbacks decode
+  server update batches producer-side, track response sequence/queue metrics, and
+  queue ordered `QueuedServerUpdate` envelopes for the shared app-runtime pump.
+- Split web remote command sending into deferred `queue_command` and explicit
+  `send_command_acknowledged` paths. Immediate commands still wait for their
+  paired response before the unlimited shared drain, preserving startup and
+  reconnect/resync behavior.
+- Routed `WebRuntimeHost::RemoteWebSocket` through the shared
+  `ClientConnection` enqueue/drain/metrics implementation instead of returning a
+  command-response `WebSocketExchange` batch.
+- Changed the normal web remote streaming frame path to enqueue chunk-view
+  interest and drain already queued updates through
+  `pump_client_connection_updates_report`; normal frames no longer await a
+  WebSocket response promise to apply updates.
+- Preserved the current WebSocket wire protocol, response pairing, disconnect
+  and error reporting, diagnostics queue-depth meanings, and explicit remote
+  reconnect/resync path.
+- Added
+  `client_connection::tests::shared_connection_pump_reports_pending_response_without_blocking_ready_only_drain`
+  to cover the held/delayed response case: ready-only frame polling reports a
+  pending response without blocking or applying out-of-order data.
+- Fixed a pre-existing `mclone-dedicated-server` diagnostics compile error by
+  removing `Copy`/`Eq` from `DedicatedSessionDiagnostics` and cloning the
+  non-`Copy` publication diagnostics value. This was required to run the extra
+  remote WebSocket app-loop smoke and does not change runtime behavior.
+
+Preflight completed 2026-07-07 before editing:
+
+```bash
+git status --short
+rg -n "trait ClientConnection|struct QueuedServerUpdate|pump_client_connection_updates_report|WebRuntimeHost|exchange_command|try_recv_update|drain_updates" native/crates/mclone-app-runtime native/apps/mclone-web-client
+rg -n "NativeClientSession|NativeClientIoSession|try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+git diff --check
+```
+
+Post-5C audit classification:
+
+- `mclone-app-runtime/src/client_connection.rs`: owns the shared
+  `ClientConnection` contract, `QueuedServerUpdate`, drain result/metrics, drain
+  mode, wasm-safe shared pump timing, pump helper, and pump regression tests.
+- `mclone-app-runtime/src/local_single_view.rs`: remaining
+  `ClientConnection`/`QueuedServerUpdate`/pump hits are native local/remote
+  adapter implementations and runtime call sites using the shared pump.
+- `native/apps/mclone-web-client/src/lib.rs`: `WebRuntimeHost` is the web host
+  adapter and all host variants, including `RemoteWebSocket`, implement the
+  shared `ClientConnection` boundary.
+- `native/apps/mclone-web-client/src/web_remote_session.rs`: no remaining
+  `exchange_command`/`WebSocketExchange` path; message callbacks queue decoded
+  updates and normal drains expose `ClientConnectionDrainResult`.
+- `native/apps/mclone-web-client/src/web_canvas.rs`: normal remote streaming
+  frame polling enqueues chunk-view interest and drains queued updates; it does
+  not await the WebSocket response promise.
+- `native/apps/mclone-web-client/src/web_server_worker.rs`: remaining
+  `exchange_command`/`drain_updates` hits are compatibility/probe helpers for
+  the web integrated worker adapter, not normal runtime frame polling.
+- Remaining `drain_updates` hits are app-runtime diagnostics fields, native
+  local/remote runtime drain accounting, and compatibility/test helpers.
+
+Validation completed 2026-07-07:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+cargo check --manifest-path native/Cargo.toml -p mclone-dedicated-server
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+rg -n "WebRuntimeHost|exchange_command|ClientConnection|QueuedServerUpdate|drain_updates" native/apps/mclone-web-client native/crates/mclone-app-runtime
+git diff --check
+```
+
+Known unchanged warning: wasm `mclone-server` check/smoke still reports the
+`with_unload_hysteresis_chunks` dead-code warning.
+
+Extra validation note: `pnpm native:web:remote-smoke` is not a named Slice 5C
+gate, but it was attempted after edits. After the dedicated diagnostics compile
+fix, the current worktree and a temporary pre-Slice-5C worktree at `5c5e6c38`
+with the same diagnostics fix both failed the full remote app-loop probe at the
+same place-interaction target miss (`place: miss`, `commandSent=false`). This is
+classified as a pre-existing remote app-loop probe issue, not a Slice 5C shared
+ingress regression.
 
 ## Slice 5D: Close-Out Audit
 

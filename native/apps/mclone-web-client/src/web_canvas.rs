@@ -4456,13 +4456,9 @@ impl WebChunkRenderSession {
 
         self.ensure_streaming_compile_supported()?;
 
-        // Remote websocket exchanges are awaited command/response round trips. Unlike the
-        // worker-integrated path there is no deferred command queue to drain after the fact;
-        // the returned updates are applied by `request_chunk_view_async`.
         if self.interest_center != Some(center) {
             self.runtime
-                .request_chunk_view_async(center, radius_chunks, radius_chunks)
-                .await
+                .request_chunk_view_deferred(center, radius_chunks, radius_chunks)
                 .map_err(|error| {
                     format!("failed to request remote streaming chunk view: {error}")
                 })?;

@@ -251,6 +251,9 @@ mod tests {
     struct ScriptedClientConnection {
         sent_commands: Vec<ClientCommand>,
         queued_updates: VecDeque<QueuedServerUpdate>,
+        pending_depth: usize,
+        pending_bytes: usize,
+        drain_modes: Vec<ConnectionUpdateDrainMode>,
     }
 
     impl ScriptedClientConnection {
@@ -258,7 +261,16 @@ mod tests {
             Self {
                 sent_commands: Vec::new(),
                 queued_updates: updates.into(),
+                pending_depth: 0,
+                pending_bytes: 0,
+                drain_modes: Vec::new(),
             }
+        }
+
+        fn with_pending_response(mut self, pending_depth: usize, pending_bytes: usize) -> Self {
+            self.pending_depth = pending_depth;
+            self.pending_bytes = pending_bytes;
+            self
         }
     }
 
@@ -270,8 +282,9 @@ mod tests {
 
         fn drain_next_update(
             &mut self,
-            _mode: ConnectionUpdateDrainMode,
+            mode: ConnectionUpdateDrainMode,
         ) -> Result<ClientConnectionDrainResult> {
+            self.drain_modes.push(mode);
             Ok(match self.queued_updates.pop_front() {
                 Some(update) => ClientConnectionDrainResult::with_update(
                     update,
@@ -281,6 +294,9 @@ mod tests {
                         .map(QueuedServerUpdate::encoded_len)
                         .sum(),
                 ),
+                None if self.pending_depth > 0 => {
+                    ClientConnectionDrainResult::pending(self.pending_depth, self.pending_bytes)
+                }
                 None => ClientConnectionDrainResult::default(),
             })
         }
@@ -407,5 +423,34 @@ mod tests {
         assert_eq!(report.remaining_queue_depth, 0);
         assert_eq!(core.day_time(), 300);
         assert!(core.transport_drained());
+    }
+
+    #[test]
+    fn shared_connection_pump_reports_pending_response_without_blocking_ready_only_drain() {
+        let center = ChunkPos::new(0, 0);
+        let mut core = SingleViewRuntime::remote_dedicated(
+            center,
+            0,
+            chunk_tracking_radius_for_render_distance(0),
+        );
+        let mut connection = ScriptedClientConnection::new(Vec::new()).with_pending_response(1, 99);
+
+        let report = pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::unlimited(),
+            ConnectionUpdateDrainMode::ReadyOnly,
+        )
+        .unwrap();
+
+        assert_eq!(
+            connection.drain_modes,
+            vec![ConnectionUpdateDrainMode::ReadyOnly]
+        );
+        assert_eq!(report.apply_report.updates, 0);
+        assert_eq!(report.remaining_queue_depth, 1);
+        assert_eq!(report.remaining_queue_bytes, 99);
+        assert!(!report.stalled);
+        assert!(!core.transport_drained());
     }
 }

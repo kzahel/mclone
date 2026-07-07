@@ -44,8 +44,8 @@ impl DedicatedSession {
         self.player_id
     }
 
-    pub(crate) const fn last_diagnostics(&self) -> DedicatedSessionDiagnostics {
-        self.last_diagnostics
+    pub(crate) fn last_diagnostics(&self) -> DedicatedSessionDiagnostics {
+        self.last_diagnostics.clone()
     }
 
     #[cfg(test)]
@@ -106,7 +106,7 @@ impl DedicatedSession {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DedicatedSessionDiagnostics {
     pub simulation_tick: u64,
     pub tick_total_us: u128,
@@ -128,7 +128,7 @@ impl DedicatedSessionDiagnostics {
             tick_total_us: report.timing.total_us,
             scheduler_tick_us: report.timing.scheduler_tick_us,
             scheduler_publish_completed_us: report.timing.scheduler_publish_completed_us,
-            publication: report.scheduler_publication,
+            publication: report.scheduler_publication.clone(),
             pending_jobs_after,
             pending_publications_after,
         }
