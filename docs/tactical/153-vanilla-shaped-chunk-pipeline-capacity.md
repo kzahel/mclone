@@ -6,9 +6,9 @@ light path now enqueues replacement rechecks only when current opacity/emission
 facts change, cutting clean RD10/RD15 changed-block recheck time by about `90%`
 and light compute by `54-56%` while the lighting fixtures remain byte-identical.
 Fresh startup moved `26-29%`. The scout did not find a missing vanilla
-initial-light batching algorithm; schema v8 now splits `host-publication` age
-into runner/worldgen/light component rows so the next narrow implementation can
-choose a publication valve or sky-graph solver win from source-level evidence.
+initial-light batching algorithm, and the schema v8 component rows now show the
+next implementation should be Slice 3 publication max-units derivation before a
+sky-graph hot-path probe.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -584,6 +584,25 @@ four publication rows; in that smoke the component depths were runner `41`,
 worldgen `55`, and light `0`, proving the split can distinguish publication
 valve backlog from light-publication backlog. This smoke is a wiring check, not
 a replacement for the RD10/RD15 decision rows.
+
+The clean RD10/RD15 decision rows on `bf4025a5` then selected the publication
+valve. With the same frozen-fluid, workers `1/4`, 60 Hz knobs, RD10 reached full
+view / target quiescence in `7157.870ms / 8248.762ms`, and RD15 in
+`14320.163ms / 15715.883ms`, both `0 / 0` over/over-2x. Component queue ages
+were:
+
+| Lane | Aggregate | Runner | Worldgen publication | Light publication | Max pending worldgen pubs | Max pending light pubs | Max publish spent |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 | `1626.560ms` | `1626.560ms` | `2027.595ms` | `2526.334ms` | `120` | `8` | `1.753ms` |
+| RD15 | `2559.859ms` | `2287.251ms` | `3071.544ms` | `3049.842ms` | `175` | `9` | `1.807ms` |
+
+Interpretation: light compute remains real (`5325.763ms` RD10,
+`10269.710ms` RD15), but completed feature/light publication queues are aging
+while each poll spends only about `1.8ms` against a `10ms` grant. The next code
+slice should enter Slice 3 and make publication family `max_units` cost-derived
+from elapsed grant / EWMA unit cost, leaving the old `4` as a cold-estimator
+floor or safety bound. A sky-graph hot-path probe should wait until the count cap
+is no longer the visible publication limiter.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages

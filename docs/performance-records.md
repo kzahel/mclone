@@ -101,6 +101,55 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Publication-Age Component Decision Row
+
+Commit reported by benchmark JSON: `bf4025a5`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: frame-pipeline schema v8 publication-age component split. The
+startup-streaming lanes keep the same comparison knobs as the post-light-filter
+re-rank: explicit `render-compile-workers=1`,
+`render-compile-max-pending-jobs=4`, frozen scheduled fluids,
+`debug-passive-showcase=false`, and 60 Hz target.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-publication-split-rd10-fresh-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 15 --startup-streaming-frames 2400 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-publication-split-rd15-fresh-frozen.json
+```
+
+Whole-pipeline result:
+
+| Lane | Full view | Target quiescent | p95 / max frame | Over / over-2x | Compile / uploaded sections |
+|---|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `7157.870ms` | `8248.762ms` | `10.325 / 12.306ms` | `0 / 0` | `7136 / 2179` |
+| RD15 fresh frozen | `14320.163ms` | `15715.883ms` | `10.507 / 13.043ms` | `0 / 0` | `15456 / 4843` |
+
+Publication split:
+
+| Lane | Aggregate publication age | Runner age | Worldgen publication age | Light publication age | Max pending worldgen pubs | Max pending light pubs | Max publish spent |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `1626.560ms` | `1626.560ms` | `2027.595ms` | `2526.334ms` | `120` | `8` | `1.753ms` |
+| RD15 fresh frozen | `2559.859ms` | `2287.251ms` | `3071.544ms` | `3049.842ms` | `175` | `9` | `1.807ms` |
+
+Peer-stage context:
+
+| Lane | Server runner busy | Worldgen busy | Light busy | Max worldgen mailbox | Max light mailbox | Render compile queue age |
+|---|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `13174.752ms` | `2132.008ms` | `5325.763ms` | `1` | `11` | `47.629ms` |
+| RD15 fresh frozen | `32282.705ms` | `4444.684ms` | `10269.710ms` | `1` | `11` | `47.651ms` |
+
+Interpretation: this rules in the publication valve as the next implementation
+lane. Light compute is still expensive, but the completed publication queues are
+aging while the scheduler spends only `~1.8ms` max per poll against a `10ms`
+publication grant. The fixed `4` unit cap, not the elapsed grant, is now the
+visible publication limiter. Worldgen publication depth is the large backlog
+(`120/175`); light publication depth is shallow (`8/9`) but still old, meaning
+both completed feature chunks and completed light statuses are waiting behind the
+same count-shaped drain. Render compile stays drained, so a sky-graph hot-path
+probe should wait until the publication cap is made cost-derived.
+
 ### 2026-07-07 - Tactical 153 Post-Light-Filter Whole-Pipeline Re-rank
 
 Commit reported by benchmark JSON: `0e5c2525`, `git_dirty=false`,
