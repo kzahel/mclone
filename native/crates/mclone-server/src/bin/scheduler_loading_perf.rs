@@ -819,6 +819,10 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         metrics.total_light_status_changed_block_raw_checks
     );
     println!(
+        "{indent}    \"enqueued_checks\": {},",
+        metrics.total_light_status_changed_block_light_property_changes
+    );
+    println!(
         "{indent}    \"light_property_changes\": {},",
         metrics.total_light_status_changed_block_light_property_changes
     );

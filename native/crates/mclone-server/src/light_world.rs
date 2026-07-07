@@ -308,37 +308,33 @@ fn changed_block_positions(
     new_blocks: &[RawBlockId],
 ) -> ChangedBlockPositions {
     let mut changes = ChangedBlockPositions::default();
-    changes.positions = old_blocks
-        .iter()
-        .zip(new_blocks.iter())
-        .enumerate()
-        .filter_map(|(index, (old, new))| {
-            (old != new).then(|| {
-                changes.raw_checks += 1;
-                let opacity_changed = block_light_opacity(*old) != block_light_opacity(*new);
-                let emission_changed = block_light_emission(*old) != block_light_emission(*new);
-                if opacity_changed {
-                    changes.opacity_changes += 1;
-                }
-                if emission_changed {
-                    changes.emission_changes += 1;
-                }
-                if opacity_changed || emission_changed {
-                    changes.light_property_changes += 1;
-                } else {
-                    changes.raw_only_changes += 1;
-                }
-                let local_x = (index & 15) as i32;
-                let local_z = ((index >> 4) & 15) as i32;
-                let local_y = (index >> 8) as i32;
-                block_pos_as_long(
-                    chunk_pos.min_block_x() + local_x,
-                    min_y + local_y,
-                    chunk_pos.min_block_z() + local_z,
-                )
-            })
-        })
-        .collect();
+    for (index, (old, new)) in old_blocks.iter().zip(new_blocks.iter()).enumerate() {
+        if old == new {
+            continue;
+        }
+        changes.raw_checks += 1;
+        let opacity_changed = block_light_opacity(*old) != block_light_opacity(*new);
+        let emission_changed = block_light_emission(*old) != block_light_emission(*new);
+        if opacity_changed {
+            changes.opacity_changes += 1;
+        }
+        if emission_changed {
+            changes.emission_changes += 1;
+        }
+        if opacity_changed || emission_changed {
+            changes.light_property_changes += 1;
+            let local_x = (index & 15) as i32;
+            let local_z = ((index >> 4) & 15) as i32;
+            let local_y = (index >> 8) as i32;
+            changes.positions.push(block_pos_as_long(
+                chunk_pos.min_block_x() + local_x,
+                min_y + local_y,
+                chunk_pos.min_block_z() + local_z,
+            ));
+        } else {
+            changes.raw_only_changes += 1;
+        }
+    }
     changes
 }
 
@@ -617,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_light_world_classifies_raw_only_replacements() {
+    fn retained_light_world_skips_raw_only_replacement_rechecks() {
         let mut world = RetainedLightWorld::default();
         world.configure(0, SECTION_HEIGHT);
         let chunk_pos = ChunkPos::new(0, 0);
@@ -632,7 +628,7 @@ mod tests {
         assert_eq!(
             world.upsert_chunk(chunk_pos, &blocks),
             Some(RetainedChunkChange::Replaced(ChangedBlockPositions {
-                positions: vec![block_pos_as_long(2, 3, 4)],
+                positions: Vec::new(),
                 raw_checks: 1,
                 light_property_changes: 0,
                 opacity_changes: 0,
