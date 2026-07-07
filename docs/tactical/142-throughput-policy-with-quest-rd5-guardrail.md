@@ -14,6 +14,11 @@ over-budget frames.
 Slice 0 of tactical 150 recaptured the binding desktop and Quest guardrail rows
 on a clean commit (`bc55076c`, 2026-07-06). Those rows re-pin the RD5/RD7 Quest
 gate envelopes below and supersede the dirty 2026-07-04 gate numbers.
+Tactical 150 closed 2026-07-07 as a baseline-stabilization pass: publication
+budgeting is default for local-integrated desktop/native-XR/Android-XR, render
+compile max-pending defaults to `4`, and clean Slice 5 rows are recorded. The
+full per-stage adaptive render pipeline budget remains a follow-up, not a
+completed part of 142/150.
 Workstream: native Rust performance, desktop streaming throughput, Android XR /
 Quest frame-pacing guardrails.
 
@@ -320,7 +325,7 @@ shorthand for the four render-admission substage `StageId`s.
 | Single in-flight feature job; next job gated on full publication | structural | `scheduler.rs` (`has_incomplete_feature_status_job`, `mark_job_complete`) | same server host windows; `TerrainGeneration` -> `SchedulerPublication` handoff | job bookkeeping simplicity | 150 Slice 3 opt-in decouples pipeline completion from publication under controller backlog cap; fixed default unchanged until promotion |
 | Worldgen / light-status workers | `1` thread each | `worldgen_mailbox.rs`, `light_mailbox.rs` | `IntegratedServerRunner` / `DedicatedServerCommandLoop` / `WebRafWorkers` `WorkerPoll`; `TerrainGeneration`, `LightComputeStatus` | bring-up shape | only if generation becomes the measured limit after A |
 | `DEFAULT_RENDER_CHUNK_MESH_BUDGET` | `1` chunk/sync call | `mclone-app-runtime/src/lib.rs` | display hosts `BeforeRender`, XR overlap `PostSubmitOverlapSlack`, headless `OffscreenStep`; `RenderSectionAdmission` and `RenderAdmission*` | Quest frame safety | Candidate B |
-| `DEFAULT_RENDER_SECTION_COMPILE_WORKERS` + in-flight cap | `1` | `mclone-app-runtime/src/render_assets.rs` | display/offscreen admission windows submit `RenderAdmissionWorkerSubmit`; compile workers run `CpuMeshCompile` in `WorkerPoll` | Quest sync/upload tails (`120`) | Candidate B, later lever (bulk-drain effect falsified) |
+| `DEFAULT_RENDER_SECTION_COMPILE_WORKERS` + in-flight cap | workers `1`, max-pending `4` | `mclone-app-runtime/src/render_assets.rs` | display/offscreen admission windows submit `RenderAdmissionWorkerSubmit`; compile workers run `CpuMeshCompile` in `WorkerPoll` | Quest sync/upload tails (`120`) | 150 Slice 4 promoted conservative queue-depth baseline; desktop worker ladder and adaptive render admission remain follow-ups |
 | Update-pump elapsed budget / unload cap | `2ms` / `16` | `mclone-app-runtime/src/lib.rs` (`133`) | display hosts `BeforeRender`, XR overlap `PostSubmitOverlapSlack`, headless `OffscreenStep`; `TransportDecode`, `ClientUpdateApply` | Quest apply tails | keep; absorbed the `32`/tick prototype bursts cleanly |
 | XR upload/accept/completed-result budgets | `None`; opt-in CLI flags | `mclone-xr-scene`, android-xr CLI | `AndroidXrOpenXr` / `DesktopXrOpenXr` `BeforeRender` and overlap `PostSubmitOverlapSlack`; `CompletedResultAcceptance`, `GpuUpload`, `UploadApply` | Quest measurement lanes (`128`) | unchanged; lane args, not defaults |
 
@@ -593,6 +598,12 @@ instrumentation to watch it:
   [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
   Slice 3, with local-integrated desktop/native-XR/Android-XR defaults promoted
   after the native-window present-path A/B row.
+- [x] Promote the conservative Candidate B queue-depth baseline:
+  `DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS = 4` with workers still `1`
+  by default. Tactical 150 Slice 5 recorded clean desktop/Quest guardrails and
+  explicitly deferred worker-count laddering, adaptive render admission
+  default-on, completed-result acceptance budgeting, and GPU upload/apply
+  budgeting to a follow-up tactical.
 
 ## Cost Questions To Resolve First
 

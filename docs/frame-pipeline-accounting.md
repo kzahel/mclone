@@ -520,6 +520,15 @@ timestamp agreement is not applicable until Android XR emits a wgpu timestamp
 panel. Gap 8 closed with the desktop flat/offscreen debug overlay routed
 through the shared client-experience facade.
 
+As of 2026-07-07, tactical 150 closed the first gap-10 implementation pass as
+baseline stabilization: local-integrated publication budgeting is default for
+desktop/native-XR/Android-XR and render compile max-pending defaults to `4`
+with workers still `1`. The full gap-10 endpoint is not complete: render
+admission default-on, completed-result acceptance budgeting, GPU upload/apply
+budgeting, XR accept/upload policy, worker-count laddering, and mixed
+long-run Quest soak remain a follow-up per-stage render pipeline budgeting
+tactical.
+
 1. Extract the shared accounting owner (`mclone-diagnostics`): one
    budget/percentile/over-period/headroom implementation and one versioned
    report schema, adopted by the desktop runtime, the Quest probe, and the

@@ -109,6 +109,89 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 5 Clean Baseline Guardrails And Churn Soak
+
+Benchmarked commit: `42d3e43a`, clean worktree. The first row rebuilt and
+installed the release APK; later rows reused the APK and staged assets. All
+commands intentionally omit `--render-compile-max-pending-jobs` and reported
+default max pending `4`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Battery/thermal | before soak `100%`, `35.0C`; after soak `100%`, `43.0C` |
+
+Commands:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-150-slice5-quest-rd5-orbit.txt --log /tmp/mclone-150-slice5-quest-rd5-orbit-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-150-slice5-quest-rd7-orbit.txt --log /tmp/mclone-150-slice5-quest-rd7-orbit-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-150-slice5-quest-rd5-churn.txt --log /tmp/mclone-150-slice5-quest-rd5-churn-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 900 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics-periodic --wait-seconds 1080 --perf-summary /tmp/mclone-150-slice5-quest-rd5-churn-soak900.txt --log /tmp/mclone-150-slice5-quest-rd5-churn-soak900-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+```
+
+Short guardrail rows:
+
+| Lane | Config | Skipped | Dropped delta | App p95 / p99 | Headroom avg / p05 | App over-period | Compile queue max age | Deadline skips |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| RD5 settled orbit | workers `2`, default max pending `4`, accept/upload `2/16/64` | `0` | `15` | `12.040 / 12.673ms` | `+3.172 / +1.849ms` | `0.0%` | `114.857ms` | `0` |
+| RD7 settled orbit | workers `1`, default max pending `4`, unbounded accept/upload | `0` | `16` | `12.755 / 13.759ms` | `+2.697 / +1.134ms` | `0.9%` | `174.714ms` | `0` |
+| RD5 chunk-view churn | workers `2`, default max pending `4`, accept/upload `2/16/64` | `0` | `16` | `9.771 / 10.705ms` | `+8.663 / +4.118ms` | `0.0%` | `531.182ms` | `0` |
+
+Additional queue and upload markers:
+
+| Lane | Upload-work max age | Host-publication max age | Server update queue / age | Upload limited | Accept limited | Update pump stalls |
+|---|---:|---:|---:|---|---|---:|
+| RD5 settled orbit | `40.063ms` | `0.000ms` | `0 / 15.705ms` | `true` | `false` | `0` |
+| RD7 settled orbit | `0.000ms` | `271.066ms` | `19 / 34.540ms` | `false` | `false` | `1` |
+| RD5 chunk-view churn | `211.405ms` | `1890.433ms` | `287 / 161.496ms` | `true` | `true` | `1` |
+
+Long churn soak (`900.076s`, single-mode chunk-view churn because the validator
+cannot combine settled orbit and churn in one launch):
+
+| Metric | Value |
+|---|---:|
+| frames / submitted FPS | `37616 / 41.79` |
+| skipped delta | `0` |
+| app p95 / p99 / max | `10.209 / 11.710 / 43.547ms` |
+| headroom avg / p05 / min | `+8.498 / +3.680 / -29.658ms` |
+| app over-period frames / pct | `24 / 0.1%` |
+| render-compile queue max age | `1558.614ms` |
+| upload-work / host-publication max age | `478.470 / 2098.178ms` |
+| server update queue / age | `287 / 445.220ms` |
+| deadline-skipped compile requests | `1` |
+| periodic Meta dropped-frame delta | `219 -> 358` across 61 samples |
+
+Interpretation:
+
+- The short RD5/RD7/churn guardrails are green on clean commit `42d3e43a`.
+- The long soak is useful but **not** a clean Slice 5 soak pass. App-work
+  percentiles stayed safe, but submitted/runtime FPS fell to `41.79`, periodic
+  Meta dropped-frame deltas grew, queue ages increased, and one render compile
+  deadline skip appeared. Treat this as thermal/compositor/long-run drift plus
+  backlog evidence for the follow-up staged-budgeting tactical.
+- The mixed orbit+churn soak requested by Tactical 150 is blocked by current
+  validator shape: `--perf-settled-orbit` and `--perf-chunk-view-churn` are
+  mutually exclusive.
+
+Raw artifacts:
+
+- `/tmp/mclone-150-slice5-quest-rd5-orbit.txt`
+- `/tmp/mclone-150-slice5-quest-rd5-orbit-logcat.txt`
+- `/tmp/mclone-150-slice5-quest-rd7-orbit.txt`
+- `/tmp/mclone-150-slice5-quest-rd7-orbit-logcat.txt`
+- `/tmp/mclone-150-slice5-quest-rd5-churn.txt`
+- `/tmp/mclone-150-slice5-quest-rd5-churn-logcat.txt`
+- `/tmp/mclone-150-slice5-quest-rd5-churn-soak900.txt`
+- `/tmp/mclone-150-slice5-quest-rd5-churn-soak900-logcat.txt`
+
 ### 2026-07-07 - Tactical 150 Queue-Depth Default-On Verification
 
 Benchmarked worktree: dirty on `1815d7f0` while promoting the shared default

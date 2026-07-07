@@ -101,6 +101,54 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Slice 5 Clean Baseline Close-Out
+
+Commit reported by benchmark JSON: `42d3e43a`, `git_dirty=false`.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-slice5-rd10-frozen-a.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-slice5-rd10-frozen-b.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 15 --startup-streaming-frames 2400 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-slice5-rd15-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-slice5-rd10-persisted-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --movement-frame-probe --frame-budget-frames 240 --target-hz 120 > /tmp/mclone-150-slice5-movement-frame.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --movement-frame-probe --frame-budget-frames 240 --target-hz 120 > /tmp/mclone-150-slice5-movement-frame-repeat.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --seed 74739 --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-slice5-rd10-seed74739-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 20 --startup-streaming-frames 30000 --target-hz 120 --debug-passive-showcase false > /tmp/mclone-150-slice5-rd20-long.json
+```
+
+Startup-streaming rows use the promoted default max-pending `4` with workers
+`1`; the commands intentionally omit `--render-compile-max-pending-jobs`.
+
+| Lane | Full view | Initial render complete | Target quiescent | p95 / p99 / max frame | Over / over-2x | Notes |
+|---|---:|---:|---:|---:|---:|---|
+| RD10 frozen A | `9183.072ms` | `9183.072ms` | `10744.258ms` | `7.191 / 7.583 / 10.332ms` | `0 / 0` | deadline skips `0`, post-full-view target rebuilds `0` |
+| RD10 frozen B | `9137.523ms` | `9137.523ms` | `10853.328ms` | `7.004 / 7.626 / 8.726ms` | `0 / 0` | deadline skips `0`, post-full-view target rebuilds `0` |
+| RD15 frozen | `19429.505ms` | `19429.505ms` | `21637.988ms` | `10.502 / 11.967 / 14.399ms` | `0 / 0` | `2.9x` faster than Slice 0 RD15 full-view baseline |
+| RD10 persisted frozen | `1014.642ms` | `4924.696ms` | `4924.696ms` | `7.218 / 7.601 / 8.557ms` | `0 / 0` | already-generated reopen; post-full-view target rebuilds `5696` |
+| RD10 frozen seed `74739` | `8157.360ms` | `8157.360ms` | `9601.381ms` | `6.363 / 6.918 / 7.478ms` | `0 / 0` | contrasting stone-shore seed |
+| RD20 long live | `34864.820ms` | `34864.820ms` | `50780.778ms` | `14.163 / 16.315 / 26.256ms` | `28595 / 268` | 120 Hz backlog watch, not a pacing pass |
+
+RD20 backlog markers: max pending worldgen-publication chunks `208`, max
+pending light publications `6`, max server update queue depth `0`, update pump
+stalls `0`, deadline-skipped compile requests `0`.
+
+Movement-frame probe at 120 Hz:
+
+| Run | p95 / p99 / max frame | Over / over-2x | Shared accounting |
+|---|---:|---:|---|
+| first | `2.876 / 3.065 / 18.038ms` | `1 / 1` | `240` observed frames, `0` conservation violations |
+| repeat | `2.783 / 3.038 / 18.621ms` | `1 / 1` | `240` observed frames, `0` conservation violations |
+
+Interpretation: desktop startup-streaming close-out is green for the promoted
+queue-depth baseline. The movement-frame gate is not green on the legacy
+over-budget counter: both repeats showed one isolated `~18ms` frame despite low
+p99 and clean shared accounting. Record this as a follow-up caveat, not as a
+reason to revert the queue-depth default. The RD20 row shows bounded
+publication/update queues but also confirms that RD20 at a 120 Hz target is not
+a frame-pacing acceptance lane.
+
 ### 2026-07-07 - Tactical 150 Default-On Queue Depth RD10 Check
 
 Benchmarked worktree: dirty on `1815d7f0` while promoting

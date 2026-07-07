@@ -1,13 +1,18 @@
 # 150: Adaptive Frame Budget Controller
 
-Status: active implementation plan; Slice 0 guardrail hygiene/baselines
-captured 2026-07-06 on clean commit `bc55076c`; Slice 1 Quest frame-shape
-default flipped 2026-07-06; Slice 1.5 frame-loop work-window contract landed
+Status: closed as baseline-stabilization pass 2026-07-07 on clean commit
+`42d3e43a`; the full multi-stage adaptive render budget system is explicitly
+deferred to a follow-up tactical. Slice 0 guardrail hygiene/baselines captured
+2026-07-06 on clean commit `bc55076c`; Slice 1 Quest frame-shape default
+flipped 2026-07-06; Slice 1.5 frame-loop work-window contract landed
 2026-07-06 as docs plus inert diagnostics vocabulary, before any controller
 work; Slice 2 sans-I/O controller core landed 2026-07-06 with no engine wiring;
 Slice 3 Candidate A publication controller landed 2026-07-06 behind an opt-in
 flag, then promoted to the desktop/native-XR/Android-XR local-integrated
-default 2026-07-07 after the native-window present-path A/B row.
+default 2026-07-07 after the native-window present-path A/B row; Slice 4
+promoted the conservative render compile queue-depth baseline
+(`workers=1`, `max-pending=4`); Slice 5 recorded clean desktop/Quest
+close-out evidence and the remaining staged-budgeting gaps.
 Drafted 2026-07-06 as the gap-10 follow-on to tactical
 [`144-frame-pipeline-accounting-instrumentation.md`](144-frame-pipeline-accounting-instrumentation.md).
 Law doc: [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
@@ -1008,6 +1013,53 @@ Deliverables:
 
 Exit criteria: close conditions below all green or explicitly falsified
 with evidence; tactical closed.
+
+Slice 5 close-out result (2026-07-07, clean commit `42d3e43a`): Tactical 150 is
+closed as a measured baseline-stabilization pass, not as the finished
+multi-stage controller. Desktop startup-streaming with scheduled fluids frozen
+is green on the promoted default queue depth: RD10 reproduced full-view
+`9183.072/9137.523ms`, target quiescent `10744.258/10853.328ms`, and `0`
+over-budget frames; RD15 full-view was `19429.505ms` (`2.9x` faster than the
+Slice 0 RD15 baseline); persisted RD10 reached full-view `1014.642ms` and
+target quiescent `4924.696ms`; contrasting stone-shore seed `74739` reached
+full-view `8157.360ms` and target quiescent `9601.381ms`. The RD20 long run
+showed bounded server-side queues (`max_scheduler_pending_worldgen_publication_chunks=208`,
+`max_server_update_queue_depth=0`, `0` pump stalls), but it was a 120 Hz
+backlog-watch lane, not a pacing pass (`28595` over-budget frames).
+
+Quest short guardrails are green on the clean commit: RD5 orbit workers `2`
+plus `2/16/64` caps had skipped `0`, dropped delta `15`, app p95 `12.040ms`,
+headroom avg `+3.172ms`, and app-over-period `0.0%`; RD7 orbit default
+workers/caps had skipped `0`, dropped delta `16`, app p95 `12.755ms`, and
+app-over-period `0.9%`; RD5 churn workers `2` plus `2/16/64` caps had skipped
+`0`, dropped delta `16`, app p95 `9.771ms`, app-over-period `0.0%`, and
+render-compile queue age `531.182ms`. The 15-minute RD5 churn soak was only a
+partial soak because the validator cannot combine orbit and churn in one run:
+it kept app-work headroom safe (app p95 `10.209ms`, app-over-period `0.1%`,
+skipped `0`) but did **not** satisfy the intended clean soak bar. Submitted FPS
+fell to `41.79`, periodic Meta dropped-frame deltas grew from `219` to `358`,
+render-compile queue age reached `1558.614ms`, server-update oldest age reached
+`445.220ms`, and one deadline-skipped compile request appeared. Headset battery
+temperature rose from `35.0C` to `43.0C`.
+
+Explicit falsifications/deferred items:
+
+- movement-frame probe is not green: two clean release repeats both reported
+  `1` over-budget and `1` over-2x legacy frame (`18.038/18.621ms` max), even
+  though p99 stayed near `3ms` and shared stage accounting did not attribute
+  the spike;
+- default-on adaptive render admission is not promoted; the shipped default
+  render-side win is the fixed in-flight queue cap (`max-pending=4`);
+- completed-result acceptance and GPU upload/apply remain measured but not
+  adaptively budgeted defaults;
+- XR static `2/16/64` accept/upload caps remain lane args, not shipped defaults;
+- mixed Quest soak needs either validator support or a follow-up tactical.
+
+Durable rows live in
+[`../performance-records.md`](../performance-records.md) and
+[`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
+The next tactical should be the per-stage render pipeline budgeting follow-up
+named below, not another extension of this tactical.
 
 ## Validating The Budget Estimate
 
