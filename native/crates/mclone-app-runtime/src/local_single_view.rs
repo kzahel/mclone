@@ -21,12 +21,15 @@ use mclone_server::{
 };
 use mclone_ui::LoadingProgressOverlay;
 
+use crate::client_connection::{
+    ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
+    ConnectionUpdateDrainMode, QueuedServerUpdate, pump_client_connection_updates_report,
+};
 use crate::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
 use crate::host_mode::{
     RemoteCommandUpdateBatch, RemoteDedicatedServerSession, SingleViewHostMode,
     SingleViewHostOptions, deferred_command_exchange, dispatch_remote_dedicated_command,
     prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
-    update_drain_exchange,
 };
 use crate::render_assets::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -39,8 +42,8 @@ use crate::session::{
 use crate::{
     DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET, DEFAULT_RENDER_CHUNK_MESH_BUDGET,
     GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimePollTiming,
-    RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget, RuntimeUpdatePumpReport, SingleViewRuntime,
-    SingleViewRuntimeStats, TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
+    RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget, SingleViewRuntime, SingleViewRuntimeStats,
+    TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
     chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
@@ -194,92 +197,6 @@ impl LocalIntegratedConnection {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct QueuedServerUpdate {
-    update: Option<ServerUpdate>,
-    encoded_len: usize,
-    queued_age: Duration,
-    transport_drained: bool,
-    response_sequence: Option<u64>,
-    producer_read_ms: f64,
-    producer_decode_ms: f64,
-}
-
-impl QueuedServerUpdate {
-    fn single(
-        update: ServerUpdate,
-        encoded_len: usize,
-        queued_age: Duration,
-        transport_drained: bool,
-    ) -> Self {
-        Self {
-            update: Some(update),
-            encoded_len,
-            queued_age,
-            transport_drained,
-            response_sequence: None,
-            producer_read_ms: 0.0,
-            producer_decode_ms: 0.0,
-        }
-    }
-
-    fn empty(transport_drained: bool) -> Self {
-        Self {
-            update: None,
-            encoded_len: 0,
-            queued_age: Duration::ZERO,
-            transport_drained,
-            response_sequence: None,
-            producer_read_ms: 0.0,
-            producer_decode_ms: 0.0,
-        }
-    }
-
-    fn with_remote_metadata(
-        mut self,
-        response_sequence: Option<u64>,
-        producer_read_ms: f64,
-        producer_decode_ms: f64,
-    ) -> Self {
-        self.response_sequence = response_sequence;
-        self.producer_read_ms = producer_read_ms;
-        self.producer_decode_ms = producer_decode_ms;
-        self
-    }
-
-    fn into_updates(self) -> Vec<ServerUpdate> {
-        self.update.into_iter().collect()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ClientConnectionQueueMetrics {
-    update_depth: usize,
-    update_bytes: usize,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ClientConnectionDrainResult {
-    update: Option<QueuedServerUpdate>,
-    remaining_queue_depth: usize,
-    remaining_queue_bytes: usize,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ConnectionUpdateDrainMode {
-    Blocking,
-    ReadyOnly,
-}
-
-trait ClientConnection {
-    fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
-    fn drain_next_update(
-        &mut self,
-        mode: ConnectionUpdateDrainMode,
-    ) -> Result<ClientConnectionDrainResult>;
-    fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics>;
-}
-
 impl ClientConnection for LocalIntegratedConnection {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
         self.runner
@@ -298,10 +215,11 @@ impl ClientConnection for LocalIntegratedConnection {
         else {
             return Ok(ClientConnectionDrainResult::default());
         };
-        Ok(ClientConnectionDrainResult {
-            update: Some(queued_update_from_runner_envelope(envelope)),
-            ..ClientConnectionDrainResult::default()
-        })
+        Ok(ClientConnectionDrainResult::with_update(
+            queued_update_from_runner_envelope(envelope),
+            0,
+            0,
+        ))
     }
 
     fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
@@ -309,10 +227,10 @@ impl ClientConnection for LocalIntegratedConnection {
             .runner
             .poll_diagnostics()
             .context("failed to poll local single-view integrated server diagnostics")?;
-        Ok(ClientConnectionQueueMetrics {
-            update_depth: diagnostics.update_queue_depth,
-            update_bytes: diagnostics.update_queue_bytes,
-        })
+        Ok(ClientConnectionQueueMetrics::new(
+            diagnostics.update_queue_depth,
+            diagnostics.update_queue_bytes,
+        ))
     }
 }
 
@@ -323,60 +241,6 @@ fn queued_update_from_runner_envelope(envelope: ServerUpdateEnvelope) -> QueuedS
         envelope.queued_age,
         true,
     )
-}
-
-fn pump_client_connection_updates_report<C>(
-    core: &mut SingleViewRuntime,
-    connection: &mut C,
-    budget: RuntimeUpdatePumpBudget,
-    drain_mode: ConnectionUpdateDrainMode,
-) -> Result<RuntimeUpdatePumpReport>
-where
-    C: ClientConnection,
-{
-    let pump_start = Instant::now();
-    let mut report = RuntimeUpdatePumpReport::default();
-    loop {
-        let drain_start = Instant::now();
-        let drain = connection.drain_next_update(drain_mode)?;
-        report.drain_updates_ms += elapsed_ms(drain_start.elapsed());
-        let Some(queued_update) = drain.update else {
-            report.remaining_queue_depth = drain.remaining_queue_depth;
-            report.remaining_queue_bytes = drain.remaining_queue_bytes;
-            return Ok(report);
-        };
-
-        let encoded_len = queued_update.encoded_len;
-        let queued_age = queued_update.queued_age;
-        let transport_drained = queued_update.transport_drained;
-        let producer_read_ms = queued_update.producer_read_ms;
-        let producer_decode_ms = queued_update.producer_decode_ms;
-        let response_sequence = queued_update.response_sequence;
-        let exchange_report = core.apply_exchange_report(update_drain_exchange(
-            queued_update.into_updates(),
-            transport_drained,
-        ));
-        report.apply_report.accumulate(exchange_report.update_apply);
-        report.producer_read_ms += producer_read_ms;
-        report.producer_decode_ms += producer_decode_ms;
-        report.producer_response_sequence =
-            report.producer_response_sequence.max(response_sequence);
-        report.update_bytes = report.update_bytes.saturating_add(encoded_len);
-        report.oldest_applied_update_age_ms = report
-            .oldest_applied_update_age_ms
-            .max(elapsed_ms(queued_age));
-
-        if budget.exhausted_after_update(pump_start.elapsed(), &report.apply_report) {
-            let metrics = connection.pending_update_metrics()?;
-            report.remaining_queue_depth = metrics.update_depth;
-            report.remaining_queue_bytes = metrics.update_bytes;
-            if metrics.update_depth > 0 {
-                report.stalled = true;
-                report.stall_count = 1;
-            }
-            return Ok(report);
-        }
-    }
 }
 
 struct DeferredChunkDropWorker {
@@ -1853,12 +1717,14 @@ where
         mode: ConnectionUpdateDrainMode,
     ) -> Result<ClientConnectionDrainResult> {
         if let Some(update) = self.queued_updates.pop_front() {
-            self.queued_update_bytes = self.queued_update_bytes.saturating_sub(update.encoded_len);
-            return Ok(ClientConnectionDrainResult {
-                update: Some(update),
-                remaining_queue_depth: self.pending_response_batches + self.queued_updates.len(),
-                remaining_queue_bytes: self.queued_update_bytes,
-            });
+            self.queued_update_bytes = self
+                .queued_update_bytes
+                .saturating_sub(update.encoded_len());
+            return Ok(ClientConnectionDrainResult::with_update(
+                update,
+                self.pending_response_batches + self.queued_updates.len(),
+                self.queued_update_bytes,
+            ));
         }
 
         if self.pending_response_batches == 0 {
@@ -1878,36 +1744,36 @@ where
             }
         };
         let Some(batch) = batch else {
-            return Ok(ClientConnectionDrainResult {
-                update: None,
-                remaining_queue_depth: self.pending_response_batches,
-                remaining_queue_bytes: self.queued_update_bytes,
-            });
+            return Ok(ClientConnectionDrainResult::pending(
+                self.pending_response_batches,
+                self.queued_update_bytes,
+            ));
         };
 
         self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
         self.push_response_batch(batch)?;
         if let Some(update) = self.queued_updates.pop_front() {
-            self.queued_update_bytes = self.queued_update_bytes.saturating_sub(update.encoded_len);
-            return Ok(ClientConnectionDrainResult {
-                update: Some(update),
-                remaining_queue_depth: self.pending_response_batches + self.queued_updates.len(),
-                remaining_queue_bytes: self.queued_update_bytes,
-            });
+            self.queued_update_bytes = self
+                .queued_update_bytes
+                .saturating_sub(update.encoded_len());
+            return Ok(ClientConnectionDrainResult::with_update(
+                update,
+                self.pending_response_batches + self.queued_updates.len(),
+                self.queued_update_bytes,
+            ));
         }
 
-        Ok(ClientConnectionDrainResult {
-            update: None,
-            remaining_queue_depth: self.pending_response_batches,
-            remaining_queue_bytes: self.queued_update_bytes,
-        })
+        Ok(ClientConnectionDrainResult::pending(
+            self.pending_response_batches,
+            self.queued_update_bytes,
+        ))
     }
 
     fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
-        Ok(ClientConnectionQueueMetrics {
-            update_depth: self.pending_response_batches + self.queued_updates.len(),
-            update_bytes: self.queued_update_bytes,
-        })
+        Ok(ClientConnectionQueueMetrics::new(
+            self.pending_response_batches + self.queued_updates.len(),
+            self.queued_update_bytes,
+        ))
     }
 }
 
@@ -2045,7 +1911,7 @@ where
         let mut changed = true;
 
         if matches!(policy, GameplayCommandUpdatePolicy::DrainImmediately)
-            && self.connection.pending_update_metrics()?.update_depth > 0
+            && self.connection.pending_update_metrics()?.update_depth() > 0
         {
             let pump_report = pump_client_connection_updates_report(
                 &mut self.core,
@@ -2142,7 +2008,7 @@ where
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
         let poll_start = Instant::now();
         let mut polls = 0;
-        while self.connection.pending_update_metrics()?.update_depth > 0 {
+        while self.connection.pending_update_metrics()?.update_depth() > 0 {
             self.poll_with_update_budget_and_drain_mode(
                 RuntimeUpdatePumpBudget::unlimited(),
                 ConnectionUpdateDrainMode::Blocking,
@@ -2500,54 +2366,6 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
-    struct ScriptedClientConnection {
-        sent_commands: Vec<ClientCommand>,
-        queued_updates: VecDeque<QueuedServerUpdate>,
-    }
-
-    impl ScriptedClientConnection {
-        fn new(updates: Vec<QueuedServerUpdate>) -> Self {
-            Self {
-                sent_commands: Vec::new(),
-                queued_updates: updates.into(),
-            }
-        }
-    }
-
-    impl ClientConnection for ScriptedClientConnection {
-        fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
-            self.sent_commands.push(command);
-            Ok(())
-        }
-
-        fn drain_next_update(
-            &mut self,
-            _mode: ConnectionUpdateDrainMode,
-        ) -> Result<ClientConnectionDrainResult> {
-            Ok(ClientConnectionDrainResult {
-                update: self.queued_updates.pop_front(),
-                remaining_queue_depth: self.queued_updates.len(),
-                remaining_queue_bytes: self
-                    .queued_updates
-                    .iter()
-                    .map(|update| update.encoded_len)
-                    .sum(),
-            })
-        }
-
-        fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
-            Ok(ClientConnectionQueueMetrics {
-                update_depth: self.queued_updates.len(),
-                update_bytes: self
-                    .queued_updates
-                    .iter()
-                    .map(|update| update.encoded_len)
-                    .sum(),
-            })
-        }
-    }
-
     #[test]
     fn local_single_view_options_apply_java_tracking_radius() {
         let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2);
@@ -2797,76 +2615,6 @@ mod tests {
         assert_eq!(runtime.connection.pending_response_batches, 0);
         assert_eq!(runtime.connection.session.try_drain_count, 2);
         assert_eq!(runtime.core().day_time(), 6000);
-    }
-
-    #[test]
-    fn shared_connection_pump_preserves_order_across_budget_stall() {
-        let center = ChunkPos::new(0, 0);
-        let mut core = SingleViewRuntime::remote_dedicated(
-            center,
-            0,
-            chunk_tracking_radius_for_render_distance(0),
-        );
-        let mut connection = ScriptedClientConnection::new(vec![
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 100 },
-                11,
-                Duration::from_millis(3),
-                false,
-            )
-            .with_remote_metadata(Some(10), 23.0, 5.0),
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 200 },
-                13,
-                Duration::from_millis(5),
-                false,
-            )
-            .with_remote_metadata(Some(11), 1.5, 0.25),
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 300 },
-                17,
-                Duration::from_millis(7),
-                true,
-            )
-            .with_remote_metadata(Some(12), 2.5, 0.75),
-        ]);
-
-        let first_report = pump_client_connection_updates_report(
-            &mut core,
-            &mut connection,
-            RuntimeUpdatePumpBudget::MaxElapsed(Duration::ZERO),
-            ConnectionUpdateDrainMode::ReadyOnly,
-        )
-        .unwrap();
-
-        assert_eq!(first_report.apply_report.updates, 1);
-        assert_eq!(first_report.update_bytes, 11);
-        assert_eq!(first_report.producer_read_ms, 23.0);
-        assert_eq!(first_report.producer_decode_ms, 5.0);
-        assert_eq!(first_report.producer_response_sequence, Some(10));
-        assert_eq!(first_report.remaining_queue_depth, 2);
-        assert!(first_report.remaining_queue_bytes > 0);
-        assert!(first_report.oldest_applied_update_age_ms >= 3.0);
-        assert!(first_report.stalled);
-        assert_eq!(core.day_time(), 100);
-        assert!(!core.transport_drained());
-
-        let second_report = pump_client_connection_updates_report(
-            &mut core,
-            &mut connection,
-            RuntimeUpdatePumpBudget::unlimited(),
-            ConnectionUpdateDrainMode::ReadyOnly,
-        )
-        .unwrap();
-
-        assert_eq!(second_report.apply_report.updates, 2);
-        assert_eq!(second_report.update_bytes, 30);
-        assert_eq!(second_report.producer_read_ms, 4.0);
-        assert_eq!(second_report.producer_decode_ms, 1.0);
-        assert_eq!(second_report.producer_response_sequence, Some(12));
-        assert_eq!(second_report.remaining_queue_depth, 0);
-        assert_eq!(core.day_time(), 300);
-        assert!(!second_report.stalled);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod client_catalog_policy;
+pub mod client_connection;
 pub mod client_experience;
 pub mod client_session_policy;
 pub mod far_lod;

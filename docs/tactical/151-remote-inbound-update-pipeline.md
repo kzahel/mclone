@@ -7,7 +7,8 @@ diagnostics completed 2026-07-06; Slice 4 Quest remote chunk-view churn
 rebaseline completed 2026-07-06; Slice 4A remote command enqueue decoupling
 completed 2026-07-06. Slice 5 was re-planned 2026-07-07 into 5A-5D because the
 native `ClientConnection` seam still lives inside the single-view scene module;
-Slice 5A shared contract promotion is next. This is the focused remote
+Slice 5A shared contract promotion completed 2026-07-07; Slice 5B web
+integrated shared ingress is next. This is the focused remote
 connection successor to tactical
 [`149-remote-contrast-accounting-honesty.md`](149-remote-contrast-accounting-honesty.md)
 and a convergence slice for tactical 133's shared bus shape. Architecture target:
@@ -856,6 +857,8 @@ node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh \
 
 ## Slice 5A: Promote ClientConnection To Shared App-Runtime Contract
 
+Status: completed 2026-07-07.
+
 Goal: make the native 151 seam a real shared contract before web adoption.
 This is a move/refactor slice only.
 
@@ -896,6 +899,88 @@ Exit criteria: shared contract module exists; `local_single_view.rs` no longer
 owns the contract or pump; native local/remote behavior tests remain green;
 web still compiles for wasm; remaining web divergence is classified for Slice
 5B/5C.
+
+Results:
+
+- Added ungated shared module
+  `native/crates/mclone-app-runtime/src/client_connection.rs`.
+- Moved `ClientConnection`, `QueuedServerUpdate`,
+  `ClientConnectionDrainResult`, `ClientConnectionQueueMetrics`,
+  `ConnectionUpdateDrainMode`, and `pump_client_connection_updates_report` out
+  of `local_single_view.rs`.
+- Exposed the shared contract/pump through `mclone_app_runtime::client_connection`
+  so future web adapters can implement the same trait instead of defining a
+  web-local duplicate.
+- Kept `LocalIntegratedConnection` and `RemoteDedicatedConnection` in
+  `local_single_view.rs` as native adapter implementations. Their command,
+  drain, startup, reconnect, diagnostics, budget, and pending-response
+  behavior is unchanged.
+- Relocated the receive-order/budget-stall pump regression to
+  `client_connection::tests::shared_connection_pump_preserves_order_across_budget_stall`.
+
+Preflight completed 2026-07-07 before editing:
+
+```bash
+git status --short
+rg -n "trait ClientConnection|struct QueuedServerUpdate|pump_client_connection_updates_report|WebRuntimeHost|exchange_command|try_recv_update|drain_updates" native/crates/mclone-app-runtime native/apps/mclone-web-client
+rg -n "NativeClientSession|NativeClientIoSession|try_drain_command_updates|drain_command_updates|pending_response_batches|pump_pending_remote_update_batches_report" native/crates/mclone-app-runtime native/crates/mclone-net native/apps/mclone-native-client native/apps/mclone-android-client native/apps/mclone-android-xr-client || true
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:smoke
+git diff --check
+```
+
+Preflight classification:
+
+- Worktree was clean.
+- `ClientConnection` and pump hits in `local_single_view.rs` were the expected
+  pre-5A private single-view ownership.
+- `WebRuntimeHost`, `exchange_command`, `try_recv_update`, and web
+  `drain_updates` hits were the expected pre-5B/5C web divergence.
+- `NativeClientSession` and legacy drain hits remained compatibility helpers,
+  tests, app wrapper methods around `NativeClientIoSession`, and the standalone
+  remote-player visual smoke helper.
+- `pending_response_batches` remained remote connection-adapter response-paired
+  protocol bookkeeping and tests.
+- Existing warnings were unchanged: Android XR unused sentinel/helper in native
+  app checks and wasm-only `with_unload_hysteresis_chunks` dead-code warning.
+
+Post-move audit classification:
+
+- `mclone-app-runtime/src/client_connection.rs`: owns the shared
+  `ClientConnection` contract, queued update envelope, drain result/metrics,
+  drain mode, pump helper, and the shared pump test.
+- `mclone-app-runtime/src/local_single_view.rs`: remaining
+  `ClientConnection`/`QueuedServerUpdate`/pump hits are native local/remote
+  adapter implementations and runtime call sites using the shared pump.
+- `mclone-app-runtime/src/local_single_view.rs`: remaining `try_recv_update`
+  hit is the local integrated adapter receiving already decoded runner updates.
+- `mclone-app-runtime/src/lib.rs`: remaining `drain_updates_ms` hits are
+  diagnostics fields.
+- `native/apps/mclone-web-client`: remaining `WebRuntimeHost`,
+  `exchange_command`, `try_recv_update`, and `drain_updates` hits are the
+  known web integrated/remote divergence for Slice 5B/5C.
+- `mclone-net` / native app wrappers: `NativeClientSession` remains the
+  low-level compatibility/test helper; normal desktop, Android, and Android XR
+  remote wrappers remain on `NativeClientIoSession`.
+- `pending_response_batches` remains remote connection-adapter
+  response-paired protocol bookkeeping and tests.
+- `pump_pending_remote_update_batches_report`: no remaining hits.
+
+Validation completed 2026-07-07:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-net
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+rg -n "trait ClientConnection|struct QueuedServerUpdate|pump_client_connection_updates_report|WebRuntimeHost|exchange_command|try_recv_update|drain_updates" native/crates/mclone-app-runtime native/apps/mclone-web-client
+git diff --check
+```
 
 ## Slice 5B: Web Integrated Shared Ingress
 
