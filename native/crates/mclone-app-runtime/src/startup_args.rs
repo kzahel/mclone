@@ -8,7 +8,9 @@ use mclone_render_session::{
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
 
-use crate::DEFAULT_RENDER_SECTION_COMPILE_WORKERS;
+use crate::{
+    DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+};
 
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
@@ -110,7 +112,7 @@ impl Default for StartupSceneOptions {
             chunk_z: DEFAULT_STARTUP_CHUNK_Z,
             render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            render_compile_max_pending_jobs: None,
+            render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
@@ -544,7 +546,9 @@ mod tests {
                 chunk_z: 0,
                 render_distance: 5,
                 render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-                render_compile_max_pending_jobs: None,
+                render_compile_max_pending_jobs: Some(
+                    DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
+                ),
                 remote_addr: None,
                 day_time_override: None,
                 freeze_time: false,

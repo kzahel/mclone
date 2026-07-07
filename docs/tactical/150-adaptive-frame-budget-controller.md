@@ -819,9 +819,9 @@ budgets updated to point here.
   `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`, and
   `pnpm native:android-xr:apk` to compile the Android-only XR module.
 - Status: Slice 3 Candidate A promotion is complete for desktop/native-XR and
-  Android-XR local-integrated worlds. Candidate B now has an opt-in desktop
-  render-admission path, but its worker/default-promotion gate is falsified
-  below.
+  Android-XR local-integrated worlds. Candidate B's later render-side
+  measurement correction and queue-depth default decision are recorded in
+  Slice 4 below.
 
 ## Slice 4: Candidate B — Render Admission And Workers
 
@@ -941,6 +941,28 @@ older overlap pressure row, and churn's compile-max marker reported
 `deadline_skipped_requests=1` plus a render-compile queue max age of
 `678.520ms`. Next work is a repeat/decision pass for RD7 accept/upload policy
 and churn queue-age/deadline-skip attribution before changing shipped defaults.
+
+Queue-depth default promotion (2026-07-07): render compile max-pending jobs now
+defaults to `4` in the shared startup/runtime scene options. The explicit
+`--render-compile-max-pending-jobs` flag remains as an override; setting it to
+the worker count restores the old worker-tied cap for A/B. Worker count defaults
+stay unchanged (`1` desktop/Quest shipping default; RD5 guardrail lanes may
+still pass workers `2`). Static XR accept/upload caps are **not** promoted:
+RD7 queue-depth `4` with pinned `2/16/64` caps reported app p95 `12.657ms`,
+`0.9%` app-over-period, and render-compile queue age `242.677ms`, while the
+same-session unbounded repeat reported app p95 `12.718ms`, `0.7%`
+app-over-period, and queue age `124.944ms`. The default-on desktop RD10 frozen
+row, with no max-pending flag, reported max pending `4`, first initial target
+render complete `9727.841ms`, first target render quiescent `11103.993ms`, and
+`0` over-budget frames. Default-on Quest RD7 needed one dropped-frame repeat:
+the first row was app-safe but dropped delta `25`; the repeat was inside the
+RD7 envelope with dropped delta `18`, app p95 `12.738ms`, and `0.9%`
+app-over-period. Default-on RD5 churn with workers `2` and pinned accept/upload
+lane args reported max pending `4`, app p95 `9.084ms`, dropped delta `14`,
+`0.1%` app-over-period, and render-compile queue age `550.485ms`. Churn queue
+age is not a new queue-depth regression: prior accepted overlap/adaptive churn
+artifacts already showed render-compile queue max age `606.756-781.323ms`; the
+single `deadline_skipped_requests=1` row did not reproduce.
 
 ## Slice 5: Config Surface, Soak, And Close-Out
 

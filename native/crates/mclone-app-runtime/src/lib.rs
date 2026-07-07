@@ -62,6 +62,7 @@ use crate::host_mode::SingleViewHostMode;
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
+pub const DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS: usize = 4;
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET: Duration = Duration::from_millis(2);
 pub const DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET: usize = 16;
 // Count-cap unload bursts so many small ordered records cannot fit under the

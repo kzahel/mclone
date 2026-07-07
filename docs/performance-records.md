@@ -101,6 +101,38 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Default-On Queue Depth RD10 Check
+
+Benchmarked worktree: dirty on `1815d7f0` while promoting
+`DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS = 4` and updating docs. This
+is the default-on verification row: the command intentionally omits
+`--render-compile-max-pending-jobs`.
+
+Command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-150-defaulton-rd10-frozen.json
+```
+
+RD10 fresh startup-streaming, scheduled fluids frozen, adaptive publication
+default on, workers `1`, default max-pending `4`, 60 Hz budget:
+
+| Metric | Value |
+|---|---:|
+| startup playable | `525.847ms` |
+| first full view ready | `9727.841ms` |
+| first initial target render complete | `9727.841ms` |
+| first target render quiescent | `11103.993ms` |
+| p95 / p99 / max frame | `7.017 / 7.426 / 9.086ms` |
+| over-budget / over-2x frames | `0 / 0` |
+| submitted / completed compile sections | `7168 / 7168` |
+| uploaded sections | `2190` |
+| deadline-skipped compile requests | `0` |
+| post-full-view target rebuilt sections | `0` |
+
+Decision: default-on desktop behaves like the explicit queue-depth candidate and
+proves the omitted flag path now reports `render_compile_max_pending_jobs=4`.
+
 ### 2026-07-07 - Tactical 150 Persisted RD10 Queue-Depth Follow-Up
 
 Commit reported by benchmark JSON: `a89dc699`.

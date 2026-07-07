@@ -29,8 +29,8 @@ use crate::host_mode::{
     update_drain_exchange,
 };
 use crate::render_assets::{
-    DEFAULT_RENDER_SECTION_COMPILE_WORKERS, NativeRenderSectionCompileDispatcher,
-    TexturedMeshAssets, load_textured_mesh_assets,
+    DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+    NativeRenderSectionCompileDispatcher, TexturedMeshAssets, load_textured_mesh_assets,
 };
 use crate::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -80,7 +80,7 @@ impl LocalSingleViewSceneOptions {
             adaptive_chunk_publication_budget: false,
             world_storage: NativeIntegratedServerWorldStorage::Transient,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            render_compile_max_pending_jobs: None,
+            render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
         }
     }
 

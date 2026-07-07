@@ -109,6 +109,76 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-07 - Tactical 150 Queue-Depth Default-On Verification
+
+Benchmarked worktree: dirty on `1815d7f0` while promoting the shared default
+render compile max-pending cap to `4` and editing docs. The release APK was
+rebuilt for the first RD7 row, then reused with staged assets for the repeat and
+churn rows. These commands intentionally omit
+`--render-compile-max-pending-jobs`; the marker blocks prove the app default is
+now `4`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+
+Commands:
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-150-defaulton-quest-rd7-orbit.txt --log /tmp/mclone-150-defaulton-quest-rd7-orbit-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-150-defaulton-quest-rd7-orbit-repeat.txt --log /tmp/mclone-150-defaulton-quest-rd7-orbit-repeat-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-150-defaulton-quest-rd5-churn.txt --log /tmp/mclone-150-defaulton-quest-rd5-churn-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+```
+
+| Lane | Config | Skipped | Dropped delta | App p95 / p99 | Headroom avg / p05 | App over-period | Compile queue max age | Deadline skips |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| RD7 settled orbit | workers `1`, default max pending `4`, unbounded accept/upload | `0` | `25` | `12.888 / 13.988ms` | `+2.640 / +1.001ms` | `1.0%` | `125.710ms` | `0` |
+| RD7 settled orbit repeat | workers `1`, default max pending `4`, unbounded accept/upload | `0` | `18` | `12.738 / 13.845ms` | `+2.758 / +1.151ms` | `0.9%` | `106.057ms` | `0` |
+| RD5 chunk-view churn | workers `2`, default max pending `4`, accept/upload `2/16/64` | `0` | `14` | `9.084 / 10.886ms` | `+8.829 / +4.805ms` | `0.1%` | `550.485ms` | `0` |
+
+Additional queue and upload markers:
+
+| Lane | Upload-work max age | Host-publication max age | Server update queue / age | Upload limited | Update pump stalls |
+|---|---:|---:|---:|---|---:|
+| RD7 settled orbit | `0.000ms` | `466.042ms` | `19 / 37.660ms` | `false` | `1` |
+| RD7 settled orbit repeat | `0.000ms` | `1371.042ms` | `19 / 29.242ms` | `false` | `1` |
+| RD5 chunk-view churn | `217.998ms` | `1903.822ms` | `283 / 163.331ms` | `true` | `1` |
+
+Interpretation:
+
+- The promoted default path is active: all rows omitted
+  `--render-compile-max-pending-jobs` and reported
+  `render_compile_max_pending_jobs=4` plus `COMPILE_MAX max_pending_jobs=4`.
+- The first RD7 default-on row was app-work safe but failed the dropped-frame
+  delta envelope (`25` vs gate `<=20`). The immediate repeat was inside the
+  RD7 pressure envelope (`18`, app p95 `12.738ms`, app-over-period `0.9%`), so
+  treat the first row as thermal/compositor noise, not a deterministic
+  queue-depth regression.
+- Static XR accept/upload caps are not promoted. The same-session RD7
+  comparison before this default flip showed pinned `2/16/64` caps at
+  app-over-period `0.9%` and unbounded repeat at `0.7%`; unbounded remains the
+  default while RD5 guardrail scripts keep their explicit lane args.
+- Churn queue age is not a new blocker for max pending `4`. The default-on
+  churn row's render-compile queue age `550.485ms` is below prior accepted
+  overlap/adaptive churn artifacts (`606.756-781.323ms`), and the earlier
+  `deadline_skipped_requests=1` marker did not reproduce.
+
+Raw artifacts:
+
+- `/tmp/mclone-150-defaulton-quest-rd7-orbit.txt`
+- `/tmp/mclone-150-defaulton-quest-rd7-orbit-logcat.txt`
+- `/tmp/mclone-150-defaulton-quest-rd7-orbit-repeat.txt`
+- `/tmp/mclone-150-defaulton-quest-rd7-orbit-repeat-logcat.txt`
+- `/tmp/mclone-150-defaulton-quest-rd5-churn.txt`
+- `/tmp/mclone-150-defaulton-quest-rd5-churn-logcat.txt`
+
 ### 2026-07-07 - Tactical 150 Queue-Depth Candidate Quest Pass
 
 Benchmarked worktree: dirty on `a89dc699` while adding Android XR

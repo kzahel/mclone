@@ -71,7 +71,9 @@ impl Default for XrSceneOptions {
             render_distance: DEFAULT_XR_RENDER_DISTANCE,
             render_compile_worker_count:
                 mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            render_compile_max_pending_jobs: None,
+            render_compile_max_pending_jobs: Some(
+                mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
+            ),
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             day_time_override: None,
             freeze_time: false,

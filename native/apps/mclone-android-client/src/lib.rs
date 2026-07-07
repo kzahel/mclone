@@ -39,7 +39,8 @@ mod android {
         LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
     };
     use mclone_app_runtime::render_assets::{
-        DEFAULT_RENDER_SECTION_COMPILE_WORKERS, load_asset_source,
+        DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+        load_asset_source,
     };
     use mclone_app_runtime::session::{
         ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
@@ -2262,7 +2263,7 @@ mod android {
             chunk_z: 0,
             render_distance: 5,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            render_compile_max_pending_jobs: None,
+            render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             remote_addr: None,
             day_time_override: Some(6000),
