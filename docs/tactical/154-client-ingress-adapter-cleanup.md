@@ -1,11 +1,11 @@
 # 154: Client Ingress Adapter Cleanup
 
-Status: active; drafted 2026-07-07 as the narrow follow-up to tactical
+Status: closed 2026-07-07; drafted 2026-07-07 as the narrow follow-up to tactical
 [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md).
 Slice 0 audit/classification completed 2026-07-07; Slice 1 helper quarantine
-completed 2026-07-07; Slice 2 native remote wrapper sharing decision is next.
-This tactical is cleanup and guardrail work only; it must not change runtime
-behavior.
+completed 2026-07-07; Slice 2 native remote wrapper sharing decision completed
+2026-07-07. This tactical is cleanup and guardrail work only; it must not
+change runtime behavior.
 
 Workstream: native Rust shared session/runtime boundary, native web/WASM
 adapters, native desktop/Android/Android XR remote adapters.
@@ -234,6 +234,8 @@ git diff --check
 
 ## Slice 2: Native Remote Wrapper Sharing Decision
 
+Status: completed 2026-07-07.
+
 Goal: decide whether the desktop, Android, and Android XR remote wrappers have
 enough duplicated adapter code to justify one shared native remote adapter.
 
@@ -267,6 +269,55 @@ git diff --check
 Exit criteria: either a small shared helper exists with green validation, or
 the tactical records why the platform-local wrappers are intentionally left
 alone.
+
+Decision: no action; leave the native remote wrappers platform-local for now.
+
+Comparison:
+
+| Wrapper | Shared shape | Platform-local shape |
+| --- | --- | --- |
+| `native/apps/mclone-native-client/src/remote_session.rs` `RemoteServerSession` | Holds `NativeClientIoSession`, reconnects by address, forwards send/drain/try-drain/batch-drain into `RemoteDedicatedServerSession`, converts `NativeServerUpdateBatch` into `RemoteCommandUpdateBatch`. | Desktop visibility is `pub(crate)`, error text names "remote server", and the file owns the standalone desktop remote-session tests. |
+| `native/apps/mclone-android-client/src/lib.rs` `AndroidRemoteServerSession` | Same transport forwarding and batch conversion as desktop. | Lives inside Android-only app code, error text names "Android remote server", and construction is tied to Android startup/session replacement plumbing. |
+| `native/apps/mclone-android-xr-client/src/lib.rs` `AndroidXrRemoteServerSession` | Same transport forwarding and batch conversion as desktop. | Lives inside Android XR app code, error text names "Android XR remote server", and construction is tied to Android activity plus OpenXR lifecycle plumbing. |
+
+Reasoning:
+
+- The duplicated body is small and entirely adapter glue: an address string, a
+  `NativeClientIoSession`, contextual errors, reconnect, and one batch
+  conversion function.
+- `mclone-app-runtime` is currently transport-neutral and does not depend on
+  `mclone-net`. Moving this wrapper there would make the shared runtime own a
+  native TCP transport dependency, which is the wrong functional boundary for a
+  web-compatible app-runtime crate.
+- `mclone-net` also cannot own the full helper without depending upward on
+  `mclone-app-runtime`'s `RemoteDedicatedServerSession` and
+  `RemoteCommandUpdateBatch` types.
+- Introducing a new shared native-remote adapter crate only to remove three
+  short wrappers would be broader organization work. If this becomes worthwhile
+  later, route it through tactical
+  [`145-native-rust-organization-refactor.md`](145-native-rust-organization-refactor.md)
+  with an explicit crate-boundary proposal.
+- The current local wrappers keep lifecycle ownership clear: platform crates own
+  endpoint selection, Android activity/OpenXR wiring, reconnect context, and
+  host-specific error messages.
+
+Validation completed 2026-07-07:
+
+```bash
+git diff --check
+```
+
+No code changes were made in this slice.
+
+## Closeout
+
+Tactical 154 is closed. The preferred normal-frame ingress remains
+`ClientConnection` plus `pump_client_connection_updates_report`; old
+request/response-shaped helper surfaces have either been classified in Slice 0
+or documented in Slice 1; and the native remote wrapper duplication has been
+intentionally left platform-local in Slice 2. Server-push/protocol broadening
+remains tactical 133 work, throughput/capacity remains 153/128 work, and broad
+crate organization remains 145 work.
 
 ## Deferred Work
 
