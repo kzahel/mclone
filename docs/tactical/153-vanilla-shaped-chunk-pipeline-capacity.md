@@ -1,12 +1,13 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 2 sparse changed-block filtering and post-filter re-rank have
-landed. The retained-light path now enqueues replacement rechecks only when
-current opacity/emission facts change, cutting clean RD10/RD15 changed-block
-recheck time by about `90%` and light compute by `54-56%` while the lighting
-fixtures remain byte-identical. Fresh startup moved `26-29%`, and the next
-narrow step is to decide between a sky-graph scout and publication-valve age,
-not to start a broad lighting rewrite.
+Status: Slice 2 sparse changed-block filtering, post-filter re-rank, and
+vanilla comparison scout have landed. The retained-light path now enqueues
+replacement rechecks only when current opacity/emission facts change, cutting
+clean RD10/RD15 changed-block recheck time by about `90%` and light compute by
+`54-56%` while the lighting fixtures remain byte-identical. Fresh startup moved
+`26-29%`. The scout did not find a missing vanilla initial-light batching
+algorithm; the next narrow implementation should split publication age from
+serial sky-graph drain and only then pick a valve or solver win.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -549,6 +550,26 @@ The remaining visible pressure is the still-serial light lane (now mostly sky
 graph drain) plus host publication age at roughly the same scale as Slice 0.
 The next slice should scout those two narrow levers before selecting another
 implementation change.
+
+### Slice 2 Vanilla Comparison Scout
+
+Verified against the 1.17.1 source on 2026-07-07 before selecting the next
+lever. This is a shape comparison, not a new benchmark row.
+
+| Topic | Vanilla 1.17.1 shape | Mclone shape after `62b5d666` | Interpretation |
+|---|---|---|---|
+| Light actor | `ThreadedLevelLightEngine` is serial: `checkBlock`, `updateSectionStatus`, `enableLightSources`, `queueSectionData`, and `retainData` enqueue through `ChunkTaskPriorityQueueSorter`; each activation runs up to `taskPerBatch = 5` PRE tasks, drains `runUpdates(Integer.MAX_VALUE, true, true)`, then runs POST tasks. | The retained light mailbox is also serial. `LevelLightEngine::run_updates_report` keeps vanilla's block/sky budget split, and `run_all_updates_report` drains repeated `16_384`-budget passes until no work remains. | Parallel light remains a divergence, not the next default. We are not missing a vanilla "parallel lighting" subsystem. |
+| Initial sky setup | `lightChunk` marks non-empty sections, enables light sources, seeds block emitters, and lets `SkyLightSectionStorage` maintain source sections, top sections, and queued add/remove source sets. `SkyLightEngine` handles vertical empty-section skip and missing-layer sky fallback. | `SkyLightSectionStorage` has the same source/top-section queues and `SkyLightEngine` has the same graph-frontier shape. Source adds still fan out through graph seeding, but not from an obviously absent batch algorithm. | The remaining sky bucket is likely implementation cost or workload volume, not a missing vanilla stage. A sky slice should be a narrow graph/storage hot-path probe, not a rewrite. |
+| Chunk priority and publication | `ChunkMap` wraps `worldgen`, `main`, and `light` mailboxes in `ChunkTaskPriorityQueueSorter`; queues are keyed by chunk ticket level and release/acquire state. Full-chunk conversion and player chunk send also run through the main mailbox with that chunk priority. | Runtime targets and feature jobs are center-priority sorted, but completed feature jobs and completed light statuses are published from FIFO pending queues under separate feature/light publication grants. The default floor is `1` unit each; adaptive caps currently top out at `4` units per gameplay tick. | This is the sharper structural divergence. Vanilla's priority sorter decides which chunk-lane task runs next; mclone's frame poll decides how many completed chunks/statuses to publish from each queue. |
+| Publication age signal | Vanilla has no equivalent per-frame chunk-publication unit valve; pacing mainly sits in tick slack, mailbox priority, and client compile admission. | Post-filter startup still shows host-publication max age of `1728.144ms` RD10 and `2555.977ms` RD15 while render compile queue age is only about `48ms`. The reporter folds server pending publications, pending worldgen-publication chunks, and pending light publications into that age. | Before changing policy, split the age source. If the age is mostly pending light compute, keep working the sky graph. If it is mostly completed status/chunk publication, move the valve toward a priority/age-aware, cost-derived drain. |
+
+Conclusion: the comparison rules out the broad concern that mclone is simply
+applying initial light one block at a time instead of using vanilla's chunk
+light path. The retained-diff path was doing redundant block rechecks and that
+is fixed. The next implementation slice should add just enough age/source
+attribution to decide whether the remaining `host-publication` age is real
+publication backlog or a proxy for serial sky-graph work, then land the
+corresponding smallest change.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages
