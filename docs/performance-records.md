@@ -101,6 +101,72 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Slice 1 Render Compile Capacity Ladder
+
+Commit reported by benchmark JSON: `67f47a53`, `git_dirty=false`.
+
+Code under test: no default flip. The shared capacity derivation was active only
+as `render_compile_capacity_advisory`; every row below used explicit
+`--render-compile-workers` and `--render-compile-max-pending-jobs`. Normal
+production-shaped builds were used, so render-compile worker busy diagnostics
+were compiled out.
+
+Commands used the same release binary shape with the following lane-specific
+flags:
+
+```bash
+# RD10 persisted frozen ladder, 3600 frames at 60 Hz.
+--startup-streaming-perf --startup-streaming-persisted-world --render-distance 10 --startup-streaming-frames 3600 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false
+
+# RD10/RD15 fresh frozen baseline-vs-derived, 1200/2400 frames at 60 Hz.
+--startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false
+--startup-streaming-perf --render-distance 15 --startup-streaming-frames 2400 --target-hz 60 --freeze-scheduled-fluid-ticks --debug-passive-showcase false
+
+# 120 Hz probes, 240 frames.
+--frame-budget-probe --frame-budget-frames 240 --target-hz 120 --debug-passive-showcase false
+--movement-frame-probe --frame-budget-frames 240 --target-hz 120 --debug-passive-showcase false
+```
+
+Raw JSON stayed in `/tmp/mclone-153-capacity-*.json`. The advisory on this host
+resolved to `workers=7`, `max_pending=14` from `availableParallelism=14`,
+`reservedParallelism=4`, `usableParallelism=10`, and memory pack caps above the
+CPU cap.
+
+| Lane | Workers / pending | Full view | Target quiescent | p95 / max frame | Over / over-2x | Completed / uploaded sections | Post-full target rebuilds |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 persisted frozen | `1 / 4` | `1017.934ms` | `4934.921ms` | `10.754 / 13.598ms` | `0 / 0` | `7040 / 2143` | `5696` |
+| RD10 persisted frozen | `2 / 4` | `1021.058ms` | `4896.390ms` | `10.757 / 17.517ms` | `1 / 0` | `7040 / 2143` | `5696` |
+| RD10 persisted frozen | `4 / 4` | `1022.490ms` | `4840.813ms` | `10.621 / 12.940ms` | `0 / 0` | `7040 / 2143` | `5696` |
+| RD10 persisted frozen | `7 / 14` | `1020.365ms` | `1389.100ms` | `10.712 / 14.748ms` | `0 / 0` | `7040 / 2143` | `1888` |
+| RD10 fresh frozen | `1 / 4` | `9221.548ms` | `10816.486ms` | `10.338 / 12.241ms` | `0 / 0` | `7168 / 2190` | `0` |
+| RD10 fresh frozen | `7 / 14` | `9207.867ms` | `10840.326ms` | `10.445 / 14.967ms` | `0 / 0` | `7184 / 2196` | `0` |
+| RD15 fresh frozen | `1 / 4` | `19427.514ms` | `21645.497ms` | `10.582 / 12.975ms` | `0 / 0` | `15520 / 4866` | `0` |
+| RD15 fresh frozen | `7 / 14` | `19362.328ms` | `21792.767ms` | `10.913 / 13.773ms` | `0 / 0` | `15520 / 4866` | `0` |
+
+Measured derived-vs-baseline deltas:
+
+| Lane | Full-view delta | Target-quiescent delta | Interpretation |
+|---|---:|---:|---|
+| RD10 persisted frozen `7/14` vs `1/4` | `+2.431ms` / `+0.239%` | `-3545.821ms` / `-71.852%` | major persisted mesh-tail win, target `<=3s` passes |
+| RD10 fresh frozen `7/14` vs `1/4` | `-13.681ms` / `-0.148%` | `+23.840ms` / `+0.220%` | neutral; fresh remains upstream/light bound |
+| RD15 fresh frozen `7/14` vs `1/4` | `-65.186ms` / `-0.336%` | `+147.270ms` / `+0.680%` | neutral/slightly worse tail; fresh remains upstream/light bound |
+
+120 Hz probe rows:
+
+| Probe | Workers / pending | Top-level p95 / max | Top-level over / over-2x | Frame-accounting p95 / max | Frame-accounting over / over-2x |
+|---|---:|---:|---:|---:|---:|
+| frame-budget stress orbit | `1 / 4` | `2.693 / 16.035ms` | `1 / 0` | `1.143 / 3.009ms` | `0 / 0` |
+| frame-budget stress orbit | `7 / 14` | `5.285 / 18.519ms` | `1 / 1` | `2.695 / 5.742ms` | `0 / 0` |
+| movement-frame walk | `1 / 4` | `2.732 / 16.294ms` | `1 / 0` | `1.190 / 3.212ms` | `0 / 0` |
+| movement-frame walk | `7 / 14` | `3.552 / 18.571ms` | `1 / 1` | `1.931 / 5.655ms` | `0 / 0` |
+
+Interpretation: the derived capacity is validated as a strong persisted-world
+render-tail lever, but it is not yet safe as a global default. Fresh lanes do
+not materially improve, and the 120 Hz probes add one over-2x top-level outlier
+when `7/14` is forced. Next implementation should apply derived capacity only
+through an explicit opt-in or context-gated path, then rerun the same rows plus
+Quest before promotion.
+
 ### 2026-07-07 - Tactical 153 Render Compile Timing Compile-Feature A/B
 
 Commit reported by benchmark JSON: `7ec12fe3`, `git_dirty=false`.

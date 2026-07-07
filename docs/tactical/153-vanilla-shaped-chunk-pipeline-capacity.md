@@ -374,6 +374,21 @@ mesh-buffer footprint, memory budget, memory pack cap, derived worker count, and
 derived max-pending jobs. Missing parallelism or missing memory/footprint input
 falls back to today's `1/4` floors, with unit coverage for that rule.
 
+Clean-commit release ladder on `67f47a53` tested explicit `1/4`, `2/4`,
+`4/4`, and advisory `7/14` on RD10 persisted frozen. `7/14` dropped target
+quiescence from `4934.921ms` to `1389.100ms` with `0 / 0` over/over-2x frames,
+passing the persisted `<=3s` gate. Intermediate `2/4` and `4/4` barely moved
+the tail, so the larger in-flight bound is part of the win.
+
+Fresh rows did not materially improve: RD10 fresh target quiescence was
+`10816.486ms` at `1/4` and `10840.326ms` at `7/14`; RD15 was `21645.497ms` at
+`1/4` and `21792.767ms` at `7/14`, all with `0 / 0` over/over-2x. The 120 Hz
+frame-budget and movement-frame probes both changed from `1 / 0` top-level
+over/over-2x at `1/4` to `1 / 1` at `7/14`, while frame-accounting stage rows
+stayed `0 / 0`. Decision: do not flip the global default from advisory data
+alone. Next implementation should add an explicit opt-in or context-gated
+derived-capacity path, then rerun these rows plus Quest.
+
 Gates (inner loop per iteration; promotion before default flip):
 
 - inner: RD10 persisted frozen + movement-frame probe + Quest RD5 orbit;
