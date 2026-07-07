@@ -152,11 +152,12 @@ over-2x outlier while the shared frame-accounting rows stay green, so this is a
 good explicit opt-in and persisted-world lever, but still not a global default.
 
 Quest was not measured in this applied-capacity row. `adb devices` showed the
-Quest connected, but Android XR startup parsing only accepts the manual
-`--render-compile-workers` / `--render-compile-max-pending-jobs` flags today;
-it would reject `--render-compile-capacity derived`. The next narrow slice is to
-wire the same capacity request through the Android/shared startup path, then run
-the Quest RD5 orbit/churn guardrails with the derived value actually applied.
+Quest connected, but Android XR startup parsing at the time only accepted the
+manual `--render-compile-workers` /
+`--render-compile-max-pending-jobs` flags; it would have rejected
+`--render-compile-capacity derived`. The follow-up wiring landed in
+`ab582d3c`; the Quest rows are recorded in
+[`quest-standalone-performance-records.md`](quest-standalone-performance-records.md).
 
 ### 2026-07-07 - Tactical 153 Slice 1 Render Compile Capacity Ladder
 

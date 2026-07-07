@@ -429,6 +429,21 @@ tripwires that require new startup flags to be classified as shared startup
 policy or explicit app-local/platform-local flags. The next measurement slice is
 Quest RD5 orbit/churn with `--render-compile-capacity derived` active.
 
+Quest applied-capacity rows on clean commit `ab582d3c` then proved that the
+shared request reaches Android XR and resolves to Quest-local `1/4`, not the
+desktop `7/14`. RD5 settled orbit repeated cleanly on app work (`0` skipped,
+app p95 `11.994ms` then `12.088ms`, app over-period `0.0-0.1%`), and the
+second repeat returned Meta dropped-frame delta to `15` after a first-repeat
+`23`. RD5 churn was also app-work green (`0` skipped, dropped delta `17`, app
+p95 `9.439ms`, app over-period `0.1%`, deadline skips `0`). Render-compile
+queue age was `617.266ms`, slightly above Slice 0's `581.685ms` and below the
+earlier queue-depth candidate's `678.520ms`; host-publication age rose to
+`2344.678ms`, keeping publication/light as the watched downstream pressure.
+Decision: the applied Quest path is validated, but global default promotion is
+still not accepted because desktop 120 Hz still has one top-level over-2x
+outlier at `7/14`. Keep derived capacity explicit/context-gated and move the
+next Tactical 153 slice to light/status throughput.
+
 Gates (inner loop per iteration; promotion before default flip):
 
 - inner: RD10 persisted frozen + movement-frame probe + Quest RD5 orbit;
@@ -442,7 +457,10 @@ Gates (inner loop per iteration; promotion before default flip):
 
 Exit criteria: derived defaults promoted for desktop and Quest
 local-integrated (or falsified with the ladder evidence); derivation and
-clamp-bound evidence recorded; 142 throttle inventory rows updated.
+clamp-bound evidence recorded; 142 throttle inventory rows updated. Slice 1 is
+currently in the "explicit/context-gated, not global default" state: desktop
+persisted startup benefits strongly, Quest derives safely to floors, and
+desktop 120 Hz prevents global default promotion.
 
 ## Slice 2: Light Stage Throughput
 

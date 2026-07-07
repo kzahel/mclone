@@ -109,6 +109,81 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Applied Derived Render Compile Capacity
+
+Benchmarked runtime commit: `ab582d3c`, clean worktree before docs edits. The
+release APK was rebuilt and installed for the first orbit row, then reused with
+staged assets for the repeat orbit and churn rows.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Capacity mode | `--render-compile-capacity derived`, no manual worker override |
+
+Commands used the normal RD5 orbit/churn guardrails with the existing
+completed-result/section upload/section accept caps `2/16/64`, replacing
+manual `--render-compile-workers 2` with `--render-compile-capacity derived`.
+The derived capacity resolved to Quest-local `workers=1`,
+`max_pending_jobs=4` in every marker block.
+
+```sh
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-capacity derived --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity.txt --log /tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-capacity derived --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity-r2.txt --log /tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity-r2-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-capacity derived --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 210 --perf-summary /tmp/mclone-quest-openxr-perf-churn-rd5-derived-capacity.txt --log /tmp/mclone-quest-openxr-perf-churn-rd5-derived-capacity-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time
+```
+
+Primary guardrail rows:
+
+| Lane | Workers / pending | Settle | Frames | Skipped | Dropped delta | App p95 / p99 / max | Headroom avg / p05 / min | App over-period | Compile queue max age | Deadline skips |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD5 settled orbit r1 | `1 / 4` | `12.923s` | `3193` | `0` | `23` | `11.994 / 12.828 / 15.723ms` | `+3.307 / +1.895 / -1.834ms` | `1` frame / `0.0%` | `180.945ms` | `0` |
+| RD5 settled orbit r2 | `1 / 4` | `12.756s` | `3200` | `0` | `15` | `12.088 / 12.698 / 14.135ms` | `+3.235 / +1.787 / -0.246ms` | `2` frames / `0.1%` | `154.030ms` | `0` |
+| RD5 chunk-view churn | `1 / 4` | `15.689s` | `3236` | `0` | `17` | `9.439 / 10.590 / 14.929ms` | `+8.523 / +4.450 / -1.040ms` | `4` frames / `0.1%` | `617.266ms` | `0` |
+
+Additional queue and upload markers:
+
+| Lane | Upload-work max age | Host-publication max age | Inbound max age | Update oldest age | Update pump stalls | Compile stale sections |
+|---|---:|---:|---:|---:|---:|---:|
+| RD5 settled orbit r1 | `13.212ms` | `469.071ms` | `0.000ms` | `19.935ms` | `0` | `1` |
+| RD5 settled orbit r2 | `23.343ms` | `0.000ms` | `0.000ms` | `16.607ms` | `0` | `0` |
+| RD5 chunk-view churn | `233.672ms` | `2344.678ms` | `132.665ms` | `161.149ms` | `1` | `32` |
+
+Interpretation:
+
+- The shared derived capacity request now reaches Android XR and resolves from
+  Quest resources to `1/4`, materially different from desktop's `7/14` and
+  equal to the fail-safe floor. This validates the cross-host resource-derived
+  path and prevents the desktop capacity from leaking onto Quest.
+- RD5 orbit is app-work green on both repeats. The first repeat had a high Meta
+  dropped-frame delta (`23`), so it was repeated; the second repeat returned to
+  the established `15-17` range while preserving similar app p95/headroom.
+- RD5 churn is app-work green: skipped `0`, app p95 `9.439ms`, app
+  over-period `0.1%`, and no deadline skips. Render-compile queue max age
+  `617.266ms` is slightly above the Slice 0 attribution row (`581.685ms`) but
+  below the earlier queue-depth candidate row (`678.520ms`). Host-publication
+  age is higher (`2344.678ms`), so publication/light remains the watched
+  downstream pressure, not mesh worker count.
+- This row validates the applied Quest path, but it does not justify a global
+  default promotion. Desktop 120 Hz still has one top-level over-2x outlier at
+  `7/14`; keep `derived` explicit/context-gated and move the Tactical 153 focus
+  to the fresh-startup light/status ceiling.
+
+Raw artifacts:
+
+- `/tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity.txt`
+- `/tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity-logcat.txt`
+- `/tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity-r2.txt`
+- `/tmp/mclone-quest-openxr-perf-orbit-rd5-derived-capacity-r2-logcat.txt`
+- `/tmp/mclone-quest-openxr-perf-churn-rd5-derived-capacity.txt`
+- `/tmp/mclone-quest-openxr-perf-churn-rd5-derived-capacity-logcat.txt`
+
 ### 2026-07-07 - Tactical 153 Slice 0 RD5 Churn Attribution
 
 Benchmarked runtime commit: `1c8a0743`, clean worktree before docs edits.
