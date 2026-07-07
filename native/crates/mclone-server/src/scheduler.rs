@@ -135,6 +135,15 @@ pub struct ChunkSchedulerMetrics {
     pub total_light_status_sky_column_enable_us: u128,
     pub total_light_status_sky_source_enqueue_us: u128,
     pub total_light_status_block_source_enqueue_us: u128,
+    pub total_light_status_input_chunks: usize,
+    pub total_light_status_inserted_chunks: usize,
+    pub total_light_status_replaced_chunks: usize,
+    pub total_light_status_unchanged_chunks: usize,
+    pub total_light_status_changed_block_raw_checks: usize,
+    pub total_light_status_changed_block_light_property_changes: usize,
+    pub total_light_status_changed_block_opacity_changes: usize,
+    pub total_light_status_changed_block_emission_changes: usize,
+    pub total_light_status_changed_block_raw_only_changes: usize,
     pub total_light_status_changed_block_check_us: u128,
     pub total_light_status_run_updates_us: u128,
     pub total_light_status_run_update_iterations: usize,
@@ -1419,6 +1428,31 @@ impl ChunkScheduler {
             total_light_status_block_source_enqueue_us: self
                 .light_status_timing
                 .block_source_enqueue_us,
+            total_light_status_input_chunks: self.light_status_timing.light_status_input_chunks,
+            total_light_status_inserted_chunks: self
+                .light_status_timing
+                .light_status_inserted_chunks,
+            total_light_status_replaced_chunks: self
+                .light_status_timing
+                .light_status_replaced_chunks,
+            total_light_status_unchanged_chunks: self
+                .light_status_timing
+                .light_status_unchanged_chunks,
+            total_light_status_changed_block_raw_checks: self
+                .light_status_timing
+                .changed_block_raw_checks,
+            total_light_status_changed_block_light_property_changes: self
+                .light_status_timing
+                .changed_block_light_property_changes,
+            total_light_status_changed_block_opacity_changes: self
+                .light_status_timing
+                .changed_block_opacity_changes,
+            total_light_status_changed_block_emission_changes: self
+                .light_status_timing
+                .changed_block_emission_changes,
+            total_light_status_changed_block_raw_only_changes: self
+                .light_status_timing
+                .changed_block_raw_only_changes,
             total_light_status_changed_block_check_us: self
                 .light_status_timing
                 .changed_block_check_us,

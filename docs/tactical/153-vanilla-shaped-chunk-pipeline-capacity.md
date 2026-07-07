@@ -1,13 +1,10 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 0 whole-pipeline attribution landed and recorded 2026-07-07 as
-the named follow-up to tactical
-[`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
-(close-out commits `42d3e43a`/`01147cd7`). Slice 1 (render compile capacity)
-has landed the shared derivation, advisory report, and desktop explicit
-derived-capacity opt-in. Android/shared startup wiring now accepts the same
-derived request, so the next narrow step is the Quest RD5 applied-capacity
-measurement instead of manual worker counts.
+Status: Slice 2 light sub-cost profiling has landed. Changed-block rechecks are
+the binding light-status bucket, and the follow-up classifier shows most queued
+rechecks are raw block-id replacements that do not change current
+opacity/emission facts. The next narrow step is a parity-checked sparse
+changed-block filter before any parallel-light divergence is considered.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -513,6 +510,14 @@ cost stays in `WorkerFrameMetrics` for web/worker paths. Decision: remain in
 option A. The next code slice should reduce redundant changed-block rechecks
 or make them sparse/dirty-set based while preserving byte-identical lighting
 fixtures, before any option-B parallel-light divergence is considered.
+
+The follow-up dirty RD10 classifier run on `999c78b0` added no solver behavior
+change, only counters. It reported `4726` retained-light input chunks:
+`729` inserted, `1224` replaced, and `2773` unchanged. The `1224` replacements
+queued `5550167` raw changed-block checks; only `374161` (`6.7%`) changed
+current opacity/emission facts, while `5176006` (`93.3%`) were raw-only. That
+strongly supports a vanilla-shaped filter mirroring `ProtoChunk#setBlockState`'s
+light-relevance gate as the next parity-neutral Slice 2 implementation.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages

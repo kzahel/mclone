@@ -797,6 +797,44 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         micros_to_ms(metrics.total_light_status_publication_us)
     );
     println!("{indent}  }},");
+    println!("{indent}  \"light_status_diff\": {{");
+    println!(
+        "{indent}    \"input_chunks\": {},",
+        metrics.total_light_status_input_chunks
+    );
+    println!(
+        "{indent}    \"inserted_chunks\": {},",
+        metrics.total_light_status_inserted_chunks
+    );
+    println!(
+        "{indent}    \"replaced_chunks\": {},",
+        metrics.total_light_status_replaced_chunks
+    );
+    println!(
+        "{indent}    \"unchanged_chunks\": {},",
+        metrics.total_light_status_unchanged_chunks
+    );
+    println!(
+        "{indent}    \"raw_block_checks\": {},",
+        metrics.total_light_status_changed_block_raw_checks
+    );
+    println!(
+        "{indent}    \"light_property_changes\": {},",
+        metrics.total_light_status_changed_block_light_property_changes
+    );
+    println!(
+        "{indent}    \"opacity_changes\": {},",
+        metrics.total_light_status_changed_block_opacity_changes
+    );
+    println!(
+        "{indent}    \"emission_changes\": {},",
+        metrics.total_light_status_changed_block_emission_changes
+    );
+    println!(
+        "{indent}    \"raw_only_changes\": {}",
+        metrics.total_light_status_changed_block_raw_only_changes
+    );
+    println!("{indent}  }},");
     println!("{indent}  \"light_status_graph\": {{");
     println!(
         "{indent}    \"run_update_iterations\": {},",

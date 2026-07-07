@@ -101,6 +101,36 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Slice 2 Changed-Block Diff Classification
+
+Commit reported by benchmark JSON: `999c78b0`, `git_dirty=true`,
+`debug_assertions=false`. This was captured while implementing the classifier,
+so treat it as diagnostic evidence, not a clean promoted baseline.
+
+Command:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 10 --max-seconds 180 > /tmp/mclone-153-light-diff-rd10.json
+```
+
+Result:
+
+| Lane | Target chunks | View ready | Settled | Light statuses / batches | Light compute | Changed-block check | Run updates |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `529` | `12620.188ms` | `14569.913ms` | `625 / 73` | `10462.603ms` | `6012.225ms` | `3925.894ms` |
+
+Changed-block classifier:
+
+| Input chunks | Inserted | Replaced | Unchanged | Raw block checks | Light-property changes | Opacity changes | Emission changes | Raw-only changes |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `4726` | `729` | `1224` | `2773` | `5550167` | `374161` (`6.7%`) | `373144` | `6917` | `5176006` (`93.3%`) |
+
+Interpretation: the expensive changed-block bucket is mostly raw block-id
+replacement work that does not change the current opacity/emission facts used by
+the light solver. The next Slice 2 implementation should filter retained
+replacement checks to light-affecting changes first, with byte-identical lighting
+fixtures before comparing RD10/RD15 fresh lanes.
+
 ### 2026-07-07 - Tactical 153 Slice 2 Light Sub-Cost Attribution
 
 Commit reported by benchmark JSON: `db8a9e49`, `git_dirty=false`,

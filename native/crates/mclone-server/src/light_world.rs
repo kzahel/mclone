@@ -61,10 +61,27 @@ impl RetainedInitialLightState {
             world.configure(min_y, height);
             let mut changed_chunks = Vec::new();
             let mut changed_blocks = Vec::new();
+            timing.light_status_input_chunks = input_chunks.len();
             for (&pos, blocks) in &input_chunks {
-                if let Some(block_changes) = world.upsert_chunk(pos, blocks) {
-                    changed_chunks.push(pos);
-                    changed_blocks.extend(block_changes);
+                match world.upsert_chunk(pos, blocks) {
+                    Some(RetainedChunkChange::Inserted) => {
+                        timing.light_status_inserted_chunks += 1;
+                        changed_chunks.push(pos);
+                    }
+                    Some(RetainedChunkChange::Replaced(block_changes)) => {
+                        timing.light_status_replaced_chunks += 1;
+                        timing.changed_block_raw_checks += block_changes.raw_checks;
+                        timing.changed_block_light_property_changes +=
+                            block_changes.light_property_changes;
+                        timing.changed_block_opacity_changes += block_changes.opacity_changes;
+                        timing.changed_block_emission_changes += block_changes.emission_changes;
+                        timing.changed_block_raw_only_changes += block_changes.raw_only_changes;
+                        changed_chunks.push(pos);
+                        changed_blocks.extend(block_changes.positions);
+                    }
+                    None => {
+                        timing.light_status_unchanged_chunks += 1;
+                    }
                 }
             }
             (changed_chunks, changed_blocks)
@@ -268,18 +285,49 @@ fn synthetic_sky_layer_for_envelope(
     Some(vec![value; mclone_light::DATA_LAYER_SIZE])
 }
 
+#[derive(Debug, Default, Eq, PartialEq)]
+struct ChangedBlockPositions {
+    positions: Vec<BlockPosKey>,
+    raw_checks: usize,
+    light_property_changes: usize,
+    opacity_changes: usize,
+    emission_changes: usize,
+    raw_only_changes: usize,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum RetainedChunkChange {
+    Inserted,
+    Replaced(ChangedBlockPositions),
+}
+
 fn changed_block_positions(
     chunk_pos: ChunkPos,
     min_y: i32,
     old_blocks: &[RawBlockId],
     new_blocks: &[RawBlockId],
-) -> Vec<BlockPosKey> {
-    old_blocks
+) -> ChangedBlockPositions {
+    let mut changes = ChangedBlockPositions::default();
+    changes.positions = old_blocks
         .iter()
         .zip(new_blocks.iter())
         .enumerate()
         .filter_map(|(index, (old, new))| {
             (old != new).then(|| {
+                changes.raw_checks += 1;
+                let opacity_changed = block_light_opacity(*old) != block_light_opacity(*new);
+                let emission_changed = block_light_emission(*old) != block_light_emission(*new);
+                if opacity_changed {
+                    changes.opacity_changes += 1;
+                }
+                if emission_changed {
+                    changes.emission_changes += 1;
+                }
+                if opacity_changed || emission_changed {
+                    changes.light_property_changes += 1;
+                } else {
+                    changes.raw_only_changes += 1;
+                }
                 let local_x = (index & 15) as i32;
                 let local_z = ((index >> 4) & 15) as i32;
                 let local_y = (index >> 8) as i32;
@@ -290,7 +338,8 @@ fn changed_block_positions(
                 )
             })
         })
-        .collect()
+        .collect();
+    changes
 }
 
 #[derive(Clone, Debug, Default)]
@@ -340,7 +389,11 @@ impl RetainedLightWorld {
         self.configured = true;
     }
 
-    fn upsert_chunk(&mut self, pos: ChunkPos, blocks: &[RawBlockId]) -> Option<Vec<BlockPosKey>> {
+    fn upsert_chunk(
+        &mut self,
+        pos: ChunkPos,
+        blocks: &[RawBlockId],
+    ) -> Option<RetainedChunkChange> {
         self.assert_configured();
         let expected_len = self.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
         assert_eq!(
@@ -353,9 +406,11 @@ impl RetainedLightWorld {
             if existing.as_slice() == blocks {
                 return None;
             }
-            changed_block_positions(pos, self.min_y, existing, blocks)
+            RetainedChunkChange::Replaced(changed_block_positions(
+                pos, self.min_y, existing, blocks,
+            ))
         } else {
-            Vec::new()
+            RetainedChunkChange::Inserted
         };
 
         self.chunks.insert(pos, blocks.to_vec());
@@ -464,7 +519,7 @@ impl SkyLightWorld for SharedRetainedLightWorld {
 mod tests {
     use super::*;
     use mclone_core::{BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
-    use mclone_worldgen::block::{AIR, STONE};
+    use mclone_worldgen::block::{AIR, DIRT, STONE};
 
     fn test_snapshot(pos: ChunkPos, min_y: i32, height: i32) -> mclone_core::ChunkSnapshot {
         let section_count = height / SECTION_HEIGHT;
@@ -518,7 +573,10 @@ mod tests {
         let chunk_pos = ChunkPos::new(0, 0);
         let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * 2 * CHUNK_WIDTH) as usize];
         blocks[chunk_block_index(1, 1, 1)] = STONE;
-        assert_eq!(world.upsert_chunk(chunk_pos, &blocks), Some(Vec::new()));
+        assert_eq!(
+            world.upsert_chunk(chunk_pos, &blocks),
+            Some(RetainedChunkChange::Inserted)
+        );
 
         let statuses = world.section_statuses_for(&[chunk_pos]);
 
@@ -537,14 +595,50 @@ mod tests {
         world.configure(0, SECTION_HEIGHT);
         let chunk_pos = ChunkPos::new(0, 0);
         let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize];
-        assert_eq!(world.upsert_chunk(chunk_pos, &blocks), Some(Vec::new()));
+        assert_eq!(
+            world.upsert_chunk(chunk_pos, &blocks),
+            Some(RetainedChunkChange::Inserted)
+        );
 
         blocks[chunk_block_index(1, 1, 1)] = STONE;
 
         assert_eq!(
             world.upsert_chunk(chunk_pos, &blocks),
-            Some(vec![block_pos_as_long(1, 1, 1)])
+            Some(RetainedChunkChange::Replaced(ChangedBlockPositions {
+                positions: vec![block_pos_as_long(1, 1, 1)],
+                raw_checks: 1,
+                light_property_changes: 1,
+                opacity_changes: 1,
+                emission_changes: 0,
+                raw_only_changes: 0,
+            }))
         );
         assert_eq!(world.upsert_chunk(chunk_pos, &blocks), None);
+    }
+
+    #[test]
+    fn retained_light_world_classifies_raw_only_replacements() {
+        let mut world = RetainedLightWorld::default();
+        world.configure(0, SECTION_HEIGHT);
+        let chunk_pos = ChunkPos::new(0, 0);
+        let mut blocks = vec![STONE; (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize];
+        assert_eq!(
+            world.upsert_chunk(chunk_pos, &blocks),
+            Some(RetainedChunkChange::Inserted)
+        );
+
+        blocks[chunk_block_index(2, 3, 4)] = DIRT;
+
+        assert_eq!(
+            world.upsert_chunk(chunk_pos, &blocks),
+            Some(RetainedChunkChange::Replaced(ChangedBlockPositions {
+                positions: vec![block_pos_as_long(2, 3, 4)],
+                raw_checks: 1,
+                light_property_changes: 0,
+                opacity_changes: 0,
+                emission_changes: 0,
+                raw_only_changes: 1,
+            }))
+        );
     }
 }

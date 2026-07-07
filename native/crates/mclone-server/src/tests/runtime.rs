@@ -162,6 +162,42 @@ fn integrated_server_publishes_interested_chunks() {
                 .scheduler()
                 .metrics()
                 .total_light_status_block_source_enqueue_us,
+            total_light_status_input_chunks: server
+                .scheduler()
+                .metrics()
+                .total_light_status_input_chunks,
+            total_light_status_inserted_chunks: server
+                .scheduler()
+                .metrics()
+                .total_light_status_inserted_chunks,
+            total_light_status_replaced_chunks: server
+                .scheduler()
+                .metrics()
+                .total_light_status_replaced_chunks,
+            total_light_status_unchanged_chunks: server
+                .scheduler()
+                .metrics()
+                .total_light_status_unchanged_chunks,
+            total_light_status_changed_block_raw_checks: server
+                .scheduler()
+                .metrics()
+                .total_light_status_changed_block_raw_checks,
+            total_light_status_changed_block_light_property_changes: server
+                .scheduler()
+                .metrics()
+                .total_light_status_changed_block_light_property_changes,
+            total_light_status_changed_block_opacity_changes: server
+                .scheduler()
+                .metrics()
+                .total_light_status_changed_block_opacity_changes,
+            total_light_status_changed_block_emission_changes: server
+                .scheduler()
+                .metrics()
+                .total_light_status_changed_block_emission_changes,
+            total_light_status_changed_block_raw_only_changes: server
+                .scheduler()
+                .metrics()
+                .total_light_status_changed_block_raw_only_changes,
             total_light_status_changed_block_check_us: server
                 .scheduler()
                 .metrics()

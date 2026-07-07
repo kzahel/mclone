@@ -630,6 +630,15 @@ impl FrameWriter {
         self.write_u128(timing.sky_column_enable_us);
         self.write_u128(timing.sky_source_enqueue_us);
         self.write_u128(timing.block_source_enqueue_us);
+        self.write_u64(timing.light_status_input_chunks as u64);
+        self.write_u64(timing.light_status_inserted_chunks as u64);
+        self.write_u64(timing.light_status_replaced_chunks as u64);
+        self.write_u64(timing.light_status_unchanged_chunks as u64);
+        self.write_u64(timing.changed_block_raw_checks as u64);
+        self.write_u64(timing.changed_block_light_property_changes as u64);
+        self.write_u64(timing.changed_block_opacity_changes as u64);
+        self.write_u64(timing.changed_block_emission_changes as u64);
+        self.write_u64(timing.changed_block_raw_only_changes as u64);
         self.write_u128(timing.changed_block_check_us);
         self.write_u128(timing.run_updates_us);
         self.write_u64(timing.run_update_iterations as u64);
@@ -1025,6 +1034,15 @@ impl<'a> FrameReader<'a> {
             sky_column_enable_us: self.read_u128()?,
             sky_source_enqueue_us: self.read_u128()?,
             block_source_enqueue_us: self.read_u128()?,
+            light_status_input_chunks: self.read_u64()? as usize,
+            light_status_inserted_chunks: self.read_u64()? as usize,
+            light_status_replaced_chunks: self.read_u64()? as usize,
+            light_status_unchanged_chunks: self.read_u64()? as usize,
+            changed_block_raw_checks: self.read_u64()? as usize,
+            changed_block_light_property_changes: self.read_u64()? as usize,
+            changed_block_opacity_changes: self.read_u64()? as usize,
+            changed_block_emission_changes: self.read_u64()? as usize,
+            changed_block_raw_only_changes: self.read_u64()? as usize,
             changed_block_check_us: self.read_u128()?,
             run_updates_us: self.read_u128()?,
             run_update_iterations: self.read_u64()? as usize,

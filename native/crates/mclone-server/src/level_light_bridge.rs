@@ -39,6 +39,15 @@ pub(crate) struct LevelLightComputationTiming {
     pub(crate) sky_column_enable_us: u128,
     pub(crate) sky_source_enqueue_us: u128,
     pub(crate) block_source_enqueue_us: u128,
+    pub(crate) light_status_input_chunks: usize,
+    pub(crate) light_status_inserted_chunks: usize,
+    pub(crate) light_status_replaced_chunks: usize,
+    pub(crate) light_status_unchanged_chunks: usize,
+    pub(crate) changed_block_raw_checks: usize,
+    pub(crate) changed_block_light_property_changes: usize,
+    pub(crate) changed_block_opacity_changes: usize,
+    pub(crate) changed_block_emission_changes: usize,
+    pub(crate) changed_block_raw_only_changes: usize,
     pub(crate) changed_block_check_us: u128,
     pub(crate) run_updates_us: u128,
     pub(crate) run_update_iterations: usize,
@@ -76,6 +85,15 @@ impl LevelLightComputationTiming {
         self.sky_column_enable_us += other.sky_column_enable_us;
         self.sky_source_enqueue_us += other.sky_source_enqueue_us;
         self.block_source_enqueue_us += other.block_source_enqueue_us;
+        self.light_status_input_chunks += other.light_status_input_chunks;
+        self.light_status_inserted_chunks += other.light_status_inserted_chunks;
+        self.light_status_replaced_chunks += other.light_status_replaced_chunks;
+        self.light_status_unchanged_chunks += other.light_status_unchanged_chunks;
+        self.changed_block_raw_checks += other.changed_block_raw_checks;
+        self.changed_block_light_property_changes += other.changed_block_light_property_changes;
+        self.changed_block_opacity_changes += other.changed_block_opacity_changes;
+        self.changed_block_emission_changes += other.changed_block_emission_changes;
+        self.changed_block_raw_only_changes += other.changed_block_raw_only_changes;
         self.changed_block_check_us += other.changed_block_check_us;
         self.run_updates_us += other.run_updates_us;
         self.run_update_iterations += other.run_update_iterations;
