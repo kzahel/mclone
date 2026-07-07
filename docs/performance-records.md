@@ -101,6 +101,57 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Light-Status Mailbox Attribution
+
+Commit reported by benchmark JSON: `62dc6a5d`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: native light-status mailbox attribution. The mailbox now
+reports enqueued/completed batches and statuses, max pending batches/statuses,
+queue wait before worker compute, worker compute time, and worker-completion to
+scheduler-drain wait. The lanes keep the same comparison knobs as the
+cost-derived publication row: explicit `render-compile-workers=1`,
+`render-compile-max-pending-jobs=4`, frozen scheduled fluids,
+`debug-passive-showcase=false`, and 60 Hz target.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-light-mailbox-attribution-rd10-fresh-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 15 --startup-streaming-frames 2400 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-light-mailbox-attribution-rd15-fresh-frozen.json
+```
+
+Whole-pipeline result:
+
+| Lane | Full view | Target quiescent | p95 / max frame | Over / over-2x | Compile / uploaded sections |
+|---|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `5128.613ms` | `5551.793ms` | `10.308 / 30.174ms` | `2 / 0` | `7136 / 2167` |
+| RD15 fresh frozen | `9689.129ms` | `10481.489ms` | `10.492 / 14.675ms` | `0 / 0` | `15392 / 4825` |
+
+Publication and queue context:
+
+| Lane | Max worldgen publication age | Max light publication age | Max publish spent | Max light mailbox statuses | Max render compile queue age |
+|---|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `1002.089ms` | `0.000ms` | `10.992ms` | `324` | `24.005ms` |
+| RD15 fresh frozen | `490.889ms` | `0.000ms` | `10.779ms` | `587` | `23.962ms` |
+
+Light-status mailbox split:
+
+| Lane | Batches / statuses | Avg / max batch | Max pending batches | Avg / max queue wait | Total compute | Avg compute / status | Max compute | Max completion-drain wait |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `73 / 625` | `8.56 / 9` | `37` | `1280.810ms / 2644.587ms` | `5390.905ms` | `8.625ms` | `108.567ms` | `58.682ms` |
+| RD15 fresh frozen | `144 / 1225` | `8.51 / 9` | `69` | `2334.145ms / 4751.488ms` | `10447.628ms` | `8.529ms` | `109.131ms` | `57.459ms` |
+
+Interpretation: the completed-publication path is no longer the light limiter.
+Completed light publication age is `0ms`, and worker-completion-to-drain wait is
+only about one scheduler tick at worst. The backlog is before compute: RD10/RD15
+light batches wait up to `2.645s` / `4.751s` before the serial light worker
+starts them. Actual compute is still real at about `8.5ms` per status, but the
+next narrow implementation should compare mclone's max-`9` status batches and
+FIFO-ish enqueue order against vanilla `ThreadedLevelLightEngine`'s
+`taskPerBatch = 5` plus chunk-priority sorter before changing sky-graph
+internals.
+
 ### 2026-07-07 - Tactical 153 Cost-Derived Publication Grants
 
 Commit reported by benchmark JSON: `8579fb18`, `git_dirty=false`,

@@ -1,17 +1,17 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 3a publication max-units derivation landed after Slice 2 sparse
-changed-block filtering, the vanilla comparison scout, and the publication-age
-source split. The retained light path now enqueues replacement rechecks only
-when current opacity/emission facts change, cutting clean RD10/RD15
-changed-block recheck time by about `90%` and light compute by `54-56%` while
-the lighting fixtures remain byte-identical. The cost-derived publication cap
-then moved clean fresh startup to RD10/RD15 full view
-`5106.574ms`/`9726.067ms` and target quiescence
-`5598.029ms`/`10498.777ms`. Publication is no longer the visible limiter:
-completed-publication ages fell to about `0.8-1.0s`, while the next pressure is
-the serial light-status worker mailbox (`288` RD10 / `550` RD15 max pending
-statuses).
+Status: Slice 3a publication max-units derivation and the light-status mailbox
+attribution row have landed after Slice 2 sparse changed-block filtering, the
+vanilla comparison scout, and the publication-age source split. The retained
+light path now enqueues replacement rechecks only when current opacity/emission
+facts change, cutting clean RD10/RD15 changed-block recheck time by about `90%`
+and light compute by `54-56%` while the lighting fixtures remain
+byte-identical. The cost-derived publication cap then moved clean fresh startup
+to RD10/RD15 full view around `5.1s`/`9.7s` and target quiescence around
+`5.6s`/`10.5s`. Publication is no longer the visible limiter. The current
+pressure is pre-compute light-status mailbox wait: max queue wait
+`2644.587ms` RD10 / `4751.488ms` RD15, with `73`/`144` serial batches of about
+`8.5` statuses each.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -635,6 +635,34 @@ The visible queue has moved: completed light publication depth is gone, while
 the light-status worker mailbox now reaches `288` RD10 / `550` RD15 pending
 statuses. The next narrow slice should split and inspect that light-status
 mailbox/worker pressure before changing sky-graph internals.
+
+The mailbox attribution slice landed in `62dc6a5d`. It adds native
+light-status mailbox counters for enqueued/completed batches/statuses, max
+pending batches/statuses, queue-wait time, worker compute time, and
+worker-completion-to-scheduler-drain wait. Clean RD10/RD15 rows on the same
+knobs reported:
+
+| Lane | Full view | Target quiescent | p95 / max frame | Over / over-2x | Max light pending statuses | Host publication worldgen age |
+|---|---:|---:|---:|---:|---:|---:|
+| RD10 | `5128.613ms` | `5551.793ms` | `10.308 / 30.174ms` | `2 / 0` | `324` | `1002.089ms` |
+| RD15 | `9689.129ms` | `10481.489ms` | `10.492 / 14.675ms` | `0 / 0` | `587` | `490.889ms` |
+
+Light-status mailbox split:
+
+| Lane | Batches / statuses | Avg / max batch | Max pending batches | Avg / max queue wait | Total compute | Avg compute / status | Max compute | Max completion-drain wait |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 | `73 / 625` | `8.56 / 9` | `37` | `1280.810ms / 2644.587ms` | `5390.905ms` | `8.625ms` | `108.567ms` | `58.682ms` |
+| RD15 | `144 / 1225` | `8.51 / 9` | `69` | `2334.145ms / 4751.488ms` | `10447.628ms` | `8.529ms` | `109.131ms` | `57.459ms` |
+
+Interpretation: the next limiter is not completed-publication drain and not
+worker-completion handoff. The backlog is waiting before compute on the serial
+light-status worker, while actual compute remains about `8.5ms` per light
+status. Mclone batches up to `9` statuses (`CENTER_PRIORITY_LIGHT_STATUS_BATCH_SIZE`);
+vanilla's `ThreadedLevelLightEngine` batches up to `taskPerBatch = 5` PRE tasks
+and routes them through the chunk priority sorter. The next implementation
+should stay narrow: compare and A/B light batch/priority shape before touching
+sky-graph internals. A sky hot-path probe is still likely needed later, but this
+row says the immediate scheduling problem is FIFO serial-worker queueing.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages
