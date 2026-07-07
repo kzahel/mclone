@@ -123,6 +123,7 @@ pub fn xr_locomotion_input_from_controllers_with_turn_policy(
     let left_axis = xr_left_stick_axis(controllers);
     let right_axis = xr_right_stick_axis(controllers);
     let jump = xr_right_a_pressed(controllers);
+    let descend = xr_right_b_pressed(controllers);
     let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
         .then(|| xr_left_stick_movement_impulse(left_axis));
     let mouse_delta_x =
@@ -138,6 +139,7 @@ pub fn xr_locomotion_input_from_controllers_with_turn_policy(
         dt_seconds,
         mouse_delta_x,
         jump,
+        descend,
         movement_impulse,
         movement_yaw_radians,
         ..EngineCameraInput::default()
@@ -182,6 +184,12 @@ pub(crate) fn xr_right_a_pressed(controllers: &[XrControllerSnapshot]) -> bool {
     controllers
         .iter()
         .any(|controller| controller.hand == XrHand::Right && controller.a_pressed)
+}
+
+pub(crate) fn xr_right_b_pressed(controllers: &[XrControllerSnapshot]) -> bool {
+    controllers
+        .iter()
+        .any(|controller| controller.hand == XrHand::Right && controller.b_pressed)
 }
 
 pub fn xr_hand_push_input_from_controllers(

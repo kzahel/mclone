@@ -310,6 +310,7 @@ struct XrControllerInputSummary {
     max_thumbstick: f32,
     select_pressed_frames: u32,
     a_pressed_frames: u32,
+    b_pressed_frames: u32,
     latest_left: Option<XrControllerSnapshot>,
     latest_right: Option<XrControllerSnapshot>,
 }
@@ -337,12 +338,13 @@ impl XrControllerInputSummary {
             self.max_thumbstick = self.max_thumbstick.max(snapshot.thumbstick.length());
             self.select_pressed_frames += u32::from(snapshot.select_pressed);
             self.a_pressed_frames += u32::from(snapshot.a_pressed);
+            self.b_pressed_frames += u32::from(snapshot.b_pressed);
         }
     }
 
     fn print_summary(&self) {
         println!(
-            "OpenXR controller input summary: frames_polled={} left_active={} right_active={} left_tracked={} right_tracked={} max_trigger={:.3} max_squeeze={:.3} max_thumbstick={:.3} select_pressed_frames={} a_pressed_frames={}",
+            "OpenXR controller input summary: frames_polled={} left_active={} right_active={} left_tracked={} right_tracked={} max_trigger={:.3} max_squeeze={:.3} max_thumbstick={:.3} select_pressed_frames={} a_pressed_frames={} b_pressed_frames={}",
             self.frames_polled,
             self.left_active_frames,
             self.right_active_frames,
@@ -352,7 +354,8 @@ impl XrControllerInputSummary {
             self.max_squeeze,
             self.max_thumbstick,
             self.select_pressed_frames,
-            self.a_pressed_frames
+            self.a_pressed_frames,
+            self.b_pressed_frames
         );
         if let Some(left) = self.latest_left {
             println!("OpenXR controller latest left: {}", format_snapshot(left));
@@ -366,7 +369,7 @@ impl XrControllerInputSummary {
 #[cfg(not(target_os = "android"))]
 fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
     format!(
-        "aim={} aim_dir={} grip={} trigger={:.3} squeeze={:.3} select={} a={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
+        "aim={} aim_dir={} grip={} trigger={:.3} squeeze={:.3} select={} a={} b={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
         format_position(snapshot.aim_position),
         format_direction(snapshot.aim_direction),
         format_position(snapshot.grip_position),
@@ -374,6 +377,7 @@ fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
         snapshot.squeeze,
         snapshot.select_pressed,
         snapshot.a_pressed,
+        snapshot.b_pressed,
         snapshot.thumbstick.x,
         snapshot.thumbstick.y,
         snapshot.thumbstick_pressed

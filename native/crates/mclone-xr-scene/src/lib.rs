@@ -3081,6 +3081,7 @@ mod tests {
 
         assert_eq!(input.dt_seconds, 1.0 / 72.0);
         assert!(input.jump);
+        assert!(!input.descend);
         assert_eq!(
             input.movement_impulse,
             Some(EngineCameraMovementImpulse::new(0.0, 1.0))
@@ -3344,6 +3345,16 @@ mod tests {
 
         assert!(input.jump);
         assert!(!input.descend);
+    }
+
+    #[test]
+    fn xr_locomotion_maps_right_b_to_descend() {
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.b_pressed = true;
+        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+
+        assert!(input.descend);
+        assert!(!input.jump);
     }
 
     #[test]
@@ -4419,6 +4430,7 @@ mod tests {
             squeeze: 0.0,
             select_pressed: false,
             a_pressed,
+            b_pressed: false,
             y_pressed: false,
             thumbstick,
             thumbstick_pressed: false,
