@@ -1,14 +1,17 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 2 sparse changed-block filtering, post-filter re-rank, vanilla
-comparison scout, and publication-age source split have landed. The retained
-light path now enqueues replacement rechecks only when current opacity/emission
-facts change, cutting clean RD10/RD15 changed-block recheck time by about `90%`
-and light compute by `54-56%` while the lighting fixtures remain byte-identical.
-Fresh startup moved `26-29%`. The scout did not find a missing vanilla
-initial-light batching algorithm, and the schema v8 component rows now show the
-next implementation should be Slice 3 publication max-units derivation before a
-sky-graph hot-path probe.
+Status: Slice 3a publication max-units derivation landed after Slice 2 sparse
+changed-block filtering, the vanilla comparison scout, and the publication-age
+source split. The retained light path now enqueues replacement rechecks only
+when current opacity/emission facts change, cutting clean RD10/RD15
+changed-block recheck time by about `90%` and light compute by `54-56%` while
+the lighting fixtures remain byte-identical. The cost-derived publication cap
+then moved clean fresh startup to RD10/RD15 full view
+`5106.574ms`/`9726.067ms` and target quiescence
+`5598.029ms`/`10498.777ms`. Publication is no longer the visible limiter:
+completed-publication ages fell to about `0.8-1.0s`, while the next pressure is
+the serial light-status worker mailbox (`288` RD10 / `550` RD15 max pending
+statuses).
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -603,6 +606,35 @@ slice should enter Slice 3 and make publication family `max_units` cost-derived
 from elapsed grant / EWMA unit cost, leaving the old `4` as a cold-estimator
 floor or safety bound. A sky-graph hot-path probe should wait until the count cap
 is no longer the visible publication limiter.
+
+Slice 3a landed in `8579fb18`. `PublicationGrant` now derives actual
+`max_units` from the elapsed grant divided by the scheduler's EWMA unit cost;
+the old controller cap remains the fallback only while the estimator is cold or
+invalid. Clean RD10/RD15 rows on the same frozen-fluid, workers `1/4`, 60 Hz
+knobs reported:
+
+| Lane | Full view | Target quiescent | Delta vs split row full / target | p95 / max frame | Over / over-2x | Final feature/light grants |
+|---|---:|---:|---:|---:|---:|---:|
+| RD10 | `5106.574ms` | `5598.029ms` | `-2051.296ms` (`-28.7%`) / `-2650.733ms` (`-32.1%`) | `11.135 / 27.255ms` | `1 / 0` | `28` / `90` |
+| RD15 | `9726.067ms` | `10498.777ms` | `-4594.096ms` (`-32.1%`) / `-5217.106ms` (`-33.2%`) | `10.469 / 13.450ms` | `0 / 0` | `31` / `98` |
+
+Publication component ages after the change:
+
+| Lane | Aggregate | Runner | Worldgen publication | Light publication | Max pending worldgen pubs | Max pending light pubs | Max publish spent |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 | `790.833ms` | `279.265ms` | `995.863ms` | `0.000ms` | `67` | `0` | `10.005ms` |
+| RD15 | `832.174ms` | `331.574ms` | `993.448ms` | `0.000ms` | `98` | `0` | `10.110ms` |
+
+Interpretation: the publication valve is now using the elapsed grant instead of
+the old count cap. The final grants match the observed per-unit estimates
+(`0.345ms`/feature and `0.111ms`/light at RD10; `0.321ms`/feature and
+`0.102ms`/light at RD15), and max publication spend is now roughly the `10ms`
+grant. The RD10 single `27.255ms` frame is a watch item, but the worst-frame
+stage spans do not attribute it to publication work and RD15 stayed `0 / 0`.
+The visible queue has moved: completed light publication depth is gone, while
+the light-status worker mailbox now reaches `288` RD10 / `550` RD15 pending
+statuses. The next narrow slice should split and inspect that light-status
+mailbox/worker pressure before changing sky-graph internals.
 
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages

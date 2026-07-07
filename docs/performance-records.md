@@ -101,6 +101,62 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-07 - Tactical 153 Cost-Derived Publication Grants
+
+Commit reported by benchmark JSON: `8579fb18`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: scheduler publication grants derive `max_units` from elapsed
+grant / EWMA unit cost, with the prior count cap kept as the cold-estimator
+fallback. The lanes keep the same comparison knobs as the publication-age
+component row: explicit `render-compile-workers=1`,
+`render-compile-max-pending-jobs=4`, frozen scheduled fluids,
+`debug-passive-showcase=false`, and 60 Hz target.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 10 --startup-streaming-frames 1200 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-cost-derived-publication-rd10-fresh-frozen.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --startup-streaming-perf --render-distance 15 --startup-streaming-frames 2400 --target-hz 60 --render-compile-workers 1 --render-compile-max-pending-jobs 4 --freeze-scheduled-fluid-ticks --debug-passive-showcase false > /tmp/mclone-153-cost-derived-publication-rd15-fresh-frozen.json
+```
+
+Whole-pipeline result:
+
+| Lane | Full view | Target quiescent | Delta vs split row full / target | p95 / max frame | Over / over-2x | Compile / uploaded sections |
+|---|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `5106.574ms` | `5598.029ms` | `-2051.296ms` (`-28.7%`) / `-2650.733ms` (`-32.1%`) | `11.135 / 27.255ms` | `1 / 0` | `7136 / 2167` |
+| RD15 fresh frozen | `9726.067ms` | `10498.777ms` | `-4594.096ms` (`-32.1%`) / `-5217.106ms` (`-33.2%`) | `10.469 / 13.450ms` | `0 / 0` | `15376 / 4819` |
+
+Publication split:
+
+| Lane | Aggregate publication age | Runner age | Worldgen publication age | Light publication age | Max pending worldgen pubs | Max pending light pubs | Max publish spent |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `790.833ms` | `279.265ms` | `995.863ms` | `0.000ms` | `67` | `0` | `10.005ms` |
+| RD15 fresh frozen | `832.174ms` | `331.574ms` | `993.448ms` | `0.000ms` | `98` | `0` | `10.110ms` |
+
+Peer-stage context:
+
+| Lane | Server runner busy | Worldgen busy | Light busy | Max worldgen mailbox | Max light mailbox | Render compile queue age |
+|---|---:|---:|---:|---:|---:|---:|
+| RD10 fresh frozen | `14708.647ms` | `1997.815ms` | `5448.036ms` | `1` | `288` | `24.008ms` |
+| RD15 fresh frozen | `31711.246ms` | `4023.459ms` | `10417.600ms` | `1` | `550` | `23.913ms` |
+
+Final grants and EWMA estimates:
+
+| Lane | Feature grant / EWMA | Light grant / EWMA |
+|---|---:|---:|
+| RD10 fresh frozen | `28` units / `0.345ms` | `90` units / `0.111ms` |
+| RD15 fresh frozen | `31` units / `0.321ms` | `98` units / `0.102ms` |
+
+Interpretation: the fixed `4` unit cap was a real limiter. Once publication
+uses the elapsed grant, RD10/RD15 full-view and quiescent times improve by about
+`29-33%` against the publication-split baseline. Publication queues no longer
+hold completed light statuses, and max worldgen-publication age drops to about
+`1s`. The new visible limiter is worker-side light-status backlog (`288`/`550`
+max pending statuses), not completed publication. RD10 has one `27.255ms`
+over-budget frame to watch; RD15 stayed clean, and the RD10 worst-frame spans do
+not attribute the spike to publication work.
+
 ### 2026-07-07 - Tactical 153 Publication-Age Component Decision Row
 
 Commit reported by benchmark JSON: `bf4025a5`, `git_dirty=false`,
