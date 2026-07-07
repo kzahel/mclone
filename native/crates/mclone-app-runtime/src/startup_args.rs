@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use mclone_frame_budget::RenderCompileCapacityReport;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::RenderColorProfile;
 use mclone_render_session::{
@@ -18,6 +19,7 @@ pub const ARG_CHUNK_Z: &str = "--chunk-z";
 pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
 pub const ARG_RENDER_COMPILE_WORKERS: &str = "--render-compile-workers";
 pub const ARG_RENDER_COMPILE_MAX_PENDING_JOBS: &str = "--render-compile-max-pending-jobs";
+pub const ARG_RENDER_COMPILE_CAPACITY: &str = "--render-compile-capacity";
 pub const ARG_REMOTE_ADDR: &str = "--remote-addr";
 pub const ARG_WORLD_DIR: &str = "--world-dir";
 pub const ARG_WORLD_ROOT: &str = "--world-root";
@@ -33,12 +35,40 @@ pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
 pub const ARG_SCREENSHOT_EYE: &str = "--screenshot-eye";
 pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
 
+// Shared startup flags are engine/session policy or scene-description inputs.
+// App parsers should delegate these to `StartupArgState`; platform-local flags
+// need an explicit local registry entry in the app crate.
+pub const STARTUP_ARG_FLAGS: &[&str] = &[
+    ARG_SEED,
+    ARG_CHUNK_X,
+    ARG_CHUNK_Z,
+    ARG_RENDER_DISTANCE,
+    ARG_RENDER_COMPILE_WORKERS,
+    ARG_RENDER_COMPILE_MAX_PENDING_JOBS,
+    ARG_RENDER_COMPILE_CAPACITY,
+    ARG_REMOTE_ADDR,
+    ARG_WORLD_DIR,
+    ARG_WORLD_ROOT,
+    ARG_TRANSIENT,
+    ARG_DAY_TIME,
+    ARG_FREEZE_TIME,
+    ARG_MOVEMENT_SPEED_MULTIPLIER,
+    ARG_DEBUG_PASSIVE_SHOWCASE,
+    ARG_LIGHTING,
+    ARG_SECTION_OCCLUSION,
+    ARG_FULLBRIGHT,
+    ARG_RENDER_COLOR_PROFILE,
+    ARG_SCREENSHOT_EYE,
+    ARG_SCREENSHOT_TARGET,
+];
+
 pub const QUERY_SEED: &str = "seed";
 pub const QUERY_CHUNK_X: &str = "chunkX";
 pub const QUERY_CHUNK_Z: &str = "chunkZ";
 pub const QUERY_RENDER_DISTANCE: &str = "renderDistance";
 pub const QUERY_RENDER_COMPILE_WORKERS: &str = "renderCompileWorkers";
 pub const QUERY_RENDER_COMPILE_MAX_PENDING_JOBS: &str = "renderCompileMaxPendingJobs";
+pub const QUERY_RENDER_COMPILE_CAPACITY: &str = "renderCompileCapacity";
 pub const QUERY_REMOTE_WS_URL: &str = "remoteWsUrl";
 pub const QUERY_DAY_TIME: &str = "dayTime";
 pub const QUERY_FREEZE_TIME: &str = "freezeTime";
@@ -58,6 +88,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_RENDER_DISTANCE,
     QUERY_RENDER_COMPILE_WORKERS,
     QUERY_RENDER_COMPILE_MAX_PENDING_JOBS,
+    QUERY_RENDER_COMPILE_CAPACITY,
     QUERY_REMOTE_WS_URL,
     QUERY_DAY_TIME,
     QUERY_FREEZE_TIME,
@@ -96,6 +127,7 @@ pub struct StartupSceneOptions {
     pub render_distance: u32,
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
+    pub render_compile_capacity_request: RenderCompileCapacityRequest,
     pub remote_addr: Option<String>,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
@@ -113,6 +145,7 @@ impl Default for StartupSceneOptions {
             render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
+            render_compile_capacity_request: RenderCompileCapacityRequest::Default,
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
@@ -161,6 +194,8 @@ pub struct StartupArgState {
     render_options: TexturedSectionRenderOptions,
     camera: StartupCameraOptions,
     fullbright_explicit: bool,
+    render_compile_worker_count_explicit: bool,
+    render_compile_max_pending_jobs_explicit: bool,
 }
 
 impl StartupArgState {
@@ -171,6 +206,36 @@ impl StartupArgState {
             render_options,
             camera: StartupCameraOptions::default(),
             fullbright_explicit: false,
+            render_compile_worker_count_explicit: false,
+            render_compile_max_pending_jobs_explicit: false,
+        }
+    }
+
+    pub const fn scene(&self) -> &StartupSceneOptions {
+        &self.scene
+    }
+
+    pub const fn render_compile_worker_count_explicit(&self) -> bool {
+        self.render_compile_worker_count_explicit
+    }
+
+    pub const fn render_compile_max_pending_jobs_explicit(&self) -> bool {
+        self.render_compile_max_pending_jobs_explicit
+    }
+
+    pub const fn has_manual_render_compile_capacity_fields(&self) -> bool {
+        self.render_compile_worker_count_explicit || self.render_compile_max_pending_jobs_explicit
+    }
+
+    pub fn apply_render_compile_capacity_report(&mut self, report: &RenderCompileCapacityReport) {
+        if self.scene.render_compile_capacity_request != RenderCompileCapacityRequest::Derived {
+            return;
+        }
+        if !self.render_compile_worker_count_explicit {
+            self.scene.render_compile_worker_count = report.derived_worker_count;
+        }
+        if !self.render_compile_max_pending_jobs_explicit {
+            self.scene.render_compile_max_pending_jobs = Some(report.derived_max_pending_jobs);
         }
     }
 
@@ -200,6 +265,7 @@ impl StartupArgState {
             ARG_RENDER_COMPILE_WORKERS => {
                 self.scene.render_compile_worker_count =
                     parse_render_compile_worker_count_arg(ARG_RENDER_COMPILE_WORKERS, args.next())?;
+                self.render_compile_worker_count_explicit = true;
             }
             ARG_RENDER_COMPILE_MAX_PENDING_JOBS => {
                 self.scene.render_compile_max_pending_jobs =
@@ -207,6 +273,11 @@ impl StartupArgState {
                         ARG_RENDER_COMPILE_MAX_PENDING_JOBS,
                         args.next(),
                     )?);
+                self.render_compile_max_pending_jobs_explicit = true;
+            }
+            ARG_RENDER_COMPILE_CAPACITY => {
+                self.scene.render_compile_capacity_request =
+                    parse_render_compile_capacity_arg(ARG_RENDER_COMPILE_CAPACITY, args.next())?;
             }
             ARG_REMOTE_ADDR => {
                 self.scene.remote_addr = parse_remote_addr_arg(args.next())?;
@@ -310,6 +381,7 @@ impl StartupArgState {
             QUERY_RENDER_COMPILE_WORKERS => {
                 self.scene.render_compile_worker_count =
                     parse_render_compile_worker_count_arg(QUERY_RENDER_COMPILE_WORKERS, value)?;
+                self.render_compile_worker_count_explicit = true;
             }
             QUERY_RENDER_COMPILE_MAX_PENDING_JOBS => {
                 self.scene.render_compile_max_pending_jobs =
@@ -317,6 +389,11 @@ impl StartupArgState {
                         QUERY_RENDER_COMPILE_MAX_PENDING_JOBS,
                         value,
                     )?);
+                self.render_compile_max_pending_jobs_explicit = true;
+            }
+            QUERY_RENDER_COMPILE_CAPACITY => {
+                self.scene.render_compile_capacity_request =
+                    parse_render_compile_capacity_arg(QUERY_RENDER_COMPILE_CAPACITY, value)?;
             }
             QUERY_REMOTE_WS_URL => {
                 self.scene.remote_addr = parse_remote_addr_value(QUERY_REMOTE_WS_URL, value)?;
@@ -485,6 +562,25 @@ pub fn parse_render_compile_worker_count_arg(flag: &str, value: Option<String>) 
     usize::try_from(parsed).with_context(|| format!("{flag} value does not fit usize"))
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RenderCompileCapacityRequest {
+    #[default]
+    Default,
+    Derived,
+}
+
+pub fn parse_render_compile_capacity_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<RenderCompileCapacityRequest> {
+    let value = value.with_context(|| format!("{flag} requires default or derived"))?;
+    match value.as_str() {
+        "default" | "off" | "false" => Ok(RenderCompileCapacityRequest::Default),
+        "derived" | "auto" | "on" | "true" => Ok(RenderCompileCapacityRequest::Derived),
+        _ => bail!("{flag} must be default or derived, got `{value}`"),
+    }
+}
+
 pub fn parse_movement_speed_multiplier_arg(flag: &str, value: Option<String>) -> Result<f32> {
     let parsed = parse_f32_arg(flag, value)?;
     let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
@@ -549,6 +645,7 @@ mod tests {
                 render_compile_max_pending_jobs: Some(
                     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
                 ),
+                render_compile_capacity_request: RenderCompileCapacityRequest::Default,
                 remote_addr: None,
                 day_time_override: None,
                 freeze_time: false,
@@ -586,6 +683,8 @@ mod tests {
             "2",
             ARG_RENDER_COMPILE_MAX_PENDING_JOBS,
             "6",
+            ARG_RENDER_COMPILE_CAPACITY,
+            "derived",
             ARG_DAY_TIME,
             "6000",
             ARG_FREEZE_TIME,
@@ -609,6 +708,7 @@ mod tests {
                 render_distance: 5,
                 render_compile_worker_count: 2,
                 render_compile_max_pending_jobs: Some(6),
+                render_compile_capacity_request: RenderCompileCapacityRequest::Derived,
                 remote_addr: Some("127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,
@@ -741,6 +841,7 @@ mod tests {
             (QUERY_RENDER_DISTANCE, "6"),
             (QUERY_RENDER_COMPILE_WORKERS, "3"),
             (QUERY_RENDER_COMPILE_MAX_PENDING_JOBS, "5"),
+            (QUERY_RENDER_COMPILE_CAPACITY, "derived"),
             (QUERY_REMOTE_WS_URL, "ws://127.0.0.1:25565"),
             (QUERY_DAY_TIME, "6000"),
             (QUERY_FREEZE_TIME, ""),
@@ -775,6 +876,7 @@ mod tests {
                 render_distance: 6,
                 render_compile_worker_count: 3,
                 render_compile_max_pending_jobs: Some(5),
+                render_compile_capacity_request: RenderCompileCapacityRequest::Derived,
                 remote_addr: Some("ws://127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,
@@ -826,6 +928,52 @@ mod tests {
             err.to_string().contains("must be greater than zero"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn applies_derived_render_compile_capacity_without_clobbering_manual_fields() {
+        let report = RenderCompileCapacityReport {
+            available_parallelism: Some(16),
+            reserved_parallelism: 4,
+            usable_parallelism: Some(12),
+            cpu_worker_cap: 7,
+            cpu_pack_cap: Some(16),
+            total_memory_bytes: Some(64 * 1024 * 1024 * 1024),
+            memory_budget_fraction: 0.3,
+            memory_budget_bytes: Some(19 * 1024 * 1024 * 1024),
+            mesh_footprint: Default::default(),
+            mesh_buffer_pack_bytes: Some(16 * 1024 * 1024),
+            memory_pack_cap: Some(300),
+            worker_floor: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            max_pending_floor: DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
+            derived_worker_count: 7,
+            derived_max_pending_jobs: 14,
+            fallback_reason: None,
+        };
+
+        let mut state = StartupArgState::default();
+        let mut args = [
+            ARG_RENDER_COMPILE_CAPACITY,
+            "derived",
+            ARG_RENDER_COMPILE_WORKERS,
+            "2",
+        ]
+        .into_iter()
+        .map(str::to_owned);
+        while let Some(arg) = args.next() {
+            assert!(
+                state
+                    .parse_next_arg(&arg, &mut args, RenderDistanceLimits::new(1, 16))
+                    .unwrap()
+            );
+        }
+
+        assert!(state.render_compile_worker_count_explicit());
+        assert!(!state.render_compile_max_pending_jobs_explicit());
+        state.apply_render_compile_capacity_report(&report);
+        let scene = state.finish().scene;
+        assert_eq!(scene.render_compile_worker_count, 2);
+        assert_eq!(scene.render_compile_max_pending_jobs, Some(14));
     }
 
     #[test]

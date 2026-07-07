@@ -137,6 +137,8 @@ Options:
                      Add --render-compile-workers N to startup argv.
   --render-compile-max-pending-jobs N
                      Add --render-compile-max-pending-jobs N to startup argv.
+  --render-compile-capacity default|derived
+                     Add --render-compile-capacity MODE to startup argv.
   --movement-speed-multiplier N
                      Add --movement-speed-multiplier N to startup argv.
   --day-time T       Add --day-time T to startup argv.
@@ -549,7 +551,7 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--render-compile-max-pending-jobs|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--adaptive-chunk-publication-budget|--world-dir|--world-root)
+        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--render-compile-max-pending-jobs|--render-compile-capacity|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--adaptive-chunk-publication-budget|--world-dir|--world-root)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2

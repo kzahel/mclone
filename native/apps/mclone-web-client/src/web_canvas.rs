@@ -25,12 +25,17 @@ use mclone_app_runtime::client_session_policy::{
     client_session_start_transition, client_session_status_projection,
     client_session_ui_effects_for_request,
 };
+use mclone_app_runtime::render_compile_capacity::{
+    RenderCompileCapacityHostKind, host_total_memory_bytes,
+    preflight_render_compile_capacity_report,
+};
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
     SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
 };
 use mclone_app_runtime::startup_args::{
-    RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState, StartupOptions, StartupSceneOptions,
+    RenderCompileCapacityRequest, RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState,
+    StartupOptions, StartupSceneOptions,
 };
 use mclone_app_runtime::world_catalog::{
     LOCAL_WORLD_CATALOG_SCHEMA_VERSION, LOCAL_WORLD_TARGET_MINECRAFT_VERSION,
@@ -5674,6 +5679,20 @@ fn parse_startup_options_from_query(search: &str) -> Result<StartupOptions, JsVa
                 .parse_query_param(key, params.get(key), web_render_distance_limits())
                 .map_err(|error| JsValue::from_str(&format!("{error:#}")))?;
         }
+    }
+    if state.scene().render_compile_capacity_request == RenderCompileCapacityRequest::Derived
+        && state.scene().remote_addr.is_some()
+    {
+        return Err(JsValue::from_str(
+            "--render-compile-capacity derived applies only to local integrated worlds",
+        ));
+    }
+    if state.scene().render_compile_capacity_request == RenderCompileCapacityRequest::Derived {
+        let report = preflight_render_compile_capacity_report(
+            RenderCompileCapacityHostKind::Flat,
+            host_total_memory_bytes(),
+        );
+        state.apply_render_compile_capacity_report(&report);
     }
     Ok(state.finish())
 }

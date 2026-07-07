@@ -1,4 +1,54 @@
 use super::*;
+use crate::cli::DESKTOP_LOCAL_ARG_FLAGS;
+use std::collections::BTreeSet;
+
+fn collect_cli_source_flags(source: &str) -> BTreeSet<String> {
+    let mut flags = BTreeSet::new();
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while let Some(offset) = source[index..].find("--") {
+        let start = index + offset;
+        let mut end = start + 2;
+        while end < bytes.len() {
+            let byte = bytes[end];
+            if byte.is_ascii_alphanumeric() || byte == b'-' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        if end > start + 2 {
+            flags.insert(source[start..end].to_owned());
+        }
+        index = end.max(start + 2);
+    }
+    flags
+}
+
+#[test]
+fn desktop_cli_flags_are_classified_as_shared_or_desktop_local() {
+    let shared = mclone_app_runtime::startup_args::STARTUP_ARG_FLAGS
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let desktop_local = DESKTOP_LOCAL_ARG_FLAGS
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert!(
+        shared.is_disjoint(&desktop_local),
+        "desktop-local flags must not duplicate shared startup flags"
+    );
+
+    let unclassified = collect_cli_source_flags(include_str!("../cli.rs"))
+        .into_iter()
+        .filter(|flag| !shared.contains(flag.as_str()) && !desktop_local.contains(flag.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        unclassified.is_empty(),
+        "classify desktop CLI flags as shared startup or desktop-local: {unclassified:?}"
+    );
+}
 
 #[test]
 fn cli_defaults_to_window() {

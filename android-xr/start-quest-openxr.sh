@@ -35,6 +35,8 @@ Common delegated install options:
                  Connect to a remote dedicated server.
   --render-compile-workers N
                  Set native render compile worker count for terrain meshing.
+  --render-compile-capacity default|derived
+                 Set native render compile worker capacity mode.
 
 All other options are forwarded to android-xr/install-quest-openxr.sh.
 

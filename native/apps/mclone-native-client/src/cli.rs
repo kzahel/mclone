@@ -7,8 +7,8 @@ use mclone_app_runtime::render_assets::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
 };
 use mclone_app_runtime::startup_args::{
-    RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_bool_arg, parse_i32_arg,
-    parse_render_compile_worker_count_arg, parse_u32_arg, parse_u64_arg,
+    RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupSceneOptions,
+    parse_bool_arg, parse_i32_arg, parse_u32_arg, parse_u64_arg,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render_session::{ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, EngineCameraViewMode};
@@ -41,6 +41,76 @@ const MAX_XR_SMOKE_FRAMES: u32 = 4096;
 const MAX_SIMULATION_CADENCE_RATE_HZ: u32 = 240;
 const DEFAULT_WINDOW_FRAME_REPORT_FRAMES: usize = 3600;
 const MAX_WINDOW_FRAME_REPORT_FRAMES: usize = 72000;
+
+// Desktop-owned flags must be mode selection, file paths, window/headless
+// harness options, or desktop/XR validation glue. Engine/session startup
+// policy belongs in `mclone-app-runtime::startup_args::STARTUP_ARG_FLAGS`.
+// The source-scan test fails when a new double-dash flag appears in this file without
+// being classified in either shared startup or this desktop-local registry.
+pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
+    "--actor-review-sheet",
+    "--actor-walk-review",
+    "--actor-walk-review-video",
+    "--adaptive-chunk-publication-budget",
+    "--adaptive-render-admission-budget",
+    "--cadence",
+    "--far-lod",
+    "--first-person-player",
+    "--frame-accounting",
+    "--frame-budget-frames",
+    "--frame-budget-probe",
+    "--frames",
+    "--freeze-scheduled-fluid-ticks",
+    "--headless-clear",
+    "--headless-dual-view",
+    "--height",
+    "--help",
+    "--loading-settle-distances",
+    "--loading-settle-perf",
+    "--menu",
+    "--movement-frame-probe",
+    "--movement-frame-speed",
+    "--movement-perf",
+    "--movement-steps",
+    "--path-radius",
+    "--rebuild-render-scale",
+    "--remote-player-visual-smoke",
+    "--render-compile-worker-timing",
+    "--renderer-rebuild-smoke",
+    "--screenshot",
+    "--screenshot-blink-debug",
+    "--screenshot-camera-view",
+    "--screenshot-debug-pane",
+    "--screenshot-frame-pipeline-overlay",
+    "--screenshot-hud",
+    "--screenshot-player-box",
+    "--screenshot-remote-settle-ms",
+    "--screenshot-scripted-interaction",
+    "--screenshot-ui",
+    "--settle-distances",
+    "--simulation-cadence",
+    "--start-in-world",
+    "--startup-streaming-frames",
+    "--startup-streaming-perf",
+    "--startup-streaming-persisted-world",
+    "--startup-wait",
+    "--target-hz",
+    "--timedemo",
+    "--timedemo-frames",
+    "--torch-light-probe",
+    "--view-pose",
+    "--walk-review-cycles",
+    "--walk-review-fps",
+    "--walk-review-frames",
+    "--width",
+    "--window-frame-report",
+    "--window-frame-report-frames",
+    "--xr-clear-smoke",
+    "--xr-debug-ui",
+    "--xr-forever",
+    "--xr-mclone-smoke",
+    "--xr-underwater-mode",
+];
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SceneOptions {
@@ -92,13 +162,6 @@ impl RenderCompileCapacityMode {
             Self::DerivedApplied => "derivedApplied",
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum RenderCompileCapacityRequest {
-    #[default]
-    Default,
-    Derived,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -419,6 +482,13 @@ impl SceneOptions {
                 .expect("desktop default render distance is non-negative"),
             render_compile_worker_count: self.render_compile_worker_count,
             render_compile_max_pending_jobs: self.render_compile_max_pending_jobs,
+            render_compile_capacity_request: if self.render_compile_capacity_mode
+                == RenderCompileCapacityMode::DerivedApplied
+            {
+                RenderCompileCapacityRequest::Derived
+            } else {
+                RenderCompileCapacityRequest::Default
+            },
             remote_addr: self.remote_addr.clone(),
             day_time_override: self.day_time_override,
             freeze_time: self.freeze_time,
@@ -591,9 +661,6 @@ impl Cli {
         let mut far_lod = FarTerrainLodConfig::default();
         let mut adaptive_chunk_publication_budget = None;
         let mut adaptive_render_admission_budget = None;
-        let mut render_compile_capacity_request = RenderCompileCapacityRequest::Default;
-        let mut render_compile_worker_count = None;
-        let mut render_compile_max_pending_jobs = None;
         let mut render_compile_worker_timing_enabled = None;
         let mut args = args.into_iter();
 
@@ -955,19 +1022,6 @@ impl Cli {
                         args.next(),
                     )?);
                 }
-                "--render-compile-capacity" => {
-                    render_compile_capacity_request =
-                        parse_render_compile_capacity_arg(&arg, args.next())?;
-                }
-                "--render-compile-workers" => {
-                    render_compile_worker_count =
-                        Some(parse_render_compile_worker_count_arg(&arg, args.next())?);
-                }
-                "--render-compile-max-pending-jobs" => {
-                    render_compile_max_pending_jobs = Some(
-                        parse_render_compile_max_pending_jobs_arg(&arg, args.next())?,
-                    );
-                }
                 "--render-compile-worker-timing" => {
                     render_compile_worker_timing_enabled = Some(parse_bool_arg(
                         "--render-compile-worker-timing",
@@ -1146,6 +1200,28 @@ impl Cli {
         {
             bail!("--startup-wait applies to window mode and --screenshot");
         }
+        let render_compile_capacity_request = startup_args.scene().render_compile_capacity_request;
+        let render_compile_capacity_manual_fields =
+            startup_args.has_manual_render_compile_capacity_fields();
+        if matches!(
+            render_compile_capacity_request,
+            RenderCompileCapacityRequest::Derived
+        ) && startup_args.scene().remote_addr.is_some()
+        {
+            bail!("--render-compile-capacity derived applies only to local integrated worlds");
+        }
+        if matches!(
+            render_compile_capacity_request,
+            RenderCompileCapacityRequest::Derived
+        ) {
+            let host_kind = if xr_mclone_smoke {
+                RenderCompileCapacityHostKind::Xr
+            } else {
+                RenderCompileCapacityHostKind::Flat
+            };
+            let report = preflight_render_compile_capacity_report(host_kind);
+            startup_args.apply_render_compile_capacity_report(&report);
+        }
         let startup_options = startup_args.finish();
         let startup_camera = startup_options.camera;
         let startup_storage = startup_options.storage;
@@ -1160,33 +1236,9 @@ impl Cli {
             render_compile_capacity_request,
             RenderCompileCapacityRequest::Derived
         ) {
-            let host_kind = if xr_mclone_smoke {
-                RenderCompileCapacityHostKind::Xr
-            } else {
-                RenderCompileCapacityHostKind::Flat
-            };
-            let report = preflight_render_compile_capacity_report(host_kind);
-            scene.render_compile_worker_count = report.derived_worker_count;
-            scene.render_compile_max_pending_jobs = Some(report.derived_max_pending_jobs);
             scene.render_compile_capacity_mode = RenderCompileCapacityMode::DerivedApplied;
-        }
-        if let Some(worker_count) = render_compile_worker_count {
-            scene.render_compile_worker_count = worker_count;
-            if !matches!(
-                scene.render_compile_capacity_mode,
-                RenderCompileCapacityMode::DerivedApplied
-            ) {
-                scene.render_compile_capacity_mode = RenderCompileCapacityMode::Manual;
-            }
-        }
-        if let Some(max_pending_jobs) = render_compile_max_pending_jobs {
-            scene.render_compile_max_pending_jobs = Some(max_pending_jobs);
-            if !matches!(
-                scene.render_compile_capacity_mode,
-                RenderCompileCapacityMode::DerivedApplied
-            ) {
-                scene.render_compile_capacity_mode = RenderCompileCapacityMode::Manual;
-            }
+        } else if render_compile_capacity_manual_fields {
+            scene.render_compile_capacity_mode = RenderCompileCapacityMode::Manual;
         }
         if let Some(enabled) = render_compile_worker_timing_enabled {
             scene.render_compile_worker_timing_enabled = enabled;
@@ -1208,13 +1260,6 @@ impl Cli {
         }
         if scene.adaptive_render_admission_budget && scene.remote_addr.is_some() {
             bail!("--adaptive-render-admission-budget applies only to local integrated worlds");
-        }
-        if matches!(
-            render_compile_capacity_request,
-            RenderCompileCapacityRequest::Derived
-        ) && scene.remote_addr.is_some()
-        {
-            bail!("--render-compile-capacity derived applies only to local integrated worlds");
         }
         if scene.world_dir.is_some() && scene.remote_addr.is_some() {
             bail!("--world-dir applies only to local integrated worlds");
@@ -1530,29 +1575,6 @@ fn parse_startup_streaming_frames_arg(flag: &str, value: Option<String>) -> Resu
         bail!("{flag} must be between 1 and {MAX_STARTUP_STREAMING_PERF_FRAMES}");
     }
     Ok(parsed)
-}
-
-fn parse_render_compile_max_pending_jobs_arg(flag: &str, value: Option<String>) -> Result<usize> {
-    let value = value.with_context(|| format!("{flag} requires a value"))?;
-    let parsed = value
-        .parse::<usize>()
-        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
-    if parsed == 0 {
-        bail!("{flag} must be greater than zero");
-    }
-    Ok(parsed)
-}
-
-fn parse_render_compile_capacity_arg(
-    flag: &str,
-    value: Option<String>,
-) -> Result<RenderCompileCapacityRequest> {
-    let value = value.with_context(|| format!("{flag} requires default or derived"))?;
-    match value.as_str() {
-        "default" | "off" | "false" => Ok(RenderCompileCapacityRequest::Default),
-        "derived" | "auto" | "on" | "true" => Ok(RenderCompileCapacityRequest::Derived),
-        _ => bail!("{flag} must be default or derived, got `{value}`"),
-    }
 }
 
 fn parse_actor_walk_review_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {

@@ -42,12 +42,16 @@ mod android {
         DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
         load_asset_source,
     };
+    use mclone_app_runtime::render_compile_capacity::{
+        RenderCompileCapacityHostKind, host_total_memory_bytes,
+        preflight_render_compile_capacity_report,
+    };
     use mclone_app_runtime::session::{
         ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
     };
     use mclone_app_runtime::startup_args::{
-        RenderDistanceLimits, StartupArgState, StartupCameraOptions, StartupSceneOptions,
-        StartupWorldStorageOptions,
+        RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupCameraOptions,
+        StartupSceneOptions, StartupWorldStorageOptions,
     };
     use mclone_app_runtime::world_catalog::{
         LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
@@ -2245,6 +2249,21 @@ mod android {
                 bail!("unsupported Android startup argument `{arg}`");
             }
         }
+        if shared_args.scene().render_compile_capacity_request
+            == RenderCompileCapacityRequest::Derived
+            && shared_args.scene().remote_addr.is_some()
+        {
+            bail!("--render-compile-capacity derived applies only to local integrated worlds");
+        }
+        if shared_args.scene().render_compile_capacity_request
+            == RenderCompileCapacityRequest::Derived
+        {
+            let report = preflight_render_compile_capacity_report(
+                RenderCompileCapacityHostKind::Flat,
+                host_total_memory_bytes(),
+            );
+            shared_args.apply_render_compile_capacity_report(&report);
+        }
         let options = shared_args.finish();
         if options.storage != StartupWorldStorageOptions::default() {
             bail!("Android startup storage arguments are not supported");
@@ -2264,6 +2283,7 @@ mod android {
             render_distance: 5,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
+            render_compile_capacity_request: Default::default(),
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             remote_addr: None,
             day_time_override: Some(6000),

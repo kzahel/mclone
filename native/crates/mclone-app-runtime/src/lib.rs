@@ -11,6 +11,7 @@ pub mod host_mode;
 pub mod local_single_view;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod render_assets;
+pub mod render_compile_capacity;
 pub mod session;
 pub mod startup_args;
 pub mod world_catalog;

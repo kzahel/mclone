@@ -1,59 +1,22 @@
-use mclone_frame_budget::{
-    RenderCompileCapacityInput, RenderCompileCapacityReport, RenderCompileMeshFootprint,
-    RenderCompileThreadReservation, derive_render_compile_capacity,
+use mclone_app_runtime::render_compile_capacity::{
+    preflight_render_compile_capacity_report as shared_preflight_report,
+    render_compile_capacity_report as shared_capacity_report,
 };
+use mclone_frame_budget::{RenderCompileCapacityReport, RenderCompileMeshFootprint};
 
-// Applied mode runs before any frame can report its measured mesh footprint.
-// Keep this above the measured RD10 pack size so memory only binds on small hosts.
-const PREFLIGHT_RENDER_COMPILE_PACK_BYTES: u64 = 16 * 1024 * 1024;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RenderCompileCapacityHostKind {
-    Flat,
-    Xr,
-}
-
-impl RenderCompileCapacityHostKind {
-    const fn reservation(self) -> RenderCompileThreadReservation {
-        match self {
-            Self::Flat => RenderCompileThreadReservation::local_integrated_flat(),
-            Self::Xr => RenderCompileThreadReservation::local_integrated_xr(),
-        }
-    }
-}
+pub(crate) use mclone_app_runtime::render_compile_capacity::RenderCompileCapacityHostKind;
 
 pub(crate) fn preflight_render_compile_capacity_report(
     host_kind: RenderCompileCapacityHostKind,
 ) -> RenderCompileCapacityReport {
-    render_compile_capacity_report(host_kind, preflight_render_compile_mesh_footprint())
+    shared_preflight_report(host_kind, host_total_memory_bytes())
 }
 
 pub(crate) fn render_compile_capacity_report(
     host_kind: RenderCompileCapacityHostKind,
     mesh_footprint: RenderCompileMeshFootprint,
 ) -> RenderCompileCapacityReport {
-    derive_render_compile_capacity(
-        RenderCompileCapacityInput::new(
-            std::thread::available_parallelism()
-                .ok()
-                .map(|value| value.get()),
-            host_total_memory_bytes(),
-            host_kind.reservation(),
-            mesh_footprint,
-        )
-        .with_floors(
-            mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
-        ),
-    )
-}
-
-fn preflight_render_compile_mesh_footprint() -> RenderCompileMeshFootprint {
-    RenderCompileMeshFootprint {
-        compile_request_bytes: Some(PREFLIGHT_RENDER_COMPILE_PACK_BYTES),
-        mesh_vertex_bytes: None,
-        mesh_index_bytes: None,
-    }
+    shared_capacity_report(host_kind, host_total_memory_bytes(), mesh_footprint)
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]

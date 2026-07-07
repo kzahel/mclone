@@ -31,6 +31,9 @@ serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
+[dev-dependencies]
+mclone-app-runtime.workspace = true
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 name = "mclone_android_xr_client"

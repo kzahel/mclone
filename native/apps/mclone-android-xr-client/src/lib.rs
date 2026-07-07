@@ -1,7 +1,49 @@
 #![deny(unsafe_code)]
 
+#[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
 const ANDROID_REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
 
+// Android XR-owned startup flags are OpenXR session/perf harness controls.
+// Shared scene/session policy flags must stay in `StartupArgState`.
+#[cfg(test)]
+const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
+    "--adaptive-chunk-publication-budget",
+    "--frame-accounting",
+    "--multiview-proof",
+    "--perf-chunk-view-churn",
+    "--perf-churn-interval-seconds",
+    "--perf-churn-offset-chunks",
+    "--perf-flight",
+    "--perf-flight-speed",
+    "--perf-frozen-render",
+    "--perf-metrics",
+    "--perf-metrics-periodic",
+    "--perf-orbit-speed",
+    "--perf-seconds",
+    "--perf-settled-orbit",
+    "--perf-settled-stationary",
+    "--session-smoke",
+    "--sky-terrain-actors-multiview-perf",
+    "--sky-terrain-multiview-perf",
+    "--terrain-multiview-perf",
+    "--terrain-multiview-proof",
+    "--xr-debug-ui",
+    "--xr-display-refresh-rate",
+    "--xr-foveation",
+    "--xr-frame-overlap",
+    "--xr-frame-serial",
+    "--xr-full-frame-multiview",
+    "--xr-overlap-eye-submits",
+    "--xr-overlap-runtime-prefetch",
+    "--xr-render-completed-result-accept-budget",
+    "--xr-render-scale",
+    "--xr-render-section-accept-budget",
+    "--xr-render-section-upload-budget",
+    "--xr-skip-actors",
+    "--xr-underwater-mode",
+];
+
+#[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
 fn normalize_android_legacy_remote_addr(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty() || value == ANDROID_REMOTE_ADDR_NONE_SENTINEL {
@@ -39,10 +81,14 @@ mod android {
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
     };
+    use mclone_app_runtime::render_compile_capacity::{
+        RenderCompileCapacityHostKind, host_total_memory_bytes,
+        preflight_render_compile_capacity_report,
+    };
     use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
     use mclone_app_runtime::startup_args::{
-        RenderDistanceLimits, StartupArgState, StartupSceneOptions, StartupWorldStorageOptions,
-        parse_bool_arg, parse_string_arg,
+        RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupSceneOptions,
+        StartupWorldStorageOptions, parse_bool_arg, parse_string_arg,
     };
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
@@ -705,6 +751,21 @@ mod android {
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
+        if shared_args.scene().render_compile_capacity_request
+            == RenderCompileCapacityRequest::Derived
+            && shared_args.scene().remote_addr.is_some()
+        {
+            bail!("--render-compile-capacity derived applies only to local integrated worlds");
+        }
+        if shared_args.scene().render_compile_capacity_request
+            == RenderCompileCapacityRequest::Derived
+        {
+            let report = preflight_render_compile_capacity_report(
+                RenderCompileCapacityHostKind::Xr,
+                host_total_memory_bytes(),
+            );
+            shared_args.apply_render_compile_capacity_report(&report);
+        }
         let shared_options = shared_args.finish();
         options.remote_addr = shared_options.scene.remote_addr.clone();
         options.default_world_root_enabled =
@@ -890,6 +951,7 @@ mod android {
             render_distance: scene.render_distance,
             render_compile_worker_count: scene.render_compile_worker_count,
             render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
+            render_compile_capacity_request: Default::default(),
             movement_speed_multiplier: scene.movement_speed_multiplier,
             remote_addr: None,
             day_time_override: scene.day_time_override,
@@ -7372,7 +7434,60 @@ pub fn host_placeholder() {}
 
 #[cfg(test)]
 mod tests {
-    use super::{ANDROID_REMOTE_ADDR_NONE_SENTINEL, normalize_android_legacy_remote_addr};
+    use std::collections::BTreeSet;
+
+    use super::{
+        ANDROID_REMOTE_ADDR_NONE_SENTINEL, ANDROID_XR_LOCAL_ARG_FLAGS,
+        normalize_android_legacy_remote_addr,
+    };
+
+    fn collect_source_flags(source: &str) -> BTreeSet<String> {
+        let mut flags = BTreeSet::new();
+        let bytes = source.as_bytes();
+        let mut index = 0;
+        while let Some(offset) = source[index..].find("--") {
+            let start = index + offset;
+            let mut end = start + 2;
+            while end < bytes.len() {
+                let byte = bytes[end];
+                if byte.is_ascii_alphanumeric() || byte == b'-' {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            if end > start + 2 {
+                flags.insert(source[start..end].to_owned());
+            }
+            index = end.max(start + 2);
+        }
+        flags
+    }
+
+    #[test]
+    fn android_xr_startup_flags_are_classified_as_shared_or_xr_local() {
+        let shared = mclone_app_runtime::startup_args::STARTUP_ARG_FLAGS
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let xr_local = ANDROID_XR_LOCAL_ARG_FLAGS
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        assert!(
+            shared.is_disjoint(&xr_local),
+            "Android XR local flags must not duplicate shared startup flags"
+        );
+
+        let unclassified = collect_source_flags(include_str!("lib.rs"))
+            .into_iter()
+            .filter(|flag| !shared.contains(flag.as_str()) && !xr_local.contains(flag.as_str()))
+            .collect::<Vec<_>>();
+        assert!(
+            unclassified.is_empty(),
+            "classify Android XR startup flags as shared startup or XR-local: {unclassified:?}"
+        );
+    }
 
     #[test]
     fn android_legacy_remote_addr_ignores_empty_values() {

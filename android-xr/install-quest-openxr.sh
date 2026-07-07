@@ -61,6 +61,8 @@ Options:
                   Add --render-distance N to startup argv.
   --render-compile-workers N
                   Add --render-compile-workers N to startup argv.
+  --render-compile-capacity default|derived
+                  Add --render-compile-capacity MODE to startup argv.
   --movement-speed-multiplier N
                   Add --movement-speed-multiplier N to startup argv.
   --day-time T     Add --day-time T to startup argv.
@@ -192,7 +194,7 @@ while [[ $# -gt 0 ]]; do
             REMOTE_ADDR="$2"
             shift 2
             ;;
-        --seed|--chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--world-dir|--world-root)
+        --seed|--chunk-x|--chunk-z|--render-distance|--render-compile-workers|--render-compile-capacity|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--world-dir|--world-root)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2

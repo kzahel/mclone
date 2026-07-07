@@ -5,8 +5,9 @@ the named follow-up to tactical
 [`150-adaptive-frame-budget-controller.md`](150-adaptive-frame-budget-controller.md)
 (close-out commits `42d3e43a`/`01147cd7`). Slice 1 (render compile capacity)
 has landed the shared derivation, advisory report, and desktop explicit
-derived-capacity opt-in; the next narrow step is Android/shared startup wiring
-so Quest can run the same derived request instead of manual worker counts.
+derived-capacity opt-in. Android/shared startup wiring now accepts the same
+derived request, so the next narrow step is the Quest RD5 applied-capacity
+measurement instead of manual worker counts.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -416,11 +417,17 @@ Decision is unchanged: explicit applied capacity is useful for persisted
 local-integrated startup, but the default is not promoted.
 
 Quest was not a fair applied-capacity row yet. The device was connected, but
-Android XR startup parsing does not currently accept
-`--render-compile-capacity derived`; it only accepts manual worker/max-pending
-flags. The next implementation slice is therefore startup wiring for Android
-and shared app-runtime capacity requests, followed by Quest RD5 orbit/churn with
-the derived value active.
+Android XR startup parsing did not accept `--render-compile-capacity derived` at
+the time of the row; it only accepted manual worker/max-pending flags.
+
+Follow-up wiring moved the request into shared
+`mclone-app-runtime::startup_args::StartupArgState`. Desktop, Android,
+Android XR, and web now parse the same capacity request; each runtime resolves
+it with its own host kind/resource inputs and preserves explicit
+worker/max-pending overrides. Desktop and Android XR also have source-scan
+tripwires that require new startup flags to be classified as shared startup
+policy or explicit app-local/platform-local flags. The next measurement slice is
+Quest RD5 orbit/churn with `--render-compile-capacity derived` active.
 
 Gates (inner loop per iteration; promotion before default flip):
 
