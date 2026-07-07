@@ -376,6 +376,7 @@ fn cli_parses_screenshot_scene_options() {
                 render_compile_max_pending_jobs: Some(
                     mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
                 ),
+                render_compile_worker_timing_enabled: true,
                 remote_addr: None,
                 world_root: SceneOptions::default().world_root,
                 world_dir: None,

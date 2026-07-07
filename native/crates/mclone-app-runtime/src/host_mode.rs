@@ -38,6 +38,7 @@ pub struct SingleViewHostOptions {
     pub chunk_tracking_radius: u32,
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
+    pub render_compile_worker_timing_enabled: bool,
 }
 
 impl SingleViewHostOptions {
@@ -50,6 +51,7 @@ impl SingleViewHostOptions {
             render_compile_max_pending_jobs: Some(
                 crate::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
             ),
+            render_compile_worker_timing_enabled: true,
         }
     }
 
@@ -71,6 +73,11 @@ impl SingleViewHostOptions {
         render_compile_max_pending_jobs: Option<usize>,
     ) -> Self {
         self.render_compile_max_pending_jobs = render_compile_max_pending_jobs;
+        self
+    }
+
+    pub const fn with_render_compile_worker_timing_enabled(mut self, enabled: bool) -> Self {
+        self.render_compile_worker_timing_enabled = enabled;
         self
     }
 

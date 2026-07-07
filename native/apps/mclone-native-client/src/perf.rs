@@ -1807,6 +1807,10 @@ impl StartupStreamingPerfReport {
             true,
         );
         println!(
+            "  \"render_compile_worker_timing_enabled\": {},",
+            self.options.scene.render_compile_worker_timing_enabled
+        );
+        println!(
             "  \"simulation_cadence\": {{ \"host_hz\": {}, \"gameplay_hz\": {}, \"physics_hz\": {} }},",
             self.options.scene.simulation_cadence.host_rate_hz,
             self.options.scene.simulation_cadence.gameplay_rate_hz,

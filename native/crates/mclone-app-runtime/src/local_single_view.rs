@@ -66,6 +66,7 @@ pub struct LocalSingleViewSceneOptions {
     pub world_storage: NativeIntegratedServerWorldStorage,
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
+    pub render_compile_worker_timing_enabled: bool,
 }
 
 impl LocalSingleViewSceneOptions {
@@ -84,6 +85,7 @@ impl LocalSingleViewSceneOptions {
             world_storage: NativeIntegratedServerWorldStorage::Transient,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
+            render_compile_worker_timing_enabled: true,
         }
     }
 
@@ -150,6 +152,11 @@ impl LocalSingleViewSceneOptions {
         render_compile_max_pending_jobs: Option<usize>,
     ) -> Self {
         self.render_compile_max_pending_jobs = render_compile_max_pending_jobs;
+        self
+    }
+
+    pub const fn with_render_compile_worker_timing_enabled(mut self, enabled: bool) -> Self {
+        self.render_compile_worker_timing_enabled = enabled;
         self
     }
 
@@ -432,12 +439,13 @@ impl LocalSingleViewSceneRuntime {
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         let render_compile_dispatcher =
-            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs(
+            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
                 mesh_assets.catalog.clone(),
                 options.render_compile_worker_count,
                 options
                     .render_compile_max_pending_jobs
                     .unwrap_or(options.render_compile_worker_count),
+                options.render_compile_worker_timing_enabled,
             )?;
         let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
             .context("failed to start local single-view integrated server runner")?;
@@ -1808,12 +1816,13 @@ where
     ) -> Result<Self> {
         let mut connection = RemoteDedicatedConnection::new(session);
         let render_compile_dispatcher =
-            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs(
+            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
                 mesh_assets.catalog.clone(),
                 options.render_compile_worker_count,
                 options
                     .render_compile_max_pending_jobs
                     .unwrap_or(options.render_compile_worker_count),
+                options.render_compile_worker_timing_enabled,
             )?;
         let mut core = SingleViewRuntime::remote_dedicated(
             options.center,

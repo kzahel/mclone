@@ -97,7 +97,8 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     build_remote_dedicated_client_runtime(
         SingleViewHostOptions::new(center, render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
-            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs),
+            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+            .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled),
         &mut session,
     )
 }
@@ -117,7 +118,8 @@ pub(crate) fn local_single_view_options(
     .with_lighting_enabled(scene.lighting_enabled)
     .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget)
     .with_render_compile_worker_count(scene.render_compile_worker_count)
-    .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs);
+    .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+    .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled);
     if let Some(world_dir) = &scene.world_dir {
         options = options.with_persistent_world_dir(world_dir.clone());
     }
@@ -148,7 +150,8 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
     NativeWindowSceneRuntime::remote_dedicated_with_mesh_assets(
         SingleViewHostOptions::new(center, render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
-            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs),
+            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+            .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled),
         session,
         mesh_assets,
     )

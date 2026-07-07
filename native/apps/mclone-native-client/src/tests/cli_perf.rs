@@ -114,6 +114,8 @@ fn cli_parses_startup_streaming_perf_options() {
         "2".to_owned(),
         "--render-compile-max-pending-jobs".to_owned(),
         "8".to_owned(),
+        "--render-compile-worker-timing".to_owned(),
+        "false".to_owned(),
         "--freeze-scheduled-fluid-ticks".to_owned(),
         "--width".to_owned(),
         "1024".to_owned(),
@@ -132,6 +134,7 @@ fn cli_parses_startup_streaming_perf_options() {
                     render_distance: 20,
                     render_compile_worker_count: 2,
                     render_compile_max_pending_jobs: Some(8),
+                    render_compile_worker_timing_enabled: false,
                     debug_passive_showcase: false,
                     ..SceneOptions::default()
                 },

@@ -280,11 +280,26 @@ impl NativeRenderSectionCompileDispatcher {
         worker_count: usize,
         max_pending_jobs: usize,
     ) -> Result<Self> {
+        Self::with_worker_count_and_max_pending_jobs_and_timing(
+            catalog,
+            worker_count,
+            max_pending_jobs,
+            true,
+        )
+    }
+
+    pub fn with_worker_count_and_max_pending_jobs_and_timing(
+        catalog: TexturedMeshCatalog,
+        worker_count: usize,
+        max_pending_jobs: usize,
+        worker_timing_enabled: bool,
+    ) -> Result<Self> {
         Ok(Self {
-            worker: RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs(
+            worker: RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs_and_timing(
                 catalog,
                 worker_count,
                 max_pending_jobs,
+                worker_timing_enabled,
             )?,
         })
     }
@@ -373,6 +388,20 @@ impl RenderSectionCompileWorker {
         worker_count: usize,
         max_pending_jobs: usize,
     ) -> Result<Self> {
+        Self::with_worker_count_and_max_pending_jobs_and_timing(
+            catalog,
+            worker_count,
+            max_pending_jobs,
+            true,
+        )
+    }
+
+    pub fn with_worker_count_and_max_pending_jobs_and_timing(
+        catalog: TexturedMeshCatalog,
+        worker_count: usize,
+        max_pending_jobs: usize,
+        worker_timing_enabled: bool,
+    ) -> Result<Self> {
         if worker_count == 0 {
             bail!("render section compile worker count must be greater than zero");
         }
@@ -413,12 +442,17 @@ impl RenderSectionCompileWorker {
                 .name(thread_name)
                 .spawn(move || {
                     while let Some(request) = queue.take_next() {
-                        let compile_start = Instant::now();
-                        let result = compile_render_section_request(&catalog, request);
-                        let compile_us = compile_start.elapsed().as_micros();
-                        if let Ok(mut metrics) = worker_metrics.lock() {
-                            metrics.record_task(compile_us);
-                        }
+                        let result = if worker_timing_enabled {
+                            let compile_start = Instant::now();
+                            let result = compile_render_section_request(&catalog, request);
+                            let compile_us = compile_start.elapsed().as_micros();
+                            if let Ok(mut metrics) = worker_metrics.lock() {
+                                metrics.record_task(compile_us);
+                            }
+                            result
+                        } else {
+                            compile_render_section_request(&catalog, request)
+                        };
                         if result_sender.send(result).is_err() {
                             break;
                         }
@@ -1158,6 +1192,25 @@ mod tests {
         assert_eq!(worker.release_completed_jobs(1), 1);
         assert_eq!(worker.pending_job_count(), 0);
         assert_eq!(worker.available_pending_job_slots(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn render_compile_worker_timing_can_be_disabled() -> Result<()> {
+        let mut worker =
+            RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs_and_timing(
+                TexturedMeshCatalog::default(),
+                1,
+                1,
+                false,
+            )?;
+        worker.submit(empty_compile_request())?;
+
+        let completed = wait_for_completed_result(&mut worker)?;
+        assert_eq!(completed.len(), 1);
+        assert_eq!(worker.completed_compile_task_count(), 0);
+        assert_eq!(worker.total_compile_worker_busy_us(), 0);
+        assert_eq!(worker.max_compile_worker_task_us(), 0);
         Ok(())
     }
 
