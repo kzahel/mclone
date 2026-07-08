@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/mclone-android-platform",
   "crates/mclone-audio",
   "crates/mclone-assets",
   "crates/mclone-app-runtime",
@@ -53,6 +54,7 @@ libc = "0.2"
 libloading = "0.8"
 log = "0.4"
 mclone-audio = { path = "crates/mclone-audio" }
+mclone-android-platform = { path = "crates/mclone-android-platform" }
 mclone-assets = { path = "crates/mclone-assets" }
 mclone-app-runtime = { path = "crates/mclone-app-runtime" }
 mclone-blocks = { path = "crates/mclone-blocks" }

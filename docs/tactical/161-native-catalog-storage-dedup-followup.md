@@ -1,6 +1,6 @@
 # 161: Native Catalog / Storage Adapter Dedup Follow-Up
 
-Status: active 2026-07-08. Slices 1-3 landed; follow-up slices remain open.
+Status: active 2026-07-08. Slices 1-4 landed; follow-up slices remain open.
 
 Workstream: native Rust shared client-experience/catalog/storage boundary,
 desktop flat, shared XR scene, flat Android, and Android XR. Web remains
@@ -136,6 +136,45 @@ Result on 2026-07-08: passed. The wasm web check still reports the existing
 reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
 introduced by this slice.
 
+## Slice 4: Android App-Data World-Root Helper
+
+Status: landed 2026-07-08.
+
+Problem: flat Android and Android XR each resolved their default persistent
+world catalog root with the same `internal_data_path().or_else(external_data_path()).join("worlds")`
+logic and only differed in the log label.
+
+Change:
+
+- Add `mclone-android-platform` as a small Android-specific shared glue crate,
+  separate from host-neutral `mclone-app-runtime`.
+- Add `android_world_root_from_app_data_paths` with host unit tests for the
+  internal-first fallback policy.
+- Add Android-only `android_app_data_world_root` over `AndroidApp`, preserving
+  the existing per-app log labels.
+- Route flat Android and Android XR through the shared helper.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --package mclone-android-platform --package mclone-android-client --package mclone-android-xr-client --check
+cargo test --manifest-path native/Cargo.toml -p mclone-android-platform
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml --target aarch64-linux-android -p mclone-android-platform
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-xr-client
+git diff --check
+```
+
+Result on 2026-07-08: passed. The direct raw-target app checks were not used
+because plain `cargo check --target aarch64-linux-android` does not set the NDK
+compiler environment and failed before app compilation with missing
+`aarch64-linux-android-clang`; the repo's `cargo ndk` path compiled both Android
+apps for `arm64-v8a`. The wasm web check still reports the existing
+`mclone-server` warnings for `TimingSample` and
+`with_unload_hysteresis_chunks`; no new warnings were introduced by this slice.
+
 ## Remaining Follow-Up Slices
 
 1. **LocalSingleView naming cleanup.** `LocalSingleViewSceneOptions` and related
@@ -146,10 +185,11 @@ introduced by this slice.
    `LocalIntegratedSceneOptions`, `LocalWorldRuntimeOptions`,
    `NativeLocalSessionOptions`, or `IntegratedWorldSessionOptions` once active
    storage/helper slices are settled.
-2. **Android app-data world-root helper.** Flat Android and Android XR duplicate
-   `internal_data_path().or_else(external_data_path()).join("worlds")` with only
-   log-label differences. Move this to Android-specific shared glue, not
-   `mclone-app-runtime`.
+2. **Android app-data asset-root helper audit.** Flat Android and Android XR
+   both configure `MCLONE_ANDROID_ASSET_ROOT` from app data with similar
+   logging, but flat Android currently prefers internal storage while Android XR
+   prefers external storage. Decide whether that difference is intentional
+   before moving the shared parts into `mclone-android-platform`.
 3. **Startup storage validation and logging.** Desktop, flat Android, and
    Android XR repeat pieces of `--world-dir applies only to local integrated
    worlds`, default-root enablement, and storage logging. Keep argv/intent

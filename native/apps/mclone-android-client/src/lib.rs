@@ -13,6 +13,7 @@ mod android {
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
+    use mclone_android_platform::android_app_data_world_root;
     use mclone_app_runtime::client_catalog_policy::{
         ClientCatalogEffects, ClientCatalogRequest, ClientCatalogSessionStart,
     };
@@ -204,19 +205,6 @@ mod android {
             "configured MCLONE_ANDROID_ASSET_ROOT from app data path: {}",
             path.display()
         );
-    }
-
-    fn android_world_root(app: &AndroidApp) -> Option<PathBuf> {
-        let root = app
-            .internal_data_path()
-            .or_else(|| app.external_data_path())
-            .map(|path| path.join("worlds"));
-        if let Some(root) = &root {
-            log::info!("Android world catalog root: {}", root.display());
-        } else {
-            log::warn!("Android could not resolve an app data path for persistent worlds");
-        }
-        root
     }
 
     struct AndroidGpuState {
@@ -3090,7 +3078,7 @@ mod android {
         }
         if startup_options.default_world_root_enabled && startup_options.scene.world_root.is_none()
         {
-            startup_options.scene.world_root = android_world_root(&app);
+            startup_options.scene.world_root = android_app_data_world_root(&app, "Android");
         }
         if startup_options.scene.remote_addr.is_some() && startup_options.scene.world_dir.is_some()
         {

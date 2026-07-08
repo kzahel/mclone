@@ -1386,6 +1386,7 @@ dependencies = [
  "glam 0.30.10",
  "jni 0.22.4",
  "log",
+ "mclone-android-platform",
  "mclone-app-runtime",
  "mclone-audio",
  "mclone-client",
@@ -1405,6 +1406,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-android-platform"
+version = "0.0.0"
+dependencies = [
+ "android-activity",
+ "log",
+]
+
+[[package]]
 name = "mclone-android-xr-client"
 version = "0.0.0"
 dependencies = [
@@ -1413,6 +1422,7 @@ dependencies = [
  "jni 0.22.4",
  "libc",
  "log",
+ "mclone-android-platform",
  "mclone-app-runtime",
  "mclone-assets",
  "mclone-audio",

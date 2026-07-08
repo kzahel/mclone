@@ -15,6 +15,7 @@ glam.workspace = true
 jni.workspace = true
 log.workspace = true
 mclone-audio.workspace = true
+mclone-android-platform.workspace = true
 mclone-app-runtime.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true

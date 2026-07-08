@@ -70,6 +70,7 @@ mod android {
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, bail};
+    use mclone_android_platform::android_app_data_world_root;
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::host_mode::{
         RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
@@ -246,19 +247,6 @@ mod android {
             "Android XR {ANDROID_ASSET_ROOT_ENV} configured from app data path: {}",
             path.display()
         );
-    }
-
-    fn android_xr_world_root(app: &AndroidApp) -> Option<PathBuf> {
-        let root = app
-            .internal_data_path()
-            .or_else(|| app.external_data_path())
-            .map(|path| path.join("worlds"));
-        if let Some(root) = &root {
-            log::info!("Android XR world catalog root: {}", root.display());
-        } else {
-            log::warn!("Android XR could not resolve an app data path for persistent worlds");
-        }
-        root
     }
 
     struct AndroidXrRuntimeAssets {
@@ -1245,7 +1233,7 @@ mod android {
         };
         if startup_options.default_world_root_enabled && startup_options.scene.world_root.is_none()
         {
-            startup_options.scene.world_root = android_xr_world_root(&app);
+            startup_options.scene.world_root = android_app_data_world_root(&app, "Android XR");
         }
         let startup_view_pose =
             match parse_android_xr_startup_view_pose(startup_view_pose_property.as_deref()) {
