@@ -5,15 +5,56 @@ use std::path::PathBuf;
 #[cfg(target_os = "android")]
 use android_activity::AndroidApp;
 
+pub const ANDROID_ASSET_ROOT_ENV: &str = "MCLONE_ANDROID_ASSET_ROOT";
 pub const ANDROID_WORLD_ROOT_DIR_NAME: &str = "worlds";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AndroidAppDataPathPreference {
+    InternalFirst,
+    ExternalFirst,
+}
+
+pub fn android_preferred_app_data_path(
+    internal_data_path: Option<PathBuf>,
+    external_data_path: Option<PathBuf>,
+    preference: AndroidAppDataPathPreference,
+) -> Option<PathBuf> {
+    match preference {
+        AndroidAppDataPathPreference::InternalFirst => internal_data_path.or(external_data_path),
+        AndroidAppDataPathPreference::ExternalFirst => external_data_path.or(internal_data_path),
+    }
+}
+
+pub fn android_asset_root_from_app_data_paths(
+    internal_data_path: Option<PathBuf>,
+    external_data_path: Option<PathBuf>,
+    preference: AndroidAppDataPathPreference,
+) -> Option<PathBuf> {
+    android_preferred_app_data_path(internal_data_path, external_data_path, preference)
+}
+
+#[cfg(target_os = "android")]
+pub fn android_app_data_asset_root(
+    app: &AndroidApp,
+    preference: AndroidAppDataPathPreference,
+) -> Option<PathBuf> {
+    android_asset_root_from_app_data_paths(
+        app.internal_data_path(),
+        app.external_data_path(),
+        preference,
+    )
+}
 
 pub fn android_world_root_from_app_data_paths(
     internal_data_path: Option<PathBuf>,
     external_data_path: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    internal_data_path
-        .or(external_data_path)
-        .map(|path| path.join(ANDROID_WORLD_ROOT_DIR_NAME))
+    android_preferred_app_data_path(
+        internal_data_path,
+        external_data_path,
+        AndroidAppDataPathPreference::InternalFirst,
+    )
+    .map(|path| path.join(ANDROID_WORLD_ROOT_DIR_NAME))
 }
 
 #[cfg(target_os = "android")]
@@ -31,6 +72,55 @@ pub fn android_app_data_world_root(app: &AndroidApp, log_label: &str) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferred_app_data_path_uses_requested_order() {
+        let internal = Some(PathBuf::from("/data/user/0/com.example/files"));
+        let external = Some(PathBuf::from("/sdcard/Android/data/com.example/files"));
+
+        assert_eq!(
+            android_preferred_app_data_path(
+                internal.clone(),
+                external.clone(),
+                AndroidAppDataPathPreference::InternalFirst,
+            ),
+            internal
+        );
+        assert_eq!(
+            android_preferred_app_data_path(
+                Some(PathBuf::from("/data/user/0/com.example/files")),
+                external.clone(),
+                AndroidAppDataPathPreference::ExternalFirst,
+            ),
+            external
+        );
+    }
+
+    #[test]
+    fn asset_root_prefers_requested_app_data_path() {
+        let root = android_asset_root_from_app_data_paths(
+            Some(PathBuf::from("/data/user/0/com.example/files")),
+            Some(PathBuf::from("/sdcard/Android/data/com.example/files")),
+            AndroidAppDataPathPreference::ExternalFirst,
+        );
+
+        assert_eq!(
+            root,
+            Some(PathBuf::from("/sdcard/Android/data/com.example/files"))
+        );
+    }
+
+    #[test]
+    fn asset_root_is_absent_without_app_data_path() {
+        assert_eq!(
+            android_asset_root_from_app_data_paths(
+                None,
+                None,
+                AndroidAppDataPathPreference::InternalFirst,
+            ),
+            None
+        );
+    }
 
     #[test]
     fn world_root_prefers_internal_app_data_path() {

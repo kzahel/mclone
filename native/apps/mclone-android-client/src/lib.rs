@@ -13,7 +13,10 @@ mod android {
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
-    use mclone_android_platform::android_app_data_world_root;
+    use mclone_android_platform::{
+        ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, android_app_data_asset_root,
+        android_app_data_world_root,
+    };
     use mclone_app_runtime::client_catalog_policy::{
         ClientCatalogEffects, ClientCatalogRequest, ClientCatalogSessionStart,
     };
@@ -185,25 +188,24 @@ mod android {
 
     #[allow(unsafe_code)]
     fn configure_android_asset_root(app: &AndroidApp) {
-        if let Some(existing) = std::env::var_os("MCLONE_ANDROID_ASSET_ROOT") {
+        if let Some(existing) = std::env::var_os(ANDROID_ASSET_ROOT_ENV) {
             log::info!(
-                "preserving MCLONE_ANDROID_ASSET_ROOT={}",
+                "preserving {ANDROID_ASSET_ROOT_ENV}={}",
                 std::path::PathBuf::from(existing).display()
             );
             return;
         }
-        let Some(path) = app
-            .internal_data_path()
-            .or_else(|| app.external_data_path())
+        let Some(path) =
+            android_app_data_asset_root(app, AndroidAppDataPathPreference::InternalFirst)
         else {
-            log::warn!("could not resolve Android app data path for MCLONE_ANDROID_ASSET_ROOT");
+            log::warn!("could not resolve Android app data path for {ANDROID_ASSET_ROOT_ENV}");
             return;
         };
         unsafe {
-            std::env::set_var("MCLONE_ANDROID_ASSET_ROOT", &path);
+            std::env::set_var(ANDROID_ASSET_ROOT_ENV, &path);
         }
         log::info!(
-            "configured MCLONE_ANDROID_ASSET_ROOT from app data path: {}",
+            "configured {ANDROID_ASSET_ROOT_ENV} from app data path: {}",
             path.display()
         );
     }

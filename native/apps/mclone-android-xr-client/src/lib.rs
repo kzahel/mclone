@@ -69,7 +69,10 @@ mod android {
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, bail};
-    use mclone_android_platform::android_app_data_world_root;
+    use mclone_android_platform::{
+        ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, android_app_data_asset_root,
+        android_app_data_world_root,
+    };
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::host_mode::{
         RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
@@ -139,7 +142,6 @@ mod android {
     const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
     const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
     const XR_VIEW_POSE_PROPERTY: &str = "debug.mclone.xr_view_pose";
-    const ANDROID_ASSET_ROOT_ENV: &str = "MCLONE_ANDROID_ASSET_ROOT";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const VIEW_TYPE: xr::ViewConfigurationType = PRIMARY_STEREO_VIEW_TYPE;
     const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -230,12 +232,11 @@ mod android {
             return;
         }
 
-        let Some(path) = app
-            .external_data_path()
-            .or_else(|| app.internal_data_path())
+        let Some(path) =
+            android_app_data_asset_root(app, AndroidAppDataPathPreference::ExternalFirst)
         else {
             log::warn!(
-                "Android XR could not resolve an app data path for MCLONE_ANDROID_ASSET_ROOT"
+                "Android XR could not resolve an app data path for {ANDROID_ASSET_ROOT_ENV}"
             );
             return;
         };
