@@ -32,7 +32,7 @@ Workstream: native Rust shared performance/architecture.
 
 | # | Item | Class | Priority | Status |
 |---|---|---|---|---|
-| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | investigating |
+| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | diagnosed; fix scoped, impl pending |
 | P1 | Movement-frame / 120 Hz over-2x attribution at `7/14` | unblock (promotes shipped win) | high | open |
 | P2 | Sky-light graph hot path (fresh-startup ceiling) | new capability | medium (own tactical) | open |
 | P3 | Mesh-worker clamp (`7`) rationale + cross-host evidence | anti-knob debt / docs | low | documented below |
@@ -114,7 +114,9 @@ the RD20 row as evidence. Any bound added must be vanilla-shaped (tied to the
 loaded chunk set / unload path), not a fixed cap knob (rule B). Light parity
 stays byte-identical (rule E).
 
-**Status: investigating (2026-07-08).** See "P0 Investigation Log" below.
+**Status: diagnosed 2026-07-08 — confirmed unbounded by construction, shared
+(native + web), fix scoped below. Implementation pending (own slice).** See
+"P0 Investigation Log".
 
 ---
 
@@ -253,5 +255,120 @@ running them cold.
 
 ## P0 Investigation Log
 
-(Populated during the P0 investigation — findings, vanilla comparison, and the
-bound decision land here.)
+### 2026-07-08 — diagnosis (code + vanilla reference)
+
+**Conclusion: confirmed.** The retained-light block store and the light
+engine's `DataLayer` storage grow by roughly `~64 KB + ~64 KB` per *unique chunk
+ever visited*, with no eviction path, on both the native worker and the web
+backend. It is unbounded by construction under sustained movement; 153 never saw
+it because every lane used a fixed-center or short-churn (bounded) chunk set.
+
+**mclone evidence (the accumulation chain):**
+
+- The light worker owns a session-lifetime `RetainedInitialLightState`, created
+  once before the receive loop (`light_mailbox.rs:266`, native thread) and once
+  per backend on web (`light_mailbox.rs:142,156`). It holds a
+  `RetainedLightWorld` (block copy) + a `LevelLightEngine` (light storage).
+- Every batch calls `compute_batch` -> `RetainedLightWorld::upsert_chunk`
+  (`light_world.rs:66,388`), which inserts a `Vec<RawBlockId>` into
+  `chunks: BTreeMap<ChunkPos, Vec<RawBlockId>>` (`light_world.rs:359`).
+  `RawBlockId = u8` (`mclone-worldgen/src/block.rs:3`), so each entry is
+  `height * 16 * 16` bytes ~= `64 KB` for a 256-high column. There is **no**
+  `self.chunks.remove` anywhere in the file.
+- The `LevelLightEngine` stores sky + block light per section in
+  `BTreeMap<SectionPosKey, DataLayer>` (`mclone-light/src/storage_map.rs:6-17`),
+  ~`2 KB` per `DataLayer`, ~`64 KB`/chunk across both maps. Removal primitives
+  exist (`remove_layer` `:82`, `remove_top_section` `:149`,
+  `remove_marked_sections` `section_storage.rs:200`,
+  `update_section_status(section, is_empty=true)` `section_storage.rs:283`) but
+  are only ever driven by the *current batch's* changed chunks
+  (`light_world.rs:104-113`) — never by unload.
+- The unload event exists and is healthy but is disconnected from light: the
+  scheduler drops holders in `process_pending_unloads` (`scheduler.rs:2429-2497`)
+  and emits `ChunkSchedulerEvent::HolderUnloaded`; the handler
+  (`integrated.rs:1514-1524`) frees block/liquid ticks and entities but never
+  signals light. And it *cannot*: `LightStatusRequest` has a single variant,
+  `ComputeBatch` (`light_mailbox.rs:403-405`) — there is no unload message the
+  worker could receive.
+
+**Magnitude.** ~`128 KB` x unique-chunks-visited. A bounded RD10 view (~`625`
+chunks) is ~`80 MB` and drains; but free movement across, say, `5000` unique
+chunks is ~`640 MB` and never releases. Quest is the RAM-constrained platform,
+so it is where this OOMs first — directly relevant to the "didn't regress Quest"
+close-out claim, which was never tested with a free-movement soak.
+
+**Vanilla comparison (1.17.1, source-cited).** Read
+`reference/minecraft-1.17.1/src/` on 2026-07-08:
+
+- Vanilla bounds the loaded-chunk set with a **ticket-level flood-fill**
+  (`DistanceManager.java` `ChunkTicketTracker` 247-289; `MAX_CHUNK_DISTANCE = 44`
+  in `ChunkMap.java:98-99`). A `ChunkHolder` exists only while ticket level
+  `<= 44`; movement lets the flood-fill drop unreachable chunks.
+- Unload releases light through one hook: `ChunkMap.processUnloads` (391-409) ->
+  `scheduleUnload` (411-438), which at **line 428** calls
+  `lightEngine.updateChunkStatus(pos)`.
+- `ThreadedLevelLightEngine.updateChunkStatus` (69-83) then does `retainData(…,
+  false)`, `enableLightSources(…, false)`, `queueSectionData(…, null, …)`, and
+  `updateSectionStatus(section, true)` per section. Marking empty drives the
+  section's tracked level to EMPTY, which lands in `toRemove` and calls
+  `DataLayerStorageMap.removeLayer` (= `map.remove`, `DataLayerStorageMap.java:60`)
+  on the next light tick — the actual `2 KB` array free.
+- **Vanilla keeps no persistent per-chunk block/opacity cache in the light
+  engine.** `LayerLightEngine.getStateAndOpacity` (49-104) reads *through* to the
+  live chunk via `getChunkForLighting`, with only a fixed 2-entry MRU
+  (`CACHE_SIZE = 2`) cleared each batch. If the chunk is unloaded it substitutes
+  bedrock/opacity-16. The only persistent light memory is the `DataLayer` arrays,
+  and those are evicted per-section on unload as above.
+
+**Divergence read.** `RetainedLightWorld` diverges from vanilla on two counts:
+(a) it *is* a persistent per-chunk block cache vanilla deliberately does not keep
+(it exists because mclone's light worker runs on a separate thread and needs a
+private snapshot to avoid racing the scheduler's chunk store — a *defensible*
+worker-thread divergence, unlike (b)); (b) it has no eviction hook analogous to
+`updateChunkStatus`/`removeLayer`. **The bug is (b), the missing eviction, not
+(a) the copy.** The light-engine storage maps have the same missing-eviction
+problem despite already owning the removal primitives.
+
+### Fix options
+
+- **Fix A (recommended, minimal, vanilla-shaped eviction).** Keep the retained
+  block snapshot (worker-thread necessity) but evict it on unload, matching
+  vanilla's `scheduleUnload` line 428. Add a `LightStatusRequest::Unload`
+  (single pos or a batched set), a `RetainedLightWorld::remove_chunk`, and drive
+  the *existing* engine primitives (`update_section_status(section, true)` ->
+  `remove_marked_sections`/`remove_layer`, `remove_top_section`,
+  disable sky sources) for the unloaded chunk's sections. Wire it from the
+  existing `HolderUnloaded` event (`integrated.rs:1514`) so light unload rides
+  the same ticket-driven drop the scheduler already computes. Lives in the shared
+  `mclone-server` light mailbox + `mclone-light` engine (host-neutral, rule F);
+  the web backend gets the same message. Parity-neutral: it only frees data for
+  chunks no longer loaded, so lighting fixtures + contrasting seed stay
+  byte-identical (rule E).
+- **Fix B (deeper, defer to threading topology `062`).** Eliminate the block
+  copy entirely and have the light worker read opacity through a shared
+  thread-safe view of the chunk store, exactly like vanilla's
+  `getChunkForLighting`. This removes store (a) at the cost of touching the
+  worker/scheduler ownership boundary. Out of scope for stopping the leak;
+  record it as the eventual parity end-state, sequenced with `062`.
+
+### Recommendation and next steps
+
+Implement **Fix A** as its own slice (it is an execution-path change, not an
+investigation). Sequencing:
+
+1. Land the unload message + `remove_chunk` + engine section-drop; assert (unit
+   test) that after unloading a chunk the retained world and both storage maps no
+   longer contain it, and that re-lighting a still-loaded neighbor is unchanged.
+2. Parity gate: lighting fixtures + contrasting seed byte-identical (rule E);
+   `wasm32` check for the touched shared crates (also clears a V item).
+3. Validation: the deferred **RD20-long / free-movement soak** watching retained
+   world entry count, storage-map section count, `pending_light_publications`,
+   and process RSS — must be flat (not monotonic) after the fix (the V RD20
+   watch). Re-run Quest RD5/RD7/churn to confirm no regression on the constrained
+   platform.
+
+Open sub-question for the implementer: confirm whether the scheduler already has
+the unloaded chunk's section list handy at `HolderUnloaded` time, or whether the
+light worker must derive sections from its own retained column before dropping it
+(the retained world knows the column, so deriving worker-side is viable and keeps
+the message a bare `ChunkPos`).
