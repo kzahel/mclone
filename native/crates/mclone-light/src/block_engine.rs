@@ -73,6 +73,20 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
         self.storage.swap_section_map();
     }
 
+    /// Free a section's block-light storage on chunk unload (155 P0 eviction).
+    pub fn remove_section(&mut self, section: SectionPosKey) -> bool {
+        self.storage.remove_section(section)
+    }
+
+    /// Stop retaining queued data for an unloaded chunk's column.
+    pub fn forget_retained_column(&mut self, column: SectionPosKey) {
+        self.storage.forget_retained_column(column);
+    }
+
+    pub fn stored_section_count(&self) -> usize {
+        self.storage.stored_section_count()
+    }
+
     pub fn check_block(&mut self, pos: BlockPosKey) {
         let mut delegate = BlockLightGraphDelegate {
             storage: &mut self.storage,

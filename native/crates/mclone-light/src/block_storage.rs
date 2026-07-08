@@ -73,6 +73,18 @@ impl BlockLightSectionStorage {
         self.inner.accept_queued_sections_for_stored_layers();
     }
 
+    pub fn remove_section(&mut self, section: SectionPosKey) -> bool {
+        self.inner.remove_section(section)
+    }
+
+    pub fn forget_retained_column(&mut self, column: SectionPosKey) {
+        self.inner.forget_retained_column(column);
+    }
+
+    pub fn stored_section_count(&self) -> usize {
+        self.inner.stored_section_count()
+    }
+
     pub fn get_light_value(&self, block: BlockPosKey) -> u8 {
         self.inner
             .get_data_layer_data(crate::block_to_section_key(block))

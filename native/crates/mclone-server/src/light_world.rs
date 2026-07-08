@@ -14,8 +14,9 @@ use mclone_core::{
     chunk_block_index, local_block_coord,
 };
 use mclone_light::{
-    BlockLightWorld, BlockPosKey, LevelLightEngine, SectionPosKey, SkyLightWorld,
-    block_pos_as_long, block_pos_get_x, block_pos_get_y, block_pos_get_z, section_as_long,
+    BlockLightWorld, BlockPosKey, LIGHT_SECTION_PADDING, LevelLightEngine, SectionPosKey,
+    SkyLightWorld, block_pos_as_long, block_pos_get_x, block_pos_get_y, block_pos_get_z,
+    section_as_long,
 };
 use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opacity, is_air_like};
 
@@ -182,6 +183,52 @@ impl RetainedInitialLightState {
                 )
             })
             .collect()
+    }
+
+    /// Evict unloaded chunks from the retained light world, bounding the 155 P0
+    /// leak. For each chunk the scheduler has dropped from the loaded/ticket set
+    /// this drops the retained block snapshot (`RetainedLightWorld::remove_chunk`)
+    /// and frees the light engine's per-section `DataLayer`s + sky-source state
+    /// for the column (`LevelLightEngine::evict_chunk_column`), mirroring the end
+    /// state of vanilla `ChunkMap.scheduleUnload` -> `updateChunkStatus`. Only
+    /// chunks outside the loaded set are ever passed here, so no still-loaded
+    /// chunk's light reads an evicted column; light output for loaded chunks is
+    /// byte-identical (rule E). Returns the number of chunks actually evicted.
+    pub(crate) fn evict_chunks(&mut self, positions: &[ChunkPos]) -> usize {
+        if positions.is_empty() {
+            return 0;
+        }
+
+        let (min_section_y, section_count, removed) = {
+            let mut world = self.world.borrow_mut();
+            if !world.configured {
+                return 0;
+            }
+            let min_section_y = block_to_section_coord(world.min_y);
+            let section_count = world.height / SECTION_HEIGHT;
+            let removed = positions
+                .iter()
+                .copied()
+                .filter(|pos| world.remove_chunk(*pos))
+                .collect::<Vec<_>>();
+            (min_section_y, section_count, removed)
+        };
+
+        // Light sections span the data range widened by LIGHT_SECTION_PADDING on
+        // each side (LevelLightEngine::getMinLightSection/getMaxLightSection).
+        let light_sections = (min_section_y - LIGHT_SECTION_PADDING)
+            ..(min_section_y + section_count + LIGHT_SECTION_PADDING);
+        for pos in &removed {
+            self.engine
+                .evict_chunk_column(section_as_long(pos.x, 0, pos.z), light_sections.clone());
+        }
+        removed.len()
+    }
+
+    /// Live count of chunks currently retained in the light world — the bounded
+    /// quantity the 155 P0 soak test asserts plateaus once eviction is wired.
+    pub(crate) fn retained_chunk_count(&self) -> usize {
+        self.world.borrow().chunk_count()
     }
 }
 
@@ -413,6 +460,14 @@ impl RetainedLightWorld {
         Some(changed_blocks)
     }
 
+    fn remove_chunk(&mut self, pos: ChunkPos) -> bool {
+        self.chunks.remove(&pos).is_some()
+    }
+
+    fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
     fn section_statuses_for(&self, chunks: &[ChunkPos]) -> Vec<(SectionPosKey, bool)> {
         self.assert_configured();
         let min_section_y = block_to_section_coord(self.min_y);
@@ -635,6 +690,124 @@ mod tests {
                 emission_changes: 0,
                 raw_only_changes: 1,
             }))
+        );
+    }
+
+    #[test]
+    fn evict_chunks_drops_retained_snapshot_and_frees_engine_sections() {
+        // Light a single chunk, then evict it: both the retained block snapshot
+        // (`RetainedLightWorld::chunks`) and the light engine's per-section
+        // `DataLayer`s (block + sky) must be freed — the two stores the 155 P0
+        // diagnosis identified as unbounded.
+        let chunk = ChunkPos::new(3, -2);
+        let len = (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize;
+        let mut blocks = vec![AIR; len];
+        blocks[chunk_block_index(1, 1, 1)] = STONE;
+        let status = PendingLightStatus::from_parts(
+            chunk,
+            test_snapshot(chunk, 0, SECTION_HEIGHT),
+            blocks,
+            Vec::new(),
+        );
+
+        let mut state = RetainedInitialLightState::new();
+        let completed = state.compute_batch(PendingLightStatusBatch::new(vec![status]));
+        assert_eq!(completed.len(), 1);
+        assert_eq!(state.retained_chunk_count(), 1);
+        let section = section_as_long(chunk.x, 0, chunk.z);
+        assert!(
+            state
+                .engine
+                .block_engine()
+                .storage()
+                .storing_light_for_section(section)
+        );
+        assert!(
+            state
+                .engine
+                .sky_engine()
+                .storage()
+                .storing_light_for_section(section)
+        );
+
+        assert_eq!(state.evict_chunks(&[chunk]), 1);
+        assert_eq!(state.retained_chunk_count(), 0);
+        assert!(
+            !state
+                .engine
+                .block_engine()
+                .storage()
+                .storing_light_for_section(section)
+        );
+        assert!(
+            !state
+                .engine
+                .sky_engine()
+                .storage()
+                .storing_light_for_section(section)
+        );
+        assert!(
+            state
+                .engine
+                .block_engine()
+                .storage()
+                .get_visible_data_layer(section)
+                .is_none()
+        );
+        assert!(
+            state
+                .engine
+                .sky_engine()
+                .storage()
+                .get_visible_data_layer(section)
+                .is_none()
+        );
+
+        // Re-evicting an already-gone chunk is a no-op.
+        assert_eq!(state.evict_chunks(&[chunk]), 0);
+    }
+
+    #[test]
+    fn relighting_a_chunk_after_eviction_is_byte_identical() {
+        // Parity under movement (rule E): a chunk revisited after it was unloaded
+        // and evicted must produce byte-identical published light to its first
+        // lighting — eviction must leave no stale per-column state (top sections,
+        // sky sources, retained-data flags) that would perturb the recompute.
+        let chunk = ChunkPos::new(-1, 4);
+        let len = (CHUNK_WIDTH * SECTION_HEIGHT * 2 * CHUNK_WIDTH) as usize;
+        let mut blocks = vec![AIR; len];
+        // A little terrain + an overhang so both sky spread and a block gradient
+        // are exercised, not just a trivial full-air column.
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                blocks[chunk_block_index(local_x, 0, local_z)] = STONE;
+            }
+        }
+        blocks[chunk_block_index(8, 5, 8)] = DIRT;
+
+        let make_batch = || {
+            PendingLightStatusBatch::new(vec![PendingLightStatus::from_parts(
+                chunk,
+                test_snapshot(chunk, 0, SECTION_HEIGHT * 2),
+                blocks.clone(),
+                Vec::new(),
+            )])
+        };
+
+        let mut state = RetainedInitialLightState::new();
+        let first = state.compute_batch(make_batch());
+        let first_sections = first.into_iter().next().expect("one status").1;
+        assert!(!first_sections.is_empty());
+
+        assert_eq!(state.evict_chunks(&[chunk]), 1);
+        assert_eq!(state.retained_chunk_count(), 0);
+
+        let second = state.compute_batch(make_batch());
+        let second_sections = second.into_iter().next().expect("one status").1;
+
+        assert_eq!(
+            first_sections, second_sections,
+            "re-lit sections after eviction must be byte-identical to the first lighting"
         );
     }
 }

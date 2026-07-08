@@ -105,6 +105,22 @@ impl LightStatusMailbox {
         completed
     }
 
+    /// Evict unloaded chunks from the retained light state (155 P0). Fire-and-
+    /// forget: unloads produce no completion, so `pending_count` is untouched.
+    pub(crate) fn enqueue_unload(&mut self, positions: Vec<ChunkPos>) {
+        if positions.is_empty() {
+            return;
+        }
+        self.backend.enqueue_unload(positions);
+    }
+
+    /// Block until the light worker has drained every request enqueued so far
+    /// (including unloads), so the retained gauge reflects them. Returns `false`
+    /// on timeout / dead worker.
+    pub(crate) fn wait_for_light_idle(&mut self, timeout: Duration) -> bool {
+        self.backend.wait_for_light_idle(timeout)
+    }
+
     pub(crate) const fn pending_count(&self) -> usize {
         self.pending_count
     }
@@ -204,6 +220,24 @@ impl LightStatusMailboxBackend {
         self.mailbox_metrics.record_worker_start(0);
         self.mailbox_metrics
             .record_compute(batch_statuses, compute_us);
+        self.mailbox_metrics.retained_light_chunk_count = self.light_state.retained_chunk_count();
+    }
+
+    fn enqueue_unload(&mut self, positions: Vec<ChunkPos>) {
+        if self.worker.is_some() {
+            // The web worker rebuilds `RetainedInitialLightState` per job frame
+            // (`compute_light_status_job_frame`), so it retains nothing across
+            // batches and has nothing to evict.
+            return;
+        }
+        self.light_state.evict_chunks(&positions);
+        self.mailbox_metrics.retained_light_chunk_count = self.light_state.retained_chunk_count();
+    }
+
+    fn wait_for_light_idle(&mut self, _timeout: Duration) -> bool {
+        // Inline compute + eviction are synchronous; the web worker retains no
+        // cross-batch state, so there is never a pending eviction to await.
+        true
     }
 
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
@@ -297,7 +331,19 @@ impl LightStatusMailboxBackend {
                             }
                             if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
                                 metrics.record_compute(request.target_count, compute_us);
+                                metrics.retained_light_chunk_count =
+                                    light_state.retained_chunk_count();
                             }
+                        }
+                        LightStatusRequest::Unload(positions) => {
+                            light_state.evict_chunks(&positions);
+                            if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
+                                metrics.retained_light_chunk_count =
+                                    light_state.retained_chunk_count();
+                            }
+                        }
+                        LightStatusRequest::Sync(ack) => {
+                            let _ = ack.send(());
                         }
                         LightStatusRequest::Shutdown => break,
                     }
@@ -357,6 +403,24 @@ impl LightStatusMailboxBackend {
             .expect("native light status worker stopped before receiving job");
     }
 
+    fn enqueue_unload(&mut self, positions: Vec<ChunkPos>) {
+        // Best-effort memory cleanup: if the worker has already shut down there is
+        // nothing left to evict, so a failed send is not fatal.
+        let _ = self.sender.send(LightStatusRequest::Unload(positions));
+    }
+
+    fn wait_for_light_idle(&mut self, timeout: Duration) -> bool {
+        let (ack_sender, ack_receiver) = mpsc::channel();
+        if self
+            .sender
+            .send(LightStatusRequest::Sync(ack_sender))
+            .is_err()
+        {
+            return false;
+        }
+        ack_receiver.recv_timeout(timeout).is_ok()
+    }
+
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
         let mut messages = self.completed.drain(..).collect::<Vec<_>>();
         while let Ok(message) = self.completion_receiver.try_recv() {
@@ -402,6 +466,15 @@ impl Drop for LightStatusMailboxBackend {
 #[cfg(not(target_arch = "wasm32"))]
 enum LightStatusRequest {
     ComputeBatch(LightStatusComputeRequest),
+    /// Evict unloaded chunks from the retained light state (155 P0). Rides the
+    /// same FIFO request channel as `ComputeBatch`, so an unload always applies
+    /// after any earlier compute for the same chunk and before any later relight.
+    Unload(Vec<ChunkPos>),
+    /// Round-trip barrier: the worker replies on the carried channel once it has
+    /// drained every earlier request. Lets callers observe the post-unload
+    /// retained gauge deterministically (unloads produce no completion to wait
+    /// on).
+    Sync(mpsc::Sender<()>),
     Shutdown,
 }
 

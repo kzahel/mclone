@@ -75,6 +75,21 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
         self.storage.swap_section_map();
     }
 
+    /// Free a section's sky-light storage (+ its sky-source bookkeeping) on chunk
+    /// unload (155 P0 eviction).
+    pub fn remove_section(&mut self, section: SectionPosKey) -> bool {
+        self.storage.remove_section(section)
+    }
+
+    /// Forget an unloaded chunk column's sky-source and top-section state.
+    pub fn forget_column(&mut self, column: SectionPosKey) {
+        self.storage.forget_column(column);
+    }
+
+    pub fn stored_section_count(&self) -> usize {
+        self.storage.stored_section_count()
+    }
+
     pub fn check_sky_source(&mut self, pos: BlockPosKey) {
         if !self
             .storage

@@ -222,6 +222,53 @@ impl LayerLightSectionStorage {
         removed
     }
 
+    /// Free a section's light storage on chunk unload, mirroring the end state of
+    /// vanilla `ThreadedLevelLightEngine.updateChunkStatus` +
+    /// `DataLayerStorageMap.removeLayer`
+    /// (`reference/minecraft-1.17.1/.../LayerLightSectionStorage.java`
+    /// `markNewInconsistencies` `toRemove` loop). Vanilla drives the section to
+    /// EMPTY through the section-level tracker and frees the `DataLayer` on the
+    /// next light tick; the native engine's section level is applied directly
+    /// (no `SectionTracker` flood-fill — the pre-existing 037-049 divergence), so
+    /// eviction removes the layer from **both** the updating and visible maps and
+    /// forgets every section-keyed tracking entry directly. This is only ever
+    /// called for sections of chunks the scheduler has already dropped from the
+    /// loaded/ticket set, so no still-loaded chunk's light reads this section —
+    /// the direct removal is byte-identical to letting the graph run (which would
+    /// produce no net change for the loaded set). Returns whether the section was
+    /// storing a light layer.
+    pub fn remove_section(&mut self, section: SectionPosKey) -> bool {
+        let was_storing = self.updating_section_data.remove_layer(section).is_some();
+        self.visible_section_data.remove_layer(section);
+        self.data_section_set.remove(&section);
+        self.to_mark_no_data.remove(&section);
+        self.to_mark_data.remove(&section);
+        self.changed_sections.remove(&section);
+        self.sections_affected_by_light_updates.remove(&section);
+        self.queued_sections.remove(&section);
+        self.untrusted_sections.remove(&section);
+        self.to_remove.remove(&section);
+        self.has_to_remove = !self.to_remove.is_empty();
+        self.updating_section_data.clear_cache();
+        self.visible_section_data.clear_cache();
+        was_storing
+    }
+
+    /// Stop retaining queued data for a whole column on unload — the column-keyed
+    /// half of eviction that [`remove_section`](Self::remove_section) (section-keyed)
+    /// does not cover. Mirrors vanilla `updateChunkStatus`'s `retainData(pos,
+    /// false)`.
+    pub fn forget_retained_column(&mut self, column: SectionPosKey) {
+        self.columns_to_retain_queued_data_for
+            .remove(&crate::section_get_zero_node(column));
+    }
+
+    /// Number of section `DataLayer`s currently held in the updating map — the
+    /// per-section light memory that eviction must bound (155 P0 watch).
+    pub fn stored_section_count(&self) -> usize {
+        self.updating_section_data.layer_count()
+    }
+
     pub fn accept_queued_sections_for_stored_layers(&mut self) {
         let queued = self
             .queued_sections

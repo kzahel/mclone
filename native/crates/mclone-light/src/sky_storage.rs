@@ -119,6 +119,39 @@ impl SkyLightSectionStorage {
         self.inner.accept_queued_sections_for_stored_layers();
     }
 
+    /// Free a sky section's storage on chunk unload. Delegates the `DataLayer`
+    /// removal to the shared layer storage and additionally forgets this
+    /// section's sky-source bookkeeping (`sections_with_sources` and the pending
+    /// add/remove queues), which have no block-light analogue. Column-wide state
+    /// (`columns_with_sky_sources`, `top_sections`) is cleared once per column by
+    /// [`forget_column`](Self::forget_column).
+    pub fn remove_section(&mut self, section: SectionPosKey) -> bool {
+        let was_storing = self.inner.remove_section(section);
+        self.sections_with_sources.remove(&section);
+        self.sections_to_add_sources_to.remove(&section);
+        self.sections_to_remove_sources_from.remove(&section);
+        was_storing
+    }
+
+    /// Forget a whole column's sky-source and top-section state on unload,
+    /// mirroring vanilla `updateChunkStatus`'s `enableLightSources(pos, false)` +
+    /// `retainData(pos, false)`. `current_lowest_y` is intentionally left at its
+    /// historical minimum: it is a floor sentinel (`top_section` default,
+    /// `has_sections_below`), and a value at-or-below the true loaded minimum is
+    /// conservative — it can only cost a few extra vertical-skip probe iterations
+    /// for a still-loaded chunk that is later relit, never a wrong light value,
+    /// and recomputing it would require scanning every remaining section.
+    pub fn forget_column(&mut self, column: SectionPosKey) {
+        let column = section_get_zero_node(column);
+        self.columns_with_sky_sources.remove(&column);
+        self.top_sections.remove(&column);
+        self.inner.forget_retained_column(column);
+    }
+
+    pub fn stored_section_count(&self) -> usize {
+        self.inner.stored_section_count()
+    }
+
     pub fn enable_light_sources(&mut self, column: SectionPosKey, enabled: bool) {
         let column = section_get_zero_node(column);
         if enabled && self.columns_with_sky_sources.insert(column) {

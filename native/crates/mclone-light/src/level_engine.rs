@@ -208,6 +208,40 @@ impl<B: BlockLightWorld, S: SkyLightWorld> LevelLightEngine<B, S> {
         report
     }
 
+    /// Free all light storage for an unloaded chunk column, mirroring the end
+    /// state of vanilla `ThreadedLevelLightEngine.updateChunkStatus`
+    /// (`reference/minecraft-1.17.1/.../ThreadedLevelLightEngine.java` 69-83):
+    /// `retainData(pos, false)` + `enableLightSources(pos, false)` +
+    /// `queueSectionData(_, null, _)` + `updateSectionStatus(section, true)` for
+    /// every light section, which drives each section to EMPTY and frees its
+    /// `DataLayer` on the next light tick. The native engine applies the removal
+    /// directly (its section level is set directly rather than flood-filled by a
+    /// `SectionTracker`, the pre-existing divergence), so this drops each
+    /// section's layer from both storage maps and forgets the column's sky-source
+    /// and retained-data state without running the graph.
+    ///
+    /// `light_sections` is the inclusive-exclusive light-section-Y range for the
+    /// column (the data range widened by [`LIGHT_SECTION_PADDING`] each side, as
+    /// in `LevelLightEngine.getMinLightSection`/`getMaxLightSection`). It is only
+    /// called for chunks the scheduler has already dropped from the loaded set, so
+    /// nothing still loaded reads this column — light output for loaded chunks is
+    /// unchanged (155 P0 parity gate).
+    pub fn evict_chunk_column(
+        &mut self,
+        column: SectionPosKey,
+        light_sections: std::ops::Range<i32>,
+    ) {
+        let column_x = crate::section_x(column);
+        let column_z = crate::section_z(column);
+        for section_y in light_sections {
+            let section = crate::section_as_long(column_x, section_y, column_z);
+            self.block_engine.remove_section(section);
+            self.sky_engine.remove_section(section);
+        }
+        self.block_engine.forget_retained_column(column);
+        self.sky_engine.forget_column(column);
+    }
+
     pub fn get_raw_brightness(&self, pos: BlockPosKey, sky_darken: u8) -> u8 {
         let sky = self.sky_engine.stored_light(pos).saturating_sub(sky_darken);
         let block = self.block_engine.stored_light(pos);
@@ -252,6 +286,101 @@ mod tests {
         fn light_opacity(&self, pos: BlockPosKey) -> Option<u8> {
             Some(if self.opaque.contains(&pos) { 15 } else { 0 })
         }
+    }
+
+    #[test]
+    fn evicting_a_chunk_column_frees_its_sections_and_leaves_neighbor_light_unchanged() {
+        // Two horizontally adjacent single-section columns, both lit from a sky
+        // source and a block emitter in the left column. Evicting the left column
+        // must free every section it stored while leaving the right (still-loaded)
+        // column's published light byte-identical — the 155 P0 parity invariant.
+        let left = section_as_long(0, 0, 0);
+        let right = section_as_long(1, 0, 0);
+        let emitter = block_pos_as_long(1, 1, 1);
+        let mut world = SyntheticLightWorld::default();
+        world.set_emission(emitter, 15);
+        let mut engine = LevelLightEngine::new(world.clone(), world);
+        for section in [left, right] {
+            engine.update_section_status(section, false);
+            engine.enable_light_sources(section, true);
+        }
+        engine.check_sky_source(block_pos_as_long(1, 15, 1));
+        engine.on_block_emission_increase(emitter, 15);
+        engine.run_all_updates();
+
+        // Snapshot the neighbor's published light across its whole section.
+        let neighbor_before: Vec<u8> = (0..16)
+            .flat_map(|y| (0..16).map(move |x| block_pos_as_long(16 + x, y, 1)))
+            .map(|pos| engine.get_raw_brightness(pos, 0))
+            .collect();
+        assert!(
+            engine
+                .block_engine()
+                .storage()
+                .storing_light_for_section(left)
+                && engine
+                    .sky_engine()
+                    .storage()
+                    .storing_light_for_section(left),
+            "left column should store light before eviction"
+        );
+        let stored_before = engine.block_engine().stored_section_count()
+            + engine.sky_engine().stored_section_count();
+
+        // Light-section range for a single-section column (min_section 0, count 1),
+        // padded by LIGHT_SECTION_PADDING on each side: [-1, 2).
+        engine.evict_chunk_column(left, -LIGHT_SECTION_PADDING..(1 + LIGHT_SECTION_PADDING));
+
+        // Left column is fully freed from both maps.
+        assert!(
+            !engine
+                .block_engine()
+                .storage()
+                .storing_light_for_section(left)
+        );
+        assert!(
+            !engine
+                .sky_engine()
+                .storage()
+                .storing_light_for_section(left)
+        );
+        assert!(
+            engine
+                .block_engine()
+                .storage()
+                .get_visible_data_layer(left)
+                .is_none()
+        );
+        assert!(
+            engine
+                .sky_engine()
+                .storage()
+                .get_visible_data_layer(left)
+                .is_none()
+        );
+        let stored_after = engine.block_engine().stored_section_count()
+            + engine.sky_engine().stored_section_count();
+        assert!(
+            stored_after < stored_before,
+            "eviction must drop stored sections ({stored_before} -> {stored_after})"
+        );
+
+        // Neighbor's published light is unchanged.
+        let neighbor_after: Vec<u8> = (0..16)
+            .flat_map(|y| (0..16).map(move |x| block_pos_as_long(16 + x, y, 1)))
+            .map(|pos| engine.get_raw_brightness(pos, 0))
+            .collect();
+        assert_eq!(
+            neighbor_before, neighbor_after,
+            "evicting a neighbor column must not change still-loaded light"
+        );
+        assert!(
+            engine
+                .block_engine()
+                .storage()
+                .storing_light_for_section(right),
+            "right column must still store light after neighbor eviction"
+        );
     }
 
     #[test]

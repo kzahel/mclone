@@ -91,6 +91,11 @@ pub struct LightStatusMailboxMetrics {
     pub last_completion_drain_wait_us: u128,
     pub total_completion_drain_wait_us: u128,
     pub max_completion_drain_wait_us: u128,
+    /// Live count of chunks currently retained in the light worker's
+    /// `RetainedInitialLightState` (block snapshot + engine `DataLayer`s). Set by
+    /// the worker after each compute batch and each unload eviction; the bounded
+    /// quantity the 155 P0 fix keeps flat under sustained movement.
+    pub retained_light_chunk_count: usize,
 }
 
 impl LightStatusMailboxMetrics {

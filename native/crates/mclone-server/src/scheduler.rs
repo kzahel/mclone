@@ -137,6 +137,12 @@ pub struct ChunkSchedulerMetrics {
     pub total_light_status_block_source_enqueue_us: u128,
     pub total_light_status_input_chunks: usize,
     pub total_light_status_inserted_chunks: usize,
+    /// Live count of chunks currently retained in the light worker (block
+    /// snapshot + engine `DataLayer`s), bounded by unload eviction (155 P0).
+    /// Unlike `total_light_status_inserted_chunks` (cumulative first-inserts,
+    /// never decremented) this decrements on eviction, so it plateaus near one
+    /// view's light set under sustained movement instead of growing.
+    pub retained_light_world_chunks: usize,
     pub total_light_status_replaced_chunks: usize,
     pub total_light_status_unchanged_chunks: usize,
     pub total_light_status_changed_block_raw_checks: usize,
@@ -992,6 +998,14 @@ impl ChunkScheduler {
         self.light_mailbox.wait_for_completed(timeout)
     }
 
+    /// Block until the light worker has drained every request enqueued so far,
+    /// including unload evictions (which produce no completion to wait on). Lets
+    /// callers read `retained_light_world_chunks` deterministically after an
+    /// unload pass.
+    pub fn wait_for_light_idle(&mut self, timeout: Duration) -> bool {
+        self.light_mailbox.wait_for_light_idle(timeout)
+    }
+
     pub fn tick(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         Ok(self.tick_report()?.events)
     }
@@ -1483,6 +1497,10 @@ impl ChunkScheduler {
             total_light_status_inserted_chunks: self
                 .light_status_timing
                 .light_status_inserted_chunks,
+            retained_light_world_chunks: self
+                .light_mailbox
+                .mailbox_metrics()
+                .retained_light_chunk_count,
             total_light_status_replaced_chunks: self
                 .light_status_timing
                 .light_status_replaced_chunks,
@@ -2445,6 +2463,11 @@ impl ChunkScheduler {
             .collect::<Vec<_>>();
         let mut processed = 0;
         let mut events = Vec::new();
+        // Light eviction rides the same ticket-driven holder drop the scheduler
+        // computes here (155 P0): every chunk that leaves the loaded set is
+        // evicted from the retained light state, mirroring vanilla
+        // `ChunkMap.scheduleUnload` -> `lightEngine.updateChunkStatus`.
+        let mut unloaded_light_columns = Vec::new();
 
         for pos in candidates {
             if active_levels.contains_key(&pos) {
@@ -2491,7 +2514,14 @@ impl ChunkScheduler {
             self.holders.remove(&pos);
             self.pending_unloads.remove(&pos);
             processed += 1;
+            if self.lighting_enabled {
+                unloaded_light_columns.push(pos);
+            }
             events.push(ChunkSchedulerEvent::HolderUnloaded { pos });
+        }
+
+        if !unloaded_light_columns.is_empty() {
+            self.light_mailbox.enqueue_unload(unloaded_light_columns);
         }
 
         Ok((processed, events))

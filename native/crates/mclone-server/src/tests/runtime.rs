@@ -170,6 +170,7 @@ fn integrated_server_publishes_interested_chunks() {
                 .scheduler()
                 .metrics()
                 .total_light_status_inserted_chunks,
+            retained_light_world_chunks: server.scheduler().metrics().retained_light_world_chunks,
             total_light_status_replaced_chunks: server
                 .scheduler()
                 .metrics()

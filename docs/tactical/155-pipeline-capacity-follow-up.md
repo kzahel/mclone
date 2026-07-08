@@ -32,7 +32,7 @@ Workstream: native Rust shared performance/architecture.
 
 | # | Item | Class | Priority | Status |
 |---|---|---|---|---|
-| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | diagnosed + quantified; Fix A scoped, impl pending |
+| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | **Fix A landed** — vanilla-shaped unload eviction; retained light plateaus (bounded by loaded set), acceptance gate flipped, parity byte-identical, wasm32 green |
 | P1 | Movement-frame / 120 Hz over-2x attribution at `7/14` | unblock (promotes shipped win) | high | open |
 | P2 | Sky-light graph hot path (fresh-startup ceiling) | new capability | medium (own tactical) | open |
 | P3 | Mesh-worker clamp (`7`) rationale + cross-host evidence | anti-knob debt / docs | low | documented below |
@@ -114,11 +114,13 @@ the RD20 row as evidence. Any bound added must be vanilla-shaped (tied to the
 loaded chunk set / unload path), not a fixed cap knob (rule B). Light parity
 stays byte-identical (rule E).
 
-**Status: diagnosed + quantified 2026-07-08 — confirmed unbounded by
-construction, shared (native + web); movement-soak test records `+9`
-retained-light chunks/step (linear, no plateau) against a flat `961`-chunk
-loaded set. Fix A scoped; implementation pending (own slice).** See "P0
-Investigation Log".
+**Status: Fix A landed 2026-07-08.** Vanilla-shaped unload eviction now bounds
+both retained stores: the movement-soak proxy plateaus at a fixed band (`180`
+retained chunks, `second_half_growth = 0`) instead of the pre-fix `+9`/step
+linear leak, against the same flat `961`-chunk loaded set. Parity byte-identical
+(lighting fixtures + a contrasting seed + a re-light-after-eviction test);
+`wasm32` green for the touched shared crates. See "P0 Investigation Log —
+2026-07-08 Fix A".
 
 ---
 
@@ -351,10 +353,9 @@ The loaded set is dead flat while the retained light world grows by one movement
 strip (`~9` chunks) every step with no eviction. Extrapolating the `+9`/step
 slope: `~972` retained chunks by step 100, `~9000` (`~1.1 GB` at ~128 KB/chunk)
 by step 1000 — unbounded in movement, exactly as the code/vanilla analysis
-predicted. `~36 MB` was already retained after only 24 tiny steps here. The test
-currently asserts the growth (green today); when Fix A lands it will fail as
-retained plateaus near one view, at which point it flips into the bounded
-acceptance assertion — i.e. this row is also the fix's before/after guard.
+predicted. `~36 MB` was already retained after only 24 tiny steps here. This row
+was the leak evidence; the same test is now the fix's before/after guard (see
+Fix A below).
 
 ### Fix options
 
@@ -399,3 +400,91 @@ the unloaded chunk's section list handy at `HolderUnloaded` time, or whether the
 light worker must derive sections from its own retained column before dropping it
 (the retained world knows the column, so deriving worker-side is viable and keeps
 the message a bare `ChunkPos`).
+
+### 2026-07-08 — Fix A landed (implementation)
+
+**Resolution: Fix A implemented and validated.** Vanilla-shaped unload eviction
+now bounds both retained stores. The open sub-question resolved in favour of the
+bare-`ChunkPos` message: the worker derives the column's light sections from the
+retained world's own `min_y`/`height` before dropping the block copy, so the
+scheduler ships only positions.
+
+**Change shape (shared crates, host-neutral, rule F):**
+
+- `mclone-light`: new direct-removal primitives mirroring the *end state* of
+  vanilla `updateChunkStatus` -> `removeLayer` (the native engine sets section
+  levels directly rather than flood-filling a `SectionTracker`, the pre-existing
+  037-049 divergence, so eviction removes the layer from **both** the updating and
+  visible maps and forgets the section/column tracking directly instead of
+  queuing a graph pass). `LayerLightSectionStorage::remove_section` +
+  `forget_retained_column`; `SkyLightSectionStorage::remove_section` (also drops
+  the section's sky-source bookkeeping) + `forget_column` (drops
+  `columns_with_sky_sources` + `top_sections`; `current_lowest_y` is intentionally
+  left at its historical floor — safe and, for a uniform-height overworld,
+  invariant); `LevelLightEngine::evict_chunk_column(column, light_section_range)`
+  ties it together (`retainData(false)` + per-section block/sky removal + sky
+  column forget).
+- `mclone-server`: `RetainedLightWorld::remove_chunk` drops the `~64 KB` block
+  snapshot; `RetainedInitialLightState::evict_chunks` drives it + the engine
+  column drop over the light-section range (data range ±`LIGHT_SECTION_PADDING`);
+  `retained_chunk_count` is the live gauge. Light mailbox gains
+  `LightStatusRequest::Unload(Vec<ChunkPos>)` (rides the same FIFO request channel
+  as `ComputeBatch`, so an unload always applies after any earlier compute for the
+  chunk and before any later relight) and a `Sync` round-trip barrier so callers
+  can read the post-unload gauge deterministically (unloads produce no
+  completion). The web inline backend gets the same eviction; the web *worker*
+  path is a no-op because it rebuilds `RetainedInitialLightState` per job frame
+  (`compute_light_status_job_frame`) and retains nothing across batches — it never
+  had the leak.
+- Scheduler wiring: `process_pending_unloads` collects the ticket-driven
+  `HolderUnloaded` positions and enqueues one `Unload` to the light mailbox
+  (gated on `lighting_enabled`), so light eviction rides the exact same
+  ticket-driven holder drop the scheduler already computes. A new
+  `retained_light_world_chunks` metric surfaces the worker gauge.
+
+**Key-risk resolution (only touches chunks nothing loaded depends on).** The
+scheduler only unloads chunks outside the ticket/loaded set, and eviction removes
+storage **only** for the evicted column (no neighbour data is read or written).
+After a batch drains to quiescence the block/sky graph holds no per-node state
+(`computed_levels` is emptied per node as the queue drains), so there are no
+dangling nodes to fix up. A still-loaded boundary chunk that reads an evicted
+neighbour later sees the same missing-neighbour substitutes as before —
+`light_opacity` -> `None` -> opacity `16` (vanilla's bedrock substitute) for the
+block world read, and `storing_light_for_section` -> `false` -> level `15`
+(fullbright) for the light-data read. Proven by tests, not assumed:
+`evicting_a_chunk_column_frees_its_sections_and_leaves_neighbor_light_unchanged`
+(mclone-light, byte-identical neighbour light) and
+`relighting_a_chunk_after_eviction_is_byte_identical` (mclone-server, revisit
+under movement is parity-stable — eviction leaves no stale column state).
+
+**Acceptance gate (the flipped soak, now green).**
+`movement_soak_keeps_retained_light_memory_bounded` reads the live
+`retained_light_world_chunks` gauge (flushed each step via `wait_for_light_idle`)
+instead of the cumulative first-insert proxy. Trajectory, both seeds `12345` and
+a contrasting `987654321`:
+
+| Metric | Step 0 | Step 11 | Step 23 | Behavior |
+|---|---:|---:|---:|---|
+| `holder_chunks` (loaded set) | `961` | `961` | `961` | flat — ticket-bounded |
+| `retained_light_chunks` | `81` | `180` | `180` | **fills then plateaus** — `second_half_growth = 0` |
+
+The retained set fills for `loaded_radius - lit_radius` steps (its trailing edge
+still inside the ticket set), then plateaus at `180` (one view widened by the
+unload lag — a constant bounded by the loaded set, `2.22x` one view here, **not**
+a function of distance travelled). The pre-fix run grew `+9`/step to `288` by
+step 23 and diverged. Both seeds trace the identical bounded trajectory (retained
+membership is geometry-driven, independent of terrain), which the test asserts —
+a divergence would mean eviction freed a terrain-dependent set.
+
+**Validation run.** `cargo fmt --check` clean; `cargo test -p mclone-server -p
+mclone-light` green (`375` + `55`, including the Java-oracle lighting fixtures and
+the new eviction/parity tests); `cargo check --target wasm32-unknown-unknown -p
+mclone-server -p mclone-light` green (clears the V wasm32 item for the crates this
+slice touched). Fix B (eliminate the block copy via a shared `getChunkForLighting`
+view) remains the eventual parity end-state, sequenced with `062`; Fix A stops
+the leak without touching the worker/scheduler ownership boundary.
+
+**V follow-ups still open:** the on-device Quest RD5/RD7/churn + mixed soak
+re-run under default config (confirm no regression on the RAM-constrained
+platform) and the desktop RD20-long RSS watch remain host-measurement items for a
+device pass — the shared-crate bound and its parity are proven here.
