@@ -188,6 +188,9 @@ vanilla. Fixes the absolute-world f32 precision loss (the user's "float scaling"
 hypothesis), which is **orthogonal** to the altitude flicker. Larger change;
 warrants its own tactical. Worth doing regardless for correctness far from spawn.
 
+Scoped as its own tactical:
+[`../tactical/156-camera-relative-chunk-rendering.md`](../tactical/156-camera-relative-chunk-rendering.md).
+
 ## Recommendation
 
 - Land **Option 1** (reversed-Z + `Depth32Float`) as the durable fix for the
