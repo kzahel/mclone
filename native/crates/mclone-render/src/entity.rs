@@ -752,7 +752,7 @@ fn create_actor_pipeline(
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_compare: wgpu::CompareFunction::GreaterEqual,
             stencil: Default::default(),
             bias: Default::default(),
         }),

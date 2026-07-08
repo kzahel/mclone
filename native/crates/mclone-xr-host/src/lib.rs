@@ -1579,7 +1579,8 @@ fn clear_eye_target(
             .map(|view| wgpu::RenderPassDepthStencilAttachment {
                 view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    // Reversed-Z: far plane is 0.0 (see tactical 158).
+                    load: wgpu::LoadOp::Clear(0.0),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1687,16 +1688,20 @@ pub fn xr_fov_to_projection_rh(fov: xr::Fovf, near: f32, far: f32) -> Result<Mat
     {
         anyhow::bail!("invalid OpenXR FOV {:?}", fov);
     }
+    // Reversed-Z depth mapping (near→1, far→0) to match the render pipeline's
+    // `Depth32Float` buffer, `GreaterEqual` test, and `0.0` clear. The z-row and
+    // w-row entries below are the reversed-Z form of the standard `[0,1]`
+    // projection; see `docs/tactical/158-reversed-z-depth-precision.md`.
     Ok(Mat4::from_cols(
         Vec4::new(2.0 / tan_width, 0.0, 0.0, 0.0),
         Vec4::new(0.0, 2.0 / tan_height, 0.0, 0.0),
         Vec4::new(
             (tan_right + tan_left) / tan_width,
             (tan_up + tan_down) / tan_height,
-            -far / (far - near),
+            near / (far - near),
             -1.0,
         ),
-        Vec4::new(0.0, 0.0, -(near * far) / (far - near), 0.0),
+        Vec4::new(0.0, 0.0, (near * far) / (far - near), 0.0),
     ))
 }
 
@@ -1747,7 +1752,16 @@ mod tests {
         };
 
         let actual = xr_fov_to_projection_rh(fov, near, far).unwrap();
-        let expected = Mat4::perspective_rh(fov_y, aspect, near, far);
+        // Reversed-Z: the XR matrix maps near→1, far→0. Cross-check it against
+        // the same reverse-Z remap (clip `z' = w - z`) applied to glam's standard
+        // forward projection. See tactical 158.
+        let reverse_z = Mat4::from_cols(
+            Vec4::new(1.0, 0.0, 0.0, 0.0),
+            Vec4::new(0.0, 1.0, 0.0, 0.0),
+            Vec4::new(0.0, 0.0, -1.0, 0.0),
+            Vec4::new(0.0, 0.0, 1.0, 1.0),
+        );
+        let expected = reverse_z * Mat4::perspective_rh(fov_y, aspect, near, far);
 
         assert_mat4_close(actual, expected);
     }

@@ -1,8 +1,12 @@
 # 158: Reversed-Z Depth Precision (thin-decoration z-fighting at altitude)
 
-Status: accepted 2026-07-08 — **Option 1 (reversed-Z + `Depth32Float`)** is the
-chosen and only approach; the interim mitigations previously sketched here are
-dropped. Standalone fix for the depth-buffer precision z-fighting diagnosed in
+Status: **Slices 1–2 implemented 2026-07-08** — reversed-Z + `Depth32Float`
+landed across all depth pipelines; desktop offscreen smoke + render/xr-host unit
+tests green (no depth-ordering regression). XR in-headset validation still
+pending on a Windows/Quest host. Accepted 2026-07-08 as **Option 1 (reversed-Z +
+`Depth32Float`)** — the chosen and only approach; the interim mitigations
+previously sketched here are dropped. Standalone fix for the depth-buffer
+precision z-fighting diagnosed in
 [`../issues/001-thin-decoration-z-fighting-at-altitude.md`](../issues/001-thin-decoration-z-fighting-at-altitude.md)
 (Option 1). This is the implementation tactical for that issue; the issue doc is
 the bug statement.
@@ -178,28 +182,48 @@ clearing pass wrote and only need their compare flip (§2): entity actors
 Capture a high-altitude look-down over snow / lily-pad terrain on the current
 build so before/after can be compared. See Validation for the capture note.
 
-### Slice 1 — Reversed-Z + Depth32Float, chunk terrain
+### Slices 1 + 2 — Reversed-Z + Depth32Float, all depth pipelines (done 2026-07-08)
 
-- Depth format (§1 constants) + clear value (§3 chunk sites) + compare flip (§2
-  chunk pipelines).
-- Reversed projection (§4) for desktop `perspective_rh` builders and the XR
-  `xr_fov_to_projection_rh` matrix, plus the projection test update.
-- Sky needs **no** change (audit §5) — do not touch it.
-- Validate: high-altitude before/after over snow, both per-eye and multiview;
-  each eye keeps its own view/projection (XR guardrail).
+Slices 1 and 2 **landed together in one atomic commit**. They cannot be
+separated: the projection matrix and the depth buffer are shared across chunk
+terrain, far-LOD, entity actors, and the selection outline, so reversing chunk
+while leaving the others on `LessEqual` would invert their occlusion against the
+reversed buffer (the "every depth site must flip together" guardrail). A
+chunk-only intermediate is a visibly broken frame, so the whole flip is one
+change.
 
-### Slice 2 — Remaining depth pipelines
+Implemented:
 
-Flip far LOD (`far_lod.rs`), entity actors (`entity.rs`), and selection outline
-(`selection_outline.rs`) to the reversed convention (§2 compares, plus
-`far_lod.rs:259` clear from §3) so they depth-test correctly against the chunk
-buffer. Outline write is already disabled; only its compare needs the flip. Fold
-in the XR eye and headless clear sites (`xr-host/src/lib.rs:1582`,
-`native-client/src/headless.rs:427`) and the two `XR_DEPTH_FORMAT` swapchain
-consts.
+- **Format** (§1): `DEPTH_FORMAT` and `DEFAULT_RENDER_DEPTH_FORMAT` →
+  `Depth32Float`; `color_profile` default-config assert updated; both
+  `XR_DEPTH_FORMAT` swapchain consts (`xr_clear_smoke.rs`, `android-xr-client`)
+  → `Depth32Float`.
+- **Compare** (§2): all 6 pipelines `LessEqual` → `GreaterEqual` (chunk ×2,
+  far-LOD, entity, selection outline ×2).
+- **Clear** (§3): all 5 depth clears → `0.0` via the new
+  `chunk::REVERSED_Z_DEPTH_CLEAR` const (chunk per-eye + multiview defaults,
+  far-LOD, XR eye pass, native-client headless pass).
+- **Projection** (§4): new shared `chunk::reversed_z_perspective_rh` applies a
+  `REVERSE_Z` remap (clip `z' = w - z`) to glam's `perspective_rh` at all four
+  desktop builders (incl. the `:4714` test helper); the XR
+  `xr_fov_to_projection_rh` matrix carries the reversed z/w-row entries directly,
+  and its unit test cross-checks against `REVERSE_Z * perspective_rh`.
+- **Sky** (§5): untouched, as the audit prescribed.
 
-There is no interim-mitigation slice: Option 1 is the only approach, so nothing
-is staged behind a temporary hack and nothing needs reverting.
+Validated on desktop: `pnpm native:desktop-offscreen:smoke` renders correct
+occlusion, entities, water/leaf translucency, and sky (screenshot reviewed);
+`mclone-render` (126) and `mclone-xr-host` (3) unit tests pass.
+
+There was no interim-mitigation slice: Option 1 is the only approach, so nothing
+was staged behind a temporary hack and nothing needs reverting.
+
+### Remaining — XR in-headset validation
+
+Not yet done (requires a Windows/Quest host per the validation matrix): confirm
+the fix in-headset over snow / lily-pad terrain, both eyes, and confirm the
+OpenXR runtime allocates a 32-bit float depth swapchain (see Risks). The desktop
+lane above is the no-regression gate; the altitude flicker itself needs the
+elevated look-down pose noted under Validation.
 
 ## Validation
 

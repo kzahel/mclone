@@ -1,6 +1,6 @@
 use glam::Mat4;
 
-use crate::chunk::{ChunkDepthTarget, ChunkRenderView, DEPTH_FORMAT};
+use crate::chunk::{ChunkDepthTarget, ChunkRenderView, DEPTH_FORMAT, REVERSED_Z_DEPTH_CLEAR};
 use crate::target::RenderFrameTarget;
 use crate::uniform::{
     PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
@@ -179,7 +179,7 @@ impl FarTerrainLodRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_compare: wgpu::CompareFunction::GreaterEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -256,7 +256,7 @@ impl FarTerrainLodRenderer {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &depth.view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Clear(REVERSED_Z_DEPTH_CLEAR),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,

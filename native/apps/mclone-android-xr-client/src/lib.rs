@@ -142,7 +142,7 @@ mod android {
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const VIEW_TYPE: xr::ViewConfigurationType = PRIMARY_STEREO_VIEW_TYPE;
     const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-    const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+    const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
     const XR_SAMPLE_COUNT: u32 = 1;
     const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
     const ANDROID_XR_SESSION_SMOKE_SEED: i64 = 246_813_579;

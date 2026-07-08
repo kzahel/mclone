@@ -30,7 +30,32 @@ use crate::uniform::{
     PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
 };
 
-pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+/// Reversed-Z clear value paired with [`DEPTH_FORMAT`]: the far plane is `0.0`,
+/// so the depth buffer clears to `0.0` and the depth test is `GreaterEqual`.
+pub const REVERSED_Z_DEPTH_CLEAR: f32 = 0.0;
+
+/// Reversed-Z remap matrix. Transforms a standard wgpu/DX `[0,1]` depth
+/// projection (near→0, far→1) into reversed-Z (near→1, far→0) by mapping
+/// clip-space `z' = w - z`. Paired with [`DEPTH_FORMAT`] (`Depth32Float`), a
+/// `GreaterEqual` depth test, and a [`REVERSED_Z_DEPTH_CLEAR`] clear, this gives
+/// near-uniform depth precision and eliminates far-distance z-fighting.
+/// See `docs/tactical/158-reversed-z-depth-precision.md`.
+const REVERSE_Z: Mat4 = Mat4::from_cols(
+    Vec4::new(1.0, 0.0, 0.0, 0.0),
+    Vec4::new(0.0, 1.0, 0.0, 0.0),
+    Vec4::new(0.0, 0.0, -1.0, 0.0),
+    Vec4::new(0.0, 0.0, 1.0, 1.0),
+);
+
+/// Right-handed perspective projection with reversed-Z depth. Preserves the
+/// finite near/far clip planes of [`Mat4::perspective_rh`] but flips the depth
+/// mapping to near→1, far→0. Use this everywhere a depth-writing pass builds its
+/// projection so the whole pipeline stays on one convention (see [`REVERSE_Z`]).
+pub fn reversed_z_perspective_rh(fov_y_radians: f32, aspect: f32, z_near: f32, z_far: f32) -> Mat4 {
+    REVERSE_Z * Mat4::perspective_rh(fov_y_radians, aspect, z_near, z_far)
+}
 
 const VERTEX_FLOAT_COUNT: usize = 7;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
@@ -95,7 +120,8 @@ impl ChunkCamera {
         let target = Vec3::from_array(self.target);
         let world_up = Vec3::from_array(self.up);
         let view = Mat4::look_at_rh(eye, target, world_up);
-        let projection = Mat4::perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
+        let projection =
+            reversed_z_perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
         let forward = (target - eye).normalize_or_zero();
         let right = forward.cross(world_up).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
@@ -228,7 +254,8 @@ impl PerspectiveRenderPose {
         let aspect = aspect.max(0.01);
         let orientation = self.orientation.normalize();
         let view = Mat4::from_rotation_translation(orientation, self.eye).inverse();
-        let projection = Mat4::perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
+        let projection =
+            reversed_z_perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
         let camera_forward = (orientation * Vec3::NEG_Z).normalize_or_zero();
         let camera_right = (orientation * Vec3::X).normalize_or_zero();
         let camera_up = (orientation * Vec3::Y).normalize_or_zero();
@@ -309,7 +336,8 @@ impl ChunkRenderView {
             return self;
         }
         let fov_y_radians = self.fov_y_radians * multiplier;
-        let projection = Mat4::perspective_rh(fov_y_radians, self.aspect, self.z_near, self.z_far);
+        let projection =
+            reversed_z_perspective_rh(fov_y_radians, self.aspect, self.z_near, self.z_far);
         Self {
             projection,
             view_projection: projection * self.view,
@@ -370,7 +398,7 @@ impl<'a> ChunkRenderTarget<'a> {
             depth_view,
             size,
             clear_color,
-            clear_depth: 1.0,
+            clear_depth: REVERSED_Z_DEPTH_CLEAR,
             gpu_timestamps: None,
             load_color: false,
             load_depth: false,
@@ -1955,7 +1983,7 @@ impl ChunkRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_compare: wgpu::CompareFunction::GreaterEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -2269,7 +2297,7 @@ fn create_textured_chunk_pipeline(
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_compare: wgpu::CompareFunction::GreaterEqual,
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -2496,7 +2524,7 @@ impl<'a> ChunkMultiviewRenderTarget<'a> {
             depth_view,
             size,
             clear_color,
-            clear_depth: 1.0,
+            clear_depth: REVERSED_Z_DEPTH_CLEAR,
             gpu_timestamps: None,
             load_color: false,
             load_depth: false,
@@ -4711,7 +4739,7 @@ mod tests {
         let z_near = 0.05;
         let z_far = 200.0;
         let view = Mat4::look_at_rh(eye, target, world_up);
-        let projection = Mat4::perspective_rh(fov_y_radians, aspect, z_near, z_far);
+        let projection = reversed_z_perspective_rh(fov_y_radians, aspect, z_near, z_far);
         let forward = (target - eye).normalize_or_zero();
         let right = forward.cross(world_up).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();

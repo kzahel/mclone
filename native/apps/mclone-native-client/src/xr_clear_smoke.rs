@@ -87,7 +87,7 @@ const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
 const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 #[cfg(not(target_os = "android"))]
-const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 #[cfg(not(target_os = "android"))]
 const XR_SAMPLE_COUNT: u32 = 1;
 #[cfg(not(target_os = "android"))]

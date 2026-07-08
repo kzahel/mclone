@@ -424,7 +424,8 @@ fn clear_actor_review_frame(
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: &depth.view,
             depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(1.0),
+                // Reversed-Z: far plane is 0.0 (see tactical 158).
+                load: wgpu::LoadOp::Clear(mclone_render::chunk::REVERSED_Z_DEPTH_CLEAR),
                 store: wgpu::StoreOp::Store,
             }),
             stencil_ops: None,

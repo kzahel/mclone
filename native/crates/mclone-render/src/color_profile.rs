@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 pub const DEFAULT_RENDER_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-pub const DEFAULT_RENDER_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+pub const DEFAULT_RENDER_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub const DEFAULT_RENDER_SAMPLE_COUNT: u32 = 1;
 pub const DEFAULT_RENDER_SCALE: f32 = 1.0;
 
@@ -309,7 +309,7 @@ mod tests {
 
         assert_eq!(config.color_profile, RenderColorProfile::Vanilla);
         assert_eq!(config.color_format, wgpu::TextureFormat::Rgba8Unorm);
-        assert_eq!(config.depth_format, wgpu::TextureFormat::Depth24Plus);
+        assert_eq!(config.depth_format, wgpu::TextureFormat::Depth32Float);
         assert_eq!(config.sample_count, 1);
         assert_eq!(config.render_scale, 1.0);
         assert!(!config.hdr);
