@@ -112,11 +112,10 @@ mod android {
         XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use mclone_xr_scene::{
-        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrMcloneTerrainState, XrSceneOptions,
-        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFramePipelineHostTiming, XrFramePipelineReporter,
+        XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+        XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
     };
-    #[cfg(feature = "perf-diagnostics")]
-    use mclone_xr_scene::{XrFramePipelineHostTiming, XrFramePipelineReporter};
     use openxr as xr;
 
     use super::graphics_vulkan;
@@ -3341,7 +3340,6 @@ mod android {
         let mut frame_stats = XrFrameStats::default();
         let render_path = frame_targets.render_path();
         let xr_eye_size = frame_targets.eye_size();
-        #[cfg(feature = "perf-diagnostics")]
         let mut frame_pipeline_reporter =
             XrFramePipelineReporter::new(display_refresh.current_rate.map(f64::from));
         let mut perf_probe = AndroidXrPerfProbe::new(
@@ -3627,14 +3625,21 @@ mod android {
                 frame_timing.thread_cpu_ms = (end_ms - start_ms).max(0.0);
                 frame_timing.thread_cpu_valid = true;
             }
-            let budget_decision_panel =
-                if cfg!(feature = "perf-diagnostics") || perf_probe.is_recording() {
-                    terrain.latest_budget_decision_panel()
-                } else {
-                    BudgetDecisionPanelReport::empty()
-                };
-            #[cfg(feature = "perf-diagnostics")]
+            // Feed the perf overlay whenever it is open (or perf diagnostics are
+            // compiled in / recording). The frame-pipeline report only assembles
+            // already-measured host and runtime timings, so running it while the
+            // overlay is visible is cheap and keeps the panel populated without
+            // requiring the `perf-diagnostics` build feature.
+            let frame_pipeline_overlay_open = terrain.frame_metrics_visible();
+            let budget_decision_panel = if cfg!(feature = "perf-diagnostics")
+                || perf_probe.is_recording()
+                || frame_pipeline_overlay_open
             {
+                terrain.latest_budget_decision_panel()
+            } else {
+                BudgetDecisionPanelReport::empty()
+            };
+            if cfg!(feature = "perf-diagnostics") || frame_pipeline_overlay_open {
                 let (frame_pipeline_report, frame_pipeline_revision) = frame_pipeline_reporter
                     .record_frame_with_budget_decision_panel(
                         XrFramePipelineHostTiming {

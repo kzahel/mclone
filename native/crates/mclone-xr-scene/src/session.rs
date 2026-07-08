@@ -359,6 +359,13 @@ where
         self.diagnostic_panel.clear_frame_pipeline_report();
     }
 
+    /// Whether the frame-pipeline (perf) overlay is currently toggled on. Hosts
+    /// use this to feed the overlay only while it is visible, instead of gating
+    /// the report at compile time behind `perf-diagnostics`.
+    pub fn frame_metrics_visible(&self) -> bool {
+        self.diagnostic_panel.frame_metrics_visible()
+    }
+
     pub fn set_session_runtime_factory<F>(&mut self, factory: F)
     where
         F: FnMut(
