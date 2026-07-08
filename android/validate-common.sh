@@ -302,14 +302,15 @@ mclone_collect_logcat() {
     local serial="$1"
     local pid="$2"
     local log_path="$3"
+    local line_count="${MCLONE_ANDROID_LOGCAT_LINES:-400}"
 
     mkdir -p "$(dirname "$log_path")"
     if [[ -n "$pid" ]]; then
-        "$ADB" -s "$serial" logcat -d "--pid=$pid" -t 400 > "$log_path" 2>/dev/null \
-            || "$ADB" -s "$serial" logcat -d -t 400 > "$log_path" 2>/dev/null \
+        "$ADB" -s "$serial" logcat -d "--pid=$pid" -t "$line_count" > "$log_path" 2>/dev/null \
+            || "$ADB" -s "$serial" logcat -d -t "$line_count" > "$log_path" 2>/dev/null \
             || true
     else
-        "$ADB" -s "$serial" logcat -d -t 400 > "$log_path" 2>/dev/null || true
+        "$ADB" -s "$serial" logcat -d -t "$line_count" > "$log_path" 2>/dev/null || true
     fi
 }
 
@@ -383,6 +384,15 @@ mclone_run_as_app_shell() {
     local command="$2"
 
     "$ADB" -s "$serial" shell "run-as $MCLONE_ANDROID_APP_ID sh -c '$command'"
+}
+
+mclone_reset_android_worlds_for_persist_smoke() {
+    local serial="$1"
+
+    [[ "${MCLONE_ANDROID_SESSION_SMOKE:-}" == "persist-restart" ]] || return 0
+    mclone_note "Clearing app-owned Android worlds before persist-restart smoke"
+    mclone_run_as_app_shell "$serial" "rm -rf files/worlds" >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell "rm -rf /sdcard/Android/data/$MCLONE_ANDROID_APP_ID/files/worlds" >/dev/null 2>&1 || true
 }
 
 mclone_stage_internal_asset_pack() {
@@ -632,6 +642,29 @@ mclone_run_session_smoke() {
             mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
             ;;
+        persist-restart)
+            mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title Singleplayer"
+            mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
+            sleep "${MCLONE_ANDROID_PERSIST_CREATE_SETTLE_SECONDS:-6}"
+            mclone_android_tap_pixel "$serial" $(((width / scale - 117) * scale)) $(((height / scale - 193) * scale)) "touch Use/place block"
+            sleep "${MCLONE_ANDROID_PERSIST_AFTER_PLACE_SECONDS:-2}"
+            mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu after placement"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title after placement"
+            sleep "${MCLONE_ANDROID_PERSIST_AFTER_QUIT_SECONDS:-2}"
+            "$ADB" -s "$serial" shell am force-stop "$MCLONE_ANDROID_APP_ID" >/dev/null 2>&1 || true
+            mclone_note "Relaunching $MCLONE_ANDROID_APP_ID/$MCLONE_ANDROID_ACTIVITY for persistence restart smoke"
+            "$ADB" -s "$serial" shell am start -W -n "$MCLONE_ANDROID_APP_ID/$MCLONE_ANDROID_ACTIVITY" >/dev/null
+            sleep "${MCLONE_ANDROID_PERSIST_RELAUNCH_SECONDS:-15}"
+            mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu after relaunch"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title after relaunch"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title Singleplayer after relaunch"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 89 * scale)) "world-list first row after relaunch"
+            mclone_android_tap_pixel "$serial" $((182 * scale)) $((325 * scale)) "world-list Open after relaunch"
+            sleep "${MCLONE_ANDROID_PERSIST_REOPEN_SETTLE_SECONDS:-8}"
+            ;;
         join-remote)
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
@@ -639,7 +672,7 @@ mclone_run_session_smoke() {
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "join-remote Connect"
             ;;
         *)
-            mclone_die "unsupported Android session smoke '$smoke'; expected new-world or join-remote"
+            mclone_die "unsupported Android session smoke '$smoke'; expected new-world, join-remote, or persist-restart"
             ;;
     esac
     sleep "${MCLONE_ANDROID_SESSION_SMOKE_SETTLE_SECONDS:-5}"
@@ -655,12 +688,19 @@ mclone_check_session_smoke_log() {
             grep -F "Mclone Android created local world seed=" "$log_path" >/dev/null 2>&1 \
                 || mclone_die "Android new-world session smoke marker was not found in $log_path"
             ;;
+        persist-restart)
+            grep -F "Mclone Android touch interaction Use" "$log_path" | grep -F "changed=true" >/dev/null 2>&1 \
+                || mclone_die "Android persist-restart placement marker was not found in $log_path"
+            if [[ "$(grep -F "Mclone Android created local world seed=" "$log_path" | wc -l | tr -d ' ')" -lt 2 ]]; then
+                mclone_die "Android persist-restart reopen marker was not found in $log_path"
+            fi
+            ;;
         join-remote)
             grep -F "Mclone Android joined remote session" "$log_path" >/dev/null 2>&1 \
                 || mclone_die "Android join-remote session smoke marker was not found in $log_path"
             ;;
         *)
-            mclone_die "unsupported Android session smoke '$smoke'; expected new-world or join-remote"
+            mclone_die "unsupported Android session smoke '$smoke'; expected new-world, join-remote, or persist-restart"
             ;;
     esac
 }
@@ -681,6 +721,7 @@ mclone_install_launch_smoke() {
     mclone_note "Using $(mclone_device_summary "$serial")"
     mclone_note "Installing $APK_PATH"
     "$ADB" -s "$serial" install -r "$APK_PATH"
+    mclone_reset_android_worlds_for_persist_smoke "$serial"
 
     if [[ "${STAGE_ASSETS:-1}" == "1" ]]; then
         mclone_stage_asset_pack "$serial"
@@ -747,7 +788,12 @@ mclone_install_launch_smoke() {
     mclone_run_touch_swipe "$serial"
     mclone_run_session_smoke "$serial"
 
-    mclone_collect_logcat "$serial" "$pid" "$log_path"
+    local collect_pid="$pid"
+    if [[ "${MCLONE_ANDROID_SESSION_SMOKE:-}" == "persist-restart" ]]; then
+        collect_pid=""
+        MCLONE_ANDROID_LOGCAT_LINES="${MCLONE_ANDROID_LOGCAT_LINES:-3000}"
+    fi
+    mclone_collect_logcat "$serial" "$collect_pid" "$log_path"
     if grep -E "FATAL EXCEPTION|Fatal signal|thread .* panicked|panicked at" "$log_path" >/dev/null 2>&1; then
         mclone_die "fatal Mclone logcat entries found in $log_path"
     fi

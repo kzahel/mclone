@@ -70,7 +70,7 @@ Options:
   --touch-swipe SPEC  Inject a touch swipe before capture: x1,y1,x2,y2,duration_ms.
   --session-smoke MODE
                       Inject a shared UI session flow before capture.
-                      MODE is new-world or join-remote.
+                      MODE is new-world, join-remote, or persist-restart.
   -h, --help          Show this help.
 USAGE
 }

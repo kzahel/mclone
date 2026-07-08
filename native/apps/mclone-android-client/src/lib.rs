@@ -6,6 +6,7 @@ use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
 #[cfg(target_os = "android")]
 mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Once;
     use std::time::Instant;
@@ -36,7 +37,7 @@ mod android {
         SingleViewHostOptions,
     };
     use mclone_app_runtime::local_single_view::{
-        LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
+        LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
     };
     use mclone_app_runtime::render_assets::{
         DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -54,11 +55,12 @@ mod android {
         StartupSceneOptions, StartupWorldStorageOptions,
     };
     use mclone_app_runtime::world_catalog::{
-        LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
-        WorldCatalogError, WorldCatalogRequest, WorldCatalogResponse,
+        LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalog,
+        WorldCatalogCapabilities, WorldCatalogError,
     };
     use mclone_app_runtime::{
-        debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
+        debug_block_palette_overlay, debug_hotbar_icons, execute_world_catalog_request,
+        set_player_appearance_command_for_ui_model,
     };
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_client::ClientInteractionController;
@@ -90,8 +92,8 @@ mod android {
         GameCollisionMode, GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel,
         GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState, GuiDrawList, GuiKey,
         GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats,
-        touch_action_button_rects, touch_controls_mode_label, touch_hotbar_slot_rects,
-        touch_menu_button_rect, touch_movement_zone_rect,
+        WorldCatalogUiStatus, touch_action_button_rects, touch_controls_mode_label,
+        touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -203,6 +205,19 @@ mod android {
         );
     }
 
+    fn android_world_root(app: &AndroidApp) -> Option<PathBuf> {
+        let root = app
+            .internal_data_path()
+            .or_else(|| app.external_data_path())
+            .map(|path| path.join("worlds"));
+        if let Some(root) = &root {
+            log::info!("Android world catalog root: {}", root.display());
+        } else {
+            log::warn!("Android could not resolve an app data path for persistent worlds");
+        }
+        root
+    }
+
     struct AndroidGpuState {
         surface: wgpu::Surface<'static>,
         device: wgpu::Device,
@@ -216,6 +231,7 @@ mod android {
         sky: SkyRenderer,
         draw: TexturedSectionDrawResources,
         gui: GuiRenderer,
+        world_catalog: Option<NativeWorldCatalog>,
         scene_options: AndroidSceneOptions,
         scene: AndroidSingleViewSceneRuntime,
         camera: EngineCameraController,
@@ -597,6 +613,7 @@ mod android {
                 format,
                 scene_options.clone(),
                 startup_options.camera,
+                None,
             )?;
             let depth = ChunkDepthTarget::new(device, width, height);
             let render_options = startup_options.render_options;
@@ -615,17 +632,25 @@ mod android {
             let mut gui = GuiRenderer::new(device, format);
             gui.upload_texture_atlas(device, queue, started.scene.mesh_assets().atlas.as_upload())
                 .context("upload Android GUI atlas")?;
+            let world_catalog = scene_options
+                .world_root
+                .clone()
+                .map(NativeWorldCatalog::new);
             let mut client_experience =
                 ClientExperienceController::new(android_client_experience_profile());
             client_experience
                 .catalog_mut()
-                .set_capabilities(WorldCatalogCapabilities::transient_create_only());
+                .set_capabilities(world_catalog.as_ref().map_or_else(
+                    WorldCatalogCapabilities::default,
+                    NativeWorldCatalog::capabilities,
+                ));
 
-            Ok(Self {
+            let mut renderer = Self {
                 depth,
                 sky,
                 draw: started.draw,
                 gui,
+                world_catalog,
                 scene_options: scene_options.clone(),
                 scene: started.scene,
                 camera: started.camera,
@@ -653,7 +678,9 @@ mod android {
                 last_movement_update: None,
                 audio,
                 seed_reroll_state: initial_android_seed_reroll_state(scene_options.seed),
-            })
+            };
+            renderer.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+            Ok(renderer)
         }
 
         fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
@@ -1131,6 +1158,17 @@ mod android {
             options.seed = seed;
             options.render_distance = self.scene.render_distance();
             options.remote_addr = None;
+            options.world_dir = None;
+            options
+        }
+
+        fn catalog_world_options(
+            &self,
+            summary: &LocalWorldSummary,
+            world_dir: PathBuf,
+        ) -> AndroidSceneOptions {
+            let mut options = self.local_world_options(summary.seed);
+            options.world_dir = Some(world_dir);
             options
         }
 
@@ -1138,6 +1176,7 @@ mod android {
             let mut options = self.scene_options.clone();
             options.render_distance = self.scene.render_distance();
             options.remote_addr = Some(remote_addr);
+            options.world_dir = None;
             options
         }
 
@@ -1167,19 +1206,23 @@ mod android {
             format: wgpu::TextureFormat,
             request: SessionStartRequest,
             options: AndroidSceneOptions,
+            descriptor_override: Option<ActiveSessionDescriptor>,
         ) -> Result<()> {
             self.session_status = StatusOverlay::new(request.starting_message(), true);
-            let descriptor = request.active_descriptor().with_context(|| {
-                format!(
-                    "Android replacement request did not describe an active session: {request:?}"
-                )
-            })?;
+            let descriptor = descriptor_override
+                .or_else(|| request.active_descriptor())
+                .with_context(|| {
+                    format!(
+                        "Android replacement request did not describe an active session: {request:?}"
+                    )
+                })?;
             let started = match start_android_render_scene(
                 device,
                 queue,
                 format,
                 options.clone(),
                 StartupCameraOptions::default(),
+                Some(descriptor.clone()),
             ) {
                 Ok(started) => started,
                 Err(error) => {
@@ -1325,13 +1368,13 @@ mod android {
             queue: &wgpu::Queue,
             format: wgpu::TextureFormat,
         ) -> Result<bool> {
-            for request in effects.catalog_requests {
-                if !self.execute_android_catalog_request(request, device, queue, format)? {
+            for start in effects.session_starts {
+                if !self.apply_android_catalog_session_start(start, device, queue, format)? {
                     return Ok(false);
                 }
             }
-            for start in effects.session_starts {
-                if !self.apply_android_catalog_session_start(start, device, queue, format)? {
+            for request in effects.catalog_requests {
+                if !self.execute_android_catalog_request(request, device, queue, format)? {
                     return Ok(false);
                 }
             }
@@ -1345,35 +1388,14 @@ mod android {
             queue: &wgpu::Queue,
             format: wgpu::TextureFormat,
         ) -> Result<bool> {
-            let response = match request.request {
-                WorldCatalogRequest::CreateWorld { options } => {
-                    match android_transient_catalog_summary(&options) {
-                        Ok(summary) => WorldCatalogResponse::WorldCreated { summary },
-                        Err(error) => {
-                            let effects = self
-                                .client_experience
-                                .catalog_mut()
-                                .apply_catalog_error(request.id, error);
-                            return self
-                                .apply_android_catalog_effects(effects, device, queue, format);
-                        }
-                    }
-                }
-                WorldCatalogRequest::ListWorlds
-                | WorldCatalogRequest::OpenWorld { .. }
-                | WorldCatalogRequest::DeleteWorld { .. } => {
-                    let effects = self.client_experience.catalog_mut().apply_catalog_error(
-                        request.id,
-                        WorldCatalogError::unsupported("Persistent worlds unavailable"),
-                    );
-                    return self.apply_android_catalog_effects(effects, device, queue, format);
-                }
-            };
-
-            let effects = self
-                .client_experience
-                .catalog_mut()
-                .apply_catalog_response(request.id, response);
+            let catalog = self.world_catalog.clone();
+            let active = self.active_local_world_id().cloned();
+            let effects = execute_world_catalog_request(
+                catalog.as_ref().map(|catalog| catalog as &dyn WorldCatalog),
+                self.client_experience.catalog_mut(),
+                active.as_ref(),
+                request,
+            );
             self.apply_android_catalog_effects(effects, device, queue, format)
         }
 
@@ -1385,17 +1407,24 @@ mod android {
             format: wgpu::TextureFormat,
         ) -> Result<bool> {
             let request = start.request;
-            let options = match android_scene_options_for_session_request(self, &request) {
-                Some(options) => options,
-                None => {
-                    let message = "Android catalog session start is unsupported";
-                    log::warn!("{message}: {request:?}");
-                    self.session_status = StatusOverlay::new(message, false);
-                    return Ok(false);
-                }
+            let Some(catalog) = self.world_catalog.clone() else {
+                let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
+                log::warn!("Android catalog session start failed: {error}");
+                self.session_status = StatusOverlay::new(error.message, false);
+                return Ok(false);
             };
+            let active_id = start.summary.id.clone();
+            let options =
+                self.catalog_world_options(&start.summary, catalog.world_dir(&start.summary.id));
             if self
-                .start_replacement_session(device, queue, format, request.clone(), options)
+                .start_replacement_session(
+                    device,
+                    queue,
+                    format,
+                    request.clone(),
+                    options,
+                    Some(start.descriptor),
+                )
                 .is_err()
             {
                 self.apply_client_session_ui_effects(client_session_failed_start_ui_effects(
@@ -1405,7 +1434,8 @@ mod android {
             }
             self.client_experience
                 .catalog_mut()
-                .set_active_world(Some(start.summary.id));
+                .set_active_world(Some(active_id));
+            self.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
             self.ui.set_screen(None);
             Ok(true)
         }
@@ -1427,17 +1457,25 @@ mod android {
                 self.session_status = StatusOverlay::hidden();
             }
             if let Some(request) = effects.session_start {
-                let options = match android_scene_options_for_session_request(self, &request) {
-                    Some(options) => options,
-                    None => {
-                        let message = "Android session start is unsupported";
-                        log::warn!("{message}: {request:?}");
-                        self.session_status = StatusOverlay::new(message, false);
-                        return Ok(false);
-                    }
-                };
+                let (options, descriptor_override) =
+                    match android_scene_options_for_session_request(self, &request) {
+                        Some(payload) => payload,
+                        None => {
+                            let message = "Android session start is unsupported";
+                            log::warn!("{message}: {request:?}");
+                            self.session_status = StatusOverlay::new(message, false);
+                            return Ok(false);
+                        }
+                    };
                 if self
-                    .start_replacement_session(device, queue, format, request.clone(), options)
+                    .start_replacement_session(
+                        device,
+                        queue,
+                        format,
+                        request.clone(),
+                        options,
+                        descriptor_override,
+                    )
                     .is_err()
                 {
                     self.apply_client_session_ui_effects(client_session_failed_start_ui_effects(
@@ -1669,6 +1707,35 @@ mod android {
                 if let Some(message) = unavailable.status.message() {
                     log::warn!("{message}");
                     self.session_status = StatusOverlay::new(message, unavailable.status.ok());
+                }
+            }
+        }
+
+        fn refresh_world_catalog_ui(&mut self, status: WorldCatalogUiStatus) {
+            let Some(catalog) = self.world_catalog.clone() else {
+                self.client_experience.catalog_mut().set_worlds(
+                    WorldCatalogCapabilities::default(),
+                    Vec::new(),
+                    status,
+                );
+                return;
+            };
+
+            match catalog.list_worlds() {
+                Ok(worlds) => {
+                    self.client_experience.catalog_mut().set_worlds(
+                        catalog.capabilities(),
+                        worlds,
+                        status,
+                    );
+                }
+                Err(error) => {
+                    log::warn!("failed to refresh Android local world catalog: {error}");
+                    self.client_experience.catalog_mut().set_worlds(
+                        catalog.capabilities(),
+                        Vec::new(),
+                        WorldCatalogUiStatus::new(&error.message, false),
+                    );
                 }
             }
         }
@@ -2071,9 +2138,10 @@ mod android {
         format: wgpu::TextureFormat,
         options: AndroidSceneOptions,
         camera_options: StartupCameraOptions,
+        descriptor: Option<ActiveSessionDescriptor>,
     ) -> Result<StartedAndroidRenderScene> {
         let movement_speed_multiplier = options.movement_speed_multiplier;
-        let mut scene = android_single_view_scene_runtime(options)?;
+        let mut scene = android_single_view_scene_runtime(options, descriptor)?;
         let host_label = scene.host_label();
         let session_label = active_session_label(scene.active_session());
         let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
@@ -2166,19 +2234,26 @@ mod android {
         lighting_enabled: bool,
         light_status_batch_size: usize,
         remote_addr: Option<String>,
+        world_root: Option<PathBuf>,
+        world_dir: Option<PathBuf>,
     }
 
     impl AndroidSceneOptions {
         fn local_options(&self) -> LocalSingleViewSceneOptions {
-            LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
-                .with_initial_spawn_center()
-                .with_day_time(self.day_time_override)
-                .with_freeze_time(self.freeze_time)
-                .with_debug_passive_showcase(self.debug_passive_showcase)
-                .with_lighting_enabled(self.lighting_enabled)
-                .with_light_status_batch_size(self.light_status_batch_size)
-                .with_render_compile_worker_count(self.render_compile_worker_count)
-                .with_render_compile_max_pending_jobs(self.render_compile_max_pending_jobs)
+            let mut options =
+                LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
+                    .with_initial_spawn_center()
+                    .with_day_time(self.day_time_override)
+                    .with_freeze_time(self.freeze_time)
+                    .with_debug_passive_showcase(self.debug_passive_showcase)
+                    .with_lighting_enabled(self.lighting_enabled)
+                    .with_light_status_batch_size(self.light_status_batch_size)
+                    .with_render_compile_worker_count(self.render_compile_worker_count)
+                    .with_render_compile_max_pending_jobs(self.render_compile_max_pending_jobs);
+            if let Some(world_dir) = &self.world_dir {
+                options = options.with_persistent_world_dir(world_dir.clone());
+            }
+            options
         }
 
         fn host_options(&self) -> SingleViewHostOptions {
@@ -2224,6 +2299,7 @@ mod android {
         scene: AndroidSceneOptions,
         render_options: TexturedSectionRenderOptions,
         camera: StartupCameraOptions,
+        default_world_root_enabled: bool,
     }
 
     fn parse_android_startup_options(
@@ -2267,13 +2343,18 @@ mod android {
             shared_args.apply_render_compile_capacity_report(&report);
         }
         let options = shared_args.finish();
-        if options.storage != StartupWorldStorageOptions::default() {
-            bail!("Android startup storage arguments are not supported");
+        let default_world_root_enabled =
+            !options.storage.transient && options.storage.world_root.is_none();
+        let scene =
+            android_scene_options_from_startup(options.scene, options.storage).validated()?;
+        if scene.remote_addr.is_some() && scene.world_dir.is_some() {
+            bail!("--world-dir applies only to local integrated worlds");
         }
         Ok(AndroidStartupOptions {
-            scene: android_scene_options_from_startup(options.scene).validated()?,
+            scene,
             render_options: options.render_options,
             camera: options.camera,
+            default_world_root_enabled,
         })
     }
 
@@ -2296,7 +2377,10 @@ mod android {
         }
     }
 
-    fn android_scene_options_from_startup(scene: StartupSceneOptions) -> AndroidSceneOptions {
+    fn android_scene_options_from_startup(
+        scene: StartupSceneOptions,
+        storage: StartupWorldStorageOptions,
+    ) -> AndroidSceneOptions {
         AndroidSceneOptions {
             seed: scene.seed,
             center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
@@ -2310,6 +2394,8 @@ mod android {
             lighting_enabled: scene.lighting_enabled,
             light_status_batch_size: scene.light_status_batch_size,
             remote_addr: scene.remote_addr,
+            world_root: storage.world_root,
+            world_dir: storage.world_dir,
         }
     }
 
@@ -2434,34 +2520,41 @@ mod android {
     fn android_scene_options_for_session_request(
         renderer: &AndroidFrameRenderer,
         request: &SessionStartRequest,
-    ) -> Option<AndroidSceneOptions> {
+    ) -> Option<(AndroidSceneOptions, Option<ActiveSessionDescriptor>)> {
         match request {
-            SessionStartRequest::CreateLocalWorld { options } => {
-                Some(renderer.local_world_options(options.seed))
+            SessionStartRequest::CreateLocalWorld { options } => Some((
+                renderer.local_world_options(options.seed),
+                request.active_descriptor(),
+            )),
+            SessionStartRequest::OpenLocalWorld { id } => {
+                let Some(catalog) = renderer.world_catalog.as_ref() else {
+                    log::warn!("Android local world open requested without a native catalog");
+                    return None;
+                };
+                match catalog.open_world(id) {
+                    Ok(opened) => {
+                        let descriptor =
+                            ActiveSessionDescriptor::from_local_world_summary(&opened.summary);
+                        Some((
+                            renderer.catalog_world_options(
+                                &opened.summary,
+                                catalog.world_dir(&opened.summary.id),
+                            ),
+                            Some(descriptor),
+                        ))
+                    }
+                    Err(error) => {
+                        log::warn!("failed to open Android local world `{id}`: {error}");
+                        None
+                    }
+                }
             }
-            SessionStartRequest::JoinRemote { endpoint } => {
-                Some(renderer.remote_session_options(endpoint.address.clone()))
-            }
-            SessionStartRequest::OpenLocalWorld { .. } | SessionStartRequest::Unknown => None,
+            SessionStartRequest::JoinRemote { endpoint } => Some((
+                renderer.remote_session_options(endpoint.address.clone()),
+                request.active_descriptor(),
+            )),
+            SessionStartRequest::Unknown => None,
         }
-    }
-
-    fn android_transient_catalog_summary(
-        options: &LocalWorldCreateOptions,
-    ) -> std::result::Result<LocalWorldSummary, WorldCatalogError> {
-        let id = options
-            .requested_id
-            .clone()
-            .unwrap_or_else(|| android_transient_world_id(options));
-        let mut summary =
-            LocalWorldSummary::new(id, options.display_name.clone(), options.seed, 0)?;
-        summary.last_played_unix_millis = Some(0);
-        summary.backend_label = Some("android-transient".to_owned());
-        Ok(summary)
-    }
-
-    fn android_transient_world_id(options: &LocalWorldCreateOptions) -> LocalWorldId {
-        LocalWorldId::from_display_name(&format!("{} {}", options.display_name, options.seed))
     }
 
     fn clamp_android_touch_look_sensitivity(value: f32) -> f32 {
@@ -2545,19 +2638,37 @@ mod android {
 
     fn android_single_view_scene_runtime(
         options: AndroidSceneOptions,
+        descriptor: Option<ActiveSessionDescriptor>,
     ) -> Result<AndroidSingleViewSceneRuntime> {
+        let descriptor = descriptor.unwrap_or_else(|| android_active_session_descriptor(&options));
         if let Some(remote_addr) = &options.remote_addr {
             let session = AndroidRemoteServerSession::connect(remote_addr.as_str())?;
-            return AndroidSingleViewSceneRuntime::remote_dedicated(
-                RemoteSessionEndpoint::new(remote_addr.clone()),
+            let runtime = NativeSingleViewSceneRuntime::remote_dedicated(
                 options.host_options(),
                 session,
             )
             .with_context(|| {
                 format!("failed to initialize Android remote dedicated runtime from {remote_addr}")
-            });
+            })?;
+            return Ok(
+                AndroidSingleViewSceneRuntime::from_active_runtime_with_descriptor(
+                    descriptor, runtime,
+                ),
+            );
         }
-        AndroidSingleViewSceneRuntime::local(options.local_options())
+        let runtime = NativeSingleViewSceneRuntime::local(options.local_options())?;
+        Ok(AndroidSingleViewSceneRuntime::from_active_runtime_with_descriptor(descriptor, runtime))
+    }
+
+    fn android_active_session_descriptor(options: &AndroidSceneOptions) -> ActiveSessionDescriptor {
+        if let Some(remote_addr) = &options.remote_addr {
+            return SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+            }
+            .active_descriptor()
+            .expect("remote session request has an active descriptor");
+        }
+        ActiveSessionDescriptor::new_seed_local_world(options.seed)
     }
 
     fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {
@@ -2570,6 +2681,12 @@ mod android {
             }
             None => "none".to_owned(),
         }
+    }
+
+    fn format_optional_path(value: Option<&PathBuf>) -> String {
+        value
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<none>".to_owned())
     }
 
     #[derive(Debug)]
@@ -2992,6 +3109,17 @@ mod android {
         if startup_options.scene.remote_addr.is_none() {
             startup_options.scene.remote_addr = legacy_remote_addr.clone();
         }
+        if startup_options.default_world_root_enabled && startup_options.scene.world_root.is_none()
+        {
+            startup_options.scene.world_root = android_world_root(&app);
+        }
+        if startup_options.scene.remote_addr.is_some() && startup_options.scene.world_dir.is_some()
+        {
+            log::error!(
+                "MCLONE_ANDROID_FAILURE: --world-dir applies only to local integrated worlds"
+            );
+            return;
+        }
         if let Some(remote_addr) = startup_remote_addr.as_deref() {
             log::info!(
                 "Mclone Android remote dedicated address from {STARTUP_ARGV_INTENT_EXTRA}: {remote_addr}"
@@ -3015,6 +3143,12 @@ mod android {
             startup_options.scene.freeze_time,
             startup_options.scene.movement_speed_multiplier,
             startup_options.scene.lighting_enabled
+        );
+        log::info!(
+            "Mclone Android world storage: default_root_enabled={} world_root={} world_dir={}",
+            startup_options.default_world_root_enabled,
+            format_optional_path(startup_options.scene.world_root.as_ref()),
+            format_optional_path(startup_options.scene.world_dir.as_ref())
         );
         log::info!(
             "Mclone Android render options: section_occlusion={} fullbright={} color_profile={}",
