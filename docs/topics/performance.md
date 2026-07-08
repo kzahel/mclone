@@ -168,15 +168,16 @@ frozen and the conservative render compile queue-depth default
 (`workers=1`, `max-pending=4`), clean Slice 5 RD10 startup-streaming reaches
 full target view in `9.14-9.18s`, RD15 reaches full view in `19.43s`, and
 persisted RD10 reaches actionable target render quiescence in `4.925s`.
-Remaining work is no longer "prove the baseline"; it is
-[`153`](../tactical/153-vanilla-shaped-chunk-pipeline-capacity.md), the
-vanilla-shaped pipeline capacity tactical: whole-pipeline attribution first,
-then render compile capacity from the 1.17.1 pack-pool formula, light stage
-throughput (optimize before any parallel-light divergence), count knobs
-replaced by measured valves (publication cap, XR accept/upload lane args,
-render admission promotion), and an evidence-gated shared-pool topology
-decision. Remote/local host-mode treatment stays with
-[`151`](../tactical/151-remote-inbound-update-pipeline.md).
+Tactical [`153`](../tactical/153-vanilla-shaped-chunk-pipeline-capacity.md)
+then closed the broad capacity/valve pass: shared render compile capacity now
+exists but remains explicit/context-gated, retained-light redundant rechecks are
+filtered, and publication count caps became cost-derived grants. The remaining
+fresh-startup ceiling is not another generic pipeline valve; it is serial
+sky-light graph/storage compute. Treat future work here as lighting-specific
+unless a new measurement row re-promotes a capacity or frame-pacing valve.
+Remote/local host-mode treatment stays with
+[`151`](../tactical/151-remote-inbound-update-pipeline.md), and Quest soak /
+RD7/RD10 pressure stays with the Quest pacing tacticals.
 See the publication-valve record in
 [`../performance-records.md`](../performance-records.md).
 
@@ -191,7 +192,7 @@ See the publication-valve record in
 | P4 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
 | P5 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and movement probes show upload cost is small. Do this when probes show upload/allocation cost is material again. |
 | P6 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
-| P7 | Streaming throughput with Quest guardrails | Native policy | [`142`](../tactical/142-throughput-policy-with-quest-rd5-guardrail.md), [`150`](../tactical/150-adaptive-frame-budget-controller.md), [`153`](../tactical/153-vanilla-shaped-chunk-pipeline-capacity.md), [`../performance-records.md`](../performance-records.md), [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md) | baseline stabilized; follow-up drafted as 153 | Optimize desktop RD10/RD15 startup-streaming throughput, not RD5. Tactical 150 promoted adaptive publication for local-integrated desktop/native-XR/Android-XR and the conservative render compile queue-depth baseline (`workers=1`, `max-pending=4`). Clean Slice 5 rows show RD10 frozen full-view `9.14-9.18s`, RD15 full-view `19.43s`, persisted RD10 target quiescence `4.925s`, and short Quest RD5/RD7/churn guardrails green. The long Quest churn soak was not a clean pass (`41.79` submitted FPS, periodic dropped-frame deltas grew, queue ages rose), and movement-frame had one repeatable legacy over-2x spike. The next work is [`153`](../tactical/153-vanilla-shaped-chunk-pipeline-capacity.md) (vanilla-shaped pipeline capacity: attribution, mesh capacity formula, light throughput, knobs-to-valves), not more broad default promotion inside 150. |
+| P7 | Streaming throughput with Quest guardrails | Native policy | [`142`](../tactical/142-throughput-policy-with-quest-rd5-guardrail.md), [`150`](../tactical/150-adaptive-frame-budget-controller.md), [`153`](../tactical/153-vanilla-shaped-chunk-pipeline-capacity.md), [`../performance-records.md`](../performance-records.md), [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md) | closed as broad capacity pass; lighting-specific follow-up | Optimize desktop RD10/RD15 startup-streaming throughput, not RD5. Tactical 150 promoted adaptive publication for local-integrated desktop/native-XR/Android-XR and the conservative render compile queue-depth baseline (`workers=1`, `max-pending=4`). Tactical 153 added whole-pipeline attribution, shared render compile capacity, sparse retained-light rechecks, cost-derived publication grants, light-status batch/priority evidence, and Quest metrics hygiene. Global render-capacity promotion remains declined because desktop 120 Hz still has a top-level over-2x outlier at desktop-derived `7/14`; the remaining fresh-startup ceiling is sky-light graph/storage compute, so the next throughput lever should be tracked as lighting work rather than another broad capacity default. |
 | PX | Quest 72 Hz: RD5 guardrail, RD7 pressure, RD10 stress | Native policy | [`142`](../tactical/142-throughput-policy-with-quest-rd5-guardrail.md) (current guardrail policy), [`117`](../tactical/117-android-xr-rd10-gpu-floor-and-frame-overlap.md) (RD10 stress), [`119`](../tactical/119-android-xr-live-streaming-frame-pacing.md) (active checklist); [`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md), [`106`](../tactical/106-android-xr-static-render-cpu-reduction.md), [`107`](../tactical/107-xr-stereo-uniform-ownership-and-multiview.md) (closed refs) | active; do not chase perfect RD7 before throughput work | E1 showed RD10 is a balanced serial `CPU(~9ms, now ~4ms) + GPU(~10.7ms)` frame (Meta `7ms` GPU counter under-reported; the poll wait is real GPU), so CPU-only work cannot make RD10 comfortably hit 72 Hz alone. Use `PERF_HEADROOM` app-work/headroom fields, not legacy `frame_avg_ms`, for Quest comparisons. Current throughput work must keep RD5 clean and avoid materially worsening RD7; RD10 remains the stress lane, not the primary pass/fail gate for desktop throughput policy. |
 
 ## Java Reference Anchors

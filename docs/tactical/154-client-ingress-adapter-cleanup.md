@@ -316,8 +316,9 @@ Tactical 154 is closed. The preferred normal-frame ingress remains
 request/response-shaped helper surfaces have either been classified in Slice 0
 or documented in Slice 1; and the native remote wrapper duplication has been
 intentionally left platform-local in Slice 2. Server-push/protocol broadening
-remains tactical 133 work, throughput/capacity remains 153/128 work, and broad
-crate organization remains 145 work.
+remains tactical 133 work, ongoing throughput/capacity follow-up lives in 128
+or a new lighting-specific tactical after 153's close-out, and broad crate
+organization remains 145 work.
 
 ## Deferred Work
 

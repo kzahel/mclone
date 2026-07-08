@@ -150,6 +150,21 @@ Known gaps:
   families.
 - Liquid light sampling is not ported.
 
+## Current Throughput Handoff
+
+Tactical [`153`](../tactical/153-vanilla-shaped-chunk-pipeline-capacity.md)
+closed the broad chunk-pipeline capacity pass on 2026-07-08 and handed the
+remaining fresh-startup ceiling back to lighting. The pipeline valves that could
+hide light cost have been split or fixed: retained-light replacement rechecks
+now only enqueue opacity/emission changes, publication grants are cost-derived,
+and completed light publication backlog drains under the elapsed grant. The
+current server-only boundary profile still shows about `7.7ms` light compute per
+status, with `run_updates` around `6.1ms` and sky updates around `5.8ms` per
+status (`73-74%` of light compute). Batch `5` versus `9` does not materially
+change that per-status shape. The next throughput slice should therefore target
+sky graph/storage hot paths with parity proofs, not scheduler publication knobs
+or parallel lighting by default.
+
 ## Latest Visual Probe
 
 On 2026-06-19, after adding graph-drain instrumentation and switching the graph

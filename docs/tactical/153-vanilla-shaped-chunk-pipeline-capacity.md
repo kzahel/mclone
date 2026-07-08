@@ -1,17 +1,22 @@
 # 153: Vanilla-Shaped Chunk Pipeline Capacity
 
-Status: Slice 3a publication max-units derivation and the light-status mailbox
-attribution row have landed after Slice 2 sparse changed-block filtering, the
-vanilla comparison scout, and the publication-age source split. The retained
-light path now enqueues replacement rechecks only when current opacity/emission
-facts change, cutting clean RD10/RD15 changed-block recheck time by about `90%`
-and light compute by `54-56%` while the lighting fixtures remain
-byte-identical. The cost-derived publication cap then moved clean fresh startup
-to RD10/RD15 full view around `5.1s`/`9.7s` and target quiescence around
-`5.6s`/`10.5s`. Publication is no longer the visible limiter. The current
-pressure is pre-compute light-status mailbox wait: max queue wait
-`2644.587ms` RD10 / `4751.488ms` RD15, with `73`/`144` serial batches of about
-`8.5` statuses each.
+Status: closed / re-scoped on 2026-07-08 after `9d2b2380`. Tactical 153 raised
+the measured local-integrated chunk pipeline ceiling and identified the
+remaining ceiling as lighting algorithm/storage work, not another generic
+pipeline valve. Render compile capacity is shared and explicit/context-gated;
+global promotion is intentionally declined because the desktop 120 Hz probes
+still show a top-level over-2x outlier at the desktop-derived `7/14` capacity.
+The retained light path now enqueues replacement rechecks only when current
+opacity/emission facts change, cutting clean RD10/RD15 changed-block recheck
+time by about `90%` and light compute by `54-56%` while the lighting fixtures
+remain byte-identical. Cost-derived publication grants moved clean fresh
+startup to RD10/RD15 full view around `5.1s`/`9.7s` and target quiescence
+around `5.6s`/`10.5s`; completed-publication drain is no longer the visible
+limiter. Light-status scheduling/batch probes then showed the remaining fresh
+startup ceiling is serial light compute, dominated by sky graph traversal
+(`~5.8ms` sky updates per status, `73-74%` of light compute). Further work
+belongs in a lighting tactical/topic, with Quest guardrail/soak work staying in
+the Quest pacing tacticals.
 This tactical absorbs 150's "per-stage render pipeline budgeting"
 follow-up list and widens it to the real goal: raise the
 end-to-end local-integrated chunk pipeline ceiling so desktop actually uses
@@ -811,6 +816,61 @@ Deliverables:
 
 Exit criteria: close conditions below green or explicitly falsified with
 evidence; tactical closed.
+
+## Close-Out: 2026-07-08
+
+Tactical 153 closes as a pipeline-capacity pass, not as a lighting-algorithm
+close-out. The capacity/valve questions that motivated the tactical have been
+answered:
+
+- **Render compile capacity:** shared derivation and explicit applied mode
+  landed. Desktop persisted RD10 target quiescence improved from about `4.9s`
+  to about `1.39s` at `7/14`; Quest resolves from the same shared request to
+  its floor-safe `1/4`. Global default promotion is declined because desktop
+  120 Hz frame-budget/movement probes still show one top-level over-2x outlier
+  at the desktop-derived capacity.
+- **Retained light waste:** sparse opacity/emission filtering removed the
+  redundant retained-world replacement recheck bucket and kept lighting fixture
+  parity byte-identical.
+- **Publication valve:** source-split accounting proved completed
+  feature/light publication queues were aging under the old count cap.
+  Cost-derived publication grants moved RD10/RD15 fresh full view to about
+  `5.1s` / `9.7s`, drained completed light-publication backlog, and made
+  publication spend track the elapsed `10ms` grant.
+- **Light-status scheduling:** shared batch-size plumbing, batch `5` A/B,
+  center-priority ordering, and boundary profiling showed that batch size and
+  FIFO publication order are not the remaining dominant ceiling. The remaining
+  per-status cost is serial light compute, mostly sky graph traversal.
+- **Quest measurement hygiene:** hot diagnostics compile out by default, the
+  Android XR minimal perf-detail mode separates measurement retention from
+  runtime behavior, frame overlap was confirmed better than the serial frame
+  path, and Meta dropped-frame counters are now anchored to
+  `MCLONE_ANDROID_XR_PERF_START`.
+
+The remaining work is deliberately handed off instead of kept inside 153:
+
+- **Lighting follow-up:** optimize/prove the sky-light graph/storage hot path
+  under the lighting topic/tactical lineage (`026`, `037-049`, and a new narrow
+  tactical if needed). Parallel lighting remains declined as a default because
+  vanilla 1.17.1 uses a serial light actor and the current evidence points at
+  sky graph implementation cost, not missing parallelism.
+- **Quest soak and RD7/RD10 pressure:** keep mixed soak, thermal drift, static
+  Quest lane args, and frame-pacing pressure in `117`, `119`, `128`, and the
+  Quest performance records. They are guardrails for future capacity changes,
+  not reasons to keep 153 open.
+- **Shared pool topology:** no immediate topology refactor is justified from
+  these rows. Hand any worldgen/light actor pool unification back to `062`
+  with the 153 busy-fraction and Quest evidence as input.
+- **Movement-frame caveat:** the legacy top-level over-2x outlier remains a
+  named guardrail item. It blocks default promotion of desktop-derived render
+  compile capacity; it does not block closing the pipeline-capacity
+  investigation.
+
+Close condition re-scope: the original `>=2x` fresh-startup stretch target is
+not claimed as achieved. The honest result is that 153 removed the count-shaped
+publication limiter and mesh-only persisted tail, then falsified "another
+pipeline valve" as the next broad lever. Fresh startup is now light-bound at the
+sky graph boundary and should be pursued as lighting work.
 
 ## Validating Capacity Derivations
 
