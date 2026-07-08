@@ -26,6 +26,7 @@ use mclone_app_runtime::frame_render::{
 };
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::local_single_view::LocalSingleViewStartupStep;
+use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
     RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
@@ -176,7 +177,7 @@ pub(crate) struct FlatClientDriver {
     desktop_blink_debug: DesktopBlinkDebugState,
     desktop_blink_debug_worker: Option<NativeTeleportPreviewWorker>,
     underwater_effect: UnderwaterEffectState,
-    seed_reroll_state: u64,
+    seed_reroll: NewWorldSeedReroll,
 }
 
 #[derive(Clone, Debug)]
@@ -477,7 +478,7 @@ impl FlatClientDriver {
             desktop_blink_debug: DesktopBlinkDebugState::default(),
             desktop_blink_debug_worker: None,
             underwater_effect: UnderwaterEffectState::new(),
-            seed_reroll_state: initial_seed_reroll_state(scene.seed),
+            seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         driver.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
         driver
@@ -1639,11 +1640,7 @@ impl FlatClientDriver {
     }
 
     fn next_new_world_seed(&mut self) -> i64 {
-        self.seed_reroll_state = self
-            .seed_reroll_state
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        self.seed_reroll_state as i64
+        self.seed_reroll.next_seed()
     }
 
     fn local_world_scene(&self, seed: i64) -> SceneOptions {
@@ -2880,13 +2877,6 @@ pub(crate) fn game_frame_pacing_mode(mode: FramePacingMode) -> GameFramePacingMo
         FramePacingMode::Capped => GameFramePacingMode::Capped,
         FramePacingMode::Uncapped => GameFramePacingMode::Uncapped,
     }
-}
-
-fn initial_seed_reroll_state(seed: i64) -> u64 {
-    (seed as u64)
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        .wrapping_add(0xD1B5_4A32_D192_ED03)
-        .max(1)
 }
 
 fn desktop_blink_debug_config() -> TeleportConfig {

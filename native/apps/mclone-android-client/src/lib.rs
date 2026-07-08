@@ -49,6 +49,7 @@ mod android {
         RenderCompileCapacityHostKind, host_total_memory_bytes,
         preflight_render_compile_capacity_report,
     };
+    use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
     use mclone_app_runtime::session::{
         ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest, SessionStorageIntent,
     };
@@ -244,7 +245,7 @@ mod android {
         frame_index: u64,
         last_movement_update: Option<Instant>,
         audio: Option<AudioEngine>,
-        seed_reroll_state: u64,
+        seed_reroll: NewWorldSeedReroll,
     }
 
     struct StartedAndroidRenderScene {
@@ -666,7 +667,7 @@ mod android {
                 frame_index: 0,
                 last_movement_update: None,
                 audio,
-                seed_reroll_state: initial_android_seed_reroll_state(scene_options.seed),
+                seed_reroll: NewWorldSeedReroll::new(scene_options.seed),
             };
             renderer.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
             Ok(renderer)
@@ -1135,11 +1136,7 @@ mod android {
         }
 
         fn next_new_world_seed(&mut self) -> i64 {
-            self.seed_reroll_state = self
-                .seed_reroll_state
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
-            self.seed_reroll_state as i64
+            self.seed_reroll.next_seed()
         }
 
         fn local_world_options(&self, seed: i64) -> AndroidSceneOptions {
@@ -2442,13 +2439,6 @@ mod android {
         } else {
             addr.to_owned()
         }
-    }
-
-    fn initial_android_seed_reroll_state(seed: i64) -> u64 {
-        (seed as u64)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            .wrapping_add(0xD1B5_4A32_D192_ED03)
-            .max(1)
     }
 
     fn android_client_experience_profile() -> ClientExperienceProfile {

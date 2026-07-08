@@ -37,6 +37,7 @@ use mclone_app_runtime::local_single_view::{
     LocalSingleViewStartupStep, NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
+use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, SessionFailure,
     SessionStartRequest,
@@ -309,7 +310,7 @@ where
     last_ui_draw_cache_stats: UiDrawCacheStats,
     rendered_frames: u32,
     audio: Option<AudioEngine>,
-    seed_reroll_state: u64,
+    seed_reroll: NewWorldSeedReroll,
 }
 
 impl<S> XrMcloneTerrainState<S>

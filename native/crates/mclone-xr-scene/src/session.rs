@@ -220,7 +220,7 @@ where
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
             rendered_frames: 0,
             audio: None,
-            seed_reroll_state: initial_xr_seed_reroll_state(scene.seed),
+            seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
         Ok(state)
@@ -341,7 +341,7 @@ where
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
             rendered_frames: 0,
             audio: None,
-            seed_reroll_state: initial_xr_seed_reroll_state(scene.seed),
+            seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
         state.apply_debug_ui_screen();
@@ -391,11 +391,7 @@ where
     }
 
     pub(crate) fn next_new_world_seed(&mut self) -> i64 {
-        self.seed_reroll_state = self
-            .seed_reroll_state
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        self.seed_reroll_state as i64
+        self.seed_reroll.next_seed()
     }
 
     pub(crate) fn local_world_options(&self, seed: i64) -> XrSceneOptions {
@@ -1585,13 +1581,6 @@ pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
     settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.server_simulation_cadence = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     ClientExperienceProfile::new(settings)
-}
-
-pub(crate) fn initial_xr_seed_reroll_state(seed: i64) -> u64 {
-    (seed as u64)
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        .wrapping_add(0xD1B5_4A32_D192_ED03)
-        .max(1)
 }
 
 pub(crate) fn local_single_view_options(scene: &XrSceneOptions) -> LocalSingleViewSceneOptions {
