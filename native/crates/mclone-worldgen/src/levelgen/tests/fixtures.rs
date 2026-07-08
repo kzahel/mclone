@@ -84,6 +84,34 @@ pub(super) fn gravelly_mountains_relief_surface_fixture() -> TerrainChunkOracleF
     .expect("valid gravelly mountains relief surface chunk oracle fixture")
 }
 
+pub(super) fn snowy_mountains_terrain_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-326-chunks-0-0-terrain-only.json"
+    ))
+    .expect("valid snowy mountains terrain chunk oracle fixture")
+}
+
+pub(super) fn snowy_mountains_surface_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-326-chunks-0-0-surface-only.json"
+    ))
+    .expect("valid snowy mountains surface chunk oracle fixture")
+}
+
+pub(super) fn snowy_mountains_relief_terrain_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-326-chunks-4--21-terrain-only.json"
+    ))
+    .expect("valid snowy mountains relief terrain chunk oracle fixture")
+}
+
+pub(super) fn snowy_mountains_relief_surface_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-326-chunks-4--21-surface-only.json"
+    ))
+    .expect("valid snowy mountains relief surface chunk oracle fixture")
+}
+
 pub(super) fn frozen_ocean_surface_fixture() -> TerrainChunkOracleFixture {
     serde_json::from_str(include_str!(
         "../../../../../../test/fixtures/integration/overworld-seed-12345-chunks--247--247-surface-only.json"

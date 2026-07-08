@@ -1,10 +1,10 @@
 # 146: Overworld Macro Terrain Geometry Parity
 
-Status: active parent; opened 2026-07-06. Slices A through E landed: native
+Status: active parent; opened 2026-07-06. Slices A through F landed: native
 worldgen now has deterministic macro-geometry signal tests for baseline terrain,
 eroded-badlands pillars, stone-shore / steep-coast anchors,
 shattered-savanna relief anchors, base-mountains relief anchors, and
-gravelly-mountains surface/relief anchors.
+gravelly-mountains and snowy-mountains surface/relief anchors.
 
 Workstream: native Rust worldgen. Goal: deterministic Minecraft Java 1.17.1
 overworld macro terrain shape parity before screenshot-led validation. This
@@ -125,16 +125,23 @@ Landed:
   chunks `(0,0)` and `(-12,9)`.
 - Gravelly-mountains exact Java terrain and surface fixtures exist for seed
   `250`, chunks `(0,0)` and `(-3,13)`.
+- Snowy-mountains exact Java terrain and surface fixtures exist for seed `326`,
+  chunks `(0,0)` and `(4,-21)`.
 - `native/crates/mclone-worldgen/src/levelgen/tests/terrain.rs` has a reusable
   `MacroGeometrySignal` helper for test chunks and pinned values for seed
   `12345`, chunk `(0,0)`, eroded-badlands seed `868`, chunk `(8,-6)`, and
   stone-shore seed `74739`, chunks `(0,0)` and `(6,8)`,
   shattered-savanna seed `68`, chunk `(-6,0)`, and
   shattered-savanna-plateau seed `153`, chunk `(-8,-2)`, and mountains seed
-  `33`, chunk `(-12,9)`, and gravelly-mountains seed `250`, chunk `(-3,13)`.
+  `33`, chunk `(-12,9)`, gravelly-mountains seed `250`, chunk `(-3,13)`, and
+  snowy-mountains seed `326`, chunk `(4,-21)`.
 - `native/crates/mclone-worldgen/src/levelgen/tests/terrain.rs` also has a
   `SurfaceMaterialSignal` helper for mountain-family rows that need top-column
   and above-sea grass/stone/gravel material counts.
+- `native/crates/mclone-worldgen/src/levelgen/tests/terrain.rs` has a
+  `SnowLayerSignal` helper for native feature-stage snow and freeze-top-layer
+  coverage. This is a deterministic native signal, not an exact Java `FEATURES`
+  snapshot.
 
 Not yet landed:
 
@@ -197,7 +204,7 @@ Legend:
 | Baseline 1.17.1 noise terrain | seed `12345`, chunk `(0,0)` | Exact terrain-only and surface/bedrock oracle anchor; macro signal pinned at top Y `86..98`, p05/p50/p95 `86/88/93`, no steep, exposed-face, carved-air, shore, or landmark signal | Use as a control row when adding new macro metric helpers |
 | Mountains | seed `33`, chunks `(0,0)` and `(-12,9)` | Exact terrain/surface oracle anchors; `(0,0)` pins the palette anchor but is modest at top Y `62..76`; `(-12,9)` pins relief at top Y `66..122`, p05/p50/p95 `71/113/122`, deltas `101/16/3`, `94` exposed-face columns, and `11483` above-sea grass/stone/gravel blocks | Use as the base-mountain control row for future mountain metric helper changes |
 | Wooded / gravelly mountain variants | wooded seed `58`, `(0,0)`; gravelly seed `250`, chunks `(0,0)` and `(-3,13)`; modified gravelly seed `1831`, `(0,0)` | Gravelly mountains has exact terrain/surface oracle anchors; `(0,0)` pins the palette anchor but has grass on all top columns; `(-3,13)` pins gravelly relief at top Y `62..111`, p05/p50/p95 `62/103/110`, deltas `28/25/25`, `42` exposed-face columns, `176` solid-over-air blocks, and top columns `25` grass / `134` stone / `75` gravel | Modified gravelly and wooded variants can remain candidate rows unless exact ID coverage is needed; gravelly surface-builder path is now directly covered |
-| Snowy mountain variants | snowy mountains seed `326`, `(0,0)`; taiga mountains seed `6126`, `(0,0)`; snowy taiga mountains seed `12006`, `(0,0)` | Palette matrix covers snowy/spruce/fern rows | Snow/top-layer plus relief metrics; decide whether these reuse the mountain metric row or need separate snow-top acceptance |
+| Snowy mountain variants | snowy mountains seed `326`, chunks `(0,0)` and `(4,-21)`; taiga mountains seed `6126`, `(0,0)`; snowy taiga mountains seed `12006`, `(0,0)` | Snowy mountains has exact terrain/surface oracle anchors; `(0,0)` pins the palette anchor and native feature-stage snow/freeze signal (`251` snow layers and `39` ice blocks); `(4,-21)` pins snowy relief at top Y `69..95`, p05/p50/p95 `70/86/95`, deltas `59/12/0`, `51` exposed-face columns, all `256` top columns grass before feature-stage snow, and `256` snow top columns after native features | Taiga mountains and snowy taiga mountains can remain candidate rows unless exact spruce/fern-adjacent mountain coverage is needed; add Java `FEATURES` snapshot only if top-layer drift becomes the blocker |
 | Stone shore / steep coast | seed `74739`, chunks `(0,0)` and `(6,8)` | Exact terrain/surface oracle anchors; `(0,0)` pins stone relief at top Y `62..78`, p05/p50/p95 `62/65/76`, deltas `11/0/0`, `9` exposed-face columns, `1163` above-sea stone/gravel blocks, and no water-edge signal; `(6,8)` pins shoreline relief at top Y `62..83`, p05/p50/p95 `62/62/81`, deltas `69/58/23`, `35` exposed-face columns, `117` solid-over-air blocks, water-edge deltas `57/57`, and `798` above-sea stone/gravel blocks | Use as the control row for future shore/coast metric helper changes |
 | River and frozen-river banks | river seed `39`, `(0,0)`; frozen river seed `252`, `(0,0)` | Palette matrix covers water/seagrass or frozen-river sugar cane | Bank width, water-land delta, and boundary-shape metrics; later exact fixture if drift is found |
 | Shattered savanna relief | shattered seed `68`, chunk `(-6,0)`; plateau seed `153`, chunk `(-8,-2)` | Exact terrain/surface oracle anchors; seed `68` pins modest shattered relief at top Y `62..80`, p05/p50/p95 `62/67/77`, deltas `9/0/0`, `8` exposed-face columns, and `699` above-sea grass/coarse-dirt/stone blocks; plateau seed `153` pins extreme relief at top Y `65..155`, p05/p50/p95 `73/84/152`, deltas `61/34/13`, `46` exposed-face columns, `22` solid-over-air blocks, and `5447` above-sea grass/coarse-dirt/stone blocks | Use as the control row for future shattered-savanna surface/relief helper changes |
@@ -344,19 +351,53 @@ Pinned values:
 |---|---:|---:|---:|---:|---|---|
 | seed `250`, chunk `(-3,13)`, surface stage | `62..111` | `62 / 103 / 110` | `28 / 25 / 25` | `42` | `176` solid-over-air blocks; water-edge deltas `2 / 2` | top columns `25` grass / `134` stone / `75` gravel; above-sea volumes `50` grass / `3552` stone / `370` gravel |
 
+## Slice F: Snowy Mountains Relief And Top Layer
+
+Status: landed.
+
+Implemented as exact Java fixture tests plus macro, material, and native
+feature-stage snow signal tests:
+
+- `fills_snowy_mountains_chunk_with_terrain_only_java_oracle`
+- `fills_snowy_mountains_relief_chunk_with_terrain_only_java_oracle`
+- `build_snowy_mountains_surface_and_bedrock_matches_java_oracle`
+- `build_snowy_mountains_relief_surface_and_bedrock_matches_java_oracle`
+- `macro_geometry_signal_tracks_snowy_mountains_relief_anchor`
+- `snow_layer_signal_tracks_snowy_mountains_palette_anchor`
+
+Reference check: 1.17.1 `minecraft:snowy_mountains` is registered as
+`VanillaBiomes.tundraBiome(0.45F, 0.3F, false, true)`. It uses
+`SurfaceBuilders.GRASS`; snow and water freezing come later from
+`BiomeDefaultFeatures.addSurfaceFreezing`, which adds `Features.FREEZE_TOP_LAYER`
+at `GenerationStep.Decoration.TOP_LAYER_MODIFICATION`.
+
+The palette-matrix seed `326`, chunk `(0,0)`, is exact but flat at top Y
+`69..71`. It remains useful for feature-stage snow/freeze coverage: native
+feature generation currently produces `251` snow layer blocks and `39` ice
+blocks, with `251` snow top columns. A deterministic nearby scan found seed
+`326`, chunk `(4,-21)`, which stays on `minecraft:snowy_mountains` and provides
+the stronger relief row.
+
+Pinned values:
+
+| Anchor | Top Y | p05 / p50 / p95 | Neighbor deltas ge 4 / 8 / 16 | Exposed-face columns | Relief / overhang signal | Material / top-layer signal |
+|---|---:|---:|---:|---:|---|---|
+| seed `326`, chunk `(4,-21)`, surface stage | `69..95` | `70 / 86 / 95` | `59 / 12 / 0` | `51` | no water-edge or solid-over-air signal | surface top columns `256` grass; above-sea volumes `256` grass / `4322` stone / `0` gravel; native feature-stage snow top columns `256` |
+
 ## Suggested Next Slice
 
 Add the next visible macro row that is not already covered by an exact oracle.
-The best next target is snowy mountain variants because they share mountain
-relief but add snow/top-layer acceptance:
+The best next target is ice spikes because it is the highest-value remaining
+non-structure macro silhouette row:
 
-1. Generate Java terrain and surface fixtures for snowy mountains seed `326`,
-   starting with chunk `(0,0)` and scanning nearby if it is too tame.
-2. Pin height envelope, relief distribution, snow/snow-block/ice top-material
-   counts, exposed vertical faces, and solid-over-air signal.
-3. Decide whether taiga mountains seed `6126` and snowy taiga mountains seed
-   `12006` can reuse the same relief row or need separate spruce/fern-adjacent
-   macro fixtures.
+1. Start from ice-spikes seed `59`, chunk `(0,0)` and scan nearby if the spike
+   or packed-ice patch signal is too weak.
+2. Generate Java terrain and surface fixtures for the chosen anchor. If surface
+   fixtures do not include the spike/patch massing needed for the row, use a
+   focused Java `FEATURES` snapshot only after confirming the file size stays
+   modest.
+3. Pin packed-ice / snow-block / ice volume, top height envelope, spike column
+   count, exposed vertical faces, and any solid-over-air signal.
 
 Do not start by changing density math. The first pass should tell us what the
 current native generator already does and where the Java fixture says it differs.
@@ -377,6 +418,7 @@ cargo test --manifest-path native/Cargo.toml -p mclone-worldgen build_surface_an
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen build_eroded_badlands_pillar_surface_and_bedrock_matches_java_oracle
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen gravelly_mountains
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen mountains
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen snowy_mountains
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen stone_shore
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen shattered_savanna
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen macro_geometry_signal_tracks

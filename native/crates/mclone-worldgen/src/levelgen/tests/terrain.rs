@@ -401,6 +401,45 @@ fn surface_material_signal(chunk: &MutableChunkBlockBuffer, min_y: i32) -> Surfa
     signal
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SnowLayerSignal {
+    snow_blocks: usize,
+    ice_blocks: usize,
+    snow_block_blocks: usize,
+    snow_top_columns: usize,
+    ice_top_columns: usize,
+    snow_block_top_columns: usize,
+}
+
+fn snow_layer_signal(chunk: &GeneratedChunk) -> SnowLayerSignal {
+    let mut signal = SnowLayerSignal {
+        snow_blocks: chunk.block_count(SNOW),
+        ice_blocks: chunk.block_count(ICE),
+        snow_block_blocks: chunk.block_count(SNOW_BLOCK),
+        ..SnowLayerSignal::default()
+    };
+
+    for local_z in 0..GeneratedChunk::WIDTH {
+        for local_x in 0..GeneratedChunk::WIDTH {
+            for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+                let block_id = chunk.block_at_y(local_x, y, local_z).raw();
+                if is_air_like(block_id) {
+                    continue;
+                }
+                match block_id {
+                    SNOW => signal.snow_top_columns += 1,
+                    ICE => signal.ice_top_columns += 1,
+                    SNOW_BLOCK => signal.snow_block_top_columns += 1,
+                    _ => {}
+                }
+                break;
+            }
+        }
+    }
+
+    signal
+}
+
 pub(super) fn surface_fixture_block_name_at(
     oracle: &TerrainChunkOracleFixture,
     local_x: i32,
@@ -745,6 +784,24 @@ pub(super) fn fills_gravelly_mountains_relief_chunk_with_terrain_only_java_oracl
 }
 
 #[test]
+pub(super) fn fills_snowy_mountains_chunk_with_terrain_only_java_oracle() {
+    let oracle = snowy_mountains_terrain_fixture();
+    assert_eq!(oracle.seed, "326");
+    assert_eq!(oracle.chunk_x, 0);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn fills_snowy_mountains_relief_chunk_with_terrain_only_java_oracle() {
+    let oracle = snowy_mountains_relief_terrain_fixture();
+    assert_eq!(oracle.seed, "326");
+    assert_eq!(oracle.chunk_x, 4);
+    assert_eq!(oracle.chunk_z, -21);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
 pub(super) fn fills_stone_shore_chunk_with_terrain_only_java_oracle() {
     let oracle = stone_shore_terrain_fixture();
     assert_eq!(oracle.seed, "74739");
@@ -958,6 +1015,96 @@ pub(super) fn macro_geometry_signal_tracks_gravelly_mountains_relief_anchor() {
             grass_block_volume: 50,
             stone_block_volume: 3552,
             gravel_block_volume: 370,
+        }
+    );
+}
+
+#[test]
+pub(super) fn macro_geometry_signal_tracks_snowy_mountains_relief_anchor() {
+    let oracle = snowy_mountains_relief_surface_fixture();
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+    generator.build_surface_and_bedrock(&mut chunk);
+    let sea_level = NoiseGeneratorSettings::overworld().sea_level();
+    let signal = macro_geometry_signal(
+        &chunk,
+        is_mountains_landmark_block_id,
+        Some(sea_level),
+        Some(sea_level),
+    );
+    let material_signal = surface_material_signal(&chunk, sea_level);
+    let features_chunk = generate_overworld_features_chunk(seed, oracle.chunk_x, oracle.chunk_z);
+    let snow_signal = snow_layer_signal(&features_chunk);
+
+    assert_eq!(
+        signal,
+        MacroGeometrySignal {
+            top_y_min: 69,
+            top_y_max: 95,
+            top_y_range: 26,
+            top_y_p05: 70,
+            top_y_p50: 86,
+            top_y_p95: 95,
+            neighbor_delta_ge_4: 59,
+            neighbor_delta_ge_8: 12,
+            neighbor_delta_ge_16: 0,
+            vertical_face_columns: 51,
+            solid_over_air_blocks: 0,
+            surface_near_carved_air_columns: 0,
+            carved_air_volume: 0,
+            carved_air_y_min: None,
+            carved_air_y_max: None,
+            long_vertical_air_spans: 0,
+            water_land_edge_delta_ge_4: 0,
+            water_land_edge_delta_ge_8: 0,
+            landmark_block_volume: 4578,
+            landmark_column_count: 256,
+        }
+    );
+    assert_eq!(
+        material_signal,
+        SurfaceMaterialSignal {
+            grass_top_columns: 256,
+            stone_top_columns: 0,
+            gravel_top_columns: 0,
+            grass_block_volume: 256,
+            stone_block_volume: 4322,
+            gravel_block_volume: 0,
+        }
+    );
+    assert_eq!(
+        snow_signal,
+        SnowLayerSignal {
+            snow_blocks: 256,
+            ice_blocks: 0,
+            snow_block_blocks: 0,
+            snow_top_columns: 256,
+            ice_top_columns: 0,
+            snow_block_top_columns: 0,
+        }
+    );
+}
+
+#[test]
+pub(super) fn snow_layer_signal_tracks_snowy_mountains_palette_anchor() {
+    let oracle = snowy_mountains_surface_fixture();
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let chunk = generate_overworld_features_chunk(seed, oracle.chunk_x, oracle.chunk_z);
+
+    assert_eq!(
+        snow_layer_signal(&chunk),
+        SnowLayerSignal {
+            snow_blocks: 251,
+            ice_blocks: 39,
+            snow_block_blocks: 0,
+            snow_top_columns: 251,
+            ice_top_columns: 0,
+            snow_block_top_columns: 0,
         }
     );
 }
@@ -1183,6 +1330,24 @@ pub(super) fn build_gravelly_mountains_relief_surface_and_bedrock_matches_java_o
     assert_eq!(oracle.seed, "250");
     assert_eq!(oracle.chunk_x, -3);
     assert_eq!(oracle.chunk_z, 13);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn build_snowy_mountains_surface_and_bedrock_matches_java_oracle() {
+    let oracle = snowy_mountains_surface_fixture();
+    assert_eq!(oracle.seed, "326");
+    assert_eq!(oracle.chunk_x, 0);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn build_snowy_mountains_relief_surface_and_bedrock_matches_java_oracle() {
+    let oracle = snowy_mountains_relief_surface_fixture();
+    assert_eq!(oracle.seed, "326");
+    assert_eq!(oracle.chunk_x, 4);
+    assert_eq!(oracle.chunk_z, -21);
     assert_surface_chunk_matches_java_oracle(oracle);
 }
 
