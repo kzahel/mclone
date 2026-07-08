@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
@@ -69,6 +69,53 @@ pub struct LocalSingleViewSceneOptions {
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
     pub render_compile_worker_timing_enabled: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntegratedWorldSessionStorage {
+    persistent_world_dir: Option<PathBuf>,
+    adaptive_chunk_publication_budget: bool,
+}
+
+impl Default for IntegratedWorldSessionStorage {
+    fn default() -> Self {
+        Self::transient()
+    }
+}
+
+impl IntegratedWorldSessionStorage {
+    pub const fn transient() -> Self {
+        Self {
+            persistent_world_dir: None,
+            adaptive_chunk_publication_budget: false,
+        }
+    }
+
+    pub fn from_world_dir(world_dir: Option<&Path>) -> Self {
+        let mut storage = Self::transient();
+        if let Some(world_dir) = world_dir {
+            storage.persistent_world_dir = Some(world_dir.to_path_buf());
+        }
+        storage
+    }
+
+    pub fn with_persistent_world_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.persistent_world_dir = Some(dir.into());
+        self
+    }
+
+    pub const fn with_adaptive_chunk_publication_budget(mut self, enabled: bool) -> Self {
+        self.adaptive_chunk_publication_budget = enabled;
+        self
+    }
+
+    pub fn persistent_world_dir(&self) -> Option<&Path> {
+        self.persistent_world_dir.as_deref()
+    }
+
+    pub const fn adaptive_chunk_publication_budget(&self) -> bool {
+        self.adaptive_chunk_publication_budget
+    }
 }
 
 impl LocalSingleViewSceneOptions {
@@ -148,6 +195,19 @@ impl LocalSingleViewSceneOptions {
 
     pub fn with_persistent_world_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.world_storage = NativeIntegratedServerWorldStorage::Persistent { dir: dir.into() };
+        self
+    }
+
+    pub fn with_integrated_world_session_storage(
+        mut self,
+        storage: IntegratedWorldSessionStorage,
+    ) -> Self {
+        self.adaptive_chunk_publication_budget = storage.adaptive_chunk_publication_budget;
+        self.world_storage = storage
+            .persistent_world_dir
+            .map_or(NativeIntegratedServerWorldStorage::Transient, |dir| {
+                NativeIntegratedServerWorldStorage::Persistent { dir }
+            });
         self
     }
 
@@ -2352,6 +2412,38 @@ mod tests {
         fn reconnect(&mut self) -> Result<()> {
             match *self {}
         }
+    }
+
+    #[test]
+    fn integrated_world_session_storage_defaults_to_transient_storage() {
+        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+            .with_persistent_world_dir("/tmp/old-world")
+            .with_adaptive_chunk_publication_budget(true)
+            .with_integrated_world_session_storage(IntegratedWorldSessionStorage::transient());
+
+        assert_eq!(
+            options.world_storage,
+            NativeIntegratedServerWorldStorage::Transient
+        );
+        assert!(!options.adaptive_chunk_publication_budget);
+    }
+
+    #[test]
+    fn integrated_world_session_storage_applies_persistent_dir_and_adaptive_budget() {
+        let world_dir = PathBuf::from("/tmp/mclone-worlds/world");
+        let storage = IntegratedWorldSessionStorage::from_world_dir(Some(world_dir.as_path()))
+            .with_adaptive_chunk_publication_budget(true);
+        assert_eq!(storage.persistent_world_dir(), Some(world_dir.as_path()));
+        assert!(storage.adaptive_chunk_publication_budget());
+
+        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+            .with_integrated_world_session_storage(storage);
+
+        assert_eq!(
+            options.world_storage,
+            NativeIntegratedServerWorldStorage::Persistent { dir: world_dir }
+        );
+        assert!(options.adaptive_chunk_publication_budget);
     }
 
     #[derive(Debug)]

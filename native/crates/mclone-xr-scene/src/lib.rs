@@ -33,8 +33,8 @@ use mclone_app_runtime::frame_render::{
 };
 use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostMode};
 use mclone_app_runtime::local_single_view::{
-    LocalSingleViewSceneOptions, LocalSingleViewStartupPump, LocalSingleViewStartupStep,
-    NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
+    IntegratedWorldSessionStorage, LocalSingleViewSceneOptions, LocalSingleViewStartupPump,
+    LocalSingleViewStartupStep, NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::session::{

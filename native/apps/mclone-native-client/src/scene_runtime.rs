@@ -7,8 +7,8 @@ use glam::Vec3;
 use mclone_app_runtime::far_lod::FarTerrainLodConfig;
 use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
 use mclone_app_runtime::local_single_view::{
-    LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime, LocalSingleViewStartupPump,
-    LocalSingleViewStartupStep, NativeSingleViewSceneRuntime,
+    IntegratedWorldSessionStorage, LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime,
+    LocalSingleViewStartupPump, LocalSingleViewStartupStep, NativeSingleViewSceneRuntime,
     build_local_single_view_client_runtime,
 };
 use mclone_app_runtime::{
@@ -106,7 +106,9 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
 pub(crate) fn local_single_view_options(
     scene: &SceneOptions,
 ) -> Result<LocalSingleViewSceneOptions> {
-    let mut options = LocalSingleViewSceneOptions::new(
+    let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
+        .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
+    let options = LocalSingleViewSceneOptions::new(
         scene.seed,
         ChunkPos::new(scene.chunk_x, scene.chunk_z),
         scene_render_distance(scene)?,
@@ -117,13 +119,10 @@ pub(crate) fn local_single_view_options(
     .with_debug_passive_showcase(scene.debug_passive_showcase)
     .with_lighting_enabled(scene.lighting_enabled)
     .with_light_status_batch_size(scene.light_status_batch_size)
-    .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget)
     .with_render_compile_worker_count(scene.render_compile_worker_count)
     .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
-    .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled);
-    if let Some(world_dir) = &scene.world_dir {
-        options = options.with_persistent_world_dir(world_dir.clone());
-    }
+    .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
+    .with_integrated_world_session_storage(storage);
     Ok(options)
 }
 

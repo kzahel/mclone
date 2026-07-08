@@ -1595,21 +1595,18 @@ pub(crate) fn initial_xr_seed_reroll_state(seed: i64) -> u64 {
 }
 
 pub(crate) fn local_single_view_options(scene: &XrSceneOptions) -> LocalSingleViewSceneOptions {
-    let mut options =
-        LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
-            .with_initial_spawn_center()
-            .with_day_time(scene.day_time_override)
-            .with_freeze_time(scene.freeze_time)
-            .with_debug_passive_showcase(scene.debug_passive_showcase)
-            .with_lighting_enabled(scene.lighting_enabled)
-            .with_light_status_batch_size(scene.light_status_batch_size)
-            .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget)
-            .with_render_compile_worker_count(scene.render_compile_worker_count)
-            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs);
-    if let Some(world_dir) = &scene.world_dir {
-        options = options.with_persistent_world_dir(world_dir.clone());
-    }
-    options
+    let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
+        .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
+    LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
+        .with_initial_spawn_center()
+        .with_day_time(scene.day_time_override)
+        .with_freeze_time(scene.freeze_time)
+        .with_debug_passive_showcase(scene.debug_passive_showcase)
+        .with_lighting_enabled(scene.lighting_enabled)
+        .with_light_status_batch_size(scene.light_status_batch_size)
+        .with_render_compile_worker_count(scene.render_compile_worker_count)
+        .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+        .with_integrated_world_session_storage(storage)
 }
 
 pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {

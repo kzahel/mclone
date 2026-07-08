@@ -37,7 +37,8 @@ mod android {
         SingleViewHostOptions,
     };
     use mclone_app_runtime::local_single_view::{
-        LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
+        IntegratedWorldSessionStorage, LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+        NativeSingleViewSessionRuntime,
     };
     use mclone_app_runtime::render_assets::{
         DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -2221,20 +2222,17 @@ mod android {
 
     impl AndroidSceneOptions {
         fn local_options(&self) -> LocalSingleViewSceneOptions {
-            let mut options =
-                LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
-                    .with_initial_spawn_center()
-                    .with_day_time(self.day_time_override)
-                    .with_freeze_time(self.freeze_time)
-                    .with_debug_passive_showcase(self.debug_passive_showcase)
-                    .with_lighting_enabled(self.lighting_enabled)
-                    .with_light_status_batch_size(self.light_status_batch_size)
-                    .with_render_compile_worker_count(self.render_compile_worker_count)
-                    .with_render_compile_max_pending_jobs(self.render_compile_max_pending_jobs);
-            if let Some(world_dir) = &self.world_dir {
-                options = options.with_persistent_world_dir(world_dir.clone());
-            }
-            options
+            let storage = IntegratedWorldSessionStorage::from_world_dir(self.world_dir.as_deref());
+            LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
+                .with_initial_spawn_center()
+                .with_day_time(self.day_time_override)
+                .with_freeze_time(self.freeze_time)
+                .with_debug_passive_showcase(self.debug_passive_showcase)
+                .with_lighting_enabled(self.lighting_enabled)
+                .with_light_status_batch_size(self.light_status_batch_size)
+                .with_render_compile_worker_count(self.render_compile_worker_count)
+                .with_render_compile_max_pending_jobs(self.render_compile_max_pending_jobs)
+                .with_integrated_world_session_storage(storage)
         }
 
         fn host_options(&self) -> SingleViewHostOptions {

@@ -1,6 +1,6 @@
 # 161: Native Catalog / Storage Adapter Dedup Follow-Up
 
-Status: active 2026-07-08. Slices 1-2 landed; follow-up slices remain open.
+Status: active 2026-07-08. Slices 1-3 landed; follow-up slices remain open.
 
 Workstream: native Rust shared client-experience/catalog/storage boundary,
 desktop flat, shared XR scene, flat Android, and Android XR. Web remains
@@ -98,15 +98,54 @@ Result on 2026-07-08: passed. The wasm web check still reports the existing
 reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
 introduced by this slice.
 
+## Slice 3: Shared Integrated-Session Storage Mapping
+
+Status: landed 2026-07-08.
+
+Problem: desktop flat, shared XR, flat Android, and Android XR each mapped their
+scene `world_dir` into `LocalSingleViewSceneOptions::with_persistent_world_dir`
+by hand. Desktop/XR/Android XR also set the adaptive chunk-publication flag near
+that storage projection.
+
+Change:
+
+- Add `IntegratedWorldSessionStorage` in `mclone-app-runtime` as the shared
+  host-neutral storage patch for local integrated sessions.
+- Add `LocalSingleViewSceneOptions::with_integrated_world_session_storage` so
+  persistent world dir and adaptive chunk-publication policy are applied in one
+  shared place.
+- Route desktop flat, shared XR, flat Android, and Android XR builders through
+  the helper while preserving each platform's concrete scene/options struct.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --package mclone-app-runtime --package mclone-native-client --package mclone-xr-scene --package mclone-android-client --package mclone-android-xr-client --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+git diff --check
+```
+
+Result on 2026-07-08: passed. The wasm web check still reports the existing
+`mclone-server` warnings for `TimingSample` and
+`with_unload_hysteresis_chunks`, and the native-client XR feature check still
+reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
+introduced by this slice.
+
 ## Remaining Follow-Up Slices
 
-1. **Shared local-single-view storage mapping.** Desktop, XR, flat Android, and
-   Android XR each map scene `world_dir` into
-   `LocalSingleViewSceneOptions::with_persistent_world_dir`. Create a shared
-   native builder/helper for the host-neutral options so new storage flags are
-   added once. This is also the right place to decide whether flat Android should
-   expose the adaptive chunk-publication flag that `SessionStorageIntent`
-   already marks for remote sessions and desktop/XR apply today.
+1. **LocalSingleView naming cleanup.** `LocalSingleViewSceneOptions` and related
+   `NativeSingleView*` names describe one logical local client/world runtime and
+   chunk-view center, not one rendered eye or a flat-only presentation path.
+   Shared XR and Android XR use these types today, so the name is easy to
+   misread. Prefer a future mechanical rename toward names like
+   `LocalIntegratedSceneOptions`, `LocalWorldRuntimeOptions`,
+   `NativeLocalSessionOptions`, or `IntegratedWorldSessionOptions` once active
+   storage/helper slices are settled.
 2. **Android app-data world-root helper.** Flat Android and Android XR duplicate
    `internal_data_path().or_else(external_data_path()).join("worlds")` with only
    log-label differences. Move this to Android-specific shared glue, not
