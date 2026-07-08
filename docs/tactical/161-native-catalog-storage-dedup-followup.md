@@ -1,6 +1,6 @@
 # 161: Native Catalog / Storage Adapter Dedup Follow-Up
 
-Status: active 2026-07-08. Slices 1-7 landed; follow-up slices remain open.
+Status: active 2026-07-08. Slices 1-8 landed; follow-up slices remain open.
 
 Workstream: native Rust shared client-experience/catalog/storage boundary,
 desktop flat, shared XR scene, flat Android, and Android XR. Web remains
@@ -304,6 +304,46 @@ Result on 2026-07-08: passed. The wasm web check still reports the existing
 reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
 introduced by this slice.
 
+## Slice 8: Android App-Data Asset-Root Policy Helper
+
+Status: landed 2026-07-08 in `c8615c7a`.
+
+Problem: flat Android and Android XR both configured
+`MCLONE_ANDROID_ASSET_ROOT` from app data, but duplicated the app-data path
+selection and env-var constant. They also intentionally differed in path
+preference: flat Android used internal-first, while Android XR used
+external-first.
+
+Change:
+
+- Add `ANDROID_ASSET_ROOT_ENV`, `AndroidAppDataPathPreference`,
+  `android_preferred_app_data_path`, `android_asset_root_from_app_data_paths`,
+  and Android-only `android_app_data_asset_root` to
+  `mclone-android-platform`.
+- Keep flat Android on `InternalFirst` and Android XR on `ExternalFirst`,
+  making the difference explicit in the call sites.
+- Keep `std::env::set_var` and target-specific log wording in the app crates
+  because `mclone-android-platform` still forbids unsafe code.
+- Add host unit tests for both path preference orders and missing app-data
+  paths.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --package mclone-android-platform --package mclone-android-client --package mclone-android-xr-client --check
+cargo test --manifest-path native/Cargo.toml -p mclone-android-platform
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml --target aarch64-linux-android -p mclone-android-platform
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-xr-client
+git diff --check
+```
+
+Result on 2026-07-08: passed. The wasm web check still reports the existing
+`mclone-server` warnings for `TimingSample` and
+`with_unload_hysteresis_chunks`; no new warnings were introduced by this slice.
+
 ## Remaining Follow-Up Slices
 
 1. **Core `SingleView*` taxonomy audit.** `SingleViewRuntime`,
@@ -319,12 +359,15 @@ introduced by this slice.
    render-compile settings. If it keeps growing, either rename it toward
    `IntegratedWorldSessionOptions` or split session/storage fields from render
    startup fields.
-3. **Android app-data asset-root helper audit.** Flat Android and Android XR
-   both configure `MCLONE_ANDROID_ASSET_ROOT` from app data with similar
-   logging, but flat Android currently prefers internal storage while Android XR
-   prefers external storage. Decide whether that difference is intentional
-   before moving the shared parts into `mclone-android-platform`.
-4. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
+3. **Android app-data preference convergence.** Slice 8 preserved flat
+   Android's internal-first asset root and Android XR's external-first asset
+   root. If device validation shows XR no longer needs external-first asset
+   lookup, collapse both asset-root callers onto the same preference.
+4. **Android env-var setup centralization.** Asset-root path selection is
+   shared, but `std::env::set_var` and log wording remain app-local because
+   `mclone-android-platform` forbids unsafe code. Revisit only if the crate
+   policy changes or an Android-safe env setup wrapper is introduced.
+5. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
    all Minecraft persistence. Native still lacks periodic autosave and reserved
    player/saved-data record implementations; those remain under 134/136-style
    persistence follow-up rather than this cleanup tactical.
