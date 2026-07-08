@@ -3542,8 +3542,9 @@ mod tests {
     fn headless_ui_click_toggles_options_crosshair_from_full_row() {
         let scene = SceneOptions::default();
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
-        driver.set_ui_screen(Some(GameScreen::Options {
+        driver.set_ui_screen(Some(GameScreen::OptionsCategory {
             parent: mclone_ui::GameOptionsParent::Pause,
+            category: mclone_ui::GameOptionsCategory::Display,
         }));
         driver.set_ui_scale(GuiScale::from_pixels(960, 540));
         let state = headless_ui_state(&driver);
@@ -3579,8 +3580,9 @@ mod tests {
     fn headless_ui_click_toggles_options_first_person_body_from_full_row() {
         let scene = SceneOptions::default();
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
-        driver.set_ui_screen(Some(GameScreen::Options {
+        driver.set_ui_screen(Some(GameScreen::OptionsCategory {
             parent: mclone_ui::GameOptionsParent::Pause,
+            category: mclone_ui::GameOptionsCategory::Display,
         }));
         driver.set_ui_scale(GuiScale::from_pixels(960, 540));
         let state = headless_ui_state(&driver);
@@ -3612,8 +3614,9 @@ mod tests {
     fn committed_ui_state_controls_pointer_hit_testing() {
         let scene = SceneOptions::default();
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
-        driver.set_ui_screen(Some(GameScreen::Options {
+        driver.set_ui_screen(Some(GameScreen::OptionsCategory {
             parent: mclone_ui::GameOptionsParent::Pause,
+            category: mclone_ui::GameOptionsCategory::Display,
         }));
         driver.set_ui_scale(GuiScale::from_pixels(960, 540));
 
@@ -3630,8 +3633,9 @@ mod tests {
         let mut divergent_state = committed_state;
         divergent_state.crosshair_visible = None;
         let mut divergent_surface = UiSurface::new();
-        divergent_surface.set_screen(Some(UiScreenId::Options {
+        divergent_surface.set_screen(Some(UiScreenId::OptionsCategory {
             parent: mclone_ui::GameOptionsParent::Pause,
+            category: mclone_ui::GameOptionsCategory::Display,
         }));
         divergent_surface.set_scale(GuiScale::from_pixels(960, 540));
         let (_handled, _action) = divergent_surface.pointer_move(point, divergent_state);
