@@ -140,9 +140,9 @@ fn thruster_defaults_normal_collision_but_leaves_noclip_selectable() {
 }
 
 #[test]
-fn thruster_retains_per_hand_input_without_moving() {
-    // Slice 1: Thruster is inert but retains the per-hand thrust intent so the
-    // Slice 2 integrator (and the client) can read it.
+fn thruster_full_throttle_climbs_and_retains_per_hand_input() {
+    // Slice 2: full throttle on both palms-down hands out-thrusts gravity, so the
+    // body climbs; the per-hand intent is still retained for the client to read.
     let client = ClientRuntime::local_integrated();
     let mut camera = EngineCameraController::from_eye_pose(
         Vec3d::new(0.5, 80.0, 0.5),
@@ -155,20 +155,59 @@ fn thruster_retains_per_hand_input_without_moving() {
 
     let thruster = EngineThrusterInput::new(
         EngineThrusterHand::new(Vec3d::new(0.0, -1.0, 0.0), 1.0),
-        EngineThrusterHand::new(Vec3d::new(0.0, -1.0, 0.0), 0.5),
+        EngineThrusterHand::new(Vec3d::new(0.0, -1.0, 0.0), 1.0),
     );
-    camera.apply_movement_input(
-        &client,
-        EngineCameraInput {
-            dt_seconds: 1.0 / 60.0,
-            thruster: Some(thruster),
-            ..EngineCameraInput::default()
-        },
-    );
+    for _ in 0..30 {
+        camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 1.0 / 60.0,
+                thruster: Some(thruster),
+                ..EngineCameraInput::default()
+            },
+        );
+    }
 
     assert_eq!(camera.last_thruster_input(), Some(thruster));
-    // Inert in Slice 1: full throttle does not move the player yet.
-    assert_eq!(camera.snapshot().eye, eye_before);
+    assert!(
+        camera.snapshot().eye.y > eye_before.y + 0.1,
+        "full thrust should climb: {} -> {}",
+        eye_before.y,
+        camera.snapshot().eye.y
+    );
+    // The mode stays gravity-bound and never forces NoClip.
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+}
+
+#[test]
+fn thruster_without_thrust_falls_under_gravity() {
+    // Thruster is gravity-bound: with no thrust intent the body still falls.
+    let client = ClientRuntime::local_integrated();
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 80.0, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+    camera.set_movement_mode(EngineCameraMovementMode::Thruster);
+    let eye_before = camera.snapshot().eye;
+
+    for _ in 0..10 {
+        camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 1.0 / 60.0,
+                ..EngineCameraInput::default()
+            },
+        );
+    }
+
+    assert!(
+        camera.snapshot().eye.y < eye_before.y,
+        "no thrust should fall: {} -> {}",
+        eye_before.y,
+        camera.snapshot().eye.y
+    );
 }
 
 #[test]

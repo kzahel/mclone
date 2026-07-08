@@ -815,11 +815,8 @@ impl EngineCameraController {
             EngineCameraMovementMode::HandPush => {
                 let _ = self.tick_hand_push(client, input);
             }
-            // Slice 1 (tactical 157): plumbing only — retain the per-hand thrust
-            // intent so it is available to the client, but do not move yet. The
-            // integrator lands in Slice 2.
             EngineCameraMovementMode::Thruster => {
-                self.last_thruster_input = input.thruster;
+                let _ = self.tick_thruster(client, input);
             }
         }
         self.snapshot()
@@ -846,8 +843,7 @@ impl EngineCameraController {
                 }
             }
             EngineCameraMovementMode::HandPush => self.tick_hand_push(client, input),
-            // Slice 1 (tactical 157): inert until the Slice 2 integrator lands.
-            EngineCameraMovementMode::Thruster => false,
+            EngineCameraMovementMode::Thruster => self.tick_thruster(client, input),
         }
     }
 
@@ -1142,6 +1138,30 @@ impl EngineCameraController {
         moved_by_hand || moved_by_physics
     }
 
+    /// Iron Man / repulsor thruster flight (tactical 157, Slice 2). Feeds the
+    /// per-hand palm normal + analog throttle into the client integrator, which
+    /// runs in SI units against real `dt` so feel is cadence-independent. Gravity
+    /// is always applied (this mode is gravity-bound like `Gorilla`/`HandPush`),
+    /// so an empty thrust intent still falls. Collision stays `Normal` here — the
+    /// per-frame path never forces NoClip, matching the Slice 1 entry rule.
+    fn tick_thruster(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
+        let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
+        self.last_thruster_input = input.thruster;
+        if dt_seconds <= 0.0 {
+            return false;
+        }
+        let thruster = input.thruster.unwrap_or(EngineThrusterInput::new(
+            EngineThrusterHand::NONE,
+            EngineThrusterHand::NONE,
+        ));
+        let step = ThrusterMovementStep {
+            left: thruster_hand_input(thruster.left),
+            right: thruster_hand_input(thruster.right),
+            dt_seconds,
+        };
+        self.player.tick_thruster_movement(client, step).is_some()
+    }
+
     fn emulated_hand_push_input(
         &mut self,
         input: EngineCameraInput,
@@ -1422,6 +1442,10 @@ fn clamp_movement_speed_multiplier(multiplier: f64) -> f64 {
 
 fn finite_movement_yaw(yaw_radians: Option<f64>) -> Option<f64> {
     yaw_radians.filter(|yaw| yaw.is_finite())
+}
+
+fn thruster_hand_input(hand: EngineThrusterHand) -> ThrusterHandInput {
+    ThrusterHandInput::new(hand.palm_normal, hand.throttle as f64)
 }
 
 pub(crate) fn hand_push_emulation_direction(input: EngineCameraInput, yaw_radians: f64) -> Vec3d {

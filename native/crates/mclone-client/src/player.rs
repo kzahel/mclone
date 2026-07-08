@@ -41,6 +41,26 @@ pub const HAND_PUSH_DEFAULT_VELOCITY_HISTORY_SIZE: usize = 5;
 pub const HAND_PUSH_DEFAULT_VELOCITY_LIMIT: f64 = 1.0;
 pub const HAND_PUSH_DEFAULT_MAX_JUMP_SPEED: f64 = 7.0;
 pub const HAND_PUSH_DEFAULT_JUMP_MULTIPLIER: f64 = 1.1;
+// --- Thruster (Iron Man / repulsor) flight, tactical 157 ---
+// Integrated in SI units (blocks/s, blocks/s^2) against real frame `dt`, NOT the
+// per-tick LOCAL_PLAYER_* constants above, so the feel is cadence-independent
+// (tactical 116). These are pre-headset placeholders tuned so ~2/3 throttle on
+// both hands hovers and full throttle climbs; Slice 3 promotes them to
+// dev-adjustable knobs and dials them in on-device.
+/// Continuous gravity magnitude (blocks/s^2); matches `SERVER_PHYSICS_GRAVITY`.
+pub const THRUSTER_GRAVITY_SI: f64 = 32.0;
+/// Per-flying-player "antigravity field" scale on gravity (< 1.0). At 0.5 the
+/// effective pull is 16 blocks/s^2, so full 3x MC gravity is not brutal in the
+/// full-manual model (tactical 157).
+pub const THRUSTER_GRAVITY_SCALE: f64 = 0.5;
+/// Body acceleration per hand per unit throttle (blocks/s^2) along `-palm_normal`.
+/// At 12.0, both hands hover near 2/3 throttle (2 * t * 12 = 16 -> t ~= 0.67).
+pub const THRUSTER_THRUST_SCALE: f64 = 12.0;
+/// Fraction of velocity retained per second (continuous exponential drag,
+/// applied as `DRAG.powf(dt)` so it stays cadence-independent).
+pub const THRUSTER_DRAG: f64 = 0.5;
+/// Maximum thruster flight speed magnitude (blocks/s).
+pub const THRUSTER_MAX_SPEED: f64 = 30.0;
 const LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR: f64 = 0.21600002;
 const LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR: f64 = 9.0e-4;
 const LOCAL_PLAYER_POSITION_REMINDER_INTERVAL: u32 = 20;
@@ -178,6 +198,39 @@ pub struct FlyingMovementStep {
     pub dt_seconds: f64,
     pub descending: bool,
     pub sprinting: bool,
+}
+
+/// Per-hand thrust intent for the Iron Man / repulsor flight mode (tactical 157).
+///
+/// `palm_normal` is a unit world-space vector pointing out of the palm (the
+/// direction the jet fires); the body accelerates along `-palm_normal`. It is
+/// zero when the hand pose is unavailable this frame. `throttle` is the analog
+/// trigger value in `0..=1`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThrusterHandInput {
+    pub palm_normal: Vec3d,
+    pub throttle: f64,
+}
+
+impl ThrusterHandInput {
+    pub const NONE: Self = Self {
+        palm_normal: Vec3d::ZERO,
+        throttle: 0.0,
+    };
+
+    pub fn new(palm_normal: Vec3d, throttle: f64) -> Self {
+        Self {
+            palm_normal,
+            throttle,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThrusterMovementStep {
+    pub left: ThrusterHandInput,
+    pub right: ThrusterHandInput,
+    pub dt_seconds: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1077,6 +1130,46 @@ impl LocalPlayerController {
         Some(collision)
     }
 
+    /// Iron Man / repulsor hand-thruster flight (tactical 157). Full-manual: each
+    /// hand pushes the body along `-palm_normal` scaled by its analog throttle,
+    /// gravity still applies (scaled by the antigravity-field knob), continuous
+    /// drag bleeds speed, and velocity is carried frame-to-frame (unlike Fly,
+    /// which zeroes `delta_movement`). Integrated in SI units against real `dt`,
+    /// so feel is cadence-independent (tactical 116). Resolves through
+    /// `move_colliding` under Normal collision, so terrain still stops you.
+    ///
+    /// `delta_movement` is reused as the SI velocity carrier (blocks/s) while in
+    /// Thruster mode; it is cleared to zero on movement/collision mode changes
+    /// (see `mclone-render-session` camera), so the per-tick vs per-second unit
+    /// difference never leaks into the walking/flying integrators.
+    pub fn tick_thruster_movement(
+        &mut self,
+        client: &ClientRuntime,
+        step: ThrusterMovementStep,
+    ) -> Option<CollisionMovementResult> {
+        if !step.dt_seconds.is_finite() || step.dt_seconds <= 0.0 {
+            return None;
+        }
+        let (velocity, displacement) = thruster_integrate(self.delta_movement, step);
+        let collision = self.move_colliding(client, displacement);
+        // Carry velocity between frames, but drop the component that collided so
+        // we do not accumulate thrust into terrain.
+        let mut carried = velocity;
+        if !nearly_equal(displacement.x, collision.traveled.x) {
+            carried.x = 0.0;
+        }
+        if !nearly_equal(displacement.y, collision.traveled.y) {
+            carried.y = 0.0;
+        }
+        if !nearly_equal(displacement.z, collision.traveled.z) {
+            carried.z = 0.0;
+        }
+        self.delta_movement = carried;
+        self.auto_jump_time = 0;
+        self.clear_water_contact();
+        Some(collision)
+    }
+
     pub fn tick_walking_movement(
         &mut self,
         client: &ClientRuntime,
@@ -1865,6 +1958,55 @@ pub fn flying_displacement(input: PlayerInput, step: FlyingMovementStep) -> Opti
         1.0
     };
     Some(direction.scale(step.speed_blocks_per_second * boost * step.dt_seconds))
+}
+
+/// Total continuous body acceleration (blocks/s^2) for one thruster step: the
+/// sum of both hands' reaction thrust (`-palm_normal * throttle * THRUST_SCALE`)
+/// minus scaled gravity on the Y axis. Pure and cadence-independent.
+pub fn thruster_acceleration(step: ThrusterMovementStep) -> Vec3d {
+    let mut accel =
+        thruster_hand_acceleration(step.left).add(thruster_hand_acceleration(step.right));
+    accel.y -= THRUSTER_GRAVITY_SI * THRUSTER_GRAVITY_SCALE;
+    accel
+}
+
+fn thruster_hand_acceleration(hand: ThrusterHandInput) -> Vec3d {
+    if !hand.palm_normal.is_finite() || !hand.throttle.is_finite() {
+        return Vec3d::ZERO;
+    }
+    let throttle = hand.throttle.clamp(0.0, 1.0);
+    if throttle <= 0.0 {
+        return Vec3d::ZERO;
+    }
+    // Reaction to the jet: the body is shoved opposite the palm normal.
+    hand.palm_normal.scale(-throttle * THRUSTER_THRUST_SCALE)
+}
+
+/// Advance a thruster velocity (blocks/s) by one step and return the new velocity
+/// plus the frame displacement (blocks). Integrated in SI units against real
+/// `dt`: `v += a*dt`, continuous drag `v *= DRAG.powf(dt)`, magnitude clamped to
+/// `MAX_SPEED`, then `displacement = v*dt`. Collision resolution is the caller's
+/// job (`tick_thruster_movement`); this stays pure for tick-independence tests.
+pub fn thruster_integrate(velocity: Vec3d, step: ThrusterMovementStep) -> (Vec3d, Vec3d) {
+    let dt = step.dt_seconds;
+    if !dt.is_finite() || dt <= 0.0 || !velocity.is_finite() {
+        return (velocity, Vec3d::ZERO);
+    }
+    let accel = thruster_acceleration(step);
+    let mut velocity = velocity.add(accel.scale(dt));
+    velocity = velocity.scale(THRUSTER_DRAG.powf(dt));
+    velocity = clamp_speed(velocity, THRUSTER_MAX_SPEED);
+    let displacement = velocity.scale(dt);
+    (velocity, displacement)
+}
+
+fn clamp_speed(velocity: Vec3d, max_speed: f64) -> Vec3d {
+    let len_sqr = velocity.length_sqr();
+    if max_speed <= 0.0 || !max_speed.is_finite() || len_sqr <= max_speed * max_speed {
+        velocity
+    } else {
+        velocity.scale(max_speed / len_sqr.sqrt())
+    }
 }
 
 pub fn view_vector(yaw_radians: f64, pitch_radians: f64) -> Vec3d {
@@ -3029,5 +3171,206 @@ mod tests {
             None
         );
         assert_eq!(view_vector(f64::NAN, 0.0), Vec3d::ZERO);
+    }
+
+    // --- Thruster (Iron Man) flight, tactical 157 Slice 2 ---
+
+    const PALM_DOWN: Vec3d = Vec3d::new(0.0, -1.0, 0.0);
+
+    fn thruster_step(
+        left_throttle: f64,
+        right_throttle: f64,
+        left_palm: Vec3d,
+        right_palm: Vec3d,
+        dt: f64,
+    ) -> ThrusterMovementStep {
+        ThrusterMovementStep {
+            left: ThrusterHandInput::new(left_palm, left_throttle),
+            right: ThrusterHandInput::new(right_palm, right_throttle),
+            dt_seconds: dt,
+        }
+    }
+
+    #[test]
+    fn thruster_hover_throttle_cancels_gravity() {
+        // ~2/3 throttle on both palms-down hands should net near-zero vertical
+        // acceleration, so the mode has a real hover skill point in the 60-70%
+        // band the tactical targets.
+        let hover = THRUSTER_GRAVITY_SI * THRUSTER_GRAVITY_SCALE / (2.0 * THRUSTER_THRUST_SCALE);
+        let accel = thruster_acceleration(thruster_step(hover, hover, PALM_DOWN, PALM_DOWN, 0.05));
+        assert!(accel.y.abs() < 1.0e-9, "hover accel.y = {}", accel.y);
+        assert!(
+            (0.6..=0.7).contains(&hover),
+            "hover throttle {hover} outside the 60-70% target band"
+        );
+    }
+
+    #[test]
+    fn thruster_integration_is_tick_rate_independent() {
+        // Same wall-clock climb at 20 Hz and 60 Hz must land within tolerance.
+        // The regression this guards is integrating against per-tick constants:
+        // 60 Hz would then travel ~3x as far as 20 Hz over the same seconds.
+        fn climb_for(dt: f64, total_seconds: f64) -> Vec3d {
+            let steps = (total_seconds / dt).round() as u32;
+            let mut velocity = Vec3d::ZERO;
+            let mut position = Vec3d::ZERO;
+            for _ in 0..steps {
+                let (v, d) =
+                    thruster_integrate(velocity, thruster_step(1.0, 1.0, PALM_DOWN, PALM_DOWN, dt));
+                velocity = v;
+                position = position.add(d);
+            }
+            position
+        }
+
+        let at_20hz = climb_for(1.0 / 20.0, 2.0);
+        let at_60hz = climb_for(1.0 / 60.0, 2.0);
+        assert!(
+            at_20hz.y > 1.0,
+            "expected a real climb, got {} blocks",
+            at_20hz.y
+        );
+        assert!(
+            (at_20hz.y - at_60hz.y).abs() < 0.1,
+            "tick-rate dependent displacement: 20Hz y={} vs 60Hz y={}",
+            at_20hz.y,
+            at_60hz.y
+        );
+    }
+
+    #[test]
+    fn thruster_velocity_clamps_to_max_speed() {
+        // Sustained hard thrust plus gravity would exceed MAX_SPEED without the
+        // clamp; velocity magnitude must saturate exactly at the clamp.
+        let dt = 1.0 / 60.0;
+        let palm_forward = Vec3d::new(0.0, 0.0, 1.0);
+        let mut velocity = Vec3d::ZERO;
+        for _ in 0..(8 * 60) {
+            let (v, _) = thruster_integrate(
+                velocity,
+                thruster_step(1.0, 1.0, palm_forward, palm_forward, dt),
+            );
+            velocity = v;
+            assert!(
+                velocity.length_sqr().sqrt() <= THRUSTER_MAX_SPEED + 1.0e-6,
+                "velocity {} exceeded clamp",
+                velocity.length_sqr().sqrt()
+            );
+        }
+        let speed = velocity.length_sqr().sqrt();
+        assert!(
+            (speed - THRUSTER_MAX_SPEED).abs() < 1.0e-3,
+            "velocity {speed} should saturate at MAX_SPEED"
+        );
+    }
+
+    #[test]
+    fn thruster_drag_decays_velocity_toward_zero_at_zero_throttle() {
+        // With zero throttle the horizontal axes (no gravity) must bleed
+        // monotonically toward a terminal speed of zero under continuous drag.
+        let dt = 1.0 / 60.0;
+        let mut velocity = Vec3d::new(20.0, 0.0, 0.0);
+        let mut previous = velocity.x;
+        for _ in 0..(8 * 60) {
+            let (v, _) = thruster_integrate(
+                velocity,
+                thruster_step(0.0, 0.0, Vec3d::ZERO, Vec3d::ZERO, dt),
+            );
+            velocity = v;
+            assert!(
+                velocity.x >= 0.0 && velocity.x < previous + 1.0e-12,
+                "horizontal velocity not decaying: {previous} -> {}",
+                velocity.x
+            );
+            previous = velocity.x;
+        }
+        assert!(
+            velocity.x < 0.5,
+            "horizontal velocity should have decayed toward zero, got {}",
+            velocity.x
+        );
+    }
+
+    #[test]
+    fn thruster_asymmetric_throttle_produces_banking_accel() {
+        // Symmetric opposing palm normals cancel laterally; dropping one hand's
+        // throttle leaves a net lateral (banking) acceleration.
+        let left_palm = Vec3d::new(1.0, 0.0, 0.0);
+        let right_palm = Vec3d::new(-1.0, 0.0, 0.0);
+        let symmetric = thruster_acceleration(thruster_step(1.0, 1.0, left_palm, right_palm, 0.05));
+        assert!(
+            symmetric.x.abs() < 1.0e-9,
+            "symmetric hands should not bank, lateral accel {}",
+            symmetric.x
+        );
+        let banking = thruster_acceleration(thruster_step(1.0, 0.0, left_palm, right_palm, 0.05));
+        assert!(
+            banking.x.abs() > 1.0,
+            "asymmetric throttle should bank, lateral accel {}",
+            banking.x
+        );
+    }
+
+    #[test]
+    fn tick_thruster_movement_applies_gravity_and_carries_velocity() {
+        let client = client_with_blocks(&[]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 10.0, 0.5),
+            ..Default::default()
+        });
+        let dt = 1.0 / 60.0;
+        let start_y = controller.pose().position.y;
+
+        controller
+            .tick_thruster_movement(
+                &client,
+                thruster_step(0.0, 0.0, Vec3d::ZERO, Vec3d::ZERO, dt),
+            )
+            .unwrap();
+        let v1 = controller.delta_movement().y;
+        assert!(v1 < 0.0, "gravity should pull the body down, vy={v1}");
+
+        // Velocity carries frame-to-frame (unlike Fly, which zeroes it): a second
+        // identical step accelerates further downward.
+        controller
+            .tick_thruster_movement(
+                &client,
+                thruster_step(0.0, 0.0, Vec3d::ZERO, Vec3d::ZERO, dt),
+            )
+            .unwrap();
+        let v2 = controller.delta_movement().y;
+        assert!(v2 < v1, "velocity should accumulate: {v1} -> {v2}");
+        assert!(controller.pose().position.y < start_y);
+    }
+
+    #[test]
+    fn tick_thruster_movement_collides_with_terrain_and_zeroes_blocked_velocity() {
+        // Solid block at y=1 (occupies [1,2]); thrusting straight down under
+        // Normal collision must land the feet on the block top and zero the
+        // blocked vertical velocity rather than accumulating into terrain.
+        let client = client_with_blocks(&[(BlockPos::new(0, 1, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 3.0, 0.5),
+            ..Default::default()
+        });
+        let dt = 1.0 / 60.0;
+        let palm_up = Vec3d::new(0.0, 1.0, 0.0); // -palm_normal => downward thrust
+        for _ in 0..(2 * 60) {
+            controller
+                .tick_thruster_movement(&client, thruster_step(1.0, 1.0, palm_up, palm_up, dt));
+        }
+        assert!(controller.on_ground(), "should have landed on the block");
+        assert!(
+            controller.delta_movement().y.abs() < 1.0e-9,
+            "blocked vertical velocity should be zeroed, vy={}",
+            controller.delta_movement().y
+        );
+        assert!(
+            (controller.pose().position.y - 2.0).abs() < 1.0e-6,
+            "feet should rest on the block top (y=2), got {}",
+            controller.pose().position.y
+        );
     }
 }

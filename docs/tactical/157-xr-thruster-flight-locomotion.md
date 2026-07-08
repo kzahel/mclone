@@ -1,6 +1,7 @@
 # 157: XR Thruster Flight Locomotion (Iron Man mode)
 
-Status: active 2026-07-08; Slice 1 (plumbing) landed, Slice 2 (integrator) next.
+Status: active 2026-07-08; Slices 1 (plumbing) + 2 (integrator) landed, Slice 3
+(palm calibration + dev tuning knobs) next.
 Hand-driven "Iron Man / repulsor" flight movement model, entered as a new shared
 `Movement` value alongside `Player`, `Fly`, and `Gorilla`/`HandPush`.
 
@@ -183,27 +184,45 @@ plumbed to the client via `last_thruster_input`; no movement yet.
 
 ### Slice 2 — Core thruster integrator (full manual, tick-independent)
 
-- `mclone-client/player.rs`: add `tick_thruster_movement` beside
-  `tick_flying_movement_with_impulse`. Integrate in **SI units against real dt**:
-  - `accel = sum_hands(-palm_normal * trigger * THRUST_SCALE)`
-  - `accel.y -= GRAVITY_SI * GRAVITY_SCALE`  (`GRAVITY_SI = 32.0` blocks/s²)
-  - `velocity += accel * dt`
-  - `velocity *= DRAG.powf(dt)`  (continuous exponential drag, cadence-independent)
-  - clamp `velocity` to `MAX_SPEED`
-  - `displacement = velocity * dt`; resolve via `move_colliding` (Normal) so you
-    crash into terrain; carry velocity frame-to-frame (unlike Fly, which zeroes
-    `delta_movement`).
-- `mclone-render-session`: `tick_thruster` dispatch arm in `apply_movement_input`
-  (`camera.rs:734-760`) mirroring `tick_hand_push`, feeding `EngineThrusterInput`.
-- Constants first: `THRUST_SCALE`, `DRAG`, `MAX_SPEED`, `GRAVITY_SCALE`, tuned so
-  ~60-70% throttle on both hands hovers and full throttle climbs convincingly.
-  `GRAVITY_SCALE` starts adjustable (expect to test well below 1.0 — full MC 3×
-  gravity is brutal in full manual; the "antigravity field" default may land
-  around 0.4-0.6, decided during headset tuning).
-- Headset validation on Quest 3 standalone Android XR.
+Status: landed 2026-07-08.
 
-Exit: you can fly around in the headset with per-hand thrusters against gravity;
-feel is tunable via constants; no NoClip forced; terrain collides.
+- [x] `mclone-client/player.rs`: `tick_thruster_movement` beside
+  `tick_flying_movement_with_impulse`, plus pure `thruster_acceleration` /
+  `thruster_integrate` helpers. Integrates in **SI units against real dt**:
+  - `accel = sum_hands(-palm_normal * throttle * THRUSTER_THRUST_SCALE)`
+  - `accel.y -= THRUSTER_GRAVITY_SI * THRUSTER_GRAVITY_SCALE`
+    (`THRUSTER_GRAVITY_SI = 32.0` blocks/s², matches `SERVER_PHYSICS_GRAVITY`)
+  - `velocity += accel * dt`
+  - `velocity *= THRUSTER_DRAG.powf(dt)` (continuous exponential drag)
+  - clamp `velocity` magnitude to `THRUSTER_MAX_SPEED`
+  - `displacement = velocity * dt`; resolved via `move_colliding` (Normal) so you
+    crash into terrain; velocity is carried frame-to-frame in `delta_movement`
+    (unlike Fly, which zeroes it), with any collided component zeroed. The
+    per-tick vs per-second unit difference never leaks out because
+    `delta_movement` is cleared on movement/collision mode changes.
+- [x] `mclone-render-session`: real `tick_thruster` dispatch arm in
+  `apply_movement_input` / `tick_movement` (`camera.rs`) mirroring
+  `tick_hand_push`, mapping `EngineThrusterInput` → `ThrusterMovementStep`.
+  Gravity-bound: an empty thrust intent still falls; `Collision = Normal` is
+  never overridden to NoClip in the per-frame path.
+- [x] Constants `THRUSTER_THRUST_SCALE = 12.0`, `THRUSTER_DRAG = 0.5`,
+  `THRUSTER_MAX_SPEED = 30.0`, `THRUSTER_GRAVITY_SCALE = 0.5` (effective 16
+  blocks/s²), tuned as pre-headset placeholders so ~2/3 throttle on both hands
+  hovers (`2·t·12 = 16 → t ≈ 0.667`) and full throttle climbs. These are the
+  four feel knobs Slice 3 promotes to dev-adjustable values and dials in
+  on-device (`GRAVITY_SCALE` expected to move within the 0.4-0.6 band).
+- [x] Tests (`mclone-client` + `mclone-render-session`): tick-rate independence
+  (20 Hz vs 60 Hz same-wall-clock displacement within tolerance), max-speed
+  clamp, drag decay to zero terminal at zero throttle, asymmetric per-hand
+  throttle produces banking accel, hover throttle cancels gravity, gravity
+  fall + frame-to-frame velocity carry, and terrain collision zeroing blocked
+  velocity; camera-level climb/fall dispatch keeping Normal collision.
+- [ ] Headset feel validation on Quest 3 standalone Android XR (manual/hardware;
+  the real payoff, deferred to on-device tuning in Slice 3).
+
+Exit (code path met; headset feel pending Slice 3 tuning): per-hand thrusters
+integrate against gravity in cadence-independent SI units; feel is tunable via
+the four constants; no NoClip forced; terrain collides.
 
 ### Slice 3 — Palm calibration + dev tuning knobs
 
