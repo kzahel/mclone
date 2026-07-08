@@ -54,7 +54,7 @@ mod android {
     };
     use mclone_app_runtime::startup_args::{
         RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupCameraOptions,
-        StartupSceneOptions, StartupWorldStorageOptions,
+        StartupSceneOptions, StartupWorldStorageProjection, format_optional_startup_path,
     };
     use mclone_app_runtime::world_catalog::{
         LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalog,
@@ -2310,13 +2310,10 @@ mod android {
             shared_args.apply_render_compile_capacity_report(&report);
         }
         let options = shared_args.finish();
-        let default_world_root_enabled =
-            !options.storage.transient && options.storage.world_root.is_none();
-        let scene =
-            android_scene_options_from_startup(options.scene, options.storage).validated()?;
-        if scene.remote_addr.is_some() && scene.world_dir.is_some() {
-            bail!("--world-dir applies only to local integrated worlds");
-        }
+        let storage = options.storage.project(None);
+        let default_world_root_enabled = storage.default_world_root_enabled;
+        let scene = android_scene_options_from_startup(options.scene, &storage).validated()?;
+        storage.validate_local_integrated_world(scene.remote_addr.as_deref())?;
         Ok(AndroidStartupOptions {
             scene,
             render_options: options.render_options,
@@ -2346,7 +2343,7 @@ mod android {
 
     fn android_scene_options_from_startup(
         scene: StartupSceneOptions,
-        storage: StartupWorldStorageOptions,
+        storage: &StartupWorldStorageProjection,
     ) -> AndroidSceneOptions {
         AndroidSceneOptions {
             seed: scene.seed,
@@ -2361,8 +2358,8 @@ mod android {
             lighting_enabled: scene.lighting_enabled,
             light_status_batch_size: scene.light_status_batch_size,
             remote_addr: scene.remote_addr,
-            world_root: storage.world_root,
-            world_dir: storage.world_dir,
+            world_root: storage.world_root.clone(),
+            world_dir: storage.world_dir.clone(),
         }
     }
 
@@ -2648,12 +2645,6 @@ mod android {
             }
             None => "none".to_owned(),
         }
-    }
-
-    fn format_optional_path(value: Option<&PathBuf>) -> String {
-        value
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<none>".to_owned())
     }
 
     #[derive(Debug)]
@@ -3078,13 +3069,23 @@ mod android {
         }
         if startup_options.default_world_root_enabled && startup_options.scene.world_root.is_none()
         {
-            startup_options.scene.world_root = android_app_data_world_root(&app, "Android");
+            let storage = StartupWorldStorageProjection::from_parts(
+                startup_options.default_world_root_enabled,
+                startup_options.scene.world_root.clone(),
+                startup_options.scene.world_dir.clone(),
+            )
+            .with_default_world_root(android_app_data_world_root(&app, "Android"));
+            startup_options.scene.world_root = storage.world_root;
         }
-        if startup_options.scene.remote_addr.is_some() && startup_options.scene.world_dir.is_some()
+        let storage = StartupWorldStorageProjection::from_parts(
+            startup_options.default_world_root_enabled,
+            startup_options.scene.world_root.clone(),
+            startup_options.scene.world_dir.clone(),
+        );
+        if let Err(error) =
+            storage.validate_local_integrated_world(startup_options.scene.remote_addr.as_deref())
         {
-            log::error!(
-                "MCLONE_ANDROID_FAILURE: --world-dir applies only to local integrated worlds"
-            );
+            log::error!("MCLONE_ANDROID_FAILURE: {error:#}");
             return;
         }
         if let Some(remote_addr) = startup_remote_addr.as_deref() {
@@ -3114,8 +3115,8 @@ mod android {
         log::info!(
             "Mclone Android world storage: default_root_enabled={} world_root={} world_dir={}",
             startup_options.default_world_root_enabled,
-            format_optional_path(startup_options.scene.world_root.as_ref()),
-            format_optional_path(startup_options.scene.world_dir.as_ref())
+            format_optional_startup_path(startup_options.scene.world_root.as_deref(), "<none>"),
+            format_optional_startup_path(startup_options.scene.world_dir.as_deref(), "<none>")
         );
         log::info!(
             "Mclone Android render options: section_occlusion={} fullbright={} color_profile={}",

@@ -1253,8 +1253,9 @@ impl Cli {
         if let Some(enabled) = render_compile_worker_timing_enabled {
             scene.render_compile_worker_timing_enabled = enabled;
         }
-        scene.world_root = startup_storage.world_root_or_default(Some(default_native_world_root()));
-        scene.world_dir = startup_storage.world_dir;
+        let startup_storage = startup_storage.project(Some(default_native_world_root()));
+        scene.world_root = startup_storage.world_root.clone();
+        scene.world_dir = startup_storage.world_dir.clone();
         if let Some(max_pending_jobs) = scene.render_compile_max_pending_jobs {
             if max_pending_jobs < scene.render_compile_worker_count {
                 bail!(
@@ -1271,9 +1272,7 @@ impl Cli {
         if scene.adaptive_render_admission_budget && scene.remote_addr.is_some() {
             bail!("--adaptive-render-admission-budget applies only to local integrated worlds");
         }
-        if scene.world_dir.is_some() && scene.remote_addr.is_some() {
-            bail!("--world-dir applies only to local integrated worlds");
-        }
+        startup_storage.validate_local_integrated_world(scene.remote_addr.as_deref())?;
         let render_options = startup_options.render_options;
         match mode {
             Some(HeadlessMode::Clear(path)) => Ok(Self::HeadlessClear {

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use mclone_frame_budget::RenderCompileCapacityReport;
@@ -179,6 +179,10 @@ pub struct StartupWorldStorageOptions {
 }
 
 impl StartupWorldStorageOptions {
+    pub fn default_world_root_enabled(&self) -> bool {
+        !self.transient && self.world_root.is_none()
+    }
+
     pub fn world_root_or_default(&self, default_root: Option<PathBuf>) -> Option<PathBuf> {
         if self.transient {
             None
@@ -186,6 +190,55 @@ impl StartupWorldStorageOptions {
             self.world_root.clone().or(default_root)
         }
     }
+
+    pub fn project(&self, default_world_root: Option<PathBuf>) -> StartupWorldStorageProjection {
+        StartupWorldStorageProjection {
+            default_world_root_enabled: self.default_world_root_enabled(),
+            world_root: self.world_root_or_default(default_world_root),
+            world_dir: self.world_dir.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StartupWorldStorageProjection {
+    pub default_world_root_enabled: bool,
+    pub world_root: Option<PathBuf>,
+    pub world_dir: Option<PathBuf>,
+}
+
+impl StartupWorldStorageProjection {
+    pub fn from_parts(
+        default_world_root_enabled: bool,
+        world_root: Option<PathBuf>,
+        world_dir: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            default_world_root_enabled,
+            world_root,
+            world_dir,
+        }
+    }
+
+    pub fn with_default_world_root(mut self, default_world_root: Option<PathBuf>) -> Self {
+        if self.default_world_root_enabled && self.world_root.is_none() {
+            self.world_root = default_world_root;
+        }
+        self
+    }
+
+    pub fn validate_local_integrated_world(&self, remote_addr: Option<&str>) -> Result<()> {
+        if self.world_dir.is_some() && remote_addr.is_some() {
+            bail!("--world-dir applies only to local integrated worlds");
+        }
+        Ok(())
+    }
+}
+
+pub fn format_optional_startup_path(value: Option<&Path>, none_label: &str) -> String {
+    value
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| none_label.to_owned())
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -813,6 +866,80 @@ mod tests {
                 .world_root_or_default(Some(PathBuf::from("/tmp/default-worlds"))),
             Some(PathBuf::from("/tmp/default-worlds"))
         );
+    }
+
+    #[test]
+    fn startup_world_storage_projection_applies_default_root_policy() {
+        let projection = StartupWorldStorageOptions::default()
+            .project(Some(PathBuf::from("/tmp/default-worlds")));
+        assert!(projection.default_world_root_enabled);
+        assert_eq!(
+            projection.world_root,
+            Some(PathBuf::from("/tmp/default-worlds"))
+        );
+        assert_eq!(projection.world_dir, None);
+
+        let transient = StartupWorldStorageOptions {
+            transient: true,
+            world_root: None,
+            world_dir: None,
+        }
+        .project(Some(PathBuf::from("/tmp/default-worlds")));
+        assert!(!transient.default_world_root_enabled);
+        assert_eq!(transient.world_root, None);
+
+        let explicit = StartupWorldStorageOptions {
+            transient: false,
+            world_root: Some(PathBuf::from("/tmp/explicit-worlds")),
+            world_dir: None,
+        }
+        .project(Some(PathBuf::from("/tmp/default-worlds")));
+        assert!(!explicit.default_world_root_enabled);
+        assert_eq!(
+            explicit.world_root,
+            Some(PathBuf::from("/tmp/explicit-worlds"))
+        );
+    }
+
+    #[test]
+    fn startup_world_storage_projection_can_apply_late_platform_default_root() {
+        let projection = StartupWorldStorageOptions::default()
+            .project(None)
+            .with_default_world_root(Some(PathBuf::from("/tmp/android-worlds")));
+
+        assert!(projection.default_world_root_enabled);
+        assert_eq!(
+            projection.world_root,
+            Some(PathBuf::from("/tmp/android-worlds"))
+        );
+    }
+
+    #[test]
+    fn startup_world_storage_projection_rejects_world_dir_for_remote_sessions() {
+        let projection = StartupWorldStorageProjection::from_parts(
+            true,
+            None,
+            Some(PathBuf::from("/tmp/mclone-world")),
+        );
+
+        assert!(projection.validate_local_integrated_world(None).is_ok());
+        let error = projection
+            .validate_local_integrated_world(Some("127.0.0.1:25565"))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "--world-dir applies only to local integrated worlds"
+        );
+    }
+
+    #[test]
+    fn format_optional_startup_path_uses_caller_none_label() {
+        assert_eq!(
+            format_optional_startup_path(Some(Path::new("/tmp/mclone-world")), "<none>"),
+            "/tmp/mclone-world"
+        );
+        assert_eq!(format_optional_startup_path(None, "<none>"), "<none>");
+        assert_eq!(format_optional_startup_path(None, "none"), "none");
     }
 
     #[test]

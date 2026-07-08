@@ -1,6 +1,6 @@
 # 161: Native Catalog / Storage Adapter Dedup Follow-Up
 
-Status: active 2026-07-08. Slices 1-4 landed; follow-up slices remain open.
+Status: active 2026-07-08. Slices 1-5 landed; follow-up slices remain open.
 
 Workstream: native Rust shared client-experience/catalog/storage boundary,
 desktop flat, shared XR scene, flat Android, and Android XR. Web remains
@@ -175,6 +175,48 @@ apps for `arm64-v8a`. The wasm web check still reports the existing
 `mclone-server` warnings for `TimingSample` and
 `with_unload_hysteresis_chunks`; no new warnings were introduced by this slice.
 
+## Slice 5: Startup Storage Projection And Validation
+
+Status: landed 2026-07-08.
+
+Problem: desktop, flat Android, and Android XR each repeated pieces of startup
+world-storage policy: default-root eligibility, late platform default-root
+injection, `--world-dir` rejection for remote sessions, and optional path
+formatting for storage logs.
+
+Change:
+
+- Add `StartupWorldStorageProjection` in `mclone-app-runtime::startup_args` to
+  project parsed storage into `world_root`/`world_dir` plus
+  `default_world_root_enabled`.
+- Add shared validation for `--world-dir applies only to local integrated
+  worlds`.
+- Add shared optional-path formatting with a caller-owned none label, preserving
+  flat Android's `<none>` and Android XR's `none` log spelling.
+- Route desktop CLI, flat Android, and Android XR through the projection. Flat
+  Android and Android XR also validate again after legacy remote-address fallback
+  so non-argv remote launches cannot combine with `--world-dir`.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --package mclone-app-runtime --package mclone-native-client --package mclone-android-client --package mclone-android-xr-client --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-xr-client
+git diff --check
+```
+
+Result on 2026-07-08: passed. The wasm web check still reports the existing
+`mclone-server` warnings for `TimingSample` and
+`with_unload_hysteresis_chunks`, and the native-client XR feature check still
+reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
+introduced by this slice.
+
 ## Remaining Follow-Up Slices
 
 1. **LocalSingleView naming cleanup.** `LocalSingleViewSceneOptions` and related
@@ -190,14 +232,10 @@ apps for `arm64-v8a`. The wasm web check still reports the existing
    logging, but flat Android currently prefers internal storage while Android XR
    prefers external storage. Decide whether that difference is intentional
    before moving the shared parts into `mclone-android-platform`.
-3. **Startup storage validation and logging.** Desktop, flat Android, and
-   Android XR repeat pieces of `--world-dir applies only to local integrated
-   worlds`, default-root enablement, and storage logging. Keep argv/intent
-   parsing platform-local, but centralize shared validation/projection.
-4. **Seed reroll policy.** Desktop, XR, and flat Android all use the same LCG for
+3. **Seed reroll policy.** Desktop, XR, and flat Android all use the same LCG for
    new-world seed rerolls with separate initial-state helpers. Move this into
    shared client-experience/catalog policy.
-5. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
+4. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
    all Minecraft persistence. Native still lacks periodic autosave and reserved
    player/saved-data record implementations; those remain under 134/136-style
    persistence follow-up rather than this cleanup tactical.

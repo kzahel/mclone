@@ -63,7 +63,6 @@ mod perf_metrics;
 #[cfg(target_os = "android")]
 mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
-    use std::path::PathBuf;
     use std::sync::Once;
     use std::thread;
     use std::time::{Duration, Instant};
@@ -90,7 +89,8 @@ mod android {
     use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
     use mclone_app_runtime::startup_args::{
         RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupSceneOptions,
-        StartupWorldStorageOptions, parse_bool_arg, parse_string_arg,
+        StartupWorldStorageProjection, format_optional_startup_path, parse_bool_arg,
+        parse_string_arg,
     };
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
@@ -793,18 +793,15 @@ mod android {
         }
         let shared_options = shared_args.finish();
         options.remote_addr = shared_options.scene.remote_addr.clone();
-        options.default_world_root_enabled =
-            !shared_options.storage.transient && shared_options.storage.world_root.is_none();
-        let mut scene =
-            android_xr_scene_options_from_startup(shared_options.scene, shared_options.storage);
+        let storage = shared_options.storage.project(None);
+        options.default_world_root_enabled = storage.default_world_root_enabled;
+        let mut scene = android_xr_scene_options_from_startup(shared_options.scene, &storage);
         scene.underwater_detection_mode = underwater_detection_mode;
         scene.debug_ui_screen = debug_ui_screen;
         scene.skip_actors = options.skip_actors;
         scene.adaptive_chunk_publication_budget =
             adaptive_chunk_publication_budget.unwrap_or(options.remote_addr.is_none());
-        if options.remote_addr.is_some() && scene.world_dir.is_some() {
-            bail!("--world-dir applies only to local integrated worlds");
-        }
+        storage.validate_local_integrated_world(options.remote_addr.as_deref())?;
         if options.remote_addr.is_some() && scene.adaptive_chunk_publication_budget {
             bail!("--adaptive-chunk-publication-budget applies only to local integrated worlds");
         }
@@ -994,7 +991,7 @@ mod android {
 
     fn android_xr_scene_options_from_startup(
         scene: StartupSceneOptions,
-        storage: StartupWorldStorageOptions,
+        storage: &StartupWorldStorageProjection,
     ) -> XrSceneOptions {
         XrSceneOptions {
             seed: scene.seed,
@@ -1014,8 +1011,8 @@ mod android {
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
             skip_actors: false,
-            world_root: storage.world_root,
-            world_dir: storage.world_dir,
+            world_root: storage.world_root.clone(),
+            world_dir: storage.world_dir.clone(),
         }
     }
 
@@ -1233,7 +1230,13 @@ mod android {
         };
         if startup_options.default_world_root_enabled && startup_options.scene.world_root.is_none()
         {
-            startup_options.scene.world_root = android_app_data_world_root(&app, "Android XR");
+            let storage = StartupWorldStorageProjection::from_parts(
+                startup_options.default_world_root_enabled,
+                startup_options.scene.world_root.clone(),
+                startup_options.scene.world_dir.clone(),
+            )
+            .with_default_world_root(android_app_data_world_root(&app, "Android XR"));
+            startup_options.scene.world_root = storage.world_root;
         }
         let startup_view_pose =
             match parse_android_xr_startup_view_pose(startup_view_pose_property.as_deref()) {
@@ -1248,6 +1251,15 @@ mod android {
             .remote_addr
             .clone()
             .or_else(|| legacy_remote_addr.clone());
+        let storage = StartupWorldStorageProjection::from_parts(
+            startup_options.default_world_root_enabled,
+            startup_options.scene.world_root.clone(),
+            startup_options.scene.world_dir.clone(),
+        );
+        if let Err(error) = storage.validate_local_integrated_world(remote_addr.as_deref()) {
+            report_android_xr_failure(&app, &error);
+            return;
+        }
         if remote_addr.is_some() {
             startup_options.scene.adaptive_chunk_publication_budget = false;
         }
@@ -1401,8 +1413,8 @@ mod android {
         log::info!(
             "Android XR world storage: default_root_enabled={} world_root={} world_dir={}",
             startup_options.default_world_root_enabled,
-            format_optional_path(scene_options.world_root.as_ref()),
-            format_optional_path(scene_options.world_dir.as_ref())
+            format_optional_startup_path(scene_options.world_root.as_deref(), "none"),
+            format_optional_startup_path(scene_options.world_dir.as_deref(), "none")
         );
         log::info!(
             "Android XR render options: section_occlusion={} fullbright={} color_profile={}",
@@ -5867,12 +5879,6 @@ mod android {
         value
             .map(|value| value.to_string())
             .unwrap_or_else(|| "unbounded".to_owned())
-    }
-
-    fn format_optional_path(value: Option<&PathBuf>) -> String {
-        value
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "none".to_owned())
     }
 
     fn format_optional_f64(value: Option<f64>) -> String {
