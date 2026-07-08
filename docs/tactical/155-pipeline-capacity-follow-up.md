@@ -372,12 +372,30 @@ Fix A below).
   the web backend gets the same message. Parity-neutral: it only frees data for
   chunks no longer loaded, so lighting fixtures + contrasting seed stay
   byte-identical (rule E).
-- **Fix B (deeper, defer to threading topology `062`).** Eliminate the block
-  copy entirely and have the light worker read opacity through a shared
-  thread-safe view of the chunk store, exactly like vanilla's
-  `getChunkForLighting`. This removes store (a) at the cost of touching the
-  worker/scheduler ownership boundary. Out of scope for stopping the leak;
-  record it as the eventual parity end-state, sequenced with `062`.
+- **Fix B (deeper; gated `062` candidate, not an inevitable end-state).**
+  Eliminate the block copy entirely and have the light worker read opacity
+  through a shared thread-safe view of the chunk store, exactly like vanilla's
+  `getChunkForLighting`. Removes store (a) by touching the worker/scheduler
+  ownership boundary. Out of scope for stopping the leak, and two verified facts
+  make it *gated* rather than inevitable:
+  - **No web generalization.** The web worker rebuilds
+    `RetainedInitialLightState` per job frame
+    (`compute_light_status_job_frame`) — no retention, no leak. A cross-worker
+    `getChunkForLighting` there needs shared Wasm linear memory, the exact
+    frontier `068` declined (light lane ~98% work-dominated, so the removed copy
+    is ~2% of the lane). Fix B would diverge native/web, not converge them.
+  - **No existing hook.** The worker holds no store handle today (the owned
+    block copy is *moved* over an `mpsc` channel); the scheduler owns
+    `holders: BTreeMap<ChunkPos, ChunkHolder>` by value on the tick thread with
+    no `Arc<RwLock>`. Fix B introduces concurrent read access to a single-owner
+    store — a new shared-live-state boundary, unlike `062`'s share-nothing
+    frame passing.
+
+  The reclaim is native-only and already bounded by Fix A (block copy ≈
+  loaded-set × ~64 KB — order ~8-14 MB at Quest RD5-7, ~100 MB+ at desktop
+  RD20, i.e. smallest where RAM is tightest). Sequence Fix B only if some other
+  driver introduces a shared concurrent-read chunk-store view in `062`; absent
+  that, Fix A's defensible worker-thread copy is the stable state.
 
 ### Recommendation and next steps
 
@@ -481,8 +499,11 @@ mclone-light` green (`375` + `55`, including the Java-oracle lighting fixtures a
 the new eviction/parity tests); `cargo check --target wasm32-unknown-unknown -p
 mclone-server -p mclone-light` green (clears the V wasm32 item for the crates this
 slice touched). Fix B (eliminate the block copy via a shared `getChunkForLighting`
-view) remains the eventual parity end-state, sequenced with `062`; Fix A stops
-the leak without touching the worker/scheduler ownership boundary.
+view) is a *gated* `062` candidate, not an inevitable end-state — it has no web
+generalization (needs the `068`-declined shared linear memory) and no existing
+store hook, and its reclaim is native-only and bounded by Fix A (see "Fix
+options"). Fix A stops the leak without touching the worker/scheduler ownership
+boundary.
 
 **V follow-ups still open:** the on-device Quest RD5/RD7/churn + mixed soak
 re-run under default config (confirm no regression on the RAM-constrained
