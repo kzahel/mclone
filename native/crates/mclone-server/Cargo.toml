@@ -17,6 +17,7 @@ mclone-worldgen.workspace = true
 
 [features]
 default = []
+perf-diagnostics = ["mclone-light/perf-diagnostics"]
 physics = ["dep:mclone-physics"]
 physics-rapier = ["physics", "mclone-physics/rapier"]
 

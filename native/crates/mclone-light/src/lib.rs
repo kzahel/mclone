@@ -23,22 +23,22 @@ pub(crate) type TimingSample = Instant;
 #[cfg(target_arch = "wasm32")]
 pub(crate) type TimingSample = ();
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "perf-diagnostics"))]
 pub(crate) fn timing_start() -> Option<TimingSample> {
     Some(Instant::now())
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "perf-diagnostics")))]
 pub(crate) fn timing_start() -> Option<TimingSample> {
     None
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "perf-diagnostics"))]
 pub(crate) fn timing_elapsed_us(start: Option<TimingSample>) -> u128 {
     start.map_or(0, |start| start.elapsed().as_micros())
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "perf-diagnostics")))]
 pub(crate) fn timing_elapsed_us(_start: Option<TimingSample>) -> u128 {
     0
 }

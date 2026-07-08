@@ -7,7 +7,7 @@ publish.workspace = true
 
 [features]
 default = []
-perf-diagnostics = []
+perf-diagnostics = ["mclone-server/perf-diagnostics"]
 
 [dependencies]
 anyhow.workspace = true

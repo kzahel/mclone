@@ -12,16 +12,32 @@ BUILD_TYPE="${MCLONE_ANDROID_XR_BUILD_TYPE:-release}"
 
 usage() {
     cat <<'USAGE'
-Usage: android-xr/build-apk.sh [--release|--debug]
+Usage: android-xr/build-apk.sh [--release|--debug] [--perf-diagnostics]
 
 Build the standalone Quest Android XR APK.
 
 Options:
-  --release  Build an optimized release APK. This is the default.
-  --debug    Build a debug APK with Cargo's dev profile.
-  -h, --help Show this help.
+  --release           Build an optimized release APK. This is the default.
+  --debug             Build a debug APK with Cargo's dev profile.
+  --perf-diagnostics  Build Rust code with the perf-diagnostics feature.
+  -h, --help          Show this help.
 USAGE
 }
+
+CARGO_FEATURES="${MCLONE_ANDROID_XR_CARGO_FEATURES:-}"
+
+append_cargo_feature() {
+    local feature="$1"
+    if [[ -z "$CARGO_FEATURES" ]]; then
+        CARGO_FEATURES="$feature"
+    else
+        CARGO_FEATURES="${CARGO_FEATURES},${feature}"
+    fi
+}
+
+if [[ "${MCLONE_ANDROID_XR_PERF_DIAGNOSTICS:-0}" == "1" ]]; then
+    append_cargo_feature "perf-diagnostics"
+fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -31,6 +47,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --debug)
             BUILD_TYPE=debug
+            shift
+            ;;
+        --perf-diagnostics)
+            append_cargo_feature "perf-diagnostics"
             shift
             ;;
         -h|--help)
@@ -70,9 +90,14 @@ CARGO_NDK_PLATFORM="${CARGO_NDK_PLATFORM:-28}"
 mclone_android_build_preflight "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION"
 mclone_export_android_build_env "$ANDROID_SDK_HOME" "$NDK_HOME"
 
-echo "Building Mclone Android XR shared library ($BUILD_TYPE, API $CARGO_NDK_PLATFORM)..."
+CARGO_FEATURE_ARGS=()
+if [[ -n "$CARGO_FEATURES" ]]; then
+    CARGO_FEATURE_ARGS=(--features "$CARGO_FEATURES")
+fi
+
+echo "Building Mclone Android XR shared library ($BUILD_TYPE, API $CARGO_NDK_PLATFORM, features=${CARGO_FEATURES:-default})..."
 cd "$REPO_ROOT/native"
-cargo ndk -t arm64-v8a --platform "$CARGO_NDK_PLATFORM" -o ../android-xr/jniLibs build "${CARGO_PROFILE_ARGS[@]}" --package mclone-android-xr-client --lib
+cargo ndk -t arm64-v8a --platform "$CARGO_NDK_PLATFORM" -o ../android-xr/jniLibs build "${CARGO_PROFILE_ARGS[@]}" "${CARGO_FEATURE_ARGS[@]}" --package mclone-android-xr-client --lib
 
 echo "Bundling libc++_shared.so..."
 NDK_PREBUILT="$(find "$NDK_HOME/toolchains/llvm/prebuilt" -maxdepth 1 -mindepth 1 -type d | head -1)"

@@ -8,6 +8,10 @@ publish.workspace = true
 [dependencies]
 mclone-core.workspace = true
 
+[features]
+default = []
+perf-diagnostics = []
+
 [lib]
 name = "mclone_light"
 path = "src/lib.rs"

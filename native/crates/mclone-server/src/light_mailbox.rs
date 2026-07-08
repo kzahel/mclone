@@ -13,7 +13,6 @@ use std::time::Duration;
 use std::{
     sync::{Arc, Mutex, mpsc},
     thread,
-    time::Instant,
 };
 
 use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
@@ -26,7 +25,7 @@ use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::PendingLightStatusBatch;
 use crate::light_world::RetainedInitialLightState;
 use crate::persistence::ScheduledTickRecord;
-use crate::timing::{timing_elapsed_us, timing_start};
+use crate::timing::{TimingSample, timing_elapsed_us, timing_start};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
 use crate::{LightStatusMailboxKind, LightStatusMailboxMetrics, WorkerFrameMetrics};
@@ -268,15 +267,15 @@ impl LightStatusMailboxBackend {
                 while let Ok(request) = receiver.recv() {
                     match request {
                         LightStatusRequest::ComputeBatch(request) => {
-                            let queue_wait_us = request.enqueued_at.elapsed().as_micros();
+                            let queue_wait_us = timing_elapsed_us(request.enqueued_at);
                             if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
                                 metrics.record_worker_start(queue_wait_us);
                             }
-                            let request_start = Instant::now();
+                            let request_start = timing_start();
                             let completed =
                                 CompletedLightStatus::from_batch(&mut light_state, request.batch);
-                            let compute_us = request_start.elapsed().as_micros();
-                            let completed_at = Instant::now();
+                            let compute_us = timing_elapsed_us(request_start);
+                            let completed_at = timing_start();
                             for completed in completed {
                                 if completion_sender
                                     .send(CompletedLightStatusMessage {
@@ -336,7 +335,7 @@ impl LightStatusMailboxBackend {
 
     fn enqueue_batch(&mut self, batch: PendingLightStatusBatch, pending_statuses: usize) {
         let batch_statuses = batch.target_count();
-        let enqueued_at = Instant::now();
+        let enqueued_at = timing_start();
         if let Ok(mut metrics) = self.metrics.lock() {
             metrics.record_request(0);
             let pending_frames = metrics
@@ -363,13 +362,10 @@ impl LightStatusMailboxBackend {
         while let Ok(message) = self.completion_receiver.try_recv() {
             messages.push(message);
         }
-        let now = Instant::now();
         let mut completed = Vec::with_capacity(messages.len());
         if let Ok(mut metrics) = self.mailbox_metrics.lock() {
             for message in messages {
-                metrics.record_completion_drain_wait(
-                    now.duration_since(message.completed_at).as_micros(),
-                );
+                metrics.record_completion_drain_wait(timing_elapsed_us(message.completed_at));
                 completed.push(message.completed);
             }
         } else {
@@ -412,12 +408,12 @@ enum LightStatusRequest {
 #[cfg(not(target_arch = "wasm32"))]
 struct LightStatusComputeRequest {
     batch: PendingLightStatusBatch,
-    enqueued_at: Instant,
+    enqueued_at: Option<TimingSample>,
     target_count: usize,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct CompletedLightStatusMessage {
     completed: CompletedLightStatus,
-    completed_at: Instant,
+    completed_at: Option<TimingSample>,
 }

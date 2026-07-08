@@ -210,7 +210,7 @@ pub(crate) type TimingSample = ();
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn simulation_timing_start() -> Option<Instant> {
-    timing_start()
+    Some(Instant::now())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -220,7 +220,7 @@ pub(crate) fn simulation_timing_start() -> Option<()> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn simulation_timing_elapsed_us(start: Option<Instant>) -> u128 {
-    timing_elapsed_us(start)
+    start.map_or(0, |start| start.elapsed().as_micros())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -228,22 +228,34 @@ pub(crate) fn simulation_timing_elapsed_us(_start: Option<()>) -> u128 {
     timing_elapsed_us(_start)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "perf-diagnostics"))]
 pub(crate) fn timing_start() -> Option<TimingSample> {
     Some(Instant::now())
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "perf-diagnostics")))]
 pub(crate) fn timing_start() -> Option<TimingSample> {
     None
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "perf-diagnostics"))]
 pub(crate) fn timing_elapsed_us(start: Option<TimingSample>) -> u128 {
     start.map_or(0, |start| start.elapsed().as_micros())
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "perf-diagnostics")))]
 pub(crate) fn timing_elapsed_us(_start: Option<TimingSample>) -> u128 {
     0
+}
+
+#[cfg(all(test, not(target_arch = "wasm32"), not(feature = "perf-diagnostics")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_timing_compiles_out_without_perf_diagnostics() {
+        assert!(timing_start().is_none());
+        assert_eq!(timing_elapsed_us(timing_start()), 0);
+        assert!(simulation_timing_start().is_some());
+    }
 }
