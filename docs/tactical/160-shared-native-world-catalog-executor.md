@@ -1,6 +1,8 @@
 # 160: Shared Native World Catalog Executor + Flat Android Persistence
 
-Status: proposed 2026-07-08. Plan only; no implementation started.
+Status: closed 2026-07-08. Slices 1-4 landed; native catalog requests now run
+through one shared executor, flat Android uses persistent local worlds, and web
+remains the intentional async `+1`.
 
 Workstream: native Rust shared client-experience/catalog boundary
 (`mclone-app-runtime`), shared XR scene driver (`mclone-xr-scene`), desktop flat
@@ -23,11 +25,11 @@ Concretely:
    shared executor, replacing its transient stubs. This is a **behavior change**
    (flat Android gains persistent worlds) and is the point of the slice.
 
-The intended end state is the architectural "floor": **one** native catalog
-executor + **one** native catalog backend (`SqliteWorldStore`), with web
-remaining a separate asynchronous JS/IndexedDB executor over the same shared
-request/response protocol. That web `+1` is permanent and accepted, not a gap to
-close (see Rationale).
+The landed floor is: **one** native catalog executor
+(`execute_world_catalog_request`) + **one** native catalog backend
+(`SqliteWorldStore`), with web remaining a separate asynchronous JS/IndexedDB
+executor over the same shared request/response protocol. That web `+1` is
+permanent and accepted, not a gap to close (see Rationale).
 
 ## Rationale: why this is the floor, not a universal owner
 
@@ -41,35 +43,32 @@ The *catalog policy* is also already shared: `ClientCatalogController`
 `WorldCatalogRequest`/`WorldCatalogResponse`/`WorldCatalogCapabilities` value
 types are used by all four platforms, including web.
 
-What is **not** shared is the catalog *executor* — the code that takes a
-`ClientCatalogRequest`, runs it against a catalog backend, and folds the result
-back through the controller. Today there are four copies:
+Before this tactical, what was **not** shared was the catalog *executor* — the
+code that takes a `ClientCatalogRequest`, runs it against a catalog backend, and
+folds the result back through the controller. The copies have been collapsed to:
 
 | # | Executor | Backend | Shape |
 | --- | --- | --- | --- |
-| 1 | `mclone-native-client/src/flat_client_driver.rs:1089` `execute_world_catalog_request` | SQLite | Hand-expands every `WorldCatalogRequest` variant into `list_worlds`/`create_world`/`open_world`/`delete_world`. |
-| 2 | `mclone-xr-scene/src/session.rs:1032` `execute_xr_catalog_request` | SQLite | Delegates to `NativeWorldCatalog::handle_request`. Shared by Android XR **and** desktop XR smoke. |
-| 3 | `mclone-android-client/src/lib.rs:1341` `execute_android_catalog_request` | none (transient) | Fabricates in-memory summaries; capabilities `transient_create_only()`. |
-| 4 | `mclone-web-client/src/web_canvas.rs:3591` (+ JS re-entry) | IndexedDB | Marshals requests out to JS; answers arrive asynchronously via `applyWorldCatalogResponse`. |
+| 1 | `mclone-app-runtime/src/catalog_executor.rs` `execute_world_catalog_request` | SQLite via `NativeWorldCatalog` / `SqliteWorldStore` | Shared synchronous native executor used by desktop flat, desktop XR, Android XR, and flat Android. App-local methods only apply session/GPU lifecycle effects after this executor returns `ClientCatalogEffects`. |
+| 2 | `mclone-web-client/src/web_canvas.rs` (+ JS re-entry) | IndexedDB | Intentional async web `+1`; marshals requests out to JS and applies answers asynchronously via `applyWorldCatalogResponse`. |
 
-Only #4 is forced to exist by wasm: it is asynchronous and lives in JavaScript
-because `wasm32` is single-threaded, has no filesystem, and cannot block on
-IndexedDB. `SqliteWorldStore` and `NativeWorldCatalog` are both
+Only web is forced to keep its separate executor by wasm: it is asynchronous and
+lives in JavaScript because `wasm32` is single-threaded, has no filesystem, and
+cannot block on IndexedDB. `SqliteWorldStore` and `NativeWorldCatalog` are both
 `#[cfg(not(target_arch = "wasm32"))]` and cannot compile there
 (`world_catalog.rs:412`, `mclone-server/src/lib.rs:64`).
 
-Executors #1–#3 are **native and synchronous** and could be one. They are three
-copies only because the glue was never lifted. #2 is already the clean form; #1
-re-implements the exact `match` that `NativeWorldCatalog::handle_request` already
-performs (`world_catalog.rs:437`); #3 is a transient placeholder. Collapsing
-#1–#3 to one shared executor is this tactical. #4 stays as the acknowledged
-async `+1`.
+The former desktop flat, XR, and flat Android executors were **native and
+synchronous** and are now one shared owner. Desktop flat no longer hand-expands
+the `WorldCatalogRequest` variants; XR delegates through the same shared
+executor; flat Android no longer fabricates transient summaries. Web stays as
+the acknowledged async `+1`.
 
 The cost of shipping targets is therefore per-*executor*, not per-*target*:
 desktop XR and Android XR already prove one executor spanning a desktop config
 dir and an Android NDK path; headless and the dedicated server add zero catalog
-glue. After this slice, native ships an unbounded number of targets through one
-executor + one backend.
+glue. Native now ships an unbounded number of targets through one executor + one
+backend.
 
 ## Related Docs
 
@@ -292,9 +291,59 @@ Slice 4 closeout — matching how prior XR tacticals record headset validation.
 | 3 (turn on Android) | Tier 0 + Tier 2 + **new/manual restart-persistence assertion** |
 | 4 (closeout) | Full Tier 0 + one desktop-XR + one Quest catalog/persist pass (Tier 3), results recorded |
 
+### Landed records
+
+- Slice 1 landed in `f275c667` (`Tactical 160 Slice 1: shared native
+  world-catalog executor + XR port`).
+- Slice 2 landed in `0e9c0892` (`Tactical 160 Slice 2: port desktop flat to
+  shared world-catalog executor`).
+- Slice 3 landed in `d9b1bdab` (`Turn on flat Android world persistence`).
+  Validation passed for `cargo check -p mclone-android-client`,
+  `cargo check -p mclone-android-xr-client`,
+  `cargo test -p mclone-app-runtime`,
+  `cargo test -p mclone-server native_runner_persistent_world_dir_survives_restart`,
+  `cargo check -p mclone-web-client --target wasm32-unknown-unknown`,
+  `git diff --check`, `pnpm native:android:apk:avd`,
+  `pnpm native:android:avd-session-smoke -- --skip-build`, and the
+  `android/validate-avd.sh --session-smoke persist-restart` gate with screenshot
+  `/tmp/mclone-android-avd-persist-restart.png` and log
+  `/tmp/mclone-android-avd-persist-restart-logcat.txt`.
+  Full-workspace rustfmt was blocked only by unrelated local formatting drift in
+  `native/crates/mclone-physics/src/lib.rs`; scoped Android package rustfmt
+  passed.
+- Slice 3 AVD restart-persistence proof: the log recorded touch block placement
+  with `changed=true`, then a force-stop, a new app process, and the same local
+  world seed reopened after relaunch. Final screenshot inspected:
+  `/tmp/mclone-android-avd-persist-restart.png`.
+- Native executor audit on 2026-07-08 used `rg` over `native/apps`,
+  `native/crates/mclone-app-runtime`, and `native/crates/mclone-xr-scene` for
+  `fn execute_.*catalog_request|execute_world_catalog_request\\(`; it finds the
+  one request-to-backend executor at
+  `native/crates/mclone-app-runtime/src/catalog_executor.rs`; desktop flat, XR,
+  and flat Android hits are shallow app-local adapters that immediately delegate
+  to it before applying platform lifecycle effects.
+- Slice 4 software validation on 2026-07-08 passed the app-runtime/XR
+  scene/native-client test gate, flat Android + Android XR check gate, native XR
+  feature check, wasm web check, `git diff --check`, and scoped rustfmt for the
+  touched native packages. Full-workspace rustfmt remains blocked only by
+  unrelated formatting drift in `native/crates/mclone-physics/src/lib.rs`.
+- Slice 4 Tier 3 validation on 2026-07-08 passed `pnpm native:xr:check`.
+  The plain `pnpm native:xr:mclone` lane found the WiVRn runtime JSON but failed
+  because the Monado service socket was not running; the equivalent macOS WiVRn
+  USB lane, `pnpm native:xr:mac:wivrn:mclone`, passed on the attached Quest 3
+  with 120 submitted frames. `native:android-xr:session-smoke` with
+  `MCLONE_ANDROID_XR_WAIT_SECONDS=60` passed and logged
+  `MCLONE_ANDROID_XR_REPLACEMENT_READY new-world`.
+  `native:android-xr:perf:orbit:rd5:persisted` with
+  `MCLONE_ANDROID_XR_WAIT_SECONDS=60` passed; summaries:
+  `/tmp/mclone-quest-openxr-persisted-rd5-prewarm-summary.txt` (20.015s
+  stationary-settled, `frames=1441`, `skipped_delta=0`) and
+  `/tmp/mclone-quest-openxr-persisted-rd5-summary.txt` (45.015s settled-orbit,
+  `frames=3240`, `skipped_delta=0`).
+
 ## Slice 1: `WorldCatalog` trait + shared executor, port XR first
 
-Status: proposed.
+Status: landed 2026-07-08 in `f275c667`.
 
 Goal: introduce the shared abstraction and prove it on the cleanest,
 highest-coverage consumer (XR is already delegation-shaped and is shared by
@@ -329,7 +378,7 @@ behavior change; wasm32 still compiles.
 
 ## Slice 2: Port desktop flat, delete the hand-expanded match
 
-Status: proposed.
+Status: landed 2026-07-08 in `0e9c0892`.
 
 Goal: remove executor copy #1.
 
@@ -356,7 +405,7 @@ with no behavior change; the hand-expanded match is gone.
 
 ## Slice 3: Turn on flat Android persistence
 
-Status: proposed. This is the intended behavior change.
+Status: landed 2026-07-08 in `d9b1bdab`. This is the intended behavior change.
 
 Goal: replace flat Android's transient stubs with a real SQLite
 `NativeWorldCatalog` driven through the shared executor — collapsing executor
@@ -401,7 +450,7 @@ desktop/web/XR behavior unchanged; wasm32 still compiles.
 
 ## Slice 4: Closeout + guardrail
 
-Status: proposed.
+Status: landed 2026-07-08.
 
 Deliverables:
 
@@ -425,6 +474,10 @@ git diff --check
 ```
 
 Exit criteria: one native executor; all native targets green; wasm32 green.
+
+## Guardrail
+
+Grep guardrail: `rg -n "handle_request\\(|WorldCatalogRequest::" native/apps native/crates/mclone-xr-scene` should not find native app-local catalog CRUD; start native catalog request work in `mclone_app_runtime::execute_world_catalog_request`.
 
 ## Non-Goals
 
