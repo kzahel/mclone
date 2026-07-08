@@ -163,6 +163,9 @@ Pros: near-uniform depth precision across the whole range; essentially eliminate
 this whole class of z-fighting; standard modern approach. Cons: touches every
 depth pipeline + both render paths; needs headless + Quest validation.
 
+Scoped as its own tactical:
+[`../tactical/158-reversed-z-depth-precision.md`](../tactical/158-reversed-z-depth-precision.md).
+
 ### Option 2 — Push the near plane out (cheap partial mitigation)
 
 Raise `near` from `0.05` toward `0.2`–`0.5`. Because `near` dominates the
