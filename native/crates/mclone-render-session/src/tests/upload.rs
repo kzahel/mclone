@@ -82,6 +82,51 @@ fn upload_coordinator_superseded_removal_releases_prior_compile_job() {
 }
 
 #[test]
+fn upload_coordinator_stats_track_pending_upload_mesh_bytes() {
+    let key = RenderSectionKey::new(0, 4, 0);
+    let mut vertices = Vec::with_capacity(2);
+    vertices.push(TexturedChunkVertex {
+        position: [0.0, 0.0, 0.0],
+        uv: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        packed_light: 0,
+    });
+    let mut indices = Vec::with_capacity(6);
+    indices.extend([0, 1, 2, 2, 3, 0]);
+    let section = TexturedRenderSectionMesh {
+        key,
+        mesh: TexturedVisibleChunkMesh {
+            vertices,
+            indices,
+            solid_index_count: 6,
+            opaque_index_count: 6,
+        },
+        visibility: VisibilitySet::all_visible(),
+    };
+    let expected_owned_bytes = section.estimated_owned_bytes();
+    let update = RenderSectionCacheUpdate {
+        rebuilt_sections: vec![section],
+        accepted_compile_result_count: 1,
+        ..RenderSectionCacheUpdate::default()
+    };
+    let mut coordinator = RenderSectionUploadCoordinator::default();
+
+    coordinator.enqueue_cache_update(update);
+
+    let stats = coordinator.stats();
+    assert_eq!(stats.queued_upload_sections, 1);
+    assert_eq!(stats.queued_upload_mesh_owned_bytes, expected_owned_bytes);
+
+    let drain = coordinator.drain_budgeted(Some(1), Some(1));
+
+    assert_eq!(
+        drain.rebuilt_sections[0].estimated_owned_bytes(),
+        expected_owned_bytes
+    );
+    assert_eq!(coordinator.stats().queued_upload_mesh_owned_bytes, 0);
+}
+
+#[test]
 fn upload_frame_decision_unbudgeted_allows_runtime_sync_even_with_pending_work() {
     let key = RenderSectionKey::new(0, 4, 0);
     let mut update = RenderSectionCacheUpdate::default();

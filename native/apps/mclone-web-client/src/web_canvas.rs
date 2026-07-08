@@ -1030,6 +1030,7 @@ struct GeneratedChunkRenderReport {
     vertex_count: u32,
     index_count: u32,
     face_count: u32,
+    resident_cpu_mesh_owned_bytes: usize,
     drawn_index_count: u32,
     drawn_face_count: u32,
     uploaded_section_count: usize,
@@ -1193,6 +1194,11 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "vertexCount", f64::from(self.vertex_count))?;
         set_number(&object, "indexCount", f64::from(self.index_count))?;
         set_number(&object, "faceCount", f64::from(self.face_count))?;
+        set_number(
+            &object,
+            "residentCpuMeshOwnedBytes",
+            self.resident_cpu_mesh_owned_bytes as f64,
+        )?;
         set_number(
             &object,
             "drawnIndexCount",
@@ -4990,6 +4996,9 @@ impl WebChunkRenderSession {
             vertex_count: section_vertex_count(&cached_sections),
             index_count: render_stats.loaded_index_count,
             face_count: render_stats.loaded_face_count(),
+            resident_cpu_mesh_owned_bytes: cached_sections.iter().fold(0usize, |total, section| {
+                total.saturating_add(section.estimated_owned_bytes())
+            }),
             drawn_index_count: render_stats.drawn_index_count,
             drawn_face_count: render_stats.drawn_face_count(),
             uploaded_section_count: upload_report.uploaded_section_count,

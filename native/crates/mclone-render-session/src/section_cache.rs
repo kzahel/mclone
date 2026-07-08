@@ -12,6 +12,20 @@ impl CachedTexturedRenderSectionSlot {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionResidentMeshStats {
+    pub resident_section_count: usize,
+    pub resident_vertex_count: u32,
+    pub resident_index_count: u32,
+    pub resident_mesh_owned_bytes: usize,
+}
+
+impl RenderSectionResidentMeshStats {
+    pub fn resident_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.resident_index_count)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CachedTexturedRenderSections {
     sections: BTreeMap<RenderSectionKey, CachedTexturedRenderSectionSlot>,
@@ -36,6 +50,7 @@ pub struct RenderSectionCacheUpdate {
     pub stale_compile_section_count: usize,
     pub pending_compile_jobs: usize,
     pub visibility_graph_stats: VisibilityGraphBuildStats,
+    pub resident_mesh_stats: Option<RenderSectionResidentMeshStats>,
 }
 
 impl RenderSectionCacheUpdate {
@@ -66,6 +81,9 @@ impl RenderSectionCacheUpdate {
         self.completed_compile_section_count += other.completed_compile_section_count;
         self.stale_compile_section_count += other.stale_compile_section_count;
         self.pending_compile_jobs = other.pending_compile_jobs;
+        if other.resident_mesh_stats.is_some() {
+            self.resident_mesh_stats = other.resident_mesh_stats;
+        }
         self.visibility_graph_stats.build_count += other.visibility_graph_stats.build_count;
         self.visibility_graph_stats.total_ms += other.visibility_graph_stats.total_ms;
         self.visibility_graph_stats.worst_ms = self
@@ -101,6 +119,26 @@ impl CachedTexturedRenderSections {
 
     pub const fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub fn resident_mesh_stats(&self) -> RenderSectionResidentMeshStats {
+        let mut stats = RenderSectionResidentMeshStats {
+            resident_section_count: self.sections.len(),
+            ..RenderSectionResidentMeshStats::default()
+        };
+        for slot in self.sections.values() {
+            let section_stats = slot.mesh.stats();
+            stats.resident_vertex_count = stats
+                .resident_vertex_count
+                .saturating_add(section_stats.vertex_count);
+            stats.resident_index_count = stats
+                .resident_index_count
+                .saturating_add(section_stats.index_count);
+            stats.resident_mesh_owned_bytes = stats
+                .resident_mesh_owned_bytes
+                .saturating_add(slot.mesh.estimated_owned_bytes());
+        }
+        stats
     }
 
     pub fn section_keys_for_chunk(
@@ -199,6 +237,7 @@ impl CachedTexturedRenderSections {
             report.rebuilt_index_count += stats.index_count;
             self.insert_section(section.clone());
         }
+        report.resident_mesh_stats = Some(self.resident_mesh_stats());
         report
     }
 

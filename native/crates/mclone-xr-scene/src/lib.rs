@@ -1691,6 +1691,7 @@ where
                 queued_upload_section_count: upload_queue.queued_upload_sections,
                 queued_upload_removed_section_count: upload_queue.queued_removed_sections,
                 queued_upload_lifecycle_item_count: upload_queue.queued_lifecycle_items,
+                queued_upload_mesh_owned_bytes: upload_queue.queued_upload_mesh_owned_bytes,
                 upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
                 upload_held_compile_job_count: upload_queue.held_compile_jobs,
                 traversal_ready_section_count: self.draw.traversal_ready_section_count(),
@@ -1745,6 +1746,7 @@ where
                 queued_upload_section_count: upload_queue.queued_upload_sections,
                 queued_upload_removed_section_count: upload_queue.queued_removed_sections,
                 queued_upload_lifecycle_item_count: upload_queue.queued_lifecycle_items,
+                queued_upload_mesh_owned_bytes: upload_queue.queued_upload_mesh_owned_bytes,
                 upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
                 upload_held_compile_job_count: upload_queue.held_compile_jobs,
                 traversal_ready_section_count,
@@ -1970,6 +1972,7 @@ where
         let visibility_graph_build_count = section_update.visibility_graph_stats.build_count;
         let visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
         let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
+        let resident_mesh_stats = section_update.resident_mesh_stats;
         if upload_frame_decision.should_apply_section_update_after_sync {
             let upload_start = Instant::now();
             let section_update_report = self.apply_section_update_uploads(
@@ -2026,6 +2029,13 @@ where
         self.render_stats.last_visibility_graph_build_count = visibility_graph_build_count;
         self.render_stats.last_visibility_graph_total_ms = visibility_graph_total_ms;
         self.render_stats.last_visibility_graph_worst_ms = visibility_graph_worst_ms;
+        if let Some(resident) = resident_mesh_stats {
+            self.render_stats.resident_cpu_mesh_section_count = resident.resident_section_count;
+            self.render_stats.resident_cpu_mesh_vertex_count = resident.resident_vertex_count;
+            self.render_stats.resident_cpu_mesh_face_count = resident.resident_face_count();
+            self.render_stats.resident_cpu_mesh_index_count = resident.resident_index_count;
+            self.render_stats.resident_cpu_mesh_owned_bytes = resident.resident_mesh_owned_bytes;
+        }
         self.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
         self.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
         self.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
@@ -2069,6 +2079,7 @@ where
             queued_upload_section_count: upload_queue.queued_upload_sections,
             queued_upload_removed_section_count: upload_queue.queued_removed_sections,
             queued_upload_lifecycle_item_count: upload_queue.queued_lifecycle_items,
+            queued_upload_mesh_owned_bytes: upload_queue.queued_upload_mesh_owned_bytes,
             upload_phase_event_count: upload_phase.phase_event_count,
             upload_enqueued_lifecycle_item_count: upload_phase.queued_lifecycle_items,
             upload_superseded_lifecycle_item_count: upload_phase.superseded_lifecycle_items,
@@ -2224,6 +2235,7 @@ where
             queued_upload_section_count: upload_queue.queued_upload_sections,
             queued_upload_removed_section_count: upload_queue.queued_removed_sections,
             queued_upload_lifecycle_item_count: upload_queue.queued_lifecycle_items,
+            queued_upload_mesh_owned_bytes: upload_queue.queued_upload_mesh_owned_bytes,
             upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
             upload_held_compile_job_count: upload_queue.held_compile_jobs,
             traversal_ready_section_count: self.draw.traversal_ready_section_count(),

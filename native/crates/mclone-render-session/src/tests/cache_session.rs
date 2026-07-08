@@ -56,6 +56,63 @@ fn cached_sections_apply_build_report_and_remove_unloaded_chunks() {
 }
 
 #[test]
+fn cached_sections_resident_mesh_stats_track_resident_clone_and_removal() {
+    let mut cache = CachedTexturedRenderSections::default();
+    let key = RenderSectionKey::new(0, 4, 0);
+    let mut vertices = Vec::with_capacity(3);
+    vertices.push(TexturedChunkVertex {
+        position: [0.0, 0.0, 0.0],
+        uv: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        packed_light: 0,
+    });
+    let mut indices = Vec::with_capacity(7);
+    indices.extend([0, 1, 2, 2, 3, 0]);
+    let section = TexturedRenderSectionMesh {
+        key,
+        mesh: TexturedVisibleChunkMesh {
+            vertices,
+            indices,
+            solid_index_count: 6,
+            opaque_index_count: 6,
+        },
+        visibility: VisibilitySet::all_visible(),
+    };
+    let expected_resident_owned_bytes =
+        std::mem::size_of::<TexturedChunkVertex>() + 6 * std::mem::size_of::<u32>();
+
+    let update = cache.apply_build_report(
+        &BTreeSet::from([key]),
+        TexturedRenderSectionBuildReport {
+            sections: vec![section],
+            visibility_graph: VisibilityGraphBuildStats::default(),
+        },
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+
+    let expected = RenderSectionResidentMeshStats {
+        resident_section_count: 1,
+        resident_vertex_count: 1,
+        resident_index_count: 6,
+        resident_mesh_owned_bytes: expected_resident_owned_bytes,
+    };
+    assert_eq!(cache.resident_mesh_stats(), expected);
+    assert_eq!(update.resident_mesh_stats, Some(expected));
+
+    let removal = cache.remove_sections(&BTreeSet::new(), &BTreeSet::from([key]));
+
+    assert_eq!(
+        removal.resident_mesh_stats,
+        Some(RenderSectionResidentMeshStats::default())
+    );
+    assert_eq!(
+        cache.resident_mesh_stats(),
+        RenderSectionResidentMeshStats::default()
+    );
+}
+
+#[test]
 fn near_camera_readiness_columns_track_exception_membership() {
     let camera = Vec3::new(8.0, 64.0, 8.0);
     let near_columns = render_section_near_camera_readiness_columns(camera);

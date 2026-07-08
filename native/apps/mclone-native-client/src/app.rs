@@ -1226,7 +1226,7 @@ impl ChunkApp {
             return Ok(());
         };
         log::info!(
-            "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
+            "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} cpu_mesh_bytes={} remesh_ms={:.3} upload_ms={:.3}",
             sync.loaded_chunk_count,
             summary.section_count,
             summary.face_count,
@@ -1240,6 +1240,7 @@ impl ChunkApp {
             self.driver.render_stats.last_uploaded_face_count,
             self.driver.render_stats.last_uploaded_index_count,
             self.driver.render_stats.last_upload_removed_section_count,
+            self.driver.render_stats.resident_cpu_mesh_owned_bytes,
             sync.remesh_ms,
             self.driver.render_stats.last_upload_ms
         );

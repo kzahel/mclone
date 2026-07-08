@@ -374,6 +374,7 @@ pub struct XrTerrainUploadSummary {
     pub queued_upload_section_count: usize,
     pub queued_upload_removed_section_count: usize,
     pub queued_upload_lifecycle_item_count: usize,
+    pub queued_upload_mesh_owned_bytes: usize,
     pub upload_phase_event_count: usize,
     pub upload_enqueued_lifecycle_item_count: usize,
     pub upload_superseded_lifecycle_item_count: usize,

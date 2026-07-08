@@ -72,6 +72,11 @@ pub struct RenderStreamStats {
     pub drawn_face_count: u32,
     pub index_count: u32,
     pub drawn_index_count: u32,
+    pub resident_cpu_mesh_section_count: usize,
+    pub resident_cpu_mesh_vertex_count: u32,
+    pub resident_cpu_mesh_face_count: u32,
+    pub resident_cpu_mesh_index_count: u32,
+    pub resident_cpu_mesh_owned_bytes: usize,
     pub last_rebuilt_section_count: usize,
     pub last_removed_section_count: usize,
     pub last_rebuilt_vertex_count: u32,
@@ -1655,6 +1660,13 @@ pub fn record_render_section_update_stats(
         section_update.visibility_graph_stats.build_count;
     render_stats.last_visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
     render_stats.last_visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
+    if let Some(resident) = section_update.resident_mesh_stats {
+        render_stats.resident_cpu_mesh_section_count = resident.resident_section_count;
+        render_stats.resident_cpu_mesh_vertex_count = resident.resident_vertex_count;
+        render_stats.resident_cpu_mesh_face_count = resident.resident_face_count();
+        render_stats.resident_cpu_mesh_index_count = resident.resident_index_count;
+        render_stats.resident_cpu_mesh_owned_bytes = resident.resident_mesh_owned_bytes;
+    }
     render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
     render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
     render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;

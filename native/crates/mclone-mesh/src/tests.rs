@@ -34,6 +34,35 @@ fn assert_visibility(
     );
 }
 
+#[test]
+fn textured_section_mesh_estimated_owned_bytes_tracks_vector_capacity() {
+    let mut vertices = Vec::with_capacity(3);
+    vertices.push(TexturedChunkVertex {
+        position: [0.0, 0.0, 0.0],
+        uv: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        packed_light: 0,
+    });
+    let mut indices = Vec::with_capacity(7);
+    indices.extend([0, 1, 2]);
+    let mesh = TexturedVisibleChunkMesh {
+        vertices,
+        indices,
+        solid_index_count: 3,
+        opaque_index_count: 3,
+    };
+    let expected_bytes =
+        3 * std::mem::size_of::<TexturedChunkVertex>() + 7 * std::mem::size_of::<u32>();
+    assert_eq!(mesh.estimated_owned_bytes(), expected_bytes);
+
+    let section = TexturedRenderSectionMesh {
+        key: RenderSectionKey::new(0, 4, 0),
+        mesh,
+        visibility: VisibilitySet::all_visible(),
+    };
+    assert_eq!(section.estimated_owned_bytes(), expected_bytes);
+}
+
 fn textured_chunk_blocks(
     height: i32,
     filled: &[(i32, i32, i32, BlockStateId)],

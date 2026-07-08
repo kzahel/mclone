@@ -31,6 +31,7 @@ pub struct RenderSectionUploadQueueStats {
     pub queued_upload_sections: usize,
     pub queued_removed_sections: usize,
     pub queued_lifecycle_items: usize,
+    pub queued_upload_mesh_owned_bytes: usize,
     pub held_release_batches: usize,
     pub held_release_lifecycle_items: usize,
     pub held_compile_jobs: usize,
@@ -240,6 +241,12 @@ impl RenderSectionUploadCoordinator {
             queued_upload_sections: self.pending_uploads.len(),
             queued_removed_sections: self.pending_removals.len(),
             queued_lifecycle_items: self.pending_uploads.len() + self.pending_removals.len(),
+            queued_upload_mesh_owned_bytes: self
+                .pending_uploads
+                .iter()
+                .fold(0usize, |bytes, section| {
+                    bytes.saturating_add(section.estimated_owned_bytes())
+                }),
             held_release_batches: self.pending_release_batches.len(),
             held_release_lifecycle_items: self
                 .pending_release_batches

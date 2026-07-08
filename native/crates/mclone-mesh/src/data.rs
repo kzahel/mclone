@@ -72,6 +72,17 @@ impl TexturedVisibleChunkMesh {
         self.indices.is_empty()
     }
 
+    pub fn estimated_owned_bytes(&self) -> usize {
+        self.vertices
+            .capacity()
+            .saturating_mul(std::mem::size_of::<TexturedChunkVertex>())
+            .saturating_add(
+                self.indices
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+
     pub fn stats(&self) -> SectionMeshStats {
         SectionMeshStats {
             vertex_count: self.vertices.len() as u32,
@@ -155,6 +166,10 @@ pub struct TexturedRenderSectionMesh {
 impl TexturedRenderSectionMesh {
     pub fn is_empty(&self) -> bool {
         self.mesh.is_empty()
+    }
+
+    pub fn estimated_owned_bytes(&self) -> usize {
+        self.mesh.estimated_owned_bytes()
     }
 
     pub fn stats(&self) -> SectionMeshStats {

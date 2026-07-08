@@ -6879,6 +6879,9 @@ mod android {
             queued_upload_lifecycle_item_count: a
                 .queued_upload_lifecycle_item_count
                 .max(b.queued_upload_lifecycle_item_count),
+            queued_upload_mesh_owned_bytes: a
+                .queued_upload_mesh_owned_bytes
+                .max(b.queued_upload_mesh_owned_bytes),
             upload_phase_event_count: a.upload_phase_event_count.max(b.upload_phase_event_count),
             upload_enqueued_lifecycle_item_count: a
                 .upload_enqueued_lifecycle_item_count
