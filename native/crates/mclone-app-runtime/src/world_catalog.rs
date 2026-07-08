@@ -714,6 +714,44 @@ impl NativeWorldCatalog {
     }
 }
 
+/// Native, synchronous world-catalog backend abstraction.
+///
+/// Extracted verbatim from `NativeWorldCatalog`'s existing inherent methods so
+/// the shared `execute_world_catalog_request` executor can drive any native
+/// catalog backend without knowing its concrete type. It is intentionally
+/// `#[cfg(not(target_arch = "wasm32"))]`: web catalog requests are asynchronous
+/// and answered in JavaScript over the shared request/response protocol, so web
+/// cannot implement a synchronous `handle_request`.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait WorldCatalog {
+    fn capabilities(&self) -> WorldCatalogCapabilities;
+    fn handle_request(
+        &self,
+        request: WorldCatalogRequest,
+        active_world: Option<&LocalWorldId>,
+    ) -> WorldCatalogResult<WorldCatalogResponse>;
+    fn world_dir(&self, id: &LocalWorldId) -> PathBuf;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldCatalog for NativeWorldCatalog {
+    fn capabilities(&self) -> WorldCatalogCapabilities {
+        NativeWorldCatalog::capabilities(self)
+    }
+
+    fn handle_request(
+        &self,
+        request: WorldCatalogRequest,
+        active_world: Option<&LocalWorldId>,
+    ) -> WorldCatalogResult<WorldCatalogResponse> {
+        NativeWorldCatalog::handle_request(self, request, active_world)
+    }
+
+    fn world_dir(&self, id: &LocalWorldId) -> PathBuf {
+        NativeWorldCatalog::world_dir(self, id)
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeOpenedWorld {

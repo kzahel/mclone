@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod catalog_executor;
 pub mod client_catalog_policy;
 pub mod client_connection;
 pub mod client_experience;
@@ -15,6 +17,11 @@ pub mod render_compile_capacity;
 pub mod session;
 pub mod startup_args;
 pub mod world_catalog;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::catalog_executor::execute_world_catalog_request;
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::world_catalog::WorldCatalog;
 
 use std::collections::BTreeSet;
 use std::time::Duration;

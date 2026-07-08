@@ -1035,31 +1035,18 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
-        let Some(catalog) = self.world_catalog.clone() else {
-            let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
-            log::warn!("XR world catalog action failed: {error}");
-            let effects = self
-                .client_experience
-                .catalog_mut()
-                .apply_catalog_error(request.id, error);
-            return self.apply_xr_catalog_effects(effects, device, queue);
-        };
+        // Clone the catalog before borrowing the controller mutably: the catalog
+        // lives on `self.world_catalog` and the controller on
+        // `self.client_experience`, so the executor needs an owned catalog handle
+        // (cheap: a `PathBuf`) alongside the mutable controller borrow.
+        let catalog = self.world_catalog.clone();
         let active_world = self.active_local_world_id().cloned();
-        let response = match catalog.handle_request(request.request, active_world.as_ref()) {
-            Ok(response) => response,
-            Err(error) => {
-                log::warn!("XR world catalog action failed: {error}");
-                let effects = self
-                    .client_experience
-                    .catalog_mut()
-                    .apply_catalog_error(request.id, error);
-                return self.apply_xr_catalog_effects(effects, device, queue);
-            }
-        };
-        let effects = self
-            .client_experience
-            .catalog_mut()
-            .apply_catalog_response(request.id, response);
+        let effects = execute_world_catalog_request(
+            catalog.as_ref().map(|catalog| catalog as &dyn WorldCatalog),
+            self.client_experience.catalog_mut(),
+            active_world.as_ref(),
+            request,
+        );
         self.apply_xr_catalog_effects(effects, device, queue)
     }
 
