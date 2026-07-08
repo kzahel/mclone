@@ -280,7 +280,10 @@ impl TexturedMeshCatalog {
                 selections
                     .into_iter()
                     .map(|variant| {
-                        (&variant.model, BlockStateModelRotation::from_variant(variant))
+                        (
+                            &variant.model,
+                            BlockStateModelRotation::from_variant(variant),
+                        )
                     })
                     .collect()
             } else {
@@ -906,7 +909,10 @@ mod tests {
             Some(TexturedFluidKind::Water)
         );
         assert_eq!(
-            textured_fluid_kind(&record("minecraft:tube_coral_fan", &[("waterlogged", "true")])),
+            textured_fluid_kind(&record(
+                "minecraft:tube_coral_fan",
+                &[("waterlogged", "true")]
+            )),
             Some(TexturedFluidKind::Water)
         );
         assert_eq!(
@@ -919,7 +925,10 @@ mod tests {
 
         // Non-waterlogged and solid variants report no fluid.
         assert_eq!(
-            textured_fluid_kind(&record("minecraft:tube_coral_fan", &[("waterlogged", "false")])),
+            textured_fluid_kind(&record(
+                "minecraft:tube_coral_fan",
+                &[("waterlogged", "false")]
+            )),
             None
         );
         assert_eq!(
