@@ -177,7 +177,7 @@ apps for `arm64-v8a`. The wasm web check still reports the existing
 
 ## Slice 5: Startup Storage Projection And Validation
 
-Status: landed 2026-07-08.
+Status: landed 2026-07-08 in `c2d241f0`.
 
 Problem: desktop, flat Android, and Android XR each repeated pieces of startup
 world-storage policy: default-root eligibility, late platform default-root
