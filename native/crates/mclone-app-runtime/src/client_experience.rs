@@ -152,6 +152,7 @@ impl ClientExperienceController {
             | GameUiAction::OpenHelp(_)
             | GameUiAction::CloseHelp(_)
             | GameUiAction::OpenOptions(_)
+            | GameUiAction::OpenOptionsCategory(_, _)
             | GameUiAction::OpenServerSettings(_)
             | GameUiAction::BackToPause => {
                 effects
@@ -1188,6 +1189,7 @@ pub enum ClientExperienceActionKind {
     CloseHelp,
     AssignHotbarBlock,
     OpenOptions,
+    OpenOptionsCategory,
     OpenServerSettings,
     BackToTitle,
     BackToPause,
@@ -1240,6 +1242,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::CloseHelp(_) => ClientExperienceActionKind::CloseHelp,
         GameUiAction::AssignHotbarBlock { .. } => ClientExperienceActionKind::AssignHotbarBlock,
         GameUiAction::OpenOptions(_) => ClientExperienceActionKind::OpenOptions,
+        GameUiAction::OpenOptionsCategory(_, _) => {
+            ClientExperienceActionKind::OpenOptionsCategory
+        }
         GameUiAction::OpenServerSettings(_) => ClientExperienceActionKind::OpenServerSettings,
         GameUiAction::BackToTitle => ClientExperienceActionKind::BackToTitle,
         GameUiAction::BackToPause => ClientExperienceActionKind::BackToPause,
@@ -1335,6 +1340,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::OpenHelp
         | ClientExperienceActionKind::CloseHelp
         | ClientExperienceActionKind::OpenOptions
+        | ClientExperienceActionKind::OpenOptionsCategory
         | ClientExperienceActionKind::OpenServerSettings
         | ClientExperienceActionKind::BackToPause => {
             ClientExperienceActionClassification::ProjectionSpecific

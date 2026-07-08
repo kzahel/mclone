@@ -1063,6 +1063,10 @@ pub enum GameScreen {
     Help { parent: GameHelpParent },
     BlockPalette,
     Options { parent: GameOptionsParent },
+    OptionsCategory {
+        parent: GameOptionsParent,
+        category: GameOptionsCategory,
+    },
     ServerSettings { parent: GameOptionsParent },
 }
 
@@ -1070,6 +1074,40 @@ pub enum GameScreen {
 pub enum GameOptionsParent {
     Title,
     Pause,
+}
+
+/// Sub-menu buckets the Options hub fans out into. Each category owns a subset
+/// of the settings rows; the hub itself only shows navigation buttons.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameOptionsCategory {
+    Graphics,
+    Movement,
+    Display,
+    Debug,
+}
+
+impl GameOptionsCategory {
+    /// Categories in the order the hub lists them.
+    pub const ALL: [Self; 4] = [Self::Graphics, Self::Movement, Self::Display, Self::Debug];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Graphics => "Graphics",
+            Self::Movement => "Movement",
+            Self::Display => "Display",
+            Self::Debug => "Debug",
+        }
+    }
+
+    /// UPPERCASE title shown at the top of the category panel.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Graphics => "GRAPHICS",
+            Self::Movement => "MOVEMENT",
+            Self::Display => "DISPLAY",
+            Self::Debug => "DEBUG",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1441,6 +1479,7 @@ pub enum GameUiAction {
     CloseHelp(GameHelpParent),
     AssignHotbarBlock { slot: u8, block_state: u32 },
     OpenOptions(GameOptionsParent),
+    OpenOptionsCategory(GameOptionsParent, GameOptionsCategory),
     OpenServerSettings(GameOptionsParent),
     BackToTitle,
     BackToPause,

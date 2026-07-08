@@ -367,6 +367,10 @@ pub(crate) enum HeadlessScreenshotUi {
     BlockPalette,
     OptionsTitle,
     OptionsPause,
+    OptionsGraphicsPause,
+    OptionsMovementPause,
+    OptionsDisplayPause,
+    OptionsDebugPause,
     ServerSettingsPause,
 }
 
@@ -1818,11 +1822,15 @@ pub(crate) fn parse_screenshot_ui_arg(
         "block-palette" | "block_palette" | "palette" => Ok(HeadlessScreenshotUi::BlockPalette),
         "options-title" | "options_title" => Ok(HeadlessScreenshotUi::OptionsTitle),
         "options-pause" | "options_pause" | "options" => Ok(HeadlessScreenshotUi::OptionsPause),
+        "options-graphics" | "options_graphics" => Ok(HeadlessScreenshotUi::OptionsGraphicsPause),
+        "options-movement" | "options_movement" => Ok(HeadlessScreenshotUi::OptionsMovementPause),
+        "options-display" | "options_display" => Ok(HeadlessScreenshotUi::OptionsDisplayPause),
+        "options-debug" | "options_debug" => Ok(HeadlessScreenshotUi::OptionsDebugPause),
         "server-settings-pause" | "server_settings_pause" | "server-settings" => {
             Ok(HeadlessScreenshotUi::ServerSettingsPause)
         }
         _ => bail!(
-            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, or server-settings-pause, got `{value}`"
+            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, options-graphics, options-movement, options-display, options-debug, or server-settings-pause, got `{value}`"
         ),
     }
 }

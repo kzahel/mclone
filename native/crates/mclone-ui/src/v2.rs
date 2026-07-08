@@ -1,6 +1,7 @@
 use crate::{
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
-    Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
+    Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsCategory,
+    GameOptionsParent,
     GameScreen, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
     GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect,
     Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
@@ -33,6 +34,10 @@ pub enum UiScreenId {
     Pause,
     BlockPalette,
     Options { parent: GameOptionsParent },
+    OptionsCategory {
+        parent: GameOptionsParent,
+        category: GameOptionsCategory,
+    },
     ServerSettings { parent: GameOptionsParent },
     Help { parent: GameHelpParent },
 }
@@ -49,6 +54,9 @@ impl UiScreenId {
             Some(GameScreen::Pause) => Some(Self::Pause),
             Some(GameScreen::BlockPalette) => Some(Self::BlockPalette),
             Some(GameScreen::Options { parent }) => Some(Self::Options { parent }),
+            Some(GameScreen::OptionsCategory { parent, category }) => {
+                Some(Self::OptionsCategory { parent, category })
+            }
             Some(GameScreen::ServerSettings { parent }) => Some(Self::ServerSettings { parent }),
             Some(GameScreen::Help { parent }) => Some(Self::Help { parent }),
             None => None,
@@ -645,6 +653,13 @@ impl UiSurface {
                 true,
                 Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
             ),
+            (Some(UiScreenId::OptionsCategory { parent, .. }), GuiKey::Escape) => {
+                (true, Some(GameUiAction::OpenOptions(parent)))
+            }
+            (Some(UiScreenId::OptionsCategory { parent, .. }), GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
+            ),
             (Some(UiScreenId::ServerSettings { parent }), GuiKey::Escape) => {
                 (true, Some(GameUiAction::OpenOptions(parent)))
             }
@@ -675,6 +690,9 @@ impl UiSurface {
             Some(UiScreenId::Pause) => self.render_pause(&mut draw),
             Some(UiScreenId::BlockPalette) => self.render_block_palette(&mut draw),
             Some(UiScreenId::Options { parent }) => self.render_options(&mut draw, parent),
+            Some(UiScreenId::OptionsCategory { parent, category }) => {
+                self.render_options_category(&mut draw, parent, category)
+            }
             Some(UiScreenId::ServerSettings { parent }) => {
                 self.render_server_settings(&mut draw, parent)
             }
@@ -721,6 +739,13 @@ impl UiSurface {
             Some(UiScreenId::Options { parent }) => {
                 options_layout(self.scale, self.layout_revision, parent, self.render_state)
             }
+            Some(UiScreenId::OptionsCategory { parent, category }) => options_category_layout(
+                self.scale,
+                self.layout_revision,
+                parent,
+                category,
+                self.render_state,
+            ),
             Some(UiScreenId::ServerSettings { parent }) => {
                 server_settings_layout(self.scale, self.layout_revision, parent, self.render_state)
             }
@@ -1036,6 +1061,37 @@ impl UiSurface {
         self.font.draw_centered_atlas(
             draw,
             "OPTIONS",
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+        let _ = parent;
+    }
+
+    fn render_options_category(
+        &self,
+        draw: &mut GuiDrawList,
+        parent: GameOptionsParent,
+        category: GameOptionsCategory,
+    ) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 150),
+        );
+        let panel = options_category_panel_rect(self.scale, category);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 245),
+            Color::rgba(15, 20, 22, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered_atlas(
+            draw,
+            category.title(),
             panel.center_x(),
             panel.y + 12.0,
             Color::rgba(245, 252, 234, 255),
@@ -2042,6 +2098,9 @@ impl GameUiHost {
             GameUiAction::OpenOptions(parent) => {
                 self.screen = Some(GameScreen::Options { parent });
             }
+            GameUiAction::OpenOptionsCategory(parent, category) => {
+                self.screen = Some(GameScreen::OptionsCategory { parent, category });
+            }
             GameUiAction::OpenServerSettings(parent) => {
                 self.screen = Some(GameScreen::ServerSettings { parent });
             }
@@ -2261,6 +2320,10 @@ const UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY: UiWidgetId = UiWidgetId(121);
 const UI_V2_OPTIONS_COLLISION_MODE: UiWidgetId = UiWidgetId(122);
 const UI_V2_OPTIONS_TRAVEL_ASSIST: UiWidgetId = UiWidgetId(123);
 const UI_V2_OPTIONS_DEBUG_DIAGNOSTICS: UiWidgetId = UiWidgetId(124);
+const UI_V2_OPTIONS_CAT_GRAPHICS: UiWidgetId = UiWidgetId(125);
+const UI_V2_OPTIONS_CAT_MOVEMENT: UiWidgetId = UiWidgetId(126);
+const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
+const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
 const UI_V2_SERVER_SETTINGS_HOST_RATE: UiWidgetId = UiWidgetId(701);
 const UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE: UiWidgetId = UiWidgetId(702);
 const UI_V2_SERVER_SETTINGS_PHYSICS_RATE: UiWidgetId = UiWidgetId(703);
@@ -2714,6 +2777,32 @@ const fn help_parent_covers_world(parent: GameHelpParent) -> bool {
     )
 }
 
+/// Widget id for the hub button that opens a category sub-panel.
+const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId {
+    match category {
+        GameOptionsCategory::Graphics => UI_V2_OPTIONS_CAT_GRAPHICS,
+        GameOptionsCategory::Movement => UI_V2_OPTIONS_CAT_MOVEMENT,
+        GameOptionsCategory::Display => UI_V2_OPTIONS_CAT_DISPLAY,
+        GameOptionsCategory::Debug => UI_V2_OPTIONS_CAT_DEBUG,
+    }
+}
+
+/// Number of setting rows a category renders. Every row is always present (rows
+/// unavailable on the current platform render disabled rather than hidden), so
+/// the count is constant per category and can size the panel without building
+/// the row list twice.
+const fn options_category_row_count(category: GameOptionsCategory) -> usize {
+    match category {
+        GameOptionsCategory::Graphics => 6,
+        GameOptionsCategory::Movement => 8,
+        GameOptionsCategory::Display => 3,
+        GameOptionsCategory::Debug => 4,
+    }
+}
+
+/// The Options hub: a short list of category buttons plus the shared
+/// Server Settings / Controls Help / Back navigation. Individual settings live
+/// on the per-category sub-panels reached from here.
 fn options_layout(
     scale: GuiScale,
     revision: u64,
@@ -2722,249 +2811,47 @@ fn options_layout(
 ) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::Options { parent }), revision);
     let panel = options_panel_rect(scale, state);
-    let column_gap = 10.0;
-    let column_width = ((panel.width - 42.0 - column_gap) * 0.5).max(110.0);
-    let left_x = panel.x + 18.0;
-    let right_x = left_x + column_width + column_gap;
-    let mut left_y = panel.y + 30.0;
-    let mut right_y = panel.y + 30.0;
+    let width = (panel.width - 36.0).max(150.0);
+    let x = panel.x + 18.0;
+    let mut y = panel.y + 30.0;
 
-    push_checkbox(
-        &mut layout,
-        UI_V2_OPTIONS_OCCLUSION,
-        Rect::new(left_x, left_y, column_width, 18.0),
-        "Section Occlusion",
-        state.section_occlusion_culling,
-        GameUiAction::ToggleSectionOcclusion,
-    );
-    left_y += 20.0;
-    push_checkbox(
-        &mut layout,
-        UI_V2_OPTIONS_FULLBRIGHT,
-        Rect::new(left_x, left_y, column_width, 18.0),
-        "Force Fullbright",
-        state.force_fullbright,
-        GameUiAction::ToggleFullbright,
-    );
-    left_y += 20.0;
-    push_checkbox(
-        &mut layout,
-        UI_V2_OPTIONS_FAR_LOD,
-        Rect::new(left_x, left_y, column_width, 18.0),
-        "Far LOD",
-        state.far_lod_enabled,
-        GameUiAction::ToggleFarLod,
-    );
-    left_y += 20.0;
-    layout.push(
-        UiWidget::slider(
-            UI_V2_OPTIONS_FAR_LOD_RANGE,
-            Rect::new(left_x, left_y, column_width, 20.0),
-            far_lod_range_label(state),
-            far_lod_range_slider_value(state),
-        )
-        .enabled(state.far_lod_enabled)
-        .slider_action(UiSliderAction::FarLodRange),
-    );
-    left_y += 22.0;
-    push_checkbox(
-        &mut layout,
-        UI_V2_OPTIONS_PLAYER_BOX,
-        Rect::new(left_x, left_y, column_width, 18.0),
-        "Player Box",
-        state.player_collision_box_visible,
-        GameUiAction::TogglePlayerCollisionBox,
-    );
-    left_y += 20.0;
-    push_checkbox(
-        &mut layout,
-        UI_V2_OPTIONS_FIRST_PERSON_PLAYER,
-        Rect::new(left_x, left_y, column_width, 18.0),
-        "First Person Body",
-        state.first_person_player_visible,
-        GameUiAction::ToggleFirstPersonPlayer,
-    );
-    left_y += 20.0;
-    if let Some(crosshair_visible) = state.crosshair_visible {
-        push_checkbox(
-            &mut layout,
-            UI_V2_OPTIONS_CROSSHAIR,
-            Rect::new(left_x, left_y, column_width, 18.0),
-            "Crosshair",
-            crosshair_visible,
-            GameUiAction::ToggleCrosshair,
-        );
-        left_y += 20.0;
-    }
-
-    push_cycle(
-        &mut layout,
-        UI_V2_OPTIONS_PLAYER_MODEL,
-        Rect::new(right_x, right_y, column_width, 20.0),
-        "Player Model",
-        state.player_model.label(),
-        GameUiAction::SetPlayerModel(state.player_model.next()),
-    );
-    right_y += 22.0;
-    push_cycle(
-        &mut layout,
-        UI_V2_OPTIONS_MOVEMENT_MODE,
-        Rect::new(right_x, right_y, column_width, 20.0),
-        "Movement",
-        state.movement_mode.label(),
-        GameUiAction::SetMovementMode(state.movement_mode.next()),
-    );
-    right_y += 22.0;
-    if let Some(collision_mode) = state.collision_mode {
-        push_cycle(
-            &mut layout,
-            UI_V2_OPTIONS_COLLISION_MODE,
-            Rect::new(right_x, right_y, column_width, 20.0),
-            "Collision",
-            collision_mode.label(),
-            GameUiAction::SetCollisionMode(collision_mode.next()),
-        );
-        right_y += 22.0;
-    }
-    if let Some(travel_assist_mode) = state.travel_assist_mode {
-        push_cycle(
-            &mut layout,
-            UI_V2_OPTIONS_TRAVEL_ASSIST,
-            Rect::new(right_x, right_y, column_width, 20.0),
-            "Travel Assist",
-            travel_assist_mode.label(),
-            GameUiAction::SetTravelAssistMode(travel_assist_mode.next()),
-        );
-        right_y += 22.0;
-    }
-    let turn_mode = state
-        .turn_mode
-        .or_else(|| state.xr_turn_mode.map(GameTurnMode::from));
-    if let Some(turn_mode) = turn_mode {
-        push_cycle(
-            &mut layout,
-            UI_V2_OPTIONS_TURN_MODE,
-            Rect::new(right_x, right_y, column_width, 20.0),
-            "Turn",
-            turn_mode.label(),
-            GameUiAction::SetTurnMode(turn_mode.next()),
-        );
-        right_y += 22.0;
-    }
-    push_cycle(
-        &mut layout,
-        UI_V2_OPTIONS_FRAME_PACING,
-        Rect::new(right_x, right_y, column_width, 20.0),
-        "Frame Pacing",
-        state.frame_pacing_mode.label(),
-        GameUiAction::CycleFramePacing,
-    );
-    right_y += 22.0;
-    push_cycle(
-        &mut layout,
-        UI_V2_OPTIONS_FPS_CAP,
-        Rect::new(right_x, right_y, column_width, 20.0),
-        "FPS Cap",
-        state.fps_cap.to_string(),
-        GameUiAction::CycleFpsCap,
-    );
-    right_y += 22.0;
-    push_checkbox(
-        &mut layout,
-        UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY,
-        Rect::new(right_x, right_y, column_width, 18.0),
-        "Frame Metrics",
-        state.frame_pipeline_overlay_visible,
-        GameUiAction::ToggleFramePipelineOverlay,
-    );
-    right_y += 20.0;
-    push_checkbox(
-        &mut layout,
-        UI_V2_OPTIONS_DEBUG_DIAGNOSTICS,
-        Rect::new(right_x, right_y, column_width, 18.0),
-        "Debug Pane",
-        state.debug_diagnostics_visible,
-        GameUiAction::ToggleDebugDiagnostics,
-    );
-    right_y += 20.0;
-    layout.push(
-        UiWidget::slider(
-            UI_V2_OPTIONS_RADIUS,
-            Rect::new(right_x, right_y, column_width, 20.0),
-            render_distance_label(state),
-            render_distance_slider_value(state),
-        )
-        .slider_action(UiSliderAction::RenderDistance),
-    );
-    right_y += 22.0;
-    layout.push(
-        UiWidget::slider(
-            UI_V2_OPTIONS_FLY_SPEED,
-            Rect::new(right_x, right_y, column_width, 20.0),
-            fly_speed_label(state),
-            fly_speed_slider_value(state),
-        )
-        .slider_action(UiSliderAction::FlySpeed),
-    );
-    right_y += 22.0;
-    layout.push(
-        UiWidget::slider(
-            UI_V2_OPTIONS_MOVEMENT_SPEED,
-            Rect::new(right_x, right_y, column_width, 20.0),
-            movement_speed_label(state),
-            movement_speed_slider_value(state),
-        )
-        .slider_action(UiSliderAction::MovementSpeed),
-    );
-    right_y += 22.0;
-
-    if let Some(mode) = state.touch_controls_mode {
-        push_cycle(
-            &mut layout,
-            UI_V2_OPTIONS_TOUCH_CONTROLS,
-            Rect::new(left_x, left_y, column_width, 20.0),
-            "Touch Controls",
-            touch_controls_mode_label(mode),
-            GameUiAction::SetTouchControlsMode(next_touch_controls_mode(mode)),
-        );
-        left_y += 22.0;
-    }
-    if let Some(settings) = state.touch_settings {
-        layout.push(
-            UiWidget::slider(
-                UI_V2_OPTIONS_TOUCH_LOOK,
-                Rect::new(right_x, right_y, column_width, 20.0),
-                touch_look_label(settings),
-                touch_look_slider_value(settings),
-            )
-            .slider_action(UiSliderAction::TouchLook),
-        );
-    }
-    if state.server_cadence.is_some() {
+    for category in GameOptionsCategory::ALL {
         layout.push(
             UiWidget::button(
-                UI_V2_OPTIONS_SERVER_SETTINGS,
-                Rect::new(left_x, left_y, column_width, 20.0),
-                "Server Settings",
+                options_category_widget_id(category),
+                Rect::new(x, y, width, 20.0),
+                category.label(),
             )
-            .action(GameUiAction::OpenServerSettings(parent)),
+            .action(GameUiAction::OpenOptionsCategory(parent, category)),
         );
-        left_y += 22.0;
+        y += 24.0;
     }
-    left_y += 6.0;
+
+    // Server Settings stays a first-class sub-panel; shown disabled when the
+    // local server is authoritative so its availability is visible per platform.
+    layout.push(
+        UiWidget::button(
+            UI_V2_OPTIONS_SERVER_SETTINGS,
+            Rect::new(x, y, width, 20.0),
+            "Server Settings",
+        )
+        .enabled(state.server_cadence.is_some())
+        .action(GameUiAction::OpenServerSettings(parent)),
+    );
+    y += 24.0;
     layout.push(
         UiWidget::button(
             UI_V2_OPTIONS_CONTROLS,
-            Rect::new(left_x, left_y, column_width, 20.0),
-            "Controls",
+            Rect::new(x, y, width, 20.0),
+            "Controls Help",
         )
         .action(GameUiAction::OpenHelp(help_parent_for_options(parent))),
     );
-    left_y += 22.0;
+    y += 28.0;
     layout.push(
         UiWidget::button(
             UI_V2_OPTIONS_BACK,
-            Rect::new(left_x, left_y, column_width, 20.0),
+            Rect::new(x, y, width, 20.0),
             match parent {
                 GameOptionsParent::Title => "Back",
                 GameOptionsParent::Pause => "Done",
@@ -2977,6 +2864,326 @@ fn options_layout(
     );
 
     layout
+}
+
+/// Build the setting rows for a category as `(row_height, widget)` pairs. Rows
+/// whose backing platform state is absent are emitted disabled (with an "N/A"
+/// value and no action) so every setting is discoverable while developing.
+fn options_category_rows(
+    category: GameOptionsCategory,
+    state: GameUiRenderState,
+) -> Vec<(f32, UiWidget)> {
+    let ph = Rect::new(0.0, 0.0, 0.0, 0.0);
+    match category {
+        GameOptionsCategory::Graphics => vec![
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_OCCLUSION,
+                    ph,
+                    "Section Occlusion",
+                    state.section_occlusion_culling,
+                )
+                .action(GameUiAction::ToggleSectionOcclusion),
+            ),
+            (
+                18.0,
+                UiWidget::checkbox(UI_V2_OPTIONS_FAR_LOD, ph, "Far LOD", state.far_lod_enabled)
+                    .action(GameUiAction::ToggleFarLod),
+            ),
+            (
+                20.0,
+                UiWidget::slider(
+                    UI_V2_OPTIONS_FAR_LOD_RANGE,
+                    ph,
+                    far_lod_range_label(state),
+                    far_lod_range_slider_value(state),
+                )
+                .enabled(state.far_lod_enabled)
+                .slider_action(UiSliderAction::FarLodRange),
+            ),
+            (
+                20.0,
+                UiWidget::slider(
+                    UI_V2_OPTIONS_RADIUS,
+                    ph,
+                    render_distance_label(state),
+                    render_distance_slider_value(state),
+                )
+                .slider_action(UiSliderAction::RenderDistance),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_FRAME_PACING,
+                    ph,
+                    "Frame Pacing",
+                    state.frame_pacing_mode.label(),
+                )
+                .action(GameUiAction::CycleFramePacing),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_FPS_CAP,
+                    ph,
+                    "FPS Cap",
+                    state.fps_cap.to_string(),
+                )
+                .action(GameUiAction::CycleFpsCap),
+            ),
+        ],
+        GameOptionsCategory::Movement => {
+            let turn_mode = state
+                .turn_mode
+                .or_else(|| state.xr_turn_mode.map(GameTurnMode::from));
+            vec![
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_MOVEMENT_MODE,
+                        ph,
+                        "Movement",
+                        state.movement_mode.label(),
+                    )
+                    .action(GameUiAction::SetMovementMode(state.movement_mode.next())),
+                ),
+                (
+                    20.0,
+                    optional_cycle(
+                        UI_V2_OPTIONS_COLLISION_MODE,
+                        "Collision",
+                        state.collision_mode,
+                        |mode| mode.label(),
+                        |mode| GameUiAction::SetCollisionMode(mode.next()),
+                    ),
+                ),
+                (
+                    20.0,
+                    optional_cycle(
+                        UI_V2_OPTIONS_TRAVEL_ASSIST,
+                        "Travel Assist",
+                        state.travel_assist_mode,
+                        |mode| mode.label(),
+                        |mode| GameUiAction::SetTravelAssistMode(mode.next()),
+                    ),
+                ),
+                (
+                    20.0,
+                    optional_cycle(
+                        UI_V2_OPTIONS_TURN_MODE,
+                        "Turn",
+                        turn_mode,
+                        |mode| mode.label(),
+                        |mode| GameUiAction::SetTurnMode(mode.next()),
+                    ),
+                ),
+                (
+                    20.0,
+                    UiWidget::slider(
+                        UI_V2_OPTIONS_FLY_SPEED,
+                        ph,
+                        fly_speed_label(state),
+                        fly_speed_slider_value(state),
+                    )
+                    .slider_action(UiSliderAction::FlySpeed),
+                ),
+                (
+                    20.0,
+                    UiWidget::slider(
+                        UI_V2_OPTIONS_MOVEMENT_SPEED,
+                        ph,
+                        movement_speed_label(state),
+                        movement_speed_slider_value(state),
+                    )
+                    .slider_action(UiSliderAction::MovementSpeed),
+                ),
+                (
+                    20.0,
+                    optional_cycle(
+                        UI_V2_OPTIONS_TOUCH_CONTROLS,
+                        "Touch Controls",
+                        state.touch_controls_mode,
+                        |mode| touch_controls_mode_label(mode),
+                        |mode| GameUiAction::SetTouchControlsMode(next_touch_controls_mode(mode)),
+                    ),
+                ),
+                (20.0, {
+                    let mut widget = UiWidget::slider(
+                        UI_V2_OPTIONS_TOUCH_LOOK,
+                        ph,
+                        state
+                            .touch_settings
+                            .map(touch_look_label)
+                            .unwrap_or_else(|| "Touch Look".to_string()),
+                        state.touch_settings.map(touch_look_slider_value).unwrap_or(0.0),
+                    )
+                    .enabled(state.touch_settings.is_some());
+                    if state.touch_settings.is_some() {
+                        widget = widget.slider_action(UiSliderAction::TouchLook);
+                    }
+                    widget
+                }),
+            ]
+        }
+        GameOptionsCategory::Display => vec![
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_PLAYER_MODEL,
+                    ph,
+                    "Player Model",
+                    state.player_model.label(),
+                )
+                .action(GameUiAction::SetPlayerModel(state.player_model.next())),
+            ),
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_FIRST_PERSON_PLAYER,
+                    ph,
+                    "First Person Body",
+                    state.first_person_player_visible,
+                )
+                .action(GameUiAction::ToggleFirstPersonPlayer),
+            ),
+            (18.0, {
+                let mut widget = UiWidget::checkbox(
+                    UI_V2_OPTIONS_CROSSHAIR,
+                    ph,
+                    "Crosshair",
+                    state.crosshair_visible.unwrap_or(false),
+                )
+                .enabled(state.crosshair_visible.is_some());
+                if state.crosshair_visible.is_some() {
+                    widget = widget.action(GameUiAction::ToggleCrosshair);
+                }
+                widget
+            }),
+        ],
+        GameOptionsCategory::Debug => vec![
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_PLAYER_BOX,
+                    ph,
+                    "Player Box",
+                    state.player_collision_box_visible,
+                )
+                .action(GameUiAction::TogglePlayerCollisionBox),
+            ),
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY,
+                    ph,
+                    "Frame Metrics",
+                    state.frame_pipeline_overlay_visible,
+                )
+                .action(GameUiAction::ToggleFramePipelineOverlay),
+            ),
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_DEBUG_DIAGNOSTICS,
+                    ph,
+                    "Debug Pane",
+                    state.debug_diagnostics_visible,
+                )
+                .action(GameUiAction::ToggleDebugDiagnostics),
+            ),
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_FULLBRIGHT,
+                    ph,
+                    "Force Fullbright",
+                    state.force_fullbright,
+                )
+                .action(GameUiAction::ToggleFullbright),
+            ),
+        ],
+    }
+}
+
+/// Build a cycle row backed by an `Option<T>` platform value. When present it
+/// shows the value/label and cycles on click; when absent it renders disabled
+/// with an "N/A" placeholder and no action.
+fn optional_cycle<T: Copy>(
+    id: UiWidgetId,
+    label: &'static str,
+    value: Option<T>,
+    value_label: impl Fn(T) -> &'static str,
+    action: impl Fn(T) -> GameUiAction,
+) -> UiWidget {
+    let display = value.map(&value_label).unwrap_or("N/A");
+    let mut widget = UiWidget::cycle(id, Rect::new(0.0, 0.0, 0.0, 0.0), label, display)
+        .enabled(value.is_some());
+    if let Some(value) = value {
+        widget = widget.action(action(value));
+    }
+    widget
+}
+
+/// Per-category sub-panel: flows the category's rows into (by default) two
+/// columns, with a shared Back/Done button below.
+fn options_category_layout(
+    scale: GuiScale,
+    revision: u64,
+    parent: GameOptionsParent,
+    category: GameOptionsCategory,
+    state: GameUiRenderState,
+) -> UiLayout {
+    let mut layout = UiLayout::new(
+        Some(UiScreenId::OptionsCategory { parent, category }),
+        revision,
+    );
+    let panel = options_category_panel_rect(scale, category);
+    let rows = options_category_rows(category, state);
+    let bottom = place_option_rows(&mut layout, panel, 2, rows);
+    layout.push(
+        UiWidget::button(
+            UI_V2_OPTIONS_BACK,
+            Rect::new(panel.center_x() - 55.0, bottom + 6.0, 110.0, 20.0),
+            match parent {
+                GameOptionsParent::Title => "Back",
+                GameOptionsParent::Pause => "Done",
+            },
+        )
+        .action(GameUiAction::OpenOptions(parent)),
+    );
+    layout
+}
+
+/// Flow `rows` (each `(height, widget)`) into `cols` columns within `panel`,
+/// filling each column top-to-bottom (column-major) so related rows stay
+/// adjacent. Returns the y just below the tallest column for placing a footer.
+fn place_option_rows(
+    layout: &mut UiLayout,
+    panel: Rect,
+    cols: usize,
+    rows: Vec<(f32, UiWidget)>,
+) -> f32 {
+    let cols = cols.max(1);
+    let column_gap = 10.0;
+    let column_width =
+        ((panel.width - 36.0 - column_gap * (cols as f32 - 1.0)) / cols as f32).max(110.0);
+    let x0 = panel.x + 18.0;
+    let y0 = panel.y + 30.0;
+    let pitch = 24.0;
+    let per_col = rows.len().div_ceil(cols).max(1);
+    for (index, (height, mut widget)) in rows.into_iter().enumerate() {
+        let col = index / per_col;
+        let row_in_col = index % per_col;
+        widget.rect = Rect::new(
+            x0 + col as f32 * (column_width + column_gap),
+            y0 + row_in_col as f32 * pitch,
+            column_width,
+            height,
+        );
+        layout.push(widget);
+    }
+    y0 + per_col as f32 * pitch
 }
 
 fn server_settings_layout(
@@ -3037,17 +3244,6 @@ fn server_settings_layout(
     layout
 }
 
-fn push_checkbox(
-    layout: &mut UiLayout,
-    id: UiWidgetId,
-    rect: Rect,
-    label: &'static str,
-    checked: bool,
-    action: GameUiAction,
-) {
-    layout.push(UiWidget::checkbox(id, rect, label, checked).action(action));
-}
-
 fn push_cycle(
     layout: &mut UiLayout,
     id: UiWidgetId,
@@ -3059,23 +3255,20 @@ fn push_cycle(
     layout.push(UiWidget::cycle(id, rect, label, value).action(action));
 }
 
-fn options_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {
-    let left_rows_height = 122.0
-        + f32::from(u8::from(state.crosshair_visible.is_some())) * 20.0
-        + f32::from(
-            u8::from(state.touch_controls_mode.is_some())
-                + u8::from(state.server_cadence.is_some()),
-        ) * 22.0
-        + 48.0;
-    let right_rows_height = (9
-        + usize::from(state.collision_mode.is_some())
-        + usize::from(state.travel_assist_mode.is_some())
-        + usize::from(state.turn_mode.is_some() || state.xr_turn_mode.is_some())
-        + usize::from(state.touch_settings.is_some())) as f32
-        * 22.0;
+fn options_panel_rect(scale: GuiScale, _state: GameUiRenderState) -> Rect {
+    // The hub is a fixed short list: category buttons + Server Settings +
+    // Controls Help + Back.
+    let panel_width = (scale.width - 18.0).clamp(242.0, 360.0);
+    let panel_height = 214.0f32.min((scale.height - 4.0).max(1.0));
+    centered_panel(scale, panel_width, panel_height)
+}
+
+fn options_category_panel_rect(scale: GuiScale, category: GameOptionsCategory) -> Rect {
+    let per_col = options_category_row_count(category).div_ceil(2).max(1);
     let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);
-    let panel_height =
-        (44.0 + left_rows_height.max(right_rows_height)).min((scale.height - 4.0).max(1.0));
+    // title band + flowed rows + Back button + bottom padding
+    let content = 30.0 + per_col as f32 * 24.0 + 34.0;
+    let panel_height = content.min((scale.height - 4.0).max(1.0));
     centered_panel(scale, panel_width, panel_height)
 }
 

@@ -3520,6 +3520,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
                 | GameUiAction::OpenServerSettings(_)
+                | GameUiAction::OpenOptionsCategory(_, _)
                 | GameUiAction::RerollSeed
                 | GameUiAction::Resume
                 | GameUiAction::BackToTitle
@@ -5357,6 +5358,7 @@ fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
         Some(GameScreen::Help { .. }) => "help",
         Some(GameScreen::BlockPalette) => "blockPalette",
         Some(GameScreen::Options { .. }) => "options",
+        Some(GameScreen::OptionsCategory { .. }) => "optionsCategory",
         Some(GameScreen::ServerSettings { .. }) => "serverSettings",
         None => "none",
     }
@@ -5390,6 +5392,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::JoinRemote => "joinRemote",
         GameUiAction::Resume => "resume",
         GameUiAction::OpenOptions(_) => "openOptions",
+        GameUiAction::OpenOptionsCategory(_, _) => "openOptionsCategory",
         GameUiAction::OpenServerSettings(_) => "openServerSettings",
         GameUiAction::BackToTitle => "backToTitle",
         GameUiAction::BackToPause => "backToPause",

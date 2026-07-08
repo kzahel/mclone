@@ -5,7 +5,7 @@ use mclone_core::ChunkPos;
 use mclone_ui::{
     FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts, FlatDebugOverlay,
     FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, FlatHudDebugOverlay, GameHelpParent,
-    GameOptionsParent, GameScreen,
+    GameOptionsCategory, GameOptionsParent, GameScreen,
 };
 
 use crate::cli::HeadlessScreenshotUi;
@@ -209,6 +209,22 @@ impl HeadlessScreenshotUi {
             }),
             Self::OptionsPause => Some(GameScreen::Options {
                 parent: GameOptionsParent::Pause,
+            }),
+            Self::OptionsGraphicsPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Graphics,
+            }),
+            Self::OptionsMovementPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Movement,
+            }),
+            Self::OptionsDisplayPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Display,
+            }),
+            Self::OptionsDebugPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Debug,
             }),
             Self::ServerSettingsPause => Some(GameScreen::ServerSettings {
                 parent: GameOptionsParent::Pause,

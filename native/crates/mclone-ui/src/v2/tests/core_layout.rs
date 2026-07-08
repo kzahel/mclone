@@ -78,8 +78,9 @@ fn panel_revision_changes_for_visual_interaction_not_pointer_jitter() {
 #[test]
 fn game_ui_host_v2_panel_draw_cache_tracks_panel_revision() {
     let mut host = GameUiHost::new_ingame();
-    host.set_screen(Some(GameScreen::Options {
+    host.set_screen(Some(GameScreen::OptionsCategory {
         parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Display,
     }));
     host.set_scale(GuiScale::from_pixels(960, 540));
     let state = GameUiRenderState {
