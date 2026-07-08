@@ -51,6 +51,7 @@ PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
 PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
 PERF_METRICS="${MCLONE_ANDROID_XR_PERF_METRICS:-0}"
 PERF_METRICS_PERIODIC="${MCLONE_ANDROID_XR_PERF_METRICS_PERIODIC:-0}"
+PERF_DETAIL="${MCLONE_ANDROID_XR_PERF_DETAIL:-full}"
 FRAME_ACCOUNTING="${MCLONE_ANDROID_XR_FRAME_ACCOUNTING:-}"
 MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_MULTIVIEW_PROOF:-0}"
 TERRAIN_MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF:-0}"
@@ -200,6 +201,11 @@ Options:
                      Keep the XR_META_performance_metrics probe enabled after
                      the first valid sample and emit repeated markers during
                      longer perf lanes. Implies --perf-metrics.
+  --perf-detail full|minimal
+                     Select perf summary detail. full is the default and emits
+                     queue/peer/stage/worst-frame markers. minimal emits only
+                     high-level frame/headroom/publication counters and skips
+                     retaining per-frame terrain summaries.
   --frame-accounting true|false
                      Enable or disable per-frame shared accounting work during
                      perf samples. The default is true; false is for overhead
@@ -629,6 +635,11 @@ while [[ $# -gt 0 ]]; do
             PERF_METRICS_PERIODIC=1
             shift
             ;;
+        --perf-detail)
+            require_arg "$1" "${2:-}"
+            PERF_DETAIL="$2"
+            shift 2
+            ;;
         --frame-accounting)
             require_arg "$1" "${2:-}"
             FRAME_ACCOUNTING="$2"
@@ -765,6 +776,16 @@ case "$FRAME_ACCOUNTING" in
         mclone_die "unsupported --frame-accounting '$FRAME_ACCOUNTING'; expected true or false"
         ;;
 esac
+case "$PERF_DETAIL" in
+    full|minimal)
+        ;;
+    *)
+        mclone_die "unsupported --perf-detail '$PERF_DETAIL'; expected full or minimal"
+        ;;
+esac
+if [[ "$PERF_DETAIL" == "minimal" && "$FRAME_ACCOUNTING" =~ ^(false|0|no|off)$ ]]; then
+    mclone_die "--perf-detail minimal requires frame accounting"
+fi
 if [[ -n "$SESSION_SMOKE" && "$SESSION_ONLY" == "1" ]]; then
     mclone_die "--session-smoke requires submitted-frame validation; remove --session-only"
 fi
@@ -1065,6 +1086,9 @@ if [[ "$PERF_METRICS_PERIODIC" == "1" ]]; then
 elif [[ "$PERF_METRICS" == "1" ]]; then
     STARTUP_ARGV+=(--perf-metrics)
 fi
+if [[ "$PERF_DETAIL" != "full" ]]; then
+    STARTUP_ARGV+=(--perf-detail "$PERF_DETAIL")
+fi
 if [[ -n "$FRAME_ACCOUNTING" ]]; then
     STARTUP_ARGV+=(--frame-accounting "$FRAME_ACCOUNTING")
 fi
@@ -1334,35 +1358,59 @@ if [[ -n "$PERF_SECONDS" ]]; then
             mclone_die "Android XR render completed-result accept budget perf summary marker was not seen; see $LOG_PATH"
         fi
     fi
-    for marker in \
-        MCLONE_ANDROID_XR_PERF_SUMMARY \
-        MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE \
-        MCLONE_ANDROID_XR_PERF_QUEUE \
-        MCLONE_ANDROID_XR_PERF_PEER \
-        MCLONE_ANDROID_XR_PERF_STAGE \
-        MCLONE_ANDROID_XR_PERF_HEADROOM \
-        MCLONE_ANDROID_XR_PERF_STAGES \
-        MCLONE_ANDROID_XR_PERF_TERRAIN \
-        MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME \
-        MCLONE_ANDROID_XR_PERF_GPU_SYNC_MAX \
-        MCLONE_ANDROID_XR_PERF_UPLOAD_APPLY_MAX \
-        MCLONE_ANDROID_XR_PERF_TERRAIN_PREP \
-        MCLONE_ANDROID_XR_PERF_OVERLAP \
-        MCLONE_ANDROID_XR_PERF_MULTIVIEW \
-        MCLONE_ANDROID_XR_PERF_UPLOAD_MAX \
-        MCLONE_ANDROID_XR_PERF_UPLOAD_PHASE_MAX \
-        MCLONE_ANDROID_XR_PERF_RECORD_CACHE \
-        MCLONE_ANDROID_XR_PERF_RUNTIME_MAX \
-        MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX \
-        MCLONE_ANDROID_XR_PERF_QUEUE_MAX \
-        MCLONE_ANDROID_XR_PERF_COMPILE_MAX \
-        MCLONE_ANDROID_XR_PERF_UPLOAD_LAST \
-        MCLONE_ANDROID_XR_PERF_DRAW
-    do
-        if ! grep -E "$marker([[:space:]]|$)" "$LOG_PATH" >/dev/null 2>&1; then
-            mclone_die "Android XR perf marker $marker was not seen; see $LOG_PATH"
+    if [[ "$PERF_DETAIL" == "minimal" ]]; then
+        for marker in \
+            MCLONE_ANDROID_XR_PERF_SUMMARY \
+            MCLONE_ANDROID_XR_PERF_PUBLICATION \
+            MCLONE_ANDROID_XR_PERF_HEADROOM \
+            MCLONE_ANDROID_XR_PERF_CPU_BLOCKED \
+            MCLONE_ANDROID_XR_PERF_DETAIL \
+            MCLONE_ANDROID_XR_PERF_DRAW
+        do
+            if ! grep -E "$marker([[:space:]]|$)" "$LOG_PATH" >/dev/null 2>&1; then
+                mclone_die "Android XR minimal perf marker $marker was not seen; see $LOG_PATH"
+            fi
+        done
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*detail=minimal" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR minimal perf summary detail marker was not seen; see $LOG_PATH"
         fi
-    done
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_DETAIL .*frame_details=disabled" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR minimal perf detail marker was not seen; see $LOG_PATH"
+        fi
+        if grep -E "MCLONE_ANDROID_XR_PERF_(FRAME_PIPELINE|QUEUE|PEER|STAGE|STAGES|LOCOMOTION|LOCOMOTION_COMMAND|LOCOMOTION_INTEREST_COMMAND|TERRAIN|TERRAIN_RUNTIME|GPU_SYNC_MAX|UPLOAD_APPLY_MAX|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|UPLOAD_PHASE_MAX|RECORD_CACHE|RUNTIME_MAX|UPDATE_APPLY_MAX|QUEUE_MAX|COMPILE_MAX|UPLOAD_LAST|WORST_FRAME)([[:space:]]|$)" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR minimal perf emitted full-detail markers; see $LOG_PATH"
+        fi
+    else
+        for marker in \
+            MCLONE_ANDROID_XR_PERF_SUMMARY \
+            MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE \
+            MCLONE_ANDROID_XR_PERF_QUEUE \
+            MCLONE_ANDROID_XR_PERF_PEER \
+            MCLONE_ANDROID_XR_PERF_STAGE \
+            MCLONE_ANDROID_XR_PERF_HEADROOM \
+            MCLONE_ANDROID_XR_PERF_STAGES \
+            MCLONE_ANDROID_XR_PERF_TERRAIN \
+            MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME \
+            MCLONE_ANDROID_XR_PERF_GPU_SYNC_MAX \
+            MCLONE_ANDROID_XR_PERF_UPLOAD_APPLY_MAX \
+            MCLONE_ANDROID_XR_PERF_TERRAIN_PREP \
+            MCLONE_ANDROID_XR_PERF_OVERLAP \
+            MCLONE_ANDROID_XR_PERF_MULTIVIEW \
+            MCLONE_ANDROID_XR_PERF_UPLOAD_MAX \
+            MCLONE_ANDROID_XR_PERF_UPLOAD_PHASE_MAX \
+            MCLONE_ANDROID_XR_PERF_RECORD_CACHE \
+            MCLONE_ANDROID_XR_PERF_RUNTIME_MAX \
+            MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX \
+            MCLONE_ANDROID_XR_PERF_QUEUE_MAX \
+            MCLONE_ANDROID_XR_PERF_COMPILE_MAX \
+            MCLONE_ANDROID_XR_PERF_UPLOAD_LAST \
+            MCLONE_ANDROID_XR_PERF_DRAW
+        do
+            if ! grep -E "$marker([[:space:]]|$)" "$LOG_PATH" >/dev/null 2>&1; then
+                mclone_die "Android XR perf marker $marker was not seen; see $LOG_PATH"
+            fi
+        done
+    fi
     if [[ "$PERF_FLIGHT" == "1" ]]; then
         if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*mode=flight" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR perf flight start marker was not seen; see $LOG_PATH"
@@ -1415,7 +1463,7 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
     fi
     mkdir -p "$(dirname "$PERF_SUMMARY_PATH")"
-    grep -E "MCLONE_ANDROID_XR_PERF_(SUMMARY|FRAME_PIPELINE|QUEUE|PEER|STAGE|HEADROOM|STAGES|LOCOMOTION|LOCOMOTION_COMMAND|LOCOMOTION_INTEREST_COMMAND|TERRAIN|TERRAIN_RUNTIME|GPU_SYNC_MAX|UPLOAD_APPLY_MAX|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|UPLOAD_PHASE_MAX|RECORD_CACHE|RUNTIME_MAX|UPDATE_APPLY_MAX|QUEUE_MAX|COMPILE_MAX|UPLOAD_LAST|DRAW|WORST_FRAME|WORST_FRAME_LOCOMOTION|WORST_FRAME_LOCOMOTION_COMMAND|WORST_FRAME_LOCOMOTION_INTEREST_COMMAND|WORST_FRAME_BUDGET|WORST_FRAME_TERRAIN|WORST_FRAME_RUNTIME|WORST_FRAME_GPU_SYNC|WORST_FRAME_UPLOAD_APPLY|WORST_FRAME_UPDATE_APPLY|WORST_FRAME_UPLOAD)([[:space:]]|$)|MCLONE_ANDROID_XR_PERF_METRICS[[:space:]]" "$LOG_PATH" \
+    grep -E "MCLONE_ANDROID_XR_PERF_(SUMMARY|FRAME_PIPELINE|QUEUE|PEER|STAGE|HEADROOM|CPU_BLOCKED|DETAIL|PUBLICATION|STAGES|LOCOMOTION|LOCOMOTION_COMMAND|LOCOMOTION_INTEREST_COMMAND|TERRAIN|TERRAIN_RUNTIME|GPU_SYNC_MAX|UPLOAD_APPLY_MAX|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|UPLOAD_PHASE_MAX|RECORD_CACHE|RUNTIME_MAX|UPDATE_APPLY_MAX|QUEUE_MAX|COMPILE_MAX|UPLOAD_LAST|DRAW|WORST_FRAME|WORST_FRAME_LOCOMOTION|WORST_FRAME_LOCOMOTION_COMMAND|WORST_FRAME_LOCOMOTION_INTEREST_COMMAND|WORST_FRAME_BUDGET|WORST_FRAME_TERRAIN|WORST_FRAME_RUNTIME|WORST_FRAME_GPU_SYNC|WORST_FRAME_UPLOAD_APPLY|WORST_FRAME_UPDATE_APPLY|WORST_FRAME_UPLOAD)([[:space:]]|$)|MCLONE_ANDROID_XR_PERF_METRICS[[:space:]]" "$LOG_PATH" \
         | tail -n 160 > "$PERF_SUMMARY_PATH"
     mclone_note "Perf summary: $PERF_SUMMARY_PATH"
 fi

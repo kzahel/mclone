@@ -18,6 +18,7 @@ const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--perf-frozen-render",
     "--perf-metrics",
     "--perf-metrics-periodic",
+    "--perf-detail",
     "--perf-orbit-speed",
     "--perf-seconds",
     "--perf-settled-orbit",
@@ -328,6 +329,7 @@ mod android {
         perf_frozen_render: bool,
         perf_metrics: bool,
         perf_metrics_periodic: bool,
+        perf_detail: AndroidXrPerfDetail,
         frame_accounting_enabled: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
@@ -364,6 +366,7 @@ mod android {
                 perf_frozen_render: false,
                 perf_metrics: false,
                 perf_metrics_periodic: false,
+                perf_detail: AndroidXrPerfDetail::Full,
                 frame_accounting_enabled: true,
                 multiview_proof: false,
                 terrain_multiview_proof: false,
@@ -510,6 +513,34 @@ mod android {
         }
     }
 
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    enum AndroidXrPerfDetail {
+        #[default]
+        Full,
+        Minimal,
+    }
+
+    impl AndroidXrPerfDetail {
+        fn parse_label(flag: &str, value: &str) -> Result<Self> {
+            match value.trim() {
+                "full" => Ok(Self::Full),
+                "minimal" | "summary" | "summary-only" => Ok(Self::Minimal),
+                value => bail!("{flag} has unsupported value `{value}`; expected full or minimal"),
+            }
+        }
+
+        const fn label(self) -> &'static str {
+            match self {
+                Self::Full => "full",
+                Self::Minimal => "minimal",
+            }
+        }
+
+        const fn is_full(self) -> bool {
+            matches!(self, Self::Full)
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum AndroidXrSessionSmoke {
         NewWorld,
@@ -649,6 +680,12 @@ mod android {
                 "--perf-metrics-periodic" => {
                     options.perf_metrics = true;
                     options.perf_metrics_periodic = true;
+                }
+                "--perf-detail" => {
+                    options.perf_detail = AndroidXrPerfDetail::parse_label(
+                        "--perf-detail",
+                        &parse_next_string(&mut argv, "--perf-detail")?,
+                    )?;
                 }
                 "--frame-accounting" => {
                     options.frame_accounting_enabled = parse_bool_arg(
@@ -880,6 +917,11 @@ mod android {
         }
         if options.overlap_runtime_prefetch && options.perf_frozen_render {
             bail!("--xr-overlap-runtime-prefetch cannot be combined with --perf-frozen-render");
+        }
+        if matches!(options.perf_detail, AndroidXrPerfDetail::Minimal)
+            && !options.frame_accounting_enabled
+        {
+            bail!("--perf-detail minimal requires --frame-accounting true");
         }
         if options.multiview_proof
             || options.terrain_multiview_proof
@@ -1286,6 +1328,10 @@ mod android {
             startup_options.perf_metrics_periodic
         );
         log::info!(
+            "Android XR performance detail: {}",
+            startup_options.perf_detail.label()
+        );
+        log::info!(
             "Android XR frame accounting: {}",
             startup_options.frame_accounting_enabled
         );
@@ -1403,6 +1449,7 @@ mod android {
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
             startup_options.perf_metrics_periodic,
+            startup_options.perf_detail,
             startup_options.frame_accounting_enabled,
             startup_options.multiview_proof,
             startup_options.terrain_multiview_proof,
@@ -1441,6 +1488,7 @@ mod android {
         perf_frozen_render: bool,
         perf_metrics: bool,
         perf_metrics_periodic: bool,
+        perf_detail: AndroidXrPerfDetail,
         frame_accounting_enabled: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
@@ -1879,6 +1927,7 @@ mod android {
                 perf_frozen_render,
                 perf_metrics,
                 perf_metrics_periodic,
+                perf_detail,
                 frame_accounting_enabled,
                 [scene_options.chunk_x, scene_options.chunk_z],
                 startup_view_pose,
@@ -1998,6 +2047,7 @@ mod android {
             perf_frozen_render,
             perf_metrics,
             perf_metrics_periodic,
+            perf_detail,
             frame_accounting_enabled,
             [scene_options.chunk_x, scene_options.chunk_z],
             startup_view_pose,
@@ -3270,6 +3320,7 @@ mod android {
         perf_frozen_render: bool,
         perf_metrics: bool,
         perf_metrics_periodic: bool,
+        perf_detail: AndroidXrPerfDetail,
         frame_accounting_enabled: bool,
         startup_center: [i32; 2],
         fixed_render_view_pose: Option<XrStartupViewPose>,
@@ -3300,6 +3351,7 @@ mod android {
             perf_chunk_view_churn,
             perf_settled_stationary,
             perf_frozen_render,
+            perf_detail,
             frame_accounting_enabled,
             startup_center,
             render_distance,
@@ -3914,6 +3966,7 @@ mod android {
         chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
         settled_stationary: bool,
         frozen_render: bool,
+        detail: AndroidXrPerfDetail,
         frame_accounting_enabled: bool,
         chunk_view_churn_base_center: [i32; 2],
         render_distance: u32,
@@ -3945,6 +3998,7 @@ mod android {
             chunk_view_churn: Option<AndroidXrPerfChunkViewChurn>,
             settled_stationary: bool,
             frozen_render: bool,
+            detail: AndroidXrPerfDetail,
             frame_accounting_enabled: bool,
             chunk_view_churn_base_center: [i32; 2],
             render_distance: u32,
@@ -3973,6 +4027,7 @@ mod android {
                 chunk_view_churn,
                 settled_stationary,
                 frozen_render,
+                detail,
                 frame_accounting_enabled,
                 chunk_view_churn_base_center,
                 render_distance,
@@ -4103,9 +4158,10 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} frame_accounting_enabled={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} adaptive_chunk_publication_budget={} render_distance={} render_compile_workers={} render_compile_max_pending_jobs={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} detail={} render_path={} frame_accounting_enabled={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} adaptive_chunk_publication_budget={} render_distance={} render_compile_workers={} render_compile_max_pending_jobs={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
+                self.detail.label(),
                 self.render_path.label(),
                 self.frame_accounting_enabled,
                 format_optional_usize(self.render_section_upload_budget),
@@ -4143,9 +4199,11 @@ mod android {
                 requested: Duration::from_secs(seconds),
                 started: Instant::now(),
                 start_stats: frame_stats,
+                detail: self.detail,
                 frame_accounting: self
                     .frame_accounting_enabled
                     .then(|| android_xr_frame_accounting_accumulator(self.target_hz)),
+                sample_frames: 0,
                 max_wait_begin_ms: 0.0,
                 max_wait_frame_ms: 0.0,
                 max_begin_frame_ms: 0.0,
@@ -4283,7 +4341,9 @@ mod android {
         requested: Duration,
         started: Instant,
         start_stats: XrFrameStats,
+        detail: AndroidXrPerfDetail,
         frame_accounting: Option<FrameAccumulator>,
+        sample_frames: u64,
         max_wait_begin_ms: f64,
         max_wait_frame_ms: f64,
         max_begin_frame_ms: f64,
@@ -4336,7 +4396,8 @@ mod android {
             budget_decision_panel: BudgetDecisionPanelReport,
         ) {
             self.latest_budget_decision_panel = budget_decision_panel;
-            let sample_frame = self.frame_details.len() as u64 + 1;
+            self.sample_frames = self.sample_frames.saturating_add(1);
+            let sample_frame = self.sample_frames;
             if let Some(frame_accounting) = self.frame_accounting.as_mut() {
                 frame_accounting.record_frame(android_xr_frame_observation(
                     sample_frame,
@@ -4344,11 +4405,13 @@ mod android {
                     rendered.is_some(),
                 ));
             }
-            self.frame_details.push(AndroidXrWorstFrameSnapshot {
-                sample_frame,
-                timing,
-                summary: rendered.as_ref().map(|rendered| rendered.summary),
-            });
+            if self.detail.is_full() {
+                self.frame_details.push(AndroidXrWorstFrameSnapshot {
+                    sample_frame,
+                    timing,
+                    summary: rendered.as_ref().map(|rendered| rendered.summary),
+                });
+            }
             self.max_wait_begin_ms = self.max_wait_begin_ms.max(timing.wait_begin_ms);
             self.max_wait_frame_ms = self.max_wait_frame_ms.max(timing.wait_frame_ms);
             self.max_begin_frame_ms = self.max_begin_frame_ms.max(timing.begin_frame_ms);
@@ -4396,12 +4459,13 @@ mod android {
 
         fn log_summary(&mut self, frame_stats: XrFrameStats) {
             let frame_accounting = self.frame_accounting_report();
-            let queue_panel = android_xr_queue_panel(&self.frame_details);
-            let peer_thread_panel = android_xr_peer_thread_panel(&self.frame_details);
-            let frame_pipeline_report =
+            let frame_pipeline_report = self.detail.is_full().then(|| {
+                let queue_panel = android_xr_queue_panel(&self.frame_details);
+                let peer_thread_panel = android_xr_peer_thread_panel(&self.frame_details);
                 FramePipelineReport::new(frame_accounting.clone(), queue_panel)
                     .with_peer_thread_panel(peer_thread_panel)
-                    .with_budget_decision_panel(self.latest_budget_decision_panel.clone());
+                    .with_budget_decision_panel(self.latest_budget_decision_panel.clone())
+            });
             let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = frame_accounting.frames;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
@@ -4463,9 +4527,10 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} frame_accounting_enabled={} conservation_violations={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} adaptive_chunk_publication_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} render_compile_max_pending_jobs={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} {}={} {}={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} detail={} render_path={} frame_accounting_enabled={} conservation_violations={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} adaptive_chunk_publication_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} render_compile_max_pending_jobs={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} {}={} {}={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
+                self.detail.label(),
                 self.render_path.label(),
                 self.frame_accounting_enabled,
                 frame_accounting.conservation_violations.total(),
@@ -4531,7 +4596,9 @@ mod android {
                 latest_upload.poll_scheduler_cumulative_feature_chunks_published,
                 latest_upload.poll_scheduler_cumulative_light_statuses_published
             );
-            log_android_xr_frame_pipeline_report(&frame_pipeline_report);
+            if let Some(frame_pipeline_report) = frame_pipeline_report.as_ref() {
+                log_android_xr_frame_pipeline_report(frame_pipeline_report);
+            }
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_HEADROOM sample_seconds={:.3} mode={} render_path={} xr_render_scale={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} submitted_fps={:.2} runtime_fps={:.2} wait_frame_avg_ms={:.3} wait_frame_p50_ms={:.3} wait_frame_p95_ms={:.3} wait_frame_max_ms={:.3} app_work_avg_ms={:.3} app_work_min_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} app_work_p99_ms={:.3} app_work_max_ms={:.3} headroom_avg_ms={:.3} headroom_p50_ms={:.3} headroom_p05_ms={:.3} headroom_p01_ms={:.3} headroom_min_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
@@ -4584,6 +4651,23 @@ mod android {
                 blocked.p99_ms,
                 blocked.max_ms
             );
+            if !self.detail.is_full() {
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_DETAIL detail={} frame_details=disabled retained_frame_details={} max_detail_markers=disabled",
+                    self.detail.label(),
+                    self.frame_details.len()
+                );
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_DRAW sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                    self.latest_summary.section_count,
+                    self.latest_summary.drawn_section_count,
+                    self.latest_summary.index_count,
+                    self.latest_summary.drawn_index_count,
+                    self.latest_summary.actor_count,
+                    self.latest_summary.drawn_actor_count
+                );
+                return;
+            }
             self.log_worst_frames(&frame_accounting);
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_STAGES max_wait_begin_ms={:.3} max_wait_frame_ms={:.3} max_begin_frame_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3}",
