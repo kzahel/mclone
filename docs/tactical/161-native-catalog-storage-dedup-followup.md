@@ -138,7 +138,7 @@ introduced by this slice.
 
 ## Slice 4: Android App-Data World-Root Helper
 
-Status: landed 2026-07-08.
+Status: landed 2026-07-08 in `da290e7c`.
 
 Problem: flat Android and Android XR each resolved their default persistent
 world catalog root with the same `internal_data_path().or_else(external_data_path()).join("worlds")`
