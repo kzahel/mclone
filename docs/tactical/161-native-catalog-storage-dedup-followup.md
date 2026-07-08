@@ -26,7 +26,7 @@ Current floor after 160:
 
 ## Slice 1: Shared Catalog UI Refresh
 
-Status: landed 2026-07-08.
+Status: landed 2026-07-08 in `b530df74`.
 
 Problem: desktop flat, XR, and flat Android each had the same
 `refresh_world_catalog_ui` body: missing catalog -> default empty list; list
@@ -60,7 +60,7 @@ introduced by this slice.
 
 ## Slice 2: Catalog Session-Start Scene Derivation
 
-Status: landed 2026-07-08.
+Status: landed 2026-07-08 in `59db7eb8`.
 
 Problem: desktop flat, XR, and flat Android each derived local/catalog/remote
 scene options by hand: transient local starts clear `remote_addr`/`world_dir`,
