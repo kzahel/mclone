@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_blocks::collision_aabb_for_feet_position;
 use mclone_core::{Aabb, BlockPos, BlockStateId, ChunkPos, Vec3d};
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind, ItemKind, ItemStackSnapshot};
 
@@ -46,11 +46,11 @@ pub(crate) struct ServerEntityStore {
     next_entity_id: u64,
     next_persistent_id: u64,
     debug_passive_showcase_ids: Vec<(EntityKind, EntityId)>,
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     debug_physics_cube_id: Option<EntityId>,
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DebugPhysicsCubeEntitySpawn {
     pub(crate) removed: Option<ServerEntityState>,
@@ -100,7 +100,7 @@ impl ServerEntityStore {
         id
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     pub(crate) fn spawn_debug_physics_cube(
         &mut self,
         position: Vec3d,
@@ -127,7 +127,7 @@ impl ServerEntityStore {
         DebugPhysicsCubeEntitySpawn { removed, current }
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     pub(crate) fn upsert_debug_physics_cube(
         &mut self,
         position: Vec3d,
@@ -151,7 +151,7 @@ impl ServerEntityStore {
         self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, rotation, age_ticks)
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     fn insert_debug_physics_cube(
         &mut self,
         position: Vec3d,
@@ -840,11 +840,11 @@ impl ServerEntityStore {
     }
 
     fn debug_physics_cube_id(&self) -> Option<EntityId> {
-        #[cfg(feature = "physics-rapier")]
+        #[cfg(feature = "physics-engine")]
         {
             self.debug_physics_cube_id
         }
-        #[cfg(not(feature = "physics-rapier"))]
+        #[cfg(not(feature = "physics-engine"))]
         {
             None
         }
@@ -858,7 +858,7 @@ pub(crate) struct ServerEntityStoreDiagnostics {
     pub(crate) ticking_entities: usize,
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 fn debug_physics_cube_state(
     id: EntityId,
     position: Vec3d,

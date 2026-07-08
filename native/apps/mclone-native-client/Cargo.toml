@@ -9,6 +9,7 @@ publish.workspace = true
 default = []
 perf-diagnostics = ["mclone-app-runtime/perf-diagnostics"]
 physics-rapier = ["mclone-server/physics-rapier"]
+physics-box3d = ["mclone-server/physics-box3d"]
 xr = [
     "dep:libloading",
     "dep:metal",

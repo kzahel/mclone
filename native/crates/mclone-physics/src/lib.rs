@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use mclone_core::{Aabb, Vec3d};
+#[cfg(feature = "box3d")]
+use boxddd::prelude as box3d;
 #[cfg(feature = "rapier")]
 use rapier3d::prelude as rapier;
 
@@ -23,6 +25,8 @@ pub enum PhysicsBackendKind {
     Noop,
     #[cfg(feature = "rapier")]
     Rapier,
+    #[cfg(feature = "box3d")]
+    Box3d,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -285,6 +289,8 @@ impl PhysicsWorld {
             PhysicsBackendKind::Noop => Self::noop(),
             #[cfg(feature = "rapier")]
             PhysicsBackendKind::Rapier => Self::rapier(),
+            #[cfg(feature = "box3d")]
+            PhysicsBackendKind::Box3d => Self::box3d(),
         }
     }
 
@@ -298,6 +304,13 @@ impl PhysicsWorld {
     pub fn rapier() -> Self {
         Self {
             backend: PhysicsWorldBackend::Rapier(RapierPhysicsWorld::new()),
+        }
+    }
+
+    #[cfg(feature = "box3d")]
+    pub fn box3d() -> Self {
+        Self {
+            backend: PhysicsWorldBackend::Box3d(Box3dPhysicsWorld::new()),
         }
     }
 
@@ -393,6 +406,8 @@ enum PhysicsWorldBackend {
     Noop(NoopPhysicsWorld),
     #[cfg(feature = "rapier")]
     Rapier(RapierPhysicsWorld),
+    #[cfg(feature = "box3d")]
+    Box3d(Box3dPhysicsWorld),
 }
 
 impl PhysicsWorldBackend {
@@ -401,6 +416,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.backend_kind(),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.backend_kind(),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.backend_kind(),
         }
     }
 
@@ -409,6 +426,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.spawn_body(spawn),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.spawn_body(spawn),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.spawn_body(spawn),
         }
     }
 
@@ -417,6 +436,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.remove_body(id),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.remove_body(id),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.remove_body(id),
         }
     }
 
@@ -425,6 +446,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.body(id),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.body(id),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.body(id),
         }
     }
 
@@ -433,6 +456,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.body_velocity(id),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.body_velocity(id),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.body_velocity(id),
         }
     }
 
@@ -441,6 +466,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.set_body_pose(id, pose),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.set_body_pose(id, pose),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.set_body_pose(id, pose),
         }
     }
 
@@ -449,6 +476,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.set_body_velocity(id, velocity),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.set_body_velocity(id, velocity),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.set_body_velocity(id, velocity),
         }
     }
 
@@ -457,6 +486,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.gravity(),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.gravity(),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.gravity(),
         }
     }
 
@@ -465,6 +496,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.set_gravity(gravity),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.set_gravity(gravity),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.set_gravity(gravity),
         }
     }
 
@@ -473,6 +506,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.add_terrain_patch(patch),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.add_terrain_patch(patch),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.add_terrain_patch(patch),
         }
     }
 
@@ -481,6 +516,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.update_terrain_patch(id, patch),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.update_terrain_patch(id, patch),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.update_terrain_patch(id, patch),
         }
     }
 
@@ -489,6 +526,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.remove_terrain_patch(id),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.remove_terrain_patch(id),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.remove_terrain_patch(id),
         }
     }
 
@@ -497,6 +536,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.terrain_patch(id),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.terrain_patch(id),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.terrain_patch(id),
         }
     }
 
@@ -505,6 +546,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.add_terrain_section(section),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.add_terrain_section(section),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.add_terrain_section(section),
         }
     }
 
@@ -517,6 +560,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.update_terrain_section(id, section),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.update_terrain_section(id, section),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.update_terrain_section(id, section),
         }
     }
 
@@ -525,6 +570,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.remove_terrain_section(id),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.remove_terrain_section(id),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.remove_terrain_section(id),
         }
     }
 
@@ -533,6 +580,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.terrain_section(id),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.terrain_section(id),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.terrain_section(id),
         }
     }
 
@@ -541,6 +590,8 @@ impl PhysicsWorldBackend {
             Self::Noop(backend) => backend.step(dt_seconds),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.step(dt_seconds),
+            #[cfg(feature = "box3d")]
+            Self::Box3d(backend) => backend.step(dt_seconds),
         }
     }
 }
@@ -1179,7 +1230,7 @@ fn positive_rapier_real(value: f64) -> rapier::Real {
     to_rapier_real(value.max(1.0e-4))
 }
 
-#[cfg(feature = "rapier")]
+#[cfg(any(feature = "rapier", feature = "box3d"))]
 fn poses_almost_equal(left: PhysicsBodyPose, right: PhysicsBodyPose) -> bool {
     left.position.distance_to_sqr(right.position) <= 1.0e-12
         && (left.rotation.x - right.rotation.x).abs() <= 1.0e-9
@@ -1463,6 +1514,519 @@ fn terrain_neighbor_solid(
         return false;
     }
     section.is_solid(nx as usize, ny as usize, nz as usize)
+}
+
+#[cfg(feature = "box3d")]
+const BOX3D_SUB_STEP_COUNT: i32 = 4;
+
+#[cfg(feature = "box3d")]
+struct Box3dPhysicsWorld {
+    world: box3d::World,
+    gravity: Vec3d,
+    next_body_id: u64,
+    next_collider_id: u64,
+    collider_count: usize,
+    bodies: BTreeMap<PhysicsBodyId, Box3dBodyRecord>,
+    terrain_patches: BTreeMap<PhysicsColliderId, Box3dTerrainPatchRecord>,
+    terrain_sections: BTreeMap<PhysicsColliderId, Box3dTerrainSectionRecord>,
+}
+
+#[cfg(feature = "box3d")]
+struct Box3dBodyRecord {
+    body: box3d::BodyId,
+    spawn: PhysicsBodySpawn,
+}
+
+#[cfg(feature = "box3d")]
+struct Box3dTerrainPatchRecord {
+    body: Option<box3d::BodyId>,
+    patch: PhysicsTerrainPatch,
+}
+
+#[cfg(feature = "box3d")]
+struct Box3dTerrainSectionRecord {
+    body: Option<box3d::BodyId>,
+    shape_count: usize,
+    section: PhysicsTerrainSection,
+}
+
+#[cfg(feature = "box3d")]
+impl Box3dPhysicsWorld {
+    fn new() -> Self {
+        let gravity = Vec3d::new(0.0, -9.81, 0.0);
+        let def = box3d::WorldDef::builder()
+            .gravity(box3d_vec(gravity))
+            .build();
+        let world = box3d::World::new(def).expect("Box3D world creation succeeds");
+        Self {
+            world,
+            gravity,
+            next_body_id: 1,
+            next_collider_id: 1,
+            collider_count: 0,
+            bodies: BTreeMap::new(),
+            terrain_patches: BTreeMap::new(),
+            terrain_sections: BTreeMap::new(),
+        }
+    }
+
+    const fn backend_kind(&self) -> PhysicsBackendKind {
+        PhysicsBackendKind::Box3d
+    }
+
+    fn spawn_body(&mut self, spawn: PhysicsBodySpawn) -> PhysicsBodyId {
+        let id = PhysicsBodyId(self.next_body_id);
+        self.next_body_id = self.next_body_id.wrapping_add(1).max(1);
+        let body = self.world.create_body(box3d_body_def(spawn));
+        let shape_def = box3d_shape_def();
+        match spawn.shape {
+            PhysicsShape::Cuboid { half_extents } => {
+                let hull = box3d::BoxHull::new(
+                    positive_box3d_real(half_extents.x),
+                    positive_box3d_real(half_extents.y),
+                    positive_box3d_real(half_extents.z),
+                );
+                self.world.create_hull_shape(body, &shape_def, &hull);
+            }
+            PhysicsShape::Ball { radius } => {
+                let sphere = box3d::Sphere::new(box3d::Vec3::ZERO, positive_box3d_real(radius));
+                self.world.create_sphere_shape(body, &shape_def, &sphere);
+            }
+            PhysicsShape::CapsuleY {
+                half_height,
+                radius,
+            } => {
+                let half_height = positive_box3d_real(half_height);
+                let capsule = box3d::Capsule::new(
+                    box3d::Vec3::new(0.0, -half_height, 0.0),
+                    box3d::Vec3::new(0.0, half_height, 0.0),
+                    positive_box3d_real(radius),
+                );
+                self.world.create_capsule_shape(body, &shape_def, &capsule);
+            }
+        }
+        self.collider_count += 1;
+        self.bodies.insert(id, Box3dBodyRecord { body, spawn });
+        id
+    }
+
+    fn remove_body(&mut self, id: PhysicsBodyId) -> Option<PhysicsBodySpawn> {
+        let record = self.bodies.remove(&id)?;
+        self.world.destroy_body(record.body);
+        self.collider_count = self.collider_count.saturating_sub(1);
+        Some(record.spawn)
+    }
+
+    fn body(&self, id: PhysicsBodyId) -> Option<&PhysicsBodySpawn> {
+        self.bodies.get(&id).map(|record| &record.spawn)
+    }
+
+    fn body_velocity(&self, id: PhysicsBodyId) -> Option<PhysicsBodyVelocity> {
+        let record = self.bodies.get(&id)?;
+        Some(PhysicsBodyVelocity {
+            linear: physics_vec_box3d(self.world.body_linear_velocity(record.body)),
+            angular: physics_vec_box3d(self.world.body_angular_velocity(record.body)),
+        })
+    }
+
+    fn set_body_pose(&mut self, id: PhysicsBodyId, pose: PhysicsBodyPose) -> bool {
+        let Some(record) = self.bodies.get(&id) else {
+            return false;
+        };
+        let body = record.body;
+        if self
+            .world
+            .try_set_body_transform(body, box3d_pos(pose.position), box3d_quat(pose.rotation))
+            .is_err()
+        {
+            return false;
+        }
+        self.bodies
+            .get_mut(&id)
+            .expect("body record survives transform update")
+            .spawn
+            .pose = pose;
+        true
+    }
+
+    fn set_body_velocity(&mut self, id: PhysicsBodyId, velocity: PhysicsBodyVelocity) -> bool {
+        if !velocity.linear.is_finite() || !velocity.angular.is_finite() {
+            return false;
+        }
+        let Some(record) = self.bodies.get(&id) else {
+            return false;
+        };
+        let body = record.body;
+        if self
+            .world
+            .try_set_body_linear_velocity(body, box3d_vec(velocity.linear))
+            .is_err()
+        {
+            return false;
+        }
+        if self
+            .world
+            .try_set_body_angular_velocity(body, box3d_vec(velocity.angular))
+            .is_err()
+        {
+            return false;
+        }
+        self.bodies
+            .get_mut(&id)
+            .expect("body record survives velocity update")
+            .spawn
+            .velocity = velocity;
+        true
+    }
+
+    fn gravity(&self) -> Vec3d {
+        self.gravity
+    }
+
+    fn set_gravity(&mut self, gravity: Vec3d) -> bool {
+        if !gravity.is_finite() {
+            return false;
+        }
+        self.world.set_gravity(box3d_vec(gravity));
+        self.gravity = gravity;
+        true
+    }
+
+    fn add_terrain_patch(&mut self, patch: PhysicsTerrainPatch) -> PhysicsColliderId {
+        let id = PhysicsColliderId(self.next_collider_id);
+        self.next_collider_id = self.next_collider_id.wrapping_add(1).max(1);
+        let body = self.insert_terrain_patch_body(patch);
+        if body.is_some() {
+            self.collider_count += 1;
+        }
+        self.terrain_patches
+            .insert(id, Box3dTerrainPatchRecord { body, patch });
+        id
+    }
+
+    fn update_terrain_patch(&mut self, id: PhysicsColliderId, patch: PhysicsTerrainPatch) -> bool {
+        let Some(old_body) = self
+            .terrain_patches
+            .get_mut(&id)
+            .map(|record| record.body.take())
+        else {
+            return false;
+        };
+        if let Some(body) = old_body {
+            self.world.destroy_body(body);
+            self.collider_count = self.collider_count.saturating_sub(1);
+        }
+        let body = self.insert_terrain_patch_body(patch);
+        if body.is_some() {
+            self.collider_count += 1;
+        }
+        let record = self
+            .terrain_patches
+            .get_mut(&id)
+            .expect("terrain patch record survives collider replacement");
+        record.body = body;
+        record.patch = patch;
+        true
+    }
+
+    fn remove_terrain_patch(&mut self, id: PhysicsColliderId) -> Option<PhysicsTerrainPatch> {
+        let record = self.terrain_patches.remove(&id)?;
+        if let Some(body) = record.body {
+            self.world.destroy_body(body);
+            self.collider_count = self.collider_count.saturating_sub(1);
+        }
+        Some(record.patch)
+    }
+
+    fn terrain_patch(&self, id: PhysicsColliderId) -> Option<&PhysicsTerrainPatch> {
+        self.terrain_patches.get(&id).map(|record| &record.patch)
+    }
+
+    fn add_terrain_section(&mut self, section: PhysicsTerrainSection) -> PhysicsColliderId {
+        let id = PhysicsColliderId(self.next_collider_id);
+        self.next_collider_id = self.next_collider_id.wrapping_add(1).max(1);
+        let (body, shape_count) = self.insert_terrain_section_body(&section);
+        self.collider_count += shape_count;
+        self.terrain_sections.insert(
+            id,
+            Box3dTerrainSectionRecord {
+                body,
+                shape_count,
+                section,
+            },
+        );
+        id
+    }
+
+    fn update_terrain_section(
+        &mut self,
+        id: PhysicsColliderId,
+        section: PhysicsTerrainSection,
+    ) -> bool {
+        let Some((old_body, old_count)) = self
+            .terrain_sections
+            .get_mut(&id)
+            .map(|record| (record.body.take(), record.shape_count))
+        else {
+            return false;
+        };
+        if let Some(body) = old_body {
+            self.world.destroy_body(body);
+        }
+        self.collider_count = self.collider_count.saturating_sub(old_count);
+        let (body, shape_count) = self.insert_terrain_section_body(&section);
+        self.collider_count += shape_count;
+        let record = self
+            .terrain_sections
+            .get_mut(&id)
+            .expect("terrain section record survives collider replacement");
+        record.body = body;
+        record.shape_count = shape_count;
+        record.section = section;
+        true
+    }
+
+    fn remove_terrain_section(&mut self, id: PhysicsColliderId) -> Option<PhysicsTerrainSection> {
+        let record = self.terrain_sections.remove(&id)?;
+        if let Some(body) = record.body {
+            self.world.destroy_body(body);
+        }
+        self.collider_count = self.collider_count.saturating_sub(record.shape_count);
+        Some(record.section)
+    }
+
+    fn terrain_section(&self, id: PhysicsColliderId) -> Option<&PhysicsTerrainSection> {
+        self.terrain_sections.get(&id).map(|record| &record.section)
+    }
+
+    fn step(&mut self, dt_seconds: f64) -> PhysicsStepReport {
+        let mut before = BTreeMap::new();
+        for (id, record) in &self.bodies {
+            before.insert(*id, self.box3d_body_pose(record.body));
+        }
+
+        self.world
+            .step(dt_seconds.max(0.0) as f32, BOX3D_SUB_STEP_COUNT);
+
+        let mut body_pose_update_count = 0;
+        let mut active_body_count = 0;
+        let mut updates = Vec::new();
+        for (id, record) in &self.bodies {
+            let pose = self.box3d_body_pose(record.body);
+            if self.world.try_body_awake(record.body).unwrap_or(false) {
+                active_body_count += 1;
+            }
+            if before
+                .get(id)
+                .is_some_and(|before_pose| !poses_almost_equal(*before_pose, pose))
+            {
+                body_pose_update_count += 1;
+            }
+            updates.push((*id, pose));
+        }
+        for (id, pose) in updates {
+            if let Some(record) = self.bodies.get_mut(&id) {
+                record.spawn.pose = pose;
+            }
+        }
+
+        PhysicsStepReport {
+            backend: self.backend_kind(),
+            dt_seconds,
+            body_count: self.bodies.len(),
+            collider_count: self.collider_count,
+            active_body_count,
+            terrain_patch_count: self.terrain_patches.len() + self.terrain_sections.len(),
+            body_pose_update_count,
+        }
+    }
+
+    fn box3d_body_pose(&self, body: box3d::BodyId) -> PhysicsBodyPose {
+        physics_pose_box3d(self.world.body_position(body), self.world.body_rotation(body))
+    }
+
+    fn insert_terrain_patch_body(&mut self, patch: PhysicsTerrainPatch) -> Option<box3d::BodyId> {
+        if patch.solid_cell_count == 0 {
+            return None;
+        }
+        let bounds = patch.bounds;
+        if !bounds.is_finite() {
+            return None;
+        }
+        let width = bounds.max_x - bounds.min_x;
+        let height = bounds.max_y - bounds.min_y;
+        let depth = bounds.max_z - bounds.min_z;
+        if width <= 0.0 || height <= 0.0 || depth <= 0.0 {
+            return None;
+        }
+        let center = Vec3d::new(
+            (bounds.min_x + bounds.max_x) * 0.5,
+            (bounds.min_y + bounds.max_y) * 0.5,
+            (bounds.min_z + bounds.max_z) * 0.5,
+        );
+        let body = self.world.create_body(box3d_static_body_def());
+        let shape_def = box3d_shape_def();
+        let hull = box3d::BoxHull::offset(
+            positive_box3d_real(width * 0.5),
+            positive_box3d_real(height * 0.5),
+            positive_box3d_real(depth * 0.5),
+            box3d_vec(center),
+        );
+        self.world.create_hull_shape(body, &shape_def, &hull);
+        Some(body)
+    }
+
+    fn insert_terrain_section_body(
+        &mut self,
+        section: &PhysicsTerrainSection,
+    ) -> (Option<box3d::BodyId>, usize) {
+        let runs = box3d_section_merged_x_run_boxes(section);
+        if runs.is_empty() {
+            return (None, 0);
+        }
+        let body = self.world.create_body(box3d_static_body_def());
+        let shape_def = box3d_shape_def();
+        for (center, half_extents) in &runs {
+            let hull = box3d::BoxHull::offset(
+                positive_box3d_real(half_extents.x),
+                positive_box3d_real(half_extents.y),
+                positive_box3d_real(half_extents.z),
+                box3d_vec(*center),
+            );
+            self.world.create_hull_shape(body, &shape_def, &hull);
+        }
+        let shape_count = runs.len();
+        (Some(body), shape_count)
+    }
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_body_type(kind: PhysicsBodyKind) -> box3d::BodyType {
+    match kind {
+        PhysicsBodyKind::Dynamic => box3d::BodyType::Dynamic,
+        PhysicsBodyKind::Kinematic => box3d::BodyType::Kinematic,
+        PhysicsBodyKind::Fixed => box3d::BodyType::Static,
+    }
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_body_def(spawn: PhysicsBodySpawn) -> box3d::BodyDef {
+    box3d::BodyDef::builder()
+        .body_type(box3d_body_type(spawn.kind))
+        .position(box3d_pos(spawn.pose.position))
+        .rotation(box3d_quat(spawn.pose.rotation))
+        .linear_velocity(box3d_vec(spawn.velocity.linear))
+        .angular_velocity(box3d_vec(spawn.velocity.angular))
+        .build()
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_static_body_def() -> box3d::BodyDef {
+    box3d::BodyDef::builder()
+        .body_type(box3d::BodyType::Static)
+        .position(box3d::Pos::new(0.0, 0.0, 0.0))
+        .build()
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_shape_def() -> box3d::ShapeDef {
+    box3d::ShapeDef::builder().density(1.0).build()
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_pos(value: Vec3d) -> box3d::Pos {
+    box3d::Pos::new(value.x as f32, value.y as f32, value.z as f32)
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_vec(value: Vec3d) -> box3d::Vec3 {
+    box3d::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_quat(rotation: PhysicsRotation) -> box3d::Quat {
+    if !rotation.x.is_finite()
+        || !rotation.y.is_finite()
+        || !rotation.z.is_finite()
+        || !rotation.w.is_finite()
+    {
+        return box3d::Quat::IDENTITY;
+    }
+    let length_squared =
+        rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w;
+    if length_squared <= f64::EPSILON {
+        return box3d::Quat::IDENTITY;
+    }
+    let inverse_length = 1.0 / length_squared.sqrt();
+    box3d::Quat::new(
+        box3d::Vec3::new(
+            (rotation.x * inverse_length) as f32,
+            (rotation.y * inverse_length) as f32,
+            (rotation.z * inverse_length) as f32,
+        ),
+        (rotation.w * inverse_length) as f32,
+    )
+}
+
+#[cfg(feature = "box3d")]
+fn physics_pose_box3d(position: box3d::Pos, rotation: box3d::Quat) -> PhysicsBodyPose {
+    PhysicsBodyPose {
+        position: Vec3d::new(
+            f64::from(position.x),
+            f64::from(position.y),
+            f64::from(position.z),
+        ),
+        rotation: PhysicsRotation {
+            x: f64::from(rotation.v.x),
+            y: f64::from(rotation.v.y),
+            z: f64::from(rotation.v.z),
+            w: f64::from(rotation.s),
+        },
+    }
+}
+
+#[cfg(feature = "box3d")]
+fn physics_vec_box3d(value: box3d::Vec3) -> Vec3d {
+    Vec3d::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
+}
+
+#[cfg(feature = "box3d")]
+fn positive_box3d_real(value: f64) -> f32 {
+    value.max(1.0e-4) as f32
+}
+
+#[cfg(feature = "box3d")]
+fn box3d_section_merged_x_run_boxes(section: &PhysicsTerrainSection) -> Vec<(Vec3d, Vec3d)> {
+    let mut boxes = Vec::new();
+    let voxel_size = section.voxel_size;
+    for y in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+        for z in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+            let mut x = 0;
+            while x < PHYSICS_TERRAIN_SECTION_WIDTH {
+                if !section.is_solid(x, y, z) {
+                    x += 1;
+                    continue;
+                }
+                let start_x = x;
+                while x < PHYSICS_TERRAIN_SECTION_WIDTH && section.is_solid(x, y, z) {
+                    x += 1;
+                }
+                let run_width = x - start_x;
+                let center = Vec3d::new(
+                    section.origin.x + (start_x as f64 + run_width as f64 * 0.5) * voxel_size,
+                    section.origin.y + (y as f64 + 0.5) * voxel_size,
+                    section.origin.z + (z as f64 + 0.5) * voxel_size,
+                );
+                let half_extents = Vec3d::new(
+                    run_width as f64 * voxel_size * 0.5,
+                    voxel_size * 0.5,
+                    voxel_size * 0.5,
+                );
+                boxes.push((center, half_extents));
+            }
+        }
+    }
+    boxes
 }
 
 impl Default for PhysicsBackendKind {
@@ -1812,5 +2376,67 @@ mod tests {
             .iter()
             .find(|report| report.candidate == candidate)
             .expect("candidate report")
+    }
+
+    #[cfg(feature = "box3d")]
+    #[test]
+    fn box3d_world_simulates_dynamic_cube_against_static_section() {
+        let mut world = PhysicsWorld::new(PhysicsBackendKind::Box3d);
+        let mut section = PhysicsTerrainSection::new(Vec3d::ZERO, 1.0);
+        for x in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+            for z in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+                assert!(section.set_solid(x, 0, z, true));
+            }
+        }
+        let terrain = world.add_terrain_section(section.clone());
+        let body = world.spawn_body(PhysicsBodySpawn::dynamic_cube(
+            Vec3d::new(8.0, 4.0, 8.0),
+            0.5,
+            Vec3d::ZERO,
+        ));
+
+        let mut updated_while_falling = false;
+        for _ in 0..160 {
+            let report = world.step(1.0 / 60.0);
+            assert_eq!(report.backend, PhysicsBackendKind::Box3d);
+            assert_eq!(report.body_count, 1);
+            assert_eq!(report.terrain_patch_count, 1);
+            assert!(report.collider_count >= 2);
+            updated_while_falling |= report.body_pose_update_count > 0;
+        }
+
+        let pose = world.body_pose(body).expect("dynamic body pose");
+        assert!(updated_while_falling);
+        assert!(
+            pose.position.y > 1.4 && pose.position.y < 1.8,
+            "cube should settle on section floor top, got y={}",
+            pose.position.y
+        );
+        assert_eq!(world.terrain_section(terrain), Some(&section));
+    }
+
+    #[cfg(feature = "box3d")]
+    #[test]
+    fn box3d_world_sets_body_velocity_and_gravity() {
+        let mut world = PhysicsWorld::new(PhysicsBackendKind::Box3d);
+        assert_eq!(world.gravity(), Vec3d::new(0.0, -9.81, 0.0));
+        let gravity = Vec3d::new(0.0, -32.0, 0.0);
+        assert!(world.set_gravity(gravity));
+        assert_eq!(world.gravity(), gravity);
+        assert!(!world.set_gravity(Vec3d::new(f64::NAN, 0.0, 0.0)));
+
+        let body = world.spawn_body(PhysicsBodySpawn::dynamic_cube(
+            Vec3d::ZERO,
+            0.5,
+            Vec3d::ZERO,
+        ));
+        let velocity = PhysicsBodyVelocity {
+            linear: Vec3d::new(3.0, 4.0, 5.0),
+            angular: Vec3d::new(0.25, 0.5, 0.75),
+        };
+        assert!(world.set_body_velocity(body, velocity));
+        let actual = world.body_velocity(body).expect("body velocity");
+        assert!(actual.linear.distance_to_sqr(velocity.linear) < 1.0e-6);
+        assert!(actual.angular.distance_to_sqr(velocity.angular) < 1.0e-6);
     }
 }

@@ -17,7 +17,7 @@ mod visibility;
 
 pub(crate) use mob::MobPlayerTarget;
 pub(crate) use state::ServerEntityState;
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 pub(crate) use store::DebugPhysicsCubeEntitySpawn;
 pub(crate) use store::{ItemPickupTarget, ServerEntityStore};
 pub(crate) use tracking::{EntityTracking, RoutedEntityUpdate};

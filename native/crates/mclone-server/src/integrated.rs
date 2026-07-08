@@ -14,7 +14,7 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Vec3d,
     obfuscate_biome_zoom_seed,
 };
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     ChunkView, ClientCommand, InteractionHand, MovePlayerCommand, PlayerActionCommand,
@@ -51,7 +51,7 @@ use crate::falling_block::{
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::persistence::{EntityChunkRecord, EntityPersistentId};
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 use crate::physics_runtime::ServerPhysicsRuntime;
 use crate::placement::DebugBlockItem;
 use crate::player::{MovePlayerApplyResult, ServerPlayerState};
@@ -69,13 +69,13 @@ use crate::{
     ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos, WorldStore,
 };
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 const DEBUG_PHYSICS_CUBE_EYE_HEIGHT: f64 = 1.5;
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 const DEBUG_PHYSICS_CUBE_SPAWN_DISTANCE: f64 = 1.25;
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 const DEBUG_PHYSICS_CUBE_LAUNCH_SPEED: f64 = 14.0;
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 const DEBUG_PHYSICS_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK: u32 = 3;
 const DEFAULT_PHYSICS_STEP_DT_SECONDS: f64 = 1.0 / 60.0;
@@ -103,9 +103,9 @@ pub struct IntegratedServer {
     entities: ServerEntityStore,
     entity_tracking: EntityTracking,
     dirty_entity_chunks: BTreeSet<ChunkPos>,
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     physics: ServerPhysicsRuntime,
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     debug_physics_player_target: Option<CommandTarget>,
     loading_progress: ChunkLoadingProgress,
 }
@@ -342,9 +342,9 @@ impl IntegratedServer {
             entities: ServerEntityStore::default(),
             entity_tracking: EntityTracking::default(),
             dirty_entity_chunks: BTreeSet::new(),
-            #[cfg(feature = "physics-rapier")]
+            #[cfg(feature = "physics-engine")]
             physics: ServerPhysicsRuntime::new(),
-            #[cfg(feature = "physics-rapier")]
+            #[cfg(feature = "physics-engine")]
             debug_physics_player_target: None,
             loading_progress,
         }
@@ -415,24 +415,24 @@ impl IntegratedServer {
     }
 
     pub fn physics_diagnostics(&self) -> ServerPhysicsTickDiagnostics {
-        #[cfg(feature = "physics-rapier")]
+        #[cfg(feature = "physics-engine")]
         {
             return self.physics.diagnostics();
         }
-        #[cfg(not(feature = "physics-rapier"))]
+        #[cfg(not(feature = "physics-engine"))]
         {
             ServerPhysicsTickDiagnostics::default()
         }
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     pub fn spawn_debug_physics_cube(&mut self, position: Vec3d, velocity: Vec3d) -> bool {
         self.debug_physics_player_target = None;
         self.physics
             .spawn_debug_cube(&self.scheduler, position, velocity, None)
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     pub fn debug_physics_cube_pose(&self) -> Option<mclone_physics::PhysicsBodyPose> {
         self.physics.debug_cube_pose()
     }
@@ -823,10 +823,10 @@ impl IntegratedServer {
         let physics = if physics_steps == 0 {
             self.physics_diagnostics()
         } else {
-            #[cfg(feature = "physics-rapier")]
+            #[cfg(feature = "physics-engine")]
             self.sync_debug_physics_player_collider();
             let physics = self.step_physics_steps(physics_steps, physics_step_dt_seconds);
-            #[cfg(feature = "physics-rapier")]
+            #[cfg(feature = "physics-engine")]
             if let Some(entity) = self.sync_debug_physics_cube_entity(simulation_tick, physics) {
                 entity_updates.push(entity);
             }
@@ -919,7 +919,7 @@ impl IntegratedServer {
         let total_start = simulation_timing_start();
 
         let physics_tick_start = simulation_timing_start();
-        #[cfg(feature = "physics-rapier")]
+        #[cfg(feature = "physics-engine")]
         if physics_steps > 0 {
             self.sync_debug_physics_player_collider();
         }
@@ -927,7 +927,7 @@ impl IntegratedServer {
         let physics_tick_us = simulation_timing_elapsed_us(physics_tick_start);
 
         let physics_event_apply_start = simulation_timing_start();
-        #[cfg(feature = "physics-rapier")]
+        #[cfg(feature = "physics-engine")]
         if physics_steps > 0 {
             if let Some(entity) = self.sync_debug_physics_cube_entity(self.simulation_tick, physics)
             {
@@ -1155,12 +1155,12 @@ impl IntegratedServer {
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ServerPhysicsTickDiagnostics {
-        #[cfg(feature = "physics-rapier")]
+        #[cfg(feature = "physics-engine")]
         {
             self.physics
                 .step_steps(physics_steps, physics_step_dt_seconds)
         }
-        #[cfg(not(feature = "physics-rapier"))]
+        #[cfg(not(feature = "physics-engine"))]
         {
             let _ = physics_steps;
             let _ = physics_step_dt_seconds;
@@ -1330,12 +1330,12 @@ impl IntegratedServer {
         &mut self,
         target: CommandTarget,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        #[cfg(not(feature = "physics-rapier"))]
+        #[cfg(not(feature = "physics-engine"))]
         {
             self.ensure_target_exists(target)?;
             Ok(Vec::new())
         }
-        #[cfg(feature = "physics-rapier")]
+        #[cfg(feature = "physics-engine")]
         {
             let (position, y_rot_degrees, x_rot_degrees) = {
                 let player = self.player_for_target(target)?;
@@ -1694,7 +1694,7 @@ impl IntegratedServer {
         }
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     fn spawn_debug_physics_cube_entity(
         &mut self,
         age_ticks: u64,
@@ -1713,7 +1713,7 @@ impl IntegratedServer {
         ))
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     fn sync_debug_physics_cube_entity(
         &mut self,
         age_ticks: u64,
@@ -1732,7 +1732,7 @@ impl IntegratedServer {
         ))
     }
 
-    #[cfg(feature = "physics-rapier")]
+    #[cfg(feature = "physics-engine")]
     fn sync_debug_physics_player_collider(&mut self) {
         let Some(target) = self.debug_physics_player_target else {
             return;
@@ -1958,14 +1958,14 @@ fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId
     RawBlockId::try_from(block_state.0).ok()
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DebugPhysicsCubeLaunch {
     position: Vec3d,
     velocity: Vec3d,
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 fn debug_physics_cube_launch(
     player_position: Vec3d,
     y_rot_degrees: f32,
@@ -1980,7 +1980,7 @@ fn debug_physics_cube_launch(
     }
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 fn debug_physics_cube_entity_pose(
     pose: mclone_physics::PhysicsBodyPose,
 ) -> (Vec3d, f32, f32, EntityRotation) {
@@ -1999,7 +1999,7 @@ fn debug_physics_cube_entity_pose(
     )
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 fn debug_physics_entity_rotation(rotation: mclone_physics::PhysicsRotation) -> EntityRotation {
     let len_sqr = rotation.x * rotation.x
         + rotation.y * rotation.y
@@ -2017,7 +2017,7 @@ fn debug_physics_entity_rotation(rotation: mclone_physics::PhysicsRotation) -> E
     }
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 fn rotate_debug_physics_vector(rotation: mclone_physics::PhysicsRotation, vector: Vec3d) -> Vec3d {
     let len_sqr = rotation.x * rotation.x
         + rotation.y * rotation.y
@@ -2041,7 +2041,7 @@ fn rotate_debug_physics_vector(rotation: mclone_physics::PhysicsRotation, vector
     )
 }
 
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 fn look_direction_from_rot(y_rot_degrees: f32, x_rot_degrees: f32) -> Vec3d {
     let yaw = f64::from(y_rot_degrees).to_radians();
     let pitch = f64::from(x_rot_degrees).to_radians();

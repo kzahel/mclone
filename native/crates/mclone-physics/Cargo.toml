@@ -7,10 +7,12 @@ publish.workspace = true
 
 [dependencies]
 mclone-core.workspace = true
+boxddd = { version = "0.2", optional = true }
 rapier3d = { version = "0.33", optional = true }
 
 [features]
 default = []
+box3d = ["dep:boxddd"]
 rapier = ["dep:rapier3d"]
 rapier-deterministic = ["rapier", "rapier3d/enhanced-determinism"]
 rapier-parallel = ["rapier", "rapier3d/parallel"]

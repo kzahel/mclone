@@ -278,6 +278,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxddd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af9a42cf50d7d8c76f4be0cc03c221c909dd41bc2fa64d5554c793f707cfe3e6"
+dependencies = [
+ "boxddd-sys",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "boxddd-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e18fc5652f90cfb65881293956ef9ea6a1d426bec6c9048547b76b7990234c4"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1597,6 +1616,7 @@ dependencies = [
 name = "mclone-physics"
 version = "0.0.0"
 dependencies = [
+ "boxddd",
  "mclone-core",
  "rapier3d",
 ]

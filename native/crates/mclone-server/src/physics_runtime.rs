@@ -50,7 +50,16 @@ pub(crate) struct ServerPhysicsRuntime {
 
 impl ServerPhysicsRuntime {
     pub(crate) fn new() -> Self {
-        let mut world = PhysicsWorld::new(PhysicsBackendKind::Rapier);
+        // Compile-time backend selection. Exactly one concrete engine feature is
+        // normally enabled; if both are on, Box3D wins. The degenerate
+        // engine-marker-without-a-backend case falls back to the no-op world.
+        #[cfg(feature = "physics-box3d")]
+        let backend = PhysicsBackendKind::Box3d;
+        #[cfg(all(feature = "physics-rapier", not(feature = "physics-box3d")))]
+        let backend = PhysicsBackendKind::Rapier;
+        #[cfg(not(any(feature = "physics-rapier", feature = "physics-box3d")))]
+        let backend = PhysicsBackendKind::Noop;
+        let mut world = PhysicsWorld::new(backend);
         let _ = world.set_gravity(SERVER_PHYSICS_GRAVITY);
         Self {
             world,

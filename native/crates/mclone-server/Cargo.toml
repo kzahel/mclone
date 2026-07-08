@@ -19,7 +19,11 @@ mclone-worldgen.workspace = true
 default = []
 perf-diagnostics = ["mclone-light/perf-diagnostics"]
 physics = ["dep:mclone-physics"]
-physics-rapier = ["physics", "mclone-physics/rapier"]
+# Umbrella marker: "a physics engine backend is compiled into the server runtime".
+# Enabled by whichever concrete engine feature is selected; never selected alone.
+physics-engine = ["physics"]
+physics-rapier = ["physics-engine", "mclone-physics/rapier"]
+physics-box3d = ["physics-engine", "mclone-physics/box3d"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true

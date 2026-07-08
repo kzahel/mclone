@@ -20,7 +20,7 @@ mod light_world;
 mod lighting_seed;
 mod loading_progress;
 mod persistence;
-#[cfg(feature = "physics-rapier")]
+#[cfg(feature = "physics-engine")]
 mod physics_runtime;
 #[cfg(feature = "physics")]
 mod physics_terrain;
