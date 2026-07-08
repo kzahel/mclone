@@ -25,7 +25,7 @@ use mclone_app_runtime::frame_render::{
     record_render_section_update_stats,
 };
 use mclone_app_runtime::host_mode::SingleViewHostMode;
-use mclone_app_runtime::local_single_view::LocalSingleViewStartupStep;
+use mclone_app_runtime::native_session_runtime::LocalIntegratedStartupStep;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
@@ -1797,7 +1797,7 @@ impl FlatClientDriver {
     fn complete_local_world_startup(
         &mut self,
         startup: FlatClientPendingStartup,
-        step: LocalSingleViewStartupStep,
+        step: LocalIntegratedStartupStep,
         device: Option<&wgpu::Device>,
     ) -> anyhow::Result<FlatClientSessionUpdate> {
         let descriptor = startup.descriptor;

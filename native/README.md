@@ -44,7 +44,7 @@ The Rust workspace owns live engine implementation:
 - `mclone-assets`: blockstate/model/texture/NBT asset loading.
 - `mclone-render`: `wgpu` renderer.
 - `mclone-render-session`: render-section dirty/cache/compile and camera-controller contracts.
-- `mclone-app-runtime`: shared single-view runtime/render helpers and native asset loading.
+- `mclone-app-runtime`: shared client runtime/render helpers and native asset loading.
 - `mclone-ui`: shared Rust/WebGPU UI model.
 - `mclone-xr-host`: shared OpenXR host/session/frame/action/view helpers.
 - `mclone-xr-graphics`: shared Vulkan OpenXR/`wgpu` graphics bridge.

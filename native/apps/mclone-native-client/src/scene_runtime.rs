@@ -6,10 +6,10 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::far_lod::FarTerrainLodConfig;
 use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
-use mclone_app_runtime::local_single_view::{
-    IntegratedWorldSessionStorage, LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime,
-    LocalSingleViewStartupPump, LocalSingleViewStartupStep, NativeSingleViewSceneRuntime,
-    build_local_single_view_client_runtime,
+use mclone_app_runtime::native_session_runtime::{
+    IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedSceneRuntime,
+    LocalIntegratedStartupPump, LocalIntegratedStartupStep, NativeSceneRuntime,
+    build_local_integrated_client_runtime,
 };
 use mclone_app_runtime::{
     GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
@@ -45,7 +45,7 @@ use mclone_render_session::{
 use mclone_render_session::{RenderSectionSession, render_section_neighbor_readiness};
 
 pub(crate) type WindowRuntimeStats = SingleViewRuntimeStats;
-pub(crate) type NativeWindowSceneRuntime = NativeSingleViewSceneRuntime<RemoteServerSession>;
+pub(crate) type NativeWindowSceneRuntime = NativeSceneRuntime<RemoteServerSession>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct WindowSceneAssets {
@@ -90,7 +90,7 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     let render_distance = scene_render_distance(scene)?;
     let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
     let Some(remote_addr) = &scene.remote_addr else {
-        return build_local_single_view_client_runtime(local_single_view_options(scene)?);
+        return build_local_integrated_client_runtime(local_integrated_scene_options(scene)?);
     };
 
     let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
@@ -103,12 +103,12 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     )
 }
 
-pub(crate) fn local_single_view_options(
+pub(crate) fn local_integrated_scene_options(
     scene: &SceneOptions,
-) -> Result<LocalSingleViewSceneOptions> {
+) -> Result<LocalIntegratedSceneOptions> {
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
-    let options = LocalSingleViewSceneOptions::new(
+    let options = LocalIntegratedSceneOptions::new(
         scene.seed,
         ChunkPos::new(scene.chunk_x, scene.chunk_z),
         scene_render_distance(scene)?,
@@ -141,7 +141,7 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
     let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
     let Some(remote_addr) = &scene.remote_addr else {
         return NativeWindowSceneRuntime::local_with_mesh_assets(
-            local_single_view_options(scene)?,
+            local_integrated_scene_options(scene)?,
             mesh_assets,
         );
     };
@@ -168,30 +168,30 @@ pub(crate) struct WindowSceneRuntime {
 
 #[derive(Debug)]
 pub(crate) struct WindowSceneStartupPump {
-    pump: LocalSingleViewStartupPump,
+    pump: LocalIntegratedStartupPump,
     actor_textures: ActorTextureAssets,
 }
 
 impl WindowSceneStartupPump {
     pub(crate) fn new_local(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
         Self::with_local_options(
-            local_single_view_options(scene)?.with_initial_spawn_center(),
+            local_integrated_scene_options(scene)?.with_initial_spawn_center(),
             assets,
         )
     }
 
     pub(crate) fn with_local_options(
-        options: LocalSingleViewSceneOptions,
+        options: LocalIntegratedSceneOptions,
         assets: &WindowSceneAssets,
     ) -> Result<Self> {
         Ok(Self {
-            pump: LocalSingleViewStartupPump::with_mesh_assets(options, assets.mesh_assets.clone())
+            pump: LocalIntegratedStartupPump::with_mesh_assets(options, assets.mesh_assets.clone())
                 .context("failed to create local world startup pump")?,
             actor_textures: assets.actor_textures.clone(),
         })
     }
 
-    pub(crate) fn step(&mut self, camera_position: Vec3) -> Result<LocalSingleViewStartupStep> {
+    pub(crate) fn step(&mut self, camera_position: Vec3) -> Result<LocalIntegratedStartupStep> {
         self.pump.step(camera_position)
     }
 
@@ -217,7 +217,7 @@ impl WindowSceneRuntime {
     }
 
     fn from_local_runtime(
-        runtime: LocalSingleViewSceneRuntime,
+        runtime: LocalIntegratedSceneRuntime,
         actor_textures: ActorTextureAssets,
     ) -> Self {
         Self {

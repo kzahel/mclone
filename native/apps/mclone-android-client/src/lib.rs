@@ -37,9 +37,9 @@ mod android {
         RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
         SingleViewHostOptions,
     };
-    use mclone_app_runtime::local_single_view::{
-        IntegratedWorldSessionStorage, LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
-        NativeSingleViewSessionRuntime,
+    use mclone_app_runtime::native_session_runtime::{
+        IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneRuntime,
+        NativeSessionRuntime,
     };
     use mclone_app_runtime::render_assets::{
         DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -223,7 +223,7 @@ mod android {
         gui: GuiRenderer,
         world_catalog: Option<NativeWorldCatalog>,
         scene_options: AndroidSceneOptions,
-        scene: AndroidSingleViewSceneRuntime,
+        scene: AndroidGameSessionRuntime,
         camera: EngineCameraController,
         interaction: ClientInteractionController,
         input_capabilities: InputCapabilityState,
@@ -249,7 +249,7 @@ mod android {
     }
 
     struct StartedAndroidRenderScene {
-        scene: AndroidSingleViewSceneRuntime,
+        scene: AndroidGameSessionRuntime,
         camera: EngineCameraController,
         draw: TexturedSectionDrawResources,
         render_stats: RenderStreamStats,
@@ -2108,7 +2108,7 @@ mod android {
         descriptor: Option<ActiveSessionDescriptor>,
     ) -> Result<StartedAndroidRenderScene> {
         let movement_speed_multiplier = options.movement_speed_multiplier;
-        let mut scene = android_single_view_scene_runtime(options, descriptor)?;
+        let mut scene = android_game_session_runtime(options, descriptor)?;
         let host_label = scene.host_label();
         let session_label = active_session_label(scene.active_session());
         let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
@@ -2206,9 +2206,9 @@ mod android {
     }
 
     impl AndroidSceneOptions {
-        fn local_options(&self) -> LocalSingleViewSceneOptions {
+        fn local_options(&self) -> LocalIntegratedSceneOptions {
             let storage = IntegratedWorldSessionStorage::from_world_dir(self.world_dir.as_deref());
-            LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
+            LocalIntegratedSceneOptions::new(self.seed, self.center, self.render_distance)
                 .with_initial_spawn_center()
                 .with_day_time(self.day_time_override)
                 .with_freeze_time(self.freeze_time)
@@ -2588,30 +2588,27 @@ mod android {
         })
     }
 
-    type AndroidSingleViewSceneRuntime = NativeSingleViewSessionRuntime<AndroidRemoteServerSession>;
+    type AndroidGameSessionRuntime = NativeSessionRuntime<AndroidRemoteServerSession>;
 
-    fn android_single_view_scene_runtime(
+    fn android_game_session_runtime(
         options: AndroidSceneOptions,
         descriptor: Option<ActiveSessionDescriptor>,
-    ) -> Result<AndroidSingleViewSceneRuntime> {
+    ) -> Result<AndroidGameSessionRuntime> {
         let descriptor = descriptor.unwrap_or_else(|| android_active_session_descriptor(&options));
         if let Some(remote_addr) = &options.remote_addr {
             let session = AndroidRemoteServerSession::connect(remote_addr.as_str())?;
-            let runtime = NativeSingleViewSceneRuntime::remote_dedicated(
-                options.host_options(),
-                session,
-            )
-            .with_context(|| {
-                format!("failed to initialize Android remote dedicated runtime from {remote_addr}")
-            })?;
+            let runtime = NativeSceneRuntime::remote_dedicated(options.host_options(), session)
+                .with_context(|| {
+                    format!(
+                        "failed to initialize Android remote dedicated runtime from {remote_addr}"
+                    )
+                })?;
             return Ok(
-                AndroidSingleViewSceneRuntime::from_active_runtime_with_descriptor(
-                    descriptor, runtime,
-                ),
+                AndroidGameSessionRuntime::from_active_runtime_with_descriptor(descriptor, runtime),
             );
         }
-        let runtime = NativeSingleViewSceneRuntime::local(options.local_options())?;
-        Ok(AndroidSingleViewSceneRuntime::from_active_runtime_with_descriptor(descriptor, runtime))
+        let runtime = NativeSceneRuntime::local(options.local_options())?;
+        Ok(AndroidGameSessionRuntime::from_active_runtime_with_descriptor(descriptor, runtime))
     }
 
     fn android_active_session_descriptor(options: &AndroidSceneOptions) -> ActiveSessionDescriptor {
@@ -3126,7 +3123,7 @@ mod android {
     }
 
     fn commit_engine_camera_player_pose(
-        scene: &mut AndroidSingleViewSceneRuntime,
+        scene: &mut AndroidGameSessionRuntime,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
         let server_changed = sync_engine_camera_player_pose(scene, camera)?;
@@ -3135,7 +3132,7 @@ mod android {
     }
 
     fn sync_engine_camera_player_pose(
-        scene: &mut AndroidSingleViewSceneRuntime,
+        scene: &mut AndroidGameSessionRuntime,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
         let changed = if let Some(report) = camera.next_pose_sync_command() {
@@ -3149,7 +3146,7 @@ mod android {
     }
 
     fn apply_pending_engine_camera_position_updates(
-        scene: &mut AndroidSingleViewSceneRuntime,
+        scene: &mut AndroidGameSessionRuntime,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
         let mut changed = false;
@@ -3178,7 +3175,7 @@ mod android {
     }
 
     fn update_interest_from_engine_camera(
-        scene: &mut AndroidSingleViewSceneRuntime,
+        scene: &mut AndroidGameSessionRuntime,
         camera: &EngineCameraController,
     ) -> Result<bool> {
         let snapshot = camera.snapshot();

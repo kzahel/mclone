@@ -7,14 +7,14 @@ pub(crate) type XrSessionRuntimeFactory<S> = Box<
         SessionStartRequest,
         XrSceneOptions,
         TexturedMeshAssets,
-    ) -> Result<NativeSingleViewSessionRuntime<S>>,
+    ) -> Result<NativeSessionRuntime<S>>,
 >;
 
 pub(crate) struct StartedXrTerrainRuntime<S>
 where
     S: RemoteDedicatedServerSession,
 {
-    runtime: NativeSingleViewSessionRuntime<S>,
+    runtime: NativeSessionRuntime<S>,
     camera: EngineCameraController,
     draw: TexturedSectionDrawResources,
     render_stats: RenderStreamStats,
@@ -24,7 +24,7 @@ pub(crate) struct XrLocalStartup {
     pub(super) request: SessionStartRequest,
     pub(super) descriptor: Option<ActiveSessionDescriptor>,
     pub(super) scene: XrSceneOptions,
-    pub(super) pump: LocalSingleViewStartupPump,
+    pub(super) pump: LocalIntegratedStartupPump,
     pub(super) camera: EngineCameraController,
     pub(super) startup_view_pose: Option<XrStartupViewPose>,
 }
@@ -125,8 +125,8 @@ where
         world_gui_renderer
             .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
             .context("upload initial XR GUI atlas")?;
-        let pump = LocalSingleViewStartupPump::with_mesh_assets(
-            local_single_view_options(&scene),
+        let pump = LocalIntegratedStartupPump::with_mesh_assets(
+            local_integrated_scene_options(&scene),
             mesh_assets.clone(),
         )
         .context("create initial XR local world startup pump")?;
@@ -231,7 +231,7 @@ where
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
         scene: XrSceneOptions,
-        runtime: NativeSingleViewSessionRuntime<S>,
+        runtime: NativeSessionRuntime<S>,
         render_options: TexturedSectionRenderOptions,
         actor_atlas: ActorTextureImage,
         actor_figures: ActorFigureSet,
@@ -374,7 +374,7 @@ where
                 SessionStartRequest,
                 XrSceneOptions,
                 TexturedMeshAssets,
-            ) -> Result<NativeSingleViewSessionRuntime<S>>
+            ) -> Result<NativeSessionRuntime<S>>
             + 'static,
     {
         self.session_runtime_factory = Some(Box::new(factory));
@@ -547,8 +547,8 @@ where
     ) -> Result<()> {
         let scene = scene.validated()?;
         let mesh_assets = self.mesh_assets.clone();
-        let pump = LocalSingleViewStartupPump::with_mesh_assets(
-            local_single_view_options(&scene),
+        let pump = LocalIntegratedStartupPump::with_mesh_assets(
+            local_integrated_scene_options(&scene),
             mesh_assets,
         )
         .context("create XR local world startup pump")?;
@@ -641,7 +641,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         startup: XrLocalStartup,
-        step: LocalSingleViewStartupStep,
+        step: LocalIntegratedStartupStep,
     ) -> Result<()> {
         let XrLocalStartup {
             request,
@@ -654,9 +654,9 @@ where
         let descriptor = descriptor
             .or_else(|| request.active_descriptor())
             .context("XR local startup request did not describe an active session")?;
-        let mut runtime = NativeSingleViewSessionRuntime::<S>::from_active_runtime_with_descriptor(
+        let mut runtime = NativeSessionRuntime::<S>::from_active_runtime_with_descriptor(
             descriptor.clone(),
-            NativeSingleViewSceneRuntime::Local(pump.into_runtime()),
+            NativeSceneRuntime::Local(pump.into_runtime()),
         );
         let mut initial_pose_changed =
             apply_pending_engine_camera_position_updates_for_runtime(&mut runtime, &mut camera)
@@ -1306,7 +1306,7 @@ pub(crate) fn start_xr_terrain_runtime<S>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
-    mut runtime: NativeSingleViewSessionRuntime<S>,
+    mut runtime: NativeSessionRuntime<S>,
     movement_speed_multiplier: f32,
     startup_view_pose: Option<XrStartupViewPose>,
 ) -> Result<StartedXrTerrainRuntime<S>>
@@ -1410,7 +1410,7 @@ where
 }
 
 pub(crate) fn commit_engine_camera_player_pose_for_runtime<S>(
-    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    runtime: &mut NativeSessionRuntime<S>,
     camera: &mut EngineCameraController,
     context: &'static str,
 ) -> Result<bool>
@@ -1422,7 +1422,7 @@ where
 }
 
 pub(crate) fn commit_engine_camera_player_pose_for_runtime_timed<S>(
-    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    runtime: &mut NativeSessionRuntime<S>,
     camera: &mut EngineCameraController,
     context: &'static str,
 ) -> Result<(bool, XrCameraCommitTiming)>
@@ -1440,7 +1440,7 @@ where
 }
 
 pub(crate) fn sync_engine_camera_player_pose_for_runtime_timed<S>(
-    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    runtime: &mut NativeSessionRuntime<S>,
     camera: &mut EngineCameraController,
 ) -> Result<(bool, XrCameraCommitTiming)>
 where
@@ -1477,7 +1477,7 @@ where
 }
 
 pub(crate) fn apply_pending_engine_camera_position_updates_for_runtime<S>(
-    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    runtime: &mut NativeSessionRuntime<S>,
     camera: &mut EngineCameraController,
 ) -> Result<bool>
 where
@@ -1509,7 +1509,7 @@ where
 }
 
 pub(crate) fn update_interest_from_engine_camera_for_runtime<S>(
-    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    runtime: &mut NativeSessionRuntime<S>,
     camera: &EngineCameraController,
 ) -> Result<bool>
 where
@@ -1520,7 +1520,7 @@ where
 }
 
 pub(crate) fn update_interest_from_engine_camera_for_runtime_timed<S>(
-    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    runtime: &mut NativeSessionRuntime<S>,
     camera: &EngineCameraController,
 ) -> Result<(bool, GameplayCommandTiming)>
 where
@@ -1583,10 +1583,12 @@ pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
     ClientExperienceProfile::new(settings)
 }
 
-pub(crate) fn local_single_view_options(scene: &XrSceneOptions) -> LocalSingleViewSceneOptions {
+pub(crate) fn local_integrated_scene_options(
+    scene: &XrSceneOptions,
+) -> LocalIntegratedSceneOptions {
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
-    LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
+    LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
         .with_initial_spawn_center()
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)

@@ -39,7 +39,7 @@ use crate::scene_runtime::{
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::elapsed_ms;
 #[cfg(not(target_os = "android"))]
-use mclone_app_runtime::local_single_view::NativeSingleViewSessionRuntime;
+use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::render_assets::{
     load_actor_texture_assets_from_asset_source, load_textured_mesh_assets_from_source,
@@ -731,7 +731,7 @@ fn create_mclone_terrain_state(
     });
     let mut state = if options.scene.remote_addr.is_some() {
         let request = session_start_request_for_desktop_scene(&options.scene);
-        let runtime = NativeSingleViewSessionRuntime::from_active_runtime(
+        let runtime = NativeSessionRuntime::from_active_runtime(
             request,
             native_window_scene_runtime(&options.scene)?,
         )?;
@@ -766,7 +766,7 @@ fn create_mclone_terrain_state(
     state.set_session_runtime_factory(|request, scene, mesh_assets| {
         let desktop_scene = desktop_scene_options_for_xr_request(&request, &scene);
         let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
-        NativeSingleViewSessionRuntime::from_active_runtime(request, runtime)
+        NativeSessionRuntime::from_active_runtime(request, runtime)
     });
     Ok(state)
 }

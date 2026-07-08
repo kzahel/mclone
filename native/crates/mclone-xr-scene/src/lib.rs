@@ -32,9 +32,9 @@ use mclone_app_runtime::frame_render::{
     render_view_with_underwater_effect,
 };
 use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostMode};
-use mclone_app_runtime::local_single_view::{
-    IntegratedWorldSessionStorage, LocalSingleViewSceneOptions, LocalSingleViewStartupPump,
-    LocalSingleViewStartupStep, NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
+use mclone_app_runtime::native_session_runtime::{
+    IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedStartupPump,
+    LocalIntegratedStartupStep, NativeSceneRuntime, NativeSessionRuntime,
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
@@ -250,7 +250,7 @@ where
     scene: XrSceneOptions,
     color_format: wgpu::TextureFormat,
     mesh_assets: TexturedMeshAssets,
-    runtime: Option<NativeSingleViewSessionRuntime<S>>,
+    runtime: Option<NativeSessionRuntime<S>>,
     local_startup: Option<XrLocalStartup>,
     session: GameSessionCoordinator<XrPendingSessionStart>,
     session_runtime_factory: Option<XrSessionRuntimeFactory<S>>,

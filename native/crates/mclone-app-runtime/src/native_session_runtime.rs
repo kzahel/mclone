@@ -50,10 +50,10 @@ use crate::{
 };
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const DEFAULT_LOCAL_SINGLE_VIEW_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_LOCAL_INTEGRATED_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LocalSingleViewSceneOptions {
+pub struct LocalIntegratedSceneOptions {
     pub seed: i64,
     pub center: ChunkPos,
     pub render_distance: u32,
@@ -118,7 +118,7 @@ impl IntegratedWorldSessionStorage {
     }
 }
 
-impl LocalSingleViewSceneOptions {
+impl LocalIntegratedSceneOptions {
     pub const fn new(seed: i64, center: ChunkPos, render_distance: u32) -> Self {
         Self {
             seed,
@@ -238,7 +238,7 @@ impl LocalSingleViewSceneOptions {
 }
 
 #[derive(Debug)]
-pub struct LocalSingleViewSceneRuntime {
+pub struct LocalIntegratedSceneRuntime {
     core: SingleViewRuntime,
     connection: LocalIntegratedConnection,
     mesh_assets: TexturedMeshAssets,
@@ -280,7 +280,7 @@ impl ClientConnection for LocalIntegratedConnection {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
         self.runner
             .send_command(command)
-            .context("failed to send local single-view integrated server command")
+            .context("failed to send local integrated server command")
     }
 
     fn drain_next_update(
@@ -290,7 +290,7 @@ impl ClientConnection for LocalIntegratedConnection {
         let Some(envelope) = self
             .runner
             .try_recv_update()
-            .context("failed to receive local single-view integrated server update")?
+            .context("failed to receive local integrated server update")?
         else {
             return Ok(ClientConnectionDrainResult::default());
         };
@@ -305,7 +305,7 @@ impl ClientConnection for LocalIntegratedConnection {
         let diagnostics = self
             .runner
             .poll_diagnostics()
-            .context("failed to poll local single-view integrated server diagnostics")?;
+            .context("failed to poll local integrated server diagnostics")?;
         Ok(ClientConnectionQueueMetrics::new(
             diagnostics.update_queue_depth,
             diagnostics.update_queue_bytes,
@@ -390,7 +390,7 @@ impl std::fmt::Debug for DeferredChunkDropWorker {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct LocalSingleViewStartupStep {
+pub struct LocalIntegratedStartupStep {
     pub poll_count: usize,
     pub poll_ms: f64,
     pub changed: bool,
@@ -404,25 +404,25 @@ pub struct LocalSingleViewStartupStep {
 }
 
 #[derive(Debug)]
-pub struct LocalSingleViewStartupPump {
-    runtime: LocalSingleViewSceneRuntime,
+pub struct LocalIntegratedStartupPump {
+    runtime: LocalIntegratedSceneRuntime,
     poll_count: usize,
     poll_ms: f64,
 }
 
-impl LocalSingleViewStartupPump {
+impl LocalIntegratedStartupPump {
     pub fn with_mesh_assets(
-        options: LocalSingleViewSceneOptions,
+        options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         Ok(Self {
-            runtime: LocalSingleViewSceneRuntime::with_mesh_assets(options, mesh_assets)?,
+            runtime: LocalIntegratedSceneRuntime::with_mesh_assets(options, mesh_assets)?,
             poll_count: 0,
             poll_ms: 0.0,
         })
     }
 
-    pub fn step(&mut self, camera_position: Vec3) -> Result<LocalSingleViewStartupStep> {
+    pub fn step(&mut self, camera_position: Vec3) -> Result<LocalIntegratedStartupStep> {
         let poll_start = Instant::now();
         let mut changed = self
             .runtime
@@ -444,7 +444,7 @@ impl LocalSingleViewStartupPump {
         changed |= render_changed;
         let progress = self.progress_overlay();
         let playable_ready = self.playable_ready();
-        Ok(LocalSingleViewStartupStep {
+        Ok(LocalIntegratedStartupStep {
             poll_count: self.poll_count,
             poll_ms: self.poll_ms,
             changed,
@@ -491,23 +491,23 @@ impl LocalSingleViewStartupPump {
         self.poll_ms
     }
 
-    pub fn runtime(&self) -> &LocalSingleViewSceneRuntime {
+    pub fn runtime(&self) -> &LocalIntegratedSceneRuntime {
         &self.runtime
     }
 
-    pub fn into_runtime(self) -> LocalSingleViewSceneRuntime {
+    pub fn into_runtime(self) -> LocalIntegratedSceneRuntime {
         self.runtime
     }
 }
 
-impl LocalSingleViewSceneRuntime {
-    pub fn new(options: LocalSingleViewSceneOptions) -> Result<Self> {
+impl LocalIntegratedSceneRuntime {
+    pub fn new(options: LocalIntegratedSceneOptions) -> Result<Self> {
         let mesh_assets = load_textured_mesh_assets()?;
         Self::with_mesh_assets(options, mesh_assets)
     }
 
     pub fn with_mesh_assets(
-        options: LocalSingleViewSceneOptions,
+        options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         let render_compile_dispatcher =
@@ -520,7 +520,7 @@ impl LocalSingleViewSceneRuntime {
                 options.render_compile_worker_timing_enabled,
             )?;
         let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
-            .context("failed to start local single-view integrated server runner")?;
+            .context("failed to start local integrated server runner")?;
         let mut scene = Self {
             core: SingleViewRuntime::local_integrated_with_seed(
                 options.seed,
@@ -634,7 +634,7 @@ impl LocalSingleViewSceneRuntime {
         }
         self.connection
             .set_simulation_cadence(cadence)
-            .context("failed to set local single-view simulation cadence")?;
+            .context("failed to set local integrated simulation cadence")?;
         self.simulation_cadence = cadence;
         if let Some(diagnostics) = self.last_runner_diagnostics.as_mut() {
             diagnostics.simulation_cadence = cadence;
@@ -661,7 +661,7 @@ impl LocalSingleViewSceneRuntime {
         };
         self.connection
             .send_command_only(command)
-            .context("failed to send local single-view chunk view command")?;
+            .context("failed to send local integrated chunk view command")?;
         Ok(true)
     }
 
@@ -698,7 +698,7 @@ impl LocalSingleViewSceneRuntime {
         let send_start = Instant::now();
         self.connection
             .send_command_only(command)
-            .context("failed to send local single-view gameplay command")?;
+            .context("failed to send local integrated gameplay command")?;
         let send_ms = elapsed_ms(send_start.elapsed());
         let (drain_updates_ms, apply_report) = match policy {
             GameplayCommandUpdatePolicy::DrainImmediately => {
@@ -708,7 +708,7 @@ impl LocalSingleViewSceneRuntime {
                     RuntimeUpdatePumpBudget::unlimited(),
                     ConnectionUpdateDrainMode::ReadyOnly,
                 )
-                .context("failed to drain local single-view integrated server updates")?;
+                .context("failed to drain local integrated server updates")?;
                 let drain_updates_ms = pump_report.drain_updates_ms;
                 (drain_updates_ms, pump_report.apply_report)
             }
@@ -794,7 +794,7 @@ impl LocalSingleViewSceneRuntime {
             let runner_diagnostics = self
                 .connection
                 .poll_diagnostics()
-                .context("failed to poll local single-view integrated server diagnostics")?;
+                .context("failed to poll local integrated server diagnostics")?;
             self.simulation_cadence = runner_diagnostics.simulation_cadence;
             poll_diagnostics_ms = elapsed_ms(diagnostics_start.elapsed());
             self.last_runner_diagnostics = Some(runner_diagnostics);
@@ -816,7 +816,7 @@ impl LocalSingleViewSceneRuntime {
     }
 
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-        self.poll_until_idle_with_timeout(DEFAULT_LOCAL_SINGLE_VIEW_IDLE_TIMEOUT)
+        self.poll_until_idle_with_timeout(DEFAULT_LOCAL_INTEGRATED_IDLE_TIMEOUT)
     }
 
     pub fn poll_until_idle_with_timeout(&mut self, timeout: Duration) -> Result<(usize, f64)> {
@@ -834,7 +834,7 @@ impl LocalSingleViewSceneRuntime {
             }
             if Instant::now() >= deadline {
                 bail!(
-                    "timed out waiting for local single-view worldgen jobs after {:.3}s",
+                    "timed out waiting for local integrated worldgen jobs after {:.3}s",
                     timeout.as_secs_f64()
                 );
             }
@@ -996,44 +996,44 @@ impl LocalSingleViewSceneRuntime {
     fn server_runner_diagnostics(&self) -> Result<ServerRunnerDiagnostics> {
         self.connection
             .poll_diagnostics()
-            .context("failed to poll local single-view integrated server diagnostics")
+            .context("failed to poll local integrated server diagnostics")
     }
 }
 
 #[derive(Debug)]
-pub enum NativeSingleViewSceneRuntime<S> {
-    Local(LocalSingleViewSceneRuntime),
-    RemoteDedicated(RemoteDedicatedSingleViewSceneRuntime<S>),
+pub enum NativeSceneRuntime<S> {
+    Local(LocalIntegratedSceneRuntime),
+    RemoteDedicated(RemoteDedicatedSceneRuntime<S>),
 }
 
 #[derive(Debug)]
-pub struct NativeSingleViewSessionRuntime<S> {
+pub struct NativeSessionRuntime<S> {
     session: GameSessionCoordinator<()>,
-    runtime: NativeSingleViewSceneRuntime<S>,
+    runtime: NativeSceneRuntime<S>,
 }
 
-impl<S> NativeSingleViewSceneRuntime<S>
+impl<S> NativeSceneRuntime<S>
 where
     S: RemoteDedicatedServerSession,
 {
-    pub fn local(options: LocalSingleViewSceneOptions) -> Result<Self> {
-        Ok(Self::Local(LocalSingleViewSceneRuntime::new(options)?))
+    pub fn local(options: LocalIntegratedSceneOptions) -> Result<Self> {
+        Ok(Self::Local(LocalIntegratedSceneRuntime::new(options)?))
     }
 
     pub fn local_with_mesh_assets(
-        options: LocalSingleViewSceneOptions,
+        options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        Ok(Self::Local(LocalSingleViewSceneRuntime::with_mesh_assets(
+        Ok(Self::Local(LocalIntegratedSceneRuntime::with_mesh_assets(
             options,
             mesh_assets,
         )?))
     }
 
     pub fn remote_dedicated(options: SingleViewHostOptions, session: S) -> Result<Self> {
-        Ok(Self::RemoteDedicated(
-            RemoteDedicatedSingleViewSceneRuntime::new(options, session)?,
-        ))
+        Ok(Self::RemoteDedicated(RemoteDedicatedSceneRuntime::new(
+            options, session,
+        )?))
     }
 
     pub fn remote_dedicated_with_mesh_assets(
@@ -1042,7 +1042,7 @@ where
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         Ok(Self::RemoteDedicated(
-            RemoteDedicatedSingleViewSceneRuntime::with_mesh_assets(options, session, mesh_assets)?,
+            RemoteDedicatedSceneRuntime::with_mesh_assets(options, session, mesh_assets)?,
         ))
     }
 
@@ -1568,22 +1568,22 @@ where
     }
 }
 
-impl<S> NativeSingleViewSessionRuntime<S>
+impl<S> NativeSessionRuntime<S>
 where
     S: RemoteDedicatedServerSession,
 {
-    pub fn local(options: LocalSingleViewSceneOptions) -> Result<Self> {
+    pub fn local(options: LocalIntegratedSceneOptions) -> Result<Self> {
         let request = SessionStartRequest::new_seed_local_world(options.seed);
-        Self::start_with(request, || NativeSingleViewSceneRuntime::local(options))
+        Self::start_with(request, || NativeSceneRuntime::local(options))
     }
 
     pub fn local_with_mesh_assets(
-        options: LocalSingleViewSceneOptions,
+        options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         let request = SessionStartRequest::new_seed_local_world(options.seed);
         Self::start_with(request, || {
-            NativeSingleViewSceneRuntime::local_with_mesh_assets(options, mesh_assets)
+            NativeSceneRuntime::local_with_mesh_assets(options, mesh_assets)
         })
     }
 
@@ -1594,7 +1594,7 @@ where
     ) -> Result<Self> {
         let request = SessionStartRequest::JoinRemote { endpoint };
         Self::start_with(request, || {
-            NativeSingleViewSceneRuntime::remote_dedicated(options, session)
+            NativeSceneRuntime::remote_dedicated(options, session)
         })
     }
 
@@ -1606,21 +1606,17 @@ where
     ) -> Result<Self> {
         let request = SessionStartRequest::JoinRemote { endpoint };
         Self::start_with(request, || {
-            NativeSingleViewSceneRuntime::remote_dedicated_with_mesh_assets(
-                options,
-                session,
-                mesh_assets,
-            )
+            NativeSceneRuntime::remote_dedicated_with_mesh_assets(options, session, mesh_assets)
         })
     }
 
     pub fn from_active_runtime(
         request: SessionStartRequest,
-        runtime: NativeSingleViewSceneRuntime<S>,
+        runtime: NativeSceneRuntime<S>,
     ) -> Result<Self> {
         let descriptor = request
             .active_descriptor()
-            .context("native single-view session request did not describe an active session")?;
+            .context("native game session request did not describe an active session")?;
         Ok(Self::from_active_runtime_with_descriptor(
             descriptor, runtime,
         ))
@@ -1628,7 +1624,7 @@ where
 
     pub fn from_active_runtime_with_descriptor(
         descriptor: ActiveSessionDescriptor,
-        runtime: NativeSingleViewSceneRuntime<S>,
+        runtime: NativeSceneRuntime<S>,
     ) -> Self {
         let mut session = GameSessionCoordinator::new();
         let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
@@ -1657,19 +1653,19 @@ where
         self.session.status()
     }
 
-    pub fn into_runtime(self) -> NativeSingleViewSceneRuntime<S> {
+    pub fn into_runtime(self) -> NativeSceneRuntime<S> {
         self.runtime
     }
 
     fn start_with(
         request: SessionStartRequest,
-        start: impl FnOnce() -> Result<NativeSingleViewSceneRuntime<S>>,
+        start: impl FnOnce() -> Result<NativeSceneRuntime<S>>,
     ) -> Result<Self> {
         let mut session = GameSessionCoordinator::new();
         session.begin_start(request.clone());
         let descriptor = request
             .active_descriptor()
-            .context("native single-view session request did not describe an active session")?;
+            .context("native game session request did not describe an active session")?;
         match start() {
             Ok(runtime) => {
                 let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
@@ -1677,7 +1673,7 @@ where
                 Ok(Self { session, runtime })
             }
             Err(error) => {
-                log::error!("failed to start native single-view session {request:?}: {error:#}");
+                log::error!("failed to start native game session {request:?}: {error:#}");
                 session.fail_start(SessionFailure::new(request.default_failure_message()));
                 Err(error)
             }
@@ -1685,22 +1681,22 @@ where
     }
 }
 
-impl<S> Deref for NativeSingleViewSessionRuntime<S> {
-    type Target = NativeSingleViewSceneRuntime<S>;
+impl<S> Deref for NativeSessionRuntime<S> {
+    type Target = NativeSceneRuntime<S>;
 
     fn deref(&self) -> &Self::Target {
         &self.runtime
     }
 }
 
-impl<S> DerefMut for NativeSingleViewSessionRuntime<S> {
+impl<S> DerefMut for NativeSessionRuntime<S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.runtime
     }
 }
 
 #[derive(Debug)]
-pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
+pub struct RemoteDedicatedSceneRuntime<S> {
     core: SingleViewRuntime,
     connection: RemoteDedicatedConnection<S>,
     mesh_assets: TexturedMeshAssets,
@@ -1872,7 +1868,7 @@ where
     }
 }
 
-impl<S> RemoteDedicatedSingleViewSceneRuntime<S>
+impl<S> RemoteDedicatedSceneRuntime<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -1907,7 +1903,7 @@ where
             options.chunk_tracking_radius,
         ) {
             dispatch_remote_dedicated_command(&mut core, connection.session_mut(), command)
-                .context("failed to initialize remote dedicated single-view runtime")?;
+                .context("failed to initialize remote dedicated scene runtime")?;
         }
         Ok(Self {
             core,
@@ -2280,7 +2276,7 @@ where
     }
 }
 
-impl<S> RemoteDedicatedSingleViewSceneRuntime<S>
+impl<S> RemoteDedicatedSceneRuntime<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -2302,8 +2298,8 @@ where
     }
 }
 
-pub fn build_local_single_view_client_runtime(
-    options: LocalSingleViewSceneOptions,
+pub fn build_local_integrated_client_runtime(
+    options: LocalIntegratedSceneOptions,
 ) -> Result<ClientRuntime> {
     let mut runtime = SingleViewRuntime::local_integrated_with_seed(
         options.seed,
@@ -2312,7 +2308,7 @@ pub fn build_local_single_view_client_runtime(
         options.chunk_tracking_radius(),
     );
     let mut runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
-        .context("failed to start local single-view integrated server runner")?;
+        .context("failed to start local integrated server runner")?;
     if let Some(day_time) = options.day_time_override {
         runtime.force_day_time(day_time);
     }
@@ -2323,12 +2319,12 @@ pub fn build_local_single_view_client_runtime(
     ) {
         runner
             .send_command(command)
-            .context("failed to send local single-view chunk view command")?;
+            .context("failed to send local integrated chunk view command")?;
         runtime.apply_server_updates(drain_integrated_server_runner_until_idle(&mut runner)?);
     }
     runner
         .join_shutdown()
-        .context("failed to stop local single-view integrated server runner")?;
+        .context("failed to stop local integrated server runner")?;
     Ok(runtime.client().clone())
 }
 
@@ -2342,16 +2338,16 @@ pub fn drain_integrated_server_runner_until_idle(
         updates.extend(
             runner
                 .drain_updates()
-                .context("failed to drain local single-view integrated server updates")?,
+                .context("failed to drain local integrated server updates")?,
         );
         let diagnostics = runner
             .poll_diagnostics()
-            .context("failed to poll local single-view integrated server diagnostics")?;
+            .context("failed to poll local integrated server diagnostics")?;
         if runner_idle(&diagnostics) {
             return Ok(updates);
         }
         if Instant::now() >= deadline {
-            bail!("timed out waiting for local single-view integrated server jobs");
+            bail!("timed out waiting for local integrated server jobs");
         }
         if diagnostics.update_queue_depth == 0 {
             std::thread::sleep(Duration::from_millis(1));
@@ -2360,7 +2356,7 @@ pub fn drain_integrated_server_runner_until_idle(
 }
 
 fn native_runner_config(
-    options: &LocalSingleViewSceneOptions,
+    options: &LocalIntegratedSceneOptions,
 ) -> NativeIntegratedServerRunnerConfig {
     NativeIntegratedServerRunnerConfig::new(options.seed)
         .with_lighting_enabled(options.lighting_enabled)
@@ -2416,7 +2412,7 @@ mod tests {
 
     #[test]
     fn integrated_world_session_storage_defaults_to_transient_storage() {
-        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
             .with_persistent_world_dir("/tmp/old-world")
             .with_adaptive_chunk_publication_budget(true)
             .with_integrated_world_session_storage(IntegratedWorldSessionStorage::transient());
@@ -2436,7 +2432,7 @@ mod tests {
         assert_eq!(storage.persistent_world_dir(), Some(world_dir.as_path()));
         assert!(storage.adaptive_chunk_publication_budget());
 
-        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
             .with_integrated_world_session_storage(storage);
 
         assert_eq!(
@@ -2500,15 +2496,15 @@ mod tests {
     }
 
     #[test]
-    fn local_single_view_options_apply_java_tracking_radius() {
-        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2);
+    fn local_integrated_scene_options_apply_java_tracking_radius() {
+        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2);
 
         assert_eq!(options.chunk_tracking_radius(), 3);
     }
 
     #[test]
-    fn local_single_view_options_can_use_java_initial_spawn_center() {
-        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+    fn local_integrated_scene_options_can_use_java_initial_spawn_center() {
+        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
             .with_initial_spawn_center();
 
         assert_eq!(options.center, initial_spawn_center_for_seed(12345));
@@ -2518,7 +2514,7 @@ mod tests {
     fn native_runner_config_derives_tick_interval_from_cadence_host_rate() {
         let cadence = SimulationCadenceConfig::new(60, 20, 60);
         let options =
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2).with_cadence(cadence);
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2).with_cadence(cadence);
 
         let config = native_runner_config(&options);
 
@@ -2528,7 +2524,7 @@ mod tests {
 
     #[test]
     fn native_runner_config_forwards_light_status_batch_size() {
-        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
             .with_light_status_batch_size(5);
 
         let config = native_runner_config(&options);
@@ -2537,8 +2533,8 @@ mod tests {
     }
 
     #[test]
-    fn build_local_single_view_client_runtime_loads_center_chunk_without_assets() {
-        let client = build_local_single_view_client_runtime(LocalSingleViewSceneOptions::new(
+    fn build_local_integrated_client_runtime_loads_center_chunk_without_assets() {
+        let client = build_local_integrated_client_runtime(LocalIntegratedSceneOptions::new(
             12345,
             ChunkPos::new(0, 0),
             0,
@@ -2550,12 +2546,12 @@ mod tests {
     }
 
     #[test]
-    fn local_single_view_runtime_loads_center_chunk() {
+    fn local_integrated_runtime_loads_center_chunk() {
         if !extracted_asset_root().exists() {
             return;
         }
 
-        let mut runtime = LocalSingleViewSceneRuntime::new(LocalSingleViewSceneOptions::new(
+        let mut runtime = LocalIntegratedSceneRuntime::new(LocalIntegratedSceneOptions::new(
             12345,
             ChunkPos::new(0, 0),
             0,
@@ -2578,8 +2574,8 @@ mod tests {
             return;
         }
 
-        let mut runtime = LocalSingleViewSceneRuntime::new(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+        let mut runtime = LocalIntegratedSceneRuntime::new(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
                 .with_lighting_enabled(false),
         )
         .unwrap();
@@ -2630,8 +2626,8 @@ mod tests {
             return;
         }
 
-        let mut runtime = LocalSingleViewSceneRuntime::new(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+        let mut runtime = LocalIntegratedSceneRuntime::new(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
                 .with_lighting_enabled(false),
         )
         .unwrap();
@@ -2660,8 +2656,8 @@ mod tests {
             return;
         }
 
-        let mut runtime = LocalSingleViewSceneRuntime::new(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+        let mut runtime = LocalIntegratedSceneRuntime::new(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
                 .with_lighting_enabled(false),
         )
         .unwrap();
@@ -2715,7 +2711,7 @@ mod tests {
                 Some(Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])),
             ],
         );
-        let mut runtime = RemoteDedicatedSingleViewSceneRuntime::with_mesh_assets(
+        let mut runtime = RemoteDedicatedSceneRuntime::with_mesh_assets(
             SingleViewHostOptions::new(center, 0),
             session,
             mesh_assets,
@@ -2768,8 +2764,8 @@ mod tests {
 
         let render_distance = 1;
         let tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
-        let mut runtime = LocalSingleViewSceneRuntime::new(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
+        let mut runtime = LocalIntegratedSceneRuntime::new(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
                 .with_lighting_enabled(false),
         )
         .unwrap();
@@ -2896,13 +2892,13 @@ mod tests {
     }
 
     #[test]
-    fn local_single_view_runtime_applies_simulation_cadence_control() {
+    fn local_integrated_runtime_applies_simulation_cadence_control() {
         if !extracted_asset_root().exists() {
             return;
         }
 
-        let mut runtime = LocalSingleViewSceneRuntime::new(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+        let mut runtime = LocalIntegratedSceneRuntime::new(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
                 .with_lighting_enabled(false),
         )
         .unwrap();
@@ -2937,7 +2933,7 @@ mod tests {
         }
     }
 
-    fn wait_for_update_queue_depth(runtime: &LocalSingleViewSceneRuntime, min_depth: usize) {
+    fn wait_for_update_queue_depth(runtime: &LocalIntegratedSceneRuntime, min_depth: usize) {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let diagnostics = runtime.server_runner_diagnostics().unwrap();
@@ -2959,8 +2955,8 @@ mod tests {
         }
 
         let mesh_assets = load_textured_mesh_assets().unwrap();
-        let mut pump = LocalSingleViewStartupPump::with_mesh_assets(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+        let mut pump = LocalIntegratedStartupPump::with_mesh_assets(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
                 .with_lighting_enabled(false),
             mesh_assets,
         )
@@ -3002,8 +2998,8 @@ mod tests {
         };
         let playable_gate_chunk_count = 9;
         let mesh_assets = load_textured_mesh_assets().unwrap();
-        let mut pump = LocalSingleViewStartupPump::with_mesh_assets(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
+        let mut pump = LocalIntegratedStartupPump::with_mesh_assets(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
                 .with_lighting_enabled(false),
             mesh_assets,
         )
@@ -3065,13 +3061,13 @@ mod tests {
     }
 
     #[test]
-    fn native_single_view_session_runtime_records_local_session() {
+    fn native_session_runtime_records_local_session() {
         if !extracted_asset_root().exists() {
             return;
         }
 
-        let mut runtime = NativeSingleViewSessionRuntime::<NoRemoteSession>::local(
-            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0),
+        let mut runtime = NativeSessionRuntime::<NoRemoteSession>::local(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0),
         )
         .unwrap();
         runtime.poll_until_idle().unwrap();
@@ -3091,15 +3087,15 @@ mod tests {
     }
 
     #[test]
-    fn native_single_view_session_runtime_local_interest_change_defers_updates_until_poll() {
+    fn native_session_runtime_local_interest_change_defers_updates_until_poll() {
         if !extracted_asset_root().exists() {
             return;
         }
 
         let initial_center = ChunkPos::new(0, 0);
         let next_center = ChunkPos::new(1, 0);
-        let mut runtime = NativeSingleViewSessionRuntime::<NoRemoteSession>::local(
-            LocalSingleViewSceneOptions::new(12345, initial_center, 0).with_lighting_enabled(false),
+        let mut runtime = NativeSessionRuntime::<NoRemoteSession>::local(
+            LocalIntegratedSceneOptions::new(12345, initial_center, 0).with_lighting_enabled(false),
         )
         .unwrap();
         runtime.poll_until_idle().unwrap();

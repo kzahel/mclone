@@ -57,7 +57,7 @@ use crate::render_compile_capacity::{
 };
 use crate::scene_runtime::{
     WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, build_scene_textured_sections,
-    chunk_tracking_radius_for_render_distance, local_single_view_options,
+    chunk_tracking_radius_for_render_distance, local_integrated_scene_options,
     poll_window_runtime_until_idle, poll_window_runtime_until_idle_with_timeout, square_count,
 };
 use crate::{
@@ -3791,7 +3791,7 @@ pub(crate) fn run_startup_streaming_perf(
     let spectator = SpectatorCamera::spawn_for_scene(&scene);
     let frame_duration = Duration::from_secs_f64(1.0 / options.target_hz.max(1.0));
 
-    let startup_options = local_single_view_options(&scene)?
+    let startup_options = local_integrated_scene_options(&scene)?
         .with_initial_spawn_center()
         .with_freeze_scheduled_fluid_ticks(options.freeze_scheduled_fluid_ticks);
     let mut startup = WindowSceneStartupPump::with_local_options(startup_options, &assets)?;

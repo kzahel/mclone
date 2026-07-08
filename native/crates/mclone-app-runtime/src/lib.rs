@@ -10,7 +10,7 @@ pub mod far_lod;
 pub mod frame_render;
 pub mod host_mode;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod local_single_view;
+pub mod native_session_runtime;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod render_assets;
 pub mod render_compile_capacity;

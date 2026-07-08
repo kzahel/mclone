@@ -75,8 +75,8 @@ mod android {
         RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
         SingleViewHostOptions,
     };
-    use mclone_app_runtime::local_single_view::{
-        IntegratedWorldSessionStorage, LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
+    use mclone_app_runtime::native_session_runtime::{
+        IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSessionRuntime,
     };
     use mclone_app_runtime::render_assets::{
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
@@ -132,7 +132,7 @@ mod android {
         graphics_vulkan::AppGraphics,
         graphics_vulkan::OpenXrStereoState,
     >;
-    type AndroidXrSceneRuntime = NativeSingleViewSessionRuntime<AndroidXrRemoteServerSession>;
+    type AndroidXrSceneRuntime = NativeSessionRuntime<AndroidXrRemoteServerSession>;
     type AndroidXrTerrainState = XrMcloneTerrainState<AndroidXrRemoteServerSession>;
 
     const LOG_TAG: &str = "mclone_android_xr";
@@ -2172,10 +2172,10 @@ mod android {
         }
     }
 
-    fn android_xr_local_options(scene: &XrSceneOptions) -> LocalSingleViewSceneOptions {
+    fn android_xr_local_options(scene: &XrSceneOptions) -> LocalIntegratedSceneOptions {
         let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
             .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
-        LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
+        LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
             .with_initial_spawn_center()
             .with_day_time(scene.day_time_override)
             .with_freeze_time(scene.freeze_time)
