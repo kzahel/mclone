@@ -725,6 +725,7 @@ impl NativeWorldCatalog {
 #[cfg(not(target_arch = "wasm32"))]
 pub trait WorldCatalog {
     fn capabilities(&self) -> WorldCatalogCapabilities;
+    fn list_worlds(&self) -> WorldCatalogResult<Vec<LocalWorldSummary>>;
     fn handle_request(
         &self,
         request: WorldCatalogRequest,
@@ -737,6 +738,10 @@ pub trait WorldCatalog {
 impl WorldCatalog for NativeWorldCatalog {
     fn capabilities(&self) -> WorldCatalogCapabilities {
         NativeWorldCatalog::capabilities(self)
+    }
+
+    fn list_worlds(&self) -> WorldCatalogResult<Vec<LocalWorldSummary>> {
+        NativeWorldCatalog::list_worlds(self)
     }
 
     fn handle_request(

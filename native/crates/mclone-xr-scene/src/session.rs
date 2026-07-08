@@ -427,32 +427,13 @@ where
     }
 
     pub(crate) fn refresh_world_catalog_ui(&mut self, status: WorldCatalogUiStatus) {
-        let Some(catalog) = self.world_catalog.clone() else {
-            self.client_experience.catalog_mut().set_worlds(
-                WorldCatalogCapabilities::default(),
-                Vec::new(),
-                status,
-            );
-            return;
-        };
-
-        match catalog.list_worlds() {
-            Ok(worlds) => {
-                self.client_experience.catalog_mut().set_worlds(
-                    catalog.capabilities(),
-                    worlds,
-                    status,
-                );
-            }
-            Err(error) => {
-                log::warn!("failed to refresh XR local world catalog: {error}");
-                self.client_experience.catalog_mut().set_worlds(
-                    catalog.capabilities(),
-                    Vec::new(),
-                    WorldCatalogUiStatus::new(&error.message, false),
-                );
-            }
-        }
+        let catalog = self.world_catalog.clone();
+        refresh_world_catalog_controller(
+            catalog.as_ref().map(|catalog| catalog as &dyn WorldCatalog),
+            self.client_experience.catalog_mut(),
+            status,
+            "XR local",
+        );
     }
 
     pub(crate) fn active_local_world_id(&self) -> Option<&LocalWorldId> {

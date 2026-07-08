@@ -1,11 +1,11 @@
 //! Shared native world-catalog request executor.
 //!
 //! This owns the duplicated middle of every native catalog consumer (desktop
-//! flat, desktop XR, Android XR): the missing-catalog guard → `handle_request`
-//! → `apply_catalog_response`/`apply_catalog_error` → return effects. It does
-//! **not** apply the effects; each app keeps its own `apply_*_catalog_effects`
-//! tail, which drives session/GPU lifecycle and recurses for nested catalog
-//! requests.
+//! flat, desktop XR, Android XR, flat Android): the missing-catalog guard →
+//! `handle_request` → `apply_catalog_response`/`apply_catalog_error` → return
+//! effects. It does **not** apply the effects; each app keeps its own
+//! `apply_*_catalog_effects` tail, which drives session/GPU lifecycle and
+//! recurses for nested catalog requests.
 //!
 //! Native-only (`#[cfg(not(target_arch = "wasm32"))]`) on purpose: web's
 //! executor is asynchronous and lives in JavaScript/IndexedDB, so it stays a
@@ -14,7 +14,10 @@
 use crate::client_catalog_policy::{
     ClientCatalogController, ClientCatalogEffects, ClientCatalogRequest,
 };
-use crate::world_catalog::{LocalWorldId, WorldCatalog, WorldCatalogError};
+use crate::world_catalog::{
+    LocalWorldId, WorldCatalog, WorldCatalogCapabilities, WorldCatalogError,
+};
+use mclone_ui::WorldCatalogUiStatus;
 
 /// Run one `ClientCatalogRequest` against a native catalog backend and fold the
 /// result back through the shared `ClientCatalogController`.
@@ -38,6 +41,33 @@ pub fn execute_world_catalog_request(
         Err(error) => {
             log::warn!("world catalog action failed: {error}");
             controller.apply_catalog_error(request.id, error)
+        }
+    }
+}
+
+/// Refresh a native catalog controller from the current backend list state.
+pub fn refresh_world_catalog_controller(
+    catalog: Option<&dyn WorldCatalog>,
+    controller: &mut ClientCatalogController,
+    status: WorldCatalogUiStatus,
+    log_context: &str,
+) {
+    let Some(catalog) = catalog else {
+        controller.set_worlds(WorldCatalogCapabilities::default(), Vec::new(), status);
+        return;
+    };
+
+    match catalog.list_worlds() {
+        Ok(worlds) => {
+            controller.set_worlds(catalog.capabilities(), worlds, status);
+        }
+        Err(error) => {
+            log::warn!("failed to refresh {log_context} world catalog: {error}");
+            controller.set_worlds(
+                catalog.capabilities(),
+                Vec::new(),
+                WorldCatalogUiStatus::new(&error.message, false),
+            );
         }
     }
 }
@@ -105,6 +135,12 @@ mod tests {
             WorldCatalogCapabilities::persistent_local()
         }
 
+        fn list_worlds(&self) -> WorldCatalogResult<Vec<LocalWorldSummary>> {
+            let mut worlds = self.worlds.borrow().clone();
+            sort_local_world_summaries(&mut worlds);
+            Ok(worlds)
+        }
+
         fn handle_request(
             &self,
             request: WorldCatalogRequest,
@@ -112,11 +148,9 @@ mod tests {
         ) -> WorldCatalogResult<WorldCatalogResponse> {
             match request {
                 WorldCatalogRequest::ListWorlds => {
-                    let mut worlds = self.worlds.borrow().clone();
-                    sort_local_world_summaries(&mut worlds);
                     self.record(Ok(WorldCatalogResponse::WorldList {
                         capabilities: self.capabilities(),
-                        worlds,
+                        worlds: self.list_worlds()?,
                     }))
                 }
                 WorldCatalogRequest::CreateWorld { options } => {
@@ -322,6 +356,31 @@ mod tests {
             state.status.message.as_str(),
             "Persistent worlds unavailable"
         );
+    }
+
+    #[test]
+    fn refresh_world_catalog_controller_loads_worlds_from_catalog() {
+        let catalog = FakeWorldCatalog::new();
+        let mut controller = persistent_controller();
+        let create =
+            only_request(controller.apply_ui_action(GameUiAction::CreateCatalogWorld, context(9)));
+        execute_world_catalog_request(Some(&catalog), &mut controller, None, create);
+        let created = match catalog.take_last().unwrap() {
+            WorldCatalogResponse::WorldCreated { summary } => summary,
+            response => panic!("unexpected response: {response:?}"),
+        };
+
+        refresh_world_catalog_controller(
+            Some(&catalog),
+            &mut controller,
+            WorldCatalogUiStatus::hidden(),
+            "test",
+        );
+
+        let state = controller.ui_state();
+        assert_eq!(state.entry_count(), 1);
+        assert_eq!(state.entries[0].as_ref().unwrap().seed, created.seed);
+        assert!(!state.status.visible);
     }
 
     #[test]

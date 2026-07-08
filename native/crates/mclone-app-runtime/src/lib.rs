@@ -19,7 +19,9 @@ pub mod startup_args;
 pub mod world_catalog;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use crate::catalog_executor::execute_world_catalog_request;
+pub use crate::catalog_executor::{
+    execute_world_catalog_request, refresh_world_catalog_controller,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::world_catalog::WorldCatalog;
 

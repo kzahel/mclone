@@ -17,7 +17,6 @@ use mclone_app_runtime::client_session_policy::{
     client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
     client_session_start_transition, client_session_status_projection,
 };
-use mclone_app_runtime::execute_world_catalog_request;
 use mclone_app_runtime::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
@@ -34,8 +33,9 @@ use mclone_app_runtime::session::{
 };
 use mclone_app_runtime::set_player_appearance_command_for_ui_model;
 use mclone_app_runtime::world_catalog::{
-    LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalog, WorldCatalogCapabilities,
+    LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalog,
 };
+use mclone_app_runtime::{execute_world_catalog_request, refresh_world_catalog_controller};
 use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
@@ -888,32 +888,13 @@ impl FlatClientDriver {
     }
 
     fn refresh_world_catalog_ui(&mut self, status: WorldCatalogUiStatus) {
-        let Some(catalog) = self.world_catalog.clone() else {
-            self.client_experience.catalog_mut().set_worlds(
-                WorldCatalogCapabilities::default(),
-                Vec::new(),
-                status,
-            );
-            return;
-        };
-
-        match catalog.list_worlds() {
-            Ok(worlds) => {
-                self.client_experience.catalog_mut().set_worlds(
-                    catalog.capabilities(),
-                    worlds,
-                    status,
-                );
-            }
-            Err(error) => {
-                log::warn!("failed to refresh local world catalog: {error}");
-                self.client_experience.catalog_mut().set_worlds(
-                    catalog.capabilities(),
-                    Vec::new(),
-                    WorldCatalogUiStatus::new(&error.message, false),
-                );
-            }
-        }
+        let catalog = self.world_catalog.clone();
+        refresh_world_catalog_controller(
+            catalog.as_ref().map(|catalog| catalog as &dyn WorldCatalog),
+            self.client_experience.catalog_mut(),
+            status,
+            "local",
+        );
     }
 
     fn active_local_world_id(&self) -> Option<&LocalWorldId> {
