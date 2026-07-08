@@ -101,6 +101,62 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-08 - Tactical 153 Light Compute Boundary Profile
+
+Commit reported by benchmark JSON: `c6d3939c`, `git_dirty=false`,
+`debug_assertions=false`.
+
+Code under test: server-only `scheduler_loading_perf` light-status profiling.
+The binary now reports the shared `--light-status-batch-size` knob, native
+light-status mailbox counters, and derived per-status/per-batch timing buckets.
+This lane isolates server scheduler + retained light compute; it does not
+include client update pump, mesh, GPU upload, or frame pacing.
+
+Commands:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 10 --max-seconds 180 --light-status-batch-size 9 > /tmp/mclone-153-light-boundary-clean-rd10-batch9.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 15 --max-seconds 240 --light-status-batch-size 9 > /tmp/mclone-153-light-boundary-clean-rd15-batch9.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 10 --max-seconds 180 --light-status-batch-size 5 > /tmp/mclone-153-light-boundary-clean-rd10-batch5.json
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --render-distance 15 --max-seconds 240 --light-status-batch-size 5 > /tmp/mclone-153-light-boundary-clean-rd15-batch5.json
+```
+
+Light-status timing split:
+
+| Lane | Batch | View ready | Settled | Statuses / batches | Total compute | Compute / status | World init / status | Recheck / status | Run updates / status | Sky updates / status | Sky graph / status | Collect / status |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `9` | `7940.965ms` | `8959.828ms` | `625 / 73` | `4806.494ms` | `7.690ms` | `0.116ms` | `0.959ms` | `6.127ms` | `5.810ms` | `5.717ms` | `0.039ms` |
+| RD15 server-only | `9` | `20998.821ms` | `23307.915ms` | `1225 / 144` | `9406.160ms` | `7.678ms` | `0.116ms` | `0.972ms` | `6.103ms` | `5.790ms` | `5.647ms` | `0.041ms` |
+| RD10 server-only | `5` | `7817.928ms` | `8825.158ms` | `625 / 127` | `4875.174ms` | `7.800ms` | `0.124ms` | `0.989ms` | `6.187ms` | `5.875ms` | `5.776ms` | `0.041ms` |
+| RD15 server-only | `5` | `20084.020ms` | `22274.712ms` | `1225 / 249` | `9394.964ms` | `7.669ms` | `0.121ms` | `0.997ms` | `6.058ms` | `5.740ms` | `5.593ms` | `0.040ms` |
+
+Share of light compute:
+
+| Lane | Batch | Run updates | Sky updates | Sky graph |
+|---|---:|---:|---:|---:|
+| RD10 server-only | `9` | `79.7%` | `75.6%` | `74.3%` |
+| RD15 server-only | `9` | `79.5%` | `75.4%` | `73.6%` |
+| RD10 server-only | `5` | `79.3%` | `75.3%` | `74.1%` |
+| RD15 server-only | `5` | `79.0%` | `74.9%` | `72.9%` |
+
+Graph counters:
+
+| Lane | Batch | Iterations | Sky nodes | Block nodes | Sky source updates | Sky affected sections | Sky storage swap / status |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `9` | `390` | `5427668` | `306858` | `1253` | `88743` | `0.051ms` |
+| RD15 server-only | `9` | `719` | `9977165` | `533756` | `2363` | `165637` | `0.100ms` |
+| RD10 server-only | `5` | `412` | `5449828` | `308576` | `1261` | `78002` | `0.055ms` |
+| RD15 server-only | `5` | `768` | `10001222` | `538425` | `2371` | `145792` | `0.102ms` |
+
+Interpretation: this boundary check rules out the remaining cheap pipeline
+scaffolding as the main cost. Retained-world insertion, section setup,
+light-section collection, and storage swap are all small per status. The
+dominant bucket is `run_updates`, specifically sky graph traversal at roughly
+`73-74%` of total light compute. Batch `5` and `9` change batch count and
+server-only settle time, but the per-status bucket shape is essentially the
+same. Any further large win is now lighting-algorithm/storage work, not another
+publication or mailbox valve.
+
 ### 2026-07-07 - Tactical 153 Light-Status Mailbox Attribution
 
 Commit reported by benchmark JSON: `62dc6a5d`, `git_dirty=false`,

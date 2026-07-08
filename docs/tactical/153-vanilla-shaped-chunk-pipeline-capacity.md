@@ -687,6 +687,26 @@ centers before worker submission/publication. This does not parallelize
 lighting or change the light algorithm; it prevents old FIFO light backlog
 from publishing ahead of newly relevant near-player chunks.
 
+The boundary profile then landed as tooling in `c6d3939c` and ran clean
+server-only `scheduler_loading_perf` rows for RD10/RD15 at batch `9` and `5`.
+The profile reports per-status and per-batch light buckets plus mailbox
+counters, using the same shared `--light-status-batch-size` knob. Results:
+
+| Lane | Batch | View ready | Settled | Compute / status | Run updates / status | Sky updates / status | Sky graph share |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| RD10 server-only | `9` | `7940.965ms` | `8959.828ms` | `7.690ms` | `6.127ms` | `5.810ms` | `74.3%` |
+| RD15 server-only | `9` | `20998.821ms` | `23307.915ms` | `7.678ms` | `6.103ms` | `5.790ms` | `73.6%` |
+| RD10 server-only | `5` | `7817.928ms` | `8825.158ms` | `7.800ms` | `6.187ms` | `5.875ms` | `74.1%` |
+| RD15 server-only | `5` | `20084.020ms` | `22274.712ms` | `7.669ms` | `6.058ms` | `5.740ms` | `72.9%` |
+
+Interpretation: the remaining light compute is not retained-world insertion,
+section setup, light-section collection, storage swap, worker handoff, or
+publication. Around `79%` of light compute is `run_updates`, and around
+`73-74%` is specifically sky graph traversal. Batch `5` versus `9` does not
+change that per-status shape. This is the boundary where Tactical 153 stops
+finding pipeline valves and starts pointing at a lighting algorithm/storage
+workstream.
+
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages
 watched), movement probe. Acceptance: light stage ceiling raised to at
