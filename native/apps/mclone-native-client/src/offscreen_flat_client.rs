@@ -309,6 +309,7 @@ impl OffscreenFlatClientHost {
         frame: RenderFrameContext<'_>,
         options: OffscreenFlatClientFrameOptions,
     ) -> Result<FullFrameRenderSummary> {
+        let frame_start = Instant::now();
         self.driver
             .tick_frame_timing(self.clock.frame_ms, self.clock.target_frame_ms);
         self.driver.set_ui_scale(GuiScale::from_pixels(
@@ -389,6 +390,7 @@ impl OffscreenFlatClientHost {
             ui_frame,
         )?;
         self.driver.record_surface_frame_timing(
+            frame_start.elapsed().as_secs_f64() * 1000.0,
             render_start.elapsed().as_secs_f64() * 1000.0,
             0.0,
             0.0,

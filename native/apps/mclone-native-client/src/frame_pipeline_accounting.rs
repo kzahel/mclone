@@ -34,14 +34,15 @@ impl Default for DesktopFramePipelineAccounting {
 }
 
 impl DesktopFramePipelineAccounting {
-    pub(crate) fn begin_frame(&mut self, frame_wall_ms: f64, target_period_ms: Option<f64>) {
+    /// Opens a new frame. `frame_period_ms` is the real inter-frame interval and
+    /// only advances the queue-age clock; the observation's wall is not the period
+    /// but the frame's own active span, stamped in `finish_frame` so that it covers
+    /// exactly the stage spans recorded for this frame (see conservation invariant).
+    pub(crate) fn begin_frame(&mut self, frame_period_ms: f64, target_period_ms: Option<f64>) {
         self.refresh_target(target_period_ms);
-        self.now_ms += sanitize_ms(frame_wall_ms);
+        self.now_ms += sanitize_ms(frame_period_ms);
         let frame_index = self.accumulator.len() as u64 + 1;
-        self.pending = Some(
-            FrameObservation::new(frame_index, frame_wall_ms)
-                .with_app_work_ms(sanitize_ms(frame_wall_ms)),
-        );
+        self.pending = Some(FrameObservation::new(frame_index, 0.0));
     }
 
     pub(crate) fn record_runtime_poll(&mut self, elapsed_ms: f64) {
@@ -62,8 +63,13 @@ impl DesktopFramePipelineAccounting {
         self.push_stage(StageSpan::new(StageId::UploadApply, upload_ms));
     }
 
+    /// Closes the current frame. `frame_active_ms` is the frame's own active wall
+    /// span (frame start to post-present), measured from the same clock as the
+    /// stage spans, so it is guaranteed to cover their sum and satisfy the
+    /// accumulator's conservation invariant regardless of pacing sleep or hitches.
     pub(crate) fn finish_frame(
         &mut self,
+        frame_active_ms: f64,
         render_ms: f64,
         surface_acquire_ms: f64,
         surface_submit_ms: f64,
@@ -87,9 +93,12 @@ impl DesktopFramePipelineAccounting {
         let queue_panel =
             self.queue_trackers
                 .report(runtime_stats.as_ref(), render_stats, self.now_ms);
-        let Some(observation) = self.pending.take() else {
+        let Some(mut observation) = self.pending.take() else {
             return;
         };
+        let frame_active_ms = sanitize_ms(frame_active_ms);
+        observation.frame_wall_ms = frame_active_ms;
+        observation.app_work_ms = Some(frame_active_ms);
         self.accumulator.record_frame(observation);
         let report = FramePipelineReport::new(self.accumulator.summary_report(), queue_panel)
             .with_budget_decision_panel(budget_decision_panel);
@@ -301,6 +310,7 @@ mod tests {
         accounting.record_runtime_poll(1.0);
         accounting.record_upload_apply(2.0);
         accounting.finish_frame(
+            16.0,
             4.0,
             0.25,
             0.25,
@@ -334,6 +344,7 @@ mod tests {
         let mut accounting = DesktopFramePipelineAccounting::default();
         accounting.begin_frame(16.0, Some(16.0));
         accounting.finish_frame(
+            16.0,
             4.0,
             0.25,
             0.25,

@@ -538,6 +538,7 @@ impl FlatClientDriver {
 
     pub(crate) fn record_surface_frame_timing(
         &mut self,
+        frame_active_ms: f64,
         render_ms: f64,
         acquire_ms: f64,
         encode_ms: f64,
@@ -559,6 +560,7 @@ impl FlatClientDriver {
         let budget_decision_panel =
             merged_budget_decision_panel(budget_decision_panel, self.render_budget.panel());
         self.frame_pipeline_accounting.finish_frame(
+            frame_active_ms,
             render_ms,
             acquire_ms,
             submit_ms,

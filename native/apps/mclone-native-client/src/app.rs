@@ -1808,6 +1808,7 @@ impl ApplicationHandler for ChunkApp {
                 match result {
                     Ok(report) => {
                         self.driver.record_surface_frame_timing(
+                            elapsed_ms(frame_start.elapsed()),
                             elapsed_ms(render_start.elapsed()),
                             report.acquire_ms,
                             report.encode_ms,
