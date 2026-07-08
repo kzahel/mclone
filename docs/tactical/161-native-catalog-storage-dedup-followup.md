@@ -1,6 +1,6 @@
 # 161: Native Catalog / Storage Adapter Dedup Follow-Up
 
-Status: active 2026-07-08. Slices 1-5 landed; follow-up slices remain open.
+Status: active 2026-07-08. Slices 1-6 landed; follow-up slices remain open.
 
 Workstream: native Rust shared client-experience/catalog/storage boundary,
 desktop flat, shared XR scene, flat Android, and Android XR. Web remains
@@ -217,6 +217,45 @@ Result on 2026-07-08: passed. The wasm web check still reports the existing
 reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
 introduced by this slice.
 
+## Slice 6: Shared Seed Reroll Policy
+
+Status: landed 2026-07-08 in `fc3b160d`.
+
+Problem: desktop flat, shared XR, and flat Android each kept the same new-world
+seed reroll state and LCG step locally. The code differed only by helper names,
+which made future catalog/new-world policy easy to change on one native target
+and miss on another.
+
+Change:
+
+- Add `mclone_app_runtime::seed_reroll::NewWorldSeedReroll` with fixed
+  sequence tests for the existing initial-state derivation and LCG outputs.
+- Route desktop flat, shared XR, and flat Android through the shared helper.
+  Android XR inherits the shared XR scene path.
+- Remove the platform-local `initial_*_seed_reroll_state` helpers and
+  app-local LCG step bodies.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --package mclone-app-runtime --package mclone-native-client --package mclone-xr-scene --package mclone-android-client --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-xr-client
+git diff --check
+```
+
+Result on 2026-07-08: passed. The wasm web check still reports the existing
+`mclone-server` warnings for `TimingSample` and
+`with_unload_hysteresis_chunks`, and the native-client XR feature check still
+reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
+introduced by this slice.
+
 ## Remaining Follow-Up Slices
 
 1. **LocalSingleView naming cleanup.** `LocalSingleViewSceneOptions` and related
@@ -232,10 +271,7 @@ introduced by this slice.
    logging, but flat Android currently prefers internal storage while Android XR
    prefers external storage. Decide whether that difference is intentional
    before moving the shared parts into `mclone-android-platform`.
-3. **Seed reroll policy.** Desktop, XR, and flat Android all use the same LCG for
-   new-world seed rerolls with separate initial-state helpers. Move this into
-   shared client-experience/catalog policy.
-4. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
+3. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
    all Minecraft persistence. Native still lacks periodic autosave and reserved
    player/saved-data record implementations; those remain under 134/136-style
    persistence follow-up rather than this cleanup tactical.
