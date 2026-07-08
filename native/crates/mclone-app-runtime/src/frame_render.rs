@@ -1702,7 +1702,7 @@ mod tests {
         assert!(sample_error.contains("sample_count=1"));
 
         let depth_error = FlatRenderResources::validate_supported_config(
-            RenderConfig::default().with_depth_format(wgpu::TextureFormat::Depth32Float),
+            RenderConfig::default().with_depth_format(wgpu::TextureFormat::Depth24Plus),
         )
         .unwrap_err()
         .to_string();
