@@ -48,7 +48,7 @@ mod android {
         preflight_render_compile_capacity_report,
     };
     use mclone_app_runtime::session::{
-        ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
+        ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest, SessionStorageIntent,
     };
     use mclone_app_runtime::startup_args::{
         RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupCameraOptions,
@@ -1154,12 +1154,7 @@ mod android {
         }
 
         fn local_world_options(&self, seed: i64) -> AndroidSceneOptions {
-            let mut options = self.scene_options.clone();
-            options.seed = seed;
-            options.render_distance = self.scene.render_distance();
-            options.remote_addr = None;
-            options.world_dir = None;
-            options
+            self.options_for_storage_intent(SessionStorageIntent::transient_local_world(seed))
         }
 
         fn catalog_world_options(
@@ -1167,16 +1162,21 @@ mod android {
             summary: &LocalWorldSummary,
             world_dir: PathBuf,
         ) -> AndroidSceneOptions {
-            let mut options = self.local_world_options(summary.seed);
-            options.world_dir = Some(world_dir);
-            options
+            self.options_for_storage_intent(SessionStorageIntent::catalog_world(summary, world_dir))
         }
 
         fn remote_session_options(&self, remote_addr: String) -> AndroidSceneOptions {
+            self.options_for_storage_intent(SessionStorageIntent::remote_session(remote_addr))
+        }
+
+        fn options_for_storage_intent(&self, intent: SessionStorageIntent) -> AndroidSceneOptions {
             let mut options = self.scene_options.clone();
+            if let Some(seed) = intent.seed() {
+                options.seed = seed;
+            }
             options.render_distance = self.scene.render_distance();
-            options.remote_addr = Some(remote_addr);
-            options.world_dir = None;
+            options.remote_addr = intent.remote_addr().map(str::to_owned);
+            options.world_dir = intent.world_dir().map(PathBuf::from);
             options
         }
 

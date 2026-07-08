@@ -29,7 +29,7 @@ use mclone_app_runtime::local_single_view::LocalSingleViewStartupStep;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
     RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
-    StartedGameSession,
+    SessionStorageIntent, StartedGameSession,
 };
 use mclone_app_runtime::set_player_appearance_command_for_ui_model;
 use mclone_app_runtime::world_catalog::{
@@ -1647,24 +1647,27 @@ impl FlatClientDriver {
     }
 
     fn local_world_scene(&self, seed: i64) -> SceneOptions {
-        let mut scene = self.scene.clone();
-        scene.seed = seed;
-        scene.remote_addr = None;
-        scene.world_dir = None;
-        scene
+        self.scene_for_storage_intent(SessionStorageIntent::transient_local_world(seed))
     }
 
     fn catalog_world_scene(&self, summary: &LocalWorldSummary, world_dir: PathBuf) -> SceneOptions {
-        let mut scene = self.local_world_scene(summary.seed);
-        scene.world_dir = Some(world_dir);
-        scene
+        self.scene_for_storage_intent(SessionStorageIntent::catalog_world(summary, world_dir))
     }
 
     fn remote_session_scene(&self, remote_addr: String) -> SceneOptions {
+        self.scene_for_storage_intent(SessionStorageIntent::remote_session(remote_addr))
+    }
+
+    fn scene_for_storage_intent(&self, intent: SessionStorageIntent) -> SceneOptions {
         let mut scene = self.scene.clone();
-        scene.remote_addr = Some(remote_addr);
-        scene.world_dir = None;
-        scene.adaptive_chunk_publication_budget = false;
+        if let Some(seed) = intent.seed() {
+            scene.seed = seed;
+        }
+        scene.remote_addr = intent.remote_addr().map(str::to_owned);
+        scene.world_dir = intent.world_dir().map(PathBuf::from);
+        if intent.suppress_adaptive_chunk_publication_budget() {
+            scene.adaptive_chunk_publication_budget = false;
+        }
         scene
     }
 

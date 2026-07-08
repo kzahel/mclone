@@ -1,5 +1,7 @@
 use super::*;
 
+use mclone_app_runtime::session::SessionStorageIntent;
+
 pub(crate) type XrSessionRuntimeFactory<S> = Box<
     dyn FnMut(
         SessionStartRequest,
@@ -397,23 +399,11 @@ where
     }
 
     pub(crate) fn local_world_options(&self, seed: i64) -> XrSceneOptions {
-        let mut scene = self.scene.clone();
-        scene.seed = seed;
-        scene.world_dir = None;
-        if let Some(runtime) = &self.runtime {
-            scene.render_distance = runtime.render_distance();
-        }
-        scene
+        self.scene_for_storage_intent(SessionStorageIntent::transient_local_world(seed))
     }
 
-    pub(crate) fn remote_session_options(&self) -> XrSceneOptions {
-        let mut scene = self.scene.clone();
-        scene.world_dir = None;
-        scene.adaptive_chunk_publication_budget = false;
-        if let Some(runtime) = &self.runtime {
-            scene.render_distance = runtime.render_distance();
-        }
-        scene
+    pub(crate) fn remote_session_options(&self, remote_addr: String) -> XrSceneOptions {
+        self.scene_for_storage_intent(SessionStorageIntent::remote_session(remote_addr))
     }
 
     pub(crate) fn catalog_world_scene(
@@ -421,8 +411,21 @@ where
         summary: &LocalWorldSummary,
         world_dir: PathBuf,
     ) -> XrSceneOptions {
-        let mut scene = self.local_world_options(summary.seed);
-        scene.world_dir = Some(world_dir);
+        self.scene_for_storage_intent(SessionStorageIntent::catalog_world(summary, world_dir))
+    }
+
+    fn scene_for_storage_intent(&self, intent: SessionStorageIntent) -> XrSceneOptions {
+        let mut scene = self.scene.clone();
+        if let Some(seed) = intent.seed() {
+            scene.seed = seed;
+        }
+        scene.world_dir = intent.world_dir().map(PathBuf::from);
+        if intent.suppress_adaptive_chunk_publication_budget() {
+            scene.adaptive_chunk_publication_budget = false;
+        }
+        if let Some(runtime) = &self.runtime {
+            scene.render_distance = runtime.render_distance();
+        }
         scene
     }
 
@@ -475,8 +478,8 @@ where
                     )),
                 })
             }
-            SessionStartRequest::JoinRemote { .. } => Ok(XrPendingSessionStart {
-                scene: self.remote_session_options(),
+            SessionStartRequest::JoinRemote { endpoint } => Ok(XrPendingSessionStart {
+                scene: self.remote_session_options(endpoint.address.clone()),
                 descriptor: request.active_descriptor(),
             }),
             SessionStartRequest::Unknown => bail!("unsupported unknown XR session start"),

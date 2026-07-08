@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use crate::world_catalog::{LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -229,6 +231,59 @@ impl SessionStartRequest {
             Self::CreateLocalWorld { options } => Some(options.seed),
             Self::OpenLocalWorld { .. } | Self::JoinRemote { .. } | Self::Unknown => None,
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionStorageIntent {
+    seed: Option<i64>,
+    remote_addr: Option<String>,
+    world_dir: Option<PathBuf>,
+    suppress_adaptive_chunk_publication_budget: bool,
+}
+
+impl SessionStorageIntent {
+    pub fn transient_local_world(seed: i64) -> Self {
+        Self {
+            seed: Some(seed),
+            remote_addr: None,
+            world_dir: None,
+            suppress_adaptive_chunk_publication_budget: false,
+        }
+    }
+
+    pub fn catalog_world(summary: &LocalWorldSummary, world_dir: PathBuf) -> Self {
+        Self {
+            seed: Some(summary.seed),
+            remote_addr: None,
+            world_dir: Some(world_dir),
+            suppress_adaptive_chunk_publication_budget: false,
+        }
+    }
+
+    pub fn remote_session(remote_addr: impl Into<String>) -> Self {
+        Self {
+            seed: None,
+            remote_addr: Some(remote_addr.into()),
+            world_dir: None,
+            suppress_adaptive_chunk_publication_budget: true,
+        }
+    }
+
+    pub fn seed(&self) -> Option<i64> {
+        self.seed
+    }
+
+    pub fn remote_addr(&self) -> Option<&str> {
+        self.remote_addr.as_deref()
+    }
+
+    pub fn world_dir(&self) -> Option<&Path> {
+        self.world_dir.as_deref()
+    }
+
+    pub fn suppress_adaptive_chunk_publication_budget(&self) -> bool {
+        self.suppress_adaptive_chunk_publication_budget
     }
 }
 
@@ -531,6 +586,30 @@ mod tests {
             }
         );
         assert_eq!(descriptor.start_request(), request);
+    }
+
+    #[test]
+    fn session_storage_intent_encodes_local_catalog_and_remote_policy() {
+        let local = SessionStorageIntent::transient_local_world(123);
+        assert_eq!(local.seed(), Some(123));
+        assert_eq!(local.remote_addr(), None);
+        assert_eq!(local.world_dir(), None);
+        assert!(!local.suppress_adaptive_chunk_publication_budget());
+
+        let id = LocalWorldId::new("my-world").unwrap();
+        let summary = LocalWorldSummary::new(id, "My World", 456, 100).unwrap();
+        let world_dir = PathBuf::from("/tmp/mclone-worlds/my-world");
+        let catalog = SessionStorageIntent::catalog_world(&summary, world_dir.clone());
+        assert_eq!(catalog.seed(), Some(456));
+        assert_eq!(catalog.remote_addr(), None);
+        assert_eq!(catalog.world_dir(), Some(world_dir.as_path()));
+        assert!(!catalog.suppress_adaptive_chunk_publication_budget());
+
+        let remote = SessionStorageIntent::remote_session("127.0.0.1:25565");
+        assert_eq!(remote.seed(), None);
+        assert_eq!(remote.remote_addr(), Some("127.0.0.1:25565"));
+        assert_eq!(remote.world_dir(), None);
+        assert!(remote.suppress_adaptive_chunk_publication_budget());
     }
 
     #[test]

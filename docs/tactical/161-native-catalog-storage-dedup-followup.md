@@ -1,6 +1,6 @@
 # 161: Native Catalog / Storage Adapter Dedup Follow-Up
 
-Status: active 2026-07-08. Slice 1 landed; follow-up slices remain open.
+Status: active 2026-07-08. Slices 1-2 landed; follow-up slices remain open.
 
 Workstream: native Rust shared client-experience/catalog/storage boundary,
 desktop flat, shared XR scene, flat Android, and Android XR. Web remains
@@ -58,31 +58,67 @@ Result on 2026-07-08: passed. The wasm web check still reports the existing
 reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
 introduced by this slice.
 
-## Follow-Up Slices
+## Slice 2: Catalog Session-Start Scene Derivation
 
-1. **Catalog session-start scene derivation.** Desktop, XR, and flat Android
-   still all derive local/catalog/remote scene options by clearing `world_dir`,
-   setting catalog `world_dir`, and suppressing persistence for remote sessions.
-   Lift the shared policy into a native helper that returns a small
-   platform-owned scene patch or storage intent, leaving actual surface/session
-   replacement platform-local.
-2. **Shared local-single-view storage mapping.** Desktop, XR, flat Android, and
+Status: landed 2026-07-08.
+
+Problem: desktop flat, XR, and flat Android each derived local/catalog/remote
+scene options by hand: transient local starts clear `remote_addr`/`world_dir`,
+catalog starts set the opened world dir, and remote starts clear `world_dir`
+while suppressing the desktop/XR adaptive local publication budget.
+
+Change:
+
+- Add `mclone_app_runtime::session::SessionStorageIntent` to encode the shared
+  local transient, local catalog, and remote session storage intent.
+- Route desktop flat, XR, and flat Android scene derivation through the shared
+  intent while keeping concrete scene structs, render-distance refresh,
+  OpenXR/session replacement, Android renderer ownership, and desktop mouse-lock
+  lifecycle local to their adapters.
+- Add shared unit coverage for the intent so future storage flags land in one
+  place first.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --package mclone-app-runtime --package mclone-native-client --package mclone-xr-scene --package mclone-android-client --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+git diff --check
+```
+
+Result on 2026-07-08: passed. The wasm web check still reports the existing
+`mclone-server` warnings for `TimingSample` and
+`with_unload_hysteresis_chunks`, and the native-client XR feature check still
+reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
+introduced by this slice.
+
+## Remaining Follow-Up Slices
+
+1. **Shared local-single-view storage mapping.** Desktop, XR, flat Android, and
    Android XR each map scene `world_dir` into
    `LocalSingleViewSceneOptions::with_persistent_world_dir`. Create a shared
    native builder/helper for the host-neutral options so new storage flags are
-   added once.
-3. **Android app-data world-root helper.** Flat Android and Android XR duplicate
+   added once. This is also the right place to decide whether flat Android should
+   expose the adaptive chunk-publication flag that `SessionStorageIntent`
+   already marks for remote sessions and desktop/XR apply today.
+2. **Android app-data world-root helper.** Flat Android and Android XR duplicate
    `internal_data_path().or_else(external_data_path()).join("worlds")` with only
    log-label differences. Move this to Android-specific shared glue, not
    `mclone-app-runtime`.
-4. **Startup storage validation and logging.** Desktop, flat Android, and
+3. **Startup storage validation and logging.** Desktop, flat Android, and
    Android XR repeat pieces of `--world-dir applies only to local integrated
    worlds`, default-root enablement, and storage logging. Keep argv/intent
    parsing platform-local, but centralize shared validation/projection.
-5. **Seed reroll policy.** Desktop, XR, and flat Android all use the same LCG for
+4. **Seed reroll policy.** Desktop, XR, and flat Android all use the same LCG for
    new-world seed rerolls with separate initial-state helpers. Move this into
    shared client-experience/catalog policy.
-6. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
+5. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
    all Minecraft persistence. Native still lacks periodic autosave and reserved
    player/saved-data record implementations; those remain under 134/136-style
    persistence follow-up rather than this cleanup tactical.
