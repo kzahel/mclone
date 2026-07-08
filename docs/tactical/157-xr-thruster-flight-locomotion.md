@@ -1,8 +1,8 @@
 # 157: XR Thruster Flight Locomotion (Iron Man mode)
 
-Status: proposed 2026-07-08. First implementation slice for a hand-driven
-"Iron Man / repulsor" flight movement model, entered as a new shared `Movement`
-value alongside `Player`, `Fly`, and `Gorilla`/`HandPush`.
+Status: active 2026-07-08; Slice 1 (plumbing) landed, Slice 2 (integrator) next.
+Hand-driven "Iron Man / repulsor" flight movement model, entered as a new shared
+`Movement` value alongside `Player`, `Fly`, and `Gorilla`/`HandPush`.
 
 Workstream: native Rust shared client experience, input, movement, and XR. This
 is a shared engine locomotion technique with XR controller input first, **not** a
@@ -137,27 +137,49 @@ every iteration.
 
 ### Slice 1 — Surface grip orientation + Thruster movement value (plumbing)
 
-- `mclone-xr-host`: extend `XrActionPose` / `XrControllerSnapshot` to carry the
-  grip-pose **orientation quaternion** (keep the existing derived forward).
-  Un-drop the quaternion in `locate_pose`.
-- `mclone-render-session`: add `EngineCameraMovementMode::Thruster` (extend
-  `.toggled()` cycle, `.label()`), and a `Thruster`-specific entry that keeps
-  `Collision = Normal` on entry (do NOT copy Fly's NoClip auto-enable).
-- `mclone-ui` + `mclone-app-runtime::client_experience`: add the `Thruster`
-  `Movement` value, labels, and reducer rules — `Movement = Thruster` defaults
-  `Collision = Normal` and `Travel Assist = Off` (mirror the `Gorilla` rules in
-  147). Gate as an XR-first capability in the profile; flat emulation later.
-- Converters in `locomotion.rs:268-296` and `flat_client_driver.rs:2909-2923`.
-- Add an `EngineThrusterInput` (per hand: palm normal + trigger; head/hand
-  positions optional) and a `xr_thruster_input_from_controllers` builder beside
-  `xr_hand_push_input_from_controllers`.
-- No integrator yet: selecting Thruster should be inert (no movement) so the
-  plumbing lands green before physics. Unit tests for the enum cycle/labels and
-  the reducer rules (Thruster → Normal collision, Travel Assist Off).
+Status: landed 2026-07-08.
 
-Exit: Thruster is selectable in the menu/mode cycle, defaults to Normal
-collision, and grip orientation + per-hand trigger are available to the client;
-no behavior yet.
+- [x] `mclone-xr-host`: `XrControllerSnapshot` now carries `grip_orientation:
+  Option<Quat>`; `XrActionPose` retains the grip-pose orientation quaternion and
+  `locate_pose` no longer drops it.
+- [x] `mclone-render-session`: added `EngineCameraMovementMode::Thruster`
+  (`.toggled()` cycle Walk→Fly→HandPush→Thruster→Walk, label `THRUST`, STANDING
+  dimensions). Entering Thruster defaults `Collision = Normal` (shares HandPush's
+  one-time entry default) but is deliberately left OUT of the per-frame collision
+  force, so NoClip stays selectable; it also does not hit Fly's NoClip
+  auto-enable.
+- [x] `mclone-ui` + `mclone-app-runtime::client_experience`: added the
+  `GameMovementMode::Thruster` value (label "Iron Man"), and reducer rules —
+  entry forces `Travel Assist = Off` (like Fly) and defaults `Collision = Normal`
+  (like HandPush), while `normalize_movement_experience` does NOT force Thruster
+  collision (NoClip stays selectable). `legacy_collision_mode_for_movement`
+  maps Thruster → Normal.
+- [x] All four `game_movement_mode` / `engine_movement_mode` converter pairs
+  updated (xr-scene, flat native, android, web).
+- [x] Added `EngineThrusterInput` / `EngineThrusterHand` (per-hand world palm
+  normal + analog throttle) and `EngineCameraInput.thruster`; the camera retains
+  it as `last_thruster_input()` for the Slice 2 integrator/client.
+- [x] Added `xr_thruster_input_from_controllers` beside
+  `xr_hand_push_input_from_controllers`, wired into `apply_locomotion_input`. It
+  derives each hand's world palm normal from the grip-pose quaternion via a
+  **provisional, uncalibrated** grip-local palm axis (`grip_local_palm_axis`,
+  +X left / −X right) — Slice 3 replaces this with an on-device calibrated
+  constant.
+- [x] The `Thruster` movement dispatch arm is inert (no displacement) but
+  retains the per-hand intent.
+- [x] Unit tests: engine toggle-cycle/labels include Thruster; Thruster defaults
+  Normal collision but leaves NoClip selectable (contrasted with HandPush);
+  inert-but-retains-input; reducer forces Travel Assist Off + defaults Normal and
+  keeps NoClip selectable.
+
+Deferred from Slice 1 (intentional): no per-profile capability gating was added —
+Thruster is in the shared mode cycle everywhere, matching HandPush, which is also
+ungated. XR-first capability projection can be added later alongside flat
+emulation (Slice 3) if desired; it is not required while the mode is inert.
+
+Exit (met): Thruster is selectable in the mode cycle, defaults to Normal
+collision, keeps NoClip selectable, and grip orientation + per-hand trigger are
+plumbed to the client via `last_thruster_input`; no movement yet.
 
 ### Slice 2 — Core thruster integrator (full manual, tick-independent)
 

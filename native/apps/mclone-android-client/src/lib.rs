@@ -3258,6 +3258,7 @@ mod android {
             EngineCameraMovementMode::Walking => GameMovementMode::Walk,
             EngineCameraMovementMode::Fly => GameMovementMode::Fly,
             EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
+            EngineCameraMovementMode::Thruster => GameMovementMode::Thruster,
         }
     }
 
@@ -3266,6 +3267,7 @@ mod android {
             GameMovementMode::Walk => EngineCameraMovementMode::Walking,
             GameMovementMode::Fly => EngineCameraMovementMode::Fly,
             GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+            GameMovementMode::Thruster => EngineCameraMovementMode::Thruster,
         }
     }
 

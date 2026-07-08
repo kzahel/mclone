@@ -14,6 +14,10 @@ pub struct XrControllerSnapshot {
     pub aim_position: Option<Vec3>,
     pub aim_direction: Option<Vec3>,
     pub grip_position: Option<Vec3>,
+    /// Full grip-pose orientation. The OpenXR grip pose is palm-relative, so this
+    /// is the input a thruster/repulsor mode uses to derive a palm normal (see
+    /// tactical 157). `aim_direction` is only a pointing ray and is not enough.
+    pub grip_orientation: Option<Quat>,
     pub trigger: f32,
     pub squeeze: f32,
     pub select_pressed: bool,
@@ -448,6 +452,7 @@ impl OpenXrControllerActions {
             aim_position: aim_pose.map(|pose| pose.position),
             aim_direction: aim_pose.map(|pose| pose.forward),
             grip_position: grip_pose.map(|pose| pose.position),
+            grip_orientation: grip_pose.map(|pose| pose.orientation),
             trigger: Self::read_float_action(session, trigger_action),
             squeeze: Self::read_float_action(session, squeeze_action),
             select_pressed: Self::read_bool_action(session, select_action),
@@ -496,6 +501,7 @@ impl OpenXrControllerActions {
         }
         Some(XrActionPose {
             position,
+            orientation: orientation.normalize(),
             forward: (orientation.normalize() * Vec3::NEG_Z).normalize_or_zero(),
         })
     }
@@ -528,6 +534,7 @@ impl OpenXrControllerActions {
 #[derive(Clone, Copy, Debug)]
 struct XrActionPose {
     position: Vec3,
+    orientation: Quat,
     forward: Vec3,
 }
 

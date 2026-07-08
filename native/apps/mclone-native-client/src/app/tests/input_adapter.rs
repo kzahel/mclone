@@ -234,9 +234,14 @@ fn player_movement_mode_cycles_through_shared_modes() {
     );
     assert_eq!(
         EngineCameraMovementMode::HandPush.toggled(),
+        EngineCameraMovementMode::Thruster
+    );
+    assert_eq!(
+        EngineCameraMovementMode::Thruster.toggled(),
         EngineCameraMovementMode::Walking
     );
     assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
     assert_eq!(EngineCameraMovementMode::Fly.label(), "FLY");
     assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
+    assert_eq!(EngineCameraMovementMode::Thruster.label(), "THRUST");
 }

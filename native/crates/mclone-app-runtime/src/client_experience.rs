@@ -960,10 +960,17 @@ impl ClientExperienceSettingsState {
         match change {
             ClientExperienceMovementSettingChange::MovementMode(mode) => {
                 self.movement_mode = mode;
-                if mode == GameMovementMode::Fly {
+                // Thruster (tactical 157) is a flight mode like Fly (no travel
+                // assist) and defaults to Normal collision on entry like HandPush
+                // — but, unlike HandPush, it is NOT force-normalized below, so
+                // NoClip stays selectable afterward.
+                if matches!(mode, GameMovementMode::Fly | GameMovementMode::Thruster) {
                     self.travel_assist_mode = GameTravelAssistMode::Off;
                 }
-                if mode == GameMovementMode::HandPush {
+                if matches!(
+                    mode,
+                    GameMovementMode::HandPush | GameMovementMode::Thruster
+                ) {
                     self.collision_mode = GameCollisionMode::Normal;
                 }
             }
@@ -994,9 +1001,14 @@ impl ClientExperienceSettingsState {
 
     pub fn normalize_movement_experience(&mut self) -> bool {
         let before = self.movement_experience_tuple();
-        if self.movement_mode == GameMovementMode::Fly {
+        if matches!(
+            self.movement_mode,
+            GameMovementMode::Fly | GameMovementMode::Thruster
+        ) {
             self.travel_assist_mode = GameTravelAssistMode::Off;
         }
+        // HandPush is always collision-backed; Thruster is intentionally NOT
+        // forced here so its NoClip default-on-entry can be overridden.
         if self.movement_mode == GameMovementMode::HandPush {
             self.collision_mode = GameCollisionMode::Normal;
         }
@@ -1037,7 +1049,9 @@ pub enum ClientExperienceMovementSettingChange {
 const fn legacy_collision_mode_for_movement(mode: GameMovementMode) -> GameCollisionMode {
     match mode {
         GameMovementMode::Fly => GameCollisionMode::NoClip,
-        GameMovementMode::Walk | GameMovementMode::HandPush => GameCollisionMode::Normal,
+        GameMovementMode::Walk | GameMovementMode::HandPush | GameMovementMode::Thruster => {
+            GameCollisionMode::Normal
+        }
     }
 }
 
@@ -1797,6 +1811,46 @@ mod tests {
 
         assert_eq!(state.movement_mode, GameMovementMode::HandPush);
         assert_eq!(state.collision_mode, GameCollisionMode::Normal);
+    }
+
+    #[test]
+    fn movement_experience_reducer_thruster_defaults_normal_and_clears_travel_assist() {
+        // Tactical 157: entering Thruster defaults to Normal collision and turns
+        // Travel Assist off (a flight mode, like Fly).
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Walk,
+            collision_mode: GameCollisionMode::NoClip,
+            travel_assist_mode: GameTravelAssistMode::Blink,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::MovementMode(GameMovementMode::Thruster),
+        );
+
+        assert_eq!(state.movement_mode, GameMovementMode::Thruster);
+        assert_eq!(state.collision_mode, GameCollisionMode::Normal);
+        assert_eq!(state.travel_assist_mode, GameTravelAssistMode::Off);
+    }
+
+    #[test]
+    fn movement_experience_reducer_thruster_keeps_noclip_selectable() {
+        // Unlike HandPush, Thruster is not force-normalized, so NoClip stays
+        // selectable after entry (tactical 157).
+        let mut state = ClientExperienceSettingsState {
+            movement_mode: GameMovementMode::Thruster,
+            collision_mode: GameCollisionMode::Normal,
+            travel_assist_mode: GameTravelAssistMode::Off,
+            ..ClientExperienceSettingsState::default()
+        };
+
+        let changed = state.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::CollisionMode(GameCollisionMode::NoClip),
+        );
+
+        assert!(changed);
+        assert_eq!(state.movement_mode, GameMovementMode::Thruster);
+        assert_eq!(state.collision_mode, GameCollisionMode::NoClip);
     }
 
     #[test]

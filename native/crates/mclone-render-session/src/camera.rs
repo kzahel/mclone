@@ -46,6 +46,7 @@ pub struct EngineCameraInput {
     pub movement_yaw_radians: Option<f64>,
     pub hand_push: Option<EngineHandPushInput>,
     pub hand_push_emulation: bool,
+    pub thruster: Option<EngineThrusterInput>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,6 +91,44 @@ impl EngineHandPushInput {
             left_hand_position: self.left_hand_position,
             right_hand_position: self.right_hand_position,
         }
+    }
+}
+
+/// Per-hand thrust intent for the Iron Man / repulsor flight mode (tactical 157).
+///
+/// `palm_normal` is a unit world-space vector pointing out of the palm (the
+/// direction the jet fires); the Slice 2 integrator pushes the body along
+/// `-palm_normal`. It is zero when the hand pose is unavailable this frame.
+/// `throttle` is the analog trigger value in `0..=1`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineThrusterHand {
+    pub palm_normal: Vec3d,
+    pub throttle: f32,
+}
+
+impl EngineThrusterHand {
+    pub const NONE: Self = Self {
+        palm_normal: Vec3d::ZERO,
+        throttle: 0.0,
+    };
+
+    pub fn new(palm_normal: Vec3d, throttle: f32) -> Self {
+        Self {
+            palm_normal,
+            throttle,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineThrusterInput {
+    pub left: EngineThrusterHand,
+    pub right: EngineThrusterHand,
+}
+
+impl EngineThrusterInput {
+    pub fn new(left: EngineThrusterHand, right: EngineThrusterHand) -> Self {
+        Self { left, right }
     }
 }
 
@@ -141,6 +180,7 @@ impl Default for EngineCameraInput {
             movement_yaw_radians: None,
             hand_push: None,
             hand_push_emulation: false,
+            thruster: None,
         }
     }
 }
@@ -151,6 +191,9 @@ pub enum EngineCameraMovementMode {
     Walking,
     Fly,
     HandPush,
+    /// Iron Man / repulsor hand-thruster flight (tactical 157). Gravity-bound
+    /// like `HandPush`; unlike `Fly` it must not force `NoClip` collision.
+    Thruster,
 }
 
 impl EngineCameraMovementMode {
@@ -158,7 +201,8 @@ impl EngineCameraMovementMode {
         match self {
             Self::Walking => Self::Fly,
             Self::Fly => Self::HandPush,
-            Self::HandPush => Self::Walking,
+            Self::HandPush => Self::Thruster,
+            Self::Thruster => Self::Walking,
         }
     }
 
@@ -167,6 +211,7 @@ impl EngineCameraMovementMode {
             Self::Walking => "WALK",
             Self::Fly => "FLY",
             Self::HandPush => "HAND",
+            Self::Thruster => "THRUST",
         }
     }
 }
@@ -199,9 +244,9 @@ fn player_dimensions_for_movement_mode(
 ) -> LocalPlayerDimensions {
     match movement_mode {
         EngineCameraMovementMode::HandPush => LocalPlayerDimensions::HAND_PUSH,
-        EngineCameraMovementMode::Walking | EngineCameraMovementMode::Fly => {
-            LocalPlayerDimensions::STANDING
-        }
+        EngineCameraMovementMode::Walking
+        | EngineCameraMovementMode::Fly
+        | EngineCameraMovementMode::Thruster => LocalPlayerDimensions::STANDING,
     }
 }
 
@@ -355,6 +400,7 @@ pub struct EngineCameraController {
     pub(crate) player: LocalPlayerController,
     hand_push: HandPushLocomotionController,
     last_hand_push_input: Option<EngineHandPushInput>,
+    last_thruster_input: Option<EngineThrusterInput>,
     last_room_scale_reconciliation: Option<EngineRoomScaleReconciliation>,
     room_scale_body_follow_active: bool,
     room_scale_blocked_residual: Option<Vec3d>,
@@ -400,6 +446,7 @@ impl EngineCameraController {
             player,
             hand_push: HandPushLocomotionController::default(),
             last_hand_push_input: None,
+            last_thruster_input: None,
             last_room_scale_reconciliation: None,
             room_scale_body_follow_active: false,
             room_scale_blocked_residual: None,
@@ -420,6 +467,10 @@ impl EngineCameraController {
 
     pub const fn last_hand_push_input(&self) -> Option<EngineHandPushInput> {
         self.last_hand_push_input
+    }
+
+    pub const fn last_thruster_input(&self) -> Option<EngineThrusterInput> {
+        self.last_thruster_input
     }
 
     pub const fn last_room_scale_reconciliation(&self) -> Option<EngineRoomScaleReconciliation> {
@@ -459,6 +510,7 @@ impl EngineCameraController {
         self.player.clear_delta_movement();
         self.hand_push.reset();
         self.last_hand_push_input = None;
+        self.last_thruster_input = None;
         self.reset_room_scale_body_follow();
         self.hand_push_emulation_phase = 0.0;
     }
@@ -497,12 +549,19 @@ impl EngineCameraController {
             self.player.clear_delta_movement();
             self.hand_push.reset();
             self.last_hand_push_input = None;
+            self.last_thruster_input = None;
             self.reset_room_scale_body_follow();
             self.hand_push_emulation_phase = 0.0;
         }
         self.movement_mode = movement_mode;
         self.set_player_dimensions_for_movement_mode();
-        if self.movement_mode == EngineCameraMovementMode::HandPush {
+        // HandPush is always collision-backed; Thruster defaults to Normal on
+        // entry (never forces NoClip like Fly does) but leaves NoClip selectable
+        // afterward through the independent Collision axis (tactical 157).
+        if matches!(
+            self.movement_mode,
+            EngineCameraMovementMode::HandPush | EngineCameraMovementMode::Thruster
+        ) {
             self.set_collision_mode(EngineCameraCollisionMode::Normal);
         }
     }
@@ -533,6 +592,7 @@ impl EngineCameraController {
             self.player.clear_delta_movement();
             self.hand_push.reset();
             self.last_hand_push_input = None;
+            self.last_thruster_input = None;
             self.reset_room_scale_body_follow();
             self.hand_push_emulation_phase = 0.0;
         }
@@ -755,6 +815,12 @@ impl EngineCameraController {
             EngineCameraMovementMode::HandPush => {
                 let _ = self.tick_hand_push(client, input);
             }
+            // Slice 1 (tactical 157): plumbing only — retain the per-hand thrust
+            // intent so it is available to the client, but do not move yet. The
+            // integrator lands in Slice 2.
+            EngineCameraMovementMode::Thruster => {
+                self.last_thruster_input = input.thruster;
+            }
         }
         self.snapshot()
     }
@@ -780,6 +846,8 @@ impl EngineCameraController {
                 }
             }
             EngineCameraMovementMode::HandPush => self.tick_hand_push(client, input),
+            // Slice 1 (tactical 157): inert until the Slice 2 integrator lands.
+            EngineCameraMovementMode::Thruster => false,
         }
     }
 

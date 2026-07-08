@@ -92,6 +92,17 @@ fn engine_camera_controller_toggles_movement_mode() {
     assert!(camera.snapshot().eye.y < standing_eye.y);
     assert_eq!(
         camera.toggle_movement_mode(),
+        EngineCameraMovementMode::Thruster
+    );
+    // Thruster (tactical 157) defaults to Normal collision on entry — it must
+    // NOT force NoClip the way Fly does — and uses STANDING dimensions.
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+    assert_eq!(
+        camera.player().dimensions(),
+        LocalPlayerDimensions::STANDING
+    );
+    assert_eq!(
+        camera.toggle_movement_mode(),
         EngineCameraMovementMode::Walking
     );
     assert_eq!(
@@ -102,8 +113,62 @@ fn engine_camera_controller_toggles_movement_mode() {
     assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
     assert_eq!(EngineCameraMovementMode::Fly.label(), "FLY");
     assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
+    assert_eq!(EngineCameraMovementMode::Thruster.label(), "THRUST");
     assert_eq!(EngineCameraCollisionMode::Normal.label(), "NORMAL");
     assert_eq!(EngineCameraCollisionMode::NoClip.label(), "NOCLIP");
+}
+
+#[test]
+fn thruster_defaults_normal_collision_but_leaves_noclip_selectable() {
+    // Tactical 157: entering Thruster must default to Normal collision (never
+    // force NoClip like Fly), yet — unlike HandPush, which is always
+    // collision-backed — NoClip must remain selectable afterward.
+    let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+
+    camera.set_movement_mode(EngineCameraMovementMode::Thruster);
+    assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Thruster);
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+
+    camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::NoClip);
+    assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Thruster);
+
+    // Contrast: HandPush forces Normal collision back.
+    camera.set_movement_mode(EngineCameraMovementMode::HandPush);
+    camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+}
+
+#[test]
+fn thruster_retains_per_hand_input_without_moving() {
+    // Slice 1: Thruster is inert but retains the per-hand thrust intent so the
+    // Slice 2 integrator (and the client) can read it.
+    let client = ClientRuntime::local_integrated();
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 80.0, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+    camera.set_movement_mode(EngineCameraMovementMode::Thruster);
+    let eye_before = camera.snapshot().eye;
+
+    let thruster = EngineThrusterInput::new(
+        EngineThrusterHand::new(Vec3d::new(0.0, -1.0, 0.0), 1.0),
+        EngineThrusterHand::new(Vec3d::new(0.0, -1.0, 0.0), 0.5),
+    );
+    camera.apply_movement_input(
+        &client,
+        EngineCameraInput {
+            dt_seconds: 1.0 / 60.0,
+            thruster: Some(thruster),
+            ..EngineCameraInput::default()
+        },
+    );
+
+    assert_eq!(camera.last_thruster_input(), Some(thruster));
+    // Inert in Slice 1: full throttle does not move the player yet.
+    assert_eq!(camera.snapshot().eye, eye_before);
 }
 
 #[test]

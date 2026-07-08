@@ -90,8 +90,9 @@ use mclone_render_session::{
     EngineCameraCollisionMode, EngineCameraController, EngineCameraInput,
     EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraSnapshot,
     EngineDebugVisualOptions, EngineHandPushInput, EngineRoomScaleReconciliation,
-    RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
-    RenderSectionUploadPhaseReport, actor_instances_from_presentations, engine_debug_world_lines,
+    EngineThrusterHand, EngineThrusterInput, RenderSectionCacheUpdate,
+    RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy, RenderSectionUploadPhaseReport,
+    actor_instances_from_presentations, engine_debug_world_lines,
 };
 use mclone_server::WorkerFrameMetrics;
 use mclone_ui::{
@@ -4491,6 +4492,7 @@ mod tests {
             aim_position: Some(Vec3::ZERO),
             aim_direction: Some(Vec3::NEG_Z),
             grip_position: Some(Vec3::ZERO),
+            grip_orientation: Some(Quat::IDENTITY),
             trigger: 0.0,
             squeeze: 0.0,
             select_pressed: false,

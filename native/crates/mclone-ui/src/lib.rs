@@ -1113,6 +1113,8 @@ pub enum GameMovementMode {
     Walk,
     Fly,
     HandPush,
+    /// Iron Man / repulsor hand-thruster flight (tactical 157).
+    Thruster,
 }
 
 impl GameMovementMode {
@@ -1121,6 +1123,7 @@ impl GameMovementMode {
             Self::Walk => "Walk",
             Self::Fly => "Fly",
             Self::HandPush => "Hand Push",
+            Self::Thruster => "Iron Man",
         }
     }
 
@@ -1128,7 +1131,8 @@ impl GameMovementMode {
         match self {
             Self::Walk => Self::Fly,
             Self::Fly => Self::HandPush,
-            Self::HandPush => Self::Walk,
+            Self::HandPush => Self::Thruster,
+            Self::Thruster => Self::Walk,
         }
     }
 }

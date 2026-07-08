@@ -2911,6 +2911,7 @@ pub(crate) const fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMo
         EngineCameraMovementMode::Walking => GameMovementMode::Walk,
         EngineCameraMovementMode::Fly => GameMovementMode::Fly,
         EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
+        EngineCameraMovementMode::Thruster => GameMovementMode::Thruster,
     }
 }
 
@@ -2919,6 +2920,7 @@ pub(crate) const fn engine_movement_mode(mode: GameMovementMode) -> EngineCamera
         GameMovementMode::Walk => EngineCameraMovementMode::Walking,
         GameMovementMode::Fly => EngineCameraMovementMode::Fly,
         GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+        GameMovementMode::Thruster => EngineCameraMovementMode::Thruster,
     }
 }
 

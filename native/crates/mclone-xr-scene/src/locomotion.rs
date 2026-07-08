@@ -227,6 +227,55 @@ pub(crate) fn xr_controller_hand_position(
         .and_then(|controller| controller.grip_position.or(controller.aim_position))
 }
 
+/// Per-hand thrust intent for the Iron Man / repulsor flight mode (tactical
+/// 157). Derives each hand's world-space palm normal from the OpenXR grip pose
+/// and reads the analog trigger as throttle. Missing hands / poses fall back to
+/// `EngineThrusterHand::NONE`. The Slice 2 integrator consumes this; in Slice 1
+/// the camera only retains it.
+pub fn xr_thruster_input_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    transform: XrStageToWorld,
+) -> EngineThrusterInput {
+    EngineThrusterInput::new(
+        xr_thruster_hand(controllers, XrHand::Left, transform),
+        xr_thruster_hand(controllers, XrHand::Right, transform),
+    )
+}
+
+fn xr_thruster_hand(
+    controllers: &[XrControllerSnapshot],
+    hand: XrHand,
+    transform: XrStageToWorld,
+) -> EngineThrusterHand {
+    let Some(controller) = controllers.iter().find(|c| c.hand == hand) else {
+        return EngineThrusterHand::NONE;
+    };
+    let Some(grip_orientation) = controller.grip_orientation else {
+        return EngineThrusterHand::NONE;
+    };
+    // grip-local palm axis -> stage space (via grip orientation) -> world space.
+    let stage_palm_normal = grip_orientation * grip_local_palm_axis(hand);
+    let world_palm_normal = transform.transform_direction(stage_palm_normal);
+    EngineThrusterHand::new(
+        vec3d_from_glam(world_palm_normal),
+        controller.trigger.clamp(0.0, 1.0),
+    )
+}
+
+/// Provisional grip-local palm normal for Quest 3 Touch Plus.
+///
+/// The OpenXR grip pose is palm-relative, but the exact local axis that maps to
+/// the palm normal is interaction-profile dependent. This is an **uncalibrated
+/// placeholder** — tactical 157 Slice 3 replaces it with an on-device calibrated
+/// constant. Provisional guess: the palm faces roughly across the hand toward
+/// the body, so grip-local +X (left) / -X (right).
+fn grip_local_palm_axis(hand: XrHand) -> Vec3 {
+    match hand {
+        XrHand::Left => Vec3::X,
+        XrHand::Right => Vec3::NEG_X,
+    }
+}
+
 pub fn xr_automated_flight_input(
     dt_seconds: f64,
     movement_yaw_radians: Option<f64>,
@@ -270,6 +319,7 @@ pub(crate) fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovement
         EngineCameraMovementMode::Walking => GameMovementMode::Walk,
         EngineCameraMovementMode::Fly => GameMovementMode::Fly,
         EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
+        EngineCameraMovementMode::Thruster => GameMovementMode::Thruster,
     }
 }
 
@@ -278,6 +328,7 @@ pub(crate) fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMoveme
         GameMovementMode::Walk => EngineCameraMovementMode::Walking,
         GameMovementMode::Fly => EngineCameraMovementMode::Fly,
         GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+        GameMovementMode::Thruster => EngineCameraMovementMode::Thruster,
     }
 }
 
@@ -394,6 +445,7 @@ where
         }
         input.hand_push = xr_hand_push_input_from_controllers(controllers, &views, transform)
             .context("resolve XR hand-push input")?;
+        input.thruster = Some(xr_thruster_input_from_controllers(controllers, transform));
         timing.input_ms = elapsed_ms(input_start.elapsed());
         let camera_apply_start = Instant::now();
         let runtime = self.runtime.as_ref().expect("runtime presence checked");
