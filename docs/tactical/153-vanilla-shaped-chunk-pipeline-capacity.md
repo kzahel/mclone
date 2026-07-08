@@ -670,6 +670,23 @@ size into shared startup/session policy as `--light-status-batch-size` /
 local integrated paths all forward the value into the scheduler's light-status
 enqueue threshold. Use `5` for the vanilla-shaped comparison row.
 
+The clean A/B rows on `4b8a4657` did **not** justify flipping the default to
+vanilla's `5`. RD10 batch `5` improved full view by `518.567ms` and target
+quiescence by `151.805ms`, but introduced a `49.382ms` max frame (`2 / 1`
+over/over-2x). RD15 batch `5` regressed full view by `522.580ms` and target
+quiescence by `89.451ms`. The useful signal is that smaller batches lower
+single-batch compute maxima (`~108ms -> ~60-67ms`) while increasing batch
+count and publication/drain overhead (`73 -> 127` RD10, `144 -> 249` RD15).
+Vanilla's batch number is therefore coupled to its chunk-priority sorter, not
+a standalone default.
+
+The follow-up priority slice keeps default `9` and ports the narrow sorter
+piece that fits mclone's current architecture: pending light-status batches
+and completed light publications are ordered by the current player-priority
+centers before worker submission/publication. This does not parallelize
+lighting or change the light algorithm; it prevents old FIFO light backlog
+from publishing ahead of newly relevant near-player chunks.
+
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages
 watched), movement probe. Acceptance: light stage ceiling raised to at

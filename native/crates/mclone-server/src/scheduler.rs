@@ -2940,8 +2940,7 @@ impl ChunkScheduler {
                 if let Some(statuses) = ready_light_batch {
                     diagnostics.light_status_batches_enqueued =
                         diagnostics.light_status_batches_enqueued.saturating_add(1);
-                    self.light_mailbox
-                        .enqueue_batch(PendingLightStatusBatch::new(statuses));
+                    self.enqueue_light_status_batch(statuses);
                 }
             } else if self
                 .distance_manager
@@ -2978,13 +2977,22 @@ impl ChunkScheduler {
         if !pending_light_statuses.is_empty() {
             diagnostics.light_status_batches_enqueued =
                 diagnostics.light_status_batches_enqueued.saturating_add(1);
-            self.light_mailbox
-                .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
+            self.enqueue_light_status_batch(pending_light_statuses);
         }
         if !self.publication_budget.enabled() {
             events.extend(self.enqueue_next_pending_feature_job());
         }
         Ok((events, None))
+    }
+
+    fn enqueue_light_status_batch(&mut self, statuses: Vec<PendingLightStatus>) {
+        let priority_centers = self
+            .distance_manager
+            .player_interest_priority_centers()
+            .to_vec();
+        let statuses = light_statuses_sorted_by_priority(statuses, &priority_centers);
+        self.light_mailbox
+            .enqueue_batch(PendingLightStatusBatch::new(statuses));
     }
 
     fn publish_pending_light_statuses(
@@ -2997,6 +3005,7 @@ impl ChunkScheduler {
             .completed_light_statuses_drained
             .saturating_add(completed.len());
         self.pending_light_publications.extend(completed);
+        self.prioritize_pending_light_publications();
         let mut events = Vec::new();
         let publish_start = simulation_timing_start();
         let before_units = diagnostics
@@ -3094,6 +3103,22 @@ impl ChunkScheduler {
             spent_units,
         );
         Ok(events)
+    }
+
+    fn prioritize_pending_light_publications(&mut self) {
+        if self.pending_light_publications.len() < 2 {
+            return;
+        }
+        let priority_centers = self
+            .distance_manager
+            .player_interest_priority_centers()
+            .to_vec();
+        if priority_centers.is_empty() {
+            return;
+        }
+        self.pending_light_publications
+            .make_contiguous()
+            .sort_by_key(|completed| chunk_priority_key(completed.pos, &priority_centers));
     }
 
     fn observe_publication_spend(
@@ -3889,6 +3914,16 @@ fn sorted_chunk_positions_by_priority(
     positions
 }
 
+fn light_statuses_sorted_by_priority(
+    mut statuses: Vec<PendingLightStatus>,
+    priority_centers: &[ChunkPos],
+) -> Vec<PendingLightStatus> {
+    if !priority_centers.is_empty() {
+        statuses.sort_by_key(|status| chunk_priority_key(status.pos, priority_centers));
+    }
+    statuses
+}
+
 fn chunk_priority_key(pos: ChunkPos, priority_centers: &[ChunkPos]) -> (i64, i64, i32, i32) {
     let (chebyshev_distance, manhattan_distance) = priority_centers
         .iter()
@@ -3932,6 +3967,40 @@ mod tests {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler.holders.insert(pos, holder);
         scheduler
+    }
+
+    fn test_feature_snapshot(pos: ChunkPos) -> ChunkSnapshot {
+        ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Features,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![BlockStateId(0); CHUNK_SECTION_VOLUME],
+        )
+    }
+
+    fn test_pending_light_status(pos: ChunkPos) -> PendingLightStatus {
+        PendingLightStatus::from_parts(pos, test_feature_snapshot(pos), Vec::new(), Vec::new())
+    }
+
+    fn test_completed_light_status(pos: ChunkPos) -> CompletedLightStatus {
+        CompletedLightStatus {
+            pos,
+            feature_snapshot: test_feature_snapshot(pos),
+            scheduled_block_ticks: Vec::new(),
+            scheduled_fluid_ticks: Vec::new(),
+            light_sections: Vec::new(),
+            batch_compute_leader: false,
+            compute_us: 0,
+            timing: LevelLightComputationTiming::default(),
+        }
+    }
+
+    fn test_scheduled_light_holder(pos: ChunkPos) -> ChunkHolder {
+        let mut holder = ChunkHolder::new(pos);
+        holder.mark_scheduled(ChunkStatus::Light);
+        holder
     }
 
     fn square(center: ChunkPos, radius: i32) -> BTreeSet<ChunkPos> {
@@ -4018,6 +4087,70 @@ mod tests {
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(dependency_chunks.first(), Some(&ChunkPos::new(5, -3)));
+    }
+
+    #[test]
+    fn light_status_batch_sort_orders_chunks_from_view_center_outward() {
+        let statuses = vec![
+            test_pending_light_status(ChunkPos::new(4, 0)),
+            test_pending_light_status(ChunkPos::new(0, 0)),
+            test_pending_light_status(ChunkPos::new(1, 1)),
+        ];
+
+        let sorted = light_statuses_sorted_by_priority(statuses, &[ChunkPos::new(0, 0)])
+            .into_iter()
+            .map(|status| status.pos)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            sorted,
+            vec![
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 1),
+                ChunkPos::new(4, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn light_publication_backlog_prioritizes_current_view_center() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let center = ChunkPos::new(0, 0);
+        let far = ChunkPos::new(8, 0);
+        scheduler
+            .distance_manager
+            .set_aggregate_player_ticket_positions_with_priority(BTreeSet::new(), vec![center]);
+        scheduler
+            .holders
+            .insert(center, test_scheduled_light_holder(center));
+        scheduler
+            .holders
+            .insert(far, test_scheduled_light_holder(far));
+        scheduler
+            .pending_light_publications
+            .push_back(test_completed_light_status(far));
+        scheduler
+            .pending_light_publications
+            .push_back(test_completed_light_status(center));
+
+        let mut diagnostics = ChunkSchedulerPublicationDiagnostics::default();
+        let events = scheduler
+            .publish_pending_light_statuses(&mut diagnostics, PublicationGrant::fixed(2))
+            .unwrap();
+        let ready_positions = events
+            .iter()
+            .filter_map(|event| match event {
+                ChunkSchedulerEvent::StatusChanged {
+                    pos,
+                    status: ChunkStatus::Light,
+                    step: ChunkStatusStep::Ready,
+                } => Some(*pos),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(ready_positions, vec![center, far]);
+        assert_eq!(diagnostics.light_statuses_published, 2);
     }
 
     #[test]
