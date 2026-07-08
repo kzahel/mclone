@@ -100,7 +100,7 @@ introduced by this slice.
 
 ## Slice 3: Shared Integrated-Session Storage Mapping
 
-Status: landed 2026-07-08.
+Status: landed 2026-07-08 in `50694e36`.
 
 Problem: desktop flat, shared XR, flat Android, and Android XR each mapped their
 scene `world_dir` into `LocalSingleViewSceneOptions::with_persistent_world_dir`
