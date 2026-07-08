@@ -1,7 +1,9 @@
 # 157: XR Thruster Flight Locomotion (Iron Man mode)
 
-Status: active 2026-07-08; Slices 1 (plumbing) + 2 (integrator) landed, Slice 3
-(palm calibration + dev tuning knobs) next.
+Status: active 2026-07-08; Slices 1 (plumbing) + 2 (integrator) + 3 (palm
+calibration, desktop emulation, dev tuning knobs) landed. Slice 4 (FX / sound /
+haptics) next; on-device palm-axis confirmation + headset feel tuning remain
+manual/hardware follow-ups.
 Hand-driven "Iron Man / repulsor" flight movement model, entered as a new shared
 `Movement` value alongside `Player`, `Fly`, and `Gorilla`/`HandPush`.
 
@@ -226,16 +228,44 @@ the four constants; no NoClip forced; terrain collides.
 
 ### Slice 3 — Palm calibration + dev tuning knobs
 
-- Calibrate `TOUCH_PALM_AXIS` on-device per the procedure above; replace any
-  Slice 2 placeholder axis.
-- Desktop-XR no-headset emulation for the thrust input so tuning does not require
-  the headset each pass.
-- Promote `THRUST_SCALE` / `DRAG` / `MAX_SPEED` / `GRAVITY_SCALE` to
-  dev-adjustable values (shared settings/debug surface, not a full options UI
-  yet) so the feel can be dialed in live.
+Status: landed 2026-07-08 (software); one-time on-device numeric confirmation of
+the palm axis is the remaining manual/hardware step.
 
-Exit: palm direction is correct and calibrated on Quest 3; the four feel knobs
-are adjustable without a rebuild.
+- [x] Palm axis calibrated from spec, not guessed. Replaced the Slice-1
+  provisional `grip_local_palm_axis` with documented per-profile
+  `TOUCH_PALM_AXIS_LEFT` / `_RIGHT` constants in `mclone-xr-scene/locomotion.rs`,
+  derived from the OpenXR / Windows-MR grip-pose convention: the grip
+  orientation's **Right (+X) axis** is "the ray normal to the palm — forward from
+  the LEFT palm, backward from the RIGHT palm", so the outward palm normal is
+  grip-local **+X (left) / −X (right)** (the Slice-1 placeholder values, now
+  justified). Factored a pure, testable `xr_thruster_world_palm_normal` helper.
+- [x] On-device calibration aid: `MCLONE_THRUSTER_PALM_CAL=1` logs a throttled
+  per-hand line (grip quat → world palm normal + throttle) while in Thruster
+  mode, so the axis/sign can be confirmed on real Touch Plus hardware by holding
+  the controller palm-flat-down and checking `world_palm_normal ≈ (0,-1,0)`.
+- [x] Desktop-XR no-headset emulation: `EngineCameraInput.thruster_emulation`
+  + `emulated_thruster_input` synthesize both hands' palm normal + throttle from
+  the keyboard (movement keys → horizontal thrust, jump/descend → vertical; jets
+  fire opposite desired travel, so palm-down climbs). Enabled in the flat desktop
+  driver; the integrator can now be tuned without donning the headset.
+- [x] Feel knobs promoted to a dev-adjustable `ThrusterTuning`
+  (`thrust_scale` / `gravity_scale` / `drag` / `max_speed`) threaded through
+  `ThrusterMovementStep`, sanitized (bad overrides can't break flight), with a
+  camera getter/setter (shared knob surface) and `MCLONE_THRUSTER_*` env
+  overrides seeded at desktop startup — dialable without a rebuild. `GRAVITY_SI`
+  stays a fixed physical constant.
+- [x] Tests: palm-down grip → downward world palm normal (both hands) + missing
+  grip → none + throttle passthrough (xr-scene); desktop emulation climbs on jump
+  / idles-and-falls + tuning setter sanitization (render-session); tuning
+  sanitize/clamp + gravity/thrust-scale response + env no-op (client).
+- [ ] One-time on-device numeric confirmation of `TOUCH_PALM_AXIS` on Quest 3
+  Touch Plus via the calibration aid (manual/hardware; the axis is spec-derived
+  and unit-tested, so this is a confirmation, not a discovery).
+
+Exit (software met; on-device confirmation pending): palm direction is
+spec-calibrated and unit-tested, the desktop emulation removes the headset from
+the tuning loop, and the four feel knobs are adjustable without a rebuild via the
+camera setter or `MCLONE_THRUSTER_*` env vars.
 
 ### Slice 4 — Feedback (FX / sound / haptics) — follow-up, own sub-slices
 

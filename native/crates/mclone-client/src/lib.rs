@@ -48,10 +48,10 @@ pub use player::{
     LocalPlayerController, LocalPlayerDimensions, LocalPlayerPose, MOVING_SLOW_FACTOR,
     NO_CLIP_BOOST_MULTIPLIER, NoClipMovementStep, PlayerInput, PlayerInputKey, PlayerInputKeys,
     THRUSTER_DRAG, THRUSTER_GRAVITY_SCALE, THRUSTER_GRAVITY_SI, THRUSTER_MAX_SPEED,
-    THRUSTER_THRUST_SCALE, ThrusterHandInput, ThrusterMovementStep, WalkingMovementResult,
-    WalkingMovementStep, collide_movement, flying_displacement, no_clip_displacement,
-    sphere_intersects_solid_blocks, thruster_acceleration, thruster_integrate, view_vector,
-    view_vector_from_rot_degrees,
+    THRUSTER_THRUST_SCALE, ThrusterHandInput, ThrusterMovementStep, ThrusterTuning,
+    WalkingMovementResult, WalkingMovementStep, collide_movement, flying_displacement,
+    no_clip_displacement, sphere_intersects_solid_blocks, thruster_acceleration,
+    thruster_integrate, view_vector, view_vector_from_rot_degrees,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use teleport::{

@@ -3763,6 +3763,11 @@ pub(crate) fn engine_camera_controller_from_spectator(
     );
     camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
     camera.set_first_person_player_visible(first_person_player_visible);
+    // Seed thruster feel knobs from MCLONE_THRUSTER_* env overrides so the
+    // Iron Man flight feel can be dialed in on desktop without a rebuild
+    // (tactical 157 Slice 3).
+    let thruster_tuning = camera.thruster_tuning().with_env_overrides();
+    camera.set_thruster_tuning(thruster_tuning);
     camera
 }
 
@@ -3799,6 +3804,7 @@ pub(crate) fn engine_camera_input_from_flat_frame(
             .map(|movement| EngineCameraMovementImpulse::new(movement.left, movement.forward)),
         movement_yaw_radians: None,
         hand_push_emulation: true,
+        thruster_emulation: true,
         ..EngineCameraInput::default()
     }
 }

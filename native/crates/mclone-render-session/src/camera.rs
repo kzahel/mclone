@@ -20,6 +20,10 @@ const ENGINE_HAND_PUSH_EMULATION_HAND_SPACING: f64 = 0.34;
 const ENGINE_HAND_PUSH_EMULATION_FORWARD_REACH: f64 = 0.32;
 const ENGINE_HAND_PUSH_EMULATION_STROKE: f64 = 0.36;
 const ENGINE_HAND_PUSH_EMULATION_LIFT: f64 = 0.16;
+/// Synthetic per-hand throttle used by the desktop-XR thrust emulation (tactical
+/// 157 Slice 3). Full throttle both hands: keys pick the thrust *direction*, the
+/// tuning knobs and gravity govern the resulting speed/climb.
+const ENGINE_THRUSTER_EMULATION_THROTTLE: f32 = 1.0;
 pub(crate) const ENGINE_DEBUG_HAND_SPHERE_SEGMENTS: usize = 24;
 const ENGINE_DEBUG_PLAYER_BOX_COLOR: [f32; 4] = [0.1, 0.95, 0.65, 0.95];
 const ENGINE_DEBUG_LEFT_HAND_COLOR: [f32; 4] = [0.2, 0.55, 1.0, 0.95];
@@ -47,6 +51,7 @@ pub struct EngineCameraInput {
     pub hand_push: Option<EngineHandPushInput>,
     pub hand_push_emulation: bool,
     pub thruster: Option<EngineThrusterInput>,
+    pub thruster_emulation: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -181,6 +186,7 @@ impl Default for EngineCameraInput {
             hand_push: None,
             hand_push_emulation: false,
             thruster: None,
+            thruster_emulation: false,
         }
     }
 }
@@ -412,6 +418,7 @@ pub struct EngineCameraController {
     movement_speed_multiplier: f64,
     landing_events: Vec<LandingEvent>,
     hand_push_emulation_phase: f64,
+    thruster_tuning: ThrusterTuning,
 }
 
 impl EngineCameraController {
@@ -458,6 +465,7 @@ impl EngineCameraController {
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER,
             landing_events: Vec::new(),
             hand_push_emulation_phase: 0.0,
+            thruster_tuning: ThrusterTuning::default(),
         }
     }
 
@@ -471,6 +479,17 @@ impl EngineCameraController {
 
     pub const fn last_thruster_input(&self) -> Option<EngineThrusterInput> {
         self.last_thruster_input
+    }
+
+    /// Dev-adjustable thruster feel knobs (tactical 157 Slice 3). Shared knob
+    /// surface for tuning without a rebuild; the desktop app seeds these from
+    /// `MCLONE_THRUSTER_*` env overrides at startup.
+    pub const fn thruster_tuning(&self) -> ThrusterTuning {
+        self.thruster_tuning
+    }
+
+    pub fn set_thruster_tuning(&mut self, tuning: ThrusterTuning) {
+        self.thruster_tuning = tuning.sanitized();
     }
 
     pub const fn last_room_scale_reconciliation(&self) -> Option<EngineRoomScaleReconciliation> {
@@ -1146,11 +1165,20 @@ impl EngineCameraController {
     /// per-frame path never forces NoClip, matching the Slice 1 entry rule.
     fn tick_thruster(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        self.last_thruster_input = input.thruster;
+        // Prefer real XR per-hand thrust; fall back to the desktop-XR keyboard
+        // emulation (tactical 157 Slice 3) so the feel can be tuned without a
+        // headset. Neither present -> gravity-only fall (mode stays gravity-bound).
+        let thruster = input.thruster.or_else(|| {
+            input
+                .thruster_emulation
+                .then(|| self.emulated_thruster_input(input))
+                .flatten()
+        });
+        self.last_thruster_input = thruster;
         if dt_seconds <= 0.0 {
             return false;
         }
-        let thruster = input.thruster.unwrap_or(EngineThrusterInput::new(
+        let thruster = thruster.unwrap_or(EngineThrusterInput::new(
             EngineThrusterHand::NONE,
             EngineThrusterHand::NONE,
         ));
@@ -1158,8 +1186,29 @@ impl EngineCameraController {
             left: thruster_hand_input(thruster.left),
             right: thruster_hand_input(thruster.right),
             dt_seconds,
+            tuning: self.thruster_tuning,
         };
         self.player.tick_thruster_movement(client, step).is_some()
+    }
+
+    /// Desktop-XR thrust emulation (tactical 157 Slice 3): synthesize both hands'
+    /// palm normal + throttle from the keyboard so the integrator can be tuned
+    /// without a headset. Movement keys drive a horizontal thrust direction and
+    /// jump/descend drive vertical; the body accelerates along `-palm_normal`, so
+    /// the jets fire opposite the desired travel (palm-down to rise, palms-back to
+    /// go forward), mirroring the real XR feel. Symmetric across both hands.
+    fn emulated_thruster_input(&self, input: EngineCameraInput) -> Option<EngineThrusterInput> {
+        let pose = self.player.pose();
+        let yaw_radians = finite_movement_yaw(input.movement_yaw_radians)
+            .unwrap_or_else(|| pose.native_yaw_radians());
+        let horizontal = hand_push_emulation_direction(input, yaw_radians);
+        let vertical = axis(input.jump, input.descend || input.shift) as f64;
+        let desired = normalize_vec3d_or_zero(horizontal.add(Vec3d::new(0.0, vertical, 0.0)));
+        if desired == Vec3d::ZERO {
+            return None;
+        }
+        let hand = EngineThrusterHand::new(desired.scale(-1.0), ENGINE_THRUSTER_EMULATION_THROTTLE);
+        Some(EngineThrusterInput::new(hand, hand))
     }
 
     fn emulated_hand_push_input(

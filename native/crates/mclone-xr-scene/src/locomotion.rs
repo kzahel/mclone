@@ -250,29 +250,99 @@ fn xr_thruster_hand(
     let Some(controller) = controllers.iter().find(|c| c.hand == hand) else {
         return EngineThrusterHand::NONE;
     };
-    let Some(grip_orientation) = controller.grip_orientation else {
+    let Some(world_palm_normal) = xr_thruster_world_palm_normal(controller, transform) else {
         return EngineThrusterHand::NONE;
     };
-    // grip-local palm axis -> stage space (via grip orientation) -> world space.
-    let stage_palm_normal = grip_orientation * grip_local_palm_axis(hand);
-    let world_palm_normal = transform.transform_direction(stage_palm_normal);
     EngineThrusterHand::new(
         vec3d_from_glam(world_palm_normal),
         controller.trigger.clamp(0.0, 1.0),
     )
 }
 
-/// Provisional grip-local palm normal for Quest 3 Touch Plus.
+/// World-space unit palm normal for one controller's grip pose (the direction
+/// the palm repulsor fires), or `None` when the grip orientation is unavailable
+/// this frame. Maps the profile's grip-local palm axis through the grip
+/// orientation into stage space, then into world space. Shared by the thruster
+/// input builder and the on-device calibration aid.
+pub fn xr_thruster_world_palm_normal(
+    controller: &XrControllerSnapshot,
+    transform: XrStageToWorld,
+) -> Option<Vec3> {
+    let grip_orientation = controller.grip_orientation?;
+    // grip-local palm axis -> stage space (via grip orientation) -> world space.
+    let stage_palm_normal = grip_orientation * touch_palm_axis(controller.hand);
+    Some(
+        transform
+            .transform_direction(stage_palm_normal)
+            .normalize_or_zero(),
+    )
+}
+
+/// Grip-local palm normal for the `oculus/touch_controller` interaction profile
+/// (Quest 3 Touch Plus): the unit vector in grip space pointing OUT of the palm,
+/// i.e. the direction a palm repulsor fires. The body accelerates along
+/// `-palm_normal` (tactical 157).
 ///
-/// The OpenXR grip pose is palm-relative, but the exact local axis that maps to
-/// the palm normal is interaction-profile dependent. This is an **uncalibrated
-/// placeholder** — tactical 157 Slice 3 replaces it with an on-device calibrated
-/// constant. Provisional guess: the palm faces roughly across the hand toward
-/// the body, so grip-local +X (left) / -X (right).
-fn grip_local_palm_axis(hand: XrHand) -> Vec3 {
+/// Calibrated from the OpenXR / Windows-MR grip-pose convention: the grip
+/// orientation's **Right (+X) axis** is "the ray normal to the palm — forward
+/// from the LEFT palm, backward from the RIGHT palm" (OpenXR grip-pose spec / MS
+/// motion-controllers doc). So the outward palm normal is grip-local **+X for the
+/// left hand** and **-X for the right hand**.
+///
+/// Confirm on real hardware with the calibration aid: launch with
+/// `MCLONE_THRUSTER_PALM_CAL=1`, enter Thruster mode, and hold the controller
+/// palm-flat-down — the logged `world_palm_normal` should read ~ `(0, -1, 0)`. A
+/// future Index/Vive/WMR profile adds its own constant here rather than reusing
+/// this one.
+const TOUCH_PALM_AXIS_LEFT: Vec3 = Vec3::X;
+const TOUCH_PALM_AXIS_RIGHT: Vec3 = Vec3::NEG_X;
+
+fn touch_palm_axis(hand: XrHand) -> Vec3 {
     match hand {
-        XrHand::Left => Vec3::X,
-        XrHand::Right => Vec3::NEG_X,
+        XrHand::Left => TOUCH_PALM_AXIS_LEFT,
+        XrHand::Right => TOUCH_PALM_AXIS_RIGHT,
+    }
+}
+
+/// How often (in frames) the on-device palm-calibration aid emits a log line per
+/// hand while enabled, to keep a manual calibration session readable.
+const XR_THRUSTER_PALM_CAL_LOG_EVERY_FRAMES: u32 = 30;
+
+/// True when on-device thruster palm-calibration logging is enabled via the
+/// `MCLONE_THRUSTER_PALM_CAL` env var (checked once). See [`touch_palm_axis`].
+fn thruster_palm_calibration_logging_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("MCLONE_THRUSTER_PALM_CAL").is_some())
+}
+
+/// Emit a throttled calibration line per hand (grip quaternion -> world palm
+/// normal + throttle) so the grip-local palm axis can be confirmed on real
+/// hardware per the [`touch_palm_axis`] procedure.
+fn log_thruster_palm_calibration(controllers: &[XrControllerSnapshot], transform: XrStageToWorld) {
+    static FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if frame % XR_THRUSTER_PALM_CAL_LOG_EVERY_FRAMES != 0 {
+        return;
+    }
+    for controller in controllers {
+        let Some(grip) = controller.grip_orientation else {
+            continue;
+        };
+        let Some(normal) = xr_thruster_world_palm_normal(controller, transform) else {
+            continue;
+        };
+        log::info!(
+            "MCLONE_THRUSTER_PALM_CAL hand={:?} grip_quat=[{:.3},{:.3},{:.3},{:.3}] world_palm_normal=[{:.3},{:.3},{:.3}] throttle={:.3}",
+            controller.hand,
+            grip.x,
+            grip.y,
+            grip.z,
+            grip.w,
+            normal.x,
+            normal.y,
+            normal.z,
+            controller.trigger.clamp(0.0, 1.0),
+        );
     }
 }
 
@@ -446,6 +516,11 @@ where
         input.hand_push = xr_hand_push_input_from_controllers(controllers, &views, transform)
             .context("resolve XR hand-push input")?;
         input.thruster = Some(xr_thruster_input_from_controllers(controllers, transform));
+        if thruster_palm_calibration_logging_enabled()
+            && self.camera.movement_mode() == EngineCameraMovementMode::Thruster
+        {
+            log_thruster_palm_calibration(controllers, transform);
+        }
         timing.input_ms = elapsed_ms(input_start.elapsed());
         let camera_apply_start = Instant::now();
         let runtime = self.runtime.as_ref().expect("runtime presence checked");
@@ -673,5 +748,95 @@ where
                 xr_headset_world_yaw_from_views(views, transform).map(|yaw| Some(f64::from(yaw)))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod thruster_calibration_tests {
+    use super::*;
+    use std::f32::consts::FRAC_PI_2;
+
+    fn identity_transform() -> XrStageToWorld {
+        XrStageToWorld {
+            origin_stage: Vec3::ZERO,
+            origin_world: Vec3::ZERO,
+            stage_to_world_rotation: Quat::IDENTITY,
+        }
+    }
+
+    fn controller(
+        hand: XrHand,
+        grip_orientation: Option<Quat>,
+        trigger: f32,
+    ) -> XrControllerSnapshot {
+        XrControllerSnapshot {
+            hand,
+            aim_position: None,
+            aim_direction: None,
+            grip_position: None,
+            grip_orientation,
+            trigger,
+            squeeze: 0.0,
+            select_pressed: false,
+            a_pressed: false,
+            b_pressed: false,
+            y_pressed: false,
+            thumbstick: Vec2::ZERO,
+            thumbstick_pressed: false,
+        }
+    }
+
+    #[test]
+    fn palm_down_grip_yields_downward_world_palm_normal_both_hands() {
+        // Calibrated `TOUCH_PALM_AXIS` is grip-local +X (left) / -X (right). A
+        // grip orientation that rotates that axis to world (0,-1,0) — i.e. the
+        // "palm flat, facing down" calibration pose — must produce a world palm
+        // normal of (0,-1,0), so the body thrusts straight up along -palm_normal.
+        let left_grip = Quat::from_rotation_z(-FRAC_PI_2); // +X -> (0,-1,0)
+        let left = controller(XrHand::Left, Some(left_grip), 1.0);
+        let left_normal =
+            xr_thruster_world_palm_normal(&left, identity_transform()).expect("left palm normal");
+        assert!(
+            (left_normal - Vec3::NEG_Y).length() < 1.0e-5,
+            "left world palm normal {left_normal:?} should be ~(0,-1,0)"
+        );
+
+        let right_grip = Quat::from_rotation_z(FRAC_PI_2); // -X -> (0,-1,0)
+        let right = controller(XrHand::Right, Some(right_grip), 1.0);
+        let right_normal =
+            xr_thruster_world_palm_normal(&right, identity_transform()).expect("right palm normal");
+        assert!(
+            (right_normal - Vec3::NEG_Y).length() < 1.0e-5,
+            "right world palm normal {right_normal:?} should be ~(0,-1,0)"
+        );
+    }
+
+    #[test]
+    fn missing_grip_orientation_yields_no_palm_normal() {
+        let hand = controller(XrHand::Left, None, 1.0);
+        assert!(xr_thruster_world_palm_normal(&hand, identity_transform()).is_none());
+    }
+
+    #[test]
+    fn thruster_input_builder_carries_throttle_and_downward_thrust() {
+        // Palm-down grip + full trigger -> the engine hand should thrust the body
+        // upward (accel along -palm_normal, palm_normal ~ (0,-1,0)) at throttle 1.
+        let controllers = [
+            controller(XrHand::Left, Some(Quat::from_rotation_z(-FRAC_PI_2)), 0.75),
+            controller(XrHand::Right, Some(Quat::from_rotation_z(FRAC_PI_2)), 0.25),
+        ];
+        let input = xr_thruster_input_from_controllers(&controllers, identity_transform());
+        assert!((input.left.throttle - 0.75).abs() < 1.0e-5);
+        assert!((input.right.throttle - 0.25).abs() < 1.0e-5);
+        assert!(
+            input.left.palm_normal.y < -0.9,
+            "left palm normal should point down, got {:?}",
+            input.left.palm_normal
+        );
+        assert!(
+            input.right.palm_normal.y < -0.9,
+            "right palm normal should point down, got {:?}",
+            input.right.palm_normal
+        );
     }
 }

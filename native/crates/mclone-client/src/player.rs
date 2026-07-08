@@ -226,11 +226,95 @@ impl ThrusterHandInput {
     }
 }
 
+/// Dev-adjustable feel knobs for thruster flight (tactical 157 Slice 3).
+///
+/// Promotes the `THRUSTER_*` constants to a per-player value so the feel can be
+/// dialed in without a rebuild (via [`ThrusterTuning::with_env_overrides`] or a
+/// runtime setter). `THRUSTER_GRAVITY_SI` stays a fixed physical constant — only
+/// its per-player `gravity_scale` ("antigravity field") is adjustable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThrusterTuning {
+    pub thrust_scale: f64,
+    pub gravity_scale: f64,
+    pub drag: f64,
+    pub max_speed: f64,
+}
+
+impl Default for ThrusterTuning {
+    fn default() -> Self {
+        Self {
+            thrust_scale: THRUSTER_THRUST_SCALE,
+            gravity_scale: THRUSTER_GRAVITY_SCALE,
+            drag: THRUSTER_DRAG,
+            max_speed: THRUSTER_MAX_SPEED,
+        }
+    }
+}
+
+impl ThrusterTuning {
+    /// Clamp each knob to a sane range (non-finite values fall back to the
+    /// default) so a bad dev override cannot break flight: `drag` stays in the
+    /// `(0, 1]` retain-fraction range, gravity/thrust/speed stay finite and
+    /// bounded. Idempotent.
+    pub fn sanitized(self) -> Self {
+        let default = Self::default();
+        Self {
+            thrust_scale: sanitize_thruster_knob(
+                self.thrust_scale,
+                default.thrust_scale,
+                0.0,
+                512.0,
+            ),
+            gravity_scale: sanitize_thruster_knob(
+                self.gravity_scale,
+                default.gravity_scale,
+                0.0,
+                4.0,
+            ),
+            drag: sanitize_thruster_knob(self.drag, default.drag, 1.0e-3, 1.0),
+            max_speed: sanitize_thruster_knob(self.max_speed, default.max_speed, 1.0e-3, 1024.0),
+        }
+    }
+
+    /// Apply `MCLONE_THRUSTER_*` environment overrides on top of `self` for
+    /// desktop dev tuning without a rebuild (`MCLONE_THRUSTER_THRUST_SCALE`,
+    /// `_GRAVITY_SCALE`, `_DRAG`, `_MAX_SPEED`). Unset/invalid vars leave the
+    /// field unchanged; the result is sanitized. No-op where env is unavailable
+    /// (e.g. wasm), so it is safe to call on every target.
+    pub fn with_env_overrides(self) -> Self {
+        let mut tuning = self;
+        apply_thruster_env_override("MCLONE_THRUSTER_THRUST_SCALE", &mut tuning.thrust_scale);
+        apply_thruster_env_override("MCLONE_THRUSTER_GRAVITY_SCALE", &mut tuning.gravity_scale);
+        apply_thruster_env_override("MCLONE_THRUSTER_DRAG", &mut tuning.drag);
+        apply_thruster_env_override("MCLONE_THRUSTER_MAX_SPEED", &mut tuning.max_speed);
+        tuning.sanitized()
+    }
+}
+
+fn sanitize_thruster_knob(value: f64, fallback: f64, min: f64, max: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(min, max)
+    } else {
+        fallback
+    }
+}
+
+fn apply_thruster_env_override(key: &str, slot: &mut f64) {
+    if let Ok(raw) = std::env::var(key) {
+        if let Ok(parsed) = raw.trim().parse::<f64>() {
+            if parsed.is_finite() {
+                *slot = parsed;
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThrusterMovementStep {
     pub left: ThrusterHandInput,
     pub right: ThrusterHandInput,
     pub dt_seconds: f64,
+    pub tuning: ThrusterTuning,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1961,16 +2045,18 @@ pub fn flying_displacement(input: PlayerInput, step: FlyingMovementStep) -> Opti
 }
 
 /// Total continuous body acceleration (blocks/s^2) for one thruster step: the
-/// sum of both hands' reaction thrust (`-palm_normal * throttle * THRUST_SCALE`)
-/// minus scaled gravity on the Y axis. Pure and cadence-independent.
+/// sum of both hands' reaction thrust (`-palm_normal * throttle * thrust_scale`)
+/// minus scaled gravity on the Y axis. Pure and cadence-independent; reads the
+/// dev-adjustable knobs from `step.tuning`.
 pub fn thruster_acceleration(step: ThrusterMovementStep) -> Vec3d {
-    let mut accel =
-        thruster_hand_acceleration(step.left).add(thruster_hand_acceleration(step.right));
-    accel.y -= THRUSTER_GRAVITY_SI * THRUSTER_GRAVITY_SCALE;
+    let tuning = step.tuning.sanitized();
+    let mut accel = thruster_hand_acceleration(step.left, tuning.thrust_scale)
+        .add(thruster_hand_acceleration(step.right, tuning.thrust_scale));
+    accel.y -= THRUSTER_GRAVITY_SI * tuning.gravity_scale;
     accel
 }
 
-fn thruster_hand_acceleration(hand: ThrusterHandInput) -> Vec3d {
+fn thruster_hand_acceleration(hand: ThrusterHandInput, thrust_scale: f64) -> Vec3d {
     if !hand.palm_normal.is_finite() || !hand.throttle.is_finite() {
         return Vec3d::ZERO;
     }
@@ -1979,23 +2065,25 @@ fn thruster_hand_acceleration(hand: ThrusterHandInput) -> Vec3d {
         return Vec3d::ZERO;
     }
     // Reaction to the jet: the body is shoved opposite the palm normal.
-    hand.palm_normal.scale(-throttle * THRUSTER_THRUST_SCALE)
+    hand.palm_normal.scale(-throttle * thrust_scale)
 }
 
 /// Advance a thruster velocity (blocks/s) by one step and return the new velocity
 /// plus the frame displacement (blocks). Integrated in SI units against real
-/// `dt`: `v += a*dt`, continuous drag `v *= DRAG.powf(dt)`, magnitude clamped to
-/// `MAX_SPEED`, then `displacement = v*dt`. Collision resolution is the caller's
-/// job (`tick_thruster_movement`); this stays pure for tick-independence tests.
+/// `dt`: `v += a*dt`, continuous drag `v *= drag.powf(dt)`, magnitude clamped to
+/// `max_speed`, then `displacement = v*dt`. Feel knobs come from `step.tuning`.
+/// Collision resolution is the caller's job (`tick_thruster_movement`); this
+/// stays pure for tick-independence tests.
 pub fn thruster_integrate(velocity: Vec3d, step: ThrusterMovementStep) -> (Vec3d, Vec3d) {
     let dt = step.dt_seconds;
     if !dt.is_finite() || dt <= 0.0 || !velocity.is_finite() {
         return (velocity, Vec3d::ZERO);
     }
+    let tuning = step.tuning.sanitized();
     let accel = thruster_acceleration(step);
     let mut velocity = velocity.add(accel.scale(dt));
-    velocity = velocity.scale(THRUSTER_DRAG.powf(dt));
-    velocity = clamp_speed(velocity, THRUSTER_MAX_SPEED);
+    velocity = velocity.scale(tuning.drag.powf(dt));
+    velocity = clamp_speed(velocity, tuning.max_speed);
     let displacement = velocity.scale(dt);
     (velocity, displacement)
 }
@@ -3188,6 +3276,7 @@ mod tests {
             left: ThrusterHandInput::new(left_palm, left_throttle),
             right: ThrusterHandInput::new(right_palm, right_throttle),
             dt_seconds: dt,
+            tuning: ThrusterTuning::default(),
         }
     }
 
@@ -3342,6 +3431,69 @@ mod tests {
         let v2 = controller.delta_movement().y;
         assert!(v2 < v1, "velocity should accumulate: {v1} -> {v2}");
         assert!(controller.pose().position.y < start_y);
+    }
+
+    #[test]
+    fn thruster_tuning_sanitizes_out_of_range_and_nonfinite_knobs() {
+        let bad = ThrusterTuning {
+            thrust_scale: f64::NAN,
+            gravity_scale: 99.0,
+            drag: 0.0,
+            max_speed: -5.0,
+        }
+        .sanitized();
+        // Non-finite falls back to default; out-of-range clamps into range.
+        assert_eq!(bad.thrust_scale, ThrusterTuning::default().thrust_scale);
+        assert_eq!(bad.gravity_scale, 4.0);
+        assert_eq!(bad.drag, 1.0e-3);
+        assert_eq!(bad.max_speed, 1.0e-3);
+        // A default tuning is unchanged by sanitizing (idempotent, in-range).
+        assert_eq!(
+            ThrusterTuning::default().sanitized(),
+            ThrusterTuning::default()
+        );
+    }
+
+    #[test]
+    fn thruster_tuning_gravity_scale_governs_vertical_accel() {
+        let mut zero_gravity = thruster_step(0.0, 0.0, Vec3d::ZERO, Vec3d::ZERO, 0.05);
+        zero_gravity.tuning = ThrusterTuning {
+            gravity_scale: 0.0,
+            ..ThrusterTuning::default()
+        };
+        assert!(
+            thruster_acceleration(zero_gravity).y.abs() < 1.0e-9,
+            "gravity_scale=0 should cancel vertical accel"
+        );
+
+        let default_gravity = thruster_step(0.0, 0.0, Vec3d::ZERO, Vec3d::ZERO, 0.05);
+        assert!(
+            thruster_acceleration(default_gravity).y < 0.0,
+            "default gravity_scale should pull down"
+        );
+    }
+
+    #[test]
+    fn thruster_tuning_thrust_scale_governs_thrust_magnitude() {
+        let mut strong = thruster_step(1.0, 1.0, PALM_DOWN, PALM_DOWN, 0.05);
+        strong.tuning = ThrusterTuning {
+            thrust_scale: 24.0,
+            ..ThrusterTuning::default()
+        };
+        let weak = thruster_step(1.0, 1.0, PALM_DOWN, PALM_DOWN, 0.05);
+        // Palm-down thrust is upward; a larger thrust_scale climbs harder.
+        assert!(thruster_acceleration(strong).y > thruster_acceleration(weak).y);
+    }
+
+    #[test]
+    fn thruster_tuning_env_overrides_default_to_unchanged() {
+        // With the MCLONE_THRUSTER_* vars unset, env overrides are a no-op that
+        // still returns a sanitized default (env is process-global, so we only
+        // assert the unset path here to stay parallel-test safe).
+        assert_eq!(
+            ThrusterTuning::default().with_env_overrides(),
+            ThrusterTuning::default()
+        );
     }
 
     #[test]

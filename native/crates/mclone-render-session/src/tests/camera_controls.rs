@@ -211,6 +211,100 @@ fn thruster_without_thrust_falls_under_gravity() {
 }
 
 #[test]
+fn thruster_desktop_emulation_climbs_on_jump_with_palms_down() {
+    // Slice 3: desktop-XR emulation lets the integrator be tuned without a
+    // headset. Holding jump should synthesize both palms facing down (thrust up)
+    // and climb against gravity.
+    let client = ClientRuntime::local_integrated();
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 80.0, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+    camera.set_movement_mode(EngineCameraMovementMode::Thruster);
+    let eye_before = camera.snapshot().eye;
+
+    for _ in 0..30 {
+        camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 1.0 / 60.0,
+                jump: true,
+                thruster_emulation: true,
+                ..EngineCameraInput::default()
+            },
+        );
+    }
+
+    let thruster = camera
+        .last_thruster_input()
+        .expect("emulation should synthesize thrust from jump");
+    assert!(
+        thruster.left.palm_normal.y < 0.0 && thruster.right.palm_normal.y < 0.0,
+        "jump should fire palms down (thrust up): {:?}",
+        thruster.left.palm_normal
+    );
+    assert!(
+        camera.snapshot().eye.y > eye_before.y + 0.1,
+        "emulated jump-thrust should climb: {} -> {}",
+        eye_before.y,
+        camera.snapshot().eye.y
+    );
+}
+
+#[test]
+fn thruster_desktop_emulation_idle_falls_under_gravity() {
+    // Emulation enabled but no keys held: no synthetic thrust, so gravity wins.
+    let client = ClientRuntime::local_integrated();
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 80.0, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+    camera.set_movement_mode(EngineCameraMovementMode::Thruster);
+    let eye_before = camera.snapshot().eye;
+
+    for _ in 0..10 {
+        camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 1.0 / 60.0,
+                thruster_emulation: true,
+                ..EngineCameraInput::default()
+            },
+        );
+    }
+
+    assert_eq!(camera.last_thruster_input(), None);
+    assert!(camera.snapshot().eye.y < eye_before.y);
+}
+
+#[test]
+fn thruster_tuning_setter_is_sanitized_and_readable() {
+    // Slice 3: the camera exposes the dev-adjustable feel knobs; the setter
+    // sanitizes so a bad override cannot break flight.
+    let mut camera = EngineCameraController::from_eye_pose(
+        Vec3d::new(0.5, 80.0, 0.5),
+        0.0,
+        0.0,
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+    );
+    camera.set_thruster_tuning(ThrusterTuning {
+        gravity_scale: 0.35,
+        drag: 5.0,
+        ..ThrusterTuning::default()
+    });
+    let tuning = camera.thruster_tuning();
+    assert!((tuning.gravity_scale - 0.35).abs() < 1.0e-9);
+    assert_eq!(
+        tuning.drag, 1.0,
+        "drag > 1 should clamp to the no-drag ceiling"
+    );
+}
+
+#[test]
 fn engine_debug_world_lines_include_player_box_and_hand_colliders() {
     let client = ClientRuntime::local_integrated();
     let mut camera = EngineCameraController::from_eye_pose(

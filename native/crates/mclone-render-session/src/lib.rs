@@ -11,7 +11,7 @@ use mclone_client::{
     HandPushLocomotionController, HandPushMovementStep, HandPushPose,
     LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND,
     LocalPlayerController, LocalPlayerDimensions, LocalPlayerPose, NoClipMovementStep,
-    PlayerInputKey, ThrusterHandInput, ThrusterMovementStep, WalkingMovementStep,
+    PlayerInputKey, ThrusterHandInput, ThrusterMovementStep, ThrusterTuning, WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME,
