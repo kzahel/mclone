@@ -343,6 +343,10 @@ pub(super) fn is_stone_shore_landmark_block_id(block_id: RawBlockId) -> bool {
     matches!(block_id, STONE | GRAVEL)
 }
 
+pub(super) fn is_shattered_savanna_landmark_block_id(block_id: RawBlockId) -> bool {
+    matches!(block_id, GRASS_BLOCK | COARSE_DIRT | STONE)
+}
+
 pub(super) fn surface_fixture_block_name_at(
     oracle: &TerrainChunkOracleFixture,
     local_x: i32,
@@ -669,6 +673,24 @@ pub(super) fn fills_stone_shore_edge_chunk_with_terrain_only_java_oracle() {
 }
 
 #[test]
+pub(super) fn fills_shattered_savanna_chunk_with_terrain_only_java_oracle() {
+    let oracle = shattered_savanna_terrain_fixture();
+    assert_eq!(oracle.seed, "68");
+    assert_eq!(oracle.chunk_x, -6);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn fills_shattered_savanna_plateau_chunk_with_terrain_only_java_oracle() {
+    let oracle = shattered_savanna_plateau_terrain_fixture();
+    assert_eq!(oracle.seed, "153");
+    assert_eq!(oracle.chunk_x, -8);
+    assert_eq!(oracle.chunk_z, -2);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
 pub(super) fn macro_geometry_signal_tracks_baseline_terrain_anchor() {
     let oracle = terrain_fixture();
     let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
@@ -838,6 +860,96 @@ pub(super) fn macro_geometry_signal_tracks_stone_shore_water_edge_anchor() {
 }
 
 #[test]
+pub(super) fn macro_geometry_signal_tracks_shattered_savanna_relief_anchor() {
+    let oracle = shattered_savanna_surface_fixture();
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+    generator.build_surface_and_bedrock(&mut chunk);
+    let signal = macro_geometry_signal(
+        &chunk,
+        is_shattered_savanna_landmark_block_id,
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+    );
+
+    assert_eq!(
+        signal,
+        MacroGeometrySignal {
+            top_y_min: 62,
+            top_y_max: 80,
+            top_y_range: 18,
+            top_y_p05: 62,
+            top_y_p50: 67,
+            top_y_p95: 77,
+            neighbor_delta_ge_4: 9,
+            neighbor_delta_ge_8: 0,
+            neighbor_delta_ge_16: 0,
+            vertical_face_columns: 8,
+            solid_over_air_blocks: 0,
+            surface_near_carved_air_columns: 0,
+            carved_air_volume: 0,
+            carved_air_y_min: None,
+            carved_air_y_max: None,
+            long_vertical_air_spans: 0,
+            water_land_edge_delta_ge_4: 0,
+            water_land_edge_delta_ge_8: 0,
+            landmark_block_volume: 699,
+            landmark_column_count: 126,
+        }
+    );
+}
+
+#[test]
+pub(super) fn macro_geometry_signal_tracks_shattered_savanna_plateau_relief_anchor() {
+    let oracle = shattered_savanna_plateau_surface_fixture();
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+    generator.build_surface_and_bedrock(&mut chunk);
+    let signal = macro_geometry_signal(
+        &chunk,
+        is_shattered_savanna_landmark_block_id,
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+    );
+
+    assert_eq!(
+        signal,
+        MacroGeometrySignal {
+            top_y_min: 65,
+            top_y_max: 155,
+            top_y_range: 90,
+            top_y_p05: 73,
+            top_y_p50: 84,
+            top_y_p95: 152,
+            neighbor_delta_ge_4: 61,
+            neighbor_delta_ge_8: 34,
+            neighbor_delta_ge_16: 13,
+            vertical_face_columns: 46,
+            solid_over_air_blocks: 22,
+            surface_near_carved_air_columns: 0,
+            carved_air_volume: 0,
+            carved_air_y_min: None,
+            carved_air_y_max: None,
+            long_vertical_air_spans: 0,
+            water_land_edge_delta_ge_4: 0,
+            water_land_edge_delta_ge_8: 0,
+            landmark_block_volume: 5447,
+            landmark_column_count: 256,
+        }
+    );
+}
+
+#[test]
 pub(super) fn build_surface_and_bedrock_matches_java_oracle() {
     let oracle = surface_fixture();
     assert_eq!(oracle.chunk_x, 0);
@@ -860,6 +972,24 @@ pub(super) fn build_stone_shore_edge_surface_and_bedrock_matches_java_oracle() {
     assert_eq!(oracle.seed, "74739");
     assert_eq!(oracle.chunk_x, 6);
     assert_eq!(oracle.chunk_z, 8);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn build_shattered_savanna_surface_and_bedrock_matches_java_oracle() {
+    let oracle = shattered_savanna_surface_fixture();
+    assert_eq!(oracle.seed, "68");
+    assert_eq!(oracle.chunk_x, -6);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn build_shattered_savanna_plateau_surface_and_bedrock_matches_java_oracle() {
+    let oracle = shattered_savanna_plateau_surface_fixture();
+    assert_eq!(oracle.seed, "153");
+    assert_eq!(oracle.chunk_x, -8);
+    assert_eq!(oracle.chunk_z, -2);
     assert_surface_chunk_matches_java_oracle(oracle);
 }
 

@@ -77,6 +77,34 @@ pub(super) fn stone_shore_edge_surface_fixture() -> TerrainChunkOracleFixture {
     .expect("valid stone shore edge surface chunk oracle fixture")
 }
 
+pub(super) fn shattered_savanna_terrain_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-68-chunks--6-0-terrain-only.json"
+    ))
+    .expect("valid shattered savanna terrain chunk oracle fixture")
+}
+
+pub(super) fn shattered_savanna_surface_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-68-chunks--6-0-surface-only.json"
+    ))
+    .expect("valid shattered savanna surface chunk oracle fixture")
+}
+
+pub(super) fn shattered_savanna_plateau_terrain_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-153-chunks--8--2-terrain-only.json"
+    ))
+    .expect("valid shattered savanna plateau terrain chunk oracle fixture")
+}
+
+pub(super) fn shattered_savanna_plateau_surface_fixture() -> TerrainChunkOracleFixture {
+    serde_json::from_str(include_str!(
+        "../../../../../../test/fixtures/integration/overworld-seed-153-chunks--8--2-surface-only.json"
+    ))
+    .expect("valid shattered savanna plateau surface chunk oracle fixture")
+}
+
 pub(super) fn full_chunk_fixture() -> FullChunkOracleFixture {
     serde_json::from_str(include_str!(
         "../../../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0.json"
