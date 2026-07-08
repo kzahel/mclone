@@ -471,6 +471,7 @@ struct PendingEntityChunkSave {
 pub struct ChunkScheduler {
     seed: i64,
     lighting_enabled: bool,
+    light_status_batch_size: usize,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
     pending_unloads: BTreeSet<ChunkPos>,
     pending_chunk_loads: BTreeMap<PersistenceRequestId, PendingChunkLoad>,
@@ -734,6 +735,7 @@ impl ChunkScheduler {
         Self {
             seed,
             lighting_enabled: true,
+            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             holders: BTreeMap::new(),
             pending_unloads: BTreeSet::new(),
             pending_chunk_loads: BTreeMap::new(),
@@ -782,6 +784,7 @@ impl ChunkScheduler {
         Self {
             seed,
             lighting_enabled: true,
+            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             holders: BTreeMap::new(),
             pending_unloads: BTreeSet::new(),
             pending_chunk_loads: BTreeMap::new(),
@@ -831,6 +834,14 @@ impl ChunkScheduler {
 
     pub fn set_lighting_enabled(&mut self, enabled: bool) {
         self.lighting_enabled = enabled;
+    }
+
+    pub const fn light_status_batch_size(&self) -> usize {
+        self.light_status_batch_size
+    }
+
+    pub fn set_light_status_batch_size(&mut self, batch_size: usize) {
+        self.light_status_batch_size = batch_size.max(1);
     }
 
     pub const fn publication_budget_config(&self) -> ChunkPublicationBudgetConfig {
@@ -2923,7 +2934,7 @@ impl ChunkScheduler {
                         generated.iter(),
                         retained_dependencies.iter(),
                     ));
-                    (statuses.len() >= CENTER_PRIORITY_LIGHT_STATUS_BATCH_SIZE)
+                    (statuses.len() >= self.light_status_batch_size)
                         .then(|| std::mem::take(statuses))
                 };
                 if let Some(statuses) = ready_light_batch {
@@ -4401,7 +4412,7 @@ fn status_path_to(target_status: ChunkStatus) -> Vec<ChunkStatus> {
 pub(crate) const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 pub(crate) const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
 pub(crate) const DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET: usize = 1;
-const CENTER_PRIORITY_LIGHT_STATUS_BATCH_SIZE: usize = 9;
+pub const DEFAULT_LIGHT_STATUS_BATCH_SIZE: usize = 9;
 const STARTUP_CHUNK_LOAD_REQUEST_LIMIT: usize = 9;
 const BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT: usize = 128;
 const STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 9;

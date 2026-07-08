@@ -249,6 +249,7 @@ pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
     initial_center_x: i32,
     initial_center_z: i32,
     movement_speed_multiplier: f32,
+    light_status_batch_size: usize,
     section_occlusion_culling: bool,
     force_fullbright: bool,
     render_color_profile: String,
@@ -273,7 +274,8 @@ pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
             server_job_worker_url,
             bindgen_js_url,
             bindgen_wasm_url,
-        ),
+        )
+        .with_light_status_batch_size(light_status_batch_size),
         &world_storage,
         &world_id,
         clear_world_storage,
@@ -5844,6 +5846,11 @@ fn startup_options_to_js_value(options: &StartupOptions) -> Result<JsValue, Stri
         options.scene.debug_passive_showcase,
     )?;
     set_bool(&object, "lightingEnabled", options.scene.lighting_enabled)?;
+    set_number(
+        &object,
+        "lightStatusBatchSize",
+        options.scene.light_status_batch_size as f64,
+    )?;
     set_bool(
         &object,
         "sectionOcclusionCulling",

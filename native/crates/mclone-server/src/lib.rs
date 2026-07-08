@@ -83,7 +83,7 @@ pub use runner::{
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{
     ChunkPublicationBudgetConfig, ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics,
-    ChunkStatusJob, FluidTickPhaseReport,
+    ChunkStatusJob, DEFAULT_LIGHT_STATUS_BATCH_SIZE, FluidTickPhaseReport,
 };
 pub use spawn::initial_spawn_center_for_seed;
 pub use timing::{

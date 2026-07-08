@@ -447,6 +447,14 @@ impl IntegratedServer {
             .set_target_status(runtime_chunk_target_status(&self.scheduler));
     }
 
+    pub fn light_status_batch_size(&self) -> usize {
+        self.scheduler.light_status_batch_size()
+    }
+
+    pub fn set_light_status_batch_size(&mut self, batch_size: usize) {
+        self.scheduler.set_light_status_batch_size(batch_size);
+    }
+
     pub fn publication_budget_config(&self) -> ChunkPublicationBudgetConfig {
         self.scheduler.publication_budget_config()
     }

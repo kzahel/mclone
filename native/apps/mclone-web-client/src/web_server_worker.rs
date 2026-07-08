@@ -53,6 +53,7 @@ const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WebIntegratedServerRunnerConfig {
     pub seed: i64,
+    pub light_status_batch_size: usize,
     pub worker_url: String,
     pub job_worker_url: String,
     pub bindgen_js_url: String,
@@ -81,6 +82,7 @@ impl WebIntegratedServerRunnerConfig {
     ) -> Self {
         Self {
             seed,
+            light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             worker_url: worker_url.into(),
             job_worker_url: job_worker_url.into(),
             bindgen_js_url: bindgen_js_url.into(),
@@ -100,6 +102,11 @@ impl WebIntegratedServerRunnerConfig {
             world_id: world_id.into(),
             clear_existing,
         };
+        self
+    }
+
+    pub const fn with_light_status_batch_size(mut self, batch_size: usize) -> Self {
+        self.light_status_batch_size = if batch_size == 0 { 1 } else { batch_size };
         self
     }
 
@@ -446,6 +453,11 @@ impl WebIntegratedServerRunner {
         set_string(&message, "kind", "start")?;
         set_number(&message, "requestId", f64::from(request_id))?;
         set_number(&message, "seed", config.seed as f64)?;
+        set_number(
+            &message,
+            "lightStatusBatchSize",
+            config.light_status_batch_size as f64,
+        )?;
         set_string(&message, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
         set_string(&message, "jobWorkerUrl", &config.job_worker_url)?;
@@ -1756,6 +1768,11 @@ impl McloneWebIntegratedServerWorker {
                 WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
             );
         Self::from_server(seed, server, Some(state))
+    }
+
+    #[wasm_bindgen(js_name = setLightStatusBatchSize)]
+    pub fn set_light_status_batch_size(&mut self, batch_size: usize) {
+        self.server.set_light_status_batch_size(batch_size);
     }
 
     #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]

@@ -544,6 +544,7 @@ async function createIndexedDbSmokeSession(module, assetPack, canvas, worldId, c
     0,
     0,
     1.0,
+    9,
     true,
     false,
     "vanilla",

@@ -240,6 +240,10 @@ impl MovementPerfReport {
             self.options.scene.adaptive_chunk_publication_budget
         );
         println!(
+            "  \"light_status_batch_size\": {},",
+            self.options.scene.light_status_batch_size
+        );
+        println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
         );
@@ -1112,6 +1116,10 @@ impl FrameBudgetProbeReport {
             self.options.scene.render_compile_capacity_mode.as_str()
         );
         println!(
+            "  \"light_status_batch_size\": {},",
+            self.options.scene.light_status_batch_size
+        );
+        println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
         );
@@ -1862,6 +1870,10 @@ impl StartupStreamingPerfReport {
         println!(
             "  \"adaptive_chunk_publication_budget\": {},",
             self.options.scene.adaptive_chunk_publication_budget
+        );
+        println!(
+            "  \"light_status_batch_size\": {},",
+            self.options.scene.light_status_batch_size
         );
         println!(
             "  \"freeze_scheduled_fluid_ticks\": {},",
@@ -2690,6 +2702,10 @@ impl LoadingSettlePerfReport {
         println!(
             "  \"lighting_enabled\": {},",
             self.options.scene.lighting_enabled
+        );
+        println!(
+            "  \"light_status_batch_size\": {},",
+            self.options.scene.light_status_batch_size
         );
         println!("  \"asset_load_ms\": {:.3},", self.asset_load_ms);
         println!("  \"total_elapsed_ms\": {:.3},", self.total_elapsed_ms);

@@ -58,6 +58,7 @@ interface WebStartupOptions extends WasmReport {
   chunkZ: number;
   renderDistance: number;
   movementSpeedMultiplier: number;
+  lightStatusBatchSize: number;
   remoteWebSocketUrl?: string;
   sectionOcclusionCulling: boolean;
   forceFullbright: boolean;
@@ -430,6 +431,7 @@ class WebChunkApp {
         startup.chunkX,
         startup.chunkZ,
         startup.movementSpeedMultiplier,
+        startup.lightStatusBatchSize,
         this.sectionOcclusionCulling,
         this.forceFullbright,
         startup.renderColorProfile,
@@ -1707,6 +1709,7 @@ function startupOptionsFromLocation(module: WasmModule): WebStartupOptions {
     chunkZ: finiteInteger(raw.chunkZ, 0),
     renderDistance: clampRadiusChunks(raw.renderDistance),
     movementSpeedMultiplier: finiteNumber(raw.movementSpeedMultiplier, 1.0),
+    lightStatusBatchSize: Math.max(1, finiteInteger(raw.lightStatusBatchSize, 9)),
     sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
     forceFullbright: Boolean(raw.forceFullbright),
     renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),

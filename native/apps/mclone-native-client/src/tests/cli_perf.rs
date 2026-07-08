@@ -124,6 +124,8 @@ fn cli_parses_startup_streaming_perf_options() {
         "768".to_owned(),
         "--debug-passive-showcase".to_owned(),
         "false".to_owned(),
+        "--light-status-batch-size".to_owned(),
+        "5".to_owned(),
     ])
     .unwrap();
 
@@ -138,6 +140,7 @@ fn cli_parses_startup_streaming_perf_options() {
                     render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Manual,
                     render_compile_worker_timing_enabled: false,
                     debug_passive_showcase: false,
+                    light_status_batch_size: 5,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),

@@ -53,6 +53,7 @@ pub struct XrSceneOptions {
     pub freeze_time: bool,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
+    pub light_status_batch_size: usize,
     pub adaptive_chunk_publication_budget: bool,
     pub far_lod: FarTerrainLodConfig,
     pub underwater_detection_mode: XrUnderwaterDetectionMode,
@@ -79,6 +80,9 @@ impl Default for XrSceneOptions {
             freeze_time: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            light_status_batch_size:
+                mclone_app_runtime::startup_args::StartupSceneOptions::default()
+                    .light_status_batch_size,
             adaptive_chunk_publication_budget: true,
             far_lod: FarTerrainLodConfig::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
@@ -109,6 +113,9 @@ impl XrSceneOptions {
             if max_pending_jobs < self.render_compile_worker_count {
                 bail!("XR render compile max pending jobs must be at least the worker count");
             }
+        }
+        if self.light_status_batch_size == 0 {
+            bail!("XR light status batch size must be greater than zero");
         }
         let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
         let max = ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32;

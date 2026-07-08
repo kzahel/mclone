@@ -15,9 +15,10 @@ use mclone_protocol::{ClientCommand, ServerUpdate, encode_server_update};
 use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
-    IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    NativeIntegratedServerWorldStorage, ServerRunnerDiagnostics, ServerUpdateEnvelope,
-    SimulationCadenceConfig, host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
+    DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
+    NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
+    ServerRunnerDiagnostics, ServerUpdateEnvelope, SimulationCadenceConfig,
+    host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -62,6 +63,7 @@ pub struct LocalSingleViewSceneOptions {
     pub freeze_scheduled_fluid_ticks: bool,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
+    pub light_status_batch_size: usize,
     pub adaptive_chunk_publication_budget: bool,
     pub world_storage: NativeIntegratedServerWorldStorage,
     pub render_compile_worker_count: usize,
@@ -81,6 +83,7 @@ impl LocalSingleViewSceneOptions {
             freeze_scheduled_fluid_ticks: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             adaptive_chunk_publication_budget: false,
             world_storage: NativeIntegratedServerWorldStorage::Transient,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -121,6 +124,15 @@ impl LocalSingleViewSceneOptions {
 
     pub const fn with_lighting_enabled(mut self, lighting_enabled: bool) -> Self {
         self.lighting_enabled = lighting_enabled;
+        self
+    }
+
+    pub const fn with_light_status_batch_size(mut self, light_status_batch_size: usize) -> Self {
+        self.light_status_batch_size = if light_status_batch_size == 0 {
+            1
+        } else {
+            light_status_batch_size
+        };
         self
     }
 
@@ -2292,6 +2304,7 @@ fn native_runner_config(
 ) -> NativeIntegratedServerRunnerConfig {
     NativeIntegratedServerRunnerConfig::new(options.seed)
         .with_lighting_enabled(options.lighting_enabled)
+        .with_light_status_batch_size(options.light_status_batch_size)
         .with_debug_passive_showcase(options.debug_passive_showcase)
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
@@ -2419,6 +2432,16 @@ mod tests {
 
         assert_eq!(config.cadence, cadence);
         assert_eq!(config.tick_interval, Duration::from_nanos(16_666_667));
+    }
+
+    #[test]
+    fn native_runner_config_forwards_light_status_batch_size() {
+        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+            .with_light_status_batch_size(5);
+
+        let config = native_runner_config(&options);
+
+        assert_eq!(config.light_status_batch_size, 5);
     }
 
     #[test]

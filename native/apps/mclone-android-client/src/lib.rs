@@ -2164,6 +2164,7 @@ mod android {
         freeze_time: bool,
         debug_passive_showcase: bool,
         lighting_enabled: bool,
+        light_status_batch_size: usize,
         remote_addr: Option<String>,
     }
 
@@ -2175,6 +2176,7 @@ mod android {
                 .with_freeze_time(self.freeze_time)
                 .with_debug_passive_showcase(self.debug_passive_showcase)
                 .with_lighting_enabled(self.lighting_enabled)
+                .with_light_status_batch_size(self.light_status_batch_size)
                 .with_render_compile_worker_count(self.render_compile_worker_count)
                 .with_render_compile_max_pending_jobs(self.render_compile_max_pending_jobs)
         }
@@ -2290,6 +2292,7 @@ mod android {
             freeze_time: true,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            light_status_batch_size: StartupSceneOptions::default().light_status_batch_size,
         }
     }
 
@@ -2305,6 +2308,7 @@ mod android {
             freeze_time: scene.freeze_time,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
+            light_status_batch_size: scene.light_status_batch_size,
             remote_addr: scene.remote_addr,
         }
     }

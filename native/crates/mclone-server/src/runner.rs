@@ -590,6 +590,7 @@ mod native {
     pub struct NativeIntegratedServerRunnerConfig {
         pub seed: i64,
         pub lighting_enabled: bool,
+        pub light_status_batch_size: usize,
         pub day_time: Option<u64>,
         pub day_time_frozen: bool,
         pub scheduled_fluid_ticks_frozen: bool,
@@ -606,6 +607,7 @@ mod native {
             Self {
                 seed,
                 lighting_enabled: true,
+                light_status_batch_size: crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 day_time: None,
                 day_time_frozen: false,
                 scheduled_fluid_ticks_frozen: false,
@@ -620,6 +622,11 @@ mod native {
 
         pub fn with_lighting_enabled(mut self, enabled: bool) -> Self {
             self.lighting_enabled = enabled;
+            self
+        }
+
+        pub fn with_light_status_batch_size(mut self, batch_size: usize) -> Self {
+            self.light_status_batch_size = batch_size.max(1);
             self
         }
 
@@ -993,6 +1000,7 @@ mod native {
             }
         };
         server.set_lighting_enabled(config.lighting_enabled);
+        server.set_light_status_batch_size(config.light_status_batch_size);
         server.set_publication_budget_config(if config.publication_budget.enabled {
             ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(
                 config.cadence.gameplay_rate_hz,
@@ -1503,6 +1511,10 @@ mod native {
 
             assert_eq!(config.cadence, SimulationCadenceConfig::default());
             assert_eq!(
+                config.light_status_batch_size,
+                crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE
+            );
+            assert_eq!(
                 host_tick_interval_for_rate_hz(60),
                 Duration::from_nanos(16_666_667)
             );
@@ -1539,6 +1551,13 @@ mod native {
 
             assert_eq!(config.cadence, cadence);
             assert_eq!(config.tick_interval, Duration::from_nanos(16_666_667));
+        }
+
+        #[test]
+        fn native_runner_config_clamps_zero_light_status_batch_size() {
+            let config = NativeIntegratedServerRunnerConfig::new(0).with_light_status_batch_size(0);
+
+            assert_eq!(config.light_status_batch_size, 1);
         }
 
         #[test]

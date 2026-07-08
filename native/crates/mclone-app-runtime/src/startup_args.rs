@@ -8,6 +8,7 @@ use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
+use mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE;
 
 use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -29,6 +30,7 @@ pub const ARG_FREEZE_TIME: &str = "--freeze-time";
 pub const ARG_MOVEMENT_SPEED_MULTIPLIER: &str = "--movement-speed-multiplier";
 pub const ARG_DEBUG_PASSIVE_SHOWCASE: &str = "--debug-passive-showcase";
 pub const ARG_LIGHTING: &str = "--lighting";
+pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
@@ -55,6 +57,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_MOVEMENT_SPEED_MULTIPLIER,
     ARG_DEBUG_PASSIVE_SHOWCASE,
     ARG_LIGHTING,
+    ARG_LIGHT_STATUS_BATCH_SIZE,
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
     ARG_RENDER_COLOR_PROFILE,
@@ -75,6 +78,7 @@ pub const QUERY_FREEZE_TIME: &str = "freezeTime";
 pub const QUERY_MOVEMENT_SPEED_MULTIPLIER: &str = "movementSpeedMultiplier";
 pub const QUERY_DEBUG_PASSIVE_SHOWCASE: &str = "debugPassiveShowcase";
 pub const QUERY_LIGHTING: &str = "lighting";
+pub const QUERY_LIGHT_STATUS_BATCH_SIZE: &str = "lightStatusBatchSize";
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
 pub const QUERY_FULLBRIGHT: &str = "fullbright";
 pub const QUERY_RENDER_COLOR_PROFILE: &str = "renderColorProfile";
@@ -95,6 +99,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_MOVEMENT_SPEED_MULTIPLIER,
     QUERY_DEBUG_PASSIVE_SHOWCASE,
     QUERY_LIGHTING,
+    QUERY_LIGHT_STATUS_BATCH_SIZE,
     QUERY_SECTION_OCCLUSION,
     QUERY_FULLBRIGHT,
     QUERY_RENDER_COLOR_PROFILE,
@@ -134,6 +139,7 @@ pub struct StartupSceneOptions {
     pub movement_speed_multiplier: f32,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
+    pub light_status_batch_size: usize,
 }
 
 impl Default for StartupSceneOptions {
@@ -152,6 +158,7 @@ impl Default for StartupSceneOptions {
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
         }
     }
 }
@@ -332,6 +339,10 @@ impl StartupArgState {
             ARG_LIGHTING => {
                 self.scene.lighting_enabled = parse_bool_arg(ARG_LIGHTING, args.next())?;
             }
+            ARG_LIGHT_STATUS_BATCH_SIZE => {
+                self.scene.light_status_batch_size =
+                    parse_usize_arg(ARG_LIGHT_STATUS_BATCH_SIZE, args.next())?;
+            }
             ARG_SECTION_OCCLUSION => {
                 self.render_options.section_occlusion_culling =
                     parse_bool_arg(ARG_SECTION_OCCLUSION, args.next())?;
@@ -414,6 +425,10 @@ impl StartupArgState {
             }
             QUERY_LIGHTING => {
                 self.scene.lighting_enabled = parse_bool_arg(QUERY_LIGHTING, value)?;
+            }
+            QUERY_LIGHT_STATUS_BATCH_SIZE => {
+                self.scene.light_status_batch_size =
+                    parse_usize_arg(QUERY_LIGHT_STATUS_BATCH_SIZE, value)?;
             }
             QUERY_SECTION_OCCLUSION => {
                 self.render_options.section_occlusion_culling =
@@ -558,6 +573,10 @@ pub fn parse_render_distance_arg(
 }
 
 pub fn parse_render_compile_worker_count_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    parse_usize_arg(flag, value)
+}
+
+pub fn parse_usize_arg(flag: &str, value: Option<String>) -> Result<usize> {
     let parsed = parse_u32_arg(flag, value)?;
     usize::try_from(parsed).with_context(|| format!("{flag} value does not fit usize"))
 }
@@ -652,6 +671,7 @@ mod tests {
                 movement_speed_multiplier: 1.0,
                 debug_passive_showcase: true,
                 lighting_enabled: true,
+                light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             }
         );
         assert_eq!(
@@ -692,6 +712,8 @@ mod tests {
             "2.5",
             ARG_DEBUG_PASSIVE_SHOWCASE,
             "false",
+            ARG_LIGHT_STATUS_BATCH_SIZE,
+            "5",
             ARG_REMOTE_ADDR,
             "127.0.0.1:25565",
             ARG_SCREENSHOT_EYE,
@@ -715,6 +737,7 @@ mod tests {
                 movement_speed_multiplier: 2.5,
                 debug_passive_showcase: false,
                 lighting_enabled: true,
+                light_status_batch_size: 5,
             }
         );
         assert_eq!(
@@ -848,6 +871,7 @@ mod tests {
             (QUERY_MOVEMENT_SPEED_MULTIPLIER, "0.5"),
             (QUERY_DEBUG_PASSIVE_SHOWCASE, "false"),
             (QUERY_LIGHTING, "false"),
+            (QUERY_LIGHT_STATUS_BATCH_SIZE, "5"),
             (QUERY_SECTION_OCCLUSION, "false"),
             (QUERY_FULLBRIGHT, "true"),
             (QUERY_RENDER_COLOR_PROFILE, "stylized-bright"),
@@ -883,6 +907,7 @@ mod tests {
                 movement_speed_multiplier: 0.5,
                 debug_passive_showcase: false,
                 lighting_enabled: false,
+                light_status_batch_size: 5,
             }
         );
         assert!(!options.render_options.section_occlusion_culling);
@@ -920,6 +945,23 @@ mod tests {
         let err = state
             .parse_next_arg(
                 ARG_RENDER_COMPILE_WORKERS,
+                &mut args,
+                RenderDistanceLimits::new(1, 16),
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("must be greater than zero"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn rejects_zero_light_status_batch_size() {
+        let mut state = StartupArgState::default();
+        let mut args = ["0".to_owned()].into_iter();
+        let err = state
+            .parse_next_arg(
+                ARG_LIGHT_STATUS_BATCH_SIZE,
                 &mut args,
                 RenderDistanceLimits::new(1, 16),
             )

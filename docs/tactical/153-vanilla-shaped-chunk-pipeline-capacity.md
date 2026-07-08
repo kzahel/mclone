@@ -664,6 +664,12 @@ should stay narrow: compare and A/B light batch/priority shape before touching
 sky-graph internals. A sky hot-path probe is still likely needed later, but this
 row says the immediate scheduling problem is FIFO serial-worker queueing.
 
+The first narrow A/B hook keeps the shipped default at `9` and moves the batch
+size into shared startup/session policy as `--light-status-batch-size` /
+`lightStatusBatchSize`. Desktop, Android, Android XR, XR scene, and web-worker
+local integrated paths all forward the value into the scheduler's light-status
+enqueue threshold. Use `5` for the vanilla-shaped comparison row.
+
 Gates: desktop RD10/RD15 fresh frozen (this is the slice that should move
 them), Quest RD5 orbit + churn (light publication cadence and queue ages
 watched), movement probe. Acceptance: light stage ceiling raised to at

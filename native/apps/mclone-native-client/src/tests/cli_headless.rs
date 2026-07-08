@@ -388,6 +388,7 @@ fn cli_parses_screenshot_scene_options() {
                 first_person_player_visible: false,
                 debug_passive_showcase: true,
                 lighting_enabled: true,
+                light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 adaptive_chunk_publication_budget: true,
                 adaptive_render_admission_budget: false,
                 far_lod: Default::default(),

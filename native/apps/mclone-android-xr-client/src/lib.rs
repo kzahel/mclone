@@ -958,6 +958,7 @@ mod android {
             freeze_time: scene.freeze_time,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
+            light_status_batch_size: scene.light_status_batch_size,
         }
     }
 
@@ -977,6 +978,7 @@ mod android {
             freeze_time: scene.freeze_time,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
+            light_status_batch_size: scene.light_status_batch_size,
             adaptive_chunk_publication_budget: true,
             far_lod: Default::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
@@ -1348,7 +1350,7 @@ mod android {
             startup_options.xr_render_scale
         );
         log::info!(
-            "Android XR scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} render_compile_max_pending_jobs={:?} day_time={:?} freeze_time={} lighting={} adaptive_chunk_publication_budget={} skip_actors={}",
+            "Android XR scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} render_compile_max_pending_jobs={:?} day_time={:?} freeze_time={} lighting={} light_status_batch_size={} adaptive_chunk_publication_budget={} skip_actors={}",
             scene_options.seed,
             scene_options.chunk_x,
             scene_options.chunk_z,
@@ -1358,6 +1360,7 @@ mod android {
             scene_options.day_time_override,
             scene_options.freeze_time,
             scene_options.lighting_enabled,
+            scene_options.light_status_batch_size,
             scene_options.adaptive_chunk_publication_budget,
             scene_options.skip_actors
         );
@@ -2127,6 +2130,7 @@ mod android {
                 .with_freeze_time(scene.freeze_time)
                 .with_debug_passive_showcase(scene.debug_passive_showcase)
                 .with_lighting_enabled(scene.lighting_enabled)
+                .with_light_status_batch_size(scene.light_status_batch_size)
                 .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget)
                 .with_render_compile_worker_count(scene.render_compile_worker_count)
                 .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs);

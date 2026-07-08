@@ -29,6 +29,7 @@ interface IntegratedServerWorkerMessage {
   kind?: string;
   requestId?: number;
   seed?: number | string;
+  lightStatusBatchSize?: number;
   jobWorkerUrl?: string;
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
@@ -209,6 +210,13 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
         String(message.bindgenWasmUrl),
       )
       : new workerConstructor(seed);
+  }
+  const rawLightStatusBatchSize = Number(message.lightStatusBatchSize);
+  const lightStatusBatchSize = Number.isFinite(rawLightStatusBatchSize)
+    ? Math.trunc(rawLightStatusBatchSize)
+    : 0;
+  if (lightStatusBatchSize > 0 && typeof (server as any).setLightStatusBatchSize === "function") {
+    (server as any).setLightStatusBatchSize(lightStatusBatchSize);
   }
   runnerTransportKind = message.runnerTransportKind === "shared-memory" && sharedTransportAvailable()
     ? "shared-memory"

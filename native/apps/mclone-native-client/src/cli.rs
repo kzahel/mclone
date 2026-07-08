@@ -12,7 +12,7 @@ use mclone_app_runtime::startup_args::{
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render_session::{ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, EngineCameraViewMode};
-use mclone_server::SimulationCadenceConfig;
+use mclone_server::{DEFAULT_LIGHT_STATUS_BATCH_SIZE, SimulationCadenceConfig};
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
 use crate::render_compile_capacity::{
@@ -138,6 +138,9 @@ pub(crate) struct SceneOptions {
     /// Debug/perf switch: bypass native `ChunkStatus::Light` promotion and let
     /// generated `Features` snapshots stream directly to the client.
     pub(crate) lighting_enabled: bool,
+    /// Debug/perf controller for how many feature publications are coalesced
+    /// into one initial light-status worker batch.
+    pub(crate) light_status_batch_size: usize,
     /// Experimental shared scheduler controller for feature/light publication.
     pub(crate) adaptive_chunk_publication_budget: bool,
     /// Experimental shared controller for live desktop render admission.
@@ -465,6 +468,7 @@ impl Default for SceneOptions {
             first_person_player_visible: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
             far_lod: FarTerrainLodConfig::default(),
@@ -495,6 +499,7 @@ impl SceneOptions {
             movement_speed_multiplier: self.movement_speed_multiplier,
             debug_passive_showcase: self.debug_passive_showcase,
             lighting_enabled: self.lighting_enabled,
+            light_status_batch_size: self.light_status_batch_size,
         }
     }
 
@@ -519,6 +524,7 @@ impl SceneOptions {
             first_person_player_visible: false,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
+            light_status_batch_size: scene.light_status_batch_size,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
             far_lod: FarTerrainLodConfig::default(),
