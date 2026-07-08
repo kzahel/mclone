@@ -409,7 +409,11 @@ fn add_textured_chunk_range_to_mesh(
                         world_z,
                         fluid,
                     );
-                    continue;
+                    // Waterlogged blocks (seagrass, kelp, coral, sea pickle, ...)
+                    // still render their own model on top of the liquid, matching
+                    // vanilla where LiquidBlockRenderer and the block renderer are
+                    // separate passes. Pure water/lava have no faces and fall through
+                    // to the empty-faces `continue` below.
                 }
                 if block_model.faces.is_empty() {
                     continue;

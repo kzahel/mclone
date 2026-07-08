@@ -609,7 +609,39 @@ pub const fn is_lava(block_id: RawBlockId) -> bool {
 }
 
 pub const fn has_fluid(block_id: RawBlockId) -> bool {
-    is_water(block_id) || is_lava(block_id)
+    is_water(block_id) || is_lava(block_id) || holds_source_water(block_id)
+}
+
+/// Blocks that report a full water source from their fluid state without being
+/// raw water. Mirrors vanilla `getFluidState`: `SeagrassBlock`,
+/// `TallSeagrassBlock`, `KelpBlock`, and `KelpPlantBlock` always return source
+/// water, and the waterlogged `SimpleWaterloggedBlock` sea life (sea pickles,
+/// coral plants/fans/wall fans) returns source water because worldgen only ever
+/// places them with `waterlogged=true`. Coral *blocks* are full solid cubes that
+/// are never waterlogged and are intentionally excluded.
+pub const fn holds_source_water(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        SEAGRASS
+            | TALL_SEAGRASS_LOWER
+            | TALL_SEAGRASS_UPPER
+            | KELP
+            | KELP_PLANT
+            | SEA_PICKLE_1
+            | SEA_PICKLE_2
+            | SEA_PICKLE_3
+            | SEA_PICKLE_4
+            | TUBE_CORAL
+            | BRAIN_CORAL
+            | BUBBLE_CORAL
+            | FIRE_CORAL
+            | HORN_CORAL
+            | TUBE_CORAL_FAN
+            | BRAIN_CORAL_FAN
+            | BUBBLE_CORAL_FAN
+            | FIRE_CORAL_FAN
+            | HORN_CORAL_FAN
+    ) || (block_id >= TUBE_CORAL_WALL_FAN_NORTH && block_id <= HORN_CORAL_WALL_FAN_WEST)
 }
 
 pub const fn fluid_level(block_id: RawBlockId) -> Option<u8> {
@@ -889,13 +921,16 @@ mod tests {
         assert_eq!(block_light_opacity(TALL_GRASS_LOWER), 0);
         assert_eq!(block_light_opacity(TALL_GRASS_UPPER), 0);
         assert_eq!(block_light_opacity(SUGAR_CANE), 0);
-        assert_eq!(block_light_opacity(SEAGRASS), 0);
-        assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 0);
-        assert_eq!(block_light_opacity(KELP), 0);
-        assert_eq!(block_light_opacity(KELP_PLANT), 0);
-        assert_eq!(block_light_opacity(TUBE_CORAL), 0);
-        assert_eq!(block_light_opacity(HORN_CORAL_FAN), 0);
-        assert_eq!(block_light_opacity(BRAIN_CORAL_WALL_FAN_WEST), 0);
+        // Seagrass/kelp and waterlogged coral hold a source water fluid state, so
+        // vanilla getLightBlock returns 1 (propagatesSkylightDown is false because
+        // the fluid state is non-empty), just like water itself.
+        assert_eq!(block_light_opacity(SEAGRASS), 1);
+        assert_eq!(block_light_opacity(TALL_SEAGRASS_LOWER), 1);
+        assert_eq!(block_light_opacity(KELP), 1);
+        assert_eq!(block_light_opacity(KELP_PLANT), 1);
+        assert_eq!(block_light_opacity(TUBE_CORAL), 1);
+        assert_eq!(block_light_opacity(HORN_CORAL_FAN), 1);
+        assert_eq!(block_light_opacity(BRAIN_CORAL_WALL_FAN_WEST), 1);
         assert_eq!(block_light_opacity(BAMBOO), 0);
         assert_eq!(block_light_opacity(BAMBOO_TOP_SMALL), 0);
         assert_eq!(block_light_opacity(BAMBOO_TOP_LARGE), 0);
@@ -922,7 +957,7 @@ mod tests {
         assert_eq!(block_light_opacity(BLUE_ORCHID), 0);
         assert_eq!(block_light_opacity(BROWN_MUSHROOM), 0);
         assert_eq!(block_light_opacity(RED_MUSHROOM), 0);
-        assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
+        assert_eq!(block_light_opacity(SEA_PICKLE_1), 1);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(BLUE_ICE), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);

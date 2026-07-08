@@ -7,7 +7,8 @@
 
 use mclone_core::{BlockPos, ChunkPos};
 use mclone_worldgen::block::{
-    LAVA, RawBlockId, WATER, is_lava, is_water, lava_block_for_level, water_block_for_level,
+    LAVA, RawBlockId, WATER, holds_source_water, is_lava, is_water, lava_block_for_level,
+    water_block_for_level,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,7 +55,7 @@ pub enum FluidKind {
 
 impl FluidKind {
     pub const fn from_block_id(block_id: RawBlockId) -> Option<Self> {
-        if is_water(block_id) {
+        if is_water(block_id) || holds_source_water(block_id) {
             Some(Self::Water)
         } else if is_lava(block_id) {
             Some(Self::Lava)

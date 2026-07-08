@@ -746,10 +746,22 @@ fn textured_fluid_kind(record: &mclone_assets::BlockStateRecord) -> Option<Textu
         return None;
     }
     match record.block.path() {
-        "water" => Some(TexturedFluidKind::Water),
-        "lava" => Some(TexturedFluidKind::Lava),
-        _ => None,
+        "water" => return Some(TexturedFluidKind::Water),
+        "lava" => return Some(TexturedFluidKind::Lava),
+        // Vanilla SeagrassBlock/TallSeagrassBlock/KelpBlock/KelpPlantBlock report a
+        // source water state from getFluidState unconditionally, so the liquid
+        // renderer treats their cells as water.
+        "seagrass" | "tall_seagrass" | "kelp" | "kelp_plant" => {
+            return Some(TexturedFluidKind::Water);
+        }
+        _ => {}
     }
+    // SimpleWaterloggedBlock sea life (sea pickles, coral plants/fans/wall fans, ...)
+    // reports source water whenever waterlogged=true.
+    if record.properties.get("waterlogged").map(String::as_str) == Some("true") {
+        return Some(TexturedFluidKind::Water);
+    }
+    None
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -849,6 +861,72 @@ mod tests {
         );
         assert_eq!(textured_block_tint("lily_pad", -1), TexturedBlockTint::None);
         assert_eq!(textured_block_tint("bamboo", 0), TexturedBlockTint::None);
+    }
+
+    #[test]
+    fn fluid_kind_reports_source_water_for_waterlogged_sea_life() {
+        let record = |block: &str, props: &[(&str, &str)]| {
+            mclone_assets::BlockStateRecord::new(
+                BlockStateId(0),
+                ResourceLocation::parse(block).unwrap(),
+                props.iter().copied(),
+            )
+        };
+
+        // Raw fluids stay classified as before.
+        assert_eq!(
+            textured_fluid_kind(&record("minecraft:water", &[("level", "0")])),
+            Some(TexturedFluidKind::Water)
+        );
+        assert_eq!(
+            textured_fluid_kind(&record("minecraft:lava", &[("level", "0")])),
+            Some(TexturedFluidKind::Lava)
+        );
+
+        // Seagrass/kelp report source water unconditionally (vanilla getFluidState).
+        for block in [
+            "minecraft:seagrass",
+            "minecraft:tall_seagrass",
+            "minecraft:kelp",
+            "minecraft:kelp_plant",
+        ] {
+            assert_eq!(
+                textured_fluid_kind(&record(block, &[])),
+                Some(TexturedFluidKind::Water),
+                "{block} should report source water",
+            );
+        }
+
+        // SimpleWaterloggedBlock sea life reports water when waterlogged=true.
+        assert_eq!(
+            textured_fluid_kind(&record(
+                "minecraft:sea_pickle",
+                &[("pickles", "3"), ("waterlogged", "true")]
+            )),
+            Some(TexturedFluidKind::Water)
+        );
+        assert_eq!(
+            textured_fluid_kind(&record("minecraft:tube_coral_fan", &[("waterlogged", "true")])),
+            Some(TexturedFluidKind::Water)
+        );
+        assert_eq!(
+            textured_fluid_kind(&record(
+                "minecraft:brain_coral_wall_fan",
+                &[("facing", "north"), ("waterlogged", "true")]
+            )),
+            Some(TexturedFluidKind::Water)
+        );
+
+        // Non-waterlogged and solid variants report no fluid.
+        assert_eq!(
+            textured_fluid_kind(&record("minecraft:tube_coral_fan", &[("waterlogged", "false")])),
+            None
+        );
+        assert_eq!(
+            textured_fluid_kind(&record("minecraft:tube_coral_block", &[])),
+            None
+        );
+        assert_eq!(textured_fluid_kind(&record("minecraft:stone", &[])), None);
     }
 
     fn multipart_variant(model: &str, x: i32, y: i32) -> mclone_assets::BlockStateVariant {
