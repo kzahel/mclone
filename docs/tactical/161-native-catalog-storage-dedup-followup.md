@@ -1,6 +1,6 @@
 # 161: Native Catalog / Storage Adapter Dedup Follow-Up
 
-Status: active 2026-07-08. Slices 1-6 landed; follow-up slices remain open.
+Status: active 2026-07-08. Slices 1-7 landed; follow-up slices remain open.
 
 Workstream: native Rust shared client-experience/catalog/storage boundary,
 desktop flat, shared XR scene, flat Android, and Android XR. Web remains
@@ -103,7 +103,7 @@ introduced by this slice.
 Status: landed 2026-07-08 in `50694e36`.
 
 Problem: desktop flat, shared XR, flat Android, and Android XR each mapped their
-scene `world_dir` into `LocalSingleViewSceneOptions::with_persistent_world_dir`
+scene `world_dir` into `LocalIntegratedSceneOptions::with_persistent_world_dir`
 by hand. Desktop/XR/Android XR also set the adaptive chunk-publication flag near
 that storage projection.
 
@@ -111,7 +111,7 @@ Change:
 
 - Add `IntegratedWorldSessionStorage` in `mclone-app-runtime` as the shared
   host-neutral storage patch for local integrated sessions.
-- Add `LocalSingleViewSceneOptions::with_integrated_world_session_storage` so
+- Add `LocalIntegratedSceneOptions::with_integrated_world_session_storage` so
   persistent world dir and adaptive chunk-publication policy are applied in one
   shared place.
 - Route desktop flat, shared XR, flat Android, and Android XR builders through
@@ -256,22 +256,75 @@ Result on 2026-07-08: passed. The wasm web check still reports the existing
 reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
 introduced by this slice.
 
+## Slice 7: Native Integrated Session Runtime Naming
+
+Status: landed 2026-07-08 in `e0454d8a`.
+
+Problem: `LocalSingleView*` and `NativeSingleView*` described native local or
+remote game-session runtime wrappers, not one flat rendered view or one XR eye.
+Shared XR and Android XR use these types, so the names were misleading during
+catalog/storage work.
+
+Change:
+
+- Rename the native wrapper module from
+  `mclone_app_runtime::local_single_view` to
+  `mclone_app_runtime::native_session_runtime`.
+- Rename wrapper-layer APIs:
+  `LocalSingleViewSceneOptions` -> `LocalIntegratedSceneOptions`,
+  `LocalSingleViewSceneRuntime` -> `LocalIntegratedSceneRuntime`,
+  `LocalSingleViewStartupPump/Step` -> `LocalIntegratedStartupPump/Step`,
+  `NativeSingleViewSceneRuntime` -> `NativeSceneRuntime`,
+  `NativeSingleViewSessionRuntime` -> `NativeSessionRuntime`, and
+  `RemoteDedicatedSingleViewSceneRuntime` -> `RemoteDedicatedSceneRuntime`.
+- Update desktop flat, shared XR, flat Android, and Android XR callers,
+  including Android's local alias and helper names.
+- Keep lower-level `SingleViewRuntime`/`SingleViewHost*` names unchanged in this
+  slice because they are a separate client-runtime stream taxonomy shared with
+  web and remote-dedicated plumbing.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --package mclone-app-runtime --package mclone-native-client --package mclone-xr-scene --package mclone-android-client --package mclone-android-xr-client --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-xr-client
+git diff --check
+```
+
+Result on 2026-07-08: passed. The wasm web check still reports the existing
+`mclone-server` warnings for `TimingSample` and
+`with_unload_hysteresis_chunks`, and the native-client XR feature check still
+reports the existing `DESKTOP_LOCAL_ARG_FLAGS` warning; no new warnings were
+introduced by this slice.
+
 ## Remaining Follow-Up Slices
 
-1. **LocalSingleView naming cleanup.** `LocalSingleViewSceneOptions` and related
-   `NativeSingleView*` names describe one logical local client/world runtime and
-   chunk-view center, not one rendered eye or a flat-only presentation path.
-   Shared XR and Android XR use these types today, so the name is easy to
-   misread. Prefer a future mechanical rename toward names like
-   `LocalIntegratedSceneOptions`, `LocalWorldRuntimeOptions`,
-   `NativeLocalSessionOptions`, or `IntegratedWorldSessionOptions` once active
-   storage/helper slices are settled.
-2. **Android app-data asset-root helper audit.** Flat Android and Android XR
+1. **Core `SingleView*` taxonomy audit.** `SingleViewRuntime`,
+   `SingleViewHostMode`, `SingleViewHostOptions`, and
+   `SingleViewRuntimeStats` still describe one logical client runtime stream,
+   not one physical rendered eye. They are used by web and remote-dedicated
+   helpers too, so keep this as a separate compatibility rename if the term
+   remains confusing. Possible targets: `ClientWorldRuntime`,
+   `ClientHostMode`, `ClientHostOptions`, and `ClientRuntimeStats`.
+2. **`LocalIntegratedSceneOptions` final naming/split.** The new name removes
+   the XR/flat single-view ambiguity, but the type still mixes local integrated
+   session boot, world storage, render-distance/chunk-view shape, cadence, and
+   render-compile settings. If it keeps growing, either rename it toward
+   `IntegratedWorldSessionOptions` or split session/storage fields from render
+   startup fields.
+3. **Android app-data asset-root helper audit.** Flat Android and Android XR
    both configure `MCLONE_ANDROID_ASSET_ROOT` from app data with similar
    logging, but flat Android currently prefers internal storage while Android XR
    prefers external storage. Decide whether that difference is intentional
    before moving the shared parts into `mclone-android-platform`.
-3. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
+4. **Remaining durable persistence gaps.** Tactical 160 unified catalog CRUD, not
    all Minecraft persistence. Native still lacks periodic autosave and reserved
    player/saved-data record implementations; those remain under 134/136-style
    persistence follow-up rather than this cleanup tactical.
