@@ -17,6 +17,7 @@ use mclone_app_runtime::client_session_policy::{
     client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
     client_session_start_transition, client_session_status_projection,
 };
+use mclone_app_runtime::execute_world_catalog_request;
 use mclone_app_runtime::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
@@ -33,8 +34,7 @@ use mclone_app_runtime::session::{
 };
 use mclone_app_runtime::set_player_appearance_command_for_ui_model;
 use mclone_app_runtime::world_catalog::{
-    LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalogCapabilities,
-    WorldCatalogError, WorldCatalogRequest, WorldCatalogResponse,
+    LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalog, WorldCatalogCapabilities,
 };
 use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_client::{
@@ -1091,75 +1091,18 @@ impl FlatClientDriver {
         request: ClientCatalogRequest,
         arm_mouse_lock: bool,
     ) -> bool {
-        let Some(catalog) = self.world_catalog.clone() else {
-            let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
-            log::warn!("world catalog action failed: {error}");
-            let effects = self
-                .client_experience
-                .catalog_mut()
-                .apply_catalog_error(request.id, error);
-            return self.apply_world_catalog_effects(effects, arm_mouse_lock);
-        };
-
-        let response = match request.request {
-            WorldCatalogRequest::ListWorlds => match catalog.list_worlds() {
-                Ok(worlds) => WorldCatalogResponse::WorldList {
-                    capabilities: catalog.capabilities(),
-                    worlds,
-                },
-                Err(error) => {
-                    log::warn!("world catalog list failed: {error}");
-                    let effects = self
-                        .client_experience
-                        .catalog_mut()
-                        .apply_catalog_error(request.id, error);
-                    return self.apply_world_catalog_effects(effects, arm_mouse_lock);
-                }
-            },
-            WorldCatalogRequest::CreateWorld { options } => match catalog.create_world(options) {
-                Ok(summary) => WorldCatalogResponse::WorldCreated { summary },
-                Err(error) => {
-                    log::warn!("world catalog create failed: {error}");
-                    let effects = self
-                        .client_experience
-                        .catalog_mut()
-                        .apply_catalog_error(request.id, error);
-                    return self.apply_world_catalog_effects(effects, arm_mouse_lock);
-                }
-            },
-            WorldCatalogRequest::OpenWorld { id } => match catalog.open_world(&id) {
-                Ok(opened) => WorldCatalogResponse::WorldOpened {
-                    summary: opened.summary,
-                },
-                Err(error) => {
-                    log::warn!("world catalog open failed: {error}");
-                    let effects = self
-                        .client_experience
-                        .catalog_mut()
-                        .apply_catalog_error(request.id, error);
-                    return self.apply_world_catalog_effects(effects, arm_mouse_lock);
-                }
-            },
-            WorldCatalogRequest::DeleteWorld { id } => {
-                let active_world = self.active_local_world_id().cloned();
-                match catalog.delete_world(&id, active_world.as_ref()) {
-                    Ok(summary) => WorldCatalogResponse::WorldDeleted { id: summary.id },
-                    Err(error) => {
-                        log::warn!("world catalog delete failed: {error}");
-                        let effects = self
-                            .client_experience
-                            .catalog_mut()
-                            .apply_catalog_error(request.id, error);
-                        return self.apply_world_catalog_effects(effects, arm_mouse_lock);
-                    }
-                }
-            }
-        };
-
-        let effects = self
-            .client_experience
-            .catalog_mut()
-            .apply_catalog_response(request.id, response);
+        // Clone the catalog before borrowing the controller mutably: the catalog
+        // lives on `self.world_catalog` and the controller on
+        // `self.client_experience`, so the shared executor needs an owned catalog
+        // handle (cheap: a `PathBuf`) alongside the mutable controller borrow.
+        let catalog = self.world_catalog.clone();
+        let active = self.active_local_world_id().cloned();
+        let effects = execute_world_catalog_request(
+            catalog.as_ref().map(|catalog| catalog as &dyn WorldCatalog),
+            self.client_experience.catalog_mut(),
+            active.as_ref(),
+            request,
+        );
         self.apply_world_catalog_effects(effects, arm_mouse_lock)
     }
 
