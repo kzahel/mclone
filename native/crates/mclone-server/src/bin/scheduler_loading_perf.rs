@@ -15,7 +15,7 @@ use mclone_protocol::ChunkView;
 use mclone_server::SqliteWorldStore;
 use mclone_server::{
     ChunkRecord, ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, ChunkStoreResult,
-    EntityChunkRecord, WorldStore,
+    DEFAULT_LIGHT_STATUS_BATCH_SIZE, EntityChunkRecord, LightStatusMailboxMetrics, WorldStore,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rusqlite::Connection;
@@ -55,14 +55,14 @@ fn run() -> Result<(), String> {
     let measured = match config.mode {
         BenchMode::Fresh => {
             let mut scheduler = ChunkScheduler::new(config.seed);
-            scheduler.set_lighting_enabled(config.lighting_enabled);
+            configure_scheduler(&config, &mut scheduler);
             run_scheduler_load(&config, &view, target_chunks, scheduler)?
         }
         BenchMode::PersistedMemoryReload => {
             let store = SharedMemoryWorldStore::new();
             let mut prewarm_scheduler =
                 ChunkScheduler::with_world_store(config.seed, Box::new(store.clone()));
-            prewarm_scheduler.set_lighting_enabled(config.lighting_enabled);
+            configure_scheduler(&config, &mut prewarm_scheduler);
             let prewarm_report =
                 run_scheduler_load(&config, &view, target_chunks, prewarm_scheduler)?;
             stored_chunk_records = Some(store.chunk_count());
@@ -70,7 +70,7 @@ fn run() -> Result<(), String> {
 
             let mut reload_scheduler =
                 ChunkScheduler::with_world_store(config.seed, Box::new(store));
-            reload_scheduler.set_lighting_enabled(config.lighting_enabled);
+            configure_scheduler(&config, &mut reload_scheduler);
             let reload_report =
                 run_scheduler_load(&config, &view, target_chunks, reload_scheduler)?;
             validate_persisted_reload(&reload_report)?;
@@ -96,7 +96,7 @@ fn run() -> Result<(), String> {
                     })?;
                 let mut prewarm_scheduler =
                     ChunkScheduler::with_world_store(config.seed, Box::new(prewarm_store));
-                prewarm_scheduler.set_lighting_enabled(config.lighting_enabled);
+                configure_scheduler(&config, &mut prewarm_scheduler);
                 let prewarm_report =
                     run_scheduler_load(&config, &view, target_chunks, prewarm_scheduler)?;
                 stored_chunk_records = sqlite_chunk_record_count(&world_dir)
@@ -112,7 +112,7 @@ fn run() -> Result<(), String> {
                     })?;
                 let mut reload_scheduler =
                     ChunkScheduler::with_world_store(config.seed, Box::new(reload_store));
-                reload_scheduler.set_lighting_enabled(config.lighting_enabled);
+                configure_scheduler(&config, &mut reload_scheduler);
                 let reload_report =
                     run_scheduler_load(&config, &view, target_chunks, reload_scheduler)?;
                 validate_persisted_reload(&reload_report)?;
@@ -139,6 +139,11 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn configure_scheduler(config: &Config, scheduler: &mut ChunkScheduler) {
+    scheduler.set_lighting_enabled(config.lighting_enabled);
+    scheduler.set_light_status_batch_size(config.light_status_batch_size);
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Config {
     seed: i64,
@@ -147,6 +152,7 @@ struct Config {
     render_distance: u32,
     chunk_tracking_radius: Option<u32>,
     lighting_enabled: bool,
+    light_status_batch_size: usize,
     poll_mode: PollMode,
     max_seconds: u64,
     mode: BenchMode,
@@ -161,6 +167,7 @@ impl Config {
             render_distance: DEFAULT_RENDER_DISTANCE,
             chunk_tracking_radius: None,
             lighting_enabled: true,
+            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             poll_mode: DEFAULT_POLL_MODE,
             max_seconds: DEFAULT_MAX_SECONDS,
             mode: BenchMode::Fresh,
@@ -182,6 +189,10 @@ impl Config {
                 "--lighting" => config.lighting_enabled = parse_bool_next(&mut args, "--lighting")?,
                 "--disable-lighting" => config.lighting_enabled = false,
                 "--enable-lighting" => config.lighting_enabled = true,
+                "--light-status-batch-size" => {
+                    config.light_status_batch_size =
+                        parse_next(&mut args, "--light-status-batch-size")?
+                }
                 "--poll-mode" => config.poll_mode = parse_next(&mut args, "--poll-mode")?,
                 "--persisted-memory-reload" => {
                     config.mode = BenchMode::PersistedMemoryReload;
@@ -203,6 +214,9 @@ impl Config {
         }
         if config.max_seconds == 0 {
             return Err("--max-seconds must be greater than zero".to_owned());
+        }
+        if config.light_status_batch_size == 0 {
+            return Err("--light-status-batch-size must be greater than zero".to_owned());
         }
 
         Ok(config)
@@ -352,6 +366,7 @@ struct LoadRunReport {
     total_elapsed_ms: f64,
     counters: LoopCounters,
     final_metrics: ChunkSchedulerMetrics,
+    final_light_status_mailbox_metrics: LightStatusMailboxMetrics,
 }
 
 fn print_load_run_json(
@@ -385,7 +400,13 @@ fn print_load_run_json(
         chunks_per_second(target_chunks, report.total_elapsed_ms)
     );
     print_counters_json(&format!("{indent}  "), report.counters, true);
-    print_metrics_json(&format!("{indent}  "), report.final_metrics, false);
+    print_metrics_json(&format!("{indent}  "), report.final_metrics, true);
+    print_light_status_mailbox_metrics_json(
+        &format!("{indent}  "),
+        "light_status_mailbox_metrics",
+        report.final_light_status_mailbox_metrics,
+        false,
+    );
     let suffix = if trailing_comma { "," } else { "" };
     println!("{indent}}}{suffix}");
 }
@@ -420,6 +441,10 @@ impl Report {
         );
         println!("  \"target_chunks\": {},", self.target_chunks);
         println!("  \"lighting_enabled\": {},", self.config.lighting_enabled);
+        println!(
+            "  \"light_status_batch_size\": {},",
+            self.config.light_status_batch_size
+        );
         println!("  \"poll_mode\": \"{}\",", self.config.poll_mode.as_str());
         println!("  \"mode\": \"{}\",", self.config.mode.as_str());
         match self.stored_chunk_records {
@@ -465,7 +490,13 @@ impl Report {
             chunks_per_second(self.target_chunks, self.measured.total_elapsed_ms)
         );
         print_counters_json("  ", self.measured.counters, true);
-        print_metrics_json("  ", self.measured.final_metrics, false);
+        print_metrics_json("  ", self.measured.final_metrics, true);
+        print_light_status_mailbox_metrics_json(
+            "  ",
+            "light_status_mailbox_metrics",
+            self.measured.final_light_status_mailbox_metrics,
+            false,
+        );
         println!("}}");
     }
 }
@@ -495,12 +526,14 @@ fn run_scheduler_load(
             first_view_ready_ms = Some(elapsed_ms(total_start.elapsed()));
         }
         if view_ready && server_idle(&scheduler) {
+            let final_light_status_mailbox_metrics = scheduler.light_status_mailbox_metrics();
             return Ok(LoadRunReport {
                 apply_interest_ms,
                 first_view_ready_ms,
                 total_elapsed_ms: elapsed_ms(total_start.elapsed()),
                 counters,
                 final_metrics: metrics,
+                final_light_status_mailbox_metrics,
             });
         }
         if total_start.elapsed() > max_duration {
@@ -723,6 +756,20 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         "{indent}  \"max_light_status_compute_ms\": {:.3},",
         micros_to_ms(metrics.max_light_status_compute_us)
     );
+    print_light_status_timing_per_unit_json(
+        indent,
+        "light_status_timing_per_status_ms",
+        metrics,
+        metrics.completed_light_statuses,
+        true,
+    );
+    print_light_status_timing_per_unit_json(
+        indent,
+        "light_status_timing_per_batch_ms",
+        metrics,
+        metrics.completed_light_batches,
+        true,
+    );
     println!("{indent}  \"light_status_timing_ms\": {{");
     println!(
         "{indent}    \"world_init\": {:.3},",
@@ -893,6 +940,171 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
     println!("{indent}}}{suffix}");
 }
 
+fn print_light_status_timing_per_unit_json(
+    indent: &str,
+    key: &str,
+    metrics: ChunkSchedulerMetrics,
+    units: usize,
+    trailing_comma: bool,
+) {
+    let suffix = if trailing_comma { "," } else { "" };
+    if units == 0 {
+        println!("{indent}  \"{key}\": null{suffix}");
+        return;
+    }
+
+    let divisor = units as f64;
+    println!("{indent}  \"{key}\": {{");
+    println!(
+        "{indent}    \"compute\": {:.3},",
+        micros_to_ms(metrics.total_light_status_compute_us) / divisor
+    );
+    println!(
+        "{indent}    \"world_init\": {:.3},",
+        micros_to_ms(metrics.total_light_status_world_init_us) / divisor
+    );
+    println!(
+        "{indent}    \"active_sections\": {:.3},",
+        micros_to_ms(metrics.total_light_status_active_sections_us) / divisor
+    );
+    println!(
+        "{indent}    \"block_source_scan\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_source_scan_us) / divisor
+    );
+    println!(
+        "{indent}    \"section_setup\": {:.3},",
+        micros_to_ms(metrics.total_light_status_section_setup_us) / divisor
+    );
+    println!(
+        "{indent}    \"section_status_update\": {:.3},",
+        micros_to_ms(metrics.total_light_status_section_status_update_us) / divisor
+    );
+    println!(
+        "{indent}    \"sky_column_enable\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_column_enable_us) / divisor
+    );
+    println!(
+        "{indent}    \"block_source_enqueue\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_source_enqueue_us) / divisor
+    );
+    println!(
+        "{indent}    \"changed_block_check\": {:.3},",
+        micros_to_ms(metrics.total_light_status_changed_block_check_us) / divisor
+    );
+    println!(
+        "{indent}    \"run_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_run_updates_us) / divisor
+    );
+    println!(
+        "{indent}    \"block_run_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_run_updates_us) / divisor
+    );
+    println!(
+        "{indent}    \"sky_run_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_run_updates_us) / divisor
+    );
+    println!(
+        "{indent}    \"sky_source_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_source_updates_us) / divisor
+    );
+    println!(
+        "{indent}    \"block_run_update_graph\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_run_update_graph_us) / divisor
+    );
+    println!(
+        "{indent}    \"sky_run_update_graph\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_run_update_graph_us) / divisor
+    );
+    println!(
+        "{indent}    \"block_run_update_storage_swap\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_run_update_storage_swap_us) / divisor
+    );
+    println!(
+        "{indent}    \"sky_run_update_storage_swap\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_run_update_storage_swap_us) / divisor
+    );
+    println!(
+        "{indent}    \"collect_sections\": {:.3}",
+        micros_to_ms(metrics.total_light_status_collect_sections_us) / divisor
+    );
+    println!("{indent}  }}{suffix}");
+}
+
+fn print_light_status_mailbox_metrics_json(
+    indent: &str,
+    key: &str,
+    metrics: LightStatusMailboxMetrics,
+    trailing_comma: bool,
+) {
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}\"{key}\": {{");
+    println!(
+        "{indent}  \"enqueued_batches\": {},",
+        metrics.enqueued_batches
+    );
+    println!(
+        "{indent}  \"enqueued_statuses\": {},",
+        metrics.enqueued_statuses
+    );
+    println!(
+        "{indent}  \"completed_batches\": {},",
+        metrics.completed_batches
+    );
+    println!(
+        "{indent}  \"completed_statuses\": {},",
+        metrics.completed_statuses
+    );
+    println!(
+        "{indent}  \"max_pending_batches\": {},",
+        metrics.max_pending_batches
+    );
+    println!(
+        "{indent}  \"max_pending_statuses\": {},",
+        metrics.max_pending_statuses
+    );
+    println!(
+        "{indent}  \"max_batch_statuses\": {},",
+        metrics.max_batch_statuses
+    );
+    println!(
+        "{indent}  \"last_queue_wait_ms\": {:.3},",
+        micros_to_ms(metrics.last_queue_wait_us)
+    );
+    println!(
+        "{indent}  \"total_queue_wait_ms\": {:.3},",
+        micros_to_ms(metrics.total_queue_wait_us)
+    );
+    println!(
+        "{indent}  \"max_queue_wait_ms\": {:.3},",
+        micros_to_ms(metrics.max_queue_wait_us)
+    );
+    println!(
+        "{indent}  \"last_compute_ms\": {:.3},",
+        micros_to_ms(metrics.last_compute_us)
+    );
+    println!(
+        "{indent}  \"total_compute_ms\": {:.3},",
+        micros_to_ms(metrics.total_compute_us)
+    );
+    println!(
+        "{indent}  \"max_compute_ms\": {:.3},",
+        micros_to_ms(metrics.max_compute_us)
+    );
+    println!(
+        "{indent}  \"last_completion_drain_wait_ms\": {:.3},",
+        micros_to_ms(metrics.last_completion_drain_wait_us)
+    );
+    println!(
+        "{indent}  \"total_completion_drain_wait_ms\": {:.3},",
+        micros_to_ms(metrics.total_completion_drain_wait_us)
+    );
+    println!(
+        "{indent}  \"max_completion_drain_wait_ms\": {:.3}",
+        micros_to_ms(metrics.max_completion_drain_wait_us)
+    );
+    println!("{indent}}}{suffix}");
+}
+
 fn parse_next<T: std::str::FromStr>(
     args: &mut impl Iterator<Item = String>,
     flag: &str,
@@ -917,7 +1129,7 @@ fn parse_bool_next(args: &mut impl Iterator<Item = String>, flag: &str) -> Resul
 }
 
 fn usage() -> String {
-    "usage: scheduler_loading_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--poll-mode completion|sleep|spin] [--persisted-memory-reload|--persisted-sqlite-reload] [--max-seconds N]"
+    "usage: scheduler_loading_perf [--seed N] [--chunk-x N] [--chunk-z N] [--render-distance N] [--chunk-tracking-radius N] [--lighting true|false] [--light-status-batch-size N] [--poll-mode completion|sleep|spin] [--persisted-memory-reload|--persisted-sqlite-reload] [--max-seconds N]"
         .to_owned()
 }
 
