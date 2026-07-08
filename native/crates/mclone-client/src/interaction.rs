@@ -10,7 +10,7 @@ use mclone_protocol::{
 
 use crate::{
     ClientInventory, ClientRuntime,
-    block_shapes::{block_outline_aabbs, clip_block_outline},
+    block_shapes::{block_collision_aabb, block_outline_aabbs, clip_block_outline},
 };
 
 pub const CREATIVE_PICK_RANGE: f64 = 5.0;
@@ -84,6 +84,12 @@ impl ClientInteractionController {
         eye_position: Vec3d,
         view_vector: Vec3d,
     ) -> Option<BlockInteractionTarget> {
+        // When the ray origin is embedded inside a solid block (e.g. noclip flying
+        // through terrain), suppress the target so we don't draw a block outline from
+        // inside the world geometry.
+        if client.is_point_inside_solid_block(eye_position) {
+            return None;
+        }
         self.target_from_hit(client, self.pick_block(client, eye_position, view_vector))
     }
 
@@ -143,6 +149,16 @@ impl ClientRuntime {
     pub fn block_outline_aabbs_at_block_pos(&self, pos: BlockPos) -> Option<Vec<Aabb>> {
         let state = self.block_state_at_block_pos(pos)?;
         Some(block_outline_aabbs(state, pos))
+    }
+
+    /// Returns true when `point` lies within the collision shape of the block that
+    /// contains it, i.e. the point is inside solid world geometry.
+    pub fn is_point_inside_solid_block(&self, point: Vec3d) -> bool {
+        let pos = BlockPos::containing(point);
+        let Some(state) = self.block_state_at_block_pos(pos) else {
+            return false;
+        };
+        block_collision_aabb(state, pos).is_some_and(|aabb| aabb.contains(point))
     }
 
     pub fn pick_block(
@@ -380,6 +396,46 @@ mod tests {
             target.outline_boxes,
             vec![Aabb::new(4.0, 2.0, 1.0, 5.0, 2.125, 2.0)]
         );
+    }
+
+    #[test]
+    fn interaction_target_suppressed_when_eye_inside_solid_block() {
+        let eye_pos = BlockPos::new(4, 2, 1);
+        let client = client_with_blocks(&[
+            (eye_pos, BlockStateId(7)),
+            (BlockPos::new(6, 2, 1), BlockStateId(8)),
+        ]);
+        let controller = ClientInteractionController::new();
+
+        // Eye embedded inside the solid block at eye_pos: no outline/target.
+        assert!(client.is_point_inside_solid_block(Vec3d::new(4.5, 2.5, 1.5)));
+        assert_eq!(
+            controller.target_block(
+                &client,
+                Vec3d::new(4.5, 2.5, 1.5),
+                Vec3d::new(1.0, 0.0, 0.0),
+            ),
+            None
+        );
+
+        // Eye in open air still targets the block it looks at.
+        assert!(!client.is_point_inside_solid_block(Vec3d::new(1.5, 2.5, 1.5)));
+        let target = controller
+            .target_block(
+                &client,
+                Vec3d::new(1.5, 2.5, 1.5),
+                Vec3d::new(1.0, 0.0, 0.0),
+            )
+            .expect("air-origin ray should target a block");
+        assert_eq!(target.hit.block_pos, eye_pos);
+    }
+
+    #[test]
+    fn is_point_inside_solid_block_ignores_non_colliding_blocks() {
+        // State 43 is a plant with an outline shape but no collision volume.
+        let client = client_with_blocks(&[(BlockPos::new(4, 2, 1), BlockStateId(43))]);
+
+        assert!(!client.is_point_inside_solid_block(Vec3d::new(4.5, 2.5, 1.5)));
     }
 
     #[test]

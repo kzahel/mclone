@@ -244,6 +244,15 @@ impl Aabb {
         )
     }
 
+    pub fn contains(self, point: Vec3d) -> bool {
+        point.x >= self.min_x
+            && point.x <= self.max_x
+            && point.y >= self.min_y
+            && point.y <= self.max_y
+            && point.z >= self.min_z
+            && point.z <= self.max_z
+    }
+
     pub fn intersects(self, other: Self) -> bool {
         self.min_x < other.max_x
             && self.max_x > other.min_x

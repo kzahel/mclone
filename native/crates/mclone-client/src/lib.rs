@@ -16,7 +16,7 @@ pub mod block_facts {
 }
 
 mod block_shapes {
-    pub(crate) use mclone_blocks::{block_outline_aabbs, clip_block_outline};
+    pub(crate) use mclone_blocks::{block_collision_aabb, block_outline_aabbs, clip_block_outline};
 }
 
 use mclone_core::{
