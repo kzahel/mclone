@@ -3368,6 +3368,7 @@ mod android {
             xr_render_scale,
             xr_eye_size,
         );
+        let performance_metrics_wait_for_perf_window = perf_seconds.is_some();
         let mut performance_metrics_probe = if perf_metrics {
             let mode = if perf_metrics_periodic {
                 perf_metrics::XrPerformanceMetricsMode::Periodic
@@ -3613,6 +3614,11 @@ mod android {
                 );
                 return Err(error);
             }
+            if perf_started_after_ready {
+                if let Some(probe) = performance_metrics_probe.as_mut() {
+                    probe.start_perf_window();
+                }
+            }
             frame_timing.frame_wall_ms = elapsed_ms(frame_wall_start);
             if let (Some(start_ms), Some(end_ms)) = (
                 thread_cpu_start_ms,
@@ -3655,7 +3661,9 @@ mod android {
             }
             if rendered_frame.is_some() {
                 if let Some(probe) = performance_metrics_probe.as_mut() {
-                    probe.tick();
+                    if !performance_metrics_wait_for_perf_window || probe.perf_window_started() {
+                        probe.tick();
+                    }
                 }
             }
 

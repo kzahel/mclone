@@ -71,6 +71,8 @@ pub(super) struct XrPerformanceMetricsProbe {
     session: xr::sys::Session,
     counters: Vec<(xr::sys::Path, String)>,
     last_dropped_frames: Option<f64>,
+    perf_window_dropped_frames_start: Option<f64>,
+    perf_window_started: bool,
     frames: u32,
     next_attempt_frame: u32,
     attempts: u32,
@@ -127,6 +129,8 @@ impl XrPerformanceMetricsProbe {
             session: session_handle,
             counters,
             last_dropped_frames: initial_dropped_frames,
+            perf_window_dropped_frames_start: None,
+            perf_window_started: false,
             frames: 0,
             next_attempt_frame: WARMUP_FRAMES,
             attempts: 0,
@@ -134,6 +138,29 @@ impl XrPerformanceMetricsProbe {
             mode,
             done: false,
         })
+    }
+
+    pub(super) fn start_perf_window(&mut self) {
+        let dropped_frames =
+            query_named_counter_scalar(&self.fp, self.session, &self.counters, "dropped_frame");
+        self.last_dropped_frames = dropped_frames;
+        self.perf_window_dropped_frames_start = dropped_frames;
+        self.perf_window_started = true;
+        self.frames = 0;
+        self.next_attempt_frame = WARMUP_FRAMES;
+        self.attempts = 0;
+        self.samples_logged = 0;
+        log::info!(
+            "MCLONE_ANDROID_XR_PERF_METRICS_WINDOW_START dropped_frames_start={} counters={} mode={} interval_frames={}",
+            format_metric(dropped_frames),
+            self.counters.len(),
+            self.mode.label(),
+            PERIODIC_SAMPLE_INTERVAL_FRAMES
+        );
+    }
+
+    pub(super) const fn perf_window_started(&self) -> bool {
+        self.perf_window_started
     }
 
     /// Advance one rendered frame. Once warmed up, samples every counter and
@@ -223,12 +250,14 @@ impl XrPerformanceMetricsProbe {
         let dropped_frames_start = self.last_dropped_frames;
         let dropped_frames_delta =
             metric_counter_delta(dropped_frames_start, sample.dropped_frames);
+        let perf_window_dropped_frames_delta =
+            metric_counter_delta(self.perf_window_dropped_frames_start, sample.dropped_frames);
         if sample.dropped_frames.is_some() {
             self.last_dropped_frames = sample.dropped_frames;
         }
 
         log::info!(
-            "MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms={} app_cpu_ms={} compositor_gpu_ms={} compositor_cpu_ms={} gpu_util_pct={} cpu_util_avg_pct={} cpu_util_worst_pct={} motion_to_photon_ms={} dropped_frames={} dropped_frames_start={} dropped_frames_end={} dropped_frames_delta={} stale_frames={} counters={} any_valid={} attempt={}/{} per_query_us={:.2} mode={} sample={} interval_frames={}",
+            "MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms={} app_cpu_ms={} compositor_gpu_ms={} compositor_cpu_ms={} gpu_util_pct={} cpu_util_avg_pct={} cpu_util_worst_pct={} motion_to_photon_ms={} dropped_frames={} dropped_frames_start={} dropped_frames_end={} dropped_frames_delta={} perf_window_active={} perf_window_dropped_frames_start={} perf_window_dropped_frames_delta={} stale_frames={} counters={} any_valid={} attempt={}/{} per_query_us={:.2} mode={} sample={} interval_frames={}",
             format_metric(sample.app_gpu_ms),
             format_metric(sample.app_cpu_ms),
             format_metric(sample.compositor_gpu_ms),
@@ -241,6 +270,9 @@ impl XrPerformanceMetricsProbe {
             format_metric(dropped_frames_start),
             format_metric(sample.dropped_frames),
             format_metric(dropped_frames_delta),
+            self.perf_window_started,
+            format_metric(self.perf_window_dropped_frames_start),
+            format_metric(perf_window_dropped_frames_delta),
             format_metric(sample.stale_frames),
             self.counters.len(),
             any_valid,
