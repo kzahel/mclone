@@ -1,7 +1,8 @@
 # 158: Reversed-Z Depth Precision (thin-decoration z-fighting at altitude)
 
-Status: proposed 2026-07-08. Standalone fix for the depth-buffer precision
-z-fighting diagnosed in
+Status: accepted 2026-07-08 — **Option 1 (reversed-Z + `Depth32Float`)** is the
+chosen and only approach; the interim mitigations previously sketched here are
+dropped. Standalone fix for the depth-buffer precision z-fighting diagnosed in
 [`../issues/001-thin-decoration-z-fighting-at-altitude.md`](../issues/001-thin-decoration-z-fighting-at-altitude.md)
 (Option 1). This is the implementation tactical for that issue; the issue doc is
 the bug statement.
@@ -71,52 +72,104 @@ is not immune; it mostly avoids the symptom because the world-height cap bounds
 how far down you can look. An XR clone where the player can fly much higher
 exposes the precision limit, so a reversed-Z upgrade beyond vanilla is warranted.
 
-## Fix options
+## Fix: Reversed-Z + `Depth32Float`
 
-### Option A — Reversed-Z + `Depth32Float` (recommended)
+Map near→1, far→0 with a float depth buffer. Reversed-Z's precision boost comes
+largely from the float buffer's exponent distribution cancelling the perspective
+`1/z` nonlinearity, so `Depth32Float` + reversed is the standard pairing — durable,
+near-uniform precision that kills the whole class. It touches every depth pipeline
+and both render paths, so the audit below enumerates *all* sites; the risk is a
+partial flip (one pass left forward against a reversed buffer inverts occlusion),
+not difficulty.
 
-Map near→1, far→0 with a float depth buffer:
+The two cheap alternatives were considered and rejected, recorded here so the
+rationale is not lost:
 
-- Depth format `Depth24Plus` → `Depth32Float` (`chunk.rs:33`, `color_profile.rs:4`,
-  and the runtime assert at `frame_render.rs:245`).
-- Projection: reversed form (swap near/far, or an infinite-far reversed
-  perspective). Applies to the desktop `perspective_rh` builders (`chunk.rs:98`,
-  `:231`, `:312`) and the XR `xr_fov_to_projection_rh` matrix
-  (`mclone-xr-host/src/lib.rs:1673`, near/far mapping at `:1690`).
-- Depth clear value `1.0` → `0.0` at every depth attachment clear site.
-- `CompareFunction::LessEqual` → `GreaterEqual` at every depth-stencil state
-  (`chunk.rs:1958`,`:2272`; `far_lod.rs:182`; `entity.rs:755`;
-  `selection_outline.rs:199`,`:526`).
-- Sky / any far-plane geometry that relies on `depth == 1.0` must move to the
-  reversed convention.
+- **Push the near plane out** (`near 0.05` → `0.2`–`0.5`): buys ~4–10× granularity
+  for one line, but clips blocks and the player's own hands close to the face —
+  worst on Quest, the exact platform this bug was reported on. Rejected as a net
+  regression in VR, not a clean win.
+- **Per-decoration depth epsilon** (mirror `LIQUID_EPSILON`): cheapest and most
+  local, but only patches the two block types someone noticed, leaves the general
+  precision limit intact, and diverges the lily-pad/snow mesh from the vanilla
+  model (against the reference-porting policy). Rejected as a band-aid.
 
-Reversed-Z's precision boost comes largely from the float buffer's exponent
-distribution; `Depth32Float` + reversed is the standard pairing. Pros: durable,
-near-uniform precision; kills the whole class. Cons: touches every depth pipeline
-and both render paths; needs headless + Quest validation.
+Because there is no interim mitigation, this lands atomically (per pipeline
+group) and is validated as one change; there is nothing to revert afterward.
 
-### Option B — Push the near plane out (cheap interim)
+## Depth-site audit (2026-07-08)
 
-Raise `near` from `0.05` toward `0.2`–`0.5`. Because `near` dominates the
-precision term, this alone buys ~4–10× granularity for a near-one-line change
-(`camera.rs:1291`, `XR_NEAR` in `mclone-xr-scene/src/lib.rs:135`). Cons: risks
-clipping blocks / hands very close to the face, especially in VR — a tradeoff,
-not a clean win. Usable as an interim or in combination with A.
+Exhaustive sweep of `mclone-render`, `mclone-app-runtime`, `mclone-xr-*`, and the
+XR app adapters. Every depth-stencil state, depth clear, depth texture format,
+and projection builder is accounted for below; nothing else touches depth.
 
-### Option C — Per-decoration depth epsilon (surgical band-aid)
+### 1. Depth format — `Depth24Plus` → `Depth32Float`
 
-Mirror the existing `LIQUID_EPSILON` (`mclone-mesh/src/builder.rs:679`) for thin
-top-surface decorations: nudge the decoration's top face up a hair in
-`textured_face_corners` / `add_textured_face` (`builder.rs:1160`, `:633`). Pros:
-cheapest, most localized, no pipeline/XR churn. Cons: band-aid — only the touched
-blocks, doesn't fix the general precision limit, and diverges mesh geometry from
-the vanilla model.
+The format flows from one shared const plus two XR swapchain mirrors. Change the
+constants; the pipeline/texture sites that read them follow automatically.
 
-## Recommendation
+| Site | Action |
+| --- | --- |
+| `mclone-render/src/chunk.rs:33` `DEPTH_FORMAT` | change const (master) |
+| `mclone-render/src/color_profile.rs:4` `DEFAULT_RENDER_DEPTH_FORMAT` | change const |
+| `mclone-render/src/color_profile.rs:312` `assert_eq!(…, Depth24Plus)` | update assert to `Depth32Float` |
+| `apps/mclone-native-client/src/xr_clear_smoke.rs:90` `XR_DEPTH_FORMAT` | literal `Depth24Plus` → `Depth32Float` (drives the OpenXR depth swapchain) |
+| `apps/mclone-android-xr-client/src/lib.rs:145` `XR_DEPTH_FORMAT` | literal `Depth24Plus` → `Depth32Float` (drives the OpenXR depth swapchain) |
+| `mclone-app-runtime/src/frame_render.rs:245-248` runtime assert; `:1705` test uses `Depth32Float` | follow the const automatically — verify still consistent (the `:1705` test becomes redundant with the new default) |
 
-Land **Option A** as the durable fix. Options B and C are viable interim
-mitigations if a full depth-format change is deferred; B is the fastest
-temporary relief.
+Follow automatically (read `DEPTH_FORMAT`, no literal edit): pipeline/texture
+formats at `chunk.rs:1822`,`:1864`,`:1956`,`:2270`; `far_lod.rs:180`;
+`entity.rs:753`; `selection_outline.rs:197`,`:524`; and the graphics-adapter
+asserts `xr_clear_smoke/graphics_vulkan.rs:63`, `…/graphics_metal.rs:244`,
+`android-xr-client/src/graphics_vulkan.rs:106` (they compare against
+`mclone_render::chunk::DEPTH_FORMAT`).
+
+### 2. Depth compare — `LessEqual` → `GreaterEqual` (6 pipelines)
+
+`chunk.rs:1958` (per-eye textured); `chunk.rs:2272` (multiview textured);
+`far_lod.rs:182`; `entity.rs:755`; `selection_outline.rs:199` (per-eye);
+`selection_outline.rs:526` (multiview). These are the only `CompareFunction`
+depth states in the tree.
+
+### 3. Depth clear value — `1.0` → `0.0` (5 clear sites)
+
+| Site | Note |
+| --- | --- |
+| `chunk.rs:373` `ChunkRenderTarget::clear_depth` default | per-eye main pass |
+| `chunk.rs:2499` `ChunkMultiviewRenderTarget::clear_depth` default | multiview main pass |
+| `far_lod.rs:259` `LoadOp::Clear(1.0)` | early background pass; owns its own depth clear |
+| `mclone-xr-host/src/lib.rs:1582` `LoadOp::Clear(1.0)` | XR eye pass |
+| `apps/mclone-native-client/src/headless.rs:427` `LoadOp::Clear(1.0)` | headless capture pass |
+
+Load-not-clear depth passes need **no** clear change — they inherit the buffer the
+clearing pass wrote and only need their compare flip (§2): entity actors
+(`entity.rs:415`, `LoadOp::Load`), selection outline (`selection_outline.rs:280`,
+`:336`), and the late translucent chunk passes (the `with_loaded_depth` path,
+`chunk.rs:2359`/`:3311` via `depth_load_op()`).
+
+### 4. Projection — forward (near→0, far→1) → reversed (near→1, far→0)
+
+- Desktop `Mat4::perspective_rh` builders: `chunk.rs:98`, `:231`, `:312`, **and
+  the test helper `:4714`** (the original draft listed only the first three).
+  Swap near/far, or use an infinite-far reversed perspective.
+- XR `xr_fov_to_projection_rh` (`mclone-xr-host/src/lib.rs:1673`): apply the
+  reversed mapping in the matrix entries at `:1696` (`-far/(far-near)`) and
+  `:1699` (`-(near*far)/(far-near)`).
+- XR projection test `mclone-xr-host/src/lib.rs:1749-1752` compares
+  `xr_fov_to_projection_rh` against `Mat4::perspective_rh(…)`; it must be updated
+  to the reversed reference (both flipped) so it still passes.
+
+### 5. Verified no-change (do **not** touch)
+
+- **Sky is exempt.** `sky_render.rs` pipelines use `depth_stencil: None`
+  (`:155`, `:657`) and passes use `depth_stencil_attachment: None` (`:385`,
+  `:482`). The sky dome is drawn color-only *before* the chunk pass clears depth
+  and never depth-tests, so it does **not** rely on `depth == 1.0`. This corrects
+  the original draft, which listed the sky far-plane convention as a required
+  change and a risk — reversed-Z leaves it untouched.
+- No-depth passes (also exempt): GUI (`gui.rs`, all `depth_stencil_attachment:
+  None`), screen effects (`screen_effect.rs`), `gpu_timestamps.rs`, and the web
+  canvas present pass (`web_canvas.rs:2470`).
 
 ## Slices
 
@@ -125,27 +178,28 @@ temporary relief.
 Capture a high-altitude look-down over snow / lily-pad terrain on the current
 build so before/after can be compared. See Validation for the capture note.
 
-### Slice 1 — Reversed-Z + Depth32Float (Option A), chunk terrain
+### Slice 1 — Reversed-Z + Depth32Float, chunk terrain
 
-- Depth format + clear value + compare flip across the chunk pipelines.
-- Reversed projection for desktop `perspective_rh` builders and the XR
-  `xr_fov_to_projection_rh` matrix.
-- Sky/far-plane depth convention updated.
+- Depth format (§1 constants) + clear value (§3 chunk sites) + compare flip (§2
+  chunk pipelines).
+- Reversed projection (§4) for desktop `perspective_rh` builders and the XR
+  `xr_fov_to_projection_rh` matrix, plus the projection test update.
+- Sky needs **no** change (audit §5) — do not touch it.
 - Validate: high-altitude before/after over snow, both per-eye and multiview;
   each eye keeps its own view/projection (XR guardrail).
 
 ### Slice 2 — Remaining depth pipelines
 
 Flip far LOD (`far_lod.rs`), entity actors (`entity.rs`), and selection outline
-(`selection_outline.rs`) to the reversed convention so they depth-test correctly
-against the chunk buffer. Outline write is already disabled; only its compare
-needs the flip.
+(`selection_outline.rs`) to the reversed convention (§2 compares, plus
+`far_lod.rs:259` clear from §3) so they depth-test correctly against the chunk
+buffer. Outline write is already disabled; only its compare needs the flip. Fold
+in the XR eye and headless clear sites (`xr-host/src/lib.rs:1582`,
+`native-client/src/headless.rs:427`) and the two `XR_DEPTH_FORMAT` swapchain
+consts.
 
-### Slice 3 — (optional) Retire interim mitigations
-
-If Option B/C were applied as interim relief, revert them once A lands (restore
-`near = 0.05`, drop any decoration epsilon) so VR near-clipping and vanilla mesh
-geometry are preserved.
+There is no interim-mitigation slice: Option 1 is the only approach, so nothing
+is staged behind a temporary hack and nothing needs reverting.
 
 ## Validation
 
@@ -162,7 +216,8 @@ geometry are preserved.
   `native:desktop-offscreen:smoke` framing to show it.
 - **No-regression:** run the standard sweep after each slice, both paths, and
   confirm no depth ordering regressions (terrain occlusion, transparency,
-  selection outline, sky at the far plane):
+  selection outline, and sky still showing behind terrain — see the §5 note that
+  sky carries no depth):
 
 ```
 pnpm native:desktop-offscreen:smoke
@@ -179,7 +234,8 @@ headless capture fails for lack of a GPU adapter, rerun with elevation.
 - Thin-decoration z-fighting no longer visible from high altitude over snow /
   lily-pad terrain (manual or captured A/B).
 - No depth-ordering regressions near spawn: terrain occlusion, translucency,
-  selection outline, entities, and sky at the far plane all render correctly.
+  selection outline, entities all render correctly, and sky still shows behind
+  terrain (sky carries no depth attachment).
 - Both per-eye and multiview paths carry the fix; each eye keeps its own
   view/projection.
 - Existing desktop + XR smokes remain green; no measurable frame-time regression.
@@ -187,17 +243,25 @@ headless capture fails for lack of a GPU adapter, rerun with elevation.
 ## Risks / watch-items
 
 - **Every depth site must flip together.** A mixed forward/reversed pipeline
-  (one pass `LessEqual` against a reversed buffer) inverts occlusion. Audit all
-  depth-stencil states, clear values, and any shader that reads/writes
-  `@builtin(position).z` or compares against `1.0`/`0.0`.
-- **Sky / far-plane geometry** that depends on `depth == 1.0` (far) must move to
-  `0.0`.
+  (one pass `LessEqual` against a reversed buffer) inverts occlusion. The audit
+  above is the checklist; none of the crate's WGSL shaders read/write
+  `@builtin(position).z` or compare against `1.0`/`0.0` (verified — the only
+  `@builtin(position)` uses are vertex outputs), so this is entirely a
+  Rust-side pipeline/clear/projection change.
+- **Sky is exempt (verified):** the sky pass owns no depth attachment (audit §5),
+  so there is nothing to move to the reversed convention. Do not "fix" it.
 - **XR projection matrix** is runtime-provided asymmetric FOV via
   `xr_fov_to_projection_rh`; apply the reversed mapping there too, not just the
-  glam desktop builder, and keep per-eye data independent (guardrail).
-- **`Depth32Float` support / cost:** universally available on desktop and Quest;
-  32-bit depth is slightly more bandwidth than 24-bit but negligible here. Keep
-  the `Depth32Float` test path already present at `frame_render.rs:1705` in mind
-  as the migration reference.
+  glam desktop builder, update its unit test, and keep per-eye data independent
+  (guardrail).
+- **OpenXR depth swapchain format:** the two `XR_DEPTH_FORMAT` consts drive the
+  depth swapchain the runtime allocates. The Quest/OpenXR runtime must advertise
+  a 32-bit float depth swapchain (`D32_SFLOAT`); confirm at session init and keep
+  a fallback in mind if a runtime only offers 24-bit. This is the one genuinely
+  runtime-dependent piece of the change.
+- **`Depth32Float` support / cost:** universally available on desktop and Quest
+  as a *render* depth format; 32-bit depth is slightly more bandwidth than 24-bit
+  but negligible here. The `Depth32Float` test path already present at
+  `frame_render.rs:1705` is the migration reference.
 - **Do not conflate with 156.** Far-from-origin collapse is a separate fix; keep
   validation of the two apart so neither is mistaken for the other.
