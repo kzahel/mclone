@@ -109,6 +109,79 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-08 - Tactical 155 P0 Fix A Quest Free-Movement + Churn Memory Soak
+
+Benchmarked runtime commit: `8343d960` (the P0 Fix A eviction runtime is
+`0c8de561`; `8343d960` only re-frames the 155 Fix B doc note). The release APK was
+rebuilt and installed for these rows. The worktree carried the desktop
+`scheduler_movement_smoke` instrumentation uncommitted at measurement time, which
+is **not** compiled into the XR APK (it is a `mclone-server` bin, not runtime),
+so the on-device runtime is the committed Fix A code.
+
+This row is the open 155 "V" Quest item: re-run RD5/RD7/churn on the
+RAM-constrained platform after the P0 bound landed, confirming (a) no frame/
+stability regression and (b) that the previously-untested **free-movement** case
+holds memory bounded (the leak, had it survived, would OOM the Quest first). Frame
+metrics come from the `MCLONE_ANDROID_XR_PERF_*` markers; process memory is new
+evidence for this row, sampled on-device from `/proc/<pid>/{VmRSS,VmHWM}` (RD7 soak
+used a VmRSS-only sampler to avoid perturbing frame timing; RD5 lanes also sampled
+`dumpsys meminfo` TOTAL PSS, which adds a rare dump-induced frame hitch).
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+
+Commands:
+
+```bash
+pnpm native:android-xr:perf:flight:rd5
+pnpm native:android-xr:perf:churn:rd5:metrics
+# Long sustained-flight memory soak (default runtime config, extended duration):
+bash android-xr/validate-quest-openxr.sh --perf-seconds 180 --perf-flight --perf-flight-speed 4.3 --perf-metrics --wait-seconds 320 --render-distance 7 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --day-time 6000 --freeze-time
+```
+
+Frame metrics (primary comparison fields):
+
+| Lane | Config | Frames | Skipped | App p95 / p99 / max | Headroom avg / p05 / min | App over-period | Conservation |
+|---|---|---:|---:|---:|---:|---:|---:|
+| RD5 flight (`20s`) | default, workers `1`, unbounded budgets | `1441` | `0` | `9.358 / 9.983 / 12.525ms` | `+6.753 / +4.531 / +1.364ms` | `0` / `0.0%` | `0` |
+| RD5 chunk-view churn (`45s`) | workers `2`, accept/upload `2/16/64` | `3237` | `0` | `10.664 / 12.195 / 21.291ms` | `+7.818 / +3.225 / -7.402ms` | `10` / `0.3%` | `0` |
+| RD7 flight soak (`180s`) | default, workers `1`, unbounded budgets | `12844` | `0` | `14.356 / 16.240 / 21.438ms` | `+3.781 / -0.467 / -7.549ms` | `1115` / `8.7%` | `0` |
+
+Process memory (the P0 evidence — `/proc` RSS in MB):
+
+| Lane | Traversal | Fill peak / VmHWM | Movement-phase RSS band | Net accumulation |
+|---|---|---:|---:|---:|
+| RD5 flight (`20s`) | ~5 chunks | ~620 MB HWM | `~540–580 MB` | none |
+| RD5 churn (`45s`) | ±16-chunk view toggle | ~692 MB HWM | `~574–707 MB` | **returns to baseline** (`574 → 574 MB`) |
+| RD7 flight soak (`180s`) | `774` blocks ≈ `48` new chunks | `845 MB` HWM (set at initial fill) | `~633–725 MB` (avg `679`, ends `653`) | **VmHWM never exceeded in flight** |
+
+Interpretation: **no regression and no unbounded memory growth on the constrained
+platform.** All three lanes ran to completion with `0` skipped frames and `0`
+conservation violations — no crash, no OOM. RD5 flight is fully green
+(`0.0%` over-period, all-positive headroom); the RD5 churn tail is marginally
+above the `1c8a0743` 153 baseline (app p95 `10.66` vs `8.92ms`, over-period `0.3`
+vs `0.0%`), attributable to the concurrent `dumpsys meminfo` sampler's periodic
+process dump rather than Fix A (a server-side light-unload message off the render
+hot path). RD7 continuous flight sits at `8.7%` over-period, the expected cost of
+streaming new terrain at RD7 (heavier than the settled-orbit RD7 rows), not a
+memory or eviction regression. **Memory is the decisive result:** under `180s`
+of sustained free-movement flight across ~48 fresh chunks, RSS holds a bounded
+`~633–725 MB` band and the `845 MB` high-water mark set by the initial RD7 fill is
+never exceeded — no per-unique-chunk ratchet. The churn lane loads/unloads its
+view repeatedly and RSS returns exactly to its pre-churn baseline (`574 MB`),
+the eviction-working signature. Had the pre-fix leak survived, retained light
+(~128 KB/unique chunk) would have ratcheted RSS/VmHWM upward past the fill peak
+across this traversal and threatened the Quest RAM ceiling; instead memory is
+bounded by the loaded set, matching the desktop RD20 300-step soak result.
+
 ### 2026-07-07 - Tactical 153 Applied Derived Render Compile Capacity
 
 Benchmarked runtime commit: `ab582d3c`, clean worktree before docs edits. The

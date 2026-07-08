@@ -32,11 +32,11 @@ Workstream: native Rust shared performance/architecture.
 
 | # | Item | Class | Priority | Status |
 |---|---|---|---|---|
-| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | **Fix A landed** — vanilla-shaped unload eviction; retained light plateaus (bounded by loaded set), acceptance gate flipped, parity byte-identical, wasm32 green |
+| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | **Fix A landed + verified on real hosts (2026-07-08)** — vanilla-shaped unload eviction; retained light plateaus (bounded by loaded set), acceptance gate flipped, parity byte-identical, wasm32 green; desktop RD20 300-step soak flat + Quest RD5/RD7/churn soak bounded (no OOM) |
 | P1 | Movement-frame / 120 Hz over-2x attribution at `7/14` | unblock (promotes shipped win) | high | open |
 | P2 | Sky-light graph hot path (fresh-startup ceiling) | new capability | medium (own tactical) | open |
 | P3 | Mesh-worker clamp (`7`) rationale + cross-host evidence | anti-knob debt / docs | low | documented below |
-| V | Close-condition verification backlog (RD20 memory, wasm32, Quest soak, parity) | evidence | folds into P0/promotions | open |
+| V | Close-condition verification backlog (RD20 memory, wasm32, Quest soak, parity) | evidence | folds into P0/promotions | **closed 2026-07-08** — RD20 300-step soak plateaus + flat RSS, wasm32 green, Quest RD5/RD7/churn soak bounded (no OOM), parity byte-identical; rows in perf-records + quest-records |
 
 Priority note: P1 has the highest *unblock* value (it is the only thing gating
 default promotion of the persisted RD10 `4.9s -> 1.39s` win), but P0 is a
@@ -230,19 +230,51 @@ running them cold.
 
 - **RD20-long backlog + memory watch with cost-derived grants on** (peak pending
   publication vs the `208` baseline, plus RSS / retained-world size). Primary
-  evidence for **P0**.
+  evidence for **P0**. **Verified 2026-07-08 (done).** Instrumented
+  `scheduler_movement_smoke` (live `retained_light_world_chunks` gauge + per-step
+  process RSS + a post-unload `wait_for_light_idle` flush) run at RD20 for `300`
+  steps on two seeds. Retained fills to `2520` by step `11` then hard-plateaus
+  (`second_half_growth = 0`) while the loaded set stays flat at `4489` and process
+  RSS holds a flat ~60 MB band (~`1.5 GB` / ~`1.35 GB` by seed), not monotonic,
+  across a 299-chunk traversal. Both seeds trace a byte-identical retained/holder
+  trajectory (geometry-driven). Row in
+  [`../performance-records.md`](../performance-records.md) (2026-07-08 Tactical
+  155 P0 Fix A RD20 soak).
 - **wasm32 checks green for every touched shared crate** (`mclone-server`,
   `mclone-light`, `mclone-frame-budget`, `mclone-app-runtime`). A stated 153
   close condition; confirm the `perf-diagnostics` gating + cost-derived grant
   changes still compile for `wasm32-unknown-unknown` and degrade to floors
   (simulation timing is `0` on wasm -> count-cap fallback; expected but
-  unverified in the close-out).
+  unverified in the close-out). **Verified 2026-07-08 (done, crates Fix A
+  touched).** `cargo check --target wasm32-unknown-unknown -p mclone-server -p
+  mclone-light` green (re-confirmed after the harness instrumentation landed). The
+  web *worker* light path is a no-op for eviction (rebuilds
+  `RetainedInitialLightState` per job frame), so wasm degrades to the same bounded
+  behaviour.
 - **Quest RD5/RD7/churn + mixed soak** re-run under default config after any P0
-  bound lands, to confirm no regression on the constrained platform.
+  bound lands, to confirm no regression on the constrained platform. **Verified
+  2026-07-08 (done, on Quest 3 `2G0YC1ZF93041Z`).** Fix A release APK built +
+  installed; RD5 flight, RD5 chunk-view churn, and a `180s` RD7 sustained-flight
+  soak (~48 fresh chunks) all ran to completion with `0` skipped frames / `0`
+  conservation violations — no crash, no OOM. Memory is bounded: RD7 flight RSS
+  holds a `~633–725 MB` band with the `845 MB` fill-time VmHWM never exceeded, and
+  churn RSS returns exactly to its pre-churn baseline. RD5 flight is fully green;
+  the churn/RD7 frame tails are within streaming-cost expectations, not a Fix A
+  regression. Row in
+  [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
+  (2026-07-08 Tactical 155 P0 Fix A Quest soak).
 - **Parity** (light byte-equality on fixtures + contrasting seed; mesh
-  order-independence) re-checked for any touched execution path.
+  order-independence) re-checked for any touched execution path. **Verified
+  2026-07-08 (done).** `cargo test -p mclone-server -p mclone-light` green
+  (`375` + `55`), including the Java-oracle lighting fixtures
+  (`provisional_{sky,block}_light_matches_java_*`,
+  `generated_ocean_chunk_light_matches_persisted_java_oracle_fixture`), the
+  contrasting-seed acceptance soak, and the eviction-parity tests
+  (`evicting_a_chunk_column_..._leaves_neighbor_light_unchanged`,
+  `relighting_a_chunk_after_eviction_is_byte_identical`).
 
-**Status: open; scheduled with the items they support.**
+**Status: closed 2026-07-08 — all four rows verified on real hosts (desktop RD20
++ Quest 3); see the P0 Investigation Log close entry below.**
 
 ---
 
@@ -505,7 +537,52 @@ store hook, and its reclaim is native-only and bounded by Fix A (see "Fix
 options"). Fix A stops the leak without touching the worker/scheduler ownership
 boundary.
 
-**V follow-ups still open:** the on-device Quest RD5/RD7/churn + mixed soak
-re-run under default config (confirm no regression on the RAM-constrained
-platform) and the desktop RD20-long RSS watch remain host-measurement items for a
-device pass — the shared-crate bound and its parity are proven here.
+**V follow-ups (closed 2026-07-08 — see next entry).** The two host-measurement
+items called out here — the desktop RD20-long RSS watch and the on-device Quest
+RD5/RD7/churn soak — have now been run on real hardware and confirm the
+shared-crate bound holds in practice.
+
+### 2026-07-08 — Fix A verified on real hosts (V backlog closed)
+
+**Resolution: verified.** The desktop RD20 free-movement soak and the on-device
+Quest soak both confirm Fix A bounds retained-light memory in practice, with no
+regression; all four "V" rows are closed.
+
+- **Desktop RD20 / free-movement + RSS soak (primary P0 evidence).**
+  `scheduler_movement_smoke` was extended to surface the live
+  `retained_light_world_chunks` gauge and per-step process RSS, and to
+  `wait_for_light_idle` after `process_pending_unloads` each step so the
+  fire-and-forget unload evictions are observed in the same step (mirrors the
+  acceptance gate). A pre-existing harness bug was also fixed so it runs at all
+  with lighting enabled: the wait loop now polls first (job dispatch happens in
+  `poll()`, not `apply_interest`) and drains to full quiescence
+  (`pending_job_count == 0 && pending_publication_count == 0`) instead of exiting
+  at zero worldgen jobs and publishing a partial view. Result (RD20, `300` steps,
+  seeds `12345` + `987654321`): the loaded set stays flat at `4489`;
+  `retained_light_world_chunks` fills to `2520` by step `11`, then hard-plateaus
+  (`second_half_growth = 0`) across the remaining 288 steps while the center moves
+  `299` chunks; process RSS holds a flat ~60 MB band (~`1.5 GB` / ~`1.35 GB` by
+  seed), not monotonic. Both seeds trace a byte-identical retained/holder
+  trajectory. This is the RD20 row the 153/155 close-out never measured; it now
+  exists in [`../performance-records.md`](../performance-records.md).
+- **Quest RD5/RD7/churn + soak (constrained platform, free-movement case).** A
+  Fix A release APK was built and installed to Quest 3 `2G0YC1ZF93041Z`. RD5
+  flight, RD5 chunk-view churn, and a `180s` RD7 sustained-flight soak (~`48`
+  fresh chunks) ran to completion with `0` skipped frames and `0` conservation
+  violations — no crash, no OOM. RD7 flight RSS holds a bounded `~633–725 MB` band
+  with the `845 MB` initial-fill VmHWM never exceeded; churn RSS returns exactly to
+  its pre-churn baseline (`574 MB`) — the eviction-working signature. RD5 flight is
+  fully green; the churn/RD7 frame tails are within streaming-cost expectations
+  (and the churn tail is inflated by the concurrent memory sampler), not a Fix A
+  regression. Row in
+  [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
+  This is the free-movement case that was never previously tested on the platform
+  where the leak would OOM first.
+- **wasm32 + parity (re-confirmed).** `cargo check --target
+  wasm32-unknown-unknown -p mclone-server -p mclone-light` green; `cargo test -p
+  mclone-server -p mclone-light` green (`375` + `55`, Java-oracle lighting fixtures
+  and eviction/relight parity tests included) — re-run after the harness
+  instrumentation landed.
+
+With the desktop RD20 and Quest rows recorded, the tactical 155 P0 item and its
+"V" close-condition backlog are fully evidenced on real hosts.

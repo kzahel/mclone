@@ -101,6 +101,66 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-08 - Tactical 155 P0 Fix A RD20 Free-Movement Retained-Light + RSS Soak
+
+Commit reported by benchmark JSON: `8343d960` (Fix A is `0c8de561`),
+`git_dirty=true`, `debug_assertions=false`. Host: Apple M4 Pro (14 logical
+cores), macOS (Darwin arm64). `git_dirty=true` because the soak was measured with
+the harness instrumentation described below applied to the working tree
+(committed together with this record); the light-eviction fix under test is the
+already-committed `0c8de561`.
+
+Code under test: the tactical 155 P0 Fix A vanilla-shaped unload eviction
+(retained light world + light-engine `DataLayer` storage evicted when the
+scheduler drops a chunk from the ticket/loaded set). This is the primary desktop
+P0 evidence that was open in the 155 "V" backlog: a long RD20 free-movement soak
+watching the live `retained_light_world_chunks` gauge and process RSS, which the
+153/155 close-out never measured on a real host.
+
+Harness: `scheduler_movement_smoke` (server-only scheduler + retained light
+compute; no client update pump, mesh, GPU upload, or frame pacing). For this
+verification the bin was extended to (a) surface the new
+`retained_light_world_chunks` gauge and per-step process RSS (`process_rss_kb` /
+`peak_rss_kb` / `rss_delta_kb`, sampled via `ps` after the unload flush), and (b)
+call `wait_for_light_idle` after `process_pending_unloads` each step so the
+fire-and-forget unload evictions are observed in the same step (mirrors the
+acceptance gate). A pre-existing drain bug was also fixed: the wait loop now polls
+first (job dispatch happens in `poll()`, not `apply_interest`) and drains to full
+quiescence (`pending_job_count == 0 && pending_publication_count == 0`), so
+lighting-enabled runs actually publish the full view instead of exiting early.
+
+Commands (release, default config, one contrasting seed per rule E):
+
+```bash
+native/target/release/scheduler_movement_smoke --seed 12345 --radius 20 --steps 300 --lighting true > /tmp/rd20_seed12345.json
+native/target/release/scheduler_movement_smoke --seed 987654321 --radius 20 --steps 300 --lighting true > /tmp/rd20_seed987654321.json
+```
+
+Trajectory (movement is +X, one chunk/step; the center travels 299 chunks):
+
+| Seed | Holders (loaded) | Retained step0 → plateau | Plateau reached | 2nd-half growth | Process RSS band (steps 20+) | Wall |
+|---|---:|---:|---:|---:|---:|---:|
+| `12345` | `4489` (flat) | `2025 → 2520` | step `11` | `0` | `1517408–1575584 KB` (~1.52 GB) | `174.3s` |
+| `987654321` | `4489` (flat) | `2025 → 2520` | step `11` | `0` | `1347088–1371440 KB` (~1.35 GB) | `191.7s` |
+
+Interpretation: **the retained light world plateaus and RSS is flat, not
+monotonic** — the P0 leak is bounded on a real host. The loaded set stays flat at
+`4489` (ticket-bounded) the whole run. `retained_light_world_chunks` fills for
+`loaded_radius − lit_radius` (`= ticket_radius − padding ≈ 11`) steps, then
+hard-plateaus at `2520` and holds constant across all remaining 288 steps
+(`second_half_growth = 0`) even though the center has moved 299 chunks — a
+constant band bounded by the loaded set, not a function of distance travelled.
+Process RSS holds a tight ~60 MB band around ~1.5 GB (seed `12345`) / ~1.35 GB
+(seed `987654321`) instead of climbing; the pre-fix `+45 chunks/step` retained
+slope would have added ~13.5k retained chunks (~1.7 GB of light storage) over 300
+steps and pushed RSS unboundedly. The two seeds trace a **byte-identical**
+retained/holder trajectory (verified by direct comparison), confirming retained
+membership is geometry-driven and terrain-independent — the same invariant the
+`movement_soak_keeps_retained_light_memory_bounded` acceptance gate asserts at
+RD2, now confirmed at RD20 over 300 steps. Absolute RSS differs between seeds only
+by terrain-dependent worldgen buffers for the flat loaded set, not by the retained
+light store.
+
 ### 2026-07-08 - Tactical 153 Light Compute Boundary Profile
 
 Commit reported by benchmark JSON: `c6d3939c`, `git_dirty=false`,

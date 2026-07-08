@@ -21,6 +21,12 @@ const DEFAULT_MAX_POLLS: usize = 120_000;
 const DEFAULT_POLL_SLEEP_MS: u64 = 1;
 const DEFAULT_COMPLETION_WAIT_MS: u64 = 30_000;
 const DEFAULT_POLL_MODE: PollMode = PollMode::Completion;
+/// Short bounded wait used to drain the light-gated / budget-paced publication
+/// tail after every worldgen job for a step has finished. Long enough to yield to
+/// the light worker, short enough that the tail (no completion left to block on)
+/// never stalls on the full completion timeout. Matches the acceptance test's
+/// 1 ms scheduler-completion poll.
+const LIGHT_DRAIN_NUDGE: Duration = Duration::from_millis(1);
 
 fn main() {
     if let Err(error) = run() {
@@ -35,6 +41,9 @@ fn run() -> Result<(), String> {
     let mut scheduler = ChunkScheduler::new(config.seed);
     scheduler.set_lighting_enabled(config.lighting_enabled);
     let mut steps = Vec::with_capacity(config.steps);
+    // Running high-water mark of the per-step current-RSS samples, so the report
+    // carries both the live footprint and its peak without a second mechanism.
+    let mut peak_rss_kb: Option<u64> = None;
 
     for index in 0..config.steps {
         let previous_job_count = scheduler.job_count();
@@ -61,32 +70,26 @@ fn run() -> Result<(), String> {
         let mut completion_waits = 0_usize;
         let mut completion_timeouts = 0_usize;
         let worker_wait_start = Instant::now();
-        while scheduler.pending_job_count() > 0 {
+        // Drain to full quiescence. `apply_interest` reconciles ticketed holders
+        // but does not dispatch worldgen jobs — `poll()` does — so this must poll
+        // first (like the acceptance test's `poll_scheduler_until_idle` /
+        // `drain_to_quiescence`) rather than gate loop entry on an as-yet-zero
+        // `pending_job_count()`. Continue until neither jobs nor publications
+        // remain: with lighting enabled, client publication is gated on light
+        // completion, so a step's publications can still be pending after every
+        // worldgen job has finished; exiting on `pending_job_count() == 0` alone
+        // would leave the view half-published (`client_visible_chunks` short of
+        // the interest set). Pump light completion once jobs are done so `poll()`
+        // can apply the light-gated publications.
+        loop {
             if polls >= config.max_polls {
                 return Err(format!(
                     "timed out waiting for step {index} center=({}, {}) after {polls} polls",
                     center.x, center.z
                 ));
             }
-            match config.poll_mode {
-                PollMode::Completion => {
-                    completion_waits += 1;
-                    let completion_wait_start = Instant::now();
-                    let completed = scheduler.wait_for_worldgen_completion(Duration::from_millis(
-                        config.completion_wait_ms,
-                    ));
-                    completion_wait_ms += elapsed_ms(completion_wait_start.elapsed());
-                    if !completed {
-                        completion_timeouts += 1;
-                    }
-                }
-                PollMode::Sleep => {
-                    if config.poll_sleep_ms > 0 {
-                        thread::sleep(Duration::from_millis(config.poll_sleep_ms));
-                    }
-                }
-                PollMode::Spin => {}
-            }
+            // Poll first: it both dispatches worldgen jobs and applies completed
+            // worldgen/light publications.
             let poll_start = Instant::now();
             let poll_events = scheduler.poll().map_err(|error| error.to_string())?;
             let poll_elapsed_ms = elapsed_ms(poll_start.elapsed());
@@ -101,12 +104,63 @@ fn run() -> Result<(), String> {
             }
             events.extend(poll_events);
             polls += 1;
+            if scheduler.pending_job_count() == 0 && scheduler.pending_publication_count() == 0 {
+                break;
+            }
+            // Not drained yet. Nudge both workers before the next poll so the loop
+            // is not a 100% busy-spin while they compute. `pending_job_count()`
+            // conflates worldgen jobs, light batches, and light publications, so
+            // waiting on only one worker (keyed off that count) would block the
+            // full safety timeout whenever the *other* is the one with work —
+            // notably the budget-paced light-publication tail after worldgen has
+            // finished. Wait on both with a short bounded nudge, mirroring the
+            // acceptance test's `wait_for_scheduler_completion` (worldgen + light,
+            // 1 ms each).
+            match config.poll_mode {
+                PollMode::Completion => {
+                    completion_waits += 1;
+                    let completion_wait_start = Instant::now();
+                    let worldgen_completed =
+                        scheduler.wait_for_worldgen_completion(LIGHT_DRAIN_NUDGE);
+                    let light_completed = if config.lighting_enabled {
+                        scheduler.wait_for_light_completion(LIGHT_DRAIN_NUDGE)
+                    } else {
+                        false
+                    };
+                    completion_wait_ms += elapsed_ms(completion_wait_start.elapsed());
+                    if !worldgen_completed && !light_completed {
+                        completion_timeouts += 1;
+                    }
+                }
+                PollMode::Sleep => {
+                    if config.poll_sleep_ms > 0 {
+                        thread::sleep(Duration::from_millis(config.poll_sleep_ms));
+                    }
+                }
+                PollMode::Spin => {}
+            }
         }
         let worker_wait_ms = elapsed_ms(worker_wait_start.elapsed());
         let non_poll_wait_ms = (worker_wait_ms - poll_call_ms).max(0.0);
         scheduler
             .process_pending_unloads(usize::MAX)
             .map_err(|error| error.to_string())?;
+        // Light unloads are fire-and-forget (no completion to poll), so the
+        // retained gauge lags a step unless the worker's request queue is flushed
+        // first. Mirror the acceptance gate
+        // (`movement_soak_keeps_retained_light_memory_bounded`) and block on the
+        // Sync round-trip before reading `retained_light_world_chunks`.
+        let light_idle_synced = if config.lighting_enabled {
+            scheduler.wait_for_light_idle(Duration::from_secs(30))
+        } else {
+            true
+        };
+        // Sample process RSS after the eviction flush so it reflects the
+        // post-unload footprint (the plateau the fix is meant to hold).
+        let process_rss_kb = sample_current_rss_kb();
+        if let Some(rss) = process_rss_kb {
+            peak_rss_kb = Some(peak_rss_kb.map_or(rss, |peak| peak.max(rss)));
+        }
 
         let snapshots = events
             .iter()
@@ -148,6 +202,9 @@ fn run() -> Result<(), String> {
             snapshots,
             unloads,
             metrics: scheduler.metrics(),
+            light_idle_synced,
+            process_rss_kb,
+            peak_rss_kb,
         });
     }
 
@@ -157,8 +214,12 @@ fn run() -> Result<(), String> {
         total_elapsed_ms,
         steps,
     };
-    report.validate()?;
+    // Emit the report before validating: a long soak (several hundred RD20 steps)
+    // is expensive to re-run, so always print the collected data, then surface any
+    // invariant violation as a non-zero exit. `main` prints the error to stderr,
+    // leaving valid JSON on stdout for analysis either way.
     report.print_json();
+    report.validate()?;
     Ok(())
 }
 
@@ -261,6 +322,9 @@ struct StepReport {
     snapshots: usize,
     unloads: usize,
     metrics: ChunkSchedulerMetrics,
+    light_idle_synced: bool,
+    process_rss_kb: Option<u64>,
+    peak_rss_kb: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -457,6 +521,23 @@ impl SmokeReport {
             print_timing_json("      ", step.feature_timing, true);
             println!("      \"snapshots\": {},", step.snapshots);
             println!("      \"unloads\": {},", step.unloads);
+            let rss_delta_kb = if index == 0 {
+                None
+            } else {
+                match (step.process_rss_kb, self.steps[index - 1].process_rss_kb) {
+                    // RSS samples are process KB (well under i64::MAX), so the
+                    // widening casts are lossless.
+                    (Some(current), Some(previous)) => Some(current as i64 - previous as i64),
+                    _ => None,
+                }
+            };
+            println!(
+                "      \"process_rss_kb\": {},",
+                opt_u64_json(step.process_rss_kb)
+            );
+            println!("      \"peak_rss_kb\": {},", opt_u64_json(step.peak_rss_kb));
+            println!("      \"rss_delta_kb\": {},", opt_i64_json(rss_delta_kb));
+            println!("      \"light_idle_synced\": {},", step.light_idle_synced);
             print_metrics_json("      ", step.metrics, false);
             println!("    }}{suffix}");
         }
@@ -713,8 +794,15 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         metrics.total_light_status_changed_block_emission_changes
     );
     println!(
-        "{indent}    \"raw_only_changes\": {}",
+        "{indent}    \"raw_only_changes\": {},",
         metrics.total_light_status_changed_block_raw_only_changes
+    );
+    // Live retained-light-world entry count (155 P0 Fix A gauge): bounded by the
+    // loaded set once eviction is wired, unlike `inserted_chunks` (cumulative,
+    // never decremented).
+    println!(
+        "{indent}    \"retained_light_world_chunks\": {}",
+        metrics.retained_light_world_chunks
     );
     println!("{indent}  }},");
     println!("{indent}  \"light_status_graph\": {{");
@@ -1076,6 +1164,40 @@ fn git_dirty() -> bool {
         .filter(|output| output.status.success())
         .map(|output| !output.stdout.is_empty())
         .unwrap_or(true)
+}
+
+/// Best-effort current process resident set size in KiB. Reads the same kernel
+/// RSS counter `getrusage` / `/proc/self/statm` expose, via `ps` — portable
+/// across macOS and Linux with no platform FFI, matching this bin's existing
+/// `Command`-based git helpers (keeps the shared crate free of an OS dependency
+/// added only for a desktop diagnostic). Returns `None` on unsupported platforms
+/// or if the query fails; RSS sampling is diagnostic, never fatal.
+#[cfg(unix)]
+fn sample_current_rss_kb() -> Option<u64> {
+    let pid = std::process::id().to_string();
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
+
+#[cfg(not(unix))]
+fn sample_current_rss_kb() -> Option<u64> {
+    None
+}
+
+fn opt_u64_json(value: Option<u64>) -> String {
+    value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+}
+
+fn opt_i64_json(value: Option<i64>) -> String {
+    value.map_or_else(|| "null".to_owned(), |value| value.to_string())
 }
 
 fn chunk_pos_json(pos: Option<ChunkPos>) -> String {
