@@ -343,6 +343,10 @@ pub(super) fn is_stone_shore_landmark_block_id(block_id: RawBlockId) -> bool {
     matches!(block_id, STONE | GRAVEL)
 }
 
+pub(super) fn is_mountains_landmark_block_id(block_id: RawBlockId) -> bool {
+    matches!(block_id, GRASS_BLOCK | STONE | GRAVEL)
+}
+
 pub(super) fn is_shattered_savanna_landmark_block_id(block_id: RawBlockId) -> bool {
     matches!(block_id, GRASS_BLOCK | COARSE_DIRT | STONE)
 }
@@ -655,6 +659,24 @@ pub(super) fn fills_chunk_zero_zero_with_terrain_only_java_oracle() {
 }
 
 #[test]
+pub(super) fn fills_mountains_chunk_with_terrain_only_java_oracle() {
+    let oracle = mountains_terrain_fixture();
+    assert_eq!(oracle.seed, "33");
+    assert_eq!(oracle.chunk_x, 0);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn fills_mountains_relief_chunk_with_terrain_only_java_oracle() {
+    let oracle = mountains_relief_terrain_fixture();
+    assert_eq!(oracle.seed, "33");
+    assert_eq!(oracle.chunk_x, -12);
+    assert_eq!(oracle.chunk_z, 9);
+    assert_terrain_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
 pub(super) fn fills_stone_shore_chunk_with_terrain_only_java_oracle() {
     let oracle = stone_shore_terrain_fixture();
     assert_eq!(oracle.seed, "74739");
@@ -765,6 +787,51 @@ pub(super) fn macro_geometry_signal_tracks_eroded_badlands_pillar_anchor() {
             water_land_edge_delta_ge_8: 0,
             landmark_block_volume: 7023,
             landmark_column_count: 144,
+        }
+    );
+}
+
+#[test]
+pub(super) fn macro_geometry_signal_tracks_mountains_relief_anchor() {
+    let oracle = mountains_relief_surface_fixture();
+    let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+    generator.build_surface_and_bedrock(&mut chunk);
+    let signal = macro_geometry_signal(
+        &chunk,
+        is_mountains_landmark_block_id,
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+        Some(NoiseGeneratorSettings::overworld().sea_level()),
+    );
+
+    assert_eq!(
+        signal,
+        MacroGeometrySignal {
+            top_y_min: 66,
+            top_y_max: 122,
+            top_y_range: 56,
+            top_y_p05: 71,
+            top_y_p50: 113,
+            top_y_p95: 122,
+            neighbor_delta_ge_4: 101,
+            neighbor_delta_ge_8: 16,
+            neighbor_delta_ge_16: 3,
+            vertical_face_columns: 94,
+            solid_over_air_blocks: 0,
+            surface_near_carved_air_columns: 0,
+            carved_air_volume: 0,
+            carved_air_y_min: None,
+            carved_air_y_max: None,
+            long_vertical_air_spans: 0,
+            water_land_edge_delta_ge_4: 0,
+            water_land_edge_delta_ge_8: 0,
+            landmark_block_volume: 11483,
+            landmark_column_count: 256,
         }
     );
 }
@@ -954,6 +1021,24 @@ pub(super) fn build_surface_and_bedrock_matches_java_oracle() {
     let oracle = surface_fixture();
     assert_eq!(oracle.chunk_x, 0);
     assert_eq!(oracle.chunk_z, 0);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn build_mountains_surface_and_bedrock_matches_java_oracle() {
+    let oracle = mountains_surface_fixture();
+    assert_eq!(oracle.seed, "33");
+    assert_eq!(oracle.chunk_x, 0);
+    assert_eq!(oracle.chunk_z, 0);
+    assert_surface_chunk_matches_java_oracle(oracle);
+}
+
+#[test]
+pub(super) fn build_mountains_relief_surface_and_bedrock_matches_java_oracle() {
+    let oracle = mountains_relief_surface_fixture();
+    assert_eq!(oracle.seed, "33");
+    assert_eq!(oracle.chunk_x, -12);
+    assert_eq!(oracle.chunk_z, 9);
     assert_surface_chunk_matches_java_oracle(oracle);
 }
 
