@@ -1056,18 +1056,26 @@ pub enum GameScreen {
     Title,
     WorldList,
     WorldCreate,
-    WorldDeleteConfirm { id: WorldCatalogUiWorldId },
+    WorldDeleteConfirm {
+        id: WorldCatalogUiWorldId,
+    },
     NewWorld,
     JoinRemote,
     Pause,
-    Help { parent: GameHelpParent },
+    Help {
+        parent: GameHelpParent,
+    },
     BlockPalette,
-    Options { parent: GameOptionsParent },
+    Options {
+        parent: GameOptionsParent,
+    },
     OptionsCategory {
         parent: GameOptionsParent,
         category: GameOptionsCategory,
     },
-    ServerSettings { parent: GameOptionsParent },
+    ServerSettings {
+        parent: GameOptionsParent,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

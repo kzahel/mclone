@@ -59,7 +59,9 @@ fn options_hub_lists_categories_and_navigation_only() {
 
     for category in GameOptionsCategory::ALL {
         assert!(
-            layout.widget(options_category_widget_id(category)).is_some(),
+            layout
+                .widget(options_category_widget_id(category))
+                .is_some(),
             "hub is missing a category button",
         );
     }
@@ -126,7 +128,10 @@ fn options_movement_category_enables_conditional_rows_when_available() {
         UI_V2_OPTIONS_TOUCH_LOOK,
     ] {
         let widget = layout.widget(id).expect("conditional row present");
-        assert!(widget.enabled, "conditional row should be enabled when available");
+        assert!(
+            widget.enabled,
+            "conditional row should be enabled when available"
+        );
     }
 }
 
@@ -149,7 +154,9 @@ fn options_categories_show_unavailable_rows_disabled() {
         UI_V2_OPTIONS_TOUCH_CONTROLS,
         UI_V2_OPTIONS_TOUCH_LOOK,
     ] {
-        let widget = layout.widget(id).expect("row present even when unavailable");
+        let widget = layout
+            .widget(id)
+            .expect("row present even when unavailable");
         assert!(!widget.enabled, "unavailable row should be disabled");
     }
 
@@ -167,7 +174,10 @@ fn options_categories_show_unavailable_rows_disabled() {
         .layout()
         .widget(UI_V2_OPTIONS_CROSSHAIR)
         .expect("crosshair row present even when unavailable");
-    assert!(!crosshair.enabled, "unavailable crosshair should be disabled");
+    assert!(
+        !crosshair.enabled,
+        "unavailable crosshair should be disabled"
+    );
 }
 
 #[test]

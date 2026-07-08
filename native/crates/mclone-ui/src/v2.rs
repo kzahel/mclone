@@ -1,10 +1,9 @@
 use crate::{
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsCategory,
-    GameOptionsParent,
-    GameScreen, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
-    GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect,
-    Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
+    GameOptionsParent, GameScreen, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList,
+    GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay,
+    Point, Rect, Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
     block_palette_panel_rect, block_palette_slot_rect, centered_panel,
     far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
     fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
@@ -28,18 +27,26 @@ pub enum UiScreenId {
     Title,
     WorldList,
     WorldCreate,
-    WorldDeleteConfirm { id: WorldCatalogUiWorldId },
+    WorldDeleteConfirm {
+        id: WorldCatalogUiWorldId,
+    },
     NewWorld,
     JoinRemote,
     Pause,
     BlockPalette,
-    Options { parent: GameOptionsParent },
+    Options {
+        parent: GameOptionsParent,
+    },
     OptionsCategory {
         parent: GameOptionsParent,
         category: GameOptionsCategory,
     },
-    ServerSettings { parent: GameOptionsParent },
-    Help { parent: GameHelpParent },
+    ServerSettings {
+        parent: GameOptionsParent,
+    },
+    Help {
+        parent: GameHelpParent,
+    },
 }
 
 impl UiScreenId {
@@ -3016,7 +3023,10 @@ fn options_category_rows(
                             .touch_settings
                             .map(touch_look_label)
                             .unwrap_or_else(|| "Touch Look".to_string()),
-                        state.touch_settings.map(touch_look_slider_value).unwrap_or(0.0),
+                        state
+                            .touch_settings
+                            .map(touch_look_slider_value)
+                            .unwrap_or(0.0),
                     )
                     .enabled(state.touch_settings.is_some());
                     if state.touch_settings.is_some() {
@@ -3117,8 +3127,8 @@ fn optional_cycle<T: Copy>(
     action: impl Fn(T) -> GameUiAction,
 ) -> UiWidget {
     let display = value.map(&value_label).unwrap_or("N/A");
-    let mut widget = UiWidget::cycle(id, Rect::new(0.0, 0.0, 0.0, 0.0), label, display)
-        .enabled(value.is_some());
+    let mut widget =
+        UiWidget::cycle(id, Rect::new(0.0, 0.0, 0.0, 0.0), label, display).enabled(value.is_some());
     if let Some(value) = value {
         widget = widget.action(action(value));
     }

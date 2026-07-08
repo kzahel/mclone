@@ -1242,9 +1242,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::CloseHelp(_) => ClientExperienceActionKind::CloseHelp,
         GameUiAction::AssignHotbarBlock { .. } => ClientExperienceActionKind::AssignHotbarBlock,
         GameUiAction::OpenOptions(_) => ClientExperienceActionKind::OpenOptions,
-        GameUiAction::OpenOptionsCategory(_, _) => {
-            ClientExperienceActionKind::OpenOptionsCategory
-        }
+        GameUiAction::OpenOptionsCategory(_, _) => ClientExperienceActionKind::OpenOptionsCategory,
         GameUiAction::OpenServerSettings(_) => ClientExperienceActionKind::OpenServerSettings,
         GameUiAction::BackToTitle => ClientExperienceActionKind::BackToTitle,
         GameUiAction::BackToPause => ClientExperienceActionKind::BackToPause,

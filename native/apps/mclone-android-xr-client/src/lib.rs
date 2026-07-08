@@ -112,9 +112,9 @@ mod android {
         XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use mclone_xr_scene::{
-        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFramePipelineHostTiming, XrFramePipelineReporter,
-        XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
-        XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFramePipelineHostTiming,
+        XrFramePipelineReporter, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
+        XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
     };
     use openxr as xr;
 
