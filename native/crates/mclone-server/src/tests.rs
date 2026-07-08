@@ -1,4 +1,5 @@
 mod light;
+mod light_memory_soak;
 mod liquid;
 mod persistence;
 mod runtime;

@@ -32,7 +32,7 @@ Workstream: native Rust shared performance/architecture.
 
 | # | Item | Class | Priority | Status |
 |---|---|---|---|---|
-| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | diagnosed; fix scoped, impl pending |
+| P0 | Unbounded pipeline/light memory under sustained movement | correctness / Quest stability | **highest** | diagnosed + quantified; Fix A scoped, impl pending |
 | P1 | Movement-frame / 120 Hz over-2x attribution at `7/14` | unblock (promotes shipped win) | high | open |
 | P2 | Sky-light graph hot path (fresh-startup ceiling) | new capability | medium (own tactical) | open |
 | P3 | Mesh-worker clamp (`7`) rationale + cross-host evidence | anti-knob debt / docs | low | documented below |
@@ -114,9 +114,11 @@ the RD20 row as evidence. Any bound added must be vanilla-shaped (tied to the
 loaded chunk set / unload path), not a fixed cap knob (rule B). Light parity
 stays byte-identical (rule E).
 
-**Status: diagnosed 2026-07-08 — confirmed unbounded by construction, shared
-(native + web), fix scoped below. Implementation pending (own slice).** See
-"P0 Investigation Log".
+**Status: diagnosed + quantified 2026-07-08 — confirmed unbounded by
+construction, shared (native + web); movement-soak test records `+9`
+retained-light chunks/step (linear, no plateau) against a flat `961`-chunk
+loaded set. Fix A scoped; implementation pending (own slice).** See "P0
+Investigation Log".
 
 ---
 
@@ -328,6 +330,31 @@ worker-thread divergence, unlike (b)); (b) it has no eviction hook analogous to
 `updateChunkStatus`/`removeLayer`. **The bug is (b), the missing eviction, not
 (a) the copy.** The light-engine storage maps have the same missing-eviction
 problem despite already owning the removal primitives.
+
+### 2026-07-08 — empirical measurement
+
+Quantified with a committed movement-soak test,
+`native/crates/mclone-server/src/tests/light_memory_soak.rs`
+(`movement_soak_shows_unbounded_retained_light_memory`). It steps the view
+center in +X for `24` steps at radius `2`, draining worldgen + light to
+quiescence and `process_pending_unloads` each step, and records the scheduler's
+loaded set (`holder_count`) against the retained-world proxy
+(`total_light_status_inserted_chunks` — first-insert-only, never decremented, so
+it equals the live retained-world entry count). Per-step trajectory:
+
+| Metric | Step 0 | Step 23 | Behavior |
+|---|---:|---:|---|
+| `holder_chunks` (scheduler loaded set) | `961` | `961` | **flat** — bounded by tickets, `961 = 31x31` for the whole run |
+| `retained_light_chunks` (retained world) | `81` | `288` | **+9.0/step, linear, no plateau** — `3.56x` in 24 steps |
+
+The loaded set is dead flat while the retained light world grows by one movement
+strip (`~9` chunks) every step with no eviction. Extrapolating the `+9`/step
+slope: `~972` retained chunks by step 100, `~9000` (`~1.1 GB` at ~128 KB/chunk)
+by step 1000 — unbounded in movement, exactly as the code/vanilla analysis
+predicted. `~36 MB` was already retained after only 24 tiny steps here. The test
+currently asserts the growth (green today); when Fix A lands it will fail as
+retained plateaus near one view, at which point it flips into the bounded
+acceptance assertion — i.e. this row is also the fix's before/after guard.
 
 ### Fix options
 
