@@ -3,9 +3,8 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_assets::{
-    AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord,
-    BlockStateRegistry, BlockStateVariant, ModelFaceDirection, ResourceLocation, TextureAtlasPlan,
-    TextureMaterial,
+    AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
+    BlockStateVariant, ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
 use mclone_core::BlockStateId;
 
@@ -271,12 +270,19 @@ impl TexturedMeshCatalog {
                     BlockStateModelRotation::from_variant(variant),
                 )]
             } else if variant_key.is_empty() {
-                multipart_models_and_rotations(asset, record).ok_or_else(|| {
-                    TexturedMeshError::MissingBlockStateVariant {
+                let selections = asset.multipart_selections(&record.properties);
+                if selections.is_empty() {
+                    return Err(TexturedMeshError::MissingBlockStateVariant {
                         block: record.block.clone(),
-                        variant_key: variant_key.clone(),
-                    }
-                })?
+                        variant_key,
+                    });
+                }
+                selections
+                    .into_iter()
+                    .map(|variant| {
+                        (&variant.model, BlockStateModelRotation::from_variant(variant))
+                    })
+                    .collect()
             } else {
                 return Err(TexturedMeshError::MissingBlockStateVariant {
                     block: record.block.clone(),
@@ -408,101 +414,6 @@ impl TexturedMeshCatalog {
             .as_ref()
             .map(|maps| maps.foliage.sample(temperature, downfall))
     }
-}
-
-fn multipart_primary_model_and_rotation<'a>(
-    asset: &'a mclone_assets::BlockStateAsset,
-    record: &BlockStateRecord,
-) -> Option<(&'a ResourceLocation, BlockStateModelRotation)> {
-    let model = multipart_primary_model(asset, record)?;
-    Some((model, multipart_primary_rotation(record)))
-}
-
-fn multipart_models_and_rotations<'a>(
-    asset: &'a mclone_assets::BlockStateAsset,
-    record: &BlockStateRecord,
-) -> Option<Vec<(&'a ResourceLocation, BlockStateModelRotation)>> {
-    let mut models = vec![multipart_primary_model_and_rotation(asset, record)?];
-    if record.block.path() == "bamboo" {
-        let leaf_model = match record.properties.get("leaves").map(String::as_str) {
-            Some("small") => Some("block/bamboo_small_leaves"),
-            Some("large") => Some("block/bamboo_large_leaves"),
-            _ => None,
-        };
-        if let Some(path) = leaf_model {
-            models.push((
-                multipart_model_ref(asset, path)?,
-                BlockStateModelRotation::default(),
-            ));
-        }
-    }
-    Some(models)
-}
-
-fn multipart_primary_rotation(record: &BlockStateRecord) -> BlockStateModelRotation {
-    if record.block.path() == "vine" {
-        if property_is_true(record, "up") {
-            return BlockStateModelRotation {
-                x_steps: 3,
-                y_steps: 0,
-            };
-        }
-        if property_is_true(record, "east") {
-            return BlockStateModelRotation {
-                x_steps: 0,
-                y_steps: 1,
-            };
-        }
-        if property_is_true(record, "south") {
-            return BlockStateModelRotation {
-                x_steps: 0,
-                y_steps: 2,
-            };
-        }
-        if property_is_true(record, "west") {
-            return BlockStateModelRotation {
-                x_steps: 0,
-                y_steps: 3,
-            };
-        }
-    }
-
-    BlockStateModelRotation::default()
-}
-
-fn property_is_true(record: &BlockStateRecord, property: &str) -> bool {
-    record
-        .properties
-        .get(property)
-        .is_some_and(|value| value == "true")
-}
-
-fn multipart_primary_model<'a>(
-    asset: &'a mclone_assets::BlockStateAsset,
-    record: &BlockStateRecord,
-) -> Option<&'a ResourceLocation> {
-    let block_path = record.block.path();
-    if block_path == "bamboo" {
-        if let Some(age) = record.properties.get("age") {
-            let preferred_bamboo = format!("block/bamboo1_age{age}");
-            if let Some(model) = multipart_model_ref(asset, &preferred_bamboo) {
-                return Some(model);
-            }
-        }
-    }
-
-    let preferred = format!("block/{block_path}");
-    multipart_model_ref(asset, &preferred).or_else(|| asset.model_refs.iter().next())
-}
-
-fn multipart_model_ref<'a>(
-    asset: &'a mclone_assets::BlockStateAsset,
-    path: &str,
-) -> Option<&'a ResourceLocation> {
-    asset
-        .model_refs
-        .iter()
-        .find(|model| model.namespace() == asset.block.namespace() && model.path() == path)
 }
 
 fn textured_block_tint(block_path: &str, tintindex: i32) -> TexturedBlockTint {
@@ -940,147 +851,236 @@ mod tests {
         assert_eq!(textured_block_tint("bamboo", 0), TexturedBlockTint::None);
     }
 
-    #[test]
-    fn multipart_primary_model_prefers_matching_block_model() {
-        let block = ResourceLocation::parse("minecraft:red_mushroom_block").unwrap();
-        let record = mclone_assets::BlockStateRecord::new(
-            BlockStateId(0),
-            block.clone(),
-            [] as [(&str, &str); 0],
-        );
-        let asset = mclone_assets::BlockStateAsset {
+    fn multipart_variant(model: &str, x: i32, y: i32) -> mclone_assets::BlockStateVariant {
+        mclone_assets::BlockStateVariant {
+            model: ResourceLocation::parse(model).unwrap(),
+            x,
+            y,
+            uvlock: false,
+            weight: 1,
+        }
+    }
+
+    fn when_match(pairs: &[(&str, &str)]) -> mclone_assets::MultipartWhen {
+        mclone_assets::MultipartWhen::Match(
+            pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), vec![value.to_string()]))
+                .collect(),
+        )
+    }
+
+    fn multipart_asset(
+        block: &str,
+        cases: Vec<mclone_assets::MultipartCase>,
+    ) -> mclone_assets::BlockStateAsset {
+        let block = ResourceLocation::parse(block).unwrap();
+        mclone_assets::BlockStateAsset {
             block: block.clone(),
             path: mclone_assets::AssetPath::blockstate_json(&block),
             variants: BTreeMap::new(),
             variant_keys: BTreeSet::new(),
-            model_refs: [
-                ResourceLocation::parse("minecraft:block/mushroom_block_inside").unwrap(),
-                ResourceLocation::parse("minecraft:block/red_mushroom_block").unwrap(),
-            ]
-            .into_iter()
-            .collect(),
-        };
+            model_refs: BTreeSet::new(),
+            multipart: cases,
+        }
+    }
 
-        assert_eq!(
-            multipart_primary_model(&asset, &record).map(ResourceLocation::path),
-            Some("block/red_mushroom_block")
-        );
+    fn selected_models(
+        asset: &mclone_assets::BlockStateAsset,
+        properties: &[(&str, &str)],
+    ) -> Vec<(String, BlockStateModelRotation)> {
+        let properties: BTreeMap<String, String> = properties
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        asset
+            .multipart_selections(&properties)
+            .into_iter()
+            .map(|variant| {
+                (
+                    variant.model.path().to_owned(),
+                    BlockStateModelRotation::from_variant(variant),
+                )
+            })
+            .collect()
+    }
+
+    fn red_mushroom_cap_asset() -> mclone_assets::BlockStateAsset {
+        let skin = |x, y| multipart_variant("minecraft:block/red_mushroom_block", x, y);
+        let inside = |x, y| multipart_variant("minecraft:block/mushroom_block_inside", x, y);
+        let case = |pairs: &[(&str, &str)], apply| mclone_assets::MultipartCase {
+            when: Some(when_match(pairs)),
+            apply: vec![apply],
+        };
+        multipart_asset(
+            "minecraft:red_mushroom_block",
+            vec![
+                case(&[("north", "true")], skin(0, 0)),
+                case(&[("east", "true")], skin(0, 90)),
+                case(&[("south", "true")], skin(0, 180)),
+                case(&[("west", "true")], skin(0, 270)),
+                case(&[("up", "true")], skin(270, 0)),
+                case(&[("down", "true")], skin(90, 0)),
+                case(&[("north", "false")], inside(0, 0)),
+                case(&[("east", "false")], inside(0, 90)),
+                case(&[("south", "false")], inside(0, 180)),
+                case(&[("west", "false")], inside(0, 270)),
+                case(&[("up", "false")], inside(270, 0)),
+                case(&[("down", "false")], inside(90, 0)),
+            ],
+        )
     }
 
     #[test]
-    fn multipart_primary_model_prefers_bamboo_age_stem() {
-        let block = ResourceLocation::parse("minecraft:bamboo").unwrap();
-        let record = mclone_assets::BlockStateRecord::new(
-            BlockStateId(130),
-            block.clone(),
-            [("age", "1"), ("leaves", "none"), ("stage", "0")],
+    fn multipart_mushroom_cap_bakes_skin_sides_and_top_with_inside_bottom() {
+        let asset = red_mushroom_cap_asset();
+        // The registered huge-mushroom cap state: skin on all four sides and the top,
+        // interior texture on the bottom.
+        let models = selected_models(
+            &asset,
+            &[
+                ("down", "false"),
+                ("east", "true"),
+                ("north", "true"),
+                ("south", "true"),
+                ("up", "true"),
+                ("west", "true"),
+            ],
         );
-        let asset = mclone_assets::BlockStateAsset {
-            block: block.clone(),
-            path: mclone_assets::AssetPath::blockstate_json(&block),
-            variants: BTreeMap::new(),
-            variant_keys: BTreeSet::new(),
-            model_refs: [
-                ResourceLocation::parse("minecraft:block/bamboo1_age0").unwrap(),
-                ResourceLocation::parse("minecraft:block/bamboo1_age1").unwrap(),
-                ResourceLocation::parse("minecraft:block/bamboo_large_leaves").unwrap(),
-            ]
-            .into_iter()
-            .collect(),
-        };
-
-        assert_eq!(
-            multipart_primary_model(&asset, &record).map(ResourceLocation::path),
-            Some("block/bamboo1_age1")
-        );
-    }
-
-    #[test]
-    fn multipart_models_include_bamboo_leaf_model_for_leaf_states() {
-        let block = ResourceLocation::parse("minecraft:bamboo").unwrap();
-        let record = mclone_assets::BlockStateRecord::new(
-            BlockStateId(176),
-            block.clone(),
-            [("age", "1"), ("leaves", "large"), ("stage", "0")],
-        );
-        let asset = mclone_assets::BlockStateAsset {
-            block: block.clone(),
-            path: mclone_assets::AssetPath::blockstate_json(&block),
-            variants: BTreeMap::new(),
-            variant_keys: BTreeSet::new(),
-            model_refs: [
-                ResourceLocation::parse("minecraft:block/bamboo1_age0").unwrap(),
-                ResourceLocation::parse("minecraft:block/bamboo1_age1").unwrap(),
-                ResourceLocation::parse("minecraft:block/bamboo_large_leaves").unwrap(),
-                ResourceLocation::parse("minecraft:block/bamboo_small_leaves").unwrap(),
-            ]
-            .into_iter()
-            .collect(),
-        };
-
-        let models = multipart_models_and_rotations(&asset, &record)
-            .unwrap()
-            .into_iter()
-            .map(|(model, rotation)| (model.path().to_owned(), rotation))
-            .collect::<Vec<_>>();
 
         assert_eq!(
             models,
             vec![
-                (
-                    "block/bamboo1_age1".to_owned(),
-                    BlockStateModelRotation::default()
+                ("block/red_mushroom_block".to_owned(), rotation(0, 0)),
+                ("block/red_mushroom_block".to_owned(), rotation(0, 90)),
+                ("block/red_mushroom_block".to_owned(), rotation(0, 180)),
+                ("block/red_mushroom_block".to_owned(), rotation(0, 270)),
+                ("block/red_mushroom_block".to_owned(), rotation(270, 0)),
+                ("block/mushroom_block_inside".to_owned(), rotation(90, 0)),
+            ]
+        );
+    }
+
+    fn rotation(x: i32, y: i32) -> BlockStateModelRotation {
+        BlockStateModelRotation {
+            x_steps: (x.rem_euclid(360) / 90) as u8,
+            y_steps: (y.rem_euclid(360) / 90) as u8,
+        }
+    }
+
+    #[test]
+    fn multipart_vine_selects_single_rotated_face_per_direction() {
+        let vine = |x, y| multipart_variant("minecraft:block/vine", x, y);
+        let case = |pairs: &[(&str, &str)], apply| mclone_assets::MultipartCase {
+            when: Some(when_match(pairs)),
+            apply: vec![apply],
+        };
+        let asset = multipart_asset(
+            "minecraft:vine",
+            vec![
+                case(&[("up", "true")], vine(270, 0)),
+                case(
+                    &[
+                        ("up", "false"),
+                        ("north", "false"),
+                        ("west", "false"),
+                        ("south", "false"),
+                        ("east", "false"),
+                    ],
+                    vine(270, 0),
                 ),
-                (
-                    "block/bamboo_large_leaves".to_owned(),
-                    BlockStateModelRotation::default()
-                ),
+                case(&[("north", "true")], vine(0, 0)),
+                case(&[("east", "true")], vine(0, 90)),
+                case(&[("south", "true")], vine(0, 180)),
+                case(&[("west", "true")], vine(0, 270)),
+            ],
+        );
+
+        let east = selected_models(
+            &asset,
+            &[
+                ("up", "false"),
+                ("north", "false"),
+                ("east", "true"),
+                ("south", "false"),
+                ("west", "false"),
+            ],
+        );
+        assert_eq!(east, vec![("block/vine".to_owned(), rotation(0, 90))]);
+    }
+
+    #[test]
+    fn multipart_bamboo_picks_first_apply_and_adds_leaves() {
+        let bamboo = |model: &str| multipart_variant(model, 0, 0);
+        let asset = multipart_asset(
+            "minecraft:bamboo",
+            vec![
+                mclone_assets::MultipartCase {
+                    when: Some(when_match(&[("age", "1")])),
+                    apply: vec![
+                        bamboo("minecraft:block/bamboo1_age1"),
+                        bamboo("minecraft:block/bamboo2_age1"),
+                    ],
+                },
+                mclone_assets::MultipartCase {
+                    when: Some(when_match(&[("leaves", "large")])),
+                    apply: vec![bamboo("minecraft:block/bamboo_large_leaves")],
+                },
+                mclone_assets::MultipartCase {
+                    when: Some(when_match(&[("leaves", "small")])),
+                    apply: vec![bamboo("minecraft:block/bamboo_small_leaves")],
+                },
+            ],
+        );
+
+        // Trunk (no leaves): only the first weighted-random stem model is taken.
+        assert_eq!(
+            selected_models(&asset, &[("age", "1"), ("leaves", "none"), ("stage", "0")]),
+            vec![("block/bamboo1_age1".to_owned(), rotation(0, 0))]
+        );
+
+        // Leafed state adds the matching leaf model as a second part.
+        assert_eq!(
+            selected_models(&asset, &[("age", "1"), ("leaves", "large"), ("stage", "0")]),
+            vec![
+                ("block/bamboo1_age1".to_owned(), rotation(0, 0)),
+                ("block/bamboo_large_leaves".to_owned(), rotation(0, 0)),
             ]
         );
     }
 
     #[test]
-    fn multipart_primary_rotation_preserves_single_face_vine_states() {
-        let block = ResourceLocation::parse("minecraft:vine").unwrap();
-        let record = |props: &[(&str, &str)]| {
-            mclone_assets::BlockStateRecord::new(
-                BlockStateId(0),
-                block.clone(),
-                props.iter().copied(),
-            )
+    fn multipart_absent_property_matches_all_false_fallback() {
+        // Glow lichen is registered without directional properties; a missing property is
+        // treated as `false`, so it still selects its "no active side" fallback part rather
+        // than rendering nothing.
+        let glow = |x, y| multipart_variant("minecraft:block/glow_lichen", x, y);
+        let case = |pairs: &[(&str, &str)], apply| mclone_assets::MultipartCase {
+            when: Some(when_match(pairs)),
+            apply: vec![apply],
         };
+        let asset = multipart_asset(
+            "minecraft:glow_lichen",
+            vec![
+                case(&[("up", "true")], glow(270, 0)),
+                case(
+                    &[
+                        ("up", "false"),
+                        ("north", "false"),
+                        ("west", "false"),
+                        ("south", "false"),
+                        ("east", "false"),
+                        ("down", "false"),
+                    ],
+                    glow(270, 0),
+                ),
+                case(&[("north", "true")], glow(0, 0)),
+            ],
+        );
 
         assert_eq!(
-            multipart_primary_rotation(&record(&[("north", "true")])),
-            BlockStateModelRotation::default()
-        );
-        assert_eq!(
-            multipart_primary_rotation(&record(&[("east", "true")])),
-            BlockStateModelRotation {
-                x_steps: 0,
-                y_steps: 1,
-            }
-        );
-        assert_eq!(
-            multipart_primary_rotation(&record(&[("south", "true")])),
-            BlockStateModelRotation {
-                x_steps: 0,
-                y_steps: 2,
-            }
-        );
-        assert_eq!(
-            multipart_primary_rotation(&record(&[("west", "true")])),
-            BlockStateModelRotation {
-                x_steps: 0,
-                y_steps: 3,
-            }
-        );
-        assert_eq!(
-            multipart_primary_rotation(&record(&[("up", "true")])),
-            BlockStateModelRotation {
-                x_steps: 3,
-                y_steps: 0,
-            }
+            selected_models(&asset, &[]),
+            vec![("block/glow_lichen".to_owned(), rotation(270, 0))]
         );
     }
 }

@@ -217,6 +217,7 @@ pub struct BlockStateAsset {
     pub variants: BTreeMap<String, Vec<BlockStateVariant>>,
     pub variant_keys: BTreeSet<String>,
     pub model_refs: BTreeSet<ResourceLocation>,
+    pub multipart: Vec<MultipartCase>,
 }
 
 impl BlockStateAsset {
@@ -233,17 +234,140 @@ impl BlockStateAsset {
         let variant_keys = variants.keys().cloned().collect();
         let mut model_refs = BTreeSet::new();
         collect_model_refs(&json, &mut model_refs)?;
+        let multipart = parse_multipart(&json)?;
         Ok(Self {
             block,
             path,
             variants,
             variant_keys,
             model_refs,
+            multipart,
         })
     }
 
     pub fn variants_for_key(&self, key: &str) -> Option<&[BlockStateVariant]> {
         self.variants.get(key).map(Vec::as_slice)
+    }
+
+    /// Evaluate a `multipart` blockstate for the given state properties, returning the
+    /// selected model variant of every case whose `when` condition matches. Each matching
+    /// case contributes one part (the first `apply` entry; random weighted alternatives are
+    /// not yet distinguished). Vanilla multipart blocks build a cube from several
+    /// single-face parts, so callers should render every returned variant.
+    pub fn multipart_selections(
+        &self,
+        properties: &BTreeMap<String, String>,
+    ) -> Vec<&BlockStateVariant> {
+        self.multipart
+            .iter()
+            .filter(|case| case.matches(properties))
+            .filter_map(|case| case.apply.first())
+            .collect()
+    }
+}
+
+/// A single `{ "when": ..., "apply": ... }` entry of a `multipart` blockstate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultipartCase {
+    /// The condition gating this case. `None` means the case always applies.
+    pub when: Option<MultipartWhen>,
+    /// Candidate model variants. Vanilla uses an array to express a weighted random choice;
+    /// we currently take the first entry deterministically.
+    pub apply: Vec<BlockStateVariant>,
+}
+
+impl MultipartCase {
+    fn from_json(value: &Value) -> AssetResult<Self> {
+        let object = value.as_object().ok_or_else(|| {
+            AssetError::InvalidBlockState("multipart case must be an object".to_owned())
+        })?;
+        let when = match object.get("when") {
+            Some(value) => Some(MultipartWhen::from_json(value)?),
+            None => None,
+        };
+        let apply = object.get("apply").ok_or_else(|| {
+            AssetError::InvalidBlockState("multipart case missing `apply`".to_owned())
+        })?;
+        let apply = match apply {
+            Value::Array(values) => {
+                if values.is_empty() {
+                    return Err(AssetError::InvalidBlockState(
+                        "multipart case `apply` array is empty".to_owned(),
+                    ));
+                }
+                values
+                    .iter()
+                    .map(BlockStateVariant::from_json)
+                    .collect::<AssetResult<Vec<_>>>()?
+            }
+            Value::Object(_) => vec![BlockStateVariant::from_json(apply)?],
+            _ => {
+                return Err(AssetError::InvalidBlockState(
+                    "multipart case `apply` must be an object or array".to_owned(),
+                ));
+            }
+        };
+        Ok(Self { when, apply })
+    }
+
+    pub fn matches(&self, properties: &BTreeMap<String, String>) -> bool {
+        match &self.when {
+            Some(when) => when.matches(properties),
+            None => true,
+        }
+    }
+}
+
+/// The `when` condition of a multipart case. Property comparisons treat a property that is
+/// absent from the state as the value `"false"`, which keeps directional blocks (mushrooms,
+/// vine, glow lichen) matching their "no active side" fallback part.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MultipartWhen {
+    And(Vec<MultipartWhen>),
+    Or(Vec<MultipartWhen>),
+    Match(BTreeMap<String, Vec<String>>),
+}
+
+impl MultipartWhen {
+    fn from_json(value: &Value) -> AssetResult<Self> {
+        let object = value.as_object().ok_or_else(|| {
+            AssetError::InvalidBlockState("multipart `when` must be an object".to_owned())
+        })?;
+        if let Some(list) = object.get("OR") {
+            return Ok(Self::Or(Self::parse_list(list)?));
+        }
+        if let Some(list) = object.get("AND") {
+            return Ok(Self::And(Self::parse_list(list)?));
+        }
+        let mut matches = BTreeMap::new();
+        for (name, value) in object {
+            let value = value.as_str().ok_or_else(|| {
+                AssetError::InvalidBlockState(format!(
+                    "multipart `when` value for `{name}` must be a string"
+                ))
+            })?;
+            let values = value.split('|').map(str::to_owned).collect();
+            matches.insert(name.clone(), values);
+        }
+        Ok(Self::Match(matches))
+    }
+
+    fn parse_list(value: &Value) -> AssetResult<Vec<Self>> {
+        let array = value.as_array().ok_or_else(|| {
+            AssetError::InvalidBlockState("multipart `AND`/`OR` must be an array".to_owned())
+        })?;
+        array.iter().map(Self::from_json).collect()
+    }
+
+    pub fn matches(&self, properties: &BTreeMap<String, String>) -> bool {
+        match self {
+            Self::And(list) => list.iter().all(|when| when.matches(properties)),
+            Self::Or(list) => list.iter().any(|when| when.matches(properties)),
+            Self::Match(map) => map.iter().all(|(name, allowed)| {
+                let actual = properties.get(name).map(String::as_str).unwrap_or("false");
+                allowed.iter().any(|value| value == actual)
+            }),
+        }
     }
 }
 
@@ -360,6 +484,16 @@ fn parse_variants(value: &Value) -> AssetResult<BTreeMap<String, Vec<BlockStateV
     Ok(parsed)
 }
 
+fn parse_multipart(value: &Value) -> AssetResult<Vec<MultipartCase>> {
+    let Some(multipart) = value.get("multipart") else {
+        return Ok(Vec::new());
+    };
+    let cases = multipart.as_array().ok_or_else(|| {
+        AssetError::InvalidBlockState("blockstate multipart must be an array".to_owned())
+    })?;
+    cases.iter().map(MultipartCase::from_json).collect()
+}
+
 fn collect_model_refs(value: &Value, out: &mut BTreeSet<ResourceLocation>) -> AssetResult<()> {
     match value {
         Value::Object(object) => {
@@ -418,6 +552,29 @@ fn normalized_rotation(value: i32) -> AssetResult<i32> {
 }
 
 const EMPTY_PROPS: &[(&str, &str)] = &[];
+// Huge-mushroom caps: skin on the top and all four sides, interior texture on the bottom.
+// The huge-mushroom worldgen features only ever leave a cap face exposed when it is an
+// outward rim face (skin) or the underside (interior), so this single fixed state renders
+// identically to vanilla's per-position states once neighbouring cap blocks cull the shared
+// interior faces. See docs/tactical for the parity note.
+const MUSHROOM_CAP_FACES: &[(&str, &str)] = &[
+    ("down", "false"),
+    ("east", "true"),
+    ("north", "true"),
+    ("south", "true"),
+    ("up", "true"),
+    ("west", "true"),
+];
+// Mushroom stem: skin on all four sides, interior texture on top and bottom (both culled by
+// the cap above and the ground below). Matches vanilla's stem block-state provider.
+const MUSHROOM_STEM_FACES: &[(&str, &str)] = &[
+    ("down", "false"),
+    ("east", "true"),
+    ("north", "true"),
+    ("south", "true"),
+    ("up", "false"),
+    ("west", "true"),
+];
 const SNOWY_FALSE: &[(&str, &str)] = &[("snowy", "false")];
 const AXIS_X: &[(&str, &str)] = &[("axis", "x")];
 const AXIS_Y: &[(&str, &str)] = &[("axis", "y")];
@@ -634,9 +791,9 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (120, "minecraft:sea_pickle", PICKLES_4_WATERLOGGED_TRUE),
     (121, "minecraft:dark_oak_log", AXIS_Y),
     (122, "minecraft:dark_oak_leaves", EMPTY_PROPS),
-    (123, "minecraft:brown_mushroom_block", EMPTY_PROPS),
-    (124, "minecraft:red_mushroom_block", EMPTY_PROPS),
-    (125, "minecraft:mushroom_stem", EMPTY_PROPS),
+    (123, "minecraft:brown_mushroom_block", MUSHROOM_CAP_FACES),
+    (124, "minecraft:red_mushroom_block", MUSHROOM_CAP_FACES),
+    (125, "minecraft:mushroom_stem", MUSHROOM_STEM_FACES),
     (126, "minecraft:acacia_log", AXIS_Y),
     (127, "minecraft:acacia_leaves", EMPTY_PROPS),
     (128, "minecraft:jungle_log", AXIS_Y),
@@ -1072,16 +1229,20 @@ mod tests {
             Some(BlockStateId(122))
         );
         assert_eq!(
-            registry.id_for_key("minecraft:brown_mushroom_block"),
+            registry.id_for_key(
+                "minecraft:brown_mushroom_block[down=false,east=true,north=true,south=true,up=true,west=true]"
+            ),
             Some(BlockStateId(123))
         );
         assert_eq!(
-            registry.id_for_key("minecraft:red_mushroom_block"),
+            registry.id_for_key(
+                "minecraft:red_mushroom_block[down=false,east=true,north=true,south=true,up=true,west=true]"
+            ),
             Some(BlockStateId(124))
         );
         assert_eq!(
             registry.by_id(BlockStateId(125)).unwrap().canonical_key(),
-            "minecraft:mushroom_stem"
+            "minecraft:mushroom_stem[down=false,east=true,north=true,south=true,up=false,west=true]"
         );
         assert_eq!(
             registry.id_for_key("minecraft:acacia_log[axis=y]"),

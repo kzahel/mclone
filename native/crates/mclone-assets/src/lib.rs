@@ -14,6 +14,7 @@ use std::fmt;
 pub use atlas::{TextureAtlasPlan, TextureAtlasSprite, TextureSpriteInfo};
 pub use block_registry::{
     BlockStateAsset, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry, BlockStateVariant,
+    MultipartCase, MultipartWhen,
 };
 pub use figure::{
     ActorFigureId, CHICKEN_FIGURE_ID, CHICKEN_FIGURE_PATH, DEFAULT_PLAYER_FIGURE_ID,
