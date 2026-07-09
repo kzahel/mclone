@@ -2478,7 +2478,6 @@ mod android {
         }
     }
 
-
     fn android_scene_options_for_session_request(
         renderer: &AndroidFrameRenderer,
         request: &SessionStartRequest,

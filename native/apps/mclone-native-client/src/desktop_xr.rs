@@ -117,7 +117,10 @@ enum DesktopXrMode {
     /// by default, with a desktop companion window unless suppressed. `window`
     /// is threaded through here for Slice 3 (companion window); Slice 2 renders
     /// the identical world path and does not yet spawn a window.
-    Real { options: XrMcloneSmokeOptions, window: bool },
+    Real {
+        options: XrMcloneSmokeOptions,
+        window: bool,
+    },
 }
 
 #[cfg(not(target_os = "android"))]
@@ -261,13 +264,7 @@ fn create_graphics_session_probe(
         graphics.required_device_name, graphics.adapter_name
     );
     println!("OpenXR reference space: STAGE");
-    run_smoke_frames(
-        graphics,
-        stage,
-        stereo_config,
-        environment_blend_mode,
-        mode,
-    )?;
+    run_smoke_frames(graphics, stage, stereo_config, environment_blend_mode, mode)?;
     Ok(())
 }
 
@@ -289,13 +286,7 @@ fn create_graphics_session_probe(
         graphics.queue_family_index
     );
     println!("OpenXR reference space: STAGE");
-    run_smoke_frames(
-        graphics,
-        stage,
-        stereo_config,
-        environment_blend_mode,
-        mode,
-    )?;
+    run_smoke_frames(graphics, stage, stereo_config, environment_blend_mode, mode)?;
     Ok(())
 }
 
@@ -437,13 +428,7 @@ fn run_smoke_frames(
     // Borrow-only classification captured before the `mode` match below moves
     // `options` out: whether to spawn the desktop companion window, and the
     // human label for the completion line.
-    let want_window = matches!(
-        mode,
-        DesktopXrMode::Real {
-            window: true,
-            ..
-        }
-    );
+    let want_window = matches!(mode, DesktopXrMode::Real { window: true, .. });
     let run_label = match &mode {
         DesktopXrMode::Clear { .. } => "clear smoke",
         DesktopXrMode::Mclone { .. } => "mclone smoke",

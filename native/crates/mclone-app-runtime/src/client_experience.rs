@@ -489,7 +489,10 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
 /// (or any silent `PROFILE_UNSUPPORTED` on the feature axis) fails
 /// `native_targets_share_feature_capability_availability`. Remove the entry when
 /// the feature is wired and becomes `Supported`.
-pub const NATIVE_FEATURE_PARITY_EXCEPTIONS: &[(NativePlatform, ClientExperienceFeatureCapability)] = &[
+pub const NATIVE_FEATURE_PARITY_EXCEPTIONS: &[(
+    NativePlatform,
+    ClientExperienceFeatureCapability,
+)] = &[
     (
         NativePlatform::AndroidFlat,
         ClientExperienceFeatureCapability::TravelAssist,

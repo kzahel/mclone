@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 use mclone_app_runtime::client_experience::{
-    ClientExperienceActionContext, ClientExperienceCapabilityProjection, ClientExperienceController,
-    ClientExperienceEffects, ClientExperienceGameplayEffect, ClientExperienceProjectionEffect,
-    ClientExperienceSettingEffect, ClientExperienceSettingsState,
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
+    ClientExperienceController, ClientExperienceEffects, ClientExperienceGameplayEffect,
+    ClientExperienceProjectionEffect, ClientExperienceSettingEffect, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
@@ -25,7 +25,9 @@ use mclone_app_runtime::frame_render::{
     record_render_section_update_stats,
 };
 use mclone_app_runtime::host_mode::SingleViewHostMode;
-use mclone_app_runtime::native_session_runtime::{NativeSessionStartupStep, StartupReadinessPolicy};
+use mclone_app_runtime::native_session_runtime::{
+    NativeSessionStartupStep, StartupReadinessPolicy,
+};
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,

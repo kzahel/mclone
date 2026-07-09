@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 #[cfg(feature = "rapier")]
 use std::time::Instant;
 
-use mclone_core::{Aabb, Vec3d};
 #[cfg(feature = "box3d")]
 use boxddd::prelude as box3d;
+use mclone_core::{Aabb, Vec3d};
 #[cfg(feature = "rapier")]
 use rapier3d::prelude as rapier;
 
@@ -1842,7 +1842,10 @@ impl Box3dPhysicsWorld {
     }
 
     fn box3d_body_pose(&self, body: box3d::BodyId) -> PhysicsBodyPose {
-        physics_pose_box3d(self.world.body_position(body), self.world.body_rotation(body))
+        physics_pose_box3d(
+            self.world.body_position(body),
+            self.world.body_rotation(body),
+        )
     }
 
     fn insert_terrain_patch_body(&mut self, patch: PhysicsTerrainPatch) -> Option<box3d::BodyId> {
@@ -1952,8 +1955,10 @@ fn box3d_quat(rotation: PhysicsRotation) -> box3d::Quat {
     {
         return box3d::Quat::IDENTITY;
     }
-    let length_squared =
-        rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w;
+    let length_squared = rotation.x * rotation.x
+        + rotation.y * rotation.y
+        + rotation.z * rotation.z
+        + rotation.w * rotation.w;
     if length_squared <= f64::EPSILON {
         return box3d::Quat::IDENTITY;
     }

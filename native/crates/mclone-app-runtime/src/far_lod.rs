@@ -1691,10 +1691,17 @@ mod tests {
             enabled.sample_spacing_blocks,
             DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS
         );
-        assert_eq!(enabled.extra_chunks, DEFAULT_STARTUP_LOD_PREWARM_EXTRA_CHUNKS);
+        assert_eq!(
+            enabled.extra_chunks,
+            DEFAULT_STARTUP_LOD_PREWARM_EXTRA_CHUNKS
+        );
 
-        assert!(!StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), false).enabled);
-        assert!(!StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::disabled(), true).enabled);
+        assert!(
+            !StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), false).enabled
+        );
+        assert!(
+            !StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::disabled(), true).enabled
+        );
         assert!(!StartupLodPrewarmConfig::default().enabled);
     }
 

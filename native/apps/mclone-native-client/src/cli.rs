@@ -1063,8 +1063,7 @@ impl Cli {
                     };
                 }
                 "--startup-lod-prewarm" => {
-                    startup_lod_prewarm =
-                        parse_bool_arg("--startup-lod-prewarm", args.next())?;
+                    startup_lod_prewarm = parse_bool_arg("--startup-lod-prewarm", args.next())?;
                 }
                 "--adaptive-chunk-publication-budget" => {
                     adaptive_chunk_publication_budget = Some(parse_bool_arg(

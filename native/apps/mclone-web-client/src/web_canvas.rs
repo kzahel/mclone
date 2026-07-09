@@ -11,9 +11,10 @@ use mclone_app_runtime::client_catalog_policy::{
     ClientCatalogEffects, ClientCatalogRequest, ClientCatalogSessionStart,
 };
 use mclone_app_runtime::client_experience::{
-    ClientExperienceActionContext, ClientExperienceCapabilityProjection, ClientExperienceController,
-    ClientExperienceEffects, ClientExperienceGameplayEffect, ClientExperienceProjectionEffect,
-    ClientExperienceSettingEffect, ClientExperienceSettingsEffects, ClientExperienceSettingsState,
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
+    ClientExperienceController, ClientExperienceEffects, ClientExperienceGameplayEffect,
+    ClientExperienceProjectionEffect, ClientExperienceSettingEffect,
+    ClientExperienceSettingsEffects, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection, web_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
@@ -5955,7 +5956,6 @@ fn write_active_session_to_js_object(
     }
     Ok(())
 }
-
 
 fn web_action_updates_world_catalog_render_state(action: GameUiAction) -> bool {
     matches!(

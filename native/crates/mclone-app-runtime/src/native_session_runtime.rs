@@ -27,17 +27,15 @@ use crate::client_connection::{
     ConnectionUpdateDrainMode, QueuedServerUpdate, pump_client_connection_updates_report,
 };
 use crate::far_lod::{
-    FarTerrainLodCache, FarTerrainLodConfig, FarTerrainLodCoverage, StartupLodPrewarmConfig,
-    STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET,
-};
-use crate::lod_coverage::{
-    LodCoverageCoordinator, LodReplacementCounters, LodTileAvailability,
+    FarTerrainLodCache, FarTerrainLodConfig, FarTerrainLodCoverage,
+    STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET, StartupLodPrewarmConfig,
 };
 use crate::host_mode::{
     RemoteCommandUpdateBatch, RemoteDedicatedServerSession, SingleViewHostMode,
     SingleViewHostOptions, deferred_command_exchange, dispatch_remote_dedicated_command,
     prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
 };
+use crate::lod_coverage::{LodCoverageCoordinator, LodReplacementCounters, LodTileAvailability};
 use crate::render_assets::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
     NativeRenderSectionCompileDispatcher, TexturedMeshAssets, load_textured_mesh_assets,
@@ -532,8 +530,13 @@ impl StartupLodPrewarm {
         }
         let started = *self.started_at.get_or_insert_with(Instant::now);
         let budget = STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET;
-        let coverage =
-            runtime.prewarm_far_lod(self.far_lod, self.seed, self.center, camera_position, budget);
+        let coverage = runtime.prewarm_far_lod(
+            self.far_lod,
+            self.seed,
+            self.center,
+            camera_position,
+            budget,
+        );
         self.record(coverage, started.elapsed());
     }
 
@@ -790,7 +793,9 @@ where
         }
 
         let local_progress = self.runtime.startup_progress_overlay();
-        let host_ready = self.runtime.startup_host_ready(self.readiness, camera_position);
+        let host_ready = self
+            .runtime
+            .startup_host_ready(self.readiness, camera_position);
         let render_seed_drawable = self.render_seed.drawable_section_count();
         // Every lane uses the same gate: host-mode evidence, a drawable render
         // seed, and prewarm settled (always true when prewarm is disabled).
@@ -1734,11 +1739,7 @@ where
     /// LOD prewarm which the shared startup pump owns (docs/tactical/167). Every
     /// lane uses the same [`StartupReadinessPolicy`]; the only divergence is the
     /// host-mode evidence (local spawn authority vs. remote drained active view).
-    fn startup_host_ready(
-        &self,
-        policy: StartupReadinessPolicy,
-        camera_position: Vec3,
-    ) -> bool {
+    fn startup_host_ready(&self, policy: StartupReadinessPolicy, camera_position: Vec3) -> bool {
         let host_evidence = match self {
             Self::Local(scene) => scene.startup_spawn_authority_ready(),
             Self::RemoteDedicated(scene) => scene.startup_host_ready(),
@@ -3950,7 +3951,9 @@ mod tests {
                 // Accepted compile jobs are released by the pump each step, not
                 // held by the seed: capacity is fully available after completion.
                 assert_eq!(
-                    completion.runtime.render_compile_available_pending_job_slots(),
+                    completion
+                        .runtime
+                        .render_compile_available_pending_job_slots(),
                     completion.runtime.render_compile_max_pending_job_count(),
                 );
                 assert_eq!(completion.runtime.loaded_chunk_count(), 1);

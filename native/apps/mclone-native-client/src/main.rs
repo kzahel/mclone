@@ -7,6 +7,8 @@ mod actor_assets;
 mod app;
 mod camera;
 mod cli;
+#[cfg(feature = "xr")]
+mod desktop_xr;
 mod flat_client_driver;
 mod frame_pacing;
 mod headless;
@@ -19,8 +21,6 @@ mod render_compile_capacity;
 mod scene_runtime;
 mod torch_light_probe;
 mod ui;
-#[cfg(feature = "xr")]
-mod desktop_xr;
 
 use crate::app::run_window;
 #[cfg(test)]

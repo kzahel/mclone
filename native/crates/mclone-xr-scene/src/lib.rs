@@ -8,11 +8,11 @@ use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 use mclone_app_runtime::client_experience::{
-    ClientExperienceActionContext, ClientExperienceCapabilityProjection, ClientExperienceController,
-    ClientExperienceEffects, ClientExperienceGameplayEffect, ClientExperienceProfile,
-    ClientExperienceProjectionEffect, ClientExperienceSettingEffect, ClientExperienceSettingsEffects,
-    ClientExperienceSettingsState, client_experience_should_apply_ui_projection,
-    xr_native_client_experience_profile,
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
+    ClientExperienceController, ClientExperienceEffects, ClientExperienceGameplayEffect,
+    ClientExperienceProfile, ClientExperienceProjectionEffect, ClientExperienceSettingEffect,
+    ClientExperienceSettingsEffects, ClientExperienceSettingsState,
+    client_experience_should_apply_ui_projection, xr_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
     ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,

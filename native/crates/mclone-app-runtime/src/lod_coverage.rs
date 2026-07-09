@@ -113,7 +113,10 @@ impl LodSourceKind {
     }
 
     const fn is_reduced_real(self) -> bool {
-        matches!(self, Self::ReducedRealChunk | Self::PersistedReducedRealChunk)
+        matches!(
+            self,
+            Self::ReducedRealChunk | Self::PersistedReducedRealChunk
+        )
     }
 }
 
@@ -500,7 +503,9 @@ mod tests {
         assert_eq!(resolution.frame.lod_first_drawn, 1);
         assert_eq!(resolution.frame.normal_over_lod, 0);
         assert_eq!(
-            coordinator.tile(ChunkPos::new(0, 0)).map(|tile| tile.visible),
+            coordinator
+                .tile(ChunkPos::new(0, 0))
+                .map(|tile| tile.visible),
             Some(VisibleSource::Lod(LodSourceKind::SyntheticSurface))
         );
     }
@@ -523,7 +528,9 @@ mod tests {
         assert_eq!(resolution.frame.normal_over_lod, 1);
         assert_eq!(resolution.frame.suppressed_without_replacement, 0);
         assert_eq!(
-            coordinator.tile(ChunkPos::new(0, 0)).map(|tile| tile.visible),
+            coordinator
+                .tile(ChunkPos::new(0, 0))
+                .map(|tile| tile.visible),
             Some(VisibleSource::Normal)
         );
     }
@@ -591,7 +598,9 @@ mod tests {
         assert!(resolution.visible_lod_tiles.contains(&ChunkPos::new(0, 0)));
         assert_eq!(resolution.frame.reduced_real_over_synthetic, 1);
         assert_eq!(
-            coordinator.tile(ChunkPos::new(0, 0)).map(|tile| tile.visible),
+            coordinator
+                .tile(ChunkPos::new(0, 0))
+                .map(|tile| tile.visible),
             Some(VisibleSource::Lod(LodSourceKind::ReducedRealChunk))
         );
     }
@@ -611,7 +620,9 @@ mod tests {
             coordinator.resolve(&BTreeSet::new(), &BTreeSet::new(), [synthetic, reduced]);
 
         assert_eq!(
-            coordinator.tile(ChunkPos::new(2, 3)).map(|tile| tile.visible),
+            coordinator
+                .tile(ChunkPos::new(2, 3))
+                .map(|tile| tile.visible),
             Some(VisibleSource::Lod(LodSourceKind::ReducedRealChunk))
         );
         assert!(resolution.visible_lod_tiles.contains(&ChunkPos::new(2, 3)));
