@@ -13,7 +13,7 @@ use mclone_app_runtime::native_session_runtime::{
 };
 use mclone_app_runtime::session::RemoteSessionEndpoint;
 use mclone_app_runtime::{
-    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
+    EngineCameraCommitContext, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
     SingleViewRuntimeStats, TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
 };
 #[cfg(test)]
@@ -47,6 +47,11 @@ use mclone_render_session::{RenderSectionSession, render_section_neighbor_readin
 
 pub(crate) type WindowRuntimeStats = SingleViewRuntimeStats;
 pub(crate) type NativeWindowSceneRuntime = NativeSceneRuntime<RemoteServerSession>;
+
+/// Shared camera/interest reconciliation lane for the desktop flat client
+/// (docs/tactical/167 Slice 4): send-only pose sync, `"desktop"` log lane.
+const DESKTOP_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
+    EngineCameraCommitContext::send_only("desktop");
 
 #[derive(Clone, Debug)]
 pub(crate) struct WindowSceneAssets {
@@ -458,73 +463,33 @@ impl WindowSceneRuntime {
         &mut self,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
-        let server_changed = self.sync_engine_camera_player_pose(camera)?;
-        let interest_changed = self.update_interest_from_engine_camera(camera)?;
-        Ok(server_changed || interest_changed)
+        mclone_app_runtime::commit_engine_camera_player_pose(
+            &mut self.scene,
+            camera,
+            DESKTOP_CAMERA_COMMIT_CONTEXT,
+        )
     }
 
     pub(crate) fn sync_engine_camera_player_pose(
         &mut self,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
-        let changed = if let Some(report) = camera.next_pose_sync_command() {
-            self.scene
-                .send_gameplay_command_with_update_policy(
-                    report.command,
-                    GameplayCommandUpdatePolicy::SendOnly,
-                )
-                .context("failed to sync player pose to server")?
-        } else {
-            false
-        };
-        Ok(changed || self.apply_pending_engine_camera_position_updates(camera)?)
+        mclone_app_runtime::sync_engine_camera_player_pose(
+            &mut self.scene,
+            camera,
+            DESKTOP_CAMERA_COMMIT_CONTEXT,
+        )
     }
 
     pub(crate) fn apply_pending_engine_camera_position_updates(
         &mut self,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
-        let mut changed = false;
-        for update in self.drain_player_position_updates() {
-            let accepted = camera.accept_position_update(update);
-            self.send_gameplay_command(accepted.accept_command)
-                .context("failed to acknowledge player position correction")?;
-            let resync = camera.corrected_pose_sync_command();
-            self.send_gameplay_command(resync.command)
-                .context("failed to sync corrected player pose to server")?;
-            log::warn!(
-                "accepted server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
-                accepted.update.teleport_id,
-                accepted.feet_position.x,
-                accepted.feet_position.y,
-                accepted.feet_position.z
-            );
-            changed = true;
-        }
-        if changed {
-            changed |= self.update_interest_from_engine_camera(camera)?;
-        }
-        Ok(changed)
-    }
-
-    pub(crate) fn update_interest_from_engine_camera(
-        &mut self,
-        camera: &EngineCameraController,
-    ) -> Result<bool> {
-        let snapshot = camera.snapshot();
-        let center = snapshot.chunk_pos;
-        if self.set_interest_center(center)? {
-            log::info!(
-                "chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
-                center.x,
-                center.z,
-                snapshot.eye.x,
-                snapshot.eye.y,
-                snapshot.eye.z
-            );
-            return Ok(true);
-        }
-        Ok(false)
+        mclone_app_runtime::apply_pending_engine_camera_position_updates(
+            &mut self.scene,
+            camera,
+            DESKTOP_CAMERA_COMMIT_CONTEXT,
+        )
     }
 
     pub(crate) fn poll(&mut self) -> Result<bool> {

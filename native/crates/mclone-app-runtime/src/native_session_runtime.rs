@@ -59,6 +59,10 @@ const DEFAULT_LOCAL_INTEGRATED_IDLE_TIMEOUT: Duration = Duration::from_secs(120)
 /// Default deadline for the shared synchronous startup drive
 /// (docs/tactical/167 Slice 3), matching the former `poll_until_idle` timeout.
 const DEFAULT_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
+/// Bound on startup camera/interest reconciliation re-pump passes
+/// (docs/tactical/167 Slice 4). One correction/view-pose settles in a single
+/// pass; the bound only guards a pathological correction cascade.
+const MAX_STARTUP_RECONCILE_PASSES: usize = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalIntegratedSceneOptions {
@@ -881,12 +885,87 @@ where
         timeout: Duration,
     ) -> Result<NativeSessionStartupCompletion<S>> {
         let deadline = Instant::now() + timeout;
-        loop {
-            let step = self.step(camera_position)?;
-            if step.startup_ready {
+        self.drive_until_ready(camera_position, deadline, None, timeout)?;
+        Ok(self.complete())
+    }
+
+    /// Drive the pump synchronously to readiness with the default startup timeout.
+    pub fn drive_to_ready(
+        self,
+        camera_position: Vec3,
+    ) -> Result<NativeSessionStartupCompletion<S>> {
+        self.drive_to_ready_with_timeout(camera_position, DEFAULT_STARTUP_READINESS_TIMEOUT)
+    }
+
+    /// Drive to readiness, then reconcile the final startup camera/interest before
+    /// completing (docs/tactical/167 Slice 4). `reconcile` applies the platform's
+    /// physical startup pose — flat spectator placement, an XR startup view pose,
+    /// or an accepted server position correction — to the runtime and returns the
+    /// resulting camera eye position. If reconciliation moves chunk interest, the
+    /// pump keeps driving at the new camera until the render seed covers it, so the
+    /// seed and readiness decision reflect the final startup camera rather than the
+    /// pre-reconciliation one. A large programmatic startup teleport (a far XR view
+    /// pose or a far server spawn correction) therefore cannot ship a seed built
+    /// only around the pre-teleport camera. Physical pose inputs stay platform-local
+    /// inside `reconcile`; this owns only the "re-pump at the new camera" invariant.
+    pub fn drive_to_ready_reconciled(
+        mut self,
+        initial_camera: Vec3,
+        timeout: Duration,
+        mut reconcile: impl FnMut(&mut NativeSceneRuntime<S>) -> Result<Vec3>,
+    ) -> Result<NativeSessionStartupCompletion<S>> {
+        let deadline = Instant::now() + timeout;
+        self.drive_until_ready(initial_camera, deadline, None, timeout)?;
+        for _ in 0..MAX_STARTUP_RECONCILE_PASSES {
+            let interest_before = self.runtime.interest_center();
+            let camera = reconcile(&mut self.runtime)?;
+            let interest_after = self.runtime.interest_center();
+            if interest_after == interest_before {
                 break;
             }
+            // Interest moved during reconciliation: keep pumping at the new camera
+            // until the render seed covers it (docs/tactical/167 Slice 4). Another
+            // pass may surface a further correction, so loop until interest settles.
+            self.drive_until_ready(camera, deadline, Some(interest_after), timeout)?;
+        }
+        Ok(self.complete())
+    }
+
+    /// Step the pump at `camera_position` until startup readiness (and, when
+    /// `require_drawable_near` is set, render-seed coverage near that chunk) or the
+    /// deadline. A reconciled camera may legitimately look at a view with no
+    /// drawable sections (over void), so a coverage-only timeout completes with the
+    /// best-effort seed rather than failing; a base-readiness timeout still errors.
+    fn drive_until_ready(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        require_drawable_near: Option<ChunkPos>,
+        timeout: Duration,
+    ) -> Result<()> {
+        loop {
+            let step = self.step(camera_position)?;
+            let covered = match require_drawable_near {
+                None => true,
+                Some(center) => {
+                    self.render_seed
+                        .drawable_section_count_near(center, self.runtime.render_distance() as i32)
+                        > 0
+                }
+            };
+            if step.startup_ready && covered {
+                return Ok(());
+            }
             if Instant::now() >= deadline {
+                if require_drawable_near.is_some() && step.startup_ready {
+                    log::warn!(
+                        "startup reconciliation timed out after {:.3}s waiting for {} render-seed coverage near the final camera; completing with best-effort seed (render_seed_drawable_sections={})",
+                        timeout.as_secs_f64(),
+                        self.runtime.host_label(),
+                        step.render_seed_drawable_section_count,
+                    );
+                    return Ok(());
+                }
                 bail!(
                     "timed out after {:.3}s waiting for {} startup readiness: loaded_chunks={} render_seed_drawable_sections={} pending_compile_jobs={}",
                     timeout.as_secs_f64(),
@@ -900,15 +979,6 @@ where
                 thread::sleep(Duration::from_millis(1));
             }
         }
-        Ok(self.complete())
-    }
-
-    /// Drive the pump synchronously to readiness with the default startup timeout.
-    pub fn drive_to_ready(
-        self,
-        camera_position: Vec3,
-    ) -> Result<NativeSessionStartupCompletion<S>> {
-        self.drive_to_ready_with_timeout(camera_position, DEFAULT_STARTUP_READINESS_TIMEOUT)
     }
 
     /// Consume the pump, returning the ready runtime, the transient startup render
@@ -992,6 +1062,27 @@ impl LocalIntegratedStartupPump {
             expect_local_scene(completion.runtime.into_runtime()),
             completion.startup_sections,
         )
+    }
+
+    /// Reconcile the final startup camera/interest, then consume the pump into the
+    /// runtime plus render seed (docs/tactical/167 Slice 4). Used by local lanes
+    /// (XR local) that reach playable at the spawn camera and then apply a startup
+    /// view pose: if the pose moves chunk interest, the pump re-pumps at the new
+    /// camera so the seed covers it. See
+    /// [`NativeSessionStartupPump::drive_to_ready_reconciled`].
+    pub fn drive_to_ready_reconciled(
+        self,
+        initial_camera: Vec3,
+        timeout: Duration,
+        reconcile: impl FnMut(&mut NativeSceneRuntime<LocalOnlySession>) -> Result<Vec3>,
+    ) -> Result<(LocalIntegratedSceneRuntime, Vec<TexturedRenderSectionMesh>)> {
+        let completion =
+            self.inner
+                .drive_to_ready_reconciled(initial_camera, timeout, reconcile)?;
+        Ok((
+            expect_local_scene(completion.runtime.into_runtime()),
+            completion.startup_sections,
+        ))
     }
 }
 
@@ -3963,6 +4054,75 @@ mod tests {
         }
 
         panic!("shared local startup pump did not reach playable");
+    }
+
+    // docs/tactical/167 Slice 4 tripwire: a startup pose correction that teleports
+    // the camera beyond render distance moves chunk interest, and the reconciled
+    // drive re-pumps at the new camera so the completion seed has drawable sections
+    // for the *final* camera — not just the pre-teleport startup camera. This is the
+    // full clear-ready/re-pump invariant: a far XR startup view pose (validated
+    // on-device at ~6 chunks) or a far server spawn correction leaves nothing drawn
+    // at the ready frame without it.
+    #[test]
+    fn reconciled_startup_repumps_seed_to_the_final_teleported_camera() {
+        use crate::camera_reconcile::{
+            EngineCameraCommitContext, commit_engine_camera_player_pose,
+        };
+        use mclone_render_session::EngineCameraController;
+
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let render_distance = 1;
+        let pump = NativeSessionStartupPump::<LocalOnlySession>::local_with_mesh_assets(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
+                .with_lighting_enabled(false),
+            mesh_assets,
+        )
+        .unwrap();
+
+        // Startup camera at spawn chunk (0, 0); reconcile teleports to (3, 0), three
+        // chunks away — beyond render distance, so the spawn seed cannot cover it.
+        let startup_camera = Vec3::new(8.0, 80.0, 8.0);
+        let final_chunk = ChunkPos::new(3, 0);
+        let mut applied = false;
+        let completion = pump
+            .drive_to_ready_reconciled(startup_camera, Duration::from_secs(60), |runtime| {
+                let mut camera = EngineCameraController::spawn_for_chunk(final_chunk);
+                commit_engine_camera_player_pose(
+                    runtime,
+                    &mut camera,
+                    EngineCameraCommitContext::send_only("test"),
+                )?;
+                applied = true;
+                let eye = camera.snapshot().eye;
+                Ok(Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32))
+            })
+            .unwrap();
+
+        assert!(applied, "reconcile closure must run after base readiness");
+        assert_eq!(
+            completion.runtime.interest_center(),
+            final_chunk,
+            "reconciliation must leave interest at the final camera chunk"
+        );
+        // The completion seed must carry drawable sections near the final camera,
+        // proving the pump re-pumped at (3, 0) rather than shipping the (0, 0) seed.
+        let near_final = completion
+            .startup_sections
+            .iter()
+            .filter(|section| !section.is_empty())
+            .filter(|section| {
+                (section.key.chunk_x - final_chunk.x).abs() <= render_distance as i32
+                    && (section.key.chunk_z - final_chunk.z).abs() <= render_distance as i32
+            })
+            .count();
+        assert!(
+            near_final > 0,
+            "reconciled completion seed must cover the final teleported camera"
+        );
     }
 
     #[test]

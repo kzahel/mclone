@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod camera_reconcile;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod catalog_executor;
 pub mod client_catalog_policy;
 pub mod client_connection;
@@ -22,6 +24,12 @@ pub mod startup_args;
 pub mod startup_render_seed;
 pub mod world_catalog;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::camera_reconcile::{
+    EngineCameraCommitContext, apply_pending_engine_camera_position_updates,
+    commit_engine_camera_player_pose, sync_engine_camera_player_pose,
+    update_interest_from_engine_camera,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::catalog_executor::{
     execute_world_catalog_request, refresh_world_catalog_controller,

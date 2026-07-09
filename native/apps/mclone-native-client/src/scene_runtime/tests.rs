@@ -2,6 +2,7 @@ use super::*;
 use crate::DEFAULT_SEED;
 use crate::camera::SpectatorCamera;
 use crate::render_cache::extracted_asset_root;
+use mclone_app_runtime::GameplayCommandUpdatePolicy;
 use mclone_core::{BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkView, SectionBlockUpdate};
 use mclone_render::chunk::{

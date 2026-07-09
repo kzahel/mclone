@@ -66,8 +66,9 @@ mod android {
         WorldCatalogCapabilities, WorldCatalogError,
     };
     use mclone_app_runtime::{
-        debug_block_palette_overlay, debug_hotbar_icons, execute_world_catalog_request,
-        refresh_world_catalog_controller, set_player_appearance_command_for_ui_model,
+        EngineCameraCommitContext, debug_block_palette_overlay, debug_hotbar_icons,
+        execute_world_catalog_request, refresh_world_catalog_controller,
+        set_player_appearance_command_for_ui_model,
     };
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_client::ClientInteractionController;
@@ -2144,18 +2145,31 @@ mod android {
         let mut camera = EngineCameraController::spawn_for_chunk(runtime.interest_center());
         camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
         apply_startup_camera_options(&mut camera, camera_options);
-        // docs/tactical/167 Slice 3: drive the shared startup pump synchronously to
+        // docs/tactical/167 Slice 3/4: drive the shared startup pump synchronously to
         // a drawable active view with the same `Playable` readiness as desktop/XR,
-        // instead of an Android-only `poll_until_idle` + `sync_all_render_sections`.
-        // The seed reflects the initial startup camera; the pose correction below
-        // runs after completion and normal streaming reconciles any interest drift
-        // (shared camera/interest reconciliation is Slice 4).
+        // instead of an Android-only `poll_until_idle` + `sync_all_render_sections`,
+        // reconciling the final startup pose *inside* the drive. Startup camera
+        // options are applied to the camera above but the runtime interest is still
+        // the spawn center; if committing the pose moves chunk interest (a far
+        // startup camera eye or a far server correction), the pump re-pumps at the
+        // new camera so the seed covers the final camera, not the spawn center.
         let startup_camera_position = camera_position(&camera);
         let completion = NativeSessionStartupPump::from_runtime(runtime)
-            .drive_to_ready(startup_camera_position)
+            .drive_to_ready_reconciled(
+                startup_camera_position,
+                ANDROID_STARTUP_READINESS_TIMEOUT,
+                |runtime| {
+                    mclone_app_runtime::commit_engine_camera_player_pose(
+                        runtime,
+                        &mut camera,
+                        ANDROID_CAMERA_COMMIT_CONTEXT,
+                    )?;
+                    Ok(camera_position(&camera))
+                },
+            )
             .with_context(|| format!("wait for initial Android {host_label} chunks"))?;
         let NativeSessionStartupCompletion {
-            runtime: mut scene,
+            runtime: scene,
             startup_sections,
             final_step,
         } = completion;
@@ -2168,10 +2182,6 @@ mod android {
             final_step.render_seed_section_count,
             final_step.render_seed_drawable_section_count,
         );
-        if commit_engine_camera_player_pose(&mut scene, &mut camera)? {
-            apply_pending_engine_camera_position_updates(&mut scene, &mut camera)?;
-            log::info!("Mclone Android {host_label} applied initial player pose correction");
-        }
         let camera_position = camera_position(&camera);
         // docs/tactical/167: seed the initial draw resources from the startup
         // pump's render seed rather than recompiling the resident cache.
@@ -3129,76 +3139,38 @@ mod android {
             .expect("run Android event loop");
     }
 
+    /// Shared camera/interest reconciliation lane for the flat Android client
+    /// (docs/tactical/167 Slice 4). Android drains server updates immediately on
+    /// the pose-sync command (an explicit caller policy, not a hidden platform
+    /// fork); physical touch/startup camera options stay platform-local.
+    const ANDROID_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
+        EngineCameraCommitContext::drain_immediately("Android");
+
+    /// Deadline for the Android startup drive, matching the shared default startup
+    /// timeout (docs/tactical/167).
+    const ANDROID_STARTUP_READINESS_TIMEOUT: std::time::Duration =
+        std::time::Duration::from_secs(120);
+
     fn commit_engine_camera_player_pose(
         scene: &mut AndroidGameSessionRuntime,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
-        let server_changed = sync_engine_camera_player_pose(scene, camera)?;
-        let interest_changed = update_interest_from_engine_camera(scene, camera)?;
-        Ok(server_changed || interest_changed)
-    }
-
-    fn sync_engine_camera_player_pose(
-        scene: &mut AndroidGameSessionRuntime,
-        camera: &mut EngineCameraController,
-    ) -> Result<bool> {
-        let changed = if let Some(report) = camera.next_pose_sync_command() {
-            scene
-                .send_gameplay_command(report.command)
-                .context("failed to sync Android player pose to server")?
-        } else {
-            false
-        };
-        Ok(changed || apply_pending_engine_camera_position_updates(scene, camera)?)
+        mclone_app_runtime::commit_engine_camera_player_pose(
+            &mut **scene,
+            camera,
+            ANDROID_CAMERA_COMMIT_CONTEXT,
+        )
     }
 
     fn apply_pending_engine_camera_position_updates(
         scene: &mut AndroidGameSessionRuntime,
         camera: &mut EngineCameraController,
     ) -> Result<bool> {
-        let mut changed = false;
-        for update in scene.drain_player_position_updates() {
-            let accepted = camera.accept_position_update(update);
-            scene
-                .send_gameplay_command(accepted.accept_command)
-                .context("failed to acknowledge Android player position correction")?;
-            let resync = camera.corrected_pose_sync_command();
-            scene
-                .send_gameplay_command(resync.command)
-                .context("failed to sync corrected Android player pose")?;
-            log::warn!(
-                "accepted Android player position correction id={} feet=({:.2}, {:.2}, {:.2})",
-                accepted.update.teleport_id,
-                accepted.feet_position.x,
-                accepted.feet_position.y,
-                accepted.feet_position.z
-            );
-            changed = true;
-        }
-        if changed {
-            changed |= update_interest_from_engine_camera(scene, camera)?;
-        }
-        Ok(changed)
-    }
-
-    fn update_interest_from_engine_camera(
-        scene: &mut AndroidGameSessionRuntime,
-        camera: &EngineCameraController,
-    ) -> Result<bool> {
-        let snapshot = camera.snapshot();
-        let center = snapshot.chunk_pos;
-        if scene.set_interest_center(center)? {
-            log::info!(
-                "Mclone Android chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
-                center.x,
-                center.z,
-                snapshot.eye.x,
-                snapshot.eye.y,
-                snapshot.eye.z
-            );
-            return Ok(true);
-        }
-        Ok(false)
+        mclone_app_runtime::apply_pending_engine_camera_position_updates(
+            &mut **scene,
+            camera,
+            ANDROID_CAMERA_COMMIT_CONTEXT,
+        )
     }
 
     fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {

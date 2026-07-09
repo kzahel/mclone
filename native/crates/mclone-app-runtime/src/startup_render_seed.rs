@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 
+use mclone_core::ChunkPos;
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_render_session::RenderSectionCacheUpdate;
 
@@ -52,6 +53,22 @@ impl StartupRenderSectionSeed {
         self.sections
             .values()
             .filter(|section| !section.is_empty())
+            .count()
+    }
+
+    /// Drawable sections whose chunk column lies within `radius` chunks
+    /// (Chebyshev distance) of `center`. Startup reconciliation uses this to
+    /// require render-seed coverage near the final camera before completing, so a
+    /// large startup pose correction cannot ship a seed built only around the
+    /// pre-correction camera (docs/tactical/167 Slice 4).
+    pub fn drawable_section_count_near(&self, center: ChunkPos, radius: i32) -> usize {
+        self.sections
+            .values()
+            .filter(|section| !section.is_empty())
+            .filter(|section| {
+                (section.key.chunk_x - center.x).abs() <= radius
+                    && (section.key.chunk_z - center.z).abs() <= radius
+            })
             .count()
     }
 
@@ -184,6 +201,31 @@ mod tests {
         assert_eq!(seed.section_count(), 3);
         assert_eq!(seed.drawable_section_count(), 2);
         assert!(seed.estimated_owned_bytes() > 0);
+    }
+
+    #[test]
+    fn drawable_count_near_filters_by_chunk_chebyshev_radius() {
+        use mclone_core::ChunkPos;
+
+        let mut seed = StartupRenderSectionSeed::new();
+        seed.observe(&rebuilt(vec![
+            drawable_mesh(RenderSectionKey::new(0, 0, 0)),
+            drawable_mesh(RenderSectionKey::new(2, 0, 0)),
+            drawable_mesh(RenderSectionKey::new(5, 0, 0)),
+            empty_mesh(RenderSectionKey::new(0, 1, 0)),
+        ]));
+
+        // Around a far camera at (5, 0): only the (5, 0) column is within radius 1.
+        assert_eq!(seed.drawable_section_count_near(ChunkPos::new(5, 0), 1), 1);
+        // Empty sections never count even when in range.
+        assert_eq!(seed.drawable_section_count_near(ChunkPos::new(0, 0), 0), 1);
+        // A wider radius pulls in the neighboring drawable columns.
+        assert_eq!(seed.drawable_section_count_near(ChunkPos::new(1, 0), 1), 2);
+        // A camera far from every seeded column sees no coverage.
+        assert_eq!(
+            seed.drawable_section_count_near(ChunkPos::new(20, 20), 2),
+            0
+        );
     }
 
     #[test]

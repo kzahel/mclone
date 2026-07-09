@@ -1,13 +1,17 @@
 # 167: Shared Native Session Startup Contract
 
-Status: Slice 3 complete 2026-07-09 (all native platform startup consumers —
-desktop flat local+remote, flat Android, XR remote/replacement, offscreen, and
-perf — route through the shared `NativeSessionStartupPump<S>` for both host
-modes; the divergent blocking `poll_until_idle` + `sync_all_render_sections`
-startup paths are gone). Slice 2 host-neutral pump, Slice 1 local pump seed
-handoff, and Slice 0 audit + guard comments landed first. Design/implementation
-tactical opened after the docs/tactical/163 follow-up showed that startup
-render-section seeding is both duplicated and platform-divergent.
+Status: Slice 4 complete 2026-07-09 (camera/interest startup reconciliation is
+one shared helper in `mclone-app-runtime`, and the full clear-ready/re-pump
+invariant lands where a large startup teleport is real — both XR paths and flat
+Android drive `NativeSessionStartupPump::drive_to_ready_reconciled`, on-device
+evidence showed a far XR view pose otherwise leaves the ready frame blank).
+Slice 3 routed all native platform startup consumers through the shared
+`NativeSessionStartupPump<S>` for both host modes; the divergent blocking
+`poll_until_idle` + `sync_all_render_sections` startup paths are gone. Slice 2
+host-neutral pump, Slice 1 local pump seed handoff, and Slice 0 audit + guard
+comments landed first. Design/implementation tactical opened after the
+docs/tactical/163 follow-up showed that startup render-section seeding is both
+duplicated and platform-divergent.
 
 Workstream: native Rust shared session/runtime/render startup boundary in
 `mclone-app-runtime`, with desktop flat validation first and required adoption
@@ -643,6 +647,96 @@ cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
 cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
 ```
+
+#### Slice 4 Result (2026-07-09)
+
+Consolidation — one shared `mclone-app-runtime::camera_reconcile` module now owns
+the server pose-sync + position-correction acceptance + interest-follow that were
+copied three ways (desktop `WindowSceneRuntime`, Android free functions, XR
+`*_for_runtime`): `commit_engine_camera_player_pose`,
+`sync_engine_camera_player_pose`, `apply_pending_engine_camera_position_updates`,
+and `update_interest_from_engine_camera`, all generic over
+`&mut NativeSceneRuntime<S>` + `EngineCameraController`. The one genuinely
+divergent axis is carried by `EngineCameraCommitContext { lane, pose_sync_policy }`
+— desktop/XR pose-sync is `SendOnly`, Android is `DrainImmediately` (an explicit
+caller policy, not a hidden platform fork), and `lane` (`"desktop"`/`"Android"`/
+`"XR terrain"`) drives the unified interest/correction log wording. Physical
+view-pose inputs stay platform-local: flat spectator placement, Android
+touch/startup camera options, and the XR `XrStartupViewPose` + tracking-origin
+policy. The crate-boundary Open Question resolved in favor of
+`mclone-app-runtime` (it already depends on `mclone-render-session`, which owns
+`EngineCameraController`), so no narrower module was needed. The XR per-frame
+`commit_engine_camera_player_pose_for_runtime_timed` chain stays in `mclone-xr-scene`
+as an intentional profiling overlay (it interleaves `XrCameraCommitTiming` between
+sub-steps); the now-unused non-timed `commit_engine_camera_player_pose_for_runtime`
+was deleted.
+
+Full re-pump invariant — **built, not descoped.** The prompt asked to first check
+whether a large startup interest jump actually occurs before building the re-pump
+machinery. It does: the standard Quest `native:android-xr:session-smoke` sets
+`debug.mclone.xr_view_pose=0,120,-96,180`, i.e. a startup view pose ~6 chunks
+(`z=-96`) from the loaded spawn center. Before this slice that shipped a seed built
+at the spawn center and the ready frame drew nothing at the final camera
+(`sections=6 drawn_sections=0 drawn_indices=0`). After it, the pump re-pumps at the
+teleported camera and the same frame draws terrain (`sections=123 drawn_sections=32
+drawn_indices=265422`). Remote desktop spawn corrections stay small (Slice 3), but
+the XR view pose is a supported, unbounded, in-the-smoke input, so the defensive
+guard is a real fix here.
+
+Mechanism (`mclone-app-runtime`): `NativeSessionStartupPump::drive_to_ready_reconciled(
+initial_camera, timeout, reconcile)` drives to base readiness, runs a platform
+`reconcile` closure that applies the physical pose against the still-pump-owned
+runtime and returns the resulting camera eye, and — when that moved chunk interest
+— keeps pumping at the new camera until the render seed has drawable coverage near
+it (`StartupRenderSectionSeed::drawable_section_count_near`, Chebyshev radius =
+render distance), bounded by `MAX_STARTUP_RECONCILE_PASSES` for a correction
+cascade and by the deadline. A coverage-only timeout completes with the best-effort
+seed (a reconciled view over void has no drawable sections and must not hard-fail);
+a base-readiness timeout still errors. `drive_to_ready_with_timeout` was refactored
+onto the shared `drive_until_ready` step loop, and `LocalIntegratedStartupPump`
+grew a matching `drive_to_ready_reconciled` for the XR-local finalize.
+
+Wiring — the reconciled drive is used everywhere a far startup teleport is real and
+the pose application is self-contained: XR remote/replacement (`start_xr_terrain_runtime`),
+XR local finalize (`complete_local_startup`), and flat Android (`start_android_render_scene`),
+all via the shared `reconcile_xr_startup_pose` / `commit_engine_camera_player_pose`
+closures. Desktop (`start_world_from_scene`, `complete_local_world_startup`) keeps
+the shared *post-completion* reconcile helper: its startup pose is spectator
+placement that preserves the chunk column (no interest change) plus small remote
+spawn corrections observed within a chunk in Slice 3, and its spectator placement
+is entangled with the assembled `self.runtime`/`self.camera` (needed to probe the
+surface column), which makes an inline reconciled drive awkward. This is the
+recorded per-lane exception the Open Question anticipates; the shared
+`drive_to_ready_reconciled` mechanism is ready to adopt if a far desktop remote
+spawn is later observed.
+
+Tripwires — both satisfied. (1) `reconciled_startup_repumps_seed_to_the_final_teleported_camera`
+(app-runtime) drives to ready at spawn chunk (0,0), reconciles a teleport to (3,0)
+(three chunks out, beyond render distance so the spawn seed cannot cover it), and
+asserts the completion seed carries drawable sections within render distance of the
+final chunk — proving the re-pump, not the spawn seed, feeds draw resources.
+`drawable_count_near_filters_by_chunk_chebyshev_radius` covers the seed query.
+(2) No platform re-pump path completes immediately after interest moves: the
+reconciled loop only exits once base readiness *and* near-camera coverage hold (or
+the deadline), and desktop/Android with no interest move complete with a single
+reconcile pass, as before.
+
+Tests — app-runtime 185 (183 + reconciled re-pump + seed proximity), render-session
+103, native-client 179, xr-scene 74; workspace + `wasm32` web-client `cargo check`
+clean; `cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client` clean;
+`cargo fmt --all --check` flags only pre-existing files outside this diff; `git diff
+--check` clean.
+
+Rendered/device — desktop local and remote `--startup-wait playable` both drew
+terrain (byte-identical to the Slice 3 captures; desktop path unchanged). The Quest 3
+`native:android-xr:session-smoke` ran on-device this pass: the far-view-pose new-world
+session reached `XR local world playable ... sections=112` and the ready summary drew
+terrain (`drawn_sections=32 drawn_indices=265422`), up from `drawn_sections=0` before
+the re-pump; the replacement session (interest moved to (1,1)) also drew. The flat
+Android AVD session smoke is deferred to the next Android pass (the connected device
+is the Quest 3, not a flat-Android phone; available AVDs are unrelated x86 images) —
+the flat Android startup path is covered by `cargo ndk check` and shares the exact
+`drive_to_ready_reconciled` contract exercised on-device by the XR lane.
 
 ### Slice 5: Cleanup, Naming, And Enforcement
 

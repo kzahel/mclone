@@ -654,43 +654,28 @@ where
         let descriptor = descriptor
             .or_else(|| request.active_descriptor())
             .context("XR local startup request did not describe an active session")?;
-        // docs/tactical/167: drain the startup render seed the pump accumulated
-        // before handing the runtime off, so draw resources can be created from it
-        // without recompiling the metadata-only resident cache.
-        let (local_runtime, startup_sections) = pump.into_runtime_with_startup_sections();
-        let mut runtime = NativeSessionRuntime::<S>::from_active_runtime_with_descriptor(
+        // docs/tactical/167 Slice 4: reconcile the final startup pose against the
+        // pump-owned runtime, then drain the render seed. The pump reaches playable
+        // at the spawn camera; if the accepted correction or the XR startup view
+        // pose moves chunk interest, the reconciled drive re-pumps at the new camera
+        // so the drained seed covers the final camera rather than the spawn camera.
+        let startup_camera = glam_vec3_from_vec3d(camera.snapshot().eye);
+        let (local_runtime, startup_sections) = pump
+            .drive_to_ready_reconciled(startup_camera, XR_STARTUP_READINESS_TIMEOUT, |runtime| {
+                reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose)?;
+                Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
+            })
+            .context("reconcile XR local startup pose")?;
+        let runtime = NativeSessionRuntime::<S>::from_active_runtime_with_descriptor(
             descriptor.clone(),
             NativeSceneRuntime::Local(local_runtime),
         );
-        let mut initial_pose_changed =
-            apply_pending_engine_camera_position_updates_for_runtime(&mut runtime, &mut camera)
-                .context("accept XR local startup player pose")?;
-        if let Some(view_pose) = startup_view_pose {
-            apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
-                .context("apply XR local startup view pose")?;
-            initial_pose_changed |= commit_engine_camera_player_pose_for_runtime(
-                &mut runtime,
-                &mut camera,
-                "sync XR local startup view pose",
-            )?;
-        } else {
-            initial_pose_changed |= commit_engine_camera_player_pose_for_runtime(
-                &mut runtime,
-                &mut camera,
-                "sync XR local startup player pose",
-            )?;
-        }
-        if initial_pose_changed {
-            log::info!("XR local startup applied initial player pose correction");
-        }
 
         let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
         // docs/tactical/167: seed the initial draw resources from the startup
-        // pump's render seed rather than recompiling the resident cache. The seed
-        // reflects the pump's startup camera; normal streaming reconciles any
-        // interest drift from the pose correction above (shared camera/interest
-        // startup reconciliation is tactical 167 Slice 4). Traversal-ready
-        // publication below still uses the final startup camera position.
+        // pump's render seed rather than recompiling the resident cache; the seed
+        // and the traversal-ready publication below both use the final reconciled
+        // startup camera position.
         let sections = startup_sections;
         if sections.is_empty() {
             bail!(
@@ -1329,48 +1314,34 @@ where
     let session_label = active_session_label(runtime.active_session());
     let mut camera = EngineCameraController::spawn_for_chunk(center);
     camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
-    // docs/tactical/167 Slice 3: drive the shared startup pump synchronously to a
-    // drawable active view instead of `poll_until_idle` + `sync_all_render_sections`.
-    // The seed reflects the initial spawn camera; the pose correction below runs
-    // after completion and normal streaming reconciles any interest drift (shared
-    // camera/interest reconciliation is Slice 4).
+    // docs/tactical/167 Slice 3/4: drive the shared startup pump synchronously to a
+    // drawable active view instead of `poll_until_idle` + `sync_all_render_sections`,
+    // reconciling the final startup pose *inside* the drive. If the accepted server
+    // correction or the XR startup view pose moves chunk interest (a far view pose
+    // can move it several chunks), the pump re-pumps at the new camera so the seed
+    // covers the final camera rather than the initial spawn camera.
     let initial_poll_start = Instant::now();
     let startup_camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
     let completion = NativeSessionStartupPump::from_runtime(runtime)
-        .drive_to_ready(startup_camera_position)
+        .drive_to_ready_reconciled(
+            startup_camera_position,
+            XR_STARTUP_READINESS_TIMEOUT,
+            |runtime| {
+                reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose)?;
+                Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
+            },
+        )
         .context("wait for initial XR terrain chunks")?;
     let NativeSessionStartupCompletion {
-        mut runtime,
+        runtime,
         startup_sections,
         final_step,
     } = completion;
 
-    let mut initial_pose_changed =
-        apply_pending_engine_camera_position_updates_for_runtime(&mut runtime, &mut camera)
-            .context("accept initial XR terrain player pose")?;
-    if let Some(view_pose) = startup_view_pose {
-        apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
-            .context("apply XR terrain startup view pose")?;
-        initial_pose_changed |= commit_engine_camera_player_pose_for_runtime(
-            &mut runtime,
-            &mut camera,
-            "sync XR terrain startup view pose",
-        )?;
-    } else {
-        initial_pose_changed |= commit_engine_camera_player_pose_for_runtime(
-            &mut runtime,
-            &mut camera,
-            "sync initial XR terrain player pose",
-        )?;
-    }
-    if initial_pose_changed {
-        log::info!("XR terrain runtime applied initial player pose correction");
-    }
-
     let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
     // docs/tactical/167: seed the initial draw resources from the startup pump's
-    // render seed rather than recompiling the resident cache; traversal-ready
-    // publication below still uses the final startup camera position.
+    // render seed rather than recompiling the resident cache; the seed and
+    // traversal-ready publication both use the final reconciled startup camera.
     let sections = startup_sections;
     if sections.is_empty() {
         bail!(
@@ -1422,16 +1393,45 @@ where
     })
 }
 
-pub(crate) fn commit_engine_camera_player_pose_for_runtime<S>(
-    runtime: &mut NativeSessionRuntime<S>,
+/// Shared camera/interest reconciliation lane for XR startup (docs/tactical/167
+/// Slice 4): send-only pose sync, `"XR terrain"` log lane. The per-frame timed
+/// variants below keep their own instrumentation for XR camera-commit profiling.
+const XR_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
+    EngineCameraCommitContext::send_only("XR terrain");
+
+/// Deadline for the XR startup drive, matching the shared default startup timeout.
+const XR_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Apply the XR startup physical pose against the pump-owned runtime during
+/// reconciliation (docs/tactical/167 Slice 4): accept any pending server position
+/// correction, apply the optional startup view pose, then commit the camera pose
+/// and follow chunk interest. When this moves chunk interest the shared pump
+/// re-pumps at the new camera so the seed covers the final startup camera — a far
+/// startup view pose (validated on-device several chunks out) otherwise leaves the
+/// ready frame with nothing drawn near the camera.
+fn reconcile_xr_startup_pose<S>(
+    runtime: &mut NativeSceneRuntime<S>,
     camera: &mut EngineCameraController,
-    context: &'static str,
+    startup_view_pose: Option<XrStartupViewPose>,
 ) -> Result<bool>
 where
     S: RemoteDedicatedServerSession,
 {
-    commit_engine_camera_player_pose_for_runtime_timed(runtime, camera, context)
-        .map(|(changed, _)| changed)
+    let mut changed = mclone_app_runtime::apply_pending_engine_camera_position_updates(
+        runtime,
+        camera,
+        XR_CAMERA_COMMIT_CONTEXT,
+    )?;
+    if let Some(view_pose) = startup_view_pose {
+        apply_xr_startup_view_pose(camera, view_pose.position, view_pose.yaw_degrees)
+            .context("apply XR startup view pose")?;
+    }
+    changed |= mclone_app_runtime::commit_engine_camera_player_pose(
+        runtime,
+        camera,
+        XR_CAMERA_COMMIT_CONTEXT,
+    )?;
+    Ok(changed)
 }
 
 pub(crate) fn commit_engine_camera_player_pose_for_runtime_timed<S>(
@@ -1496,40 +1496,11 @@ pub(crate) fn apply_pending_engine_camera_position_updates_for_runtime<S>(
 where
     S: RemoteDedicatedServerSession,
 {
-    let mut changed = false;
-    for update in runtime.drain_player_position_updates() {
-        let accepted = camera.accept_position_update(update);
-        runtime
-            .send_gameplay_command(accepted.accept_command)
-            .context("failed to acknowledge XR terrain player position correction")?;
-        let resync = camera.corrected_pose_sync_command();
-        runtime
-            .send_gameplay_command(resync.command)
-            .context("failed to sync corrected XR terrain player pose")?;
-        log::warn!(
-            "accepted XR terrain server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
-            accepted.update.teleport_id,
-            accepted.feet_position.x,
-            accepted.feet_position.y,
-            accepted.feet_position.z
-        );
-        changed = true;
-    }
-    if changed {
-        changed |= update_interest_from_engine_camera_for_runtime(runtime, camera)?;
-    }
-    Ok(changed)
-}
-
-pub(crate) fn update_interest_from_engine_camera_for_runtime<S>(
-    runtime: &mut NativeSessionRuntime<S>,
-    camera: &EngineCameraController,
-) -> Result<bool>
-where
-    S: RemoteDedicatedServerSession,
-{
-    update_interest_from_engine_camera_for_runtime_timed(runtime, camera)
-        .map(|(changed, _)| changed)
+    mclone_app_runtime::apply_pending_engine_camera_position_updates(
+        &mut **runtime,
+        camera,
+        XR_CAMERA_COMMIT_CONTEXT,
+    )
 }
 
 pub(crate) fn update_interest_from_engine_camera_for_runtime_timed<S>(
