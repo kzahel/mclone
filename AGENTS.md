@@ -8,6 +8,15 @@ This repo is developed on both macOS and Windows. macOS is the usual day-to-day 
 
 The `.sh` setup scripts (`scripts/decompile-mc.sh`, `scripts/extract-assets.sh`, `oracle/build.sh`, `oracle/run.sh`, etc.) require bash; run those from Git Bash, not PowerShell. The `pnpm` cargo wrappers in `package.json` are shell-agnostic and run fine from either PowerShell or Git Bash.
 
+## Android/NDK builds go through the scripts — do not conclude the environment is unset
+
+The Android SDK/NDK, `cargo-ndk`, and the Rust android targets are provisioned on the macOS and Windows hosts, and Android build/validation is a solved, one-command path. **Do not give up mid-task claiming the NDK is missing, and do not hand-roll `cargo build` or guess toolchain paths — always drive it through the scripts:**
+
+- Flat APK: `pnpm native:android:apk` · AVD smoke: `pnpm native:android:avd-smoke -- --skip-build`
+- Quest XR: `pnpm native:android-xr:apk` · validate: `pnpm native:android-xr:validate --skip-build ...`
+- The build scripts (`android/build-common.sh`) auto-discover the SDK/NDK across hosts and read the required NDK version out of `build.gradle.kts`. Anything genuinely missing dies with the exact fix (`sdkmanager "ndk;<ver>"`, `rustup target add <target>`, `cargo install cargo-ndk`).
+- A bare `echo $ANDROID_NDK_HOME` or an `ls` of a guessed SDK path is **not** a reliable check — env vars can read empty in a non-login shell and the SDK location differs per host. The scripts resolve it regardless. **If a command fails, run the script and read its error before inferring the environment is broken.** The full lane matrix lives in [`docs/platforms.md`](docs/platforms.md#validation-policy).
+
 ## Notes for agents
 
 **Do not use the auto-memory system** for this project (the `~/.claude/projects/-home-kgraehl-code-mclone/memory/` directory). Persist project-relevant guidance in this file (`AGENTS.md`) instead.
