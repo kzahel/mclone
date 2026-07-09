@@ -1950,9 +1950,17 @@ mod android {
             self.commit_engine_camera_player_pose()
                 .context("sync Android player pose before interaction")?;
             self.sync_carried_item()?;
-            let hit = self
+            // Use `target_block` (inside-solid suppression + outline gating) to
+            // match desktop, rather than the raw `pick_block` ray (tactical 168
+            // Slice 0). Interacting through geometry you're embedded in, or with
+            // a block that has no outline, is suppressed here as it is on desktop.
+            let Some(target) = self
                 .camera
-                .pick_block(self.scene.client(), &self.interaction);
+                .target_block(self.scene.client(), &self.interaction)
+            else {
+                return Ok(());
+            };
+            let hit = target.hit;
             let command = match action {
                 FlatInputAction::Attack => self.interaction.debug_instant_break_command(hit),
                 FlatInputAction::Use => self.interaction.use_item_on_command(hit),
