@@ -22,5 +22,4 @@ mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
 mclone-xr-host.workspace = true
-openxr.workspace = true
 wgpu.workspace = true

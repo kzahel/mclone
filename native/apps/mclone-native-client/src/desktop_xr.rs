@@ -982,7 +982,11 @@ fn render_mclone_frame(
     let stereo_views =
         mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)
             .context("locate OpenXR stereo views for mclone frame")?;
-    mclone.apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])?;
+    let scene_views = [
+        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+    ];
+    mclone.apply_locomotion_input(controllers, scene_views)?;
 
     let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
     let right_target = match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image")
@@ -997,7 +1001,7 @@ fn render_mclone_frame(
     let render_result = mclone.render_frame(
         &graphics.device,
         &graphics.queue,
-        [stereo_views.left, stereo_views.right],
+        scene_views,
         XrTerrainEyeTarget {
             color_view: left_target.color_view(),
             depth: &left_target.eye().depth,

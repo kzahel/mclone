@@ -103,8 +103,7 @@ use mclone_ui::{
     StatusOverlay, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
     render_loading_progress_overlay, render_status_overlay,
 };
-use mclone_xr_host::{XrControllerSnapshot, XrHand};
-use openxr as xr;
+use mclone_xr_host::{XrControllerSnapshot, XrFov, XrHand, XrView};
 
 mod comfort;
 mod diagnostic_panel;
@@ -334,7 +333,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
@@ -352,7 +351,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
@@ -371,7 +370,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         view_pose: XrStartupViewPose,
-        eye_fovs: [xr::Fovf; 2],
+        eye_fovs: [XrFov; 2],
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
@@ -394,7 +393,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
         self.render_frame_multiview_inner(
@@ -411,7 +410,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         view_pose: XrStartupViewPose,
-        eye_fovs: [xr::Fovf; 2],
+        eye_fovs: [XrFov; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
         let mut timing = XrTerrainFrameTiming::default();
@@ -432,7 +431,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let mut render_views = self.render_views(&views)?;
@@ -446,7 +445,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let render_views = self.render_views(&views)?;
@@ -457,7 +456,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let render_views = self.render_views(&views)?;
@@ -476,7 +475,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let render_views = self.render_views(&views)?;
@@ -495,7 +494,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let render_views = self.render_views(&views)?;
@@ -515,7 +514,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<()> {
         let render_views = self.render_views(&views)?;
@@ -616,7 +615,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainStereoFrameSummary> {
@@ -634,7 +633,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainStereoFrameSummary> {
@@ -654,7 +653,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainStereoFrameSummary> {
@@ -674,7 +673,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
         runtime_mode: XrTerrainRuntimeUpdateMode,
@@ -718,7 +717,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         target: XrTerrainMultiviewTarget<'_>,
         runtime_mode: XrTerrainRuntimeUpdateMode,
     ) -> Result<XrTerrainFrameSummary> {
@@ -4466,7 +4465,7 @@ mod tests {
             position: [8.0, 72.0, -12.0],
             yaw_degrees: 90.0,
         };
-        let fov = xr::Fovf {
+        let fov = XrFov {
             angle_left: -0.5,
             angle_right: 0.5,
             angle_up: 0.5,
@@ -4537,22 +4536,13 @@ mod tests {
         );
     }
 
-    fn test_xr_view(position: Vec3, orientation: Quat) -> xr::View {
-        xr::View {
-            pose: xr::Posef {
-                orientation: xr::Quaternionf {
-                    x: orientation.x,
-                    y: orientation.y,
-                    z: orientation.z,
-                    w: orientation.w,
-                },
-                position: xr::Vector3f {
-                    x: position.x,
-                    y: position.y,
-                    z: position.z,
-                },
+    fn test_xr_view(position: Vec3, orientation: Quat) -> XrView {
+        XrView {
+            pose: mclone_xr_host::XrViewPose {
+                position,
+                orientation,
             },
-            fov: xr::Fovf {
+            fov: XrFov {
                 angle_left: -0.5,
                 angle_right: 0.5,
                 angle_up: 0.5,

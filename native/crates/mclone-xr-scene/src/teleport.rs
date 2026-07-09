@@ -67,7 +67,7 @@ pub(crate) fn teleport_intent_query_matches(left: TeleportIntent, right: Telepor
 }
 
 pub(crate) fn xr_headset_player_yaw_degrees_from_views(
-    views: &[xr::View],
+    views: &[XrView],
     transform: XrStageToWorld,
 ) -> Result<f64> {
     xr_headset_world_yaw_from_views(views, transform).map(|yaw| -f64::from(yaw).to_degrees())
@@ -103,7 +103,7 @@ pub(crate) fn target_yaw_degrees_from_stick_delta(
 
 pub(crate) fn xr_blink_teleport_landing_yaw_radians(
     current_root_yaw_radians: f64,
-    views: &[xr::View],
+    views: &[XrView],
     transform: XrStageToWorld,
     target_yaw_degrees: f64,
 ) -> Result<f64> {
@@ -238,7 +238,7 @@ where
     pub(crate) fn update_xr_blink_teleport(
         &mut self,
         controllers: &[XrControllerSnapshot],
-        views: &[xr::View],
+        views: &[XrView],
         transform: XrStageToWorld,
     ) -> Result<XrBlinkTeleportFrame> {
         if let Some(frame) = xr_blink_teleport_disabled_frame(self.travel_assist_mode, controllers)
@@ -273,11 +273,7 @@ where
         })
     }
 
-    pub(crate) fn begin_xr_blink_teleport(
-        &mut self,
-        views: &[xr::View],
-        transform: XrStageToWorld,
-    ) {
+    pub(crate) fn begin_xr_blink_teleport(&mut self, views: &[XrView], transform: XrStageToWorld) {
         if self.runtime.is_none() {
             self.clear_xr_blink_teleport();
             return;
@@ -411,7 +407,7 @@ where
 
     pub(crate) fn commit_xr_blink_teleport(
         &mut self,
-        views: &[xr::View],
+        views: &[XrView],
         transform: XrStageToWorld,
     ) -> Result<()> {
         self.poll_xr_blink_teleport_worker();

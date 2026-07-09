@@ -1777,7 +1777,6 @@ dependencies = [
  "mclone-server",
  "mclone-ui",
  "mclone-xr-host",
- "openxr",
  "wgpu",
 ]
 

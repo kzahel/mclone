@@ -152,7 +152,7 @@ where
     pub(crate) fn update_head_comfort_state(
         &mut self,
         transform: XrStageToWorld,
-        views: &[xr::View],
+        views: &[XrView],
         dt_seconds: f64,
     ) -> Result<()> {
         let headset_stage_position = xr_headset_stage_position_from_views(views)?;

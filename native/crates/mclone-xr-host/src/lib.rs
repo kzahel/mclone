@@ -78,6 +78,48 @@ pub struct XrViewPose {
     pub orientation: Quat,
 }
 
+/// Host-neutral field-of-view (four tangent-space half angles, radians),
+/// mirroring `xr::Fovf` without depending on OpenXR. Downstream scene code
+/// consumes this so the scene crate stays free of the `openxr` rim
+/// (tactical 168 Slice 1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct XrFov {
+    pub angle_left: f32,
+    pub angle_right: f32,
+    pub angle_up: f32,
+    pub angle_down: f32,
+}
+
+impl XrFov {
+    pub fn from_openxr(fov: xr::Fovf) -> Self {
+        Self {
+            angle_left: fov.angle_left,
+            angle_right: fov.angle_right,
+            angle_up: fov.angle_up,
+            angle_down: fov.angle_down,
+        }
+    }
+}
+
+/// Host-neutral stereo/mono view: a validated stage-space pose plus the eye
+/// field of view. Produced from an `xr::View` at the OpenXR rim
+/// (`XrView::from_openxr`) so scene code takes neutral views instead of
+/// `xr::View` (tactical 168 Slice 1).
+#[derive(Clone, Copy, Debug)]
+pub struct XrView {
+    pub pose: XrViewPose,
+    pub fov: XrFov,
+}
+
+impl XrView {
+    pub fn from_openxr(view: &xr::View) -> Result<Self> {
+        Ok(Self {
+            pose: view_pose(view)?,
+            fov: XrFov::from_openxr(view.fov),
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct XrRenderView {
     pub view: Mat4,
@@ -1081,13 +1123,13 @@ fn fs_main() -> @location(0) vec4<f32> {
 
     let left_view = render_view_from_world_pose(
         view_pose(&stereo_views.left)?,
-        stereo_views.left.fov,
+        XrFov::from_openxr(stereo_views.left.fov),
         0.05,
         100.0,
     )?;
     let right_view = render_view_from_world_pose(
         view_pose(&stereo_views.right)?,
-        stereo_views.right.fov,
+        XrFov::from_openxr(stereo_views.right.fov),
         0.05,
         100.0,
     )?;
@@ -1637,7 +1679,7 @@ pub fn view_pose(view: &xr::View) -> Result<XrViewPose> {
 
 pub fn render_view_from_world_pose(
     pose: XrViewPose,
-    fov: xr::Fovf,
+    fov: XrFov,
     near: f32,
     far: f32,
 ) -> Result<XrRenderView> {
@@ -1671,7 +1713,7 @@ pub fn render_view_from_world_pose(
     })
 }
 
-pub fn xr_fov_to_projection_rh(fov: xr::Fovf, near: f32, far: f32) -> Result<Mat4> {
+pub fn xr_fov_to_projection_rh(fov: XrFov, near: f32, far: f32) -> Result<Mat4> {
     if !near.is_finite() || !far.is_finite() || near <= 0.0 || far <= near {
         anyhow::bail!("invalid XR projection clipping planes near={near} far={far}");
     }
@@ -1705,7 +1747,7 @@ pub fn xr_fov_to_projection_rh(fov: xr::Fovf, near: f32, far: f32) -> Result<Mat
     ))
 }
 
-pub fn xr_fov_aspect(fov: xr::Fovf) -> f32 {
+pub fn xr_fov_aspect(fov: XrFov) -> f32 {
     let width = fov.angle_right.tan() - fov.angle_left.tan();
     let height = fov.angle_up.tan() - fov.angle_down.tan();
     if width.is_finite() && height.is_finite() && height.abs() > f32::EPSILON {
@@ -1744,7 +1786,7 @@ mod tests {
         let far = 700.0;
         let tan_y = (fov_y * 0.5).tan();
         let tan_x = tan_y * aspect;
-        let fov = xr::Fovf {
+        let fov = XrFov {
             angle_left: -tan_x.atan(),
             angle_right: tan_x.atan(),
             angle_up: tan_y.atan(),
@@ -1768,7 +1810,7 @@ mod tests {
 
     #[test]
     fn render_view_from_world_pose_builds_camera_vectors() {
-        let fov = xr::Fovf {
+        let fov = XrFov {
             angle_left: -0.5,
             angle_right: 0.5,
             angle_up: 0.5,

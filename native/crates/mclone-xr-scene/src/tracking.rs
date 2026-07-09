@@ -15,9 +15,9 @@ pub struct XrStageToWorld {
 }
 
 impl XrTrackingOrigin {
-    pub fn from_initial_views(views: &[xr::View], mode: XrViewAlignmentMode) -> Result<Self> {
-        let left_stage_pose = mclone_xr_host::view_pose(&views[0])?;
-        let right_stage_pose = mclone_xr_host::view_pose(&views[1])?;
+    pub fn from_initial_views(views: &[XrView], mode: XrViewAlignmentMode) -> Result<Self> {
+        let left_stage_pose = views[0].pose;
+        let right_stage_pose = views[1].pose;
         let origin_stage = (left_stage_pose.position + right_stage_pose.position) * 0.5;
         Self::from_stage_view(origin_stage, left_stage_pose.orientation, mode)
     }
@@ -133,22 +133,22 @@ impl XrStageToWorld {
     }
 }
 
-pub fn xr_headset_stage_position_from_views(views: &[xr::View]) -> Result<Vec3> {
+pub fn xr_headset_stage_position_from_views(views: &[XrView]) -> Result<Vec3> {
     if views.len() < 2 {
         bail!("OpenXR runtime returned fewer than two stereo views");
     }
-    let left_pose = mclone_xr_host::view_pose(&views[0])?;
-    let right_pose = mclone_xr_host::view_pose(&views[1])?;
+    let left_pose = views[0].pose;
+    let right_pose = views[1].pose;
     Ok((left_pose.position + right_pose.position) * 0.5)
 }
 
 pub fn xr_view_to_chunk_render_view(
-    view: &xr::View,
+    view: &XrView,
     transform: XrStageToWorld,
     near: f32,
     far: f32,
 ) -> Result<ChunkRenderView> {
-    let stage_pose = mclone_xr_host::view_pose(view)?;
+    let stage_pose = view.pose;
     let (camera_position, camera_orientation) =
         transform.transform_pose(stage_pose.position, stage_pose.orientation);
     let render_view = mclone_xr_host::render_view_from_world_pose(
@@ -165,7 +165,7 @@ pub fn xr_view_to_chunk_render_view(
 
 pub fn fixed_startup_view_pose_render_views(
     view_pose: XrStartupViewPose,
-    eye_fovs: [xr::Fovf; 2],
+    eye_fovs: [XrFov; 2],
 ) -> Result<[ChunkRenderView; 2]> {
     let yaw_radians = view_pose.yaw_degrees.to_radians();
     if !yaw_radians.is_finite() {
@@ -191,7 +191,7 @@ pub fn fixed_startup_view_pose_render_views(
 pub(crate) fn fixed_startup_view_pose_render_view(
     position: Vec3,
     orientation: Quat,
-    fov: xr::Fovf,
+    fov: XrFov,
 ) -> Result<ChunkRenderView> {
     let render_view = mclone_xr_host::render_view_from_world_pose(
         mclone_xr_host::XrViewPose {
@@ -276,15 +276,12 @@ pub(crate) fn average_unit_direction(a: Vec3, b: Vec3, fallback: Vec3) -> Vec3 {
     }
 }
 
-pub fn xr_headset_world_yaw_from_views(
-    views: &[xr::View],
-    transform: XrStageToWorld,
-) -> Result<f32> {
+pub fn xr_headset_world_yaw_from_views(views: &[XrView], transform: XrStageToWorld) -> Result<f32> {
     if views.len() < 2 {
         bail!("OpenXR runtime returned fewer than two stereo views");
     }
-    let left_pose = mclone_xr_host::view_pose(&views[0])?;
-    let right_pose = mclone_xr_host::view_pose(&views[1])?;
+    let left_pose = views[0].pose;
+    let right_pose = views[1].pose;
     let left_forward = left_pose.orientation * Vec3::NEG_Z;
     let right_forward = right_pose.orientation * Vec3::NEG_Z;
     let stage_forward = average_unit_direction(left_forward, right_forward, Vec3::NEG_Z);
@@ -297,7 +294,7 @@ impl<S> XrMcloneTerrainState<S>
 where
     S: RemoteDedicatedServerSession,
 {
-    pub(crate) fn render_views(&mut self, views: &[xr::View]) -> Result<[ChunkRenderView; 2]> {
+    pub(crate) fn render_views(&mut self, views: &[XrView]) -> Result<[ChunkRenderView; 2]> {
         if views.len() < 2 {
             bail!("OpenXR runtime returned fewer than two stereo views");
         }
@@ -312,7 +309,7 @@ where
 
     pub(crate) fn tracking_origin_for_views(
         &mut self,
-        views: &[xr::View],
+        views: &[XrView],
     ) -> Result<XrTrackingOrigin> {
         if let Some(origin) = self.tracking_origin {
             return Ok(origin);
@@ -337,7 +334,7 @@ where
 
     pub(crate) fn reconcile_room_scale_body_to_headset(
         &mut self,
-        views: &[xr::View],
+        views: &[XrView],
     ) -> Result<XrStageToWorld> {
         let origin = self.tracking_origin_for_views(views)?;
         let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;

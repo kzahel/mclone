@@ -230,7 +230,7 @@ pub(crate) fn xr_sneak_pressed(controllers: &[XrControllerSnapshot]) -> bool {
 
 pub fn xr_hand_push_input_from_controllers(
     controllers: &[XrControllerSnapshot],
-    views: &[xr::View],
+    views: &[XrView],
     transform: XrStageToWorld,
 ) -> Result<Option<EngineHandPushInput>> {
     if views.len() < 2 {
@@ -242,8 +242,8 @@ pub fn xr_hand_push_input_from_controllers(
     let Some(right_hand_position) = xr_controller_hand_position(controllers, XrHand::Right) else {
         return Ok(None);
     };
-    let left_pose = mclone_xr_host::view_pose(&views[0])?;
-    let right_pose = mclone_xr_host::view_pose(&views[1])?;
+    let left_pose = views[0].pose;
+    let right_pose = views[1].pose;
     let head_stage_position = (left_pose.position + right_pose.position) * 0.5;
 
     Ok(Some(EngineHandPushInput::new(
@@ -487,7 +487,7 @@ where
     pub fn apply_locomotion_input(
         &mut self,
         controllers: &[XrControllerSnapshot],
-        views: [xr::View; 2],
+        views: [XrView; 2],
     ) -> Result<XrLocomotionTiming> {
         let mut timing = XrLocomotionTiming::default();
         let input_start = Instant::now();
@@ -579,7 +579,7 @@ where
 
     pub fn apply_automated_flight_input(
         &mut self,
-        views: [xr::View; 2],
+        views: [XrView; 2],
         speed_blocks_per_second: f64,
     ) -> Result<XrLocomotionTiming> {
         let mut timing = XrLocomotionTiming::default();
@@ -741,7 +741,7 @@ where
 
     pub(crate) fn apply_snap_turn_preserving_headset(
         &mut self,
-        views: &[xr::View],
+        views: &[XrView],
         before_transform: XrStageToWorld,
         yaw_delta_radians: f64,
     ) -> Result<XrStageToWorld> {
@@ -765,7 +765,7 @@ where
 
     pub(crate) fn locomotion_movement_yaw_radians(
         &mut self,
-        views: &[xr::View],
+        views: &[XrView],
     ) -> Result<Option<f64>> {
         let tracking_origin = self.tracking_origin_for_views(views)?;
         let transform =
@@ -775,7 +775,7 @@ where
 
     pub(crate) fn locomotion_movement_yaw_radians_with_transform(
         &self,
-        views: &[xr::View],
+        views: &[XrView],
         transform: XrStageToWorld,
     ) -> Result<Option<f64>> {
         match self.locomotion_mode {

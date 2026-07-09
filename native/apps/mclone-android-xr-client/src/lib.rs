@@ -2824,7 +2824,10 @@ mod android {
             .render_terrain_multiview_frame(
                 &graphics.device,
                 &graphics.queue,
-                [stereo_views.left, stereo_views.right],
+                [
+                    mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                    mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                ],
                 targets.multiview.target(),
             )
             .context("warm up terrain multiview perf scene")?;
@@ -2843,7 +2846,10 @@ mod android {
                 let _ = terrain.render_sky_terrain_stereo_frame_frozen(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets.left.target(),
                     targets.right.target(),
                 )?;
@@ -2851,7 +2857,10 @@ mod android {
                 let _ = terrain.render_sky_terrain_actors_stereo_frame_frozen(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets.left.target(),
                     targets.right.target(),
                 )?;
@@ -2859,7 +2868,10 @@ mod android {
                 let _ = terrain.render_terrain_stereo_frame_frozen(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets.left.target(),
                     targets.right.target(),
                 )?;
@@ -2868,21 +2880,30 @@ mod android {
                 let _ = terrain.render_sky_terrain_multiview_frame_frozen(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets.multiview.target(),
                 )?;
             } else if include_actors {
                 let _ = terrain.render_sky_terrain_actors_multiview_frame_frozen(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets.multiview.target(),
                 )?;
             } else {
                 let _ = terrain.render_terrain_multiview_frame_frozen(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets.multiview.target(),
                 )?;
             }
@@ -2896,7 +2917,10 @@ mod android {
                 stereo_ms.push(measure_terrain_stereo_frame(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets,
                     terrain,
                     include_sky,
@@ -2905,7 +2929,10 @@ mod android {
                 let (elapsed_ms, summary) = measure_terrain_multiview_frame(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets,
                     terrain,
                     include_sky,
@@ -2917,7 +2944,10 @@ mod android {
                 let (elapsed_ms, summary) = measure_terrain_multiview_frame(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets,
                     terrain,
                     include_sky,
@@ -2928,7 +2958,10 @@ mod android {
                 stereo_ms.push(measure_terrain_stereo_frame(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     targets,
                     terrain,
                     include_sky,
@@ -2947,7 +2980,7 @@ mod android {
     fn measure_terrain_stereo_frame(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [mclone_xr_host::XrView; 2],
         targets: &TerrainPerfTargets,
         terrain: &mut AndroidXrTerrainState,
         include_sky: bool,
@@ -2985,7 +3018,7 @@ mod android {
     fn measure_terrain_multiview_frame(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        views: [xr::View; 2],
+        views: [mclone_xr_host::XrView; 2],
         targets: &TerrainPerfTargets,
         terrain: &mut AndroidXrTerrainState,
         include_sky: bool,
@@ -3247,7 +3280,10 @@ mod android {
                 .render_terrain_multiview_frame(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     XrTerrainMultiviewTarget {
                         color_view: target.color_array_view(),
                         depth,
@@ -3259,7 +3295,10 @@ mod android {
                 .render_overlay_multiview_smoke_frame_frozen(
                     &graphics.device,
                     &graphics.queue,
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     XrTerrainMultiviewTarget {
                         color_view: target.color_array_view(),
                         depth,
@@ -7049,7 +7088,10 @@ mod android {
                 speed_blocks_per_second,
             }) => terrain
                 .apply_automated_flight_input(
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     speed_blocks_per_second,
                 )
                 .context("apply Android XR automated flight locomotion")?,
@@ -7069,7 +7111,13 @@ mod android {
                 .apply_automated_chunk_view_churn(center_x, center_z)
                 .context("apply Android XR automated chunk-view churn")?,
             None => terrain
-                .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
+                .apply_locomotion_input(
+                    controllers,
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
+                )
                 .context("apply Android XR controller locomotion")?,
         };
         timing.locomotion_ms = elapsed_ms(locomotion_start);
@@ -7109,7 +7157,10 @@ mod android {
                 &graphics.device,
                 &graphics.queue,
                 fixed_render_view_pose,
-                [stereo_views.left.fov, stereo_views.right.fov],
+                [
+                    mclone_xr_host::XrFov::from_openxr(stereo_views.left.fov),
+                    mclone_xr_host::XrFov::from_openxr(stereo_views.right.fov),
+                ],
                 left_terrain_target,
                 right_terrain_target,
             )
@@ -7117,7 +7168,10 @@ mod android {
             terrain.render_frame(
                 &graphics.device,
                 &graphics.queue,
-                [stereo_views.left, stereo_views.right],
+                [
+                    mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                    mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                ],
                 left_terrain_target,
                 right_terrain_target,
             )
@@ -7174,7 +7228,10 @@ mod android {
                 speed_blocks_per_second,
             }) => terrain
                 .apply_automated_flight_input(
-                    [stereo_views.left, stereo_views.right],
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
                     speed_blocks_per_second,
                 )
                 .context("apply Android XR automated flight locomotion")?,
@@ -7194,7 +7251,13 @@ mod android {
                 .apply_automated_chunk_view_churn(center_x, center_z)
                 .context("apply Android XR automated chunk-view churn")?,
             None => terrain
-                .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
+                .apply_locomotion_input(
+                    controllers,
+                    [
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                    ],
+                )
                 .context("apply Android XR controller locomotion")?,
         };
         timing.locomotion_ms = elapsed_ms(locomotion_start);
@@ -7223,14 +7286,20 @@ mod android {
                 &graphics.device,
                 &graphics.queue,
                 fixed_render_view_pose,
-                [stereo_views.left.fov, stereo_views.right.fov],
+                [
+                    mclone_xr_host::XrFov::from_openxr(stereo_views.left.fov),
+                    mclone_xr_host::XrFov::from_openxr(stereo_views.right.fov),
+                ],
                 terrain_target,
             )
         } else {
             terrain.render_frame_multiview(
                 &graphics.device,
                 &graphics.queue,
-                [stereo_views.left, stereo_views.right],
+                [
+                    mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
+                    mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+                ],
                 terrain_target,
             )
         };
