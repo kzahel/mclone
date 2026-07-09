@@ -2453,7 +2453,7 @@ impl FlatClientDriver {
     /// Upload the transient startup render seed batch into the draw resources
     /// (docs/tactical/167). This is the local-startup seeding path; it replaces
     /// the former mark-all-dirty recompile and must not call
-    /// `compile_all_render_section_meshes(...)`.
+    /// `recompile_all_render_section_meshes_for_resource_rebuild(...)`.
     pub(crate) fn upload_startup_seed_sections(
         &mut self,
         device: &wgpu::Device,

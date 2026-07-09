@@ -234,6 +234,21 @@ then `compile_all_render_section_meshes` recompiles them once to seed the draw
 (one extra compile of the small initial RD). Optimize by having the pump feed
 its transient batch forward, or start the XR draw empty and stream in.
 
+Follow-up resolved by [`167`](167-shared-session-startup-contract.md) (Slice 5,
+2026-07-09): the redundant startup remesh is gone. The startup pump now folds
+each transient `RenderSectionCacheUpdate` into a keyed
+`StartupRenderSectionSeed` and hands the already-compiled batch forward at
+completion (`NativeSessionStartupPump::complete().startup_sections`), so no
+startup lane recompiles from metadata to seed the draw. Every native startup
+lane (desktop flat, flat Android, XR local + remote/replacement, offscreen,
+perf) shares that one host-neutral pump and seed. The dirty-all recompile
+survives only as the renderer/surface **resource-rebuild** path and was renamed
+`recompile_all_render_section_meshes_for_resource_rebuild(...)` to make that
+explicit; an enforcement test
+(`mclone-app-runtime/tests/startup_contract_lock.rs`) fails if any file outside
+its owner references it. `resident_mesh_owned_bytes` stays 0; the transient seed
+bytes exist only for the startup window and drop to zero at completion.
+
 ### Slice 2: Make Draw Resources Creatable Empty
 
 Add an explicit empty terrain draw-resource initialization path:

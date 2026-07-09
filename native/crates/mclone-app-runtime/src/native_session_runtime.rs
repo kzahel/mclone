@@ -984,8 +984,9 @@ where
     /// Consume the pump, returning the ready runtime, the transient startup render
     /// seed batch for a one-shot draw-resource upload, and the final startup step
     /// (docs/tactical/167). Use this instead of
-    /// `compile_all_render_section_meshes(...)`: it hands over meshes the pump
-    /// already compiled rather than recompiling from metadata-only resident state.
+    /// `recompile_all_render_section_meshes_for_resource_rebuild(...)`: it hands
+    /// over meshes the pump already compiled rather than recompiling from
+    /// metadata-only resident state.
     pub fn complete(mut self) -> NativeSessionStartupCompletion<S> {
         let startup_sections = self.render_seed.drain_sections();
         NativeSessionStartupCompletion {
@@ -1635,11 +1636,11 @@ impl LocalIntegratedSceneRuntime {
     /// retaining CPU meshes (docs/tactical/163).
     ///
     /// docs/tactical/167: this is a renderer/surface **resource-rebuild** path,
-    /// not a startup seeding path. New startup callers must take their draw seed
-    /// from the startup pump's render seed; do not add startup uses of this
-    /// function. Migrating the remaining startup callers off it is tracked by
-    /// tactical 167.
-    pub fn compile_all_render_section_meshes(
+    /// not a startup seeding path — the name says so. Startup callers must take
+    /// their draw seed from the startup pump's render seed
+    /// ([`NativeSessionStartupCompletion::startup_sections`]); the last startup
+    /// callers were migrated off this in Slice 3. Do not add startup uses.
+    pub fn recompile_all_render_section_meshes_for_resource_rebuild(
         &mut self,
         camera_position: Vec3,
     ) -> Result<Vec<TexturedRenderSectionMesh>> {
@@ -2232,16 +2233,19 @@ where
         }
     }
 
-    /// See [`LocalIntegratedSceneRuntime::compile_all_render_section_meshes`].
+    /// See
+    /// [`LocalIntegratedSceneRuntime::recompile_all_render_section_meshes_for_resource_rebuild`].
     /// docs/tactical/167: resource-rebuild only — not for startup draw seeding.
-    pub fn compile_all_render_section_meshes(
+    pub fn recompile_all_render_section_meshes_for_resource_rebuild(
         &mut self,
         camera_position: Vec3,
     ) -> Result<Vec<TexturedRenderSectionMesh>> {
         match self {
-            Self::Local(scene) => scene.compile_all_render_section_meshes(camera_position),
+            Self::Local(scene) => {
+                scene.recompile_all_render_section_meshes_for_resource_rebuild(camera_position)
+            }
             Self::RemoteDedicated(scene) => {
-                scene.compile_all_render_section_meshes(camera_position)
+                scene.recompile_all_render_section_meshes_for_resource_rebuild(camera_position)
             }
         }
     }
@@ -3109,11 +3113,11 @@ where
     /// retaining CPU meshes (docs/tactical/163).
     ///
     /// docs/tactical/167: this is a renderer/surface **resource-rebuild** path,
-    /// not a startup seeding path. New startup callers must take their draw seed
-    /// from the startup pump's render seed; do not add startup uses of this
-    /// function. Migrating the remaining startup callers off it is tracked by
-    /// tactical 167.
-    pub fn compile_all_render_section_meshes(
+    /// not a startup seeding path — the name says so. Startup callers must take
+    /// their draw seed from the startup pump's render seed
+    /// ([`NativeSessionStartupCompletion::startup_sections`]); the last startup
+    /// callers were migrated off this in Slice 3. Do not add startup uses.
+    pub fn recompile_all_render_section_meshes_for_resource_rebuild(
         &mut self,
         camera_position: Vec3,
     ) -> Result<Vec<TexturedRenderSectionMesh>> {

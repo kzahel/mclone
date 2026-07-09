@@ -1,10 +1,14 @@
 # 167: Shared Native Session Startup Contract
 
-Status: Slice 4 complete 2026-07-09 (camera/interest startup reconciliation is
+Status: Slice 5 complete 2026-07-09 (startup contract locked in: the dirty-all
+recompile is renamed `recompile_all_render_section_meshes_for_resource_rebuild`
+and confined to `native_session_runtime.rs` by an enforcement test; every native
+startup lane seeds from the shared pump's render seed; renderer-rebuild + Quest
+on-device smokes green). Slice 4 landed camera/interest startup reconciliation as
 one shared helper in `mclone-app-runtime`, and the full clear-ready/re-pump
 invariant lands where a large startup teleport is real — both XR paths and flat
 Android drive `NativeSessionStartupPump::drive_to_ready_reconciled`, on-device
-evidence showed a far XR view pose otherwise leaves the ready frame blank).
+evidence showed a far XR view pose otherwise leaves the ready frame blank.
 Slice 3 routed all native platform startup consumers through the shared
 `NativeSessionStartupPump<S>` for both host modes; the divergent blocking
 `poll_until_idle` + `sync_all_render_sections` startup paths are gone. Slice 2
@@ -785,6 +789,72 @@ cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone
 MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-session-smoke
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 ```
+
+#### Slice 5 Result (2026-07-09)
+
+Naming/enforcement — the dirty-all recompile is renamed
+`recompile_all_render_section_meshes_for_resource_rebuild(...)` (all three
+`mclone-app-runtime/native_session_runtime.rs` copies: the `LocalIntegratedSceneRuntime`
+def, the `NativeSceneRuntime<S>` host-mode dispatch, and the
+`RemoteDedicatedSceneRuntime` def), so the name now states it is a
+renderer/surface resource-rebuild path, not a startup seeding path. It is
+callerless in the tree: real resource rebuilds already run
+`mark_all_render_sections_dirty_for_resource_rebuild(...)` +
+`sync_all_render_sections(...)` inline (desktop `sync_all_runtime_sections`,
+`--renderer-rebuild-smoke`), and every startup lane seeds from the pump's render
+seed. A new source-scan enforcement test,
+`mclone-app-runtime/tests/startup_contract_lock.rs` (mirroring the
+`mclone-web-client/tests/` ABI-lock convention), walks `native/apps` +
+`native/crates` and fails if any non-comment line outside the owner file
+references the helper — a fresh call site is almost always a startup path trying
+to bypass the seed, and now fails a host test instead of silently
+double-compiling.
+
+Compatibility wrappers — `LocalIntegratedStartupPump` / `LocalIntegratedStartupStep`
+were re-audited for deletion and **kept**: they are not dead. XR local startup
+(`mclone-xr-scene/session.rs`) still constructs the wrapper and drives its
+Slice-4 `drive_to_ready_reconciled` for the far-view-pose finalize, and three
+app-runtime unit tests build it directly. The wrapper holds no separate startup
+behavior (it is a thin map over `NativeSessionStartupPump<LocalOnlySession>`), so
+it is a live local-lane convenience, not slice-safety scaffolding, and stays.
+No other slice-safety wrappers survived earlier slices (Slice 1 already deleted
+the desktop `WindowSceneStartupPump::into_runtime` /
+`compile_all_render_section_meshes` pass-throughs and `cached_runtime_sections`).
+
+Docs — `docs/platforms.md` needed no change: no startup smoke command or log line
+changed this slice (the rename is internal; the Quest smoke line remains
+`XR local world playable ... sections=N` and the desktop counters are unchanged).
+[`163`](163-render-section-cpu-mesh-eviction.md)'s "Known follow-up" (XR local
+double-compile) is now marked resolved by this tactical: the redundant startup
+remesh is gone tree-wide and the helper is renamed/locked.
+
+Tripwires — `resident_mesh_owned_bytes` stays 0 (unchanged; `mclone-render-session`
+103 green). The transient `StartupRenderSectionSeed` owned bytes are the only
+startup mesh pressure and drain to zero at `complete()` (app-runtime seed +
+completion tests, 185 pass). The renamed dirty-all recompile path stays available
+for real rebuilds: `--renderer-rebuild-smoke` reuploaded all 664 sections with
+`mismatch_pixels=0`, `state_preserved=true`.
+
+Validation — `cargo fmt --all --check` clean (repo is fmt-clean under the local
+toolchain after `c52c2fd1`; the renamed lines and the new test format clean).
+`cargo test`: mesh 85, render 126, render-session 103, app-runtime 185 + the new
+`startup_contract_lock` (1), native-client 179, xr-scene 74 — all pass. Workspace
+`cargo check` and `wasm32` `mclone-web-client` `cargo check` clean; `git diff
+--check` clean.
+
+Rendered/device — local `--screenshot --startup-wait playable` drew terrain
+(6 sections, 2 drawn) from the seed; `--renderer-rebuild-smoke` passed
+(above). Quest 3 `native:android-xr:session-smoke` ran on-device this pass:
+new-world reached `XR local world playable seed=12345 polls=82 sections=112
+target_ready=9/9` with a ready summary of `sections=123 drawn_sections=32
+drawn_indices=265422` (terrain drawn — the Slice-4 re-pump path intact after the
+rename), and the replacement session reached `MCLONE_ANDROID_XR_REPLACEMENT_READY
+new-world seed=246813579 sections=20 drawn_sections=2 drawn_indices=9348`. The
+flat Android AVD `native:android:avd-session-smoke` is deferred to the next
+Android pass (the connected device is the Quest 3, not a flat-Android phone;
+available AVDs are unrelated x86 images) — the flat Android startup path shares
+the exact renamed/seed contract exercised on-device by the XR lane and on desktop
+by both host modes, and is covered by `cargo ndk check`.
 
 ## Implementation Guardrails
 
