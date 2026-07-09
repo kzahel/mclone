@@ -124,6 +124,8 @@ pub fn xr_locomotion_input_from_controllers_with_turn_policy(
     let right_axis = xr_right_stick_axis(controllers);
     let jump = xr_right_a_pressed(controllers);
     let descend = xr_right_b_pressed(controllers);
+    let sprint = xr_sprint_pressed(controllers);
+    let shift = xr_sneak_pressed(controllers);
     let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
         .then(|| xr_left_stick_movement_impulse(left_axis));
     let mouse_delta_x =
@@ -135,14 +137,28 @@ pub fn xr_locomotion_input_from_controllers_with_turn_policy(
             0.0
         };
 
+    // Spell every field explicitly: this is a gameplay-semantic constructor and a
+    // bare `..default()` here is exactly how sprint/sneak were silently dropped
+    // on both XR surfaces (tactical 168 Slice 0). New fields must fail to compile
+    // rather than default to "off" on XR.
     EngineCameraInput {
         dt_seconds,
         mouse_delta_x,
+        mouse_delta_y: 0.0,
+        forward: false,
+        backward: false,
+        left: false,
+        right: false,
         jump,
         descend,
+        shift,
+        sprint,
         movement_impulse,
         movement_yaw_radians,
-        ..EngineCameraInput::default()
+        hand_push: None,
+        hand_push_emulation: false,
+        thruster: None,
+        thruster_emulation: false,
     }
 }
 
@@ -190,6 +206,26 @@ pub(crate) fn xr_right_b_pressed(controllers: &[XrControllerSnapshot]) -> bool {
     controllers
         .iter()
         .any(|controller| controller.hand == XrHand::Right && controller.b_pressed)
+}
+
+/// Sprint binding for XR locomotion (tactical 168 Slice 0). The left thumbstick
+/// click is already the game-UI toggle (`XR_GAME_UI_TOGGLE_HAND`), so sprint —
+/// a movement modifier — maps to the left-hand Y button, next to the movement
+/// stick. The shared player already fully supports sprint; only the XR input
+/// assembly was dropping it.
+pub(crate) fn xr_sprint_pressed(controllers: &[XrControllerSnapshot]) -> bool {
+    controllers
+        .iter()
+        .any(|controller| controller.hand == XrHand::Left && controller.y_pressed)
+}
+
+/// Sneak binding for XR locomotion (tactical 168 Slice 0). Mapped to the right
+/// thumbstick *click*, which does not collide with snap-turn (the right stick
+/// *axis*). Jump/descend already occupy the right A/B buttons.
+pub(crate) fn xr_sneak_pressed(controllers: &[XrControllerSnapshot]) -> bool {
+    controllers
+        .iter()
+        .any(|controller| controller.hand == XrHand::Right && controller.thumbstick_pressed)
 }
 
 pub fn xr_hand_push_input_from_controllers(
@@ -838,5 +874,54 @@ mod thruster_calibration_tests {
             "right palm normal should point down, got {:?}",
             input.right.palm_normal
         );
+    }
+
+    #[test]
+    fn left_y_button_maps_to_sprint() {
+        // Sprint is the left-hand Y button (the left thumbstick click is the
+        // game-UI toggle). Tactical 168 Slice 0: sprint was previously dropped by
+        // a `..default()` and unreachable on both XR surfaces.
+        let mut left = controller(XrHand::Left, None, 0.0);
+        left.y_pressed = true;
+        let input = xr_locomotion_input_from_controllers(
+            &[left, controller(XrHand::Right, None, 0.0)],
+            0.016,
+            None,
+        );
+        assert!(input.sprint, "left Y button should engage sprint");
+        assert!(!input.shift, "left Y button should not engage sneak");
+    }
+
+    #[test]
+    fn right_thumbstick_click_maps_to_sneak() {
+        // Sneak is the right thumbstick *click*, which does not collide with the
+        // snap-turn axis on the same stick (tactical 168 Slice 0).
+        let mut right = controller(XrHand::Right, None, 0.0);
+        right.thumbstick_pressed = true;
+        let input = xr_locomotion_input_from_controllers(
+            &[controller(XrHand::Left, None, 0.0), right],
+            0.016,
+            None,
+        );
+        assert!(input.shift, "right thumbstick click should engage sneak");
+        assert!(
+            !input.sprint,
+            "right thumbstick click should not engage sprint"
+        );
+    }
+
+    #[test]
+    fn left_thumbstick_click_is_not_sprint_or_sneak() {
+        // Left thumbstick click is reserved for the game-UI toggle; it must not
+        // leak into locomotion as sprint/sneak.
+        let mut left = controller(XrHand::Left, None, 0.0);
+        left.thumbstick_pressed = true;
+        let input = xr_locomotion_input_from_controllers(
+            &[left, controller(XrHand::Right, None, 0.0)],
+            0.016,
+            None,
+        );
+        assert!(!input.sprint);
+        assert!(!input.shift);
     }
 }
