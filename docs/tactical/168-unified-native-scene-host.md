@@ -1,8 +1,8 @@
 # 168: Unified Native Scene Host
 
-Status: approved direction 2026-07-09; implementation not started. Slice 0 is
-ready to begin with no other context beyond this document and the referenced
-code.
+Status: approved direction 2026-07-09; Slice 0 (bug-grade parity pre-fixes)
+landed 2026-07-09. Slices 1+ not started; Slice 1 is ready to begin with no
+other context beyond this document and the referenced code.
 
 Workstream: native Rust shared runtime convergence. This tactical collapses the
 four native client runtimes (desktop flat, desktop XR, flat Android, Android
@@ -258,11 +258,38 @@ settled.
 Every slice must independently satisfy the **cross-slice guardrails** at the
 bottom of this doc. Statuses below are all "not started".
 
-### Slice 0: Bug-grade parity pre-fixes
+### Slice 0: Bug-grade parity pre-fixes — DONE (2026-07-09)
 
 Goal: fix the behavior divergences that exist today, before any structural
 work, so later slices migrate correct behavior instead of enshrining bugs.
 Each fix is small and independently landable.
+
+Landed decisions (see deliverables below for the reasoning):
+
+- **XR sprint/sneak bindings.** Sprint = left-hand **Y button** (`y_pressed`);
+  the suggested left-thumbstick click was unavailable because it is already the
+  game-UI toggle (`XR_GAME_UI_TOGGLE_HAND`). Sneak = **right thumbstick click**
+  (`thumbstick_pressed`), which does not collide with snap-turn (the right-stick
+  *axis*). `EngineCameraInput` in `xr_locomotion_input_from_controllers_*` is now
+  spelled exhaustively (no `..default()`); three unit tests lock the bindings.
+- **Quest save-on-pause.** Implemented as an explicit synchronous flush (option
+  2), not session teardown/rebuild (option 1), to avoid regressing the
+  in-headset resume experience. New `NativeRunnerControl::FlushPersistence`
+  (ack-gated, blocking) → `NativeIntegratedServerRunner::flush_persistence` →
+  `NativeSceneRuntime::flush_persistence` (remote host modes no-op) →
+  `XrMcloneTerrainState::flush_persistence`; android-xr flushes on
+  `MainEvent::Pause`/`Stop` from inside the frame loop
+  (`poll_android_lifecycle`), logging `MCLONE_ANDROID_XR_PAUSE_SAVE`.
+
+Validation status: full compile/test battery green (fmt, workspace check, 77
+xr-scene tests + app-runtime/native-client/server, wasm check, `cargo ndk`
+check for both Android apps). Device: Quest session-smoke drew terrain
+(sections=123, drawn_sections=32) with no regression; flat Android AVD session +
+touch smokes drew terrain and ran clean. The Quest Pause→force-stop→relaunch
+retains-blocks acceptance still needs a **worn-headset manual pass** (the VR
+compositor terminates the window when the headset is off-head, so the app cannot
+be driven into the frame loop remotely); the flush path is compile- and
+logic-verified and fires from the lifecycle pump.
 
 Deliverables:
 

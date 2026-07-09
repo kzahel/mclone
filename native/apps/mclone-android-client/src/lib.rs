@@ -3325,6 +3325,12 @@ mod android {
             movement_impulse: frame
                 .analog_movement
                 .map(|movement| EngineCameraMovementImpulse::new(movement.left, movement.forward)),
+            // Match desktop (`flat_client_driver.rs`): flat surfaces enable
+            // hand-push / thruster flight emulation so those movement modes are
+            // reachable without a headset (tactical 168 Slice 0). This copy dies
+            // in Slice 8; the flags keep behavior right until then.
+            hand_push_emulation: true,
+            thruster_emulation: true,
             ..EngineCameraInput::default()
         }
     }
