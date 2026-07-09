@@ -10,6 +10,7 @@ use mclone_render_session::{
 };
 use mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE;
 
+use crate::far_lod::FarTerrainLodConfig;
 use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
 };
@@ -140,6 +141,10 @@ pub struct StartupSceneOptions {
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
+    /// Shared far-terrain LOD startup config. Disabled by default on every
+    /// native target; the shared owner so far-LOD is injected uniformly instead
+    /// of via per-app scene-option forks.
+    pub far_lod: FarTerrainLodConfig,
 }
 
 impl Default for StartupSceneOptions {
@@ -159,6 +164,7 @@ impl Default for StartupSceneOptions {
             debug_passive_showcase: true,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+            far_lod: FarTerrainLodConfig::default(),
         }
     }
 }
@@ -725,6 +731,7 @@ mod tests {
                 debug_passive_showcase: true,
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+                far_lod: FarTerrainLodConfig::default(),
             }
         );
         assert_eq!(
@@ -791,6 +798,7 @@ mod tests {
                 debug_passive_showcase: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
+                far_lod: FarTerrainLodConfig::default(),
             }
         );
         assert_eq!(
@@ -1035,6 +1043,7 @@ mod tests {
                 debug_passive_showcase: false,
                 lighting_enabled: false,
                 light_status_batch_size: 5,
+                far_lod: FarTerrainLodConfig::default(),
             }
         );
         assert!(!options.render_options.section_occlusion_culling);

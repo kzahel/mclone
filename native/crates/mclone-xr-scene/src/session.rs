@@ -1573,14 +1573,9 @@ pub(crate) fn normalized_xr_remote_addr(addr: &str) -> String {
 }
 
 pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
-    let mut settings = ClientExperienceSettingsProfile::all_supported();
-    settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    ClientExperienceProfile::new(settings)
+    // Shared native profile owner; the XR crate keeps this thin crate-local alias
+    // so its several call sites stay stable.
+    xr_native_client_experience_profile()
 }
 
 pub(crate) fn local_integrated_scene_options(

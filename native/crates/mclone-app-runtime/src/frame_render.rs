@@ -914,6 +914,64 @@ where
     )
 }
 
+/// Single-view full-frame render that also draws the retained far-terrain LOD
+/// shell. Same shape as [`render_full_frame_for_view`] with the far-LOD renderer
+/// and prepared mesh threaded in, so flat targets that own their renderers
+/// individually (Android) get the same far-LOD path desktop gets through
+/// [`FlatRenderResources`].
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_far_lod<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodMesh>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        SINGLE_VIEW_SLOT,
+        far_lod,
+        far_lod_mesh,
+        None,
+        None,
+        None,
+        render_stats,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render_full_frame_for_view_in_slot<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,

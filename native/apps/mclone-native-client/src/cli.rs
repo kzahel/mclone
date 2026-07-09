@@ -511,6 +511,7 @@ impl SceneOptions {
             debug_passive_showcase: self.debug_passive_showcase,
             lighting_enabled: self.lighting_enabled,
             light_status_batch_size: self.light_status_batch_size,
+            far_lod: self.far_lod,
         }
     }
 
@@ -538,7 +539,7 @@ impl SceneOptions {
             light_status_batch_size: scene.light_status_batch_size,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
-            far_lod: FarTerrainLodConfig::default(),
+            far_lod: scene.far_lod,
             startup_lod_prewarm: true,
         })
     }

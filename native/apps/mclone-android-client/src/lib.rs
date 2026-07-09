@@ -22,19 +22,20 @@ mod android {
     };
     use mclone_app_runtime::client_experience::{
         ClientExperienceActionContext, ClientExperienceCapabilityProjection,
-        ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
-        ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
-        ClientExperienceSettingEffect, ClientExperienceSettingsEffects,
-        ClientExperienceSettingsProfile, ClientExperienceSettingsState,
+        ClientExperienceController, ClientExperienceEffects, ClientExperienceGameplayEffect,
+        ClientExperienceProjectionEffect, ClientExperienceSettingEffect,
+        ClientExperienceSettingsEffects, ClientExperienceSettingsState,
+        android_flat_native_client_experience_profile,
         client_experience_should_apply_ui_projection,
     };
     use mclone_app_runtime::client_session_policy::{
         ClientSessionEffects, ClientSessionHostAction, ClientSessionUiEffects,
         client_session_failed_start_ui_effects,
     };
+    use mclone_app_runtime::far_lod::FarTerrainLodConfig;
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
-        render_full_frame_for_view,
+        render_full_frame_for_view_with_far_lod,
     };
     use mclone_app_runtime::host_mode::{
         RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
@@ -83,6 +84,7 @@ mod android {
         ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
         TexturedSectionUploadReport,
     };
+    use mclone_render::far_lod::FarTerrainLodRenderer;
     use mclone_render::gui::GuiRenderer;
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
@@ -222,6 +224,8 @@ mod android {
         depth: ChunkDepthTarget,
         sky: SkyRenderer,
         draw: TexturedSectionDrawResources,
+        far_lod: FarTerrainLodConfig,
+        far_lod_renderer: FarTerrainLodRenderer,
         gui: GuiRenderer,
         world_catalog: Option<NativeWorldCatalog>,
         scene_options: AndroidSceneOptions,
@@ -621,6 +625,7 @@ mod android {
                     None
                 }
             };
+            let far_lod_renderer = FarTerrainLodRenderer::new(device, format);
             let mut gui = GuiRenderer::new(device, format);
             gui.upload_texture_atlas(device, queue, started.scene.mesh_assets().atlas.as_upload())
                 .context("upload Android GUI atlas")?;
@@ -629,7 +634,7 @@ mod android {
                 .clone()
                 .map(NativeWorldCatalog::new);
             let mut client_experience =
-                ClientExperienceController::new(android_client_experience_profile());
+                ClientExperienceController::new(android_flat_native_client_experience_profile());
             client_experience
                 .catalog_mut()
                 .set_capabilities(world_catalog.as_ref().map_or_else(
@@ -641,6 +646,8 @@ mod android {
                 depth,
                 sky,
                 draw: started.draw,
+                far_lod: scene_options.far_lod,
+                far_lod_renderer,
                 gui,
                 world_catalog,
                 scene_options: scene_options.clone(),
@@ -1523,11 +1530,24 @@ mod android {
                             if enabled { "enabled" } else { "disabled" }
                         );
                     }
-                    ClientExperienceSettingEffect::SetFarLod { .. }
-                    | ClientExperienceSettingEffect::ClearFarLod => {
-                        self.session_status =
-                            StatusOverlay::new("Far LOD is unavailable on flat Android", false);
-                        ok = false;
+                    ClientExperienceSettingEffect::SetFarLod {
+                        enabled,
+                        extra_radius_chunks,
+                    } => {
+                        self.far_lod = self.far_lod.with_extra_radius_chunks(extra_radius_chunks);
+                        self.far_lod.enabled = enabled;
+                        log::info!(
+                            "Mclone Android far LOD {} ({} chunks beyond render distance)",
+                            if self.far_lod.enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            },
+                            self.far_lod.extra_radius_chunks
+                        );
+                    }
+                    ClientExperienceSettingEffect::ClearFarLod => {
+                        self.scene.clear_far_lod();
                     }
                     ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
                         self.player_collision_box_visible = visible;
@@ -1728,9 +1748,8 @@ mod android {
                 max_render_distance: ANDROID_MAX_RENDER_DISTANCE,
                 section_occlusion_culling: self.render_options.section_occlusion_culling,
                 force_fullbright: self.render_options.force_fullbright,
-                far_lod_enabled: false,
-                far_lod_range_chunks:
-                    mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+                far_lod_enabled: self.far_lod.enabled,
+                far_lod_range_chunks: self.far_lod.extra_radius_chunks as i32,
                 min_far_lod_range_chunks:
                     mclone_app_runtime::far_lod::MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
                 max_far_lod_range_chunks:
@@ -2048,6 +2067,8 @@ mod android {
             );
             let time_of_day = self.scene.time_of_day();
             let sun_angle = self.scene.sun_angle();
+            let sky_clear_color = self.scene.sky_clear_color();
+            let far_lod_center = self.camera.snapshot().chunk_pos;
             let render_view = self
                 .camera
                 .render_pose(self.scene.render_distance())
@@ -2059,18 +2080,26 @@ mod android {
             let ui_covers_world = self.ui.covers_world();
             let (gui_draw, flat_hud_retained_cache) = self.gui_draw_list(gui_scale, ui_state);
             let gui_active = !gui_draw.commands().is_empty();
-            let mut summary = render_full_frame_for_view(
+            let far_lod_mesh = self.scene.prepare_far_lod_mesh(
+                self.far_lod,
+                self.scene_options.seed,
+                far_lod_center,
+                camera_position,
+            );
+            let mut summary = render_full_frame_for_view_with_far_lod(
                 frame,
                 &self.depth,
                 &self.sky,
                 &mut self.draw,
+                Some(&mut self.far_lod_renderer),
+                far_lod_mesh,
                 None,
                 None,
                 Some(&mut self.gui),
                 render_view,
                 &[],
                 None,
-                self.scene.sky_clear_color(),
+                sky_clear_color,
                 time_of_day,
                 sun_angle,
                 self.render_options,
@@ -2202,6 +2231,7 @@ mod android {
         debug_passive_showcase: bool,
         lighting_enabled: bool,
         light_status_batch_size: usize,
+        far_lod: FarTerrainLodConfig,
         remote_addr: Option<String>,
         world_root: Option<PathBuf>,
         world_dir: Option<PathBuf>,
@@ -2337,6 +2367,7 @@ mod android {
             debug_passive_showcase: true,
             lighting_enabled: true,
             light_status_batch_size: StartupSceneOptions::default().light_status_batch_size,
+            far_lod: FarTerrainLodConfig::default(),
         }
     }
 
@@ -2356,6 +2387,7 @@ mod android {
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
             light_status_batch_size: scene.light_status_batch_size,
+            far_lod: scene.far_lod,
             remote_addr: scene.remote_addr,
             world_root: storage.world_root.clone(),
             world_dir: storage.world_dir.clone(),
@@ -2443,35 +2475,6 @@ mod android {
         }
     }
 
-    fn android_client_experience_profile() -> ClientExperienceProfile {
-        let mut settings = ClientExperienceSettingsProfile::all_supported();
-        settings.far_lod =
-            ClientExperienceCapabilityStatus::Unsupported("Far LOD is unavailable on flat Android");
-        settings.travel_assist = ClientExperienceCapabilityStatus::Unsupported(
-            "Travel assist is unavailable on flat Android",
-        );
-        settings.turn_mode = ClientExperienceCapabilityStatus::Unsupported(
-            "Turn mode is unavailable on flat Android",
-        );
-        settings.xr_turn = ClientExperienceCapabilityStatus::Unsupported(
-            "XR turn mode is unavailable on flat Android",
-        );
-        settings.frame_pacing = ClientExperienceCapabilityStatus::Unsupported(
-            "Frame pacing is fixed by Android surface presentation",
-        );
-        settings.fps_cap =
-            ClientExperienceCapabilityStatus::Unsupported("FPS cap is fixed on flat Android");
-        settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
-            "Frame pipeline overlay is unavailable on flat Android",
-        );
-        settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
-            "Debug diagnostics panel is unavailable on flat Android",
-        );
-        settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
-            "Server simulation cadence is unavailable on flat Android",
-        );
-        ClientExperienceProfile::new(settings)
-    }
 
     fn android_scene_options_for_session_request(
         renderer: &AndroidFrameRenderer,

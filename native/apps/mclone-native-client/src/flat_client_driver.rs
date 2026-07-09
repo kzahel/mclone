@@ -5,11 +5,10 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 use mclone_app_runtime::client_experience::{
-    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
-    ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
-    ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
-    ClientExperienceSettingEffect, ClientExperienceSettingsProfile, ClientExperienceSettingsState,
-    client_experience_should_apply_ui_projection,
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection, ClientExperienceController,
+    ClientExperienceEffects, ClientExperienceGameplayEffect, ClientExperienceProjectionEffect,
+    ClientExperienceSettingEffect, ClientExperienceSettingsState,
+    client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
     ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
@@ -473,7 +472,9 @@ impl FlatClientDriver {
             latest_target_frame_ms: None,
             render_budget: DesktopRenderBudgetController::default(),
             world_catalog: scene.world_root.clone().map(NativeWorldCatalog::new),
-            client_experience: ClientExperienceController::new(desktop_client_experience_profile()),
+            client_experience: ClientExperienceController::new(
+                desktop_native_client_experience_profile(),
+            ),
             status_overlay: StatusOverlay::hidden(),
             desktop_blink_debug: DesktopBlinkDebugState::default(),
             desktop_blink_debug_worker: None,
@@ -2768,15 +2769,6 @@ fn max_optional_ms(left: Option<f64>, right: Option<f64>) -> Option<f64> {
 
 fn usize_to_u32(value: usize) -> u32 {
     value.try_into().unwrap_or(u32::MAX)
-}
-
-fn desktop_client_experience_profile() -> ClientExperienceProfile {
-    let mut settings = ClientExperienceSettingsProfile::all_supported();
-    settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    ClientExperienceProfile::new(settings)
 }
 
 pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUiRenderState {

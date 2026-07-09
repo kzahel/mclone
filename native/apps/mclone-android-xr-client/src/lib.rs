@@ -987,6 +987,7 @@ mod android {
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
             light_status_batch_size: scene.light_status_batch_size,
+            far_lod: scene.far_lod,
         }
     }
 
@@ -1008,7 +1009,7 @@ mod android {
             lighting_enabled: scene.lighting_enabled,
             light_status_batch_size: scene.light_status_batch_size,
             adaptive_chunk_publication_budget: true,
-            far_lod: Default::default(),
+            far_lod: scene.far_lod,
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
             skip_actors: false,

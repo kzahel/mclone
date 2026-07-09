@@ -11,12 +11,10 @@ use mclone_app_runtime::client_catalog_policy::{
     ClientCatalogEffects, ClientCatalogRequest, ClientCatalogSessionStart,
 };
 use mclone_app_runtime::client_experience::{
-    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
-    ClientExperienceCapabilityStatus, ClientExperienceController, ClientExperienceEffects,
-    ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
-    ClientExperienceSettingEffect, ClientExperienceSettingsEffects,
-    ClientExperienceSettingsProfile, ClientExperienceSettingsState,
-    client_experience_should_apply_ui_projection,
+    ClientExperienceActionContext, ClientExperienceCapabilityProjection, ClientExperienceController,
+    ClientExperienceEffects, ClientExperienceGameplayEffect, ClientExperienceProjectionEffect,
+    ClientExperienceSettingEffect, ClientExperienceSettingsEffects, ClientExperienceSettingsState,
+    client_experience_should_apply_ui_projection, web_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
     ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
@@ -5970,23 +5968,6 @@ fn write_active_session_to_js_object(
     Ok(())
 }
 
-fn web_client_experience_profile() -> ClientExperienceProfile {
-    let mut settings = ClientExperienceSettingsProfile::all_supported();
-    settings.far_lod = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.travel_assist = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
-        "Frame pipeline overlay is unavailable until web emits frame accounting reports",
-    );
-    settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
-        "Debug diagnostics panel is unavailable until the web presenter is wired",
-    );
-    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    ClientExperienceProfile::new(settings)
-}
 
 fn web_action_updates_world_catalog_render_state(action: GameUiAction) -> bool {
     matches!(

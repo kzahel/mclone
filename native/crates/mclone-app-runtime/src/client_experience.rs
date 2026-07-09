@@ -316,7 +316,201 @@ impl ClientExperienceSettingsProfile {
             _ => ClientExperienceCapabilityStatus::Supported,
         }
     }
+
+    /// The feature axis: engine features whose *availability* must be uniform
+    /// across every native target (desktop flat, XR, Android flat, Android XR).
+    /// A native target may only diverge here with an explicit, reason-bearing
+    /// [`ClientExperienceCapabilityStatus::Unsupported`] that is tracked in
+    /// [`NATIVE_FEATURE_PARITY_EXCEPTIONS`]; a bare
+    /// [`ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED`] (silent drift)
+    /// is forbidden. Input/surface-shaped capabilities (turn, touch, crosshair,
+    /// frame pacing, fps cap) are intentionally excluded — those legitimately
+    /// differ by hardware and may vary per platform.
+    pub fn feature_axis(
+        self,
+    ) -> [(
+        ClientExperienceFeatureCapability,
+        ClientExperienceCapabilityStatus,
+    ); 15] {
+        use ClientExperienceFeatureCapability as F;
+        [
+            (F::SectionOcclusion, self.section_occlusion),
+            (F::Fullbright, self.fullbright),
+            (F::FarLod, self.far_lod),
+            (F::PlayerCollisionBox, self.player_collision_box),
+            (F::FirstPersonPlayer, self.first_person_player),
+            (F::FramePipelineOverlay, self.frame_pipeline_overlay),
+            (F::DebugDiagnostics, self.debug_diagnostics),
+            (F::PlayerModel, self.player_model),
+            (F::MovementMode, self.movement_mode),
+            (F::CollisionMode, self.collision_mode),
+            (F::TravelAssist, self.travel_assist),
+            (F::RenderDistance, self.render_distance),
+            (F::FlySpeed, self.fly_speed),
+            (F::MovementSpeed, self.movement_speed),
+            (F::ServerSimulationCadence, self.server_simulation_cadence),
+        ]
+    }
 }
+
+/// Engine features that must share the same availability across all native
+/// targets. See [`ClientExperienceSettingsProfile::feature_axis`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientExperienceFeatureCapability {
+    SectionOcclusion,
+    Fullbright,
+    FarLod,
+    PlayerCollisionBox,
+    FirstPersonPlayer,
+    FramePipelineOverlay,
+    DebugDiagnostics,
+    PlayerModel,
+    MovementMode,
+    CollisionMode,
+    TravelAssist,
+    RenderDistance,
+    FlySpeed,
+    MovementSpeed,
+    ServerSimulationCadence,
+}
+
+/// Native client-experience targets. A single XR profile serves both desktop XR
+/// and Android XR, so three profiles cover the four native configurations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativePlatform {
+    DesktopFlat,
+    Xr,
+    AndroidFlat,
+}
+
+/// Canonical native feature baseline: every engine feature available. Native
+/// profiles derive from this and may only subtract input/surface capabilities,
+/// or record a temporary, reason-bearing feature exception (tracked in
+/// [`NATIVE_FEATURE_PARITY_EXCEPTIONS`]). This is the single owner that keeps a
+/// feature from being silently `Unsupported` on one native target.
+pub fn native_client_experience_baseline() -> ClientExperienceSettingsProfile {
+    ClientExperienceSettingsProfile::all_supported()
+}
+
+/// Desktop flat profile: full native baseline minus touch/turn input, which are
+/// hardware-shaped (input/surface axis, free to differ).
+pub fn desktop_native_client_experience_profile() -> ClientExperienceProfile {
+    let mut settings = native_client_experience_baseline();
+    settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    ClientExperienceProfile::new(settings)
+}
+
+/// XR profile (desktop XR and Android XR): full native baseline minus
+/// surface/input capabilities that XR owns differently (world-space reticle,
+/// compositor-owned pacing, controller turn), plus one tracked feature-axis
+/// exception for cadence.
+pub fn xr_native_client_experience_profile() -> ClientExperienceProfile {
+    let mut settings = native_client_experience_baseline();
+    settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    // Feature-axis exception (tracked): cadence control is not yet wired on XR.
+    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
+        "Server simulation cadence is not yet wired on XR",
+    );
+    ClientExperienceProfile::new(settings)
+}
+
+/// Android flat profile: full native baseline minus touch-device/surface input,
+/// plus tracked feature-axis exceptions. Those exceptions are genuine Android
+/// runtime plumbing gaps (not hardware limits) to burn down toward the native
+/// baseline one feature per slice — see [`NATIVE_FEATURE_PARITY_EXCEPTIONS`].
+pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfile {
+    let mut settings = native_client_experience_baseline();
+    settings.turn_mode =
+        ClientExperienceCapabilityStatus::Unsupported("Turn mode is unavailable on flat Android");
+    settings.xr_turn = ClientExperienceCapabilityStatus::Unsupported(
+        "XR turn mode is unavailable on flat Android",
+    );
+    settings.frame_pacing = ClientExperienceCapabilityStatus::Unsupported(
+        "Frame pacing is fixed by Android surface presentation",
+    );
+    settings.fps_cap =
+        ClientExperienceCapabilityStatus::Unsupported("FPS cap is fixed on flat Android");
+    // Far LOD is wired on flat Android (shared far-LOD render path); it stays on
+    // the native baseline. Do not gate it here.
+    settings.travel_assist = ClientExperienceCapabilityStatus::Unsupported(
+        "Travel assist is unavailable on flat Android",
+    );
+    settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
+        "Frame pipeline overlay is unavailable on flat Android",
+    );
+    settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
+        "Debug diagnostics panel is unavailable on flat Android",
+    );
+    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
+        "Server simulation cadence is unavailable on flat Android",
+    );
+    ClientExperienceProfile::new(settings)
+}
+
+/// Web profile: the one non-native target, whose threading/runtime model
+/// legitimately forces feature divergence. Web is exempt from native feature
+/// parity, but every divergence must still be reason-bearing (never a silent
+/// `PROFILE_UNSUPPORTED` on the feature axis), enforced by
+/// `web_feature_divergences_are_reason_bearing`.
+pub fn web_client_experience_profile() -> ClientExperienceProfile {
+    let mut settings = native_client_experience_baseline();
+    settings.far_lod = ClientExperienceCapabilityStatus::Unsupported(
+        "Far LOD is measured on web separately before enabling (tactical 162)",
+    );
+    settings.travel_assist =
+        ClientExperienceCapabilityStatus::Unsupported("Travel assist is not yet wired on web");
+    settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
+        "Frame pipeline overlay is unavailable until web emits frame accounting reports",
+    );
+    settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
+        "Debug diagnostics panel is unavailable until the web presenter is wired",
+    );
+    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
+        "Server simulation cadence is not yet wired on web",
+    );
+    ClientExperienceProfile::new(settings)
+}
+
+/// Temporary, explicitly-tracked feature-axis divergences on native targets.
+/// Every entry is a genuine runtime plumbing gap to burn down toward the native
+/// baseline — NOT a permanent capability difference. Adding an entry is a
+/// deliberate, reviewed act; a native feature divergence that is NOT listed here
+/// (or any silent `PROFILE_UNSUPPORTED` on the feature axis) fails
+/// `native_targets_share_feature_capability_availability`. Remove the entry when
+/// the feature is wired and becomes `Supported`.
+pub const NATIVE_FEATURE_PARITY_EXCEPTIONS: &[(NativePlatform, ClientExperienceFeatureCapability)] = &[
+    (
+        NativePlatform::AndroidFlat,
+        ClientExperienceFeatureCapability::TravelAssist,
+    ),
+    (
+        NativePlatform::AndroidFlat,
+        ClientExperienceFeatureCapability::FramePipelineOverlay,
+    ),
+    (
+        NativePlatform::AndroidFlat,
+        ClientExperienceFeatureCapability::DebugDiagnostics,
+    ),
+    (
+        NativePlatform::AndroidFlat,
+        ClientExperienceFeatureCapability::ServerSimulationCadence,
+    ),
+    (
+        NativePlatform::Xr,
+        ClientExperienceFeatureCapability::ServerSimulationCadence,
+    ),
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClientExperienceCapabilityStatus {
@@ -1385,6 +1579,103 @@ mod tests {
             next_new_world_seed: Some(5678),
             current_join_remote_addr: "127.0.0.1:25565",
             fallback_remote_addr: Some("10.0.0.2:25565"),
+        }
+    }
+
+    fn native_profiles() -> [(NativePlatform, ClientExperienceSettingsProfile); 3] {
+        [
+            (
+                NativePlatform::DesktopFlat,
+                desktop_native_client_experience_profile().settings,
+            ),
+            (
+                NativePlatform::Xr,
+                xr_native_client_experience_profile().settings,
+            ),
+            (
+                NativePlatform::AndroidFlat,
+                android_flat_native_client_experience_profile().settings,
+            ),
+        ]
+    }
+
+    /// The core native-parity invariant: a feature can never be *silently*
+    /// unavailable on one native target. Feature-axis divergence is allowed only
+    /// as a reason-bearing, explicitly-declared exception.
+    #[test]
+    fn native_targets_share_feature_capability_availability() {
+        for (platform, profile) in native_profiles() {
+            for (feature, status) in profile.feature_axis() {
+                match status {
+                    ClientExperienceCapabilityStatus::Supported => {}
+                    ClientExperienceCapabilityStatus::Unsupported(message) => {
+                        assert_ne!(
+                            status,
+                            ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED,
+                            "{platform:?} silently drops native feature {feature:?}; \
+                             feature-axis divergence must carry an explicit reason",
+                        );
+                        assert!(
+                            !message.trim().is_empty(),
+                            "{platform:?} feature {feature:?} exception has an empty reason",
+                        );
+                        assert!(
+                            NATIVE_FEATURE_PARITY_EXCEPTIONS.contains(&(platform, feature)),
+                            "{platform:?} diverges on native feature {feature:?} without a \
+                             declared exception in NATIVE_FEATURE_PARITY_EXCEPTIONS",
+                        );
+                    }
+                    other => panic!(
+                        "{platform:?} feature {feature:?} has status {other:?}; the feature axis \
+                         must be Supported or a reason-bearing Unsupported",
+                    ),
+                }
+            }
+        }
+    }
+
+    /// Keep the exception ledger honest: a declared exception that has become
+    /// `Supported` is stale and must be removed so the ledger reflects real gaps.
+    #[test]
+    fn native_feature_parity_exceptions_are_live() {
+        let profiles = native_profiles();
+        for &(platform, feature) in NATIVE_FEATURE_PARITY_EXCEPTIONS {
+            let profile = profiles
+                .iter()
+                .find(|(candidate, _)| *candidate == platform)
+                .map(|(_, profile)| profile)
+                .unwrap_or_else(|| panic!("no native profile for {platform:?}"));
+            let status = profile
+                .feature_axis()
+                .into_iter()
+                .find(|(candidate, _)| *candidate == feature)
+                .map(|(_, status)| status)
+                .expect("feature axis entry for declared exception");
+            assert!(
+                !status.is_supported(),
+                "{platform:?} lists {feature:?} as a parity exception but it is now Supported; \
+                 remove the stale NATIVE_FEATURE_PARITY_EXCEPTIONS entry",
+            );
+        }
+    }
+
+    /// Web may diverge on features (different runtime/threading model) but never
+    /// silently: no bare `PROFILE_UNSUPPORTED` on the feature axis.
+    #[test]
+    fn web_feature_divergences_are_reason_bearing() {
+        let profile = web_client_experience_profile().settings;
+        for (feature, status) in profile.feature_axis() {
+            if let ClientExperienceCapabilityStatus::Unsupported(message) = status {
+                assert_ne!(
+                    status,
+                    ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED,
+                    "web silently drops feature {feature:?}; record an explicit reason",
+                );
+                assert!(
+                    !message.trim().is_empty(),
+                    "web feature {feature:?} exception has an empty reason",
+                );
+            }
         }
     }
 
