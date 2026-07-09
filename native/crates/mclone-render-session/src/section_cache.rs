@@ -2,13 +2,18 @@ use super::*;
 
 #[derive(Clone, Debug)]
 struct CachedTexturedRenderSectionSlot {
-    mesh: TexturedRenderSectionMesh,
+    // docs/tactical/163: the resident cache retains only compact metadata after a
+    // section is compiled and uploaded, not the owned CPU vertex/index payload.
+    metadata: TexturedRenderSectionMetadata,
     dirty: bool,
 }
 
 impl CachedTexturedRenderSectionSlot {
-    fn new(mesh: TexturedRenderSectionMesh) -> Self {
-        Self { mesh, dirty: false }
+    fn new(metadata: TexturedRenderSectionMetadata) -> Self {
+        Self {
+            metadata,
+            dirty: false,
+        }
     }
 }
 
@@ -106,11 +111,17 @@ impl CachedTexturedRenderSections {
         self.sections.contains_key(&key)
     }
 
-    pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
+    /// Resident section metadata for every cached section. This replaces the old
+    /// `sections()` accessor that cloned full CPU meshes (docs/tactical/163).
+    pub fn section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
         self.sections
             .values()
-            .map(|slot| slot.mesh.clone())
+            .map(|slot| slot.metadata.clone())
             .collect()
+    }
+
+    pub fn cached_section_count(&self) -> usize {
+        self.sections.len()
     }
 
     pub fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
@@ -127,16 +138,17 @@ impl CachedTexturedRenderSections {
             ..RenderSectionResidentMeshStats::default()
         };
         for slot in self.sections.values() {
-            let section_stats = slot.mesh.stats();
+            let section_stats = &slot.metadata.stats;
             stats.resident_vertex_count = stats
                 .resident_vertex_count
                 .saturating_add(section_stats.vertex_count);
             stats.resident_index_count = stats
                 .resident_index_count
                 .saturating_add(section_stats.index_count);
-            stats.resident_mesh_owned_bytes = stats
-                .resident_mesh_owned_bytes
-                .saturating_add(slot.mesh.estimated_owned_bytes());
+            // docs/tactical/163: the resident cache no longer owns vertex/index
+            // vectors, so its retained CPU mesh byte pressure is zero. The
+            // transient compile/upload payloads still carry those bytes and are
+            // accounted separately by the upload coordinator.
         }
         stats
     }
@@ -171,6 +183,21 @@ impl CachedTexturedRenderSections {
         };
         slot.dirty = true;
         true
+    }
+
+    /// Mark every resident section dirty so the next sync recompiles and
+    /// re-emits their meshes. Used by explicit render-resource rebuilds that
+    /// must reconstruct GPU buffers without a retained CPU mesh copy
+    /// (docs/tactical/163). Returns the number of sections marked.
+    pub(crate) fn mark_all_sections_dirty(&mut self) -> usize {
+        let mut marked = 0;
+        for slot in self.sections.values_mut() {
+            if !slot.dirty {
+                marked += 1;
+            }
+            slot.dirty = true;
+        }
+        marked
     }
 
     pub(crate) fn clear_section_dirty(&mut self, key: RenderSectionKey) -> bool {
@@ -231,11 +258,15 @@ impl CachedTexturedRenderSections {
             completed_compile_section_count: ready_section_keys.len(),
             ..RenderSectionCacheUpdate::default()
         };
+        // docs/tactical/163: borrow each rebuilt section only long enough to
+        // record accounting and insert its compact metadata. The full mesh
+        // payload stays in `report.rebuilt_sections` and is moved out to the
+        // upload path below — it is never cloned back into the resident cache.
         for section in &report.rebuilt_sections {
             let stats = section.stats();
             report.rebuilt_vertex_count += stats.vertex_count;
             report.rebuilt_index_count += stats.index_count;
-            self.insert_section(section.clone());
+            self.insert_metadata(section.metadata());
         }
         report.resident_mesh_stats = Some(self.resident_mesh_stats());
         report
@@ -254,21 +285,21 @@ impl CachedTexturedRenderSections {
         )
     }
 
-    fn insert_section(&mut self, section: TexturedRenderSectionMesh) {
-        let key = section.key;
+    fn insert_metadata(&mut self, metadata: TexturedRenderSectionMetadata) {
+        let key = metadata.key;
         if !self.sections.contains_key(&key) {
             self.generation = self.generation.wrapping_add(1);
         }
         self.sections
-            .insert(key, CachedTexturedRenderSectionSlot::new(section));
+            .insert(key, CachedTexturedRenderSectionSlot::new(metadata));
         self.section_keys_by_chunk
             .entry(render_section_chunk_pos(key))
             .or_default()
             .insert(key);
     }
 
-    fn remove_section(&mut self, key: RenderSectionKey) -> Option<TexturedRenderSectionMesh> {
-        let section = self.sections.remove(&key)?.mesh;
+    fn remove_section(&mut self, key: RenderSectionKey) -> Option<TexturedRenderSectionMetadata> {
+        let metadata = self.sections.remove(&key)?.metadata;
         self.generation = self.generation.wrapping_add(1);
         let pos = render_section_chunk_pos(key);
         if let Some(keys) = self.section_keys_by_chunk.get_mut(&pos) {
@@ -277,6 +308,6 @@ impl CachedTexturedRenderSections {
                 self.section_keys_by_chunk.remove(&pos);
             }
         }
-        Some(section)
+        Some(metadata)
     }
 }

@@ -175,6 +175,40 @@ impl TexturedRenderSectionMesh {
     pub fn stats(&self) -> SectionMeshStats {
         self.mesh.stats()
     }
+
+    /// Compact resident description of a compiled section, derived from the mesh
+    /// but owning no vertex/index vectors. The render-session cache retains this
+    /// instead of the full mesh after upload (docs/tactical/163).
+    pub fn metadata(&self) -> TexturedRenderSectionMetadata {
+        TexturedRenderSectionMetadata {
+            key: self.key,
+            visibility: self.visibility,
+            stats: self.mesh.stats(),
+            drawable: !self.mesh.is_empty(),
+        }
+    }
+}
+
+/// Resident render-section metadata: everything the culling/visibility, upload
+/// diffing, and diagnostics paths need without retaining the CPU vertex/index
+/// payload. See docs/tactical/163-render-section-cpu-mesh-eviction.md.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TexturedRenderSectionMetadata {
+    pub key: RenderSectionKey,
+    pub visibility: VisibilitySet,
+    pub stats: SectionMeshStats,
+    pub drawable: bool,
+}
+
+impl TexturedRenderSectionMetadata {
+    /// A section with no drawable geometry is treated as empty by the renderer.
+    pub fn is_empty(&self) -> bool {
+        !self.drawable
+    }
+
+    pub fn stats(&self) -> SectionMeshStats {
+        self.stats.clone()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

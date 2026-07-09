@@ -1,6 +1,8 @@
 # 163: Render Section CPU Mesh Eviction
 
-Status: active 2026-07-08; Slice 0 byte accounting landed.
+Status: active 2026-07-09; Slice 0 byte accounting landed; Slice 1 mesh eviction
+landed (bundled the minimum of Slices 2-3 required to keep every lane
+non-breaking — see below).
 
 Workstream: native Rust shared render-session / render-resource boundary.
 Desktop validation first, but the target shape must stay shared across flat,
@@ -183,6 +185,54 @@ Important implementation detail: when applying a completed build report, borrow
 `rebuilt_sections` to compute and insert metadata, then move the same
 `rebuilt_sections` into the update. Do not clone the mesh payload back into the
 cache.
+
+Landed 2026-07-09:
+
+- `TexturedRenderSectionMetadata { key, visibility, stats, drawable }` now lives
+  in `mclone-mesh` (both `mclone-render` and `mclone-render-session` depend on
+  it there). `TexturedRenderSectionMesh::metadata()` derives it.
+- `CachedTexturedRenderSectionSlot` stores metadata, not a mesh.
+  `apply_build_report(...)` borrows `rebuilt_sections` to insert metadata and
+  moves the payload into the update without cloning. `resident_mesh_stats()`
+  keeps logical vertex/index counts but reports `resident_mesh_owned_bytes = 0`.
+- Cache/session/app-runtime expose `section_metadata()`, `cached_section_count()`,
+  and `mark_all_sections_dirty_for_resource_rebuild()`; `sections()` /
+  `cached_sections()` (which returned `Vec<TexturedRenderSectionMesh>`) are gone.
+- `textured_section_visibility_stats*` accept `&[TexturedRenderSectionMetadata]`.
+
+Because `sync_all_render_sections` returns only per-pass deltas (empty
+`rebuilt_sections` on a warm cache), removing the resident mesh could not be
+isolated from the caller migration and the resource-rebuild path. This slice
+therefore also took the minimum of Slices 2-3 needed to avoid a broken
+intermediate:
+
+- Draw resources are seeded empty (`TexturedSectionDrawResources::new(..., &[],
+  ...)`) and filled from transient batches. `mclone-app-runtime` gained
+  `compile_all_render_section_meshes(camera)` (dirty-all + `sync_all` → transient
+  full batch) for warm-cache seed/rebuild callers.
+- Cold-cache startup callers (Android `start_android_render_scene`, XR terrain
+  host, headless dual-view / renderer-rebuild smoke, perf frame-budget probe)
+  seed directly from the first sync's `rebuilt_sections`. Warm-cache callers (XR
+  local startup pump, flat `sync_all_runtime_sections` /
+  `cached_runtime_sections`, startup-streaming perf) recompile via
+  `compile_all_render_section_meshes`. Web renders per-frame: it now creates the
+  draw empty and applies `rebuilt_sections`/removals every frame (the first
+  drawable batch is the full initial set).
+
+Validation (2026-07-09): `cargo fmt` (touched crates), `cargo test` for
+mclone-mesh/render/render-session/app-runtime/native-client/xr-scene/android
+(all pass), `cargo check --workspace` + web `wasm32-unknown-unknown`, desktop
+flat `--screenshot` (664 sections, terrain correct), `--renderer-rebuild-smoke`
+(mismatch_pixels=0, reuploaded_sections=664, state_preserved=true),
+frame-budget + desktop-offscreen smokes, web chunk smoke (residentSectionCount
+48, terrain drawn), and Quest 3 `native:android-xr:session-smoke` new-world
+(local startup sections=6; new-world replacement sections=19 drawn_sections=7
+drawn_indices=35448, multiview=true, no panics).
+
+Known follow-up: the XR local-startup pump compiles sections to reach playable,
+then `compile_all_render_section_meshes` recompiles them once to seed the draw
+(one extra compile of the small initial RD). Optimize by having the pump feed
+its transient batch forward, or start the XR draw empty and stream in.
 
 ### Slice 2: Make Draw Resources Creatable Empty
 

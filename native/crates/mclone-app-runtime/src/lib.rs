@@ -43,7 +43,7 @@ use mclone_core::{
     local_block_coord, local_section_block_coord,
 };
 use mclone_diagnostics::BudgetDecisionPanelReport;
-use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMesh};
+use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMetadata};
 use mclone_protocol::{
     ChunkView, ClientCommand, HOTBAR_SLOT_COUNT_USIZE, PlayerAppearance, PlayerModelKind,
     PlayerPositionUpdate, ServerUpdate, SetPlayerAppearanceCommand,
@@ -2254,8 +2254,20 @@ impl SingleViewRuntime {
         }
     }
 
-    pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.engine.sections()
+    pub fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        self.engine.section_metadata()
+    }
+
+    pub fn cached_section_count(&self) -> usize {
+        self.engine.cached_section_count()
+    }
+
+    /// Mark every resident render section dirty so a subsequent sync recompiles
+    /// and re-emits their meshes for an explicit render-resource rebuild. The
+    /// resident cache no longer retains CPU meshes, so rebuild paths recompile
+    /// instead of re-uploading a retained payload (docs/tactical/163).
+    pub fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        self.engine.mark_all_sections_dirty_for_resource_rebuild()
     }
 
     pub fn traversal_ready_render_section_keys(

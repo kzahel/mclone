@@ -2164,7 +2164,10 @@ mod android {
         }
         let camera_position = camera_position(&camera);
         let section_update = scene.sync_all_render_sections(camera_position)?;
-        let sections = scene.cached_sections();
+        // docs/tactical/163: first (cold) sync, so the transient rebuilt payload
+        // is the full section set; the resident cache no longer retains CPU
+        // meshes. Seed the initial draw resources directly from it.
+        let sections = &section_update.rebuilt_sections;
         if sections.is_empty() {
             bail!(
                 "Android {host_label} runtime produced no render sections: loaded_chunks={} rebuilt_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
@@ -2186,7 +2189,7 @@ mod android {
             device,
             queue,
             format,
-            &sections,
+            sections,
             scene.mesh_assets().atlas.as_upload(),
         )?;
         draw.set_traversal_ready_sections(

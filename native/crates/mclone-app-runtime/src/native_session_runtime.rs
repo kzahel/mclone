@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::ClientRuntime;
 use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot};
-use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
+use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, TexturedRenderSectionMetadata};
 use mclone_protocol::{ClientCommand, ServerUpdate, encode_server_update};
 use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
@@ -563,7 +563,7 @@ impl LocalIntegratedStartupPump {
             lod_prewarm_ms: self.prewarm.elapsed_ms,
             startup_lod_tiles_ready: self.prewarm.tiles_ready,
             startup_lod_tiles_target: self.prewarm.tiles_target,
-            cached_section_count: self.runtime.cached_sections().len(),
+            cached_section_count: self.runtime.cached_section_count(),
             rebuilt_section_count: section_update.rebuilt_section_count(),
             submitted_compile_section_count: section_update.submitted_compile_section_count,
             completed_compile_section_count: section_update.completed_compile_section_count,
@@ -594,7 +594,7 @@ impl LocalIntegratedStartupPump {
                 .client()
                 .chunk_snapshot(progress.playable_chunk)
                 .is_some()
-            && !self.runtime.cached_sections().is_empty()
+            && self.runtime.cached_section_count() > 0
     }
 
     pub const fn poll_count(&self) -> usize {
@@ -1136,8 +1136,31 @@ impl LocalIntegratedSceneRuntime {
         )
     }
 
-    pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.core.cached_sections()
+    pub fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        self.core.resident_section_metadata()
+    }
+
+    pub fn cached_section_count(&self) -> usize {
+        self.core.cached_section_count()
+    }
+
+    pub fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        self.core
+            .mark_all_render_sections_dirty_for_resource_rebuild()
+    }
+
+    /// Recompile every resident render section and return the transient full
+    /// mesh batch for a one-shot GPU (re)upload, without the resident cache ever
+    /// retaining CPU meshes (docs/tactical/163). Used to seed draw resources at
+    /// startup and to rebuild them after a surface/renderer reset.
+    pub fn compile_all_render_section_meshes(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<Vec<TexturedRenderSectionMesh>> {
+        self.mark_all_render_sections_dirty_for_resource_rebuild();
+        Ok(self
+            .sync_all_render_sections(camera_position)?
+            .rebuilt_sections)
     }
 
     pub fn traversal_ready_render_section_keys(
@@ -1614,10 +1637,38 @@ where
         }
     }
 
-    pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
+    pub fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
         match self {
-            Self::Local(scene) => scene.cached_sections(),
-            Self::RemoteDedicated(scene) => scene.cached_sections(),
+            Self::Local(scene) => scene.resident_section_metadata(),
+            Self::RemoteDedicated(scene) => scene.resident_section_metadata(),
+        }
+    }
+
+    pub fn cached_section_count(&self) -> usize {
+        match self {
+            Self::Local(scene) => scene.cached_section_count(),
+            Self::RemoteDedicated(scene) => scene.cached_section_count(),
+        }
+    }
+
+    pub fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        match self {
+            Self::Local(scene) => scene.mark_all_render_sections_dirty_for_resource_rebuild(),
+            Self::RemoteDedicated(scene) => {
+                scene.mark_all_render_sections_dirty_for_resource_rebuild()
+            }
+        }
+    }
+
+    pub fn compile_all_render_section_meshes(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<Vec<TexturedRenderSectionMesh>> {
+        match self {
+            Self::Local(scene) => scene.compile_all_render_section_meshes(camera_position),
+            Self::RemoteDedicated(scene) => {
+                scene.compile_all_render_section_meshes(camera_position)
+            }
         }
     }
 
@@ -2444,8 +2495,31 @@ where
         )
     }
 
-    pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.core.cached_sections()
+    pub fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        self.core.resident_section_metadata()
+    }
+
+    pub fn cached_section_count(&self) -> usize {
+        self.core.cached_section_count()
+    }
+
+    pub fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        self.core
+            .mark_all_render_sections_dirty_for_resource_rebuild()
+    }
+
+    /// Recompile every resident render section and return the transient full
+    /// mesh batch for a one-shot GPU (re)upload, without the resident cache ever
+    /// retaining CPU meshes (docs/tactical/163). Used to seed draw resources at
+    /// startup and to rebuild them after a surface/renderer reset.
+    pub fn compile_all_render_section_meshes(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<Vec<TexturedRenderSectionMesh>> {
+        self.mark_all_render_sections_dirty_for_resource_rebuild();
+        Ok(self
+            .sync_all_render_sections(camera_position)?
+            .rebuilt_sections)
     }
 
     pub fn traversal_ready_render_section_keys(

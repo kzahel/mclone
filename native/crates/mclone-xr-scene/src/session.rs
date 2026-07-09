@@ -681,7 +681,13 @@ where
         }
 
         let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
-        let sections = runtime.cached_sections();
+        // docs/tactical/163: the startup pump compiled these sections into the
+        // resident cache, which now holds only metadata. Recompile them into a
+        // transient full batch to seed the initial draw resources instead of
+        // pulling retained CPU meshes out of the cache.
+        let sections = runtime
+            .compile_all_render_section_meshes(camera_position)
+            .context("compile XR local startup render sections")?;
         if sections.is_empty() {
             bail!(
                 "XR local startup seed={} center=({}, {}) render_distance={} reached playable threshold without render sections",
@@ -1351,7 +1357,10 @@ where
     let section_update = runtime
         .sync_all_render_sections(camera_position)
         .context("compile initial XR terrain render sections")?;
-    let sections = runtime.cached_sections();
+    // docs/tactical/163: the resident cache no longer retains CPU meshes. This is
+    // the first (cold) terrain sync, so the transient rebuilt payload is the full
+    // section set and seeds the initial draw resources directly.
+    let sections = &section_update.rebuilt_sections;
     if sections.is_empty() {
         bail!(
             "XR terrain host={} center=({}, {}) render_distance={} produced no render sections",
@@ -1365,7 +1374,7 @@ where
         device,
         queue,
         color_format,
-        &sections,
+        sections,
         runtime.mesh_assets().atlas.as_upload(),
     )
     .context("upload initial XR terrain render sections")?;

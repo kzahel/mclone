@@ -327,8 +327,10 @@ pub(crate) enum DesktopBlinkDebugCommitStatus {
 
 pub(crate) struct FlatClientFullSectionSync {
     pub(crate) camera_view: FlatClientCameraView,
+    // docs/tactical/163: `section_update.rebuilt_sections` carries the transient
+    // full mesh batch for a one-shot upload; the resident cache no longer holds
+    // CPU meshes, so there is no separate retained `sections` field.
     pub(crate) section_update: RenderSectionCacheUpdate,
-    pub(crate) sections: Vec<TexturedRenderSectionMesh>,
     pub(crate) remesh_ms: f64,
 }
 
@@ -2260,24 +2262,36 @@ impl FlatClientDriver {
             return Ok(None);
         };
         let remesh_start = std::time::Instant::now();
+        // docs/tactical/163: recompile every resident section into a transient
+        // full batch. This path seeds draw resources both at startup (cold cache)
+        // and when restoring sections after a render-resource rebuild (warm
+        // cache), so it must reconstruct the complete set rather than rely on a
+        // retained CPU mesh copy.
+        runtime.mark_all_render_sections_dirty_for_resource_rebuild();
         let section_update = runtime.sync_all_render_sections(camera_view.render_eye)?;
-        let sections = runtime.cached_sections();
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         Ok(Some(FlatClientFullSectionSync {
             camera_view,
             section_update,
-            sections,
             remesh_ms,
         }))
     }
 
-    pub(crate) fn cached_runtime_sections(&self) -> Option<FlatClientCachedSections> {
+    pub(crate) fn cached_runtime_sections(
+        &mut self,
+    ) -> anyhow::Result<Option<FlatClientCachedSections>> {
         let camera_view = self.camera_view();
-        let runtime = self.runtime.as_ref()?;
-        Some(FlatClientCachedSections {
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(None);
+        };
+        // docs/tactical/163: the playable-startup pump compiled these sections
+        // into the resident cache, which now holds only metadata. Recompile them
+        // into a transient batch to seed the draw resources.
+        let sections = runtime.compile_all_render_section_meshes(camera_view.render_eye)?;
+        Ok(Some(FlatClientCachedSections {
             camera_view,
-            sections: runtime.cached_sections(),
-        })
+            sections,
+        }))
     }
 
     pub(crate) fn traversal_ready_section_keys(
@@ -2383,7 +2397,7 @@ impl FlatClientDriver {
         let upload_start = std::time::Instant::now();
         let upload_report = render_resources
             .draw_mut()
-            .update_sections(device, &sync.sections)
+            .update_sections(device, &sync.section_update.rebuilt_sections)
             .context("failed to upload world chunk section resources")?;
         render_resources
             .draw_mut()
@@ -2418,7 +2432,7 @@ impl FlatClientDriver {
             TexturedSectionUploadReport,
         )>,
     > {
-        let Some(cached) = self.cached_runtime_sections() else {
+        let Some(cached) = self.cached_runtime_sections()? else {
             return Ok(None);
         };
         let traversal_ready_sections = self.traversal_ready_section_keys(cached.camera_view);

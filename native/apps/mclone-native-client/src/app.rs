@@ -1257,7 +1257,7 @@ impl ChunkApp {
         else {
             return Ok(());
         };
-        if sync.sections.is_empty() {
+        if sync.section_update.rebuilt_sections.is_empty() {
             anyhow::bail!(
                 "world seed={} center=({}, {}) render_distance={} produced no render sections",
                 self.driver.scene.seed,

@@ -3347,7 +3347,7 @@ pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<M
 
         let remesh_start = Instant::now();
         let section_update = runtime.sync_all_render_sections(spectator.position)?;
-        let sections = runtime.cached_sections();
+        let sections = runtime.resident_section_metadata();
         let ready_sections = runtime.traversal_ready_render_section_keys(spectator.position);
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let camera = spectator.camera(runtime.render_distance());
@@ -3478,7 +3478,7 @@ pub(crate) fn run_loading_settle_perf(
         let render_mesh_start = Instant::now();
         let section_update = runtime.sync_all_render_sections(spectator.position)?;
         let render_mesh_settle_ms = elapsed_ms(render_mesh_start.elapsed());
-        let cached_sections = runtime.cached_sections().len();
+        let cached_sections = runtime.cached_section_count();
         let final_stats = runtime.stats();
         let full_settle_ms = runtime_settle_ms + render_mesh_settle_ms;
         let simulation_seconds = if scene.simulation_cadence.gameplay_rate_hz == 0 {
@@ -3822,8 +3822,10 @@ pub(crate) fn run_startup_streaming_perf(
     let startup_target_chunk_count =
         startup_progress.map_or(0, |progress| progress.target_chunk_count);
     let startup_target_percent = startup_progress.map_or(0, |progress| progress.percent());
-    let runtime = startup.into_runtime();
-    let initial_sections = runtime.cached_sections();
+    let mut runtime = startup.into_runtime();
+    // docs/tactical/163: seed the probe draw resources from a fresh recompile
+    // batch; the resident cache no longer retains CPU meshes.
+    let initial_sections = runtime.compile_all_render_section_meshes(spectator.position)?;
     if initial_sections.is_empty() {
         bail!("startup streaming perf entered playable with no cached render sections");
     }
@@ -4297,7 +4299,10 @@ pub(crate) fn run_frame_budget_probe(
     let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
     let initial_remesh_start = Instant::now();
     let initial_update = runtime.sync_all_render_sections(initial_spectator.position)?;
-    let initial_sections = runtime.cached_sections();
+    // docs/tactical/163: first (cold) sync, so the transient rebuilt payload is
+    // the full section set; clone it to seed the probe draw resources since the
+    // resident cache no longer retains CPU meshes.
+    let initial_sections = initial_update.rebuilt_sections.clone();
     let initial_remesh_ms = elapsed_ms(initial_remesh_start.elapsed());
     if initial_sections.is_empty() {
         bail!(

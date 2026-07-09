@@ -56,7 +56,7 @@ fn cached_sections_apply_build_report_and_remove_unloaded_chunks() {
 }
 
 #[test]
-fn cached_sections_resident_mesh_stats_track_resident_clone_and_removal() {
+fn cached_sections_retain_metadata_without_owning_cpu_mesh_bytes() {
     let mut cache = CachedTexturedRenderSections::default();
     let key = RenderSectionKey::new(0, 4, 0);
     let mut vertices = Vec::with_capacity(3);
@@ -78,8 +78,6 @@ fn cached_sections_resident_mesh_stats_track_resident_clone_and_removal() {
         },
         visibility: VisibilitySet::all_visible(),
     };
-    let expected_resident_owned_bytes =
-        std::mem::size_of::<TexturedChunkVertex>() + 6 * std::mem::size_of::<u32>();
 
     let update = cache.apply_build_report(
         &BTreeSet::from([key]),
@@ -91,14 +89,28 @@ fn cached_sections_resident_mesh_stats_track_resident_clone_and_removal() {
         &BTreeSet::new(),
     );
 
+    // docs/tactical/163: the resident cache keeps logical vertex/index counts
+    // (from metadata) but owns zero CPU mesh bytes after upload.
     let expected = RenderSectionResidentMeshStats {
         resident_section_count: 1,
         resident_vertex_count: 1,
         resident_index_count: 6,
-        resident_mesh_owned_bytes: expected_resident_owned_bytes,
+        resident_mesh_owned_bytes: 0,
     };
     assert_eq!(cache.resident_mesh_stats(), expected);
     assert_eq!(update.resident_mesh_stats, Some(expected));
+
+    // The transient rebuilt payload still carries the full mesh for upload; it is
+    // moved into the update, not cloned back into the resident cache.
+    assert_eq!(update.rebuilt_sections.len(), 1);
+    assert!(update.rebuilt_sections[0].estimated_owned_bytes() > 0);
+
+    let metadata = cache.section_metadata();
+    assert_eq!(metadata.len(), 1);
+    assert_eq!(metadata[0].key, key);
+    assert!(metadata[0].drawable);
+    assert_eq!(metadata[0].stats.index_count, 6);
+    assert_eq!(cache.cached_section_count(), 1);
 
     let removal = cache.remove_sections(&BTreeSet::new(), &BTreeSet::from([key]));
 
@@ -110,6 +122,32 @@ fn cached_sections_resident_mesh_stats_track_resident_clone_and_removal() {
         cache.resident_mesh_stats(),
         RenderSectionResidentMeshStats::default()
     );
+    assert_eq!(cache.cached_section_count(), 0);
+}
+
+#[test]
+fn mark_all_sections_dirty_flags_every_resident_section() {
+    let mut cache = CachedTexturedRenderSections::default();
+    let first = RenderSectionKey::new(0, 4, 0);
+    let second = RenderSectionKey::new(0, 5, 0);
+    cache.apply_build_report(
+        &BTreeSet::from([first, second]),
+        test_build_report([first, second]),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+    assert!(!cache.has_dirty_sections());
+
+    let marked = cache.mark_all_sections_dirty();
+
+    assert_eq!(marked, 2);
+    assert!(cache.has_dirty_sections());
+    assert_eq!(
+        cache.dirty_section_keys().collect::<BTreeSet<_>>(),
+        BTreeSet::from([first, second])
+    );
+    // Idempotent: already-dirty sections are not recounted.
+    assert_eq!(cache.mark_all_sections_dirty(), 0);
 }
 
 #[test]

@@ -26,8 +26,9 @@ pub use catalog::{
 };
 pub use data::{
     ChunkVertex, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,
-    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
-    VisibilityGraphBuildStats, VisibleChunkMesh, quad_face_count_from_indices,
+    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedRenderSectionMetadata,
+    TexturedVisibleChunkMesh, VisibilityGraphBuildStats, VisibleChunkMesh,
+    quad_face_count_from_indices,
 };
 pub use mclone_core::{CHUNK_WIDTH, SECTION_HEIGHT as RENDER_SECTION_HEIGHT};
 pub use terrain_assets::{

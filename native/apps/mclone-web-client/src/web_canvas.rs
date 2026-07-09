@@ -4778,14 +4778,16 @@ impl WebChunkRenderSession {
         };
         drain_result
             .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;
-        let cached_sections = self.runtime.engine().sections();
+        // docs/tactical/163: the resident cache holds only metadata now; the
+        // full CPU mesh payloads live transiently in `cache_update.rebuilt_sections`.
+        let cached_metadata = self.runtime.engine().section_metadata();
         // 067 Stage 3: the streaming loop renders every frame, so the cache can be empty
         // on the first frames after a view loads (sections still compiling). Sky-only
         // frames are expected then — the desktop window shows the same while terrain
         // streams in. Draw the section pass only once non-empty sections exist.
-        let has_sections = !cached_sections.iter().all(|section| section.is_empty());
+        let has_sections = cached_metadata.iter().any(|section| section.drawable);
         let upload_report = if has_sections {
-            self.upload_sections(&cache_update, &cached_sections)?
+            self.upload_sections(&cache_update)?
         } else {
             TexturedSectionUploadReport::default()
         };
@@ -4991,12 +4993,11 @@ impl WebChunkRenderSession {
             atlas_width: self.mesh_assets.atlas.width,
             atlas_height: self.mesh_assets.atlas.height,
             atlas_sprite_count: self.mesh_assets.atlas_sprite_count,
-            vertex_count: section_vertex_count(&cached_sections),
+            vertex_count: section_vertex_count(&cached_metadata),
             index_count: render_stats.loaded_index_count,
             face_count: render_stats.loaded_face_count(),
-            resident_cpu_mesh_owned_bytes: cached_sections.iter().fold(0usize, |total, section| {
-                total.saturating_add(section.estimated_owned_bytes())
-            }),
+            // docs/tactical/163: the resident cache no longer owns CPU mesh bytes.
+            resident_cpu_mesh_owned_bytes: 0,
             drawn_index_count: render_stats.drawn_index_count,
             drawn_face_count: render_stats.drawn_face_count(),
             uploaded_section_count: upload_report.uploaded_section_count,
@@ -5081,38 +5082,41 @@ impl WebChunkRenderSession {
     fn upload_sections(
         &mut self,
         update: &RenderSectionCacheUpdate,
-        cached_sections: &[mclone_mesh::TexturedRenderSectionMesh],
     ) -> Result<TexturedSectionUploadReport, String> {
+        // docs/tactical/163: create the draw resources empty and apply the
+        // transient rebuilt/removed batch incrementally. On the first upload the
+        // rebuilt batch is the full initial drawable set (drawable sections only
+        // become resident via a rebuilt payload, and the first one triggers this
+        // path); later frames apply deltas. The resident cache never retains CPU
+        // meshes.
         let first_upload = self.draw.is_none();
-
-        let upload_report = if first_upload {
+        if first_upload {
             let draw = TexturedSectionDrawResources::new(
                 &self.context.device,
                 &self.context.queue,
                 self.context.format,
-                cached_sections,
+                &[],
                 atlas_upload(&self.mesh_assets.atlas),
             )
             .map_err(|error| {
-                format!("failed to upload generated textured section meshes: {error:#}")
+                format!("failed to initialize generated textured section resources: {error:#}")
             })?;
             self.draw = Some(draw);
             self.atlas_upload_count += 1;
-            upload_report_for_sections(cached_sections)
-        } else {
-            let draw = self
-                .draw
-                .as_mut()
-                .ok_or_else(|| "textured section resources were not initialized".to_owned())?;
-            draw.apply_section_updates(
+        }
+        let draw = self
+            .draw
+            .as_mut()
+            .ok_or_else(|| "textured section resources were not initialized".to_owned())?;
+        let upload_report = draw
+            .apply_section_updates(
                 &self.context.device,
                 &update.rebuilt_sections,
                 &update.removed_section_keys,
             )
             .map_err(|error| {
                 format!("failed to upload generated textured section mesh updates: {error:#}")
-            })?
-        };
+            })?;
         if first_upload || update.rebuilt_section_count() > 0 || update.removed_section_count() > 0
         {
             self.mesh_upload_count += 1;
@@ -5241,22 +5245,6 @@ fn canvas_size_to_js_value(width: u32, height: u32, changed: bool) -> Result<JsV
     Ok(object.into())
 }
 
-fn upload_report_for_sections(
-    sections: &[mclone_mesh::TexturedRenderSectionMesh],
-) -> TexturedSectionUploadReport {
-    let mut report = TexturedSectionUploadReport::default();
-    for section in sections {
-        if section.is_empty() {
-            continue;
-        }
-        let stats = section.stats();
-        report.uploaded_section_count += 1;
-        report.uploaded_vertex_count += stats.vertex_count;
-        report.uploaded_index_count += stats.index_count;
-    }
-    report
-}
-
 fn sort_chunk_positions_by_coordinate(
     positions: impl IntoIterator<Item = ChunkPos>,
 ) -> Vec<ChunkPos> {
@@ -5287,11 +5275,11 @@ fn render_section_keys_from_int32_array(
         .collect())
 }
 
-fn section_vertex_count(sections: &[mclone_mesh::TexturedRenderSectionMesh]) -> u32 {
+fn section_vertex_count(sections: &[mclone_mesh::TexturedRenderSectionMetadata]) -> u32 {
     sections
         .iter()
-        .filter(|section| !section.is_empty())
-        .map(|section| section.stats().vertex_count)
+        .filter(|section| section.drawable)
+        .map(|section| section.stats.vertex_count)
         .sum()
 }
 

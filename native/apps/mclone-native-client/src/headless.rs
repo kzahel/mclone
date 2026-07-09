@@ -799,8 +799,11 @@ pub(crate) fn write_headless_dual_view(
         options.scene.chunk_z,
         options.scene.render_distance,
     );
-    runtime.sync_all_render_sections(Vec3::from_array(base_camera.eye))?;
-    let sections = runtime.cached_sections();
+    // docs/tactical/163: first (cold) sync, so the transient rebuilt payload is
+    // the full section set; the resident cache no longer retains CPU meshes.
+    let sections = runtime
+        .sync_all_render_sections(Vec3::from_array(base_camera.eye))?
+        .rebuilt_sections;
     if sections.is_empty() {
         bail!(
             "headless dual-view seed={} center=({}, {}) render_distance={} produced no render sections",
@@ -961,7 +964,10 @@ pub(crate) fn run_renderer_rebuild_smoke(
     }
     let camera = spectator.camera(runtime.render_distance());
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
-    let sections = runtime.cached_sections();
+    // docs/tactical/163: first (cold) sync; keep an owned copy of the transient
+    // full batch to re-upload during the render-resource rebuild step, since the
+    // resident cache no longer retains CPU meshes.
+    let sections = section_update.rebuilt_sections.clone();
     if sections.is_empty() {
         bail!(
             "renderer rebuild smoke seed={} center=({}, {}) render_distance={} produced no render sections",

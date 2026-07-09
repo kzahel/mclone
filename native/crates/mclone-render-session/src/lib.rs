@@ -21,8 +21,8 @@ use mclone_core::{
 };
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,
-    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
-    VisibilityGraphBuildStats, VisibilitySet,
+    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedRenderSectionMetadata,
+    TexturedVisibleChunkMesh, VisibilityGraphBuildStats, VisibilitySet,
     build_textured_render_sections_for_section_set_with_stats,
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };

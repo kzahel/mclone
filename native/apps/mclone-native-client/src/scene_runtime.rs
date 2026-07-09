@@ -24,7 +24,7 @@ use mclone_client::ClientRuntime;
 #[cfg(test)]
 use mclone_core::AIR_BLOCK_STATE_ID;
 use mclone_core::ChunkPos;
-use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
+use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, TexturedRenderSectionMetadata};
 #[cfg(test)]
 use mclone_protocol::ServerUpdate;
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
@@ -464,8 +464,27 @@ impl WindowSceneRuntime {
         self.scene.release_render_compile_jobs(count)
     }
 
-    pub(crate) fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.scene.cached_sections()
+    pub(crate) fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        self.scene.resident_section_metadata()
+    }
+
+    pub(crate) fn cached_section_count(&self) -> usize {
+        self.scene.cached_section_count()
+    }
+
+    pub(crate) fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        self.scene
+            .mark_all_render_sections_dirty_for_resource_rebuild()
+    }
+
+    /// Recompile every resident render section and return the transient full
+    /// mesh batch for a one-shot GPU (re)upload (docs/tactical/163).
+    pub(crate) fn compile_all_render_section_meshes(
+        &mut self,
+        camera_position: Vec3,
+    ) -> anyhow::Result<Vec<TexturedRenderSectionMesh>> {
+        self.scene
+            .compile_all_render_section_meshes(camera_position)
     }
 
     /// Sky clear color for the current day-time, driving the day/night gradient.

@@ -232,7 +232,7 @@ fn window_runtime_streams_chunks_when_spectator_crosses_boundary() {
         .unwrap();
     assert!(initial_update.rebuilt_section_count() > 0);
     assert_eq!(initial_update.removed_section_count(), 0);
-    let initial_sections = runtime.cached_sections();
+    let initial_sections = runtime.resident_section_metadata();
     assert!(!initial_sections.is_empty());
     assert!(section_index_count(&initial_sections) > 0);
     assert!(
@@ -261,7 +261,7 @@ fn window_runtime_streams_chunks_when_spectator_crosses_boundary() {
         .unwrap();
     assert!(moved_update.rebuilt_section_count() > 0);
     assert!(moved_update.removed_section_count() > 0);
-    let moved_sections = runtime.cached_sections();
+    let moved_sections = runtime.resident_section_metadata();
     assert!(!moved_sections.is_empty());
     assert!(section_index_count(&moved_sections) > 0);
     assert!(
@@ -293,7 +293,7 @@ fn window_runtime_defers_far_boundary_sections_without_neighbors() {
     assert!(update.deferred_section_count > 0);
     assert!(runtime.pending_render_chunk_count() > 0);
     assert!(!runtime.has_pending_render_work(far_camera));
-    assert!(runtime.cached_sections().is_empty());
+    assert!(runtime.resident_section_metadata().is_empty());
 
     let deferred_key = *runtime
         .render_session()
@@ -454,7 +454,7 @@ fn window_runtime_updates_render_distance_live() {
         .unwrap();
     assert!(grown_update.rebuilt_section_count() > 0);
     assert_eq!(grown_update.removed_section_count(), 0);
-    assert!(runtime.cached_sections().iter().any(|section| {
+    assert!(runtime.resident_section_metadata().iter().any(|section| {
         section.key.chunk_x != scene.chunk_x || section.key.chunk_z != scene.chunk_z
     }));
 
@@ -468,7 +468,7 @@ fn window_runtime_updates_render_distance_live() {
         .sync_all_render_sections(spectator.position)
         .unwrap();
     assert!(shrunk_update.removed_section_count() > 0);
-    assert!(runtime.cached_sections().iter().all(|section| {
+    assert!(runtime.resident_section_metadata().iter().all(|section| {
         section.key.chunk_x == scene.chunk_x && section.key.chunk_z == scene.chunk_z
     }));
 }
@@ -494,7 +494,7 @@ fn window_runtime_mesh_queue_processes_ready_work_by_chunk_budget() {
     assert!(runtime.stats().pending_render_compile_jobs > 0);
     assert!(runtime.pending_render_chunk_count() > 0);
 
-    let first_sections = runtime.cached_sections();
+    let first_sections = runtime.resident_section_metadata();
     assert!(first_sections.is_empty());
 
     let remaining_update = runtime
@@ -502,7 +502,7 @@ fn window_runtime_mesh_queue_processes_ready_work_by_chunk_budget() {
         .unwrap();
     assert!(remaining_update.rebuilt_section_count() > 0);
     assert!(!runtime.has_pending_render_work(spectator.position));
-    assert!(!runtime.cached_sections().is_empty());
+    assert!(!runtime.resident_section_metadata().is_empty());
 }
 
 #[test]
@@ -555,7 +555,7 @@ fn high_altitude_radius_one_keeps_neighbor_chunks_draw_ready() {
     runtime
         .sync_all_render_sections(spectator.position)
         .unwrap();
-    let sections = runtime.cached_sections();
+    let sections = runtime.resident_section_metadata();
     assert!(sections.iter().any(|section| {
         section.key.chunk_x != scene.chunk_x || section.key.chunk_z != scene.chunk_z
     }));
@@ -979,9 +979,9 @@ fn poll_window_runtime_until_idle(runtime: &mut WindowSceneRuntime) -> Result<()
     runtime.scene.poll_until_idle().map(|_| ())
 }
 
-fn section_index_count(sections: &[TexturedRenderSectionMesh]) -> u32 {
+fn section_index_count(sections: &[TexturedRenderSectionMetadata]) -> u32 {
     sections
         .iter()
-        .map(|section| section.stats().index_count)
+        .map(|section| section.stats.index_count)
         .sum()
 }

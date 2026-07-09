@@ -440,8 +440,17 @@ impl EngineRenderSession {
             .has_ready_pending_dirty_work(client, |key| section_readiness(client, key))
     }
 
-    pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.render_session.sections()
+    pub fn section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        self.render_session.section_metadata()
+    }
+
+    pub fn cached_section_count(&self) -> usize {
+        self.render_session.cached_section_count()
+    }
+
+    pub fn mark_all_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        self.render_session
+            .mark_all_sections_dirty_for_resource_rebuild()
     }
 }
 
@@ -680,8 +689,19 @@ impl RenderSectionSession {
         }
     }
 
-    pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.cache.sections()
+    pub fn section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        self.cache.section_metadata()
+    }
+
+    pub fn cached_section_count(&self) -> usize {
+        self.cache.cached_section_count()
+    }
+
+    /// Mark every resident render section dirty for an explicit render-resource
+    /// rebuild (docs/tactical/163). Returns the number of sections marked so the
+    /// caller can log/skip when there is nothing to rebuild.
+    pub fn mark_all_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        self.cache.mark_all_sections_dirty()
     }
 
     pub fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {

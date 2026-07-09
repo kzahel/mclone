@@ -15,8 +15,8 @@ use mclone_core::{
 use mclone_diagnostics::GpuPassId;
 use mclone_mesh::{
     CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey, SectionFace,
-    TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilitySet, VisibleChunkMesh,
-    quad_face_count_from_indices,
+    TexturedRenderSectionMesh, TexturedRenderSectionMetadata, TexturedVisibleChunkMesh,
+    VisibilitySet, VisibleChunkMesh, quad_face_count_from_indices,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use wgpu::util::DeviceExt;
@@ -618,7 +618,7 @@ impl TexturedSectionUploadTiming {
 }
 
 pub fn textured_section_visibility_stats(
-    sections: &[TexturedRenderSectionMesh],
+    sections: &[TexturedRenderSectionMetadata],
     render_view: ChunkRenderView,
 ) -> TexturedSectionRenderStats {
     textured_section_visibility_stats_with_options(
@@ -629,7 +629,7 @@ pub fn textured_section_visibility_stats(
 }
 
 pub fn textured_section_visibility_stats_with_options(
-    sections: &[TexturedRenderSectionMesh],
+    sections: &[TexturedRenderSectionMetadata],
     render_view: ChunkRenderView,
     options: TexturedSectionRenderOptions,
 ) -> TexturedSectionRenderStats {
@@ -642,7 +642,7 @@ pub fn textured_section_visibility_stats_with_options(
 }
 
 pub fn textured_section_visibility_stats_with_options_and_ready_sections(
-    sections: &[TexturedRenderSectionMesh],
+    sections: &[TexturedRenderSectionMetadata],
     render_view: ChunkRenderView,
     options: TexturedSectionRenderOptions,
     ready_sections: Option<&BTreeSet<RenderSectionKey>>,
@@ -653,9 +653,9 @@ pub fn textured_section_visibility_stats_with_options_and_ready_sections(
             (
                 section.key,
                 TexturedSectionCullingRecord {
-                    index_count: section.stats().index_count,
+                    index_count: section.stats.index_count,
                     visibility: section.visibility,
-                    drawable: !section.is_empty(),
+                    drawable: section.drawable,
                     traversal_ready: ready_sections
                         .is_none_or(|ready| ready.contains(&section.key)),
                 },
@@ -4264,7 +4264,7 @@ mod tests {
         key: RenderSectionKey,
         index_count: usize,
         visibility: VisibilitySet,
-    ) -> TexturedRenderSectionMesh {
+    ) -> TexturedRenderSectionMetadata {
         TexturedRenderSectionMesh {
             key,
             mesh: TexturedVisibleChunkMesh {
@@ -4275,10 +4275,11 @@ mod tests {
             },
             visibility,
         }
+        .metadata()
     }
 
     fn prepared_records_for_sections(
-        sections: &[TexturedRenderSectionMesh],
+        sections: &[TexturedRenderSectionMetadata],
     ) -> PreparedTexturedSectionRecords {
         let records = sections
             .iter()
@@ -4286,9 +4287,9 @@ mod tests {
                 (
                     section.key,
                     TexturedSectionCullingRecord {
-                        index_count: section.stats().index_count,
+                        index_count: section.stats.index_count,
                         visibility: section.visibility,
-                        drawable: !section.is_empty(),
+                        drawable: section.drawable,
                         traversal_ready: true,
                     },
                 )
