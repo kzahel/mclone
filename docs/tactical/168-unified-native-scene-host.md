@@ -1,10 +1,11 @@
 # 168: Unified Native Scene Host
 
 Status: approved direction 2026-07-09; Slice 0 (bug-grade parity pre-fixes)
-landed 2026-07-09; Slice 2 (web-shaped runner-generic seam) landed 2026-07-09.
-Slice 1 and Slices 3+ not started; Slice 1 is ready to begin with no other
-context beyond this document and the referenced code. (Slices 0–2 are
-independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
+landed 2026-07-09; Slice 2 (web-shaped runner-generic seam) landed 2026-07-09;
+Slice 1 (OpenXR-free scene crate + `mclone-xr-scene` -> `mclone-scene` rename)
+landed 2026-07-09. Slices 3+ not started; Slice 3 requires Slice 1 (done) and
+Slice 4 requires Slice 1 (done). (Slices 0–2 are independent per the sequencing
+guardrail, so Slice 2 landed ahead of Slice 1.)
 
 Workstream: native Rust shared runtime convergence. This tactical collapses the
 four native client runtimes (desktop flat, desktop XR, flat Android, Android
@@ -341,27 +342,48 @@ Exit criteria: sprint/sneak observable on Quest (log or on-device movement
 speed), a Pause -> force-stop -> relaunch cycle on Quest retains placed/broken
 blocks, Android AVD session smoke still draws terrain.
 
-### Slice 1: OpenXR-free scene crate (`mclone-xr-scene` -> `mclone-scene`)
+### Slice 1: OpenXR-free scene crate (`mclone-xr-scene` -> `mclone-scene`) — DONE (2026-07-09)
 
 Goal: neutralize the rim. Behavior-free.
 
-Deliverables:
+Landed shape:
 
-- Introduce host-neutral view/pose types in the scene crate (the internal
-  render-view representation that `render_views(&views)` already produces
-  becomes the public API surface).
-- Move `xr::View`/`xr::Fovf` -> neutral-view conversion into `mclone-xr-host`
-  (or a tiny adapter module in the XR apps temporarily).
-- Remove the `openxr` dependency from the scene crate's `Cargo.toml`.
-- Rename the crate directory + package `mclone-xr-scene` -> `mclone-scene` as
-  a **separate, purely mechanical commit** within the slice (imports only, no
-  logic edits in the rename commit).
+- Host-neutral view types live in `mclone-xr-host` (which keeps the `openxr`
+  rim): `XrFov` (four tangent half-angles) and `XrView` (a validated
+  `XrViewPose` + `XrFov`), each with a `from_openxr` conversion. The scene
+  crate's public render/locomotion/teleport/comfort signatures take
+  `XrView`/`XrFov` instead of `xr::View`/`xr::Fovf`. `render_view_from_world_pose`,
+  `xr_fov_to_projection_rh`, and `xr_fov_aspect` now take neutral `XrFov`.
+- The `openxr` -> neutral conversion happens at the OpenXR rim: the two XR apps
+  (`desktop_xr.rs`, `android-xr/lib.rs`) convert their located
+  `XrStereoFrameViews` with `XrView::from_openxr` at the call boundary before
+  handing views to the scene. Pose finiteness validation therefore moved from
+  inside the scene functions to that boundary (behavior-equivalent).
+- `openxr` removed from the scene crate's `Cargo.toml`. The scene crate still
+  depends on `mclone-xr-host` for the neutral types and controller snapshots;
+  fully shedding that transitive `openxr` link is a later-tactical (web
+  adoption) concern, not a Slice 1 deliverable.
+- Crate directory + package renamed `mclone-xr-scene` -> `mclone-scene` as a
+  **separate mechanical commit** (imports/paths only): workspace member,
+  dependency declarations in both consuming apps, and the `mclone_xr_scene`
+  import paths. Two commits total: rim neutralization, then rename.
 
-Tripwires: `grep -rn "openxr" native/crates/mclone-scene/` returns nothing;
-xr-scene test suite (74 tests at time of writing) passes unchanged under the
-new name; no `xr::` type appears in any `pub fn` signature of the scene crate.
+Tripwires (all pass): `grep -rn "openxr\|xr::" native/crates/mclone-scene/`
+returns nothing; the scene test suite (77 tests) passes unchanged under the new
+name; no `xr::` type appears in any `pub fn` signature of the scene crate.
 
-Validation:
+Validation (all green 2026-07-09): `cargo fmt --all --check`, workspace
+`cargo check`, `cargo test -p mclone-scene -p mclone-app-runtime
+-p mclone-native-client` (77 scene + 185 + 179 + xr-host, 0 failed),
+`cargo check -p mclone-web-client --target wasm32-unknown-unknown`, and
+`cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+-p mclone-android-xr-client`. On-device Quest 3 session-smoke drew the seed
+world identically to the Slice 0 baseline (terrain ready summary
+`sections=123 drawn_sections=32 indices=599700 drawn_indices=265422 actors=2`),
+with the log now emitting from `mclone_scene::session` — confirming the renamed
+crate runs unchanged on-device.
+
+Validation commands:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-scene -p mclone-app-runtime -p mclone-native-client
@@ -372,8 +394,8 @@ pnpm native:xr:desktop            # desktop XR smoke (see docs/platforms.md for 
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 ```
 
-Exit criteria: identical on-device behavior (same session-smoke log lines and
-seed section counts as the pre-slice baseline — capture the baseline first).
+Exit criteria (met): identical on-device behavior — same session-smoke seed
+section counts as the pre-slice (Slice 0) baseline.
 
 ### Slice 2: Web-shaped seam — runner-generic local host mode — DONE (2026-07-09)
 
