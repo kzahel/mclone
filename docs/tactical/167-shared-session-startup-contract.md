@@ -850,11 +850,15 @@ target_ready=9/9` with a ready summary of `sections=123 drawn_sections=32
 drawn_indices=265422` (terrain drawn — the Slice-4 re-pump path intact after the
 rename), and the replacement session reached `MCLONE_ANDROID_XR_REPLACEMENT_READY
 new-world seed=246813579 sections=20 drawn_sections=2 drawn_indices=9348`. The
-flat Android AVD `native:android:avd-session-smoke` is deferred to the next
-Android pass (the connected device is the Quest 3, not a flat-Android phone;
-available AVDs are unrelated x86 images) — the flat Android startup path shares
-the exact renamed/seed contract exercised on-device by the XR lane and on desktop
-by both host modes, and is covered by `cargo ndk check`.
+flat Android AVD `native:android:avd-session-smoke` also ran this pass on the
+`jstorrent-tablet` arm64-v8a emulator (API 34): new-world reached `Mclone Android
+local integrated runtime playable ... sections=128 drawable_sections=47`, then
+`uploaded local integrated render sections: sections=47 ... drawable_sections=47`
+from the seed and rendered terrain — same startup-ready wording and seed counters
+as desktop/XR, no Android-only path. The captured screenshot shows a correct
+new-world scene (trees, grass, hotbar, touch controls). This closes the
+flat-Android validation that Slices 3/4 had deferred; every native startup lane
+is now validated on-device/on-emulator through the shared pump/seed contract.
 
 ## Implementation Guardrails
 
