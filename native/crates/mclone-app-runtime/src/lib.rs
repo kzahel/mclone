@@ -26,6 +26,11 @@ pub mod world_catalog;
 pub use crate::catalog_executor::{
     execute_world_catalog_request, refresh_world_catalog_controller,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::native_session_runtime::{
+    LocalOnlySession, NativeSessionStartupCompletion, NativeSessionStartupPump,
+    NativeSessionStartupStep, StartupReadinessPolicy,
+};
 pub use crate::startup_render_seed::StartupRenderSectionSeed;
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::world_catalog::WorldCatalog;

@@ -404,6 +404,44 @@ impl std::fmt::Debug for DeferredChunkDropWorker {
     }
 }
 
+/// Startup readiness gate shared by every native startup lane (docs/tactical/167).
+///
+/// `Playable` is the default for desktop, Android, and XR: startup differences
+/// must come from host-mode evidence (`LocalIntegrated` vs `RemoteDedicated`),
+/// not from per-platform threshold forks. `Idle` is a named diagnostics /
+/// screenshot / test option that additionally waits for the active view to have
+/// no pending render work; it must never be the hidden reason a platform startup
+/// behaves differently.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StartupReadinessPolicy {
+    #[default]
+    Playable,
+    Idle,
+}
+
+/// Uninhabited [`RemoteDedicatedServerSession`] used to parameterize the shared
+/// startup pump for local-integrated startup, where no remote session exists.
+///
+/// It lets [`NativeSessionStartupPump`] own a `NativeSessionRuntime<S>` for both
+/// host modes while the local convenience constructors and the
+/// [`LocalIntegratedStartupPump`] wrapper stay session-type-free.
+#[derive(Debug)]
+pub enum LocalOnlySession {}
+
+impl RemoteDedicatedServerSession for LocalOnlySession {
+    fn send_command_only(&mut self, _command: ClientCommand) -> Result<()> {
+        match *self {}
+    }
+
+    fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+        match *self {}
+    }
+
+    fn reconnect(&mut self) -> Result<()> {
+        match *self {}
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LocalIntegratedStartupStep {
     pub poll_count: usize,
@@ -506,34 +544,200 @@ impl StartupLodPrewarm {
     }
 }
 
+/// One shared startup step over a [`NativeSessionRuntime`] (docs/tactical/167).
+///
+/// Host-neutral: `local_progress` and the `lod_prewarm_*` / `spawn_authority_*`
+/// fields carry local-integrated diagnostics and stay `None`/zeroed for remote
+/// dedicated startup. `startup_ready` is the one gate every lane waits on under
+/// the shared [`StartupReadinessPolicy`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeSessionStartupStep {
+    pub host_mode: SingleViewHostMode,
+    pub poll_count: usize,
+    pub poll_ms: f64,
+    pub changed: bool,
+    /// Combined gate the driver waits on for the active [`StartupReadinessPolicy`]:
+    /// host-mode evidence plus a drawable render seed plus prewarm settled.
+    pub startup_ready: bool,
+    /// Host-mode readiness evidence alone (local spawn authority / remote drained
+    /// active view), before the render-seed and prewarm gates are applied.
+    pub host_ready: bool,
+    /// Whether startup LOD prewarm is active this session (local only).
+    pub lod_prewarm_enabled: bool,
+    /// Prewarm reached its desired (tile-capped) visual coverage.
+    pub lod_prewarm_complete: bool,
+    /// Prewarm hit its time cap before completing coverage.
+    pub lod_prewarm_timeout: bool,
+    /// Wall-clock spent on prewarm so far.
+    pub lod_prewarm_ms: f64,
+    /// Retained prewarm tiles drawable so far.
+    pub startup_lod_tiles_ready: usize,
+    /// Desired prewarm tiles, tile-capped.
+    pub startup_lod_tiles_target: usize,
+    pub cached_section_count: usize,
+    pub rebuilt_section_count: usize,
+    pub submitted_compile_section_count: usize,
+    pub accepted_compile_result_count: usize,
+    pub completed_compile_section_count: usize,
+    pub pending_compile_jobs: usize,
+    /// Sections accumulated in the startup render seed so far (docs/tactical/167).
+    pub render_seed_section_count: usize,
+    /// Startup render-seed sections carrying drawable geometry (docs/tactical/167).
+    pub render_seed_drawable_section_count: usize,
+    /// Local-integrated loading-progress overlay; `None` for remote dedicated.
+    pub local_progress: Option<LoadingProgressOverlay>,
+}
+
+impl NativeSessionStartupStep {
+    /// Project the host-neutral step onto the local-integrated startup step shape
+    /// consumed by the desktop/XR/perf local pump wrapper. Keeps those callers on
+    /// a single startup implementation during the tactical 167 migration.
+    fn into_local_integrated(self) -> LocalIntegratedStartupStep {
+        LocalIntegratedStartupStep {
+            poll_count: self.poll_count,
+            poll_ms: self.poll_ms,
+            changed: self.changed,
+            playable_ready: self.startup_ready,
+            spawn_authority_ready: self.host_ready,
+            lod_prewarm_enabled: self.lod_prewarm_enabled,
+            lod_prewarm_complete: self.lod_prewarm_complete,
+            lod_prewarm_timeout: self.lod_prewarm_timeout,
+            lod_prewarm_ms: self.lod_prewarm_ms,
+            startup_lod_tiles_ready: self.startup_lod_tiles_ready,
+            startup_lod_tiles_target: self.startup_lod_tiles_target,
+            cached_section_count: self.cached_section_count,
+            rebuilt_section_count: self.rebuilt_section_count,
+            submitted_compile_section_count: self.submitted_compile_section_count,
+            completed_compile_section_count: self.completed_compile_section_count,
+            pending_compile_jobs: self.pending_compile_jobs,
+            render_seed_section_count: self.render_seed_section_count,
+            render_seed_drawable_section_count: self.render_seed_drawable_section_count,
+            progress: self.local_progress,
+        }
+    }
+}
+
+/// Host-neutral native world startup pump (docs/tactical/167).
+///
+/// Owns a [`NativeSessionRuntime`] plus the transient render-section seed, the
+/// startup LOD prewarm policy (local-integrated only), the poll/sync/compile-job
+/// release loop, and the shared readiness gate. Both local integrated and remote
+/// dedicated startup reach ready through this one contract: remote never falls
+/// back to `poll_until_idle` + `sync_all_render_sections`.
 #[derive(Debug)]
-pub struct LocalIntegratedStartupPump {
-    runtime: LocalIntegratedSceneRuntime,
+pub struct NativeSessionStartupPump<S> {
+    runtime: NativeSessionRuntime<S>,
+    // Local-integrated startup LOD prewarm; remote pumps carry a disabled prewarm
+    // that is always settled so the shared gate collapses to host evidence + seed.
     prewarm: StartupLodPrewarm,
+    readiness: StartupReadinessPolicy,
     // docs/tactical/167: accumulate the transient CPU section meshes the pump
     // compiles so the platform adapter can seed draw resources at completion
     // without a redundant mark-all-dirty recompile (docs/tactical/163).
     render_seed: StartupRenderSectionSeed,
     poll_count: usize,
     poll_ms: f64,
+    last_step: NativeSessionStartupStep,
 }
 
-impl LocalIntegratedStartupPump {
-    pub fn with_mesh_assets(
+/// Consumed startup result: the ready runtime plus the transient render seed for
+/// a one-shot platform draw-resource upload, and the final startup step.
+#[derive(Debug)]
+pub struct NativeSessionStartupCompletion<S> {
+    pub runtime: NativeSessionRuntime<S>,
+    pub startup_sections: Vec<TexturedRenderSectionMesh>,
+    pub final_step: NativeSessionStartupStep,
+}
+
+impl NativeSessionStartupPump<LocalOnlySession> {
+    pub fn local(options: LocalIntegratedSceneOptions) -> Result<Self> {
+        let mesh_assets = load_textured_mesh_assets()?;
+        Self::local_with_mesh_assets(options, mesh_assets)
+    }
+
+    pub fn local_with_mesh_assets(
         options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let prewarm = StartupLodPrewarm::new(options.startup_lod_prewarm, options.seed, options.center);
-        Ok(Self {
-            runtime: LocalIntegratedSceneRuntime::with_mesh_assets(options, mesh_assets)?,
+        let prewarm =
+            StartupLodPrewarm::new(options.startup_lod_prewarm, options.seed, options.center);
+        let runtime = NativeSessionRuntime::local_with_mesh_assets(options, mesh_assets)?;
+        Ok(Self::from_session_runtime(
+            runtime,
+            StartupReadinessPolicy::Playable,
             prewarm,
+        ))
+    }
+}
+
+impl<S> NativeSessionStartupPump<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    pub fn remote_dedicated(
+        endpoint: RemoteSessionEndpoint,
+        options: SingleViewHostOptions,
+        session: S,
+    ) -> Result<Self> {
+        let mesh_assets = load_textured_mesh_assets()?;
+        Self::remote_dedicated_with_mesh_assets(endpoint, options, session, mesh_assets)
+    }
+
+    pub fn remote_dedicated_with_mesh_assets(
+        endpoint: RemoteSessionEndpoint,
+        options: SingleViewHostOptions,
+        session: S,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        let center = options.center;
+        let runtime = NativeSessionRuntime::remote_dedicated_with_mesh_assets(
+            endpoint,
+            options,
+            session,
+            mesh_assets,
+        )?;
+        // Remote startup carries a disabled prewarm: startup LOD prewarm is a
+        // local-integrated policy only (docs/tactical/167).
+        let prewarm = StartupLodPrewarm::new(StartupLodPrewarmConfig::disabled(), 0, center);
+        Ok(Self::from_session_runtime(
+            runtime,
+            StartupReadinessPolicy::Playable,
+            prewarm,
+        ))
+    }
+
+    /// Wrap an already-constructed session runtime. Prewarm should be disabled for
+    /// remote runtimes; for local runtimes pass a prewarm built from the local
+    /// options so startup coverage matches the direct constructors.
+    fn from_session_runtime(
+        runtime: NativeSessionRuntime<S>,
+        readiness: StartupReadinessPolicy,
+        prewarm: StartupLodPrewarm,
+    ) -> Self {
+        let host_mode = runtime.host_mode();
+        Self {
+            runtime,
+            prewarm,
+            readiness,
             render_seed: StartupRenderSectionSeed::new(),
             poll_count: 0,
             poll_ms: 0.0,
-        })
+            last_step: NativeSessionStartupStep {
+                host_mode,
+                ..NativeSessionStartupStep::default()
+            },
+        }
     }
 
-    pub fn step(&mut self, camera_position: Vec3) -> Result<LocalIntegratedStartupStep> {
+    /// Select the startup readiness policy. `Playable` is the default for every
+    /// lane; `Idle` is a named diagnostics/screenshot/test option.
+    pub fn with_readiness(mut self, readiness: StartupReadinessPolicy) -> Self {
+        self.readiness = readiness;
+        self
+    }
+
+    pub fn step(&mut self, camera_position: Vec3) -> Result<NativeSessionStartupStep> {
+        let host_mode = self.runtime.host_mode();
         let poll_start = Instant::now();
         let mut changed = self
             .runtime
@@ -541,16 +745,19 @@ impl LocalIntegratedStartupPump {
         let poll_ms = elapsed_ms(poll_start.elapsed());
         self.poll_count += 1;
         self.poll_ms += poll_ms;
-        let diagnostics = self.runtime.server_runner_diagnostics()?;
-        self.runtime.last_runner_diagnostics = Some(diagnostics);
-        self.runtime.last_runner_diagnostics_poll_at = Some(Instant::now());
+
+        // Local startup readiness / loading-progress overlay reads server-runner
+        // diagnostics; remote host modes have no runner and this is a no-op.
+        self.runtime.refresh_startup_runner_diagnostics()?;
 
         let section_update = self.runtime.sync_render_sections(camera_position)?;
         self.runtime
             .release_render_compile_jobs(section_update.accepted_compile_result_count);
         // docs/tactical/167: fold the transient update into the startup seed before
         // it is dropped, so completion can hand a full draw batch to the platform
-        // adapter without recompiling from the metadata-only resident cache.
+        // adapter without recompiling from the metadata-only resident cache. The
+        // compile-job release above stays in the pump: accepted jobs are not held
+        // by the seed after this step.
         self.render_seed.observe(&section_update);
         let render_changed = section_update.rebuilt_section_count() > 0
             || section_update.removed_section_count() > 0
@@ -558,19 +765,26 @@ impl LocalIntegratedStartupPump {
             || section_update.completed_compile_section_count > 0;
         changed |= render_changed;
 
-        // Prewarm cheap LOD coverage alongside spawn-authority loading. It never
-        // decides spawn authority; it only gates the presentation-side wait.
-        self.prewarm.advance(&mut self.runtime, camera_position);
+        // Startup LOD prewarm is a local-integrated policy; remote runtimes have a
+        // disabled prewarm and are skipped here.
+        if let Some(local) = self.runtime.as_local_mut() {
+            self.prewarm.advance(local, camera_position);
+        }
 
-        let progress = self.progress_overlay();
-        let spawn_authority_ready = self.playable_ready();
-        let playable_ready = spawn_authority_ready && self.prewarm.settled();
-        Ok(LocalIntegratedStartupStep {
+        let local_progress = self.runtime.startup_progress_overlay();
+        let host_ready = self.runtime.startup_host_ready(self.readiness, camera_position);
+        let render_seed_drawable = self.render_seed.drawable_section_count();
+        // Every lane uses the same gate: host-mode evidence, a drawable render
+        // seed, and prewarm settled (always true when prewarm is disabled).
+        let startup_ready = host_ready && render_seed_drawable > 0 && self.prewarm.settled();
+
+        let step = NativeSessionStartupStep {
+            host_mode,
             poll_count: self.poll_count,
             poll_ms: self.poll_ms,
             changed,
-            playable_ready,
-            spawn_authority_ready,
+            startup_ready,
+            host_ready,
             lod_prewarm_enabled: self.prewarm.enabled(),
             lod_prewarm_complete: self.prewarm.complete,
             lod_prewarm_timeout: self.prewarm.timed_out,
@@ -580,37 +794,23 @@ impl LocalIntegratedStartupPump {
             cached_section_count: self.runtime.cached_section_count(),
             rebuilt_section_count: section_update.rebuilt_section_count(),
             submitted_compile_section_count: section_update.submitted_compile_section_count,
+            accepted_compile_result_count: section_update.accepted_compile_result_count,
             completed_compile_section_count: section_update.completed_compile_section_count,
             pending_compile_jobs: section_update.pending_compile_jobs,
             render_seed_section_count: self.render_seed.section_count(),
-            render_seed_drawable_section_count: self.render_seed.drawable_section_count(),
-            progress,
-        })
+            render_seed_drawable_section_count: render_seed_drawable,
+            local_progress,
+        };
+        self.last_step = step.clone();
+        Ok(step)
     }
 
     pub fn progress_overlay(&self) -> Option<LoadingProgressOverlay> {
-        self.runtime
-            .last_runner_diagnostics
-            .as_ref()
-            .and_then(loading_progress_overlay_from_diagnostics)
+        self.runtime.startup_progress_overlay()
     }
 
-    pub fn playable_ready(&self) -> bool {
-        let Some(progress) = self
-            .runtime
-            .last_runner_diagnostics
-            .as_ref()
-            .and_then(|diagnostics| diagnostics.loading_progress)
-        else {
-            return false;
-        };
-        progress.playable_chunk_ready
-            && self
-                .runtime
-                .client()
-                .chunk_snapshot(progress.playable_chunk)
-                .is_some()
-            && self.runtime.cached_section_count() > 0
+    pub const fn readiness_policy(&self) -> StartupReadinessPolicy {
+        self.readiness
     }
 
     pub const fn poll_count(&self) -> usize {
@@ -621,8 +821,12 @@ impl LocalIntegratedStartupPump {
         self.poll_ms
     }
 
-    pub fn runtime(&self) -> &LocalIntegratedSceneRuntime {
+    pub fn runtime(&self) -> &NativeSessionRuntime<S> {
         &self.runtime
+    }
+
+    pub fn runtime_mut(&mut self) -> &mut NativeSessionRuntime<S> {
+        &mut self.runtime
     }
 
     /// Startup render-seed sections accumulated so far, including empty sections.
@@ -635,20 +839,100 @@ impl LocalIntegratedStartupPump {
         self.render_seed.drawable_section_count()
     }
 
-    pub fn into_runtime(self) -> LocalIntegratedSceneRuntime {
+    pub fn into_runtime(self) -> NativeSessionRuntime<S> {
         self.runtime
     }
 
+    /// Consume the pump, returning the ready runtime, the transient startup render
+    /// seed batch for a one-shot draw-resource upload, and the final startup step
+    /// (docs/tactical/167). Use this instead of
+    /// `compile_all_render_section_meshes(...)`: it hands over meshes the pump
+    /// already compiled rather than recompiling from metadata-only resident state.
+    pub fn complete(mut self) -> NativeSessionStartupCompletion<S> {
+        let startup_sections = self.render_seed.drain_sections();
+        NativeSessionStartupCompletion {
+            runtime: self.runtime,
+            startup_sections,
+            final_step: self.last_step,
+        }
+    }
+}
+
+/// Thin local-integrated wrapper over the shared [`NativeSessionStartupPump`]
+/// (docs/tactical/167 Slice 2). It keeps the desktop/XR/perf local startup API
+/// stable while sharing one startup implementation; it holds no separate startup
+/// behavior. Local platform consumers migrate to the shared pump in Slice 3.
+#[derive(Debug)]
+pub struct LocalIntegratedStartupPump {
+    inner: NativeSessionStartupPump<LocalOnlySession>,
+}
+
+impl LocalIntegratedStartupPump {
+    pub fn with_mesh_assets(
+        options: LocalIntegratedSceneOptions,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        Ok(Self {
+            inner: NativeSessionStartupPump::local_with_mesh_assets(options, mesh_assets)?,
+        })
+    }
+
+    pub fn step(&mut self, camera_position: Vec3) -> Result<LocalIntegratedStartupStep> {
+        Ok(self.inner.step(camera_position)?.into_local_integrated())
+    }
+
+    pub fn progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.inner.progress_overlay()
+    }
+
+    pub const fn poll_count(&self) -> usize {
+        self.inner.poll_count()
+    }
+
+    pub const fn poll_ms(&self) -> f64 {
+        self.inner.poll_ms()
+    }
+
+    pub fn runtime(&self) -> &LocalIntegratedSceneRuntime {
+        self.inner
+            .runtime()
+            .as_local()
+            .expect("local startup pump always owns a local integrated runtime")
+    }
+
+    /// Startup render-seed sections accumulated so far, including empty sections.
+    pub fn render_seed_section_count(&self) -> usize {
+        self.inner.render_seed_section_count()
+    }
+
+    /// Startup render-seed sections carrying drawable geometry.
+    pub fn render_seed_drawable_section_count(&self) -> usize {
+        self.inner.render_seed_drawable_section_count()
+    }
+
+    pub fn into_runtime(self) -> LocalIntegratedSceneRuntime {
+        expect_local_scene(self.inner.into_runtime().into_runtime())
+    }
+
     /// Consume the pump, returning the runtime plus the transient startup render
-    /// seed batch for a one-shot draw-resource upload (docs/tactical/167). Use
-    /// this instead of `compile_all_render_section_meshes(...)` at local startup:
-    /// it hands over the meshes the pump already compiled rather than marking
-    /// every resident section dirty and recompiling from metadata.
+    /// seed batch for a one-shot draw-resource upload (docs/tactical/167).
     pub fn into_runtime_with_startup_sections(
-        mut self,
+        self,
     ) -> (LocalIntegratedSceneRuntime, Vec<TexturedRenderSectionMesh>) {
-        let sections = self.render_seed.drain_sections();
-        (self.runtime, sections)
+        let completion = self.inner.complete();
+        (
+            expect_local_scene(completion.runtime.into_runtime()),
+            completion.startup_sections,
+        )
+    }
+}
+
+fn expect_local_scene<S>(runtime: NativeSceneRuntime<S>) -> LocalIntegratedSceneRuntime {
+    match runtime {
+        NativeSceneRuntime::Local(scene) => scene,
+        NativeSceneRuntime::RemoteDedicated(_) => {
+            unreachable!("local startup pump always owns a local integrated runtime")
+        }
     }
 }
 
@@ -1235,6 +1519,40 @@ impl LocalIntegratedSceneRuntime {
             .poll_diagnostics()
             .context("failed to poll local integrated server diagnostics")
     }
+
+    /// Refresh the cached server-runner diagnostics that back local startup
+    /// readiness and the loading-progress overlay (docs/tactical/167 shared
+    /// startup pump). Remote host modes have no runner and skip this.
+    fn refresh_startup_runner_diagnostics(&mut self) -> Result<()> {
+        let diagnostics = self.server_runner_diagnostics()?;
+        self.last_runner_diagnostics = Some(diagnostics);
+        self.last_runner_diagnostics_poll_at = Some(Instant::now());
+        Ok(())
+    }
+
+    /// Honest local spawn-authority gate: the playable chunk is server-ready and
+    /// its client snapshot is present. Render-seed drawability and startup LOD
+    /// prewarm are layered on by the shared startup pump, never here.
+    fn startup_spawn_authority_ready(&self) -> bool {
+        let Some(progress) = self
+            .last_runner_diagnostics
+            .as_ref()
+            .and_then(|diagnostics| diagnostics.loading_progress)
+        else {
+            return false;
+        };
+        progress.playable_chunk_ready
+            && self
+                .client()
+                .chunk_snapshot(progress.playable_chunk)
+                .is_some()
+    }
+
+    fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.last_runner_diagnostics
+            .as_ref()
+            .and_then(loading_progress_overlay_from_diagnostics)
+    }
 }
 
 #[derive(Debug)]
@@ -1313,6 +1631,62 @@ where
         match self.host_mode() {
             SingleViewHostMode::LocalIntegrated => "local integrated",
             SingleViewHostMode::RemoteDedicated => "remote dedicated",
+        }
+    }
+
+    pub fn as_local(&self) -> Option<&LocalIntegratedSceneRuntime> {
+        match self {
+            Self::Local(scene) => Some(scene),
+            Self::RemoteDedicated(_) => None,
+        }
+    }
+
+    fn as_local_mut(&mut self) -> Option<&mut LocalIntegratedSceneRuntime> {
+        match self {
+            Self::Local(scene) => Some(scene),
+            Self::RemoteDedicated(_) => None,
+        }
+    }
+
+    /// Refresh the local server-runner diagnostics that back startup readiness /
+    /// the loading-progress overlay. No-op for remote host modes, which have no
+    /// integrated runner (docs/tactical/167 shared startup pump).
+    fn refresh_startup_runner_diagnostics(&mut self) -> Result<()> {
+        match self {
+            Self::Local(scene) => scene.refresh_startup_runner_diagnostics(),
+            Self::RemoteDedicated(_) => Ok(()),
+        }
+    }
+
+    /// Local loading-progress overlay for the startup step; remote returns `None`
+    /// because there is no integrated loading-progress source.
+    pub fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        match self {
+            Self::Local(scene) => scene.startup_progress_overlay(),
+            Self::RemoteDedicated(_) => None,
+        }
+    }
+
+    /// Host-mode startup readiness evidence, excluding the render seed and startup
+    /// LOD prewarm which the shared startup pump owns (docs/tactical/167). Every
+    /// lane uses the same [`StartupReadinessPolicy`]; the only divergence is the
+    /// host-mode evidence (local spawn authority vs. remote drained active view).
+    fn startup_host_ready(
+        &self,
+        policy: StartupReadinessPolicy,
+        camera_position: Vec3,
+    ) -> bool {
+        let host_evidence = match self {
+            Self::Local(scene) => scene.startup_spawn_authority_ready(),
+            Self::RemoteDedicated(scene) => scene.startup_host_ready(),
+        };
+        match policy {
+            StartupReadinessPolicy::Playable => host_evidence,
+            // Idle additionally waits for the active view to have no pending
+            // render work at the final startup camera (screenshots/diagnostics).
+            StartupReadinessPolicy::Idle => {
+                host_evidence && !self.has_pending_render_work(camera_position)
+            }
         }
     }
 
@@ -2015,6 +2389,14 @@ where
         self.queued_update_bytes = 0;
     }
 
+    /// Outstanding response-paired update backlog: response batches awaiting a
+    /// drain plus already-decoded updates still queued for the client pump. The
+    /// shared startup pump waits for this to reach zero so the initial view has
+    /// drained before completion (docs/tactical/167).
+    fn pending_update_depth(&self) -> usize {
+        self.pending_response_batches + self.queued_updates.len()
+    }
+
     fn push_response_batch(&mut self, batch: RemoteCommandUpdateBatch) -> Result<()> {
         let transport_drained_after_batch = self.pending_response_batches == 0;
         let update_count = batch.updates.len();
@@ -2263,6 +2645,20 @@ where
 
     pub fn loaded_chunk_count(&self) -> usize {
         self.core.client().loaded_chunk_count()
+    }
+
+    /// Outstanding response-paired update backlog for the current wire protocol
+    /// (docs/tactical/167). Startup readiness waits for this to drain.
+    fn startup_pending_update_backlog(&self) -> usize {
+        self.connection.pending_update_depth()
+    }
+
+    /// Remote host-mode startup evidence: the active chunk view has produced
+    /// client chunks and the initial response/update backlog has drained. This is
+    /// a host-mode fact, not a platform fact; when server-push broadening lands it
+    /// should wait for a drawable active view, not "the stream is forever idle".
+    fn startup_host_ready(&self) -> bool {
+        self.loaded_chunk_count() > 0 && self.startup_pending_update_backlog() == 0
     }
 
     pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
@@ -3394,7 +3790,7 @@ mod tests {
                 assert!(startup_progress.playable_ready);
 
                 let view_progress = pump
-                    .runtime
+                    .runtime()
                     .last_runner_diagnostics
                     .as_ref()
                     .and_then(view_readiness_overlay_from_diagnostics)
@@ -3428,6 +3824,146 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    fn stone_test_snapshot(pos: ChunkPos) -> ChunkSnapshot {
+        use mclone_core::CHUNK_SECTION_VOLUME;
+        // A fully-solid single section: its outer faces have no loaded neighbor,
+        // so the compiled render section carries drawable geometry.
+        ChunkSnapshot::from_block_state_ids(
+            pos,
+            mclone_core::ChunkStatus::Full,
+            mclone_core::ChunkRevision(1),
+            0,
+            16,
+            &vec![BlockStateId(1); CHUNK_SECTION_VOLUME],
+        )
+    }
+
+    #[test]
+    fn startup_readiness_policy_defaults_to_playable() {
+        assert_eq!(
+            StartupReadinessPolicy::default(),
+            StartupReadinessPolicy::Playable
+        );
+    }
+
+    #[test]
+    fn native_startup_pump_local_reaches_playable_through_shared_seed() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let mut pump = NativeSessionStartupPump::local_with_mesh_assets(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false),
+            mesh_assets,
+        )
+        .unwrap();
+        let camera_position = Vec3::new(8.0, 80.0, 8.0);
+
+        for _ in 0..2_000 {
+            let step = pump.step(camera_position).unwrap();
+            if step.startup_ready {
+                assert_eq!(step.host_mode, SingleViewHostMode::LocalIntegrated);
+                assert!(step.host_ready);
+                assert!(step.local_progress.as_ref().unwrap().playable_ready);
+                // Playable readiness implies a non-empty startup render seed with
+                // at least one drawable section (docs/tactical/167).
+                assert!(step.render_seed_drawable_section_count > 0);
+                assert!(step.cached_section_count > 0);
+
+                let completion = pump.complete();
+                assert!(completion.final_step.startup_ready);
+                assert!(!completion.startup_sections.is_empty());
+                assert!(
+                    completion
+                        .startup_sections
+                        .iter()
+                        .any(|section| !section.is_empty()),
+                    "startup seed must carry at least one drawable section"
+                );
+                // Accepted compile jobs are released by the pump each step, not
+                // held by the seed: capacity is fully available after completion.
+                assert_eq!(
+                    completion.runtime.render_compile_available_pending_job_slots(),
+                    completion.runtime.render_compile_max_pending_job_count(),
+                );
+                assert_eq!(completion.runtime.loaded_chunk_count(), 1);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        panic!("shared local startup pump did not reach playable");
+    }
+
+    #[test]
+    fn native_startup_pump_remote_reaches_ready_without_poll_until_idle() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let center = ChunkPos::new(0, 0);
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        // The initial SetChunkView response is drained once during construction;
+        // startup then reaches ready through the shared pump + seed, never a
+        // poll_until_idle + sync_all blocking loop (docs/tactical/167).
+        let session = PollableRemoteSession::new(
+            vec![Ok(vec![
+                ServerUpdate::WorldInfo {
+                    biome_zoom_seed: 1124,
+                },
+                ServerUpdate::ChunkSnapshot(stone_test_snapshot(center)),
+            ])],
+            Vec::new(),
+        );
+        let mut pump = NativeSessionStartupPump::remote_dedicated_with_mesh_assets(
+            RemoteSessionEndpoint::new("127.0.0.1:25565"),
+            SingleViewHostOptions::new(center, 0),
+            session,
+            mesh_assets,
+        )
+        .unwrap();
+        let camera_position = Vec3::new(8.0, 80.0, 8.0);
+
+        for _ in 0..2_000 {
+            let step = pump.step(camera_position).unwrap();
+            if step.startup_ready {
+                assert_eq!(step.host_mode, SingleViewHostMode::RemoteDedicated);
+                assert!(step.host_ready);
+                // Remote startup carries no local loading-progress overlay.
+                assert!(step.local_progress.is_none());
+                assert!(!step.lod_prewarm_enabled);
+                assert!(step.render_seed_drawable_section_count > 0);
+
+                let completion = pump.complete();
+                assert!(
+                    completion
+                        .startup_sections
+                        .iter()
+                        .any(|section| !section.is_empty()),
+                    "remote startup seed must carry at least one drawable section"
+                );
+                assert!(completion.runtime.loaded_chunk_count() > 0);
+                match &*completion.runtime {
+                    NativeSceneRuntime::RemoteDedicated(scene) => {
+                        assert_eq!(
+                            scene.connection.session.blocking_drain_count, 1,
+                            "shared remote startup must not poll_until_idle: only the \
+                             construction-time response is blocking-drained"
+                        );
+                        assert_eq!(scene.startup_pending_update_backlog(), 0);
+                    }
+                    NativeSceneRuntime::Local(_) => panic!("expected a remote runtime"),
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        panic!("shared remote startup pump did not reach ready");
     }
 
     #[test]

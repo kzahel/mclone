@@ -1,9 +1,10 @@
 # 167: Shared Native Session Startup Contract
 
-Status: Slice 1 complete 2026-07-09 (local pump seed handoff; Slice 0 audit +
-guard comments landed first). Design/implementation tactical opened after the
-docs/tactical/163 follow-up showed that startup render-section seeding is both
-duplicated and platform-divergent.
+Status: Slice 2 complete 2026-07-09 (host-neutral `NativeSessionStartupPump<S>`;
+Slice 1 local pump seed handoff and Slice 0 audit + guard comments landed
+first). Design/implementation tactical opened after the docs/tactical/163
+follow-up showed that startup render-section seeding is both duplicated and
+platform-divergent.
 
 Workstream: native Rust shared session/runtime/render startup boundary in
 `mclone-app-runtime`, with desktop flat validation first and required adoption
@@ -403,6 +404,62 @@ cargo test --manifest-path native/Cargo.toml -p mclone-render-session
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-xr-scene -p mclone-android-client
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
 ```
+
+#### Slice 2 Result (2026-07-09)
+
+- Introduced the host-neutral `NativeSessionStartupPump<S>` in
+  `mclone-app-runtime/native_session_runtime.rs`. It owns a
+  `NativeSessionRuntime<S>`, the transient `StartupRenderSectionSeed`, a
+  `StartupReadinessPolicy` (default `Playable`), the poll/sync/compile-job
+  release loop, and startup LOD prewarm. `step(...)` returns a host-neutral
+  `NativeSessionStartupStep` (`host_mode`, `startup_ready`, `host_ready`,
+  seed/compile counters, `local_progress: Option<LoadingProgressOverlay>`, and
+  local-only prewarm fields zeroed for remote). `complete(self)` drains the seed
+  into `NativeSessionStartupCompletion<S> { runtime, startup_sections,
+  final_step }`. Constructors: `local`/`local_with_mesh_assets` (on
+  `NativeSessionStartupPump<LocalOnlySession>`) and
+  `remote_dedicated`/`remote_dedicated_with_mesh_assets`, plus `with_readiness`.
+- Expressed readiness once behind `StartupReadinessPolicy` with host-mode
+  evidence supplied by `NativeSceneRuntime::startup_host_ready(policy, camera)`:
+  local uses `LocalIntegratedSceneRuntime::startup_spawn_authority_ready`
+  (playable chunk server-ready + client snapshot present), remote uses
+  `RemoteDedicatedSceneRuntime::startup_host_ready` (active view produced client
+  chunks + response/update backlog drained). The shared gate is
+  `host_ready && render seed has ≥1 drawable section && prewarm settled`. `Idle`
+  additionally waits for no pending render work at the final camera; no lane
+  forks thresholds by platform. Local loading-progress stays optional step data;
+  remote returns `None`.
+- Startup LOD prewarm is a pump policy active only when the runtime is local
+  integrated (remote carries a disabled, always-settled prewarm). Compile-job
+  release stays in the pump after accepting results; the seed never holds compile
+  capacity after `step`.
+- Rebuilt `LocalIntegratedStartupPump` as a thin wrapper over
+  `NativeSessionStartupPump<LocalOnlySession>` (keeps `with_mesh_assets`, `step`
+  → `LocalIntegratedStartupStep`, `progress_overlay`, `runtime`, `into_runtime`,
+  `into_runtime_with_startup_sections`). It holds no separate startup behavior;
+  desktop/XR/perf local consumers are unchanged and migrate to the shared pump in
+  Slice 3. The old `into_runtime()`/`playable_ready()` local-only helpers folded
+  into the wrapper mapping.
+- Tripwires green: app-runtime 183 tests (180 + 3 new — local reaches playable
+  through the shared seed; a scripted `RemoteDedicated` session reaches ready
+  through the shared pump+seed and proves it does **not** `poll_until_idle` (only
+  the construction-time response is blocking-drained, `blocking_drain_count == 1`,
+  backlog drained); readiness policy defaults to `Playable`). The existing
+  high-render-distance local test still reaches playable before the full view
+  settles (now via the wrapper over the shared pump). The local completion test
+  asserts compile capacity is fully available after `complete()`, proving
+  accepted jobs are released, not held by the seed. render-session 103 green;
+  `mclone-native-client`/`mclone-xr-scene`/`mclone-android-client` and
+  `wasm32` `mclone-web-client` `cargo check` clean; `git diff --check` clean;
+  local `--startup-wait playable` screenshot drew terrain (`6 sections, 2 drawn`)
+  from the seeded draw resources.
+- Deferred to Slice 3: desktop remote (`start_world_from_scene` blocking path),
+  flat Android (`start_android_render_scene`), and XR remote
+  (`start_xr_terrain_runtime`) still use the blocking
+  `poll_until_idle` + `sync_all_render_sections` sequence; migrating them onto the
+  shared pump/completion is Slice 3. Shared camera/interest reconciliation stays
+  Slice 4; `compile_all_render_section_meshes(...)` remains the documented
+  (callerless) resource-rebuild path, renamed in Slice 5.
 
 ### Slice 3: Migrate Native Platform Startup Consumers
 
