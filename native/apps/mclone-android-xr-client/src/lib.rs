@@ -111,14 +111,14 @@ mod android {
         TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions,
     };
     use mclone_render_session::EngineCameraSnapshot;
-    use mclone_xr_host::{
-        OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
-        XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
-    };
-    use mclone_xr_scene::{
+    use mclone_scene::{
         MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFramePipelineHostTiming,
         XrFramePipelineReporter, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
         XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+    };
+    use mclone_xr_host::{
+        OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
+        XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use openxr as xr;
 
@@ -2605,12 +2605,12 @@ mod android {
 
     #[derive(Clone, Copy)]
     struct TerrainMultiviewPerfFrame {
-        summary: mclone_xr_scene::XrTerrainMultiviewFrameSummary,
+        summary: mclone_scene::XrTerrainMultiviewFrameSummary,
         ready: bool,
     }
 
     struct TerrainMultiviewPerfSummary {
-        terrain: mclone_xr_scene::XrTerrainMultiviewFrameSummary,
+        terrain: mclone_scene::XrTerrainMultiviewFrameSummary,
         stereo_ms: Vec<f64>,
         multiview_ms: Vec<f64>,
     }
@@ -3023,7 +3023,7 @@ mod android {
         terrain: &mut AndroidXrTerrainState,
         include_sky: bool,
         include_actors: bool,
-    ) -> Result<(f64, mclone_xr_scene::XrTerrainMultiviewFrameSummary)> {
+    ) -> Result<(f64, mclone_scene::XrTerrainMultiviewFrameSummary)> {
         let start = Instant::now();
         let summary = if include_actors {
             terrain.render_sky_terrain_actors_multiview_frame_frozen(
@@ -3191,7 +3191,7 @@ mod android {
     }
 
     struct TerrainMultiviewProofFrame {
-        summary: mclone_xr_scene::XrTerrainMultiviewFrameSummary,
+        summary: mclone_scene::XrTerrainMultiviewFrameSummary,
         difference: Option<mclone_xr_host::XrMultiviewLayerDifferenceProof>,
     }
 
@@ -3744,7 +3744,7 @@ mod android {
 
     #[derive(Clone, Copy, Debug)]
     struct AndroidXrRenderedFrame {
-        summary: mclone_xr_scene::XrTerrainFrameSummary,
+        summary: mclone_scene::XrTerrainFrameSummary,
         camera: EngineCameraSnapshot,
         timing: AndroidXrRenderFrameTiming,
     }
@@ -4015,7 +4015,7 @@ mod android {
     struct AndroidXrWorstFrameSnapshot {
         sample_frame: u64,
         timing: AndroidXrFrameTiming,
-        summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
+        summary: Option<mclone_scene::XrTerrainFrameSummary>,
     }
 
     struct AndroidXrPerfProbe {
@@ -4269,7 +4269,7 @@ mod android {
                 max_controller_poll_ms: 0.0,
                 max_render_mclone_frame_ms: 0.0,
                 max_render: AndroidXrRenderFrameTiming::default(),
-                max_upload: mclone_xr_scene::XrTerrainUploadSummary::default(),
+                max_upload: mclone_scene::XrTerrainUploadSummary::default(),
                 upload_work_frames: 0,
                 diagnostics_refresh_frames: 0,
                 render_distance: self.render_distance,
@@ -4323,7 +4323,7 @@ mod android {
 
         fn record_settle_frame(
             &mut self,
-            summary: mclone_xr_scene::XrTerrainFrameSummary,
+            summary: mclone_scene::XrTerrainFrameSummary,
             mode: &'static str,
         ) -> bool {
             let _ = self.settle_started.get_or_insert_with(Instant::now);
@@ -4409,7 +4409,7 @@ mod android {
         max_controller_poll_ms: f64,
         max_render_mclone_frame_ms: f64,
         max_render: AndroidXrRenderFrameTiming,
-        max_upload: mclone_xr_scene::XrTerrainUploadSummary,
+        max_upload: mclone_scene::XrTerrainUploadSummary,
         upload_work_frames: u64,
         diagnostics_refresh_frames: u64,
         render_distance: u32,
@@ -4443,7 +4443,7 @@ mod android {
         frame_details: Vec<AndroidXrWorstFrameSnapshot>,
         start_scheduler_cumulative_feature_chunks_published: u64,
         start_scheduler_cumulative_light_statuses_published: u64,
-        latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
+        latest_summary: mclone_scene::XrTerrainFrameSummary,
         latest_budget_decision_panel: BudgetDecisionPanelReport,
     }
 
@@ -6619,7 +6619,7 @@ mod android {
         }
     }
 
-    fn terrain_upload_summary_has_work(summary: mclone_xr_scene::XrTerrainUploadSummary) -> bool {
+    fn terrain_upload_summary_has_work(summary: mclone_scene::XrTerrainUploadSummary) -> bool {
         summary.poll_changed
             || summary.rebuilt_section_count > 0
             || summary.removed_section_count > 0
@@ -6632,9 +6632,7 @@ mod android {
             || summary.upload_removed_section_count > 0
     }
 
-    fn android_xr_perf_settle_frame_is_quiet(
-        summary: mclone_xr_scene::XrTerrainFrameSummary,
-    ) -> bool {
+    fn android_xr_perf_settle_frame_is_quiet(summary: mclone_scene::XrTerrainFrameSummary) -> bool {
         let upload = summary.upload;
         !terrain_upload_summary_has_work(upload)
             && upload.server_command_queue_depth == 0
@@ -6646,10 +6644,10 @@ mod android {
     }
 
     fn max_upload_summary(
-        a: mclone_xr_scene::XrTerrainUploadSummary,
-        b: mclone_xr_scene::XrTerrainUploadSummary,
-    ) -> mclone_xr_scene::XrTerrainUploadSummary {
-        mclone_xr_scene::XrTerrainUploadSummary {
+        a: mclone_scene::XrTerrainUploadSummary,
+        b: mclone_scene::XrTerrainUploadSummary,
+    ) -> mclone_scene::XrTerrainUploadSummary {
+        mclone_scene::XrTerrainUploadSummary {
             host_mode: if b.host_mode.server_owned_lanes_are_remote() {
                 b.host_mode
             } else {
@@ -7005,7 +7003,7 @@ mod android {
 
     fn copy_locomotion_timing(
         timing: &mut AndroidXrRenderFrameTiming,
-        locomotion: mclone_xr_scene::XrLocomotionTiming,
+        locomotion: mclone_scene::XrLocomotionTiming,
     ) {
         timing.locomotion_input_ms = locomotion.input_ms;
         timing.locomotion_camera_apply_ms = locomotion.camera_apply_ms;
@@ -7330,7 +7328,7 @@ mod android {
 
     fn copy_terrain_frame_timing(
         timing: &mut AndroidXrRenderFrameTiming,
-        scene_timing: mclone_xr_scene::XrTerrainFrameTiming,
+        scene_timing: mclone_scene::XrTerrainFrameTiming,
     ) {
         timing.terrain_render_views_ms = scene_timing.render_views_ms;
         timing.terrain_menu_pointer_ms = scene_timing.menu_pointer_ms;

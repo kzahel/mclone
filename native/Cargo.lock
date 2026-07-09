@@ -1431,9 +1431,9 @@ dependencies = [
  "mclone-protocol",
  "mclone-render",
  "mclone-render-session",
+ "mclone-scene",
  "mclone-xr-graphics",
  "mclone-xr-host",
- "mclone-xr-scene",
  "openxr",
  "serde_json",
  "wgpu",
@@ -1594,11 +1594,11 @@ dependencies = [
  "mclone-protocol",
  "mclone-render",
  "mclone-render-session",
+ "mclone-scene",
  "mclone-server",
  "mclone-ui",
  "mclone-xr-graphics",
  "mclone-xr-host",
- "mclone-xr-scene",
  "metal",
  "openxr",
  "pollster",
@@ -1672,6 +1672,29 @@ dependencies = [
  "mclone-mesh",
  "mclone-protocol",
  "mclone-render",
+]
+
+[[package]]
+name = "mclone-scene"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "glam 0.30.10",
+ "log",
+ "mclone-app-runtime",
+ "mclone-assets",
+ "mclone-audio",
+ "mclone-client",
+ "mclone-core",
+ "mclone-diagnostics",
+ "mclone-mesh",
+ "mclone-protocol",
+ "mclone-render",
+ "mclone-render-session",
+ "mclone-server",
+ "mclone-ui",
+ "mclone-xr-host",
+ "wgpu",
 ]
 
 [[package]]
@@ -1754,29 +1777,6 @@ dependencies = [
  "glam 0.30.10",
  "log",
  "openxr",
- "wgpu",
-]
-
-[[package]]
-name = "mclone-xr-scene"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "glam 0.30.10",
- "log",
- "mclone-app-runtime",
- "mclone-assets",
- "mclone-audio",
- "mclone-client",
- "mclone-core",
- "mclone-diagnostics",
- "mclone-mesh",
- "mclone-protocol",
- "mclone-render",
- "mclone-render-session",
- "mclone-server",
- "mclone-ui",
- "mclone-xr-host",
  "wgpu",
 ]
 

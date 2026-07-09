@@ -12,15 +12,15 @@ use anyhow::{Result, bail};
 #[cfg(not(target_os = "android"))]
 use glam::Vec3;
 #[cfg(not(target_os = "android"))]
-use mclone_xr_host::{
-    OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
-    XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
-};
-#[cfg(not(target_os = "android"))]
-use mclone_xr_scene::{
+use mclone_scene::{
     XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrFramePipelineReporter,
     XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
     XrTerrainFrameSummary, XrUnderwaterDetectionMode,
+};
+#[cfg(not(target_os = "android"))]
+use mclone_xr_host::{
+    OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
+    XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
