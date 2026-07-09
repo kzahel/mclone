@@ -26,7 +26,10 @@ use crate::client_connection::{
     ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
     ConnectionUpdateDrainMode, QueuedServerUpdate, pump_client_connection_updates_report,
 };
-use crate::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
+use crate::far_lod::{
+    FarTerrainLodCache, FarTerrainLodConfig, FarTerrainLodCoverage, StartupLodPrewarmConfig,
+    STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET,
+};
 use crate::host_mode::{
     RemoteCommandUpdateBatch, RemoteDedicatedServerSession, SingleViewHostMode,
     SingleViewHostOptions, deferred_command_exchange, dispatch_remote_dedicated_command,
@@ -69,6 +72,7 @@ pub struct LocalIntegratedSceneOptions {
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
     pub render_compile_worker_timing_enabled: bool,
+    pub startup_lod_prewarm: StartupLodPrewarmConfig,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -136,6 +140,7 @@ impl LocalIntegratedSceneOptions {
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
             render_compile_worker_timing_enabled: true,
+            startup_lod_prewarm: StartupLodPrewarmConfig::disabled(),
         }
     }
 
@@ -229,6 +234,11 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_render_compile_worker_timing_enabled(mut self, enabled: bool) -> Self {
         self.render_compile_worker_timing_enabled = enabled;
+        self
+    }
+
+    pub const fn with_startup_lod_prewarm(mut self, prewarm: StartupLodPrewarmConfig) -> Self {
+        self.startup_lod_prewarm = prewarm;
         self
     }
 
@@ -394,7 +404,23 @@ pub struct LocalIntegratedStartupStep {
     pub poll_count: usize,
     pub poll_ms: f64,
     pub changed: bool,
+    /// Combined gate the driver waits on: spawn authority plus prewarm settled.
     pub playable_ready: bool,
+    /// Spawn-authority readiness: underfoot/near real chunks are honest. This is
+    /// the only gate that gameplay honesty depends on; prewarm never sets it.
+    pub spawn_authority_ready: bool,
+    /// Whether startup LOD prewarm is active this session.
+    pub lod_prewarm_enabled: bool,
+    /// Prewarm reached its desired (tile-capped) visual coverage.
+    pub lod_prewarm_complete: bool,
+    /// Prewarm hit its time cap before completing coverage.
+    pub lod_prewarm_timeout: bool,
+    /// Wall-clock spent on prewarm so far (`lod_prewarm_ms`).
+    pub lod_prewarm_ms: f64,
+    /// Retained prewarm tiles drawable so far (`startup_lod_tiles_ready`).
+    pub startup_lod_tiles_ready: usize,
+    /// Desired prewarm tiles, tile-capped (`startup_lod_tiles_target`).
+    pub startup_lod_tiles_target: usize,
     pub cached_section_count: usize,
     pub rebuilt_section_count: usize,
     pub submitted_compile_section_count: usize,
@@ -403,9 +429,78 @@ pub struct LocalIntegratedStartupStep {
     pub progress: Option<LoadingProgressOverlay>,
 }
 
+/// Startup visual-coverage prewarm tracker (tactical 162 Slice 1).
+///
+/// Runs alongside spawn-authority loading, building cheap retained far-LOD
+/// coverage around the spawn center so the first playable frame has less blank
+/// space. It is bounded by a hard time cap and tile cap, and never contributes
+/// to the spawn-authority gate. When it times out, startup degrades to current
+/// behavior (playable as soon as spawn authority is ready).
+#[derive(Clone, Copy, Debug)]
+struct StartupLodPrewarm {
+    config: StartupLodPrewarmConfig,
+    far_lod: FarTerrainLodConfig,
+    seed: i64,
+    center: ChunkPos,
+    started_at: Option<Instant>,
+    elapsed_ms: f64,
+    tiles_ready: usize,
+    tiles_target: usize,
+    complete: bool,
+    timed_out: bool,
+}
+
+impl StartupLodPrewarm {
+    fn new(config: StartupLodPrewarmConfig, seed: i64, center: ChunkPos) -> Self {
+        Self {
+            config,
+            far_lod: config.far_lod_config(),
+            seed,
+            center,
+            started_at: None,
+            elapsed_ms: 0.0,
+            tiles_ready: 0,
+            tiles_target: 0,
+            complete: false,
+            timed_out: false,
+        }
+    }
+
+    const fn enabled(&self) -> bool {
+        self.config.enabled
+    }
+
+    /// Whether the prewarm no longer blocks the playable transition: disabled,
+    /// coverage complete, or the time cap has been hit.
+    const fn settled(&self) -> bool {
+        !self.config.enabled || self.complete || self.timed_out
+    }
+
+    fn advance(&mut self, runtime: &mut LocalIntegratedSceneRuntime, camera_position: Vec3) {
+        if self.settled() {
+            return;
+        }
+        let started = *self.started_at.get_or_insert_with(Instant::now);
+        let budget = STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET;
+        let coverage =
+            runtime.prewarm_far_lod(self.far_lod, self.seed, self.center, camera_position, budget);
+        self.record(coverage, started.elapsed());
+    }
+
+    fn record(&mut self, coverage: FarTerrainLodCoverage, elapsed: Duration) {
+        let effective_target = coverage.target_tiles.min(self.config.tile_cap);
+        self.tiles_target = effective_target;
+        self.tiles_ready = coverage.ready_tiles.min(effective_target);
+        self.elapsed_ms = elapsed_ms(elapsed);
+        self.complete = self.tiles_ready >= effective_target;
+        self.timed_out = !self.complete && elapsed >= self.config.time_cap;
+    }
+}
+
 #[derive(Debug)]
 pub struct LocalIntegratedStartupPump {
     runtime: LocalIntegratedSceneRuntime,
+    prewarm: StartupLodPrewarm,
     poll_count: usize,
     poll_ms: f64,
 }
@@ -415,8 +510,10 @@ impl LocalIntegratedStartupPump {
         options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
+        let prewarm = StartupLodPrewarm::new(options.startup_lod_prewarm, options.seed, options.center);
         Ok(Self {
             runtime: LocalIntegratedSceneRuntime::with_mesh_assets(options, mesh_assets)?,
+            prewarm,
             poll_count: 0,
             poll_ms: 0.0,
         })
@@ -442,13 +539,26 @@ impl LocalIntegratedStartupPump {
             || section_update.submitted_compile_section_count > 0
             || section_update.completed_compile_section_count > 0;
         changed |= render_changed;
+
+        // Prewarm cheap LOD coverage alongside spawn-authority loading. It never
+        // decides spawn authority; it only gates the presentation-side wait.
+        self.prewarm.advance(&mut self.runtime, camera_position);
+
         let progress = self.progress_overlay();
-        let playable_ready = self.playable_ready();
+        let spawn_authority_ready = self.playable_ready();
+        let playable_ready = spawn_authority_ready && self.prewarm.settled();
         Ok(LocalIntegratedStartupStep {
             poll_count: self.poll_count,
             poll_ms: self.poll_ms,
             changed,
             playable_ready,
+            spawn_authority_ready,
+            lod_prewarm_enabled: self.prewarm.enabled(),
+            lod_prewarm_complete: self.prewarm.complete,
+            lod_prewarm_timeout: self.prewarm.timed_out,
+            lod_prewarm_ms: self.prewarm.elapsed_ms,
+            startup_lod_tiles_ready: self.prewarm.tiles_ready,
+            startup_lod_tiles_target: self.prewarm.tiles_target,
             cached_section_count: self.runtime.cached_sections().len(),
             rebuilt_section_count: section_update.rebuilt_section_count(),
             submitted_compile_section_count: section_update.submitted_compile_section_count,
@@ -609,6 +719,33 @@ impl LocalIntegratedSceneRuntime {
             self.core.render_distance(),
             Some(&normal_terrain_chunks),
             self.mesh_assets.far_lod_materials.as_ref(),
+        )
+    }
+
+    /// Build cheap retained far-LOD coverage during startup with an explicit
+    /// build budget, sharing the same retained patches the live far-LOD path
+    /// reuses. Presentation only: this never satisfies spawn authority.
+    pub fn prewarm_far_lod(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        camera_position: Vec3,
+        chunk_budget: usize,
+    ) -> FarTerrainLodCoverage {
+        let normal_terrain_chunks = traversal_ready_chunks(
+            &self
+                .core
+                .traversal_ready_render_section_keys(camera_position),
+        );
+        self.far_lod_cache.prewarm(
+            config,
+            seed,
+            center,
+            self.core.render_distance(),
+            Some(&normal_terrain_chunks),
+            self.mesh_assets.far_lod_materials.as_ref(),
+            chunk_budget,
         )
     }
 
@@ -2982,6 +3119,45 @@ mod tests {
         }
 
         panic!("startup pump did not reach playable center");
+    }
+
+    #[test]
+    fn startup_pump_prewarms_far_lod_before_playable() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let prewarm = StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), true)
+            .with_extra_chunks(3);
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let mut pump = LocalIntegratedStartupPump::with_mesh_assets(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false)
+                .with_startup_lod_prewarm(prewarm),
+            mesh_assets,
+        )
+        .unwrap();
+        let camera_position = Vec3::new(8.0, 80.0, 8.0);
+
+        for _ in 0..2_000 {
+            let step = pump.step(camera_position).unwrap();
+            assert!(step.lod_prewarm_enabled);
+            // Spawn authority never depends on prewarm; playable requires both
+            // spawn authority and the prewarm settling (complete or timed out).
+            if step.playable_ready {
+                assert!(step.spawn_authority_ready);
+                assert!(step.lod_prewarm_complete || step.lod_prewarm_timeout);
+                assert!(step.startup_lod_tiles_target > 0);
+                assert!(step.startup_lod_tiles_ready <= step.startup_lod_tiles_target);
+                if step.lod_prewarm_complete {
+                    assert_eq!(step.startup_lod_tiles_ready, step.startup_lod_tiles_target);
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        panic!("startup pump did not reach playable center with prewarm enabled");
     }
 
     #[test]

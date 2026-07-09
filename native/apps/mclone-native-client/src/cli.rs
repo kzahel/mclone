@@ -90,6 +90,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--settle-distances",
     "--simulation-cadence",
     "--start-in-world",
+    "--startup-lod-prewarm",
     "--startup-streaming-frames",
     "--startup-streaming-perf",
     "--startup-streaming-persisted-world",
@@ -147,6 +148,11 @@ pub(crate) struct SceneOptions {
     pub(crate) adaptive_render_admission_budget: bool,
     /// Experimental, opt-in far surface LOD shell. Disabled by default.
     pub(crate) far_lod: FarTerrainLodConfig,
+    /// Startup LOD prewarm (tactical 162 Slice 1): build cheap retained far-LOD
+    /// coverage before the first playable frame. Only active when `far_lod` is
+    /// enabled. Defaults on so `--far-lod true` prewarms; disable with
+    /// `--startup-lod-prewarm false`.
+    pub(crate) startup_lod_prewarm: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -476,6 +482,7 @@ impl Default for SceneOptions {
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
             far_lod: FarTerrainLodConfig::default(),
+            startup_lod_prewarm: true,
         }
     }
 }
@@ -532,6 +539,7 @@ impl SceneOptions {
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
             far_lod: FarTerrainLodConfig::default(),
+            startup_lod_prewarm: true,
         })
     }
 }
@@ -669,6 +677,7 @@ impl Cli {
         let mut xr_debug_ui_screen = None;
         let mut rebuild_render_scale = None;
         let mut far_lod = FarTerrainLodConfig::default();
+        let mut startup_lod_prewarm = true;
         let mut adaptive_chunk_publication_budget = None;
         let mut adaptive_render_admission_budget = None;
         let mut render_compile_worker_timing_enabled = None;
@@ -1020,6 +1029,10 @@ impl Cli {
                         FarTerrainLodConfig::default()
                     };
                 }
+                "--startup-lod-prewarm" => {
+                    startup_lod_prewarm =
+                        parse_bool_arg("--startup-lod-prewarm", args.next())?;
+                }
                 "--adaptive-chunk-publication-budget" => {
                     adaptive_chunk_publication_budget = Some(parse_bool_arg(
                         "--adaptive-chunk-publication-budget",
@@ -1239,6 +1252,7 @@ impl Cli {
         scene.first_person_player_visible = first_person_player_visible;
         scene.simulation_cadence = simulation_cadence;
         scene.far_lod = far_lod;
+        scene.startup_lod_prewarm = startup_lod_prewarm;
         scene.adaptive_chunk_publication_budget =
             adaptive_chunk_publication_budget.unwrap_or(scene.remote_addr.is_none());
         scene.adaptive_render_admission_budget = adaptive_render_admission_budget.unwrap_or(false);
@@ -1847,11 +1861,11 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\

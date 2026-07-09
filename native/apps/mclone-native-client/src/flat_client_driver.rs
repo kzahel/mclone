@@ -1821,7 +1821,7 @@ impl FlatClientDriver {
             .as_ref()
             .map_or(0, |runtime| runtime.client().loaded_chunk_count());
         log::info!(
-            "world seed={} playable startup ready polls={} poll_ms={:.3} loaded={} cached_sections={} target_ready={}/{}",
+            "world seed={} playable startup ready polls={} first_playable_ms={:.3} loaded={} cached_sections={} target_ready={}/{} lod_prewarm={} lod_prewarm_ms={:.3} startup_lod_tiles_ready={} startup_lod_tiles_target={} startup_lod_timeout={}",
             self.scene.seed,
             step.poll_count,
             step.poll_ms,
@@ -1832,7 +1832,12 @@ impl FlatClientDriver {
                 .map_or(0, |progress| progress.target_ready_chunks),
             step.progress
                 .as_ref()
-                .map_or(0, |progress| progress.target_chunk_count)
+                .map_or(0, |progress| progress.target_chunk_count),
+            step.lod_prewarm_enabled,
+            step.lod_prewarm_ms,
+            step.startup_lod_tiles_ready,
+            step.startup_lod_tiles_target,
+            step.lod_prewarm_timeout,
         );
         self.session.complete_start(descriptor.clone());
         self.apply_started_session_ui(&descriptor);

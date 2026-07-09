@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_app_runtime::far_lod::FarTerrainLodConfig;
+use mclone_app_runtime::far_lod::{FarTerrainLodConfig, StartupLodPrewarmConfig};
 use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
 use mclone_app_runtime::native_session_runtime::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedSceneRuntime,
@@ -122,6 +122,10 @@ pub(crate) fn local_integrated_scene_options(
     .with_render_compile_worker_count(scene.render_compile_worker_count)
     .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
     .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
+    .with_startup_lod_prewarm(StartupLodPrewarmConfig::for_far_lod(
+        scene.far_lod,
+        scene.startup_lod_prewarm,
+    ))
     .with_integrated_world_session_storage(storage);
     Ok(options)
 }

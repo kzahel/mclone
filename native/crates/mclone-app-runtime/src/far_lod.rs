@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetPath, AssetSource};
@@ -24,6 +25,18 @@ pub const DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS: u32 = 4;
 pub const DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET: usize = 4;
 pub const DEFAULT_FAR_TERRAIN_LOD_EVICTION_MARGIN_CHUNKS: u32 = 2;
 pub const MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES: usize = 4096;
+
+/// Startup visual-coverage prewarm defaults (tactical 162 Slice 1). These bound
+/// how much cheap synthetic LOD is built before the first playable frame so the
+/// initial view has less blank space, without letting slow LOD delay entry into
+/// play. The prewarm is presentation-only: it never satisfies spawn authority.
+pub const DEFAULT_STARTUP_LOD_PREWARM_EXTRA_CHUNKS: u32 = 5;
+pub const DEFAULT_STARTUP_LOD_PREWARM_TIME_CAP: Duration = Duration::from_millis(2000);
+pub const DEFAULT_STARTUP_LOD_PREWARM_TILE_CAP: usize = 1024;
+/// Chunk patches built per prewarm step. The pump calls the prewarm each poll,
+/// so this is a per-step burst bounded by the overall time/tile caps.
+pub const STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET: usize = 24;
+
 pub const SEA_LEVEL: f32 = 63.0;
 pub const FAR_TERRAIN_LOD_MATERIALS_PATH: &str = "assets/mclone/lod/materials.v1.json";
 const FAR_TERRAIN_LOD_VERTEX_FLOATS: usize = 7;
@@ -79,6 +92,100 @@ impl FarTerrainLodConfig {
 impl Default for FarTerrainLodConfig {
     fn default() -> Self {
         Self::disabled()
+    }
+}
+
+/// Startup visual-coverage prewarm policy (tactical 162 Slice 1).
+///
+/// This is presentation-only. It builds cheap retained synthetic LOD patches
+/// around the spawn center before the first playable frame so the opening view
+/// has less blank space. It must never satisfy the spawn-authority gate: real
+/// underfoot/near chunks still decide playable honesty. Coverage is bounded by a
+/// hard time cap and tile cap so slow LOD degrades to current behavior.
+///
+/// `sample_spacing_blocks` must match the live far-LOD spacing so prewarmed
+/// patches share the same [`FarTerrainLodSourceKey`] and are reused by live
+/// rendering instead of being reset and rebuilt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StartupLodPrewarmConfig {
+    pub enabled: bool,
+    pub extra_chunks: u32,
+    pub time_cap: Duration,
+    pub tile_cap: usize,
+    pub sample_spacing_blocks: u32,
+}
+
+impl StartupLodPrewarmConfig {
+    pub const fn disabled() -> Self {
+        Self {
+            enabled: false,
+            extra_chunks: DEFAULT_STARTUP_LOD_PREWARM_EXTRA_CHUNKS,
+            time_cap: DEFAULT_STARTUP_LOD_PREWARM_TIME_CAP,
+            tile_cap: DEFAULT_STARTUP_LOD_PREWARM_TILE_CAP,
+            sample_spacing_blocks: DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS,
+        }
+    }
+
+    /// Derive a prewarm policy for a given live far-LOD config. Prewarm is only
+    /// enabled when both the caller opts in and far LOD itself is enabled, since
+    /// prewarmed patches are useless if the live path never draws them.
+    pub fn for_far_lod(far_lod: FarTerrainLodConfig, enabled: bool) -> Self {
+        Self {
+            enabled: enabled && far_lod.enabled,
+            sample_spacing_blocks: far_lod.normalized().sample_spacing_blocks,
+            ..Self::disabled()
+        }
+    }
+
+    pub fn with_extra_chunks(mut self, extra_chunks: u32) -> Self {
+        self.extra_chunks = extra_chunks.clamp(
+            MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+            MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+        );
+        self
+    }
+
+    pub const fn with_time_cap(mut self, time_cap: Duration) -> Self {
+        self.time_cap = time_cap;
+        self
+    }
+
+    pub const fn with_tile_cap(mut self, tile_cap: usize) -> Self {
+        self.tile_cap = tile_cap;
+        self
+    }
+
+    /// The far-LOD config used to build prewarm coverage: enabled, spawn-centered,
+    /// and reaching `render_distance + extra_chunks`, at the live sample spacing.
+    pub fn far_lod_config(&self) -> FarTerrainLodConfig {
+        FarTerrainLodConfig {
+            enabled: true,
+            start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
+            extra_radius_chunks: self.extra_chunks,
+            sample_spacing_blocks: self.sample_spacing_blocks,
+        }
+        .normalized()
+    }
+}
+
+impl Default for StartupLodPrewarmConfig {
+    fn default() -> Self {
+        Self::disabled()
+    }
+}
+
+/// Snapshot of how much desired far-LOD coverage is currently drawable, used to
+/// track startup prewarm readiness. `target_tiles` is the desired chunk-patch
+/// count and `ready_tiles` is how many of those patches are already retained.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FarTerrainLodCoverage {
+    pub ready_tiles: usize,
+    pub target_tiles: usize,
+}
+
+impl FarTerrainLodCoverage {
+    pub const fn is_complete(&self) -> bool {
+        self.ready_tiles >= self.target_tiles
     }
 }
 
@@ -400,6 +507,72 @@ impl FarTerrainLodCache {
             self.clear();
             return None;
         }
+        self.advance_for_camera(
+            config,
+            seed,
+            center,
+            render_distance,
+            normal_terrain_chunks,
+            materials,
+            DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET,
+        );
+        self.mesh.as_ref()
+    }
+
+    /// Advance retained coverage toward `render_distance + config.extra_radius`
+    /// with an explicit build budget and report how much of the desired coverage
+    /// is currently drawable. Used by startup prewarm; shares the same retained
+    /// patches and source key as [`Self::mesh_for_camera`] so prewarmed tiles are
+    /// reused (not reset) once live rendering takes over.
+    pub fn prewarm(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        render_distance: u32,
+        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+        chunk_budget: usize,
+    ) -> FarTerrainLodCoverage {
+        if !config.enabled {
+            self.clear();
+            return FarTerrainLodCoverage::default();
+        }
+        self.advance_for_camera(
+            config,
+            seed,
+            center,
+            render_distance,
+            normal_terrain_chunks,
+            materials,
+            chunk_budget,
+        );
+        self.coverage()
+    }
+
+    /// How many of the currently desired chunk patches are already retained.
+    pub fn coverage(&self) -> FarTerrainLodCoverage {
+        let ready_tiles = self
+            .desired_chunks
+            .iter()
+            .filter(|pos| self.retained_patches.contains_key(pos))
+            .count();
+        FarTerrainLodCoverage {
+            ready_tiles,
+            target_tiles: self.desired_chunks.len(),
+        }
+    }
+
+    fn advance_for_camera(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        render_distance: u32,
+        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+        chunk_budget: usize,
+    ) {
         let source_key = FarTerrainLodSourceKey::new(seed, config, materials.is_some());
         if self.source_key != Some(source_key) {
             self.reset_for_source(source_key);
@@ -412,11 +585,10 @@ impl FarTerrainLodCache {
             normal_terrain_chunks,
         );
         self.update_target(key, normal_terrain_chunks);
-        self.advance_build(DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET, materials);
+        self.advance_build(chunk_budget, materials);
         if self.mesh_dirty {
             self.rebuild_mesh();
         }
-        self.mesh.as_ref()
     }
 
     fn reset_for_source(&mut self, source_key: FarTerrainLodSourceKey) {
@@ -1488,6 +1660,102 @@ mod tests {
             cache.retained_patches.len() + cache.pending_chunks.len()
                 <= MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES
         );
+    }
+
+    #[test]
+    fn startup_lod_prewarm_config_gates_on_far_lod_enabled() {
+        let enabled = StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), true);
+        assert!(enabled.enabled);
+        assert_eq!(
+            enabled.sample_spacing_blocks,
+            DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS
+        );
+        assert_eq!(enabled.extra_chunks, DEFAULT_STARTUP_LOD_PREWARM_EXTRA_CHUNKS);
+
+        assert!(!StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), false).enabled);
+        assert!(!StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::disabled(), true).enabled);
+        assert!(!StartupLodPrewarmConfig::default().enabled);
+    }
+
+    #[test]
+    fn startup_lod_prewarm_far_lod_config_targets_extra_chunks() {
+        let config = StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), true)
+            .with_extra_chunks(5);
+        let far_lod = config.far_lod_config();
+
+        assert!(far_lod.enabled);
+        assert_eq!(far_lod.extra_radius_chunks, 5);
+        assert_eq!(
+            far_lod.sample_spacing_blocks,
+            DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS
+        );
+
+        // Extra chunks below the minimum ring are clamped up.
+        assert_eq!(
+            StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), true)
+                .with_extra_chunks(0)
+                .extra_chunks,
+            MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS
+        );
+    }
+
+    #[test]
+    fn far_terrain_lod_cache_prewarm_fills_coverage_incrementally() {
+        let mut cache = FarTerrainLodCache::new();
+        let config = StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), true)
+            .with_extra_chunks(1)
+            .far_lod_config();
+
+        let first = cache.prewarm(config, 12345, ChunkPos::new(0, 0), 0, None, None, 3);
+        assert_eq!(first.target_tiles, 8);
+        assert_eq!(first.ready_tiles, 3);
+        assert!(!first.is_complete());
+
+        let mut coverage = first;
+        for _ in 0..8 {
+            if coverage.is_complete() {
+                break;
+            }
+            coverage = cache.prewarm(config, 12345, ChunkPos::new(0, 0), 0, None, None, 3);
+        }
+        assert!(coverage.is_complete());
+        assert_eq!(coverage.ready_tiles, 8);
+        assert_eq!(cache.coverage(), coverage);
+    }
+
+    #[test]
+    fn far_terrain_lod_cache_prewarm_patches_are_reused_by_live_mesh() {
+        let mut cache = FarTerrainLodCache::new();
+        let live = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
+        let prewarm = StartupLodPrewarmConfig::for_far_lod(live, true)
+            .with_extra_chunks(1)
+            .far_lod_config();
+
+        // Prewarm to full coverage before any live frame.
+        let mut coverage = FarTerrainLodCoverage::default();
+        for _ in 0..8 {
+            coverage = cache.prewarm(prewarm, 12345, ChunkPos::new(0, 0), 0, None, None, 24);
+            if coverage.is_complete() {
+                break;
+            }
+        }
+        assert!(coverage.is_complete());
+        let prewarmed = cache
+            .retained_patches
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(prewarmed.len(), 8);
+
+        // The first live frame must reuse the prewarmed patches, not reset them:
+        // prewarm and live share the same source key (seed + spacing + materials).
+        cache.mesh_for_camera(live, 12345, ChunkPos::new(0, 0), 0, None, None);
+        for pos in &prewarmed {
+            assert!(
+                cache.retained_patches.contains_key(pos),
+                "live rendering should reuse prewarmed patch {pos:?}"
+            );
+        }
     }
 
     #[test]

@@ -74,6 +74,37 @@ fn cli_parses_far_lod_opt_in() {
 }
 
 #[test]
+fn cli_defaults_startup_lod_prewarm_on() {
+    assert!(SceneOptions::default().startup_lod_prewarm);
+}
+
+#[test]
+fn cli_parses_startup_lod_prewarm_opt_out() {
+    let cli = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-frame.png".to_owned(),
+        "--far-lod".to_owned(),
+        "true".to_owned(),
+        "--startup-lod-prewarm".to_owned(),
+        "false".to_owned(),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        cli,
+        screenshot_cli(
+            "/tmp/mclone-frame.png",
+            SceneOptions {
+                far_lod: mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled(),
+                startup_lod_prewarm: false,
+                ..SceneOptions::default()
+            },
+            TexturedSectionRenderOptions::default(),
+        )
+    );
+}
+
+#[test]
 fn cli_parses_movement_speed_multiplier() {
     let cli = Cli::parse([
         "--screenshot".to_owned(),

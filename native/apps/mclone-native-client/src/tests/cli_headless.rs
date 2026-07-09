@@ -392,6 +392,7 @@ fn cli_parses_screenshot_scene_options() {
                 adaptive_chunk_publication_budget: true,
                 adaptive_render_admission_budget: false,
                 far_lod: Default::default(),
+                startup_lod_prewarm: true,
             },
             TexturedSectionRenderOptions::default(),
         )

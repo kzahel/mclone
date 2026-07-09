@@ -1,7 +1,7 @@
 # 162: Real-Chunk LOD Reduction Draft
 
-Status: draft 2026-07-08. Slice 0A retained synthetic chunk patches landed;
-startup prewarm remains next.
+Status: draft 2026-07-09. Slice 0A retained synthetic chunk patches and Slice 1
+startup LOD prewarm landed; coverage coordinator (Slice 2) remains next.
 
 Workstream: native Rust shared runtime/persistence/render boundary. Desktop
 validation remains the likely first lane, but the target shape must stay shared
@@ -297,6 +297,30 @@ Deliverables:
 
 This is the product experiment: prove whether cheap coarse coverage avoids empty
 space without materially delaying entry to play.
+
+Slice 1 landed with a shared startup prewarm path:
+
+- `StartupLodPrewarmConfig` (shared `far_lod` module) carries enabled, extra
+  chunks (default `render distance + 5`), time cap (default `2000ms`), tile cap
+  (default `1024`), and the live sample spacing so prewarmed patches share the
+  live `FarTerrainLodSourceKey` and are reused, not reset, by live rendering
+- `FarTerrainLodCache::prewarm`/`coverage` advance the retained chunk patches
+  with an explicit build budget and report `ready`/`target` tiles; this shares
+  the exact retained-patch path as `mesh_for_camera`
+- `LocalIntegratedStartupPump` runs the prewarm alongside spawn-authority
+  loading and tracks readiness separately: `spawn_authority_ready` never depends
+  on prewarm, and `playable_ready = spawn_authority_ready && (prewarm complete
+  or timed out or disabled)`
+- diagnostics on the startup step and the desktop completion log:
+  `first_playable_ms`, `lod_prewarm_ms`, `startup_lod_tiles_ready`,
+  `startup_lod_tiles_target`, `startup_lod_timeout`
+- desktop opt-out via `--startup-lod-prewarm true|false`; auto-enabled with
+  `--far-lod true`. Measured desktop (RD4, seed 12345): 280/280 tiles prewarmed
+  in ~307ms, no timeout, before the playable transition
+
+Not yet done here (deferred to later slices): a shared coverage coordinator
+(Slice 2), LOD budget/queue policy (Slice 3), reduced real-chunk tiles
+(Slice 4+), and any persistence.
 
 ### Slice 2: Coverage Coordinator And Source Precedence
 
