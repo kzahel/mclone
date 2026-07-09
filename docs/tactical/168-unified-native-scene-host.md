@@ -491,32 +491,90 @@ Validation: standard battery, plus:
   unchanged; this path is not migrated in this slice).
 - One Quest session-smoke to prove no XR regression.
 
+> Line anchors in Slices 4–10 were re-verified 2026-07-09 after Slices 0–2
+> landed. Expect small drift as slices land — anchor on symbol names first,
+> line numbers second. The scene crate is now `mclone-scene`
+> (`native/crates/mclone-scene/`); older references to `mclone-xr-scene` in
+> the evidence section describe the pre-rename audit.
+
 ### Slice 4: Shared OpenXR frame driver
 
 Goal: write the poll -> waitFrame -> locate -> render-or-skip -> end -> report
 loop **once**, in `mclone-xr-host` (or a new thin `mclone-xr-runtime` crate if
-dependency direction demands it).
+dependency direction demands it), and remove the transitive `openxr` edge that
+Slice 1 left behind.
+
+Read first: `native/crates/mclone-xr-host/src/lib.rs` (the frame primitives:
+`poll_openxr_events`, `wait_begin_frame`, `end_skipped_frame`,
+`end_frame_with_layers`, `end_stereo_projection_frame`,
+`end_multiview_projection_frame`, `acquire_eye_target`/`acquire_stereo_target`,
+`locate_stereo_views`, the `XrEyeSwapchain`/`XrStereoSwapchain` traits, and the
+neutral `XrViewPose`/`XrFov`/`XrView` types at `lib.rs:76-114`);
+`desktop_xr.rs:415` (`run_smoke_frames`) as the simplest existing loop;
+android-xr `lib.rs:3343` (`run_mclone_frame_loop`) as the fullest one; then the
+three harness loops (`run_multiview_proof_loop` `:2370`,
+`run_terrain_multiview_perf_loop` `:2667`, `run_terrain_multiview_proof_loop`
+`:3053`).
+
+Context: xr-host owns every frame *step* but not the loop that sequences them,
+so the skeleton is copy-pasted six times. The only genuinely per-surface
+pieces are: (a) the outer event pump (winit companion pump on desktop vs
+`poll_android_events`/`wait_for_android_resume` on Android), (b)
+frame-limit/timeout policy (desktop bounded smoke frames vs Android
+unbounded), (c) the concrete graphics session (already abstracted by the
+swapchain traits). All three become injected values/hooks on the driver.
 
 Deliverables:
 
-- `OpenXrFrameDriver` generic over the graphics session (the
-  `XrEyeSwapchain`/`XrStereoSwapchain` traits already abstract Metal/Vulkan),
-  taking a per-frame render callback and a platform pump hook (winit companion
-  pump on desktop, `poll_android_events` on Android) and frame-limit/timeout
-  policy as injected values.
-- Migrate all six loops onto it: `desktop_xr.rs:415`, android-xr `lib.rs:3304`,
-  `:2370`, `:2667`, `:3020`, and unify the `render_mclone_frame` twins
-  (`desktop_xr.rs:972`, android-xr `lib.rs:7020`/`:7145`), moving the
-  automation-dispatch `match` next to the locomotion methods it calls.
-- Dedup `log_openxr_host_event` (`desktop_xr.rs:294` / android-xr `lib.rs:7006`)
-  and the scene-option adapter triplication (make
-  `local_integrated_scene_options`, `session.rs:1565`, public; delete
-  `android_xr_local_options`/`android_xr_host_options` and
-  `xr_scene_options_from_desktop_scene` copies).
+1. **Dependency-direction fix (discovered post-Slice-1, required here).** The
+   neutral view types landed in `mclone-xr-host`, and `mclone-scene` depends
+   on `mclone-xr-host` (`mclone-scene/Cargo.toml:24`,
+   `mclone-scene/src/lib.rs:106` imports `XrControllerSnapshot, XrFov, XrHand,
+   XrView`) — so the scene crate still carries a **transitive** `openxr`
+   dependency, violating host purity (guardrail 5) the moment flat consumers
+   arrive. Move the neutral pose/view/fov/controller-snapshot types to an
+   openxr-free home so `mclone-scene` can drop its `mclone-xr-host` dep
+   entirely. Preferred home: an existing openxr-free crate both already
+   depend on (`mclone-render-session` beside `EngineCamera`, or
+   `mclone-app-runtime`); a tiny new types crate is acceptable if neither
+   fits cleanly. `mclone-xr-host` keeps only the `from_openxr` conversions.
+   Record the placement choice in this doc. Exit check:
+   `cargo tree --manifest-path native/Cargo.toml -p mclone-scene | grep -i openxr`
+   returns nothing.
+2. **`OpenXrFrameDriver`**, generic over the graphics session via the
+   existing swapchain traits, taking: a per-frame render callback, a platform
+   pump hook, frame-limit/timeout policy, and the idle poll interval.
+   `SESSION_IDLE_POLL_INTERVAL` (declared identically at `desktop_xr.rs:103`
+   and android-xr `lib.rs:150`) gets its single home here.
+3. **Migrate all six loops** onto the driver: `desktop_xr.rs:415`, android-xr
+   `lib.rs:3343` (main), `:2370`, `:2667`, `:3053` (harnesses). The harness
+   loops become thin render-callback variants, not separate loops.
+4. **Unify the `render_mclone_frame` twins** — `desktop_xr.rs:972`, android-xr
+   `lib.rs:7065` (per-eye) and `:7205` (multiview) — into one scene-crate
+   entry point with per-eye and multiview variants. Move the ~28-line
+   automation-dispatch `match` (copy-pasted inside both android-xr variants)
+   into `mclone-scene/src/locomotion.rs` next to the methods it calls.
+5. **Small dedups while the files are open**: `log_openxr_host_event`
+   (`desktop_xr.rs:294` / android-xr `lib.rs:7051`) moves beside the driver;
+   `local_integrated_scene_options` (`mclone-scene/src/session.rs:1565`)
+   becomes `pub` and the copies die (`android_xr_local_options`/
+   `android_xr_host_options` in android-xr `lib.rs` ~2177,
+   `xr_scene_options_from_desktop_scene` in `desktop_xr.rs` ~855-949).
 
-Tripwires: grep — no app crate contains a `wait_begin_frame` call outside the
-shared driver; Quest smoke log lines (session-smoke ready summaries,
-`drawn_sections`/`drawn_indices`) match pre-slice baselines.
+Out of scope: report formatting (Slice 5), admission policy (Slice 6), any
+flat surface, any gameplay/effects change. XR pixel output must be
+byte-identical; this is loop plumbing only.
+
+Baseline capture (before editing): save the full Quest session-smoke log and
+a desktop XR smoke log to `/tmp` for post-slice line-by-line comparison. The
+validation scripts grep for specific log markers (e.g.
+`MCLONE_ANDROID_XR_REPLACEMENT_READY` in `android-xr/validate-quest-openxr.sh`)
+— those exact strings must survive the migration.
+
+Tripwires: `grep -rn "wait_begin_frame" native/apps` hits nothing (only the
+shared driver calls it); Quest smoke ready-summary lines
+(`sections=`/`drawn_sections=`/`drawn_indices=`) match pre-slice baselines;
+the `cargo tree` openxr check on `mclone-scene` is clean.
 
 Validation: standard battery + `pnpm native:xr:desktop` +
 `MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke` +
@@ -524,92 +582,221 @@ Validation: standard battery + `pnpm native:xr:desktop` +
 `pnpm native:android-xr:terrain-multiview-proof` (the harness loops must still
 pass after migrating onto the driver).
 
+Exit criteria: six loops replaced by one driver; both XR apps' loop code is
+render-callback + platform pump only; `mclone-scene` has no openxr edge,
+direct or transitive; device logs match baselines.
+
 ### Slice 5: Diagnostics presentation consolidation
 
-Goal: one set of frame-report builders and formatters.
+Goal: one set of frame-report builders, one set of formatters, one accountant.
+
+Read first: `mclone-scene/src/frame_pipeline_reporter.rs` (the canonical
+builders: `xr_frame_pipeline_stage_spans` `:119`, the peer-panel builder, and
+the `remote_host_queue_report`/`server_runner_peer_report`/
+`worker_metrics_peer_report` helpers `:329-349`);
+`mclone-app-runtime/src/frame_pipeline_accounting.rs` (the flat-side
+`FramePipelineAccountant` relocated there by 165 Slice 2a); android-xr
+`lib.rs:4519` (`log_summary`, ~700 lines) and `:5218` (`log_worst_frames`,
+~300 lines); the android-xr duplicate builders
+(`android_xr_render_stage_spans` `:5549`, `android_xr_queue_panel` `:5596`,
+`android_xr_peer_thread_panel` `:5684`, plus its local
+`remote_host_queue_report`/`server_runner_peer_report`/
+`worker_metrics_peer_report`); desktop `perf.rs:2995-3284` (the third copy of
+StageId/QueueId/PeerThreadId construction); and **the 165 tactical's Slice 2c
+section**, which already scopes the accountant convergence.
+
+Context: the *builders* are triplicated (shared crate / android-xr / desktop
+perf). The *presentation* (text formatting of `FramePipelineReport`) was never
+shared at all, so android-xr and desktop perf each wrote their own — that is
+most of the remaining bulk of the 7,661-line Quest file. Separately, two
+accountants emit the same `FramePipelineReport`
+(`FramePipelineAccountant` in app-runtime; `XrFramePipelineReporter` in
+mclone-scene).
 
 Deliverables:
 
-- Move report *presentation* (`log_summary`/`log_worst_frames`, `*_label`
-  formatters — android-xr `lib.rs:4472-7020`) next to the shared builders in
-  the scene crate's `frame_pipeline_reporter`; delete the android-xr duplicate
-  builders (`android_xr_render_stage_spans` `lib.rs:5502`,
-  `android_xr_peer_thread_panel` `:5637`, `remote_host_queue_report` `:5769`,
-  `server_runner_peer_report` `:5774`, `worker_metrics_peer_report` `:5738`,
-  `android_xr_queue_panel` `:5549`) and the desktop `perf.rs:2995-3284`
-  triplication.
-- Converge the two accountants toward one host-owned accountant emitting
-  `FramePipelineReport`. **Coordinate with 165 Slice 2c**, which already
-  scopes the `XrFramePipelineReporter` collapse (single-shot `record_frame`
-  feed, `NearestRank` percentiles, queue-age semantics, peer-thread panel must
-  be preserved exactly). If 165-2c has landed, consume its result; if not,
-  land it here and mark it done there. Do not implement it twice.
+1. **Shared presentation module** (formatters: summary, worst-frames, the
+   `*_label` helpers) living beside whichever accountant survives — prefer
+   `mclone-app-runtime` next to `frame_pipeline_accounting` if flat consumers
+   need it without the scene crate, otherwise the scene crate's reporter
+   module. Delete the android-xr copies (`log_summary`/`log_worst_frames` +
+   `*_label` + duplicate builders listed above) and the desktop
+   `perf.rs:2995-3284` builder copy; both repoint at the shared module.
+2. **Accountant convergence per 165 Slice 2c.** 165 records the exact
+   semantics that must survive: the XR single-shot `record_frame` feed (vs
+   the desktop push API), `NearestRank` percentile config, the
+   `completed_results` enqueue/dequeue queue-age semantics (vs plain
+   `reconcile_depth`), the XR-only peer-thread panel, and neutralizing the
+   XR-local `XrTerrain*` input types. 165's recommended shape: generalize the
+   shared accountant to accept a `FrameAccountingConfig` plus a
+   `record_prebuilt(observation, queue_panel, extras)` entry point, and a
+   neutral queue-depth input struct. **If 165-2c has already landed, consume
+   its result; if not, land it here and mark it done in the 165 doc. Do not
+   implement it twice.**
 
-Tripwires: per the XR render-path guardrail, XR-pixel-visible output changes
-require desktop-XR + Quest capture validation; percentile/age semantics must
-be preserved exactly (compare a Quest perf summary line-by-line pre/post).
+Out of scope: admission/budget behavior (Slice 6); changing what is measured
+(only where the builders/formatters live); flat surfaces beyond the
+`perf.rs` builder dedup.
+
+Baseline capture: one full Quest `terrain-multiview-perf` summary and one
+desktop perf/timedemo report saved to `/tmp` pre-slice. The formatters may be
+unified, but any changed log line must be checked against what the validation
+scripts parse (`android-xr/validate-quest-openxr.sh` greps specific markers)
+and against the perf-summary comparison workflow.
+
+Tripwires: per the XR render-path guardrail, any XR-pixel-visible change
+requires desktop-XR + Quest capture validation (the diagnostic panel is
+XR-visible); percentile/age semantics preserved exactly — compare a Quest
+perf summary line-by-line pre/post; parsed log markers unchanged.
 
 Validation: standard battery + Quest session-smoke +
 `pnpm native:android-xr:terrain-multiview-perf` (report formatting is exactly
-what this exercises).
+what this exercises) + one desktop `pnpm native:timedemo:smoke`.
+
+Exit criteria: one builder set, one formatter set, one accountant type;
+android-xr `lib.rs` loses roughly the `:4472-7020` region; 165 Slice 2c is
+marked resolved in both docs.
 
 ### Slice 6: Shared adaptive render-admission policy
 
-Goal: one client-side upload-admission policy on the host.
+Goal: one client-side upload-admission policy, owned by the scene host.
+
+Read first: `flat_client_driver.rs:186` (`DesktopRenderBudgetController`: the
+`decide(...)` grant path building `BudgetControllerInput` +
+`decision_for_family(BudgetDecisionFamily::RenderAdmission)`, and
+`observe_sync(...)` feeding the `EwmaCostEstimator` from timed section
+updates) plus its call sites (the `decide` call in the sync path ~`:2251`,
+panel merge ~`:568`, reset on session change ~`:2727`);
+`mclone-frame-budget` (`BudgetController`,
+`render_frame_budget_controller_config`); the scene host's current static
+policy (`RenderSectionUploadFramePolicy` + `should_drain_before_runtime_sync`
+in `mclone-scene/src/lib.rs` ~`:1757-1765`, cap setter
+`mclone-scene/src/options.rs:195`); and the **frame-budget scoping section of
+this doc** — the server-scheduler budgeting (150) and render compile capacity
+are already shared and must not be touched.
+
+Context: three admission policies exist for one problem — desktop adaptive
+(EWMA + headroom-based grants), XR static cap + drain rule, Android nothing.
+The adaptive controller is the survivor; the other two become an override and
+an inheritance respectively.
 
 Deliverables:
 
-- Move `DesktopRenderBudgetController` (`flat_client_driver.rs:186-236`) into
-  the host as the shared admission policy, fed by the (now single) frame
-  accountant; per-driver input is only the target frame period (compositor
-  refresh on XR, vsync/pacing period on desktop flat).
-- The XR static cap (`render_section_upload_budget`,
-  `mclone-scene/src/options.rs:195`) becomes an optional override on the same
-  policy, not a parallel mechanism; the pre-sync drain rule
-  (`should_drain_before_runtime_sync`) stays as shared policy.
+1. Move the adaptive controller into the scene host as **the** admission
+   policy, fed by the single frame accountant's `FramePipelineReport`
+   (Slice 5). Keep the EWMA observation of timed section updates.
+2. Per-driver input is only the **target frame period**: compositor refresh
+   on XR (xr-host already queries display refresh), vsync/frame-pacing period
+   on desktop flat; Android flat inherits in Slice 8 (fixed 60Hz per its
+   current `ANDROID_FIXED_FPS_CAP` until a refresh query exists).
+3. The XR static cap (`render_section_upload_budget`) becomes a **clamp on
+   the adaptive grant** — an optional override knob, not a parallel
+   mechanism. When set, the effective admission is
+   `min(adaptive grant, configured cap)`. The pre-sync drain rule stays as
+   shared policy.
+4. Desktop's app-local controller struct and call sites are deleted.
 
-Tripwires: desktop frame-budget probes show unchanged admission behavior;
-Quest perf smoke shows no frame-time regression (the adaptive controller must
-not admit more work than the old static cap did on Quest — if it does, tune or
-gate with the override before landing).
+Out of scope: `mclone-frame-budget` decision-family design changes (166 owns
+that direction — this slice only *relocates* today's controller); server
+scheduler config; compile-capacity config.
+
+Baseline capture: `pnpm native:frame-budget:smoke` output and a Quest
+`sky-terrain-multiview-perf` report pre-slice.
+
+Tripwires: desktop probes show unchanged admission behavior (same decision
+panels for the same inputs — the move must be behavior-preserving on
+desktop); Quest shows no frame-time regression. On Quest the adaptive
+controller must not admit more work per frame than the old static cap did —
+the Quest smoke configs that set a cap keep it, so the clamp in deliverable 3
+guarantees this; a Quest lane with no cap set should be compared explicitly
+before relying on the adaptive grant alone.
 
 Validation: standard battery + `pnpm native:frame-budget:smoke` +
 `pnpm native:startup-streaming:smoke` + Quest
-`pnpm native:android-xr:sky-terrain-multiview-perf`.
+`pnpm native:android-xr:sky-terrain-multiview-perf`, comparing frame-time
+percentiles against the baseline.
+
+Exit criteria: `DesktopRenderBudgetController` gone from the app crate; one
+policy type in the host consumed by both topologies; desktop probe output
+matches baseline; Quest percentiles within noise of baseline.
 
 ### Slice 7: Desktop flat onto the host (delete `FlatClientDriver` orchestration)
 
-Goal: desktop flat becomes `WinitFrameDriver` + host. Biggest slice; may land
-as several PRs, each keeping desktop green.
+Goal: desktop flat becomes `WinitFrameDriver` + host. Biggest slice — land it
+as ordered sub-slices (7a–7e below), **each keeping desktop green and each
+independently validated**. Do not attempt 7 as one change.
 
-Deliverables:
+Read first: `flat_client_driver.rs` end to end (it is the thing being
+deleted — know what it owns before deleting: per-frame orchestration
+`poll_runtime`/`sync_runtime_sections`/`upload_runtime_sections`/
+`prepare_frame_inputs`; effects `apply_client_experience_settings_effects`
+~`:1195` + capability projection ~`:1403`; pending-start machine
+`finish_pending_session_start` `:1467`, `start_pending_session` `:1676`,
+`begin_pending_local_world_start` `:1781`; input assembly
+`engine_camera_input_from_flat_frame` ~`:3750`); `app.rs` (winit handler,
+`current_flat_hud` `:899`, `finish_pending_session_start` `:928`); the scene
+host's existing wiring that desktop will adopt
+(`mclone-scene/src/session.rs`: `apply_xr_settings_effects` `:1080`,
+`execute_xr_catalog_request` `:1007`, the session-runtime factory /
+`start_session_for_request` machinery, timed camera-reconcile fork
+`:1437-1540`); `remote_session.rs:9` (the adapter being deduplicated); and
+`offscreen_flat_client.rs` + the Slice 3 `OffscreenDriver`.
 
-- Desktop per-frame loop consumes the host's Mono topology (poll/sync/upload/
-  frame-input assembly all deleted from the app crate).
-- Effects wiring through the host's single effect applier + `HostEffects`
-  impl (mouse lock, present mode/frame pacing, quit). Desktop's frame-pacing
-  driver (`frame_pacing.rs`) stays app-local as the cadence source but its
-  POD stats structs move shared (165 Slice 3 already scopes this — coordinate,
-  don't duplicate).
-- Session replacement through the host's factory: delete the pending-start
-  state machine (`app.rs:928-948`, `flat_client_driver.rs:1470-1740`) and the
-  desktop copy of the `SessionStartRequest` dispatch.
-- Collapse the triplicated `RemoteServerSession` adapter into one shared type
-  (label-parameterized) in `mclone-net` or `mclone-app-runtime`; desktop
-  consumes it (Android copies die in Slice 8 / already-thin XR apps repoint).
-- HUD assembly (`app.rs:899-919 current_flat_hud`) moves onto the host's
-  screen-space presentation.
-- CLI, screenshot, timedemo, perf harnesses repoint at the host through the
-  offscreen driver from Slice 3.
-- Absorb the XR timed camera-reconcile fork: shared `camera_reconcile` grows
-  optional timing output; delete `session.rs:1437-1540` equivalents in the
-  renamed crate.
+Recommended sub-slice order:
 
-Tripwires: `flat_client_driver.rs` shrinks to (or is deleted in favor of)
-winit/surface/input glue; grep — no per-frame `sync`/`upload`/frame-input
-assembly outside the host; desktop screenshot/timedemo/perf baselines match.
+- **7a — Effects/HostEffects.** Generalize the host's effect applier
+  (today's `apply_xr_settings_effects`) into the single applier with a
+  `HostEffects` trait for the genuinely platform hooks. Known desktop-only
+  arms to design for: mouse-lock arm/release, `CycleFramePacing`/`CycleFpsCap`
+  (desktop host actions; Android/XR reject or ignore them today with visible
+  reasons — that stays, expressed through the trait), quit-to-title/exit.
+  Desktop and the XR session host both consume the shared applier; the
+  desktop copy of the 24 arms + capability projection dies. The Android/web
+  copies die in Slice 8 / the web follow-up. Frame-pacing POD stats structs
+  move shared per **165 Slice 3** (coordinate, don't duplicate); the
+  `FramePacing` winit driver itself stays app-local.
+- **7b — Session start/replacement.** Desktop routes world create/open/join
+  and mid-session replacement through the host's session-runtime factory;
+  delete the pending-start state machine (`app.rs:928-948`,
+  `flat_client_driver.rs:1467-1781`) and desktop's `SessionStartRequest`
+  handling. Collapse the triplicated `RemoteServerSession` adapter into one
+  label-parameterized shared type in `mclone-net` or `mclone-app-runtime`;
+  desktop and both XR apps consume it (the flat-Android copy dies in
+  Slice 8).
+- **7c — Per-frame loop.** `WinitFrameDriver`: redraw-driven, builds the mono
+  view from the engine camera, acquires the window surface texture, calls the
+  host's Mono frame; poll/sync/upload/traversal-ready/frame-input assembly
+  all delete from the app crate. HUD assembly (`current_flat_hud`,
+  `app.rs:899`) moves onto the host's screen-space presentation (which
+  Slice 3 built at capture grade; this is where it becomes fully
+  interactive). Desktop input events keep flowing through `mclone-input` to
+  the host's input application.
+- **7d — Harnesses.** CLI `--screenshot`, timedemo, frame-budget/movement
+  probes, and `perf.rs` consumers repoint at the host through the Slice 3
+  `OffscreenDriver`; `offscreen_flat_client.rs` is deleted or reduced to a
+  thin driver instantiation. `perf.rs` is large (~4,900 lines) — it keeps
+  measuring the same stages via the hooks that moved in Slices 5/6; budget
+  extra time here.
+- **7e — Camera-reconcile timed fork.** Shared
+  `mclone_app_runtime::camera_reconcile` grows optional timing output;
+  delete the `*_for_runtime_timed` fork
+  (`mclone-scene/src/session.rs:1437-1540`).
 
-Validation: full desktop suite —
+Out of scope: flat Android (Slice 8), any web code, XR behavior changes
+(7a/7e touch shared XR paths — those need XR validation but not XR behavior
+change).
+
+Baseline capture: before 7c/7d, capture `--screenshot` local + remote,
+timedemo, and frame-budget probe outputs to `/tmp` for comparison.
+
+Tripwires: `flat_client_driver.rs` is deleted or reduced to winit/surface/
+input glue (if what remains exceeds ~500 lines, something orchestration-
+shaped survived — find it); grep — no per-frame `sync`/`upload`/frame-input
+assembly outside the host; no `ClientExperienceSettingEffect` match in
+`mclone-native-client`; desktop screenshot/timedemo/perf outputs match
+baselines; XR smokes unchanged after 7a/7e.
+
+Validation (full desktop suite, after each sub-slice as applicable) —
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-app-runtime -p mclone-scene
@@ -627,32 +814,72 @@ MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 
 Goal: `mclone-android-client/src/lib.rs` is deleted-and-replaced, not
 refactored. Target size: activity/surface/lifecycle glue + input adapter +
-driver instantiation.
+driver instantiation. When in doubt about whether some Android code has value,
+the default answer is: it is a worse copy of what the host now owns — delete
+it. The three exceptions with real value are the touch controls, the
+system-property startup config, and the surface/lifecycle glue.
+
+Read first: `mclone-android-client/src/lib.rs` regions — touch layer
+(`AndroidMovementTouch`/`AndroidTouchControls` `:276-398`, touch-look
+`:690-707`); frame renderer (the `poll` -> reconcile -> `sync` -> apply ->
+render sequence around `:2036-2089`); lifecycle (`suspended()` `~:2798` —
+today's drop-driven save); effect arms `~:1509`; remote adapter `:2663`;
+input assembly `~:3303` + key tables `~:3184`; startup/property config
+(`debug.mclone.remote_addr` handling). Also `mclone-input/src/lib.rs:1257`
+(`TouchBindings`, the dead shared contract this slice makes real) and
+`android/validate-avd.sh` (what the AVD smokes actually assert).
 
 Deliverables:
 
-- `AndroidSurfaceDriver` (AndroidApp events + surface + suspend/resume ->
-  host lifecycle calls). Suspend persistence now comes from the host's
-  `on_background()` policy — the same policy Quest uses after Slice 0.
-- Touch controls move into `mclone-input` as the real implementation of the
-  currently-dead `TouchBindings` (`mclone-input/src/lib.rs:1257-1310`),
-  replacing the hand-rolled `AndroidMovementTouch`/`AndroidTouchControls`
-  (`lib.rs:276-398`) — including the screen-normalized configurable touch-look
-  model (`lib.rs:690-707`), which becomes the shared touch-look semantics.
-- Delete the Android copies of: the per-frame loop, effect arms, catalog/session
-  wrappers, `engine_camera_input_from_flat_frame`, key tables, remote-session
-  adapter, startup-option duplication. Reconcile the two Android surfaces'
-  remote-addr resolution (`debug.mclone.remote_addr` property vs android-xr's
-  sentinel normalization) into one shared helper.
-- Android inherits from the host: adaptive render admission, frame-pipeline
-  accounting + overlay data, travel assist, debug diagnostics — which should
-  clear the corresponding 165 ledger rows. **Flip each 165 capability to
-  `Supported` in the same change that lands its plumbing, and drop the ledger
-  entries** (165's enforcement tests require exactly this ordering).
+1. **`AndroidSurfaceDriver`**: AndroidApp events + surface acquire/resize +
+   suspend/resume forwarded to host lifecycle calls. Suspend persistence now
+   comes from the host's `on_background()` policy — the same policy Quest
+   uses after Slice 0; the Android-specific full teardown/rebuild on suspend
+   may remain as the driver's *implementation* of background, but the save
+   decision is the host's.
+2. **Touch controls move into `mclone-input`** as the real implementation of
+   the currently-unused `TouchBindings`, replacing the hand-rolled layer —
+   including the screen-normalized, configurable touch-look model
+   (`touch_look_sensitivity`, clamped, resolution-independent), which becomes
+   the shared touch-look semantics. Preserve current joystick geometry
+   (`TOUCH_JOYSTICK_RADIUS_GUI`) and add sneak to the touch layout if the
+   layout allows (it has jump/sprint/descend but no sneak today — if sneak
+   doesn't fit, record it as an input-axis platform difference, which 165
+   permits).
+3. **Delete the Android copies** of: the per-frame loop, effect arms +
+   capability projection, catalog/session wrappers,
+   `engine_camera_input_from_flat_frame`, keyboard key tables (fold the
+   Android-vs-desktop table drift — arrows/F5 — into one shared table with
+   the shared adapter), the remote-session adapter (`:2663`, consume the
+   Slice 7b shared type), and the startup-option duplication. Reconcile the
+   two Android surfaces' remote-addr resolution (flat's
+   `debug.mclone.remote_addr` system property vs android-xr's
+   sentinel/normalization helpers) into one shared helper used by both apps.
+4. **Android inherits from the host** (no Android-specific code): adaptive
+   render admission (target period = 60Hz fixed, per Slice 6), frame-pipeline
+   accounting + overlay data, travel assist, debug diagnostics. **165 ledger
+   coordination**: flip each affected capability
+   (`TravelAssist`, `FramePipelineOverlay`, `DebugDiagnostics`, and
+   `ServerSimulationCadence` if the host wires cadence for local sessions by
+   then) to `Supported` in the same change that lands its plumbing, and drop
+   the ledger entries — 165's enforcement tests require exactly this
+   ordering, and `native_feature_parity_exceptions_are_live` will fail if a
+   stale entry remains. Note `DebugDiagnostics` also depends on the
+   debug-stats aggregator move scoped in 165 Slice 3 — coordinate.
+5. Present-mode policy (`PresentMode::Fifo`, fixed FPS cap with its visible
+   "fixed on flat Android" status message) survives as the driver's
+   `HostEffects` implementation detail, not as effect-arm copies.
+
+Out of scope: Android XR (already thin after Slices 4–5); changing touch UX
+beyond the sneak addition; web.
+
+Baseline capture: all three AVD smoke screenshots + logcat outputs pre-slice.
 
 Tripwires: `mclone-android-client` contains no `ClientExperienceSettingEffect`
-match, no `sync_render_sections` call, no session-request dispatch; AVD smoke
-log lines use the same wording/counters as desktop/XR; 165 ledger shrinks.
+match, no `sync_render_sections` call, no session-request dispatch, no
+`EngineCameraInput` construction; AVD smoke log lines use the same
+startup-ready wording and seed counters as desktop/XR; 165 ledger shrinks and
+its three enforcement tests pass.
 
 Validation:
 
@@ -662,41 +889,119 @@ MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-smoke
 MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-touch-smoke
 MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-session-smoke
 # plus the standard battery and one Quest session-smoke (shared-code regression)
+# optional extra lane: Quest-as-flat-Android device smoke
+pnpm native:android:quest-flat
 ```
 
 Inspect the AVD screenshots (`/tmp/mclone-android-avd-*.png`) — terrain drawn,
-touch controls responsive, frame-pipeline overlay now populated when toggled.
+touch controls responsive (the touch smoke swipes and asserts camera motion),
+frame-pipeline overlay now populated when toggled. Exercise a
+suspend/resume cycle on the AVD and verify the world persists (the host
+`on_background()` path).
+
+Exit criteria: new `lib.rs` is glue-only (target well under ~1,000 lines);
+all three AVD smokes pass with unchanged-or-better output; the 165 ledger
+rows for flat Android are gone.
 
 ### Slice 9: XR-emulation lane on desktop (acceptance proof)
 
-Goal: prove the unification by running the stereo scene with a synthetic head.
+Goal: prove the unification by running the stereo scene with a synthetic head
+— no headset, no OpenXR runtime, no OpenXR loader initialization.
 
-Deliverables: a desktop lane (CLI flag or offscreen mode) that feeds synthetic
-stereo poses through the host's Stereo topology and renders side-by-side or
-offscreen captures — no OpenXR runtime involved. Snap-turn/locomotion driven
-from keyboard/gamepad through the same locomotion path.
-
-Validation: capture a side-by-side stereo screenshot to `/tmp` and inspect it;
-both eyes show correctly-offset views (per-eye view/projection invariant
-holds); standard battery.
-
-### Slice 10: Cleanup, enforcement, docs
+Context: because Slice 4 removed the openxr edge from `mclone-scene`, the
+host's Stereo topology takes neutral view types. Feeding it two synthetic
+views is therefore pure data construction. This lane doubles as a
+headset-free way to develop and screenshot XR-visible features (menus,
+world-quad UI, comfort effects) going forward.
 
 Deliverables:
 
-- Delete compatibility wrappers that survived only for slice safety.
-- Tripwire enforcement (tests or a grep script beside the existing 167-style
-  tripwires): app crates must not contain `ClientExperienceSettingEffect`
-  matches, per-frame section sync/upload calls, `wait_begin_frame`, or
-  `SessionStartRequest` dispatches. Shared timeout/interval constants get one
-  home (the 120s readiness timeout currently has five copies; the 25ms idle
-  poll interval two).
-- Delete or adopt the now-orphaned `GamepadInputAdapter` (decide: keep as the
-  contract for a future gamepad slice with a note, or remove).
-- Update [`../platforms.md`](../platforms.md) (validation matrix / entry
-  points) and [`../native-engine-architecture.md`](../native-engine-architecture.md)
-  (crate ownership shape) to describe the host + drivers model.
-- Update 165 (ledger state) and 163/167 follow-up notes.
+1. A desktop lane (CLI verb on `mclone-native-client`, e.g.
+   `--xr-emulation-screenshot <path>` for offscreen and/or a windowed
+   side-by-side mode) that constructs two synthetic neutral views — eye
+   offsets from a fixed IPD (~64mm), symmetric FoVs (reuse the defaults the
+   stereo config path produces) — and drives the host's Stereo topology
+   through the Slice 3 `OffscreenDriver` (offscreen) or the winit driver
+   (windowed side-by-side).
+2. The synthetic head pose is driven by the engine camera; snap-turn and XR
+   locomotion semantics run through the same `mclone-scene` locomotion path,
+   fed from keyboard (and gamepad if the Slice 10 gamepad decision lands
+   "adopt"), so XR input semantics are exercisable without controllers.
+3. The lane must not initialize any OpenXR instance or require a runtime to
+   be installed — if the desktop binary currently links the loader
+   unconditionally, the emulation path simply must not call into it.
+
+Out of scope: making the emulated lane a full interactive product surface;
+head-tracking simulation beyond the engine camera; multiview (stereo per-eye
+is sufficient for the proof — multiview stays validated on Quest).
+
+Validation: capture a side-by-side stereo pair to `/tmp`
+(e.g. `/tmp/mclone-xr-emulation.png`) and **inspect it**: both eyes render,
+horizontally offset by the IPD (near geometry visibly shifts between eyes,
+far geometry barely), world-quad UI panels appear in both eyes with their own
+projections (per-eye view/projection invariant holds — never shared mutable
+per-eye uniforms); standard battery; one Quest session-smoke to confirm the
+real stereo path is untouched.
+
+Exit criteria: the acceptance sentence from the top of this doc holds —
+"desktop can run the stereo scene with a fake head" — demonstrated by a
+committed-to-`/tmp` capture and a documented command (docs land in Slice 10).
+
+### Slice 10: Cleanup, enforcement, docs
+
+Goal: make the unified shape hard to regress, then document it.
+
+Deliverables:
+
+1. **Delete compatibility wrappers** that survived only for slice safety
+   (sweep Slices 4–8 result notes for anything marked temporary).
+2. **Constant consolidation.** One home each for: the 120s startup-readiness
+   timeout (canonical: `DEFAULT_STARTUP_READINESS_TIMEOUT`,
+   `mclone-app-runtime/src/native_session_runtime.rs:61`; delete the copies —
+   originally `BLOCKING_STARTUP_TIMEOUT` in `flat_client_driver.rs`,
+   `XR_STARTUP_READINESS_TIMEOUT` in the scene session,
+   `ANDROID_STARTUP_READINESS_TIMEOUT` in the Android app, and the
+   `remote_player_visual_smoke.rs` copy — several should already be gone via
+   Slices 7/8; verify with grep) and the 25ms `SESSION_IDLE_POLL_INTERVAL`
+   (should already be single-homed in the Slice 4 driver; verify).
+3. **Tripwire enforcement.** Add a check that fails loudly when app crates
+   regrow orchestration. Two acceptable shapes (pick one, follow repo
+   precedent — 165 used tests, 167 used documented `rg` tripwires): a small
+   script (e.g. `scripts/check-native-thin-adapters.sh`) run in validation,
+   or unit tests. Forbidden in `native/apps/*`:
+   `ClientExperienceSettingEffect` matches, per-frame
+   `sync_render_sections`/section-upload calls, `wait_begin_frame`,
+   `SessionStartRequest` dispatch matches, and `EngineCameraInput`
+   field-by-field construction. Also enforce host purity:
+   `cargo tree -p mclone-scene | grep -i openxr` empty (plus no
+   winit/android-activity/jni edges).
+4. **Gamepad decision.** `GamepadInputAdapter`/`GamepadBindings` in
+   `mclone-input` still have zero users. Decide and record: adopt (wire it on
+   desktop + the Slice 9 emulation lane) or keep-as-contract with a dated
+   note, or delete. Do not leave it undecided — dead shared API misleads the
+   next contributor.
+5. **Docs.** Update [`../platforms.md`](../platforms.md) (validation matrix,
+   the new XR-emulation lane command, host+driver entry points) and
+   [`../native-engine-architecture.md`](../native-engine-architecture.md)
+   (crate ownership: `mclone-scene` host, driver crates, what app crates may
+   own). Add the host/driver boundary to the "Shared-first feature policy"
+   guidance in `CLAUDE.md`/`AGENTS.md` if its wording still describes the
+   pre-168 crate shape.
+6. **Cross-tactical bookkeeping.** Update 165 (ledger end-state; Slices 2c/3
+   resolution), 163 and 167 follow-up notes, and this doc's status +
+   README index row to complete.
+
+Final acceptance checklist (run everything on this machine):
+
+- Enforcement greps/tests pass; host-purity `cargo tree` checks clean.
+- Full standard battery + all device lanes: desktop offscreen screenshot,
+  desktop XR smoke, Quest session-smoke + one multiview proof, all three
+  `jstorrent-tablet` AVD smokes, `pnpm native:remote:smoke`, wasm
+  `cargo check`.
+- The XR-emulation capture from Slice 9 reproduces with the documented
+  command.
+- 165's non-web exception ledger is empty or every remaining row has a
+  recorded reason unrelated to this tactical.
 
 ## Cross-slice guardrails
 
