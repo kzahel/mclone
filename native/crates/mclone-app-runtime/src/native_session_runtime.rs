@@ -30,6 +30,9 @@ use crate::far_lod::{
     FarTerrainLodCache, FarTerrainLodConfig, FarTerrainLodCoverage, StartupLodPrewarmConfig,
     STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET,
 };
+use crate::lod_coverage::{
+    LodCoverageCoordinator, LodReplacementCounters, LodTileAvailability,
+};
 use crate::host_mode::{
     RemoteCommandUpdateBatch, RemoteDedicatedServerSession, SingleViewHostMode,
     SingleViewHostOptions, deferred_command_exchange, dispatch_remote_dedicated_command,
@@ -254,6 +257,7 @@ pub struct LocalIntegratedSceneRuntime {
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
+    lod_coverage: LodCoverageCoordinator,
     deferred_chunk_drop_worker: DeferredChunkDropWorker,
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
@@ -642,6 +646,7 @@ impl LocalIntegratedSceneRuntime {
             mesh_assets,
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
+            lod_coverage: LodCoverageCoordinator::new(),
             deferred_chunk_drop_worker: DeferredChunkDropWorker::new()?,
             simulation_cadence: options.cadence,
             last_runner_diagnostics: None,
@@ -698,6 +703,12 @@ impl LocalIntegratedSceneRuntime {
 
     pub fn clear_far_lod(&mut self) {
         self.far_lod_cache.clear();
+        self.lod_coverage.clear();
+    }
+
+    /// Cumulative LOD coverage replacement/pop counters (tactical 162 Slice 2).
+    pub fn lod_coverage_counters(&self) -> LodReplacementCounters {
+        self.lod_coverage.counters()
     }
 
     pub fn prepare_far_lod_mesh(
@@ -712,14 +723,37 @@ impl LocalIntegratedSceneRuntime {
                 .core
                 .traversal_ready_render_section_keys(camera_position),
         );
-        self.far_lod_cache.mesh_for_camera(
+        // Advance and build the synthetic mesh first, then release the cache
+        // borrow so the coverage coordinator can read what the synthetic source
+        // now offers. `mesh_for_camera` already stores the merged mesh, so
+        // `current_mesh` returns the same product afterwards.
+        let _ = self.far_lod_cache.mesh_for_camera(
             config,
             seed,
             center,
             self.core.render_distance(),
             Some(&normal_terrain_chunks),
             self.mesh_assets.far_lod_materials.as_ref(),
-        )
+        );
+        self.resolve_lod_coverage(&normal_terrain_chunks);
+        self.far_lod_cache.current_mesh()
+    }
+
+    /// Drive the shared LOD coverage coordinator with this frame's drawable
+    /// normal chunks, loaded chunks, and synthetic tile availability. This makes
+    /// per-tile precedence (normal drawable > reduced real > synthetic > nothing)
+    /// explicit and records replacement/pop diagnostics; it does not rebuild the
+    /// mesh (a derived product of the synthetic cache).
+    fn resolve_lod_coverage(&mut self, normal_drawable: &BTreeSet<ChunkPos>) {
+        let normal_loaded: BTreeSet<ChunkPos> =
+            self.core.client().loaded_chunk_positions().collect();
+        let synthetic: Vec<LodTileAvailability> = self
+            .far_lod_cache
+            .drawable_lod_tiles()
+            .map(LodTileAvailability::synthetic)
+            .collect();
+        self.lod_coverage
+            .resolve(normal_drawable, &normal_loaded, synthetic);
     }
 
     /// Build cheap retained far-LOD coverage during startup with an explicit
@@ -1263,6 +1297,14 @@ where
             Self::RemoteDedicated(scene) => {
                 scene.prepare_far_lod_mesh(config, seed, center, camera_position)
             }
+        }
+    }
+
+    /// Cumulative LOD coverage replacement/pop counters (tactical 162 Slice 2).
+    pub fn lod_coverage_counters(&self) -> LodReplacementCounters {
+        match self {
+            Self::Local(scene) => scene.lod_coverage_counters(),
+            Self::RemoteDedicated(scene) => scene.lod_coverage_counters(),
         }
     }
 
@@ -1839,6 +1881,7 @@ pub struct RemoteDedicatedSceneRuntime<S> {
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
+    lod_coverage: LodCoverageCoordinator,
 }
 
 #[derive(Debug)]
@@ -2048,6 +2091,7 @@ where
             mesh_assets,
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
+            lod_coverage: LodCoverageCoordinator::new(),
         })
     }
 
@@ -2069,6 +2113,12 @@ where
 
     pub fn clear_far_lod(&mut self) {
         self.far_lod_cache.clear();
+        self.lod_coverage.clear();
+    }
+
+    /// Cumulative LOD coverage replacement/pop counters (tactical 162 Slice 2).
+    pub fn lod_coverage_counters(&self) -> LodReplacementCounters {
+        self.lod_coverage.counters()
     }
 
     pub fn prepare_far_lod_mesh(
@@ -2083,14 +2133,24 @@ where
                 .core
                 .traversal_ready_render_section_keys(camera_position),
         );
-        self.far_lod_cache.mesh_for_camera(
+        let _ = self.far_lod_cache.mesh_for_camera(
             config,
             seed,
             center,
             self.core.render_distance(),
             Some(&normal_terrain_chunks),
             self.mesh_assets.far_lod_materials.as_ref(),
-        )
+        );
+        let normal_loaded: BTreeSet<ChunkPos> =
+            self.core.client().loaded_chunk_positions().collect();
+        let synthetic: Vec<LodTileAvailability> = self
+            .far_lod_cache
+            .drawable_lod_tiles()
+            .map(LodTileAvailability::synthetic)
+            .collect();
+        self.lod_coverage
+            .resolve(&normal_terrain_chunks, &normal_loaded, synthetic);
+        self.far_lod_cache.current_mesh()
     }
 
     pub fn render_distance(&self) -> u32 {

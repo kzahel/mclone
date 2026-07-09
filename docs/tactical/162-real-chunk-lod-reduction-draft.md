@@ -1,7 +1,8 @@
 # 162: Real-Chunk LOD Reduction Draft
 
-Status: draft 2026-07-09. Slice 0A retained synthetic chunk patches and Slice 1
-startup LOD prewarm landed; coverage coordinator (Slice 2) remains next.
+Status: draft 2026-07-09. Slice 0A retained synthetic chunk patches, Slice 1
+startup LOD prewarm, and Slice 2 coverage coordinator + source precedence landed;
+LOD budget/queue policy (Slice 3) remains next.
 
 Workstream: native Rust shared runtime/persistence/render boundary. Desktop
 validation remains the likely first lane, but the target shape must stay shared
@@ -339,6 +340,48 @@ Deliverables:
 
 This slice is where 162 becomes a coordination plan instead of only a data-model
 draft.
+
+Slice 2 landed with a shared CPU-side coverage coordinator:
+
+- new `mclone-app-runtime` module `lod_coverage` owns `LodCoverageCoordinator`.
+  It lives beside `far_lod` (not in `mclone-render-session`) because it consumes
+  both the drawable normal-chunk set derived from render-session traversal
+  readiness and the synthetic `FarTerrainLodCache`, both of which app-runtime
+  already owns and shares across flat/XR/Android/web via `NativeSceneRuntime`.
+  This keeps the desktop app pure glue.
+- `NormalChunkCoverage` tracks per-chunk drawable state (`Loaded` vs `Drawable`)
+  kept separate from the client loaded-chunk map. Only a `Drawable` normal chunk
+  suppresses overlapping LOD; a loaded-but-not-drawable chunk keeps old LOD
+  visible until the real mesh is actually drawable (no blank flicker on
+  replacement), matching 128's "old output stays until replacement complete."
+- `LodTileCoverage` models tile identity, source kind
+  (`synthetic surface | reduced real chunk | persisted reduced real`), quality
+  (`unlit | lit | stale | dirty | cached`), and a resident lifecycle
+  (`Pending → Reducing → Meshing → Uploading → Drawable`) aligned with 128's
+  admission/upload/drawable vocabulary. Slice 2 only exercises the synthetic
+  source; the reduced-real slots are modeled so Slice 4 drops straight in.
+- precedence is applied per tile/cell (`normal drawable > reduced real >
+  synthetic > nothing`); there is no centered full-set rebuild. The coordinator
+  is a pure decision component, driven each frame from `prepare_far_lod_mesh`
+  after the synthetic mesh is built (via new `FarTerrainLodCache::current_mesh`
+  and `drawable_lod_tiles` accessors, so the mesh borrow is released first).
+- counters: `normal_over_lod`, `reduced_real_over_synthetic`,
+  `lod_revealed_on_unload`, `lod_first_drawn`, `lod_evicted`, and
+  `suppressed_without_replacement` (a genuine blank/pop distinguished from benign
+  eviction by whether the cell is still loaded/drawable). Exposed via
+  `lod_coverage_counters()` on the local, remote-dedicated, and enum runtimes.
+- focused unit tests cover per-tile precedence (drawable-normal suppresses LOD,
+  loaded-not-drawable keeps old LOD, unload re-reveals LOD, reduced-real replaces
+  synthetic) and every counter. Desktop headless far-LOD captures (RD4, seed
+  12345, `--far-lod true`) show coarse LOD around sparse real chunks at
+  `playable` and detailed real chunks cleanly replacing overlapping LOD at
+  `idle` with no blank seam.
+
+Not yet done here (deferred): LOD budget/queue policy (Slice 3), reduced
+real-chunk tiles and reducer (Slice 4+), edit dirtying (Slice 5), and any
+persistence (Slice 6). Slice 2 keeps synthetic surface as the only real source;
+LOD still never satisfies chunk interest, collision, raycast, edits, entities, or
+gameplay authority.
 
 ### Slice 3: LOD Budget And Queue Policy
 

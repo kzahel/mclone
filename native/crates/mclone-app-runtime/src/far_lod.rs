@@ -550,6 +550,27 @@ impl FarTerrainLodCache {
         self.coverage()
     }
 
+    /// The most recently built merged LOD mesh, without advancing coverage.
+    ///
+    /// Lets callers read the mesh handoff after driving coverage through the LOD
+    /// coverage coordinator, instead of holding the `&mut self` borrow that
+    /// [`Self::mesh_for_camera`] returns.
+    pub fn current_mesh(&self) -> Option<&FarTerrainLodMesh> {
+        self.mesh.as_ref()
+    }
+
+    /// Chunk-aligned tiles that currently have a drawable retained synthetic
+    /// patch (desired tiles whose patch geometry is built). This is the synthetic
+    /// availability the [`crate::lod_coverage::LodCoverageCoordinator`] resolves
+    /// against; it excludes tiles suppressed by drawable normal chunks, since
+    /// those are never desired.
+    pub fn drawable_lod_tiles(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.desired_chunks
+            .iter()
+            .copied()
+            .filter(|pos| self.retained_patches.contains_key(pos))
+    }
+
     /// How many of the currently desired chunk patches are already retained.
     pub fn coverage(&self) -> FarTerrainLodCoverage {
         let ready_tiles = self

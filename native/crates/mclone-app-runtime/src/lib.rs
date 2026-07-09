@@ -9,6 +9,7 @@ pub mod client_session_policy;
 pub mod far_lod;
 pub mod frame_render;
 pub mod host_mode;
+pub mod lod_coverage;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_session_runtime;
 #[cfg(not(target_arch = "wasm32"))]
