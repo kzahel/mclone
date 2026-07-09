@@ -49,6 +49,11 @@ use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 #[cfg(not(target_os = "android"))]
 use mclone_audio::{AudioEngine, AudioSettings};
 
+#[cfg(not(target_os = "android"))]
+mod companion_window;
+#[cfg(not(target_os = "android"))]
+use companion_window::CompanionWindow;
+
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 mod graphics_metal;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
@@ -429,6 +434,21 @@ fn run_smoke_frames(
             options.frame_limit
         }
     };
+    // Borrow-only classification captured before the `mode` match below moves
+    // `options` out: whether to spawn the desktop companion window, and the
+    // human label for the completion line.
+    let want_window = matches!(
+        mode,
+        DesktopXrMode::Real {
+            window: true,
+            ..
+        }
+    );
+    let run_label = match &mode {
+        DesktopXrMode::Clear { .. } => "clear smoke",
+        DesktopXrMode::Mclone { .. } => "mclone smoke",
+        DesktopXrMode::Real { .. } => "run",
+    };
     let frame_limit_label = frame_limit
         .map(|frames| frames.to_string())
         .unwrap_or_else(|| "unbounded".to_owned());
@@ -475,16 +495,27 @@ fn run_smoke_frames(
             create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
                 .context("initialize mclone XR terrain state")?,
         ),
-        DesktopXrMode::Real { options, window } => {
-            // Slice 3 will spawn the desktop companion window when `window` is
-            // true; Slice 2 renders the identical world path with no window yet.
-            let _ = window;
-            Some(
-                create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
-                    .context("initialize mclone XR terrain state")?,
-            )
-        }
+        DesktopXrMode::Real { options, .. } => Some(
+            create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
+                .context("initialize mclone XR terrain state")?,
+        ),
     };
+
+    // Real `--desktop-xr` run: give the operator a desktop presence and a
+    // non-headset quit. App-local winit glue, status surface only (no mirror /
+    // per-view path — see tactical 164 Slice 3 and the XR render-path guardrail).
+    let mut companion = if want_window {
+        match CompanionWindow::spawn("Desktop XR — connecting to headset…") {
+            Ok(window) => Some(window),
+            Err(err) => {
+                println!("desktop XR companion window disabled: {err:#}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let mut companion_running_announced = false;
     let controller_actions = OpenXrControllerActions::create_with_binding_logger(
         graphics.session.instance(),
         &graphics.session,
@@ -504,11 +535,25 @@ fn run_smoke_frames(
     let mut frame_stats = XrFrameStats::default();
     let mut frame_pipeline_reporter = XrFramePipelineReporter::new(None);
     let mut runtime_requested_exit = false;
+    let mut window_requested_exit = false;
 
     while frame_limit
         .map(|frames| frame_stats.submitted_frames < u64::from(frames))
         .unwrap_or(true)
     {
+        // Drain the companion window first so a title-bar close quits even while
+        // still waiting for the headset session to reach READY (the idle branch
+        // below `continue`s). Window-close is a normal end for the persistent
+        // run, exactly like the headset-menu EXITING path.
+        if let Some(companion) = companion.as_mut() {
+            if companion.pump() {
+                println!("desktop XR companion window close requested");
+                companion.set_status("Desktop XR — shutting down…");
+                window_requested_exit = true;
+                break;
+            }
+        }
+
         match mclone_xr_host::poll_openxr_events(
             &graphics.session,
             &mut event_storage,
@@ -536,6 +581,13 @@ fn run_smoke_frames(
                 continue;
             }
             OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
+        }
+
+        if let Some(companion) = companion.as_mut() {
+            if session_running && !companion_running_announced {
+                companion.set_status("Desktop XR — running · close this window to quit");
+                companion_running_announced = true;
+            }
         }
 
         let frame_wall_start = Instant::now();
@@ -651,15 +703,24 @@ fn run_smoke_frames(
     if let Some(mclone) = &mclone {
         print_mclone_summary(mclone);
     }
-    let completed_label = if mclone.is_some() { "mclone" } else { "clear" };
+    // Headset-menu EXITING already left the runtime stopped; a window close or a
+    // completed frame budget still needs an explicit app-driven EXITING handshake.
     if !runtime_requested_exit {
+        if window_requested_exit {
+            println!("desktop XR shutting down: companion window closed");
+        }
         shutdown_openxr_session(&mut graphics, &mut event_storage, &mut session_running)
-            .context("shut down OpenXR session after smoke")?;
+            .context("shut down OpenXR session after desktop XR run")?;
     }
-    // Mirrors Playbox's desktop OpenXR shutdown shape. Some runtimes fault while
-    // destroying session-owned graphics handles after an app-requested EXITING
-    // transition; this smoke is process-bounded, so keep the XR object graph
-    // alive after the clean shutdown instead of touching a stopped runtime.
+    // Real desktop XR runs and the bounded smokes both exit the process right
+    // after this returns, so a graceful shutdown followed by process teardown is
+    // the defined quit path. We still `mem::forget` the XR object graph rather
+    // than dropping it: on the runtimes this path drives — the macOS WiVRn/Monado
+    // self-port and Windows VDXR — destroying session-owned graphics handles
+    // after an app-requested EXITING transition faults inside the runtime. Real
+    // per-handle teardown stays deferred until a runtime is validated safe to
+    // drop post-EXITING; process exit reclaims the memory regardless. The
+    // companion window is NOT forgotten — it drops normally below.
     std::mem::forget(left_eye);
     std::mem::forget(right_eye);
     std::mem::forget(stage);
@@ -668,7 +729,8 @@ fn run_smoke_frames(
     if let Some(mclone) = mclone {
         std::mem::forget(mclone);
     }
-    println!("desktop OpenXR {completed_label} smoke complete: frames={frame_limit_label}");
+    drop(companion);
+    println!("desktop OpenXR {run_label} complete: frames={frame_limit_label}");
     Ok(())
 }
 

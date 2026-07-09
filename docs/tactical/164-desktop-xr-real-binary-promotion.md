@@ -1,7 +1,8 @@
 # 164: Desktop XR Real-Binary Promotion
 
 Status: active 2026-07-09; Slices 1 (module rename) + 2 (real `--desktop-xr`
-verb, persistent default, `--no-window`) landed.
+verb, persistent default, `--no-window`) + 3 (companion window, graceful quit)
+landed. Remaining: Slice 4 (launcher persistent path + docs).
 
 Workstream: native Rust desktop platform glue (`mclone-native-client`) plus the
 shared XR frame interior it already drives. Desktop validation first; the frame
@@ -138,26 +139,79 @@ Ordered so each slice lands independently and keeps `native:xr:*` green.
   the non-xr binary to confirm `--desktop-xr` bails with the rebuild hint and
   `--no-window` alone hits its guard.
 
-### Slice 3 — Companion window + graceful quit
+### Slice 3 — Companion window + graceful quit — LANDED 2026-07-09
 
-- Spawn a small 2D desktop window for the real verb (winit, app-local — this is
-  legitimate desktop platform glue and stays in the app crate per the
-  shared-first policy). Minimum contents: status/connection line and a **Close**
-  control so the user can quit without the headset. Errors/handshake state can
-  surface here too.
-- Wire a defined quit path: window close request and headset-menu EXITING both
-  drive the same graceful shutdown. In the persistent mode, treat headset-menu
-  exit as a normal end (not the `bail!` used by the bounded path in
-  `desktop_xr.rs` `run_smoke_frames`). The `Real` arm already threads a `window`
-  bool into `run_smoke_frames`; consume it here to build/skip the window.
-- Revisit the `std::mem::forget` teardown in `desktop_xr.rs` `run_smoke_frames`: keep it
-  only where a runtime genuinely faults on handle destruction; otherwise perform
-  a real teardown for the persistent path, or document per-runtime why the
-  forget-on-exit shape stays. Process exit on quit is acceptable as an interim.
-- **Multiview/per-eye guardrail:** this slice adds no new per-view render path.
-  The companion window starts as a status surface only; a mirror image is
-  Slice 4 / follow-up and must reuse an existing renderer, not a new per-eye
-  path (see the XR render-path guardrail in `CLAUDE.md`).
+- New app-local module `desktop_xr/companion_window.rs` owns a winit
+  `EventLoop` + `Window` (`CompanionWindow`). This is legitimate desktop
+  platform glue and stays in the app crate per the shared-first policy; no
+  engine/gameplay/render policy moved into the app. The XR frame loop owns
+  timing, so the window is drained non-blockingly with winit's
+  `pump_app_events(Some(Duration::ZERO))` once per XR frame rather than running
+  its own blocking event loop (the flat client uses `run_app`; the XR path
+  cannot, since the XR frame loop is the driver).
+- **Status surface is the window title** — decision: the live status line is
+  carried on the window title (`"Desktop XR — connecting to headset…"` →
+  `"… running · close this window to quit"` → `"… shutting down…"`), and the OS
+  window-close control (title-bar close / Cmd-W) is the **Close** affordance.
+  This gives a real desktop presence (dock/menu-bar entry as
+  `mclone-native-client`) and a non-headset quit with **zero new dependencies
+  and no renderer** — deliberately avoiding a second wgpu surface or a text
+  renderer for what is only a status surface this slice. The window body is
+  intentionally empty (default system background). Title updates are debounced
+  (`set_status` no-ops when unchanged) so we do not thrash the OS title bar at
+  headset frame rate.
+- **Consumed the `window` bool** in `run_smoke_frames`: `want_window` is captured
+  by borrow before the `mode` match moves `options`, and only
+  `Real { window: true, .. }` builds a `CompanionWindow`. `--no-window` and both
+  smoke/clear gates stay windowless, so the headless CI paths are byte-for-byte
+  unchanged. If window creation fails it degrades to a windowless run with a
+  printed note rather than aborting.
+- **Graceful quit, one shutdown path:** the companion is pumped at the *top* of
+  the frame loop (so a title-bar close quits even while still waiting for the
+  headset session to reach READY, where the idle branch `continue`s). A window
+  close sets `window_requested_exit` and `break`s; because `runtime_requested_exit`
+  stays false, the loop falls into `shutdown_openxr_session` (app-driven
+  `request_exit` → the STOPPING→IDLE→EXITING handshake). The headset-menu path
+  (`OpenXrPollStatus::Exit` in the unbounded branch) already broke cleanly with
+  `runtime_requested_exit = true` and skips the redundant request; Slice 3
+  confirmed that and wired the window path to converge on the same teardown.
+  The bounded/smoke `bail!("…requested exit before smoke completed")` remains
+  guarded by `frame_limit.is_some()` and is untouched.
+- **`std::mem::forget` teardown decision:** kept, with the comment rewritten to
+  own the rationale. Both the real run and the bounded smokes exit the process
+  immediately after `run_smoke_frames` returns, so a graceful EXITING handshake
+  followed by process teardown is the defined quit path. We still `mem::forget`
+  the XR object graph (eyes/stage/actions/graphics/terrain) rather than dropping
+  it because the runtimes this path drives — the macOS WiVRn/Monado self-port and
+  Windows VDXR — fault inside the runtime when session-owned graphics handles are
+  destroyed after an app-requested EXITING. Real per-handle teardown stays
+  deferred until a runtime is validated safe to drop post-EXITING; process exit
+  reclaims the memory regardless. The completion label was corrected from
+  `"…mclone smoke complete"` to `"…run complete"` for the real verb. The
+  companion window is **not** forgotten — it drops normally.
+- **Multiview/per-eye guardrail:** honored — no new per-view render path, no new
+  renderer, no shader/uniform/pass. The window is a status surface only; the
+  headset mirror stays a follow-up that must reuse an existing per-eye/multiview
+  renderer (see the XR render-path guardrail in `CLAUDE.md`).
+- **Validated (Mac WiVRn USB, headset connected):** `cargo check -p
+  mclone-native-client` clean both with and without `--features xr`; all 181
+  crate tests pass. Ran the real `--desktop-xr` verb persistently against the
+  live WiVRn stack: the companion window appeared titled
+  `"Desktop XR — running · close this window to quit"` while the shared mclone
+  world rendered (10,625 real frames, 593 sections, 7 actors). Clicking the
+  window Close control drove the graceful STOPPING→IDLE→EXITING shutdown and a
+  clean `rc=0` — confirmed twice, including while the headset session was paused
+  (headset disconnected). Observed that a headset disconnect does **not** end the
+  persistent run: WiVRn holds the session at SYNCHRONIZED for reconnect, so the
+  run correctly survives it. A *genuine* runtime-initiated EXITING (the physical
+  headset system-menu quit) could not be synthesized remotely this session
+  (client force-stop only pauses the session, and the button press is physical),
+  but that branch is pre-existing and reaches the same `shutdown`-less clean
+  break plus the teardown exercised end-to-end by the window path; a with-headset
+  manual menu-quit check is the only residual runtime verification.
+- Launcher passthrough was **not** added (kept for Slice 4 per scope); the run
+  was driven by bringing the WiVRn host/adb/Quest client up manually and
+  launching the binary directly with the WiVRn runtime env.
 
 ### Slice 4 — Launcher + docs
 
