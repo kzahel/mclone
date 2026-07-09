@@ -46,6 +46,7 @@ use crate::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
     SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
 };
+use crate::startup_render_seed::StartupRenderSectionSeed;
 use crate::{
     DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET, DEFAULT_RENDER_CHUNK_MESH_BUDGET,
     GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimePollTiming,
@@ -430,6 +431,10 @@ pub struct LocalIntegratedStartupStep {
     pub submitted_compile_section_count: usize,
     pub completed_compile_section_count: usize,
     pub pending_compile_jobs: usize,
+    /// Sections accumulated in the startup render seed so far (docs/tactical/167).
+    pub render_seed_section_count: usize,
+    /// Startup render-seed sections carrying drawable geometry (docs/tactical/167).
+    pub render_seed_drawable_section_count: usize,
     pub progress: Option<LoadingProgressOverlay>,
 }
 
@@ -505,6 +510,10 @@ impl StartupLodPrewarm {
 pub struct LocalIntegratedStartupPump {
     runtime: LocalIntegratedSceneRuntime,
     prewarm: StartupLodPrewarm,
+    // docs/tactical/167: accumulate the transient CPU section meshes the pump
+    // compiles so the platform adapter can seed draw resources at completion
+    // without a redundant mark-all-dirty recompile (docs/tactical/163).
+    render_seed: StartupRenderSectionSeed,
     poll_count: usize,
     poll_ms: f64,
 }
@@ -518,6 +527,7 @@ impl LocalIntegratedStartupPump {
         Ok(Self {
             runtime: LocalIntegratedSceneRuntime::with_mesh_assets(options, mesh_assets)?,
             prewarm,
+            render_seed: StartupRenderSectionSeed::new(),
             poll_count: 0,
             poll_ms: 0.0,
         })
@@ -538,6 +548,10 @@ impl LocalIntegratedStartupPump {
         let section_update = self.runtime.sync_render_sections(camera_position)?;
         self.runtime
             .release_render_compile_jobs(section_update.accepted_compile_result_count);
+        // docs/tactical/167: fold the transient update into the startup seed before
+        // it is dropped, so completion can hand a full draw batch to the platform
+        // adapter without recompiling from the metadata-only resident cache.
+        self.render_seed.observe(&section_update);
         let render_changed = section_update.rebuilt_section_count() > 0
             || section_update.removed_section_count() > 0
             || section_update.submitted_compile_section_count > 0
@@ -568,6 +582,8 @@ impl LocalIntegratedStartupPump {
             submitted_compile_section_count: section_update.submitted_compile_section_count,
             completed_compile_section_count: section_update.completed_compile_section_count,
             pending_compile_jobs: section_update.pending_compile_jobs,
+            render_seed_section_count: self.render_seed.section_count(),
+            render_seed_drawable_section_count: self.render_seed.drawable_section_count(),
             progress,
         })
     }
@@ -609,8 +625,30 @@ impl LocalIntegratedStartupPump {
         &self.runtime
     }
 
+    /// Startup render-seed sections accumulated so far, including empty sections.
+    pub fn render_seed_section_count(&self) -> usize {
+        self.render_seed.section_count()
+    }
+
+    /// Startup render-seed sections carrying drawable geometry.
+    pub fn render_seed_drawable_section_count(&self) -> usize {
+        self.render_seed.drawable_section_count()
+    }
+
     pub fn into_runtime(self) -> LocalIntegratedSceneRuntime {
         self.runtime
+    }
+
+    /// Consume the pump, returning the runtime plus the transient startup render
+    /// seed batch for a one-shot draw-resource upload (docs/tactical/167). Use
+    /// this instead of `compile_all_render_section_meshes(...)` at local startup:
+    /// it hands over the meshes the pump already compiled rather than marking
+    /// every resident section dirty and recompiling from metadata.
+    pub fn into_runtime_with_startup_sections(
+        mut self,
+    ) -> (LocalIntegratedSceneRuntime, Vec<TexturedRenderSectionMesh>) {
+        let sections = self.render_seed.drain_sections();
+        (self.runtime, sections)
     }
 }
 
@@ -3251,7 +3289,17 @@ mod tests {
             if step.playable_ready {
                 assert!(step.cached_section_count > 0);
                 assert!(step.progress.unwrap().playable_ready);
-                let runtime = pump.into_runtime();
+                // docs/tactical/167: playable readiness must imply a non-empty
+                // startup render seed with at least one drawable section, so the
+                // platform adapter can seed draw resources without recompiling.
+                assert!(step.render_seed_section_count > 0);
+                assert!(step.render_seed_drawable_section_count > 0);
+                let (runtime, startup_sections) = pump.into_runtime_with_startup_sections();
+                assert!(!startup_sections.is_empty());
+                assert!(
+                    startup_sections.iter().any(|section| !section.is_empty()),
+                    "startup seed must carry at least one drawable section"
+                );
                 assert_eq!(runtime.loaded_chunk_count(), 1);
                 assert!(
                     runtime

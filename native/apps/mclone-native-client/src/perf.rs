@@ -3822,10 +3822,9 @@ pub(crate) fn run_startup_streaming_perf(
     let startup_target_chunk_count =
         startup_progress.map_or(0, |progress| progress.target_chunk_count);
     let startup_target_percent = startup_progress.map_or(0, |progress| progress.percent());
-    let mut runtime = startup.into_runtime();
-    // docs/tactical/163: seed the probe draw resources from a fresh recompile
-    // batch; the resident cache no longer retains CPU meshes.
-    let initial_sections = runtime.compile_all_render_section_meshes(spectator.position)?;
+    // docs/tactical/167: seed the probe draw resources from the startup pump's
+    // render seed instead of a redundant recompile of the resident cache.
+    let (runtime, initial_sections) = startup.into_runtime_with_startup_sections();
     if initial_sections.is_empty() {
         bail!("startup streaming perf entered playable with no cached render sections");
     }

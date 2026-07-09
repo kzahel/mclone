@@ -19,12 +19,14 @@ pub mod render_compile_capacity;
 pub mod seed_reroll;
 pub mod session;
 pub mod startup_args;
+pub mod startup_render_seed;
 pub mod world_catalog;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::catalog_executor::{
     execute_world_catalog_request, refresh_world_catalog_controller,
 };
+pub use crate::startup_render_seed::StartupRenderSectionSeed;
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::world_catalog::WorldCatalog;
 

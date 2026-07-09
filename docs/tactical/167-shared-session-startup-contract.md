@@ -1,9 +1,9 @@
 # 167: Shared Native Session Startup Contract
 
-Status: Slice 0 complete 2026-07-09 (startup audit + guard comments, no behavior
-change). Design/implementation tactical opened after the docs/tactical/163
-follow-up showed that startup render-section seeding is both duplicated and
-platform-divergent.
+Status: Slice 1 complete 2026-07-09 (local pump seed handoff; Slice 0 audit +
+guard comments landed first). Design/implementation tactical opened after the
+docs/tactical/163 follow-up showed that startup render-section seeding is both
+duplicated and platform-divergent.
 
 Workstream: native Rust shared session/runtime/render startup boundary in
 `mclone-app-runtime`, with desktop flat validation first and required adoption
@@ -327,6 +327,41 @@ MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 Log tripwire: startup logs should report `sections=N` from the seed, with no
 startup recompile path. The Quest smoke line to watch remains
 `XR local world playable ... sections=N`.
+
+#### Slice 1 Result (2026-07-09)
+
+- Added `StartupRenderSectionSeed` in `mclone-app-runtime`
+  (`startup_render_seed.rs`): a `BTreeMap<RenderSectionKey,
+  TexturedRenderSectionMesh>` accumulator with `observe(&update)` (removals
+  before rebuilds so a same-update rebuild stays drawable), `section_count`,
+  `drawable_section_count`, `estimated_owned_bytes`, `is_empty`, and
+  `drain_sections`. Five unit tests cover latest-rebuild-wins, removal deletes,
+  removal+rebuild-same-update keeps the rebuild, no duplicate keys, drawable
+  count, and drain-empties-to-zero.
+- `LocalIntegratedStartupPump` now owns a `render_seed`, folds every transient
+  `RenderSectionCacheUpdate` into it during `step(...)` (compile-job release
+  stays in the pump, unchanged), surfaces `render_seed_section_count` /
+  `render_seed_drawable_section_count` on `LocalIntegratedStartupStep`, and adds
+  `into_runtime_with_startup_sections()` alongside the retained `into_runtime()`.
+- Migrated all local seeders off `compile_all_render_section_meshes(...)`:
+  desktop flat (`flat_client_driver` `complete_local_world_startup` →
+  `upload_startup_seed_sections`; `cached_runtime_sections` deleted), offscreen
+  playable startup (shares that driver path), XR local (`session.rs`
+  `complete_local_startup`), and startup-streaming perf. The now-dead desktop
+  `WindowSceneStartupPump::into_runtime` and
+  `WindowSceneRuntime::compile_all_render_section_meshes` wrappers were removed.
+- Tripwires green: app-runtime 180 tests (175 + 5 seed), render-session 103,
+  native-client 179, xr-scene 74; workspace + `wasm32` web-client `cargo check`
+  clean; local startup screenshot at `--startup-wait playable` drew terrain
+  (`6 sections, 2 drawn sections`) from the seed with no recompile path.
+- Deferred to later slices: XR remote (`start_xr_terrain_runtime`) and Android
+  local+remote (`start_android_render_scene`) still use the blocking
+  `poll_until_idle` + `sync_all_render_sections` path (Slice 3, once the
+  host-neutral pump lands in Slice 2). The XR-local seed still reflects the
+  pump's startup camera; interest drift from a startup pose correction is
+  reconciled by normal streaming until Slice 4 makes reconciliation shared. The
+  app-runtime `compile_all_render_section_meshes(...)` methods remain as the
+  documented resource-rebuild path (currently callerless; renamed in Slice 5).
 
 ### Slice 2: Host-Neutral Startup Pump
 

@@ -203,8 +203,17 @@ impl WindowSceneStartupPump {
         self.pump.progress_overlay()
     }
 
-    pub(crate) fn into_runtime(self) -> WindowSceneRuntime {
-        WindowSceneRuntime::from_local_runtime(self.pump.into_runtime(), self.actor_textures)
+    /// Consume the pump into the runtime plus the transient startup render seed
+    /// batch for a one-shot draw upload (docs/tactical/167), instead of
+    /// recompiling every resident section after startup.
+    pub(crate) fn into_runtime_with_startup_sections(
+        self,
+    ) -> (WindowSceneRuntime, Vec<TexturedRenderSectionMesh>) {
+        let (runtime, sections) = self.pump.into_runtime_with_startup_sections();
+        (
+            WindowSceneRuntime::from_local_runtime(runtime, self.actor_textures),
+            sections,
+        )
     }
 }
 
@@ -475,19 +484,6 @@ impl WindowSceneRuntime {
     pub(crate) fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
         self.scene
             .mark_all_render_sections_dirty_for_resource_rebuild()
-    }
-
-    /// Recompile every resident render section and return the transient full
-    /// mesh batch for a one-shot GPU (re)upload (docs/tactical/163).
-    ///
-    /// docs/tactical/167: resource-rebuild/probe path only. The desktop startup
-    /// seed must come from the startup pump, not this dirty-all recompile.
-    pub(crate) fn compile_all_render_section_meshes(
-        &mut self,
-        camera_position: Vec3,
-    ) -> anyhow::Result<Vec<TexturedRenderSectionMesh>> {
-        self.scene
-            .compile_all_render_section_meshes(camera_position)
     }
 
     /// Sky clear color for the current day-time, driving the day/night gradient.

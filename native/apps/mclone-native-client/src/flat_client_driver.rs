@@ -1804,7 +1804,12 @@ impl FlatClientDriver {
         device: Option<&wgpu::Device>,
     ) -> anyhow::Result<FlatClientSessionUpdate> {
         let descriptor = startup.descriptor;
-        self.runtime = Some(startup.pump.into_runtime());
+        // docs/tactical/167: take the startup render seed the pump accumulated
+        // instead of recompiling every resident section after the fact. If no
+        // device/render resources exist yet, the seed is dropped and the resource
+        // (re)build path re-populates draw sections when resources are created.
+        let (runtime, startup_sections) = startup.pump.into_runtime_with_startup_sections();
+        self.runtime = Some(runtime);
         self.sync_player_appearance()
             .context("failed to sync initial player appearance")?;
         match self.apply_pending_player_position_updates() {
@@ -1816,7 +1821,7 @@ impl FlatClientDriver {
             }
         }
         if let Some(device) = device {
-            self.upload_cached_runtime_sections(device)
+            self.upload_startup_seed_sections(device, startup_sections)
                 .context("failed to upload playable startup render sections")?;
         }
         let loaded = self
@@ -2277,21 +2282,16 @@ impl FlatClientDriver {
         }))
     }
 
-    pub(crate) fn cached_runtime_sections(
-        &mut self,
-    ) -> anyhow::Result<Option<FlatClientCachedSections>> {
+    fn startup_seed_sections(
+        &self,
+        sections: Vec<TexturedRenderSectionMesh>,
+    ) -> Option<FlatClientCachedSections> {
         let camera_view = self.camera_view();
-        let Some(runtime) = &mut self.runtime else {
-            return Ok(None);
-        };
-        // docs/tactical/163: the playable-startup pump compiled these sections
-        // into the resident cache, which now holds only metadata. Recompile them
-        // into a transient batch to seed the draw resources.
-        let sections = runtime.compile_all_render_section_meshes(camera_view.render_eye)?;
-        Ok(Some(FlatClientCachedSections {
+        self.runtime.as_ref()?;
+        Some(FlatClientCachedSections {
             camera_view,
             sections,
-        }))
+        })
     }
 
     pub(crate) fn traversal_ready_section_keys(
@@ -2422,9 +2422,14 @@ impl FlatClientDriver {
         Ok(Some((sync, summary)))
     }
 
-    pub(crate) fn upload_cached_runtime_sections(
+    /// Upload the transient startup render seed batch into the draw resources
+    /// (docs/tactical/167). This is the local-startup seeding path; it replaces
+    /// the former mark-all-dirty recompile and must not call
+    /// `compile_all_render_section_meshes(...)`.
+    pub(crate) fn upload_startup_seed_sections(
         &mut self,
         device: &wgpu::Device,
+        sections: Vec<TexturedRenderSectionMesh>,
     ) -> anyhow::Result<
         Option<(
             FlatClientCachedSections,
@@ -2432,7 +2437,7 @@ impl FlatClientDriver {
             TexturedSectionUploadReport,
         )>,
     > {
-        let Some(cached) = self.cached_runtime_sections()? else {
+        let Some(cached) = self.startup_seed_sections(sections) else {
             return Ok(None);
         };
         let traversal_ready_sections = self.traversal_ready_section_keys(cached.camera_view);

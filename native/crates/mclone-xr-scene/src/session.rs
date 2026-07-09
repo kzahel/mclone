@@ -654,9 +654,13 @@ where
         let descriptor = descriptor
             .or_else(|| request.active_descriptor())
             .context("XR local startup request did not describe an active session")?;
+        // docs/tactical/167: drain the startup render seed the pump accumulated
+        // before handing the runtime off, so draw resources can be created from it
+        // without recompiling the metadata-only resident cache.
+        let (local_runtime, startup_sections) = pump.into_runtime_with_startup_sections();
         let mut runtime = NativeSessionRuntime::<S>::from_active_runtime_with_descriptor(
             descriptor.clone(),
-            NativeSceneRuntime::Local(pump.into_runtime()),
+            NativeSceneRuntime::Local(local_runtime),
         );
         let mut initial_pose_changed =
             apply_pending_engine_camera_position_updates_for_runtime(&mut runtime, &mut camera)
@@ -681,13 +685,13 @@ where
         }
 
         let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
-        // docs/tactical/163: the startup pump compiled these sections into the
-        // resident cache, which now holds only metadata. Recompile them into a
-        // transient full batch to seed the initial draw resources instead of
-        // pulling retained CPU meshes out of the cache.
-        let sections = runtime
-            .compile_all_render_section_meshes(camera_position)
-            .context("compile XR local startup render sections")?;
+        // docs/tactical/167: seed the initial draw resources from the startup
+        // pump's render seed rather than recompiling the resident cache. The seed
+        // reflects the pump's startup camera; normal streaming reconciles any
+        // interest drift from the pose correction above (shared camera/interest
+        // startup reconciliation is tactical 167 Slice 4). Traversal-ready
+        // publication below still uses the final startup camera position.
+        let sections = startup_sections;
         if sections.is_empty() {
             bail!(
                 "XR local startup seed={} center=({}, {}) render_distance={} reached playable threshold without render sections",
