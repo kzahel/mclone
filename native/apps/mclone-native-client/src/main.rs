@@ -21,7 +21,7 @@ mod scene_runtime;
 mod torch_light_probe;
 mod ui;
 #[cfg(feature = "xr")]
-mod xr_clear_smoke;
+mod desktop_xr;
 
 use crate::app::run_window;
 #[cfg(test)]
@@ -363,7 +363,7 @@ fn json_escape(value: &str) -> String {
 
 #[cfg(feature = "xr")]
 fn run_xr_clear_smoke(options: crate::cli::XrClearSmokeOptions) -> Result<()> {
-    xr_clear_smoke::run(options)
+    desktop_xr::run(options)
 }
 
 #[cfg(not(feature = "xr"))]
@@ -373,7 +373,7 @@ fn run_xr_clear_smoke(_options: crate::cli::XrClearSmokeOptions) -> Result<()> {
 
 #[cfg(feature = "xr")]
 fn run_xr_mclone_smoke(options: crate::cli::XrMcloneSmokeOptions) -> Result<()> {
-    xr_clear_smoke::run_mclone(options)
+    desktop_xr::run_mclone(options)
 }
 
 #[cfg(not(feature = "xr"))]

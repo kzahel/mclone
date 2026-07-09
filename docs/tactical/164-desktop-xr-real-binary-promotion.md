@@ -1,6 +1,6 @@
 # 164: Desktop XR Real-Binary Promotion
 
-Status: proposed 2026-07-09.
+Status: active 2026-07-09; Slice 1 (module rename/relocate) landed.
 
 Workstream: native Rust desktop platform glue (`mclone-native-client`) plus the
 shared XR frame interior it already drives. Desktop validation first; the frame
@@ -44,16 +44,16 @@ explicitly deferred to a follow-up slice — see Non-Goals.
   script.
 - **Teardown is process-bounded.** `run_smoke_frames` deliberately
   `std::mem::forget`s the whole XR object graph after a clean shutdown
-  (`xr_clear_smoke.rs:636-647`) because some runtimes fault while destroying
+  (`desktop_xr.rs:636-647`) because some runtimes fault while destroying
   session-owned graphics handles after EXITING. Fine for a run-to-count harness;
   a persistent app needs a defined quit path.
 - **No desktop presence.** Desktop XR spawns no window. The only display surface
   is the headset; the only ways to end a session are the headset system menu
-  (OpenXR EXITING, handled at `xr_clear_smoke.rs:501-504`, but only honored in
+  (OpenXR EXITING, handled at `desktop_xr.rs:501-504`, but only honored in
   the unbounded path), the frame limit, or Ctrl-C in the terminal. There is no
   taskbar/dock presence and no non-headset quit.
 - **Module name signals "test."** The whole path lives in
-  `native/apps/mclone-native-client/src/xr_clear_smoke.rs`, dispatched as
+  `native/apps/mclone-native-client/src/desktop_xr.rs`, dispatched as
   `Cli::XrClearSmoke` / `Cli::XrMcloneSmoke` in `main.rs:293-294`.
 
 ## Design Principle
@@ -75,15 +75,26 @@ the *real* run intent, not of desktop XR as such.
 
 Ordered so each slice lands independently and keeps `native:xr:*` green.
 
-### Slice 1 — Rename/relocate the module for authority
+### Slice 1 — Rename/relocate the module for authority — LANDED 2026-07-09
 
-- Rename `native/apps/mclone-native-client/src/xr_clear_smoke.rs` →
-  `desktop_xr.rs` and update `mod` + `use` sites (`main.rs:24`, dispatch at
-  `main.rs:293-294`, and the feature-gated shims at `main.rs:364-382`).
-- Keep the clear/mclone/real distinction as an internal enum
-  (`DesktopXrSmoke` grows a `Real`/persistent variant, or is renamed to a
-  `DesktopXrMode` covering all three intents).
-- Pure rename/move slice: no behavior change, keeps the diff reviewable.
+- Renamed `native/apps/mclone-native-client/src/xr_clear_smoke.rs` →
+  `desktop_xr.rs` and the sibling `xr_clear_smoke/` graphics dir
+  (`graphics_metal.rs`, `graphics_vulkan.rs`) → `desktop_xr/`, via `git mv` to
+  preserve history. Updated the three `main.rs` sites: `mod desktop_xr;`
+  (line 24) and the two feature-gated call sites `desktop_xr::run` /
+  `desktop_xr::run_mclone` (lines 366/376).
+- Pure rename/move: no behavior change. The `--xr-clear-smoke` /
+  `--xr-mclone-smoke` CLI flags, the `Cli::XrClearSmoke` variant, and the
+  `xr_clear_smoke` boolean in `cli.rs` are intentionally unchanged — flag/verb
+  work is Slice 2. The internal `DesktopXrSmoke` enum keeps its clear/mclone
+  shape here; the `Real`/persistent variant lands in Slice 2.
+- Verified: `cargo check -p mclone-native-client --features xr` clean (only the
+  pre-existing `DESKTOP_LOCAL_ARG_FLAGS` dead-code warning), and the 14
+  `tests::cli_xr` tests pass.
+- Deferred to Slice 4: living docs still referencing the old path
+  (`docs/frame-pipeline-accounting.md:202`, `tactical/150:386`) get updated with
+  the rest of the doc pass. Historical tactical records (081, 083, 086, 130,
+  144, 145, 158) are left as-is.
 
 ### Slice 2 — First-class CLI verb + real defaults
 
@@ -162,9 +173,9 @@ Ordered so each slice lands independently and keeps `native:xr:*` green.
 
 ## References
 
-- Current path: `native/apps/mclone-native-client/src/xr_clear_smoke.rs`
-  (→ `desktop_xr.rs`), dispatch `main.rs:293-294`, feature shims
-  `main.rs:364-382`, flags/guards `cli.rs`.
+- Current path: `native/apps/mclone-native-client/src/desktop_xr.rs` (+
+  `desktop_xr/graphics_{metal,vulkan}.rs`), dispatch `main.rs:293-294`, feature
+  shims `main.rs:364-382`, flags/guards `cli.rs`.
 - Shared frame interior: `mclone-xr-scene`, `mclone-xr-host`;
   `docs/frame-pipeline-accounting.md` (desktop-XR host drives the same interior
   as Android XR).
