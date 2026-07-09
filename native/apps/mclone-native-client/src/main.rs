@@ -292,6 +292,7 @@ fn main() -> Result<()> {
         }
         Cli::XrClearSmoke { options } => run_xr_clear_smoke(options),
         Cli::XrMcloneSmoke { options } => run_xr_mclone_smoke(options),
+        Cli::DesktopXr { options, window } => run_desktop_xr(options, window),
         Cli::Window {
             scene,
             render_options,
@@ -379,6 +380,16 @@ fn run_xr_mclone_smoke(options: crate::cli::XrMcloneSmokeOptions) -> Result<()> 
 #[cfg(not(feature = "xr"))]
 fn run_xr_mclone_smoke(_options: crate::cli::XrMcloneSmokeOptions) -> Result<()> {
     anyhow::bail!("rebuild with `--features xr` to use --xr-mclone-smoke")
+}
+
+#[cfg(feature = "xr")]
+fn run_desktop_xr(options: crate::cli::XrMcloneSmokeOptions, window: bool) -> Result<()> {
+    desktop_xr::run_desktop(options, window)
+}
+
+#[cfg(not(feature = "xr"))]
+fn run_desktop_xr(_options: crate::cli::XrMcloneSmokeOptions, _window: bool) -> Result<()> {
+    anyhow::bail!("rebuild with `--features xr` to use --desktop-xr")
 }
 
 #[cfg(test)]

@@ -180,7 +180,7 @@ fn cli_rejects_xr_clear_smoke_with_headless_mode() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("XR smoke modes cannot be combined"));
+    assert!(err.contains("XR modes cannot be combined"));
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn cli_rejects_xr_frames_without_xr_clear_smoke() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("--frames requires --xr-clear-smoke or --xr-mclone-smoke"));
+    assert!(err.contains("--frames requires --xr-clear-smoke, --xr-mclone-smoke, or --desktop-xr"));
 }
 
 #[test]
@@ -198,7 +198,9 @@ fn cli_rejects_xr_forever_without_xr_smoke() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("--xr-forever requires --xr-clear-smoke or --xr-mclone-smoke"));
+    assert!(
+        err.contains("--xr-forever requires --xr-clear-smoke, --xr-mclone-smoke, or --desktop-xr")
+    );
 }
 
 #[test]
@@ -256,4 +258,126 @@ fn cli_rejects_combined_xr_smoke_modes() {
     .to_string();
 
     assert!(err.contains("--xr-mclone-smoke cannot be combined"));
+}
+
+#[test]
+fn cli_parses_desktop_xr_persistent_with_window_by_default() {
+    let cli = Cli::parse(["--desktop-xr".to_owned()]).unwrap();
+
+    assert_eq!(
+        cli,
+        Cli::DesktopXr {
+            options: XrMcloneSmokeOptions {
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+                frame_limit: None,
+                view_pose: None,
+                underwater_mode: XrUnderwaterMode::Midpoint,
+                debug_ui_screen: None,
+            },
+            window: true,
+        }
+    );
+}
+
+#[test]
+fn cli_parses_desktop_xr_no_window() {
+    let cli = Cli::parse(["--desktop-xr".to_owned(), "--no-window".to_owned()]).unwrap();
+
+    assert!(matches!(cli, Cli::DesktopXr { window: false, .. }));
+}
+
+#[test]
+fn cli_parses_desktop_xr_frame_bound() {
+    let cli = Cli::parse([
+        "--desktop-xr".to_owned(),
+        "--frames".to_owned(),
+        "300".to_owned(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        cli,
+        Cli::DesktopXr {
+            options: XrMcloneSmokeOptions {
+                frame_limit: Some(300),
+                ..
+            },
+            window: true,
+        }
+    ));
+}
+
+#[test]
+fn cli_parses_desktop_xr_forever_stays_persistent() {
+    let cli = Cli::parse(["--desktop-xr".to_owned(), "--xr-forever".to_owned()]).unwrap();
+
+    assert!(matches!(
+        cli,
+        Cli::DesktopXr {
+            options: XrMcloneSmokeOptions {
+                frame_limit: None,
+                ..
+            },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn cli_parses_desktop_xr_mclone_modifiers() {
+    let cli = Cli::parse([
+        "--desktop-xr".to_owned(),
+        "--view-pose".to_owned(),
+        "0,72,0,0".to_owned(),
+        "--xr-underwater-mode".to_owned(),
+        "per-eye".to_owned(),
+        "--xr-debug-ui".to_owned(),
+        "pause".to_owned(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        cli,
+        Cli::DesktopXr {
+            options: XrMcloneSmokeOptions {
+                view_pose: Some(_),
+                underwater_mode: XrUnderwaterMode::PerEye,
+                debug_ui_screen: Some(XrDebugUiScreen::Pause),
+                ..
+            },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn cli_rejects_no_window_without_desktop_xr() {
+    let err = Cli::parse(["--xr-mclone-smoke".to_owned(), "--no-window".to_owned()])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("--no-window requires --desktop-xr"));
+}
+
+#[test]
+fn cli_rejects_desktop_xr_with_smoke_mode() {
+    let err = Cli::parse(["--desktop-xr".to_owned(), "--xr-mclone-smoke".to_owned()])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("--xr-mclone-smoke cannot be combined"));
+}
+
+#[test]
+fn cli_rejects_desktop_xr_with_headless_mode() {
+    let err = Cli::parse([
+        "--desktop-xr".to_owned(),
+        "--headless-clear".to_owned(),
+        "/tmp/mclone-clear.png".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("XR modes cannot be combined"));
 }

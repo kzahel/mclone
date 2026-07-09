@@ -103,25 +103,37 @@ struct OpenXrRuntimeManifest {
 }
 
 #[cfg(not(target_os = "android"))]
-enum DesktopXrSmoke {
+enum DesktopXrMode {
+    /// Per-eye diagnostic clear pattern; no world. Frame-bounded liveness smoke.
     Clear { frame_limit: Option<u32> },
+    /// The mclone world, frame-bounded. CI/validation smoke gate.
     Mclone { options: XrMcloneSmokeOptions },
+    /// The real desktop XR run verb: the same mclone world interior, persistent
+    /// by default, with a desktop companion window unless suppressed. `window`
+    /// is threaded through here for Slice 3 (companion window); Slice 2 renders
+    /// the identical world path and does not yet spawn a window.
+    Real { options: XrMcloneSmokeOptions, window: bool },
 }
 
 #[cfg(not(target_os = "android"))]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
-    run_desktop_xr_smoke(DesktopXrSmoke::Clear {
+    run_desktop_xr(DesktopXrMode::Clear {
         frame_limit: options.frame_limit,
     })
 }
 
 #[cfg(not(target_os = "android"))]
 pub(crate) fn run_mclone(options: XrMcloneSmokeOptions) -> Result<()> {
-    run_desktop_xr_smoke(DesktopXrSmoke::Mclone { options })
+    run_desktop_xr(DesktopXrMode::Mclone { options })
 }
 
 #[cfg(not(target_os = "android"))]
-fn run_desktop_xr_smoke(smoke: DesktopXrSmoke) -> Result<()> {
+pub(crate) fn run_desktop(options: XrMcloneSmokeOptions, window: bool) -> Result<()> {
+    run_desktop_xr(DesktopXrMode::Real { options, window })
+}
+
+#[cfg(not(target_os = "android"))]
+fn run_desktop_xr(mode: DesktopXrMode) -> Result<()> {
     let (entry, entry_source) = load_openxr_entry()?;
     let available = entry
         .enumerate_extensions()
@@ -198,7 +210,7 @@ fn run_desktop_xr_smoke(smoke: DesktopXrSmoke) -> Result<()> {
         system,
         stereo_config,
         environment_blend_mode,
-        smoke,
+        mode,
     )?;
 
     Ok(())
@@ -234,7 +246,7 @@ fn create_graphics_session_probe(
     system: xr::SystemId,
     stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
-    smoke: DesktopXrSmoke,
+    mode: DesktopXrMode,
 ) -> Result<()> {
     let graphics = graphics_metal::create_graphics_session(instance, system)
         .context("create OpenXR Metal graphics session")?;
@@ -249,7 +261,7 @@ fn create_graphics_session_probe(
         stage,
         stereo_config,
         environment_blend_mode,
-        smoke,
+        mode,
     )?;
     Ok(())
 }
@@ -260,7 +272,7 @@ fn create_graphics_session_probe(
     system: xr::SystemId,
     stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
-    smoke: DesktopXrSmoke,
+    mode: DesktopXrMode,
 ) -> Result<()> {
     let graphics = graphics_vulkan::create_graphics_session(instance, system)
         .context("create OpenXR Vulkan graphics session")?;
@@ -277,7 +289,7 @@ fn create_graphics_session_probe(
         stage,
         stereo_config,
         environment_blend_mode,
-        smoke,
+        mode,
     )?;
     Ok(())
 }
@@ -409,11 +421,13 @@ fn run_smoke_frames(
     stage: xr::Space,
     stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
-    smoke: DesktopXrSmoke,
+    mode: DesktopXrMode,
 ) -> Result<()> {
-    let frame_limit = match &smoke {
-        DesktopXrSmoke::Clear { frame_limit } => *frame_limit,
-        DesktopXrSmoke::Mclone { options } => options.frame_limit,
+    let frame_limit = match &mode {
+        DesktopXrMode::Clear { frame_limit } => *frame_limit,
+        DesktopXrMode::Mclone { options } | DesktopXrMode::Real { options, .. } => {
+            options.frame_limit
+        }
     };
     let frame_limit_label = frame_limit
         .map(|frames| frames.to_string())
@@ -455,12 +469,21 @@ fn run_smoke_frames(
             SUBMITTED_FRAME_PROGRESS_TIMEOUT.as_secs_f64()
         );
     }
-    let mut mclone = match smoke {
-        DesktopXrSmoke::Clear { .. } => None,
-        DesktopXrSmoke::Mclone { options } => Some(
+    let mut mclone = match mode {
+        DesktopXrMode::Clear { .. } => None,
+        DesktopXrMode::Mclone { options } => Some(
             create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
                 .context("initialize mclone XR terrain state")?,
         ),
+        DesktopXrMode::Real { options, window } => {
+            // Slice 3 will spawn the desktop companion window when `window` is
+            // true; Slice 2 renders the identical world path with no window yet.
+            let _ = window;
+            Some(
+                create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
+                    .context("initialize mclone XR terrain state")?,
+            )
+        }
     };
     let controller_actions = OpenXrControllerActions::create_with_binding_logger(
         graphics.session.instance(),

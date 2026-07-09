@@ -54,6 +54,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--adaptive-chunk-publication-budget",
     "--adaptive-render-admission-budget",
     "--cadence",
+    "--desktop-xr",
     "--far-lod",
     "--first-person-player",
     "--frame-accounting",
@@ -72,6 +73,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--movement-frame-speed",
     "--movement-perf",
     "--movement-steps",
+    "--no-window",
     "--path-radius",
     "--rebuild-render-scale",
     "--remote-player-visual-smoke",
@@ -601,6 +603,14 @@ pub(crate) enum Cli {
     XrMcloneSmoke {
         options: XrMcloneSmokeOptions,
     },
+    /// The real desktop XR run verb (`--desktop-xr`): the mclone world, persistent
+    /// by default (unbounded frames), with a desktop companion window unless
+    /// `--no-window` is passed. Reuses `XrMcloneSmokeOptions` for the shared world
+    /// content; `window` toggles the Slice 3 companion window.
+    DesktopXr {
+        options: XrMcloneSmokeOptions,
+        window: bool,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -667,6 +677,8 @@ impl Cli {
         let mut path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
         let mut xr_clear_smoke = false;
         let mut xr_mclone_smoke = false;
+        let mut desktop_xr = false;
+        let mut no_window_explicit = false;
         let mut xr_frames_explicit = false;
         let mut xr_forever_explicit = false;
         let mut xr_frame_limit = Some(DEFAULT_XR_CLEAR_SMOKE_FRAMES);
@@ -695,6 +707,7 @@ impl Cli {
                         || startup_streaming_perf
                         || loading_settle_perf
                         || xr_mclone_smoke
+                        || desktop_xr
                     {
                         bail!("--xr-clear-smoke cannot be combined with other run modes");
                     }
@@ -709,10 +722,29 @@ impl Cli {
                         || startup_streaming_perf
                         || loading_settle_perf
                         || xr_clear_smoke
+                        || desktop_xr
                     {
                         bail!("--xr-mclone-smoke cannot be combined with other run modes");
                     }
                     xr_mclone_smoke = true;
+                }
+                "--desktop-xr" => {
+                    if mode.is_some()
+                        || movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || startup_streaming_perf
+                        || loading_settle_perf
+                        || xr_clear_smoke
+                        || xr_mclone_smoke
+                    {
+                        bail!("--desktop-xr cannot be combined with other run modes");
+                    }
+                    desktop_xr = true;
+                }
+                "--no-window" => {
+                    no_window_explicit = true;
                 }
                 "--movement-perf" => {
                     if mode.is_some() {
@@ -1161,11 +1193,17 @@ impl Cli {
                 "--movement-perf, --timedemo, --frame-budget-probe, --movement-frame-probe, --startup-streaming-perf, and --loading-settle-perf are mutually exclusive"
             );
         }
-        if (xr_clear_smoke || xr_mclone_smoke) && (mode.is_some() || perf_mode_count > 0) {
-            bail!("XR smoke modes cannot be combined with headless or perf modes");
+        if (xr_clear_smoke || xr_mclone_smoke || desktop_xr)
+            && (mode.is_some() || perf_mode_count > 0)
+        {
+            bail!("XR modes cannot be combined with headless or perf modes");
         }
         if window_frame_report_path.is_some()
-            && (mode.is_some() || perf_mode_count > 0 || xr_clear_smoke || xr_mclone_smoke)
+            && (mode.is_some()
+                || perf_mode_count > 0
+                || xr_clear_smoke
+                || xr_mclone_smoke
+                || desktop_xr)
         {
             bail!("--window-frame-report applies only to window mode");
         }
@@ -1173,27 +1211,34 @@ impl Cli {
             bail!("--window-frame-report-frames requires --window-frame-report");
         }
         if window_start_intent == WindowStartIntent::Menu
-            && (mode.is_some() || perf_mode_count > 0 || xr_clear_smoke || xr_mclone_smoke)
+            && (mode.is_some()
+                || perf_mode_count > 0
+                || xr_clear_smoke
+                || xr_mclone_smoke
+                || desktop_xr)
         {
             bail!("--menu/--start-in-world false only apply to window mode");
         }
-        if xr_frames_explicit && !xr_clear_smoke && !xr_mclone_smoke {
-            bail!("--frames requires --xr-clear-smoke or --xr-mclone-smoke");
+        if no_window_explicit && !desktop_xr {
+            bail!("--no-window requires --desktop-xr");
         }
-        if xr_forever_explicit && !xr_clear_smoke && !xr_mclone_smoke {
-            bail!("--xr-forever requires --xr-clear-smoke or --xr-mclone-smoke");
+        if xr_frames_explicit && !xr_clear_smoke && !xr_mclone_smoke && !desktop_xr {
+            bail!("--frames requires --xr-clear-smoke, --xr-mclone-smoke, or --desktop-xr");
+        }
+        if xr_forever_explicit && !xr_clear_smoke && !xr_mclone_smoke && !desktop_xr {
+            bail!("--xr-forever requires --xr-clear-smoke, --xr-mclone-smoke, or --desktop-xr");
         }
         if xr_frames_explicit && xr_forever_explicit {
             bail!("--xr-forever cannot be combined with --frames");
         }
-        if xr_view_pose_explicit && !xr_mclone_smoke {
-            bail!("--view-pose requires --xr-mclone-smoke");
+        if xr_view_pose_explicit && !xr_mclone_smoke && !desktop_xr {
+            bail!("--view-pose requires --xr-mclone-smoke or --desktop-xr");
         }
-        if xr_underwater_mode_explicit && !xr_mclone_smoke {
-            bail!("--xr-underwater-mode requires --xr-mclone-smoke");
+        if xr_underwater_mode_explicit && !xr_mclone_smoke && !desktop_xr {
+            bail!("--xr-underwater-mode requires --xr-mclone-smoke or --desktop-xr");
         }
-        if xr_debug_ui_screen_explicit && !xr_mclone_smoke {
-            bail!("--xr-debug-ui requires --xr-mclone-smoke");
+        if xr_debug_ui_screen_explicit && !xr_mclone_smoke && !desktop_xr {
+            bail!("--xr-debug-ui requires --xr-mclone-smoke or --desktop-xr");
         }
         if rebuild_render_scale.is_some()
             && !matches!(mode, Some(HeadlessMode::RendererRebuildSmoke(_)))
@@ -1209,6 +1254,7 @@ impl Cli {
             && (perf_mode_count > 0
                 || xr_clear_smoke
                 || xr_mclone_smoke
+                || desktop_xr
                 || matches!(
                     mode,
                     Some(
@@ -1445,6 +1491,23 @@ impl Cli {
                     underwater_mode: xr_underwater_mode,
                     debug_ui_screen: xr_debug_ui_screen,
                 },
+            }),
+            None if desktop_xr => Ok(Self::DesktopXr {
+                options: XrMcloneSmokeOptions {
+                    scene,
+                    render_options,
+                    // The real verb is persistent by default: only an explicit
+                    // `--frames N` bounds it. `--xr-forever` leaves it unbounded.
+                    frame_limit: if xr_frames_explicit {
+                        xr_frame_limit
+                    } else {
+                        None
+                    },
+                    view_pose: xr_view_pose,
+                    underwater_mode: xr_underwater_mode,
+                    debug_ui_screen: xr_debug_ui_screen,
+                },
+                window: !no_window_explicit,
             }),
             None => Ok(Self::Window {
                 scene,
@@ -1878,7 +1941,9 @@ fn print_help() {
            mclone-native-client --startup-streaming-perf [--startup-streaming-persisted-world] [--freeze-scheduled-fluid-ticks] [--width 1280] [--height 720] [--seed 12345] [--render-distance 20] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--render-compile-worker-timing true|false] [--startup-streaming-frames 2400] [--target-hz 120] [--simulation-cadence 20/20/60] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
-           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --desktop-xr [--no-window] [--frames N|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [scene/render options as --xr-mclone-smoke]\n\n\
+        --desktop-xr is the real desktop OpenXR run verb: it renders the same mclone world as --xr-mclone-smoke but is persistent by default (unbounded frames; pass --frames N only to bound a run) and spawns a desktop companion window unless --no-window is passed. --xr-clear-smoke and --xr-mclone-smoke remain the frame-bounded CI/liveness gates.\n\
         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --window-frame-report to run the live winit/swapchain path for N rendered frames, write surface acquire/encode/submit/present timing JSON, then exit. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. The shared scheduler publication controller is the local-integrated default; use --adaptive-chunk-publication-budget false to force the fixed floor for comparison, and remote dedicated sessions keep it off. Use --adaptive-render-admission-budget true to test the shared render admission controller on the live local-integrated desktop path. Render compile in-flight capacity defaults to 4 jobs; use --render-compile-capacity derived to apply the shared host-derived worker/max-pending capacity before startup, or use --render-compile-workers and --render-compile-max-pending-jobs as manual overrides. Use --render-compile-worker-timing false only for meter-tax A/B perf captures; it disables render compile worker busy counters without changing queueing or compile work. Use --freeze-scheduled-fluid-ticks only in startup-streaming perf to isolate initial render-streaming from water/lava scheduled tick mutation. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
     );
 }

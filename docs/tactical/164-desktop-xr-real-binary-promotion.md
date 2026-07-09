@@ -1,6 +1,7 @@
 # 164: Desktop XR Real-Binary Promotion
 
-Status: active 2026-07-09; Slice 1 (module rename/relocate) landed.
+Status: active 2026-07-09; Slices 1 (module rename) + 2 (real `--desktop-xr`
+verb, persistent default, `--no-window`) landed.
 
 Workstream: native Rust desktop platform glue (`mclone-native-client`) plus the
 shared XR frame interior it already drives. Desktop validation first; the frame
@@ -96,20 +97,46 @@ Ordered so each slice lands independently and keeps `native:xr:*` green.
   the rest of the doc pass. Historical tactical records (081, 083, 086, 130,
   144, 145, 158) are left as-is.
 
-### Slice 2 — First-class CLI verb + real defaults
+### Slice 2 — First-class CLI verb + real defaults — LANDED 2026-07-09
 
-- Add a real run verb (e.g. `--desktop-xr`, or plain `--xr`) producing a new
-  `Cli::DesktopXr` that defaults to **persistent** (unbounded) mclone play.
-- Preserve the existing validation flags verbatim: `--xr-clear-smoke`,
-  `--xr-mclone-smoke`, `--frames N` (still capped for CI), `--xr-forever`, plus
-  the `--view-pose` / `--xr-underwater-mode` / `--xr-debug-ui` modifiers and
-  their guards (`cli.rs:1180-1196`).
-- Add an explicit **`--headless` / `--no-window`** flag (name TBD) so any real
-  or smoke run can suppress the companion window. Headless is the default for
-  the bounded smoke gates; window is the default for the real verb.
-- Decide the `MAX_XR_SMOKE_FRAMES` story: keep the 4096 cap for the *smoke*
-  frame budget (it is a CI bound), but the real verb is not frame-bounded at
-  all, so the cap no longer limits real sessions.
+- Added the `--desktop-xr` run verb producing a new `Cli::DesktopXr { options,
+  window }`. It renders the same mclone world as `--xr-mclone-smoke` but is
+  **persistent by default** (unbounded frames): only an explicit `--frames N`
+  bounds it; `--xr-forever` and the no-flag default both leave it unbounded.
+  The verb reuses `XrMcloneSmokeOptions` for the shared world content rather
+  than duplicating a struct.
+- Internal enum `DesktopXrSmoke` → `DesktopXrMode` with a new `Real { options,
+  window }` variant beside `Clear`/`Mclone`; `desktop_xr::run_desktop` is the
+  new entry. The `Real` arm renders the identical world path as `Mclone` and
+  threads `window` through to `run_smoke_frames` for Slice 3 to consume (it is a
+  deliberate no-op here, `let _ = window;`).
+- Companion-window flag: chose **`--no-window`** (not a bare `--headless`) to
+  avoid collision with the existing `--headless-clear` / `--headless-dual-view`
+  headless *modes*. It suppresses the Slice 3 window; `window` defaults to
+  `true` for the real verb. `--no-window` requires `--desktop-xr` (the smoke
+  gates are already windowless, so it is meaningless there).
+- Preserved every validation flag verbatim: `--xr-clear-smoke`,
+  `--xr-mclone-smoke`, `--frames N` (still capped at `MAX_XR_SMOKE_FRAMES` =
+  4096 for the smoke frame budget), `--xr-forever`. The `--frames` /
+  `--xr-forever` / `--view-pose` / `--xr-underwater-mode` / `--xr-debug-ui`
+  guards now also accept `--desktop-xr` (messages updated); the combined-mode /
+  window-report / menu / startup-wait guards now also reject combining
+  `--desktop-xr` with headless/perf modes. The "XR smoke modes cannot be
+  combined…" message became "XR modes…" since the real verb is not a smoke.
+- `MAX_XR_SMOKE_FRAMES` (4096) stays as the *smoke* CI bound. The real verb is
+  not frame-bounded, so that cap no longer limits real sessions — persistent is
+  the default and `--frames N` is opt-in.
+- Registered `--desktop-xr` and `--no-window` in `DESKTOP_LOCAL_ARG_FLAGS` and
+  refreshed the `--help` usage. `main.rs` gained the `Cli::DesktopXr` dispatch
+  plus feature-gated shims (`--features xr` → `desktop_xr::run_desktop`;
+  otherwise the friendly "rebuild with `--features xr`" bail).
+- Verified: `cargo check -p mclone-native-client` clean both with and without
+  `--features xr`; all crate tests pass (181), including 8 new `tests::cli_xr`
+  cases (persistent+window default, `--no-window`, `--frames` bound,
+  `--xr-forever`, mclone modifiers, and the three rejection guards) and the
+  `desktop_cli_flags_are_classified_as_shared_or_desktop_local` scan test. Ran
+  the non-xr binary to confirm `--desktop-xr` bails with the rebuild hint and
+  `--no-window` alone hits its guard.
 
 ### Slice 3 — Companion window + graceful quit
 
@@ -120,9 +147,10 @@ Ordered so each slice lands independently and keeps `native:xr:*` green.
   surface here too.
 - Wire a defined quit path: window close request and headset-menu EXITING both
   drive the same graceful shutdown. In the persistent mode, treat headset-menu
-  exit as a normal end (not the `bail!` used by the bounded path at
-  `xr_clear_smoke.rs:498-500`).
-- Revisit the `std::mem::forget` teardown (`xr_clear_smoke.rs:636-647`): keep it
+  exit as a normal end (not the `bail!` used by the bounded path in
+  `desktop_xr.rs` `run_smoke_frames`). The `Real` arm already threads a `window`
+  bool into `run_smoke_frames`; consume it here to build/skip the window.
+- Revisit the `std::mem::forget` teardown in `desktop_xr.rs` `run_smoke_frames`: keep it
   only where a runtime genuinely faults on handle destruction; otherwise perform
   a real teardown for the persistent path, or document per-runtime why the
   forget-on-exit shape stays. Process exit on quit is acceptable as an interim.
