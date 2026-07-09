@@ -26,6 +26,7 @@ use mclone_app_runtime::far_lod::{
 };
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
+    render_full_frame_for_view_with_far_lod,
     render_full_frame_for_view_with_prepared_stereo_draw_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot,
     render_view_with_underwater_effect,
@@ -73,7 +74,9 @@ use mclone_render::chunk::{
 use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats};
 use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::fog::RenderFog;
-use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats, WorldGuiRenderer};
+use mclone_render::gui::{
+    GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats, WorldGuiRenderer,
+};
 use mclone_render::screen_effect::{
     ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState, UnderwaterOverlay,
 };
@@ -109,6 +112,7 @@ mod comfort;
 mod diagnostic_panel;
 mod frame_pipeline_reporter;
 mod locomotion;
+mod mono;
 mod options;
 mod session;
 mod teleport;
@@ -118,6 +122,7 @@ mod ui_panels;
 
 pub use comfort::*;
 pub use locomotion::*;
+pub use mono::*;
 pub use options::*;
 pub use session::*;
 pub(crate) use teleport::*;
@@ -270,6 +275,13 @@ where
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
     world_gui_overlay_renderer: WorldGuiRenderer,
+    // Screen-space HUD renderer for the flat (mono) view topology (tactical 168
+    // Slice 3). The stereo path draws UI as a world-space quad through
+    // `world_gui_renderer`; the mono path draws it in screen space through the
+    // shared `render_full_frame_for_view*` GUI slot. Built lazily on first
+    // screen-space-HUD mono render (needs device/queue + the chunk atlas), so it
+    // stays `None` on headsets that never take the mono path.
+    mono_gui: Option<GuiRenderer>,
     diagnostic_panel: XrDiagnosticPanel,
     ui: GameUiHost,
     menu_overlay_cache: XrMenuPanelOverlayCache,

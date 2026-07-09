@@ -15,7 +15,6 @@ xr = [
     "dep:metal",
     "dep:mclone-xr-graphics",
     "dep:mclone-xr-host",
-    "dep:mclone-scene",
     "dep:openxr",
     "dep:pollster",
 ]
@@ -45,7 +44,10 @@ mclone-server.workspace = true
 mclone-ui.workspace = true
 mclone-xr-graphics = { workspace = true, optional = true }
 mclone-xr-host = { workspace = true, optional = true }
-mclone-scene = { workspace = true, optional = true }
+# Non-optional so the flat/offscreen lanes can consume the shared scene host's
+# mono view topology (tactical 168 Slice 3). The host crate is openxr-free; the
+# transitive `mclone-xr-host -> openxr` link is the Slice 1 deferred cleanup.
+mclone-scene = { workspace = true }
 openxr = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
 serde_json.workspace = true

@@ -3,9 +3,10 @@
 Status: approved direction 2026-07-09; Slice 0 (bug-grade parity pre-fixes)
 landed 2026-07-09; Slice 2 (web-shaped runner-generic seam) landed 2026-07-09;
 Slice 1 (OpenXR-free scene crate + `mclone-xr-scene` -> `mclone-scene` rename)
-landed 2026-07-09. Slices 3+ not started; Slice 3 requires Slice 1 (done) and
-Slice 4 requires Slice 1 (done). (Slices 0–2 are independent per the sequencing
-guardrail, so Slice 2 landed ahead of Slice 1.)
+landed 2026-07-09; Slice 3 (mono view topology + screen-space HUD strategy +
+offscreen driver) landed 2026-07-09. Slices 4+ not started; Slice 4 requires
+Slice 1 (done). (Slices 0–2 are independent per the sequencing guardrail, so
+Slice 2 landed ahead of Slice 1.)
 
 Workstream: native Rust shared runtime convergence. This tactical collapses the
 four native client runtimes (desktop flat, desktop XR, flat Android, Android
@@ -441,9 +442,66 @@ Validation (all green 2026-07-09): `cargo fmt --all --check`, workspace
 render unchanged). No device smoke needed — behavior-preserving structural
 slice.
 
-### Slice 3: Mono view topology + first flat consumer (offscreen/headless)
+### Slice 3: Mono view topology + first flat consumer (offscreen/headless) — DONE (2026-07-09)
 
 Goal: the scene host can render a single flat view.
+
+Landed shape:
+
+- **Mono view topology on the host.** New `mclone-scene/src/mono.rs` adds
+  `XrMcloneTerrainState::render_mono_frame` (live) and
+  `render_mono_frame_frozen_runtime` (frozen), rendering one flat
+  `ChunkRenderView` through the shared
+  `render_full_frame_for_view_with_far_lod` entry (far-LOD included). They
+  reuse the host's existing frame orchestration unchanged — `live_upload_for_frame`
+  (budgeted poll/sync/upload/compile-release), `effective_render_options`,
+  `sky_clear_color`/`time_of_day`/`sun_angle`, `current_actor_instances`, and a
+  new single-view `mono_underwater_overlay` mirroring the stereo midpoint case.
+  Unlike the self-submitting stereo eye path, the mono entries encode into a
+  caller-owned `RenderFrameContext` and leave submission to the driver (matching
+  the shared `render_full_frame_for_view*` contract), so they compose with
+  offscreen capture loops and any future surface driver. The Stereo/Multiview
+  paths are untouched.
+- **Screen-space UI presentation strategy.** `MonoUiPresentation::{None,
+  ScreenSpaceHud}` selects the strategy; the stereo world-quad panel remains the
+  other. `ScreenSpaceHud` draws the same `GameUiHost` draw list the stereo path
+  renders (via `prepare_xr_menu_panel_draw`) through the shared GUI slot at the
+  target resolution, backed by a lazily-built `mono_gui: Option<GuiRenderer>` on
+  the host (built on first HUD render; stays `None` on headsets). The dual-view
+  consumer uses `None` (world capture only), matching what the headless path
+  drew before.
+- **Readiness seam.** New non-blocking `local_startup_complete()` and
+  `pending_stream_work()` host queries (server pending render chunks + pending
+  compile jobs + queued client uploads). The blocking drive-to-ready loop lives
+  in the native driver, not the host (Web posture rule).
+- **OffscreenDriver.** New `mclone-native-client/src/offscreen_scene_host.rs`
+  `MonoOffscreenSceneHost` constructs the host for a local flat scene, streams
+  the world in against a scratch target until `pending_stream_work()` reaches
+  zero (the step-based equivalent of the old cold full-sync), then renders flat
+  cameras via the host mono topology. `write_headless_dual_view`
+  (`--headless-dual-view`) now consumes it; the inline third copy of frame-input
+  assembly (`headless.rs:844-891`, `write_headless_dual_view_frame`) is deleted.
+  `offscreen_flat_client.rs` and the `--screenshot` path are untouched (Slice 7).
+- **Dependency.** `mclone-scene` is now a non-optional dependency of
+  `mclone-native-client` so the flat/offscreen lane links the openxr-free host.
+  The transitive `mclone-xr-host -> openxr` link remains the Slice 1 deferred
+  cleanup (a later web-adoption tactical sheds it).
+
+Validation (all green 2026-07-09): `cargo fmt --all --check`, workspace
+`cargo check`, `cargo test -p mclone-scene -p mclone-app-runtime
+-p mclone-native-client` (77 scene + 185 app-runtime + 179 + native-client, 0
+failed), `cargo check -p mclone-web-client --target wasm32-unknown-unknown`, and
+`cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+-p mclone-android-xr-client`. `--headless-dual-view` (seed 12345, rd 3) rendered
+238 streamed sections through the host mono path (left/right offset overview
+captures reviewed in `/tmp/mclone-168-dualview/`). The `--screenshot` canary
+(`pnpm native:desktop-offscreen:smoke`) is **byte-identical** to the pre-slice
+baseline (64 sections / 11 drawn / 2 actors — `FlatClientDriver` path untouched).
+Desktop→Quest OpenXR session smoke over WiVRn-USB ran the full session lifecycle
+(VISIBLE→SYNCHRONIZED→…→EXITING, frames submitted) clean with the changes
+compiled in — no XR regression. A terrain-drawing worn-headset session-smoke
+remains the deeper on-device check (same worn-headset limitation noted in Slice
+0), but the stereo render path is byte-unchanged.
 
 **Scope boundary (clarified 2026-07-09): this slice migrates only the
 headless consumers that do NOT sit on `FlatClientDriver`.** The

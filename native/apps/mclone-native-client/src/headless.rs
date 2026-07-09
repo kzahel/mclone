@@ -6,37 +6,31 @@ use anyhow::{Context, Result, bail};
 use glam::{Vec3, Vec4};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
-    record_render_section_update_stats, render_full_frame_for_view,
+    record_render_section_update_stats,
 };
 use mclone_client::ActorInterpolationState;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
-    TexturedSectionUploadReport,
+    ChunkCamera, ChunkDepthTarget, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
-use mclone_render::headless::{
-    HEADLESS_FORMAT, HeadlessFrameLoopOptions, HeadlessFrameOptions, run_headless_capture_loop,
-    save_rgba_png, write_headless_frame_png,
-};
+use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::screen_effect::UnderwaterOverlay;
-use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{
-    GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiDrawList, GuiScale,
-};
+use mclone_ui::{GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiScale};
 
 use crate::actor_assets::load_actor_texture_assets;
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessActorReviewSheetOptions, HeadlessActorWalkReviewOptions, HeadlessDualViewOptions,
-    HeadlessScreenshotOptions, RendererRebuildSmokeOptions,
+    HeadlessScreenshotOptions, RendererRebuildSmokeOptions, SceneOptions,
 };
 use crate::flat_client_driver::{
     FlatClientUiRenderOptions, game_simulation_cadence_from_config, game_ui_render_state,
 };
 use crate::frame_pacing::FramePacingUiState;
+use crate::offscreen_scene_host::MonoOffscreenSceneHost;
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 
@@ -788,133 +782,107 @@ pub(crate) fn write_headless_dual_view(
         )
     })?;
 
-    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
-    poll_window_runtime_until_idle(&mut runtime)?;
-    if let Some(day_time) = options.scene.day_time_override {
-        runtime.force_day_time(day_time);
-    }
-
     let base_camera = ChunkCamera::overview_for_chunk_area(
         options.scene.chunk_x,
         options.scene.chunk_z,
         options.scene.render_distance,
     );
-    // docs/tactical/163: first (cold) sync, so the transient rebuilt payload is
-    // the full section set; the resident cache no longer retains CPU meshes.
-    let sections = runtime
-        .sync_all_render_sections(Vec3::from_array(base_camera.eye))?
-        .rebuilt_sections;
-    if sections.is_empty() {
-        bail!(
-            "headless dual-view seed={} center=({}, {}) render_distance={} produced no render sections",
-            options.scene.seed,
-            options.scene.chunk_x,
-            options.scene.chunk_z,
-            options.scene.render_distance
-        );
-    }
+    let cameras = dual_view_cameras(base_camera);
+    let scene = dual_view_scene_options(&options.scene)?;
+    let render_options = options.render_options;
 
+    // Drive the shared scene host's mono (flat) view topology (tactical 168
+    // Slice 3): the host owns the session runtime, budgeted section streaming,
+    // and sky/time/sun/far-LOD frame-input assembly. Two capture frames render
+    // the offset stereo-preview cameras with the runtime frozen after warmup.
+    let (loop_report, frame_pixels, host) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: cameras.len(),
+            pace_frame_duration: None,
+        },
+        move |device, queue, _format, size| {
+            let mut host = MonoOffscreenSceneHost::new(
+                device,
+                queue,
+                size,
+                scene,
+                render_options,
+                base_camera,
+            )?;
+            host.drive_until_streamed(device, queue)?;
+            Ok(host)
+        },
+        |index, frame, host| {
+            host.render_camera_frozen(frame, cameras[index].1)?;
+            Ok(())
+        },
+    )?;
+
+    let summaries = host.captured();
     let mut reports = Vec::new();
-    for (view_name, camera) in dual_view_cameras(base_camera) {
+    for (index, (view_name, _camera)) in cameras.iter().enumerate() {
+        let pixels = frame_pixels
+            .get(index)
+            .with_context(|| format!("dual-view {view_name} capture produced no frame"))?;
+        let non_clear_rgb_pixel_count = non_clear_rgb_pixel_count(pixels);
+        if non_clear_rgb_pixel_count == 0 {
+            bail!(
+                "headless dual-view {view_name} capture had no world pixels over the clear background"
+            );
+        }
         let path = options.directory.join(format!("{view_name}.png"));
-        reports.push(write_headless_dual_view_frame(
-            &runtime,
-            &sections,
-            path,
-            options.width,
-            options.height,
+        save_rgba_png(&path, loop_report.width, loop_report.height, pixels)?;
+        let summary = summaries
+            .get(index)
+            .copied()
+            .with_context(|| format!("dual-view {view_name} capture recorded no summary"))?;
+        reports.push(HeadlessDualViewReport {
             view_name,
-            camera,
-            options.render_options,
-        )?);
+            path,
+            width: loop_report.width,
+            height: loop_report.height,
+            byte_len: pixels.len(),
+            non_clear_rgb_pixel_count,
+            section_count: summary.section_count,
+            drawn_section_count: summary.drawn_section_count,
+            index_count: summary.index_count,
+            drawn_index_count: summary.drawn_index_count,
+        });
     }
     Ok(reports)
 }
 
-fn write_headless_dual_view_frame(
-    runtime: &WindowSceneRuntime,
-    sections: &[mclone_mesh::TexturedRenderSectionMesh],
-    path: PathBuf,
-    width: u32,
-    height: u32,
-    view_name: &'static str,
-    camera: ChunkCamera,
-    render_options: TexturedSectionRenderOptions,
-) -> Result<HeadlessDualViewReport> {
-    let sky_clear_color = runtime.sky_clear_color();
-    let time_of_day = runtime.time_of_day();
-    let sun_angle = runtime.sun_angle();
-    let (frame_report, summary) = write_headless_frame_png(
-        HeadlessFrameOptions {
-            path,
-            width,
-            height,
-        },
-        |frame| {
-            let depth =
-                ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
-            let mut draw = TexturedSectionDrawResources::new(
-                frame.device,
-                frame.queue,
-                HEADLESS_FORMAT,
-                sections,
-                runtime.mesh_assets().atlas.as_upload(),
-            )?;
-            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
-            draw.set_traversal_ready_sections(
-                &runtime.traversal_ready_render_section_keys(render_view.camera_position),
-            );
-            let sky = SkyRenderer::new_with_color_profile(
-                frame.device,
-                HEADLESS_FORMAT,
-                render_options.color_profile,
-            );
-            let mut render_stats = RenderStreamStats {
-                section_count: draw.section_count(),
-                index_count: draw.index_count(),
-                face_count: quad_face_count_from_indices(draw.index_count()),
-                ..RenderStreamStats::default()
-            };
-            render_full_frame_for_view(
-                frame,
-                &depth,
-                &sky,
-                &mut draw,
-                None,
-                None,
-                None,
-                render_view,
-                &[],
-                None,
-                sky_clear_color,
-                time_of_day,
-                sun_angle,
-                render_options,
-                FullFrameGui::new(false, false, [1.0, 1.0]),
-                |_| GuiDrawList::new(),
-                &mut render_stats,
-            )
-        },
-    )?;
-    if frame_report.non_clear_rgb_pixel_count == 0 {
-        bail!(
-            "headless dual-view {view_name} capture had no world pixels over the clear background: {}",
-            frame_report.path.display()
-        );
+/// Adapt the CLI's flat `SceneOptions` into the scene host's `XrSceneOptions`
+/// for the offscreen dual-view capture (tactical 168 Slice 3). Mirrors
+/// `desktop_xr::xr_scene_options_from_desktop_scene` but with review-friendly
+/// defaults (midpoint underwater detection, no debug UI screen, actors shown).
+fn dual_view_scene_options(scene: &SceneOptions) -> Result<mclone_scene::XrSceneOptions> {
+    mclone_scene::XrSceneOptions {
+        seed: scene.seed,
+        chunk_x: scene.chunk_x,
+        chunk_z: scene.chunk_z,
+        render_distance: u32::try_from(scene.render_distance)
+            .context("dual-view render distance must fit u32")?,
+        render_compile_worker_count: scene.render_compile_worker_count,
+        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
+        movement_speed_multiplier: scene.movement_speed_multiplier,
+        day_time_override: scene.day_time_override,
+        freeze_time: scene.freeze_time,
+        debug_passive_showcase: scene.debug_passive_showcase,
+        lighting_enabled: scene.lighting_enabled,
+        light_status_batch_size: scene.light_status_batch_size,
+        adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
+        far_lod: scene.far_lod,
+        underwater_detection_mode: mclone_scene::XrUnderwaterDetectionMode::Midpoint,
+        debug_ui_screen: None,
+        skip_actors: false,
+        world_root: scene.world_root.clone(),
+        world_dir: scene.world_dir.clone(),
     }
-
-    Ok(HeadlessDualViewReport {
-        view_name,
-        path: frame_report.path,
-        width: frame_report.width,
-        height: frame_report.height,
-        byte_len: frame_report.byte_len,
-        non_clear_rgb_pixel_count: frame_report.non_clear_rgb_pixel_count,
-        section_count: summary.section_count,
-        drawn_section_count: summary.drawn_section_count,
-        index_count: summary.index_count,
-        drawn_index_count: summary.drawn_index_count,
-    })
+    .validated()
+    .context("validate dual-view scene options")
 }
 
 fn dual_view_cameras(base: ChunkCamera) -> [(&'static str, ChunkCamera); 2] {

@@ -13,6 +13,7 @@ mod flat_client_driver;
 mod frame_pacing;
 mod headless;
 mod offscreen_flat_client;
+mod offscreen_scene_host;
 mod perf;
 mod remote_player_visual_smoke;
 mod remote_session;

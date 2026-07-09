@@ -226,6 +226,29 @@ where
         }
     }
 
+    /// Single-view underwater overlay for the flat (mono) view topology
+    /// (tactical 168 Slice 3). Mirrors the stereo midpoint case in
+    /// [`Self::underwater_overlays`] for one camera, reusing the shared midpoint
+    /// effect state so the flat and stereo submerged transitions match.
+    pub(crate) fn mono_underwater_overlay(
+        &mut self,
+        render_view: ChunkRenderView,
+    ) -> Option<UnderwaterOverlay> {
+        let dt_seconds = self.underwater_effect_dt_seconds();
+        let underwater = self.camera_inside_water(render_view.camera_position);
+        let effect = self
+            .underwater_effects
+            .midpoint
+            .update(underwater, dt_seconds);
+        underwater.then(|| {
+            underwater_overlay_from_forward(
+                render_view.camera_forward,
+                effect.water_vision,
+                effect.effect_strength,
+            )
+        })
+    }
+
     pub(crate) fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
         let Some(runtime) = &self.runtime else {
             return false;
