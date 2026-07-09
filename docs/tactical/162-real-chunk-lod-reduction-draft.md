@@ -385,6 +385,19 @@ gameplay authority.
 
 ### Slice 3: LOD Budget And Queue Policy
 
+> **Re-scoped 2026-07-09 into [`166`](166-shared-resident-tile-substrate.md).**
+> Slice 3 as drafted below would give far LOD a *bespoke* budget/queue, which
+> deepens the divergence from the real-section pipeline. Instead, far LOD becomes
+> a producer on a shared residency/priority/budget substrate (166): the P1–P5
+> lanes land as new `mclone-frame-budget` decision families plus cross-family
+> ordering (not a new scheduler/queue), LOD gen/mesh moves onto the shared
+> render-compile worker pool, and GPU residency uses per-tile slots in region
+> arenas with region-level packed-index draws — reusing the real-section
+> admission/upload policy rather than paralleling it. The deliverables below are
+> absorbed as 166 Slice 3's acceptance criteria. Slices 4–6 (reduced-real tiles,
+> edit dirtying, persistence) remain here but land as later producers on the 166
+> substrate.
+
 Integrate LOD work with the existing frame/pipeline accounting model.
 
 Deliverables:
