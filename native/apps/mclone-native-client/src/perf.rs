@@ -3800,7 +3800,7 @@ pub(crate) fn run_startup_streaming_perf(
     let playable_step = loop {
         let frame_start = Instant::now();
         let step = startup.step(spectator.position)?;
-        if step.playable_ready {
+        if step.startup_ready {
             break step;
         }
         startup_playable_frame += 1;
@@ -3816,7 +3816,7 @@ pub(crate) fn run_startup_streaming_perf(
         }
     };
     let startup_playable_ms = elapsed_ms(startup_start.elapsed());
-    let startup_progress = playable_step.progress.as_ref();
+    let startup_progress = playable_step.local_progress.as_ref();
     let startup_target_ready_chunks =
         startup_progress.map_or(0, |progress| progress.target_ready_chunks);
     let startup_target_chunk_count =
@@ -3824,7 +3824,7 @@ pub(crate) fn run_startup_streaming_perf(
     let startup_target_percent = startup_progress.map_or(0, |progress| progress.percent());
     // docs/tactical/167: seed the probe draw resources from the startup pump's
     // render seed instead of a redundant recompile of the resident cache.
-    let (runtime, initial_sections) = startup.into_runtime_with_startup_sections();
+    let (runtime, initial_sections, _startup_step) = startup.complete();
     if initial_sections.is_empty() {
         bail!("startup streaming perf entered playable with no cached render sections");
     }

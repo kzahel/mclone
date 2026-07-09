@@ -25,7 +25,7 @@ use mclone_app_runtime::far_lod::{
     MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
+    FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     render_full_frame_for_view_with_prepared_stereo_draw_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot,
     render_view_with_underwater_effect,
@@ -34,6 +34,7 @@ use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHost
 use mclone_app_runtime::native_session_runtime::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedStartupPump,
     LocalIntegratedStartupStep, NativeSceneRuntime, NativeSessionRuntime,
+    NativeSessionStartupCompletion, NativeSessionStartupPump,
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;

@@ -1,10 +1,13 @@
 # 167: Shared Native Session Startup Contract
 
-Status: Slice 2 complete 2026-07-09 (host-neutral `NativeSessionStartupPump<S>`;
-Slice 1 local pump seed handoff and Slice 0 audit + guard comments landed
-first). Design/implementation tactical opened after the docs/tactical/163
-follow-up showed that startup render-section seeding is both duplicated and
-platform-divergent.
+Status: Slice 3 complete 2026-07-09 (all native platform startup consumers —
+desktop flat local+remote, flat Android, XR remote/replacement, offscreen, and
+perf — route through the shared `NativeSessionStartupPump<S>` for both host
+modes; the divergent blocking `poll_until_idle` + `sync_all_render_sections`
+startup paths are gone). Slice 2 host-neutral pump, Slice 1 local pump seed
+handoff, and Slice 0 audit + guard comments landed first. Design/implementation
+tactical opened after the docs/tactical/163 follow-up showed that startup
+render-section seeding is both duplicated and platform-divergent.
 
 Workstream: native Rust shared session/runtime/render startup boundary in
 `mclone-app-runtime`, with desktop flat validation first and required adoption
@@ -523,6 +526,86 @@ MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 Quest/Android XR remote validation should be batched with the next headset pass:
 local new-world and remote join must both report nonzero startup seed sections
 and draw terrain.
+
+#### Slice 3 Result (2026-07-09)
+
+Shared-pump additions in `mclone-app-runtime`
+(`native_session_runtime.rs`):
+
+- `NativeSessionStartupPump::local`/`local_with_mesh_assets` moved from the
+  `LocalOnlySession`-only impl to the generic `impl<S>`, so desktop
+  (`RemoteServerSession`), XR, and Android can build one pump type for both host
+  modes; local-only callers infer `S = LocalOnlySession`.
+- `from_runtime(NativeSessionRuntime<S>)` wraps an already-constructed runtime
+  (prewarm disabled, `Playable`) for lanes that build the runtime up front.
+- `drive_to_ready_with_timeout(camera, timeout)` / `drive_to_ready(camera)` are
+  the shared synchronous blocking drive: step to `startup_ready` under the active
+  policy, tiny-sleep when unchanged, then `complete()`. No lane calls
+  `poll_until_idle` for startup anymore.
+
+Per-consumer migration:
+
+- **Desktop flat** (`flat_client_driver.rs`, `scene_runtime.rs`): `WindowSceneStartupPump`
+  now wraps `NativeSessionStartupPump<RemoteServerSession>` and builds local
+  *or* remote pumps (`from_scene` keeps the loading-screen spawn-center anchor;
+  `from_scene_at_scene_center` matches the pre-tactical blocking `make_runtime`
+  scene center for tests / offscreen idle / remote join). `start_world_from_scene`
+  replaced its `poll_window_runtime_until_idle` + `upload_all_runtime_sections`
+  path with a shared blocking drive at the runtime interest center + a
+  `upload_startup_seed_sections` seed upload, and takes a `StartupReadinessPolicy`
+  (`Playable` for real starts, `Idle` for screenshots). `finish_pending_session_start`
+  dropped its `make_runtime` arg and drives both branches from one pump maker.
+  The startup step is now the host-neutral `NativeSessionStartupStep`
+  (`startup_ready`, `local_progress`). `upload_all_runtime_sections` /
+  `sync_all_runtime_sections` stay only for the surface/resource-rebuild path.
+- **XR** (`mclone-xr-scene/session.rs`): `start_xr_terrain_runtime` (remote and
+  replacement) now `NativeSessionStartupPump::from_runtime(runtime).drive_to_ready(...)`,
+  seeds draw resources from the completion seed, then commits the startup
+  pose/view-pose after completion (unchanged reconciliation ordering). XR local
+  `complete_local_startup` already consumed the seed (Slice 1) via the wrapper.
+- **Flat Android** (`mclone-android-client/lib.rs`): `start_android_render_scene`
+  replaced local+remote `poll_until_idle` + optional pose-poll +
+  `sync_all_render_sections` with the same `from_runtime`/`drive_to_ready`
+  (`Playable`) drive and seed, using the same startup-ready log wording and seed
+  section counters as desktop/XR; no Android-only idle wait remains.
+- **Perf / offscreen**: startup-streaming perf reads `step.startup_ready` /
+  `step.local_progress` and completes via the shared `complete()` seed; offscreen
+  playable/idle route through the same driver paths (idle → blocking pump with
+  `Idle`).
+
+Tripwires: `cargo test` — app-runtime 183, native-client 179, xr-scene 74
+(unchanged from Slice 2). Workspace `cargo check`, `wasm32` `mclone-web-client`
+`cargo check`, and `cargo ndk -t arm64-v8a --platform 28 check -p
+mclone-android-client` all clean; `git diff --check` clean; `cargo fmt --all
+--check` flags only pre-existing files outside this slice's diff (repo `main` is
+not fmt-clean under the local toolchain — added lines verified clean). Static
+grep: no app startup path calls `compile_all_render_section_meshes(...)` or
+`sync_all_render_sections(...)`; remaining hits are app-runtime shared defs, the
+desktop surface-rebuild + perf-probe `sync_all`, headless/perf
+`poll_window_runtime_until_idle`, tests, and the `start_*_terrain_runtime` /
+`start_android_render_scene` entry functions that now drive the shared pump.
+Android local and remote both log `Mclone Android <host> runtime playable ...
+sections=N drawable_sections=N`, matching the desktop/XR seed counters.
+
+Rendered validation (desktop, this host): local new-world
+`--startup-wait playable` drew terrain (6 sections, 2 drawn); local blocking
+`--startup-wait idle` drew the full view (64 sections, 11 drawn); remote join
+against a local dedicated server drew terrain at both `Playable` (27 sections, 9
+drawn — the intended earlier drawable-active-view) and `Idle` (664 sections, 93
+drawn). All four are non-blank terrain.
+
+Device smokes: the Quest 3 XR `native:android-xr:session-smoke` ran on-device
+this pass and passed. XR local new-world reached `XR local world playable
+seed=12345 polls=78 sections=6 target_ready=9/9`, and the replacement session —
+which drives the migrated `start_xr_terrain_runtime` through the shared pump —
+reached `MCLONE_ANDROID_XR_REPLACEMENT_READY new-world seed=246813579 sections=19
+drawn_sections=16 drawn_indices=124530` (nonzero seed sections, terrain drawn).
+The flat Android AVD `native:android:avd-session-smoke` is deferred to the next
+Android pass (the available AVDs are unrelated x86 images; the connected physical
+device is the Quest 3, not a flat-Android phone). The flat Android code path is
+validated by `cargo ndk check` and shares the exact `from_runtime` /
+`drive_to_ready` contract exercised on-device by the XR lane and on desktop by
+both host modes.
 
 ### Slice 4: Shared Camera/Interest Startup Reconciliation
 

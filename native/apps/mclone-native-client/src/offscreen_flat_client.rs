@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::native_session_runtime::StartupReadinessPolicy;
 use mclone_app_runtime::{
     debug_block_palette_overlay, debug_hotbar_icons, frame_render::FullFrameRenderSummary,
 };
@@ -184,9 +185,12 @@ impl OffscreenFlatClientHost {
     ) -> Result<()> {
         let assets = &self.assets;
         self.driver
-            .start_world_from_scene(scene, Some(device), &mut |scene| {
-                WindowSceneRuntime::with_assets(scene, assets)
-            })
+            .start_world_from_scene(
+                scene,
+                Some(device),
+                StartupReadinessPolicy::Idle,
+                &mut |scene| WindowSceneStartupPump::from_scene_at_scene_center(scene, assets),
+            )
             .context("failed to start offscreen flat client scene")?;
         self.require_uploaded_sections()?;
         Ok(())
@@ -202,11 +206,11 @@ impl OffscreenFlatClientHost {
         self.driver.request_current_scene_start(false, false);
 
         let assets = &self.assets;
-        let session_update = self.driver.finish_pending_session_start(
-            Some(device),
-            |scene| WindowSceneRuntime::with_assets(scene, assets),
-            |scene| WindowSceneStartupPump::new_local(scene, assets),
-        );
+        let session_update = self
+            .driver
+            .finish_pending_session_start(Some(device), |scene| {
+                WindowSceneStartupPump::from_scene(scene, assets)
+            });
         if session_update.mouse_lock_requested.is_some() {
             self.driver.clear_camera_input();
         }
@@ -254,11 +258,11 @@ impl OffscreenFlatClientHost {
         self.driver.request_current_scene_start(false, false);
 
         let assets = &self.assets;
-        let session_update = self.driver.finish_pending_session_start(
-            Some(device),
-            |scene| WindowSceneRuntime::with_assets(scene, assets),
-            |scene| WindowSceneStartupPump::new_local(scene, assets),
-        );
+        let session_update = self
+            .driver
+            .finish_pending_session_start(Some(device), |scene| {
+                WindowSceneStartupPump::from_scene(scene, assets)
+            });
         if session_update.mouse_lock_requested.is_some() {
             self.driver.clear_camera_input();
         }
@@ -318,11 +322,11 @@ impl OffscreenFlatClientHost {
         ));
 
         let assets = &self.assets;
-        let session_update = self.driver.finish_pending_session_start(
-            Some(frame.device),
-            |scene| WindowSceneRuntime::with_assets(scene, assets),
-            |scene| WindowSceneStartupPump::new_local(scene, assets),
-        );
+        let session_update = self
+            .driver
+            .finish_pending_session_start(Some(frame.device), |scene| {
+                WindowSceneStartupPump::from_scene(scene, assets)
+            });
         let startup_update = self.driver.advance_local_world_startup(Some(frame.device));
         if session_update.mouse_lock_requested.is_some()
             || startup_update.mouse_lock_requested.is_some()

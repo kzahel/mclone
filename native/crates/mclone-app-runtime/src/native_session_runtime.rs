@@ -58,6 +58,9 @@ use crate::{
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_LOCAL_INTEGRATED_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Default deadline for the shared synchronous startup drive
+/// (docs/tactical/167 Slice 3), matching the former `poll_until_idle` timeout.
+const DEFAULT_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalIntegratedSceneOptions {
@@ -649,7 +652,14 @@ pub struct NativeSessionStartupCompletion<S> {
     pub final_step: NativeSessionStartupStep,
 }
 
-impl NativeSessionStartupPump<LocalOnlySession> {
+impl<S> NativeSessionStartupPump<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    /// Construct a local-integrated startup pump. Generic over `S` so desktop
+    /// (`RemoteServerSession`), XR, and Android can share one pump type across
+    /// both host modes; local-only callers infer `S = LocalOnlySession`
+    /// (docs/tactical/167 Slice 3).
     pub fn local(options: LocalIntegratedSceneOptions) -> Result<Self> {
         let mesh_assets = load_textured_mesh_assets()?;
         Self::local_with_mesh_assets(options, mesh_assets)
@@ -668,12 +678,7 @@ impl NativeSessionStartupPump<LocalOnlySession> {
             prewarm,
         ))
     }
-}
 
-impl<S> NativeSessionStartupPump<S>
-where
-    S: RemoteDedicatedServerSession,
-{
     pub fn remote_dedicated(
         endpoint: RemoteSessionEndpoint,
         options: SingleViewHostOptions,
@@ -727,6 +732,19 @@ where
                 ..NativeSessionStartupStep::default()
             },
         }
+    }
+
+    /// Wrap an already-constructed session runtime for a synchronous startup
+    /// drive (docs/tactical/167 Slice 3: XR remote/replacement, Android remote,
+    /// and any lane that builds the runtime up front). Startup LOD prewarm is
+    /// disabled — it is a local-first-construction policy owned by the `local*`
+    /// constructors, so wrapping an existing runtime preserves the pre-tactical
+    /// `poll_until_idle` behavior (no prewarm) for these lanes while still routing
+    /// them through the shared readiness gate and render seed.
+    pub fn from_runtime(runtime: NativeSessionRuntime<S>) -> Self {
+        let center = runtime.interest_center();
+        let prewarm = StartupLodPrewarm::new(StartupLodPrewarmConfig::disabled(), 0, center);
+        Self::from_session_runtime(runtime, StartupReadinessPolicy::Playable, prewarm)
     }
 
     /// Select the startup readiness policy. `Playable` is the default for every
@@ -841,6 +859,51 @@ where
 
     pub fn into_runtime(self) -> NativeSessionRuntime<S> {
         self.runtime
+    }
+
+    /// Drive the pump synchronously at a fixed startup camera until startup
+    /// readiness (under the active [`StartupReadinessPolicy`]) or the timeout,
+    /// then consume it into the completion (docs/tactical/167 Slice 3). This is
+    /// the shared blocking startup drive for the native lanes that initialize the
+    /// world up front (XR remote/replacement, Android, desktop remote/idle) so
+    /// none of them fall back to `poll_until_idle` + `sync_all_render_sections`.
+    /// The seed reflects this fixed startup camera; interest drift from a later
+    /// pose correction is reconciled by normal streaming (shared camera/interest
+    /// reconciliation is tactical 167 Slice 4).
+    pub fn drive_to_ready_with_timeout(
+        mut self,
+        camera_position: Vec3,
+        timeout: Duration,
+    ) -> Result<NativeSessionStartupCompletion<S>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let step = self.step(camera_position)?;
+            if step.startup_ready {
+                break;
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "timed out after {:.3}s waiting for {} startup readiness: loaded_chunks={} render_seed_drawable_sections={} pending_compile_jobs={}",
+                    timeout.as_secs_f64(),
+                    self.runtime.host_label(),
+                    self.runtime.loaded_chunk_count(),
+                    step.render_seed_drawable_section_count,
+                    step.pending_compile_jobs,
+                );
+            }
+            if !step.changed {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+        Ok(self.complete())
+    }
+
+    /// Drive the pump synchronously to readiness with the default startup timeout.
+    pub fn drive_to_ready(
+        self,
+        camera_position: Vec3,
+    ) -> Result<NativeSessionStartupCompletion<S>> {
+        self.drive_to_ready_with_timeout(camera_position, DEFAULT_STARTUP_READINESS_TIMEOUT)
     }
 
     /// Consume the pump, returning the ready runtime, the transient startup render
@@ -3855,7 +3918,7 @@ mod tests {
         }
 
         let mesh_assets = load_textured_mesh_assets().unwrap();
-        let mut pump = NativeSessionStartupPump::local_with_mesh_assets(
+        let mut pump = NativeSessionStartupPump::<LocalOnlySession>::local_with_mesh_assets(
             LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
                 .with_lighting_enabled(false),
             mesh_assets,

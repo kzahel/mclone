@@ -25,7 +25,7 @@ use mclone_app_runtime::frame_render::{
     record_render_section_update_stats,
 };
 use mclone_app_runtime::host_mode::SingleViewHostMode;
-use mclone_app_runtime::native_session_runtime::LocalIntegratedStartupStep;
+use mclone_app_runtime::native_session_runtime::{NativeSessionStartupStep, StartupReadinessPolicy};
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
@@ -89,9 +89,7 @@ use mclone_ui::{
 use crate::camera::SpectatorCamera;
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{FramePacingMode, FramePacingUiState, FrameTimingStats};
-use crate::scene_runtime::{
-    WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
-};
+use crate::scene_runtime::{WindowSceneRuntime, WindowSceneStartupPump};
 use crate::ui::DebugPaneStats;
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_render_session::{
@@ -101,6 +99,9 @@ use mclone_render_session::{
 
 const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
 const GROUND_PROBE_DISTANCE: f64 = 0.01;
+/// Deadline for the blocking desktop startup drive (docs/tactical/167 Slice 3),
+/// matching the former `poll_window_runtime_until_idle` timeout.
+const BLOCKING_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const DESKTOP_BLINK_DEBUG_MAX_DISTANCE: f64 = 8.0;
 const DESKTOP_BLINK_DEBUG_ARC_HEIGHT: f64 = 1.25;
 const DESKTOP_BLINK_DEBUG_ORIGIN_LEFT_OFFSET: f64 = 0.35;
@@ -1464,7 +1465,6 @@ impl FlatClientDriver {
     pub(crate) fn finish_pending_session_start(
         &mut self,
         device: Option<&wgpu::Device>,
-        mut make_runtime: impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
         mut make_startup_pump: impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
     ) -> FlatClientSessionUpdate {
         let Some(pending) = self.session.take_pending_start() else {
@@ -1493,7 +1493,7 @@ impl FlatClientDriver {
         let request = pending.request.clone();
         let arm_mouse_lock = pending.payload.arm_mouse_lock;
         let show_title_on_failure = pending.payload.show_title_on_failure;
-        let result = self.start_pending_session(pending, device, &mut make_runtime);
+        let result = self.start_pending_session(pending, device, &mut make_startup_pump);
         self.session.apply_start_result(&result);
         match result {
             Ok(started) => {
@@ -1546,7 +1546,7 @@ impl FlatClientDriver {
             }
         };
 
-        if !step.playable_ready {
+        if !step.startup_ready {
             return FlatClientSessionUpdate::default();
         }
 
@@ -1675,9 +1675,14 @@ impl FlatClientDriver {
         &mut self,
         pending: PendingSessionStart<FlatClientPendingSessionStart>,
         device: Option<&wgpu::Device>,
-        make_runtime: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
+        make_startup_pump: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
     ) -> SessionStartResult<()> {
-        self.start_session_from_scene(pending.request, pending.payload.scene, device, make_runtime)
+        self.start_session_from_scene(
+            pending.request,
+            pending.payload.scene,
+            device,
+            make_startup_pump,
+        )
     }
 
     fn start_session_from_scene(
@@ -1685,12 +1690,17 @@ impl FlatClientDriver {
         request: SessionStartRequest,
         scene: SceneOptions,
         device: Option<&wgpu::Device>,
-        make_runtime: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
+        make_startup_pump: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
     ) -> SessionStartResult<()> {
         let Some(descriptor) = request.active_descriptor() else {
             return Err(SessionFailure::new("Unsupported session start"));
         };
-        match self.start_world_from_scene(scene, device, make_runtime) {
+        match self.start_world_from_scene(
+            scene,
+            device,
+            StartupReadinessPolicy::Playable,
+            make_startup_pump,
+        ) {
             Ok(()) => Ok(StartedGameSession::new(descriptor, ())),
             Err(err) => {
                 log::error!("failed to start session {request:?}: {err:#}");
@@ -1699,11 +1709,18 @@ impl FlatClientDriver {
         }
     }
 
+    /// Blocking startup for local and remote host modes (docs/tactical/167 Slice
+    /// 3): build the shared startup pump from the scene and drive it synchronously
+    /// to a drawable active view, then seed draw resources from the pump's render
+    /// seed. Replaces the former `poll_window_runtime_until_idle` +
+    /// `upload_all_runtime_sections` startup path. `readiness` is `Playable` for
+    /// real session starts and `Idle` for screenshot/diagnostics waits.
     pub(crate) fn start_world_from_scene(
         &mut self,
         scene: SceneOptions,
         device: Option<&wgpu::Device>,
-        make_runtime: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
+        readiness: StartupReadinessPolicy,
+        make_startup_pump: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
     ) -> anyhow::Result<()> {
         self.runtime = None;
         self.startup = None;
@@ -1715,11 +1732,18 @@ impl FlatClientDriver {
             self.clear_render_stats();
         }
 
-        let mut runtime =
-            make_runtime(&self.scene).context("failed to create flat client world runtime")?;
-        let initial_poll_start = std::time::Instant::now();
-        let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)
-            .context("failed to load initial light-ready chunks")?;
+        let pump = make_startup_pump(&self.scene)
+            .context("failed to create flat client world startup pump")?
+            .with_readiness(readiness);
+        // Drive the pump at the runtime's interest center so camera-targeted
+        // section compilation reaches a drawable view regardless of the stale
+        // pre-start camera. The final player/camera pose is reconciled below;
+        // interest drift is fixed by normal streaming (docs/tactical/167 Slice 4).
+        let startup_camera_position = pump.startup_camera_position();
+        let startup_start = std::time::Instant::now();
+        let (runtime, startup_sections, step) = pump
+            .drive_to_ready_with_timeout(startup_camera_position, BLOCKING_STARTUP_TIMEOUT)
+            .context("failed to load initial world to a drawable view")?;
         self.runtime = Some(runtime);
         self.sync_player_appearance()
             .context("failed to sync initial player appearance")?;
@@ -1736,15 +1760,17 @@ impl FlatClientDriver {
             .as_ref()
             .map_or(0, |runtime| runtime.client().loaded_chunk_count());
         log::info!(
-            "world seed={} initial chunks loaded in {} polls poll_ms={:.3} elapsed_ms={:.3} loaded={}",
+            "world seed={} host startup ready in {} polls poll_ms={:.3} elapsed_ms={:.3} loaded={} sections={} drawable_sections={}",
             self.scene.seed,
-            initial_poll_count,
-            initial_poll_ms,
-            initial_poll_start.elapsed().as_secs_f64() * 1000.0,
-            loaded
+            step.poll_count,
+            step.poll_ms,
+            startup_start.elapsed().as_secs_f64() * 1000.0,
+            loaded,
+            step.render_seed_section_count,
+            step.render_seed_drawable_section_count,
         );
         if let Some(device) = device {
-            self.upload_all_runtime_sections(device, |elapsed| elapsed.as_secs_f64() * 1000.0)
+            self.upload_startup_seed_sections(device, startup_sections)
                 .context("failed to upload initial world render sections")?;
         }
         Ok(())
@@ -1800,7 +1826,7 @@ impl FlatClientDriver {
     fn complete_local_world_startup(
         &mut self,
         startup: FlatClientPendingStartup,
-        step: LocalIntegratedStartupStep,
+        step: NativeSessionStartupStep,
         device: Option<&wgpu::Device>,
     ) -> anyhow::Result<FlatClientSessionUpdate> {
         let descriptor = startup.descriptor;
@@ -1808,7 +1834,7 @@ impl FlatClientDriver {
         // instead of recompiling every resident section after the fact. If no
         // device/render resources exist yet, the seed is dropped and the resource
         // (re)build path re-populates draw sections when resources are created.
-        let (runtime, startup_sections) = startup.pump.into_runtime_with_startup_sections();
+        let (runtime, startup_sections, _final_step) = startup.pump.complete();
         self.runtime = Some(runtime);
         self.sync_player_appearance()
             .context("failed to sync initial player appearance")?;
@@ -1835,10 +1861,10 @@ impl FlatClientDriver {
             step.poll_ms,
             loaded,
             step.cached_section_count,
-            step.progress
+            step.local_progress
                 .as_ref()
                 .map_or(0, |progress| progress.target_ready_chunks),
-            step.progress
+            step.local_progress
                 .as_ref()
                 .map_or(0, |progress| progress.target_chunk_count),
             step.lod_prewarm_enabled,

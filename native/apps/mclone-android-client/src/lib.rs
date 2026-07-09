@@ -43,7 +43,7 @@ mod android {
     };
     use mclone_app_runtime::native_session_runtime::{
         IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneRuntime,
-        NativeSessionRuntime,
+        NativeSessionRuntime, NativeSessionStartupCompletion, NativeSessionStartupPump,
     };
     use mclone_app_runtime::render_assets::{
         DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -82,7 +82,6 @@ mod android {
     use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::{
         ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
-        TexturedSectionUploadReport,
     };
     use mclone_render::far_lod::FarTerrainLodRenderer;
     use mclone_render::gui::GuiRenderer;
@@ -2139,57 +2138,60 @@ mod android {
         descriptor: Option<ActiveSessionDescriptor>,
     ) -> Result<StartedAndroidRenderScene> {
         let movement_speed_multiplier = options.movement_speed_multiplier;
-        let mut scene = android_game_session_runtime(options, descriptor)?;
-        let host_label = scene.host_label();
-        let session_label = active_session_label(scene.active_session());
-        let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
+        let runtime = android_game_session_runtime(options, descriptor)?;
+        let host_label = runtime.host_label();
+        let session_label = active_session_label(runtime.active_session());
+        let mut camera = EngineCameraController::spawn_for_chunk(runtime.interest_center());
         camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
         apply_startup_camera_options(&mut camera, camera_options);
-        let (poll_count, poll_ms) = scene.poll_until_idle()?;
+        // docs/tactical/167 Slice 3: drive the shared startup pump synchronously to
+        // a drawable active view with the same `Playable` readiness as desktop/XR,
+        // instead of an Android-only `poll_until_idle` + `sync_all_render_sections`.
+        // The seed reflects the initial startup camera; the pose correction below
+        // runs after completion and normal streaming reconciles any interest drift
+        // (shared camera/interest reconciliation is Slice 4).
+        let startup_camera_position = camera_position(&camera);
+        let completion = NativeSessionStartupPump::from_runtime(runtime)
+            .drive_to_ready(startup_camera_position)
+            .with_context(|| format!("wait for initial Android {host_label} chunks"))?;
+        let NativeSessionStartupCompletion {
+            runtime: mut scene,
+            startup_sections,
+            final_step,
+        } = completion;
         log::info!(
-            "Mclone Android {host_label} runtime idle: session={} polls={} poll_ms={:.1} loaded_chunks={}",
+            "Mclone Android {host_label} runtime playable: session={} polls={} poll_ms={:.1} loaded_chunks={} sections={} drawable_sections={}",
             session_label,
-            poll_count,
-            poll_ms,
-            scene.loaded_chunk_count()
+            final_step.poll_count,
+            final_step.poll_ms,
+            scene.loaded_chunk_count(),
+            final_step.render_seed_section_count,
+            final_step.render_seed_drawable_section_count,
         );
         if commit_engine_camera_player_pose(&mut scene, &mut camera)? {
-            let (pose_poll_count, pose_poll_ms) = scene.poll_until_idle()?;
-            log::info!(
-                "Mclone Android {host_label} player pose synced: polls={} poll_ms={:.1}",
-                pose_poll_count,
-                pose_poll_ms
-            );
             apply_pending_engine_camera_position_updates(&mut scene, &mut camera)?;
+            log::info!("Mclone Android {host_label} applied initial player pose correction");
         }
         let camera_position = camera_position(&camera);
-        let section_update = scene.sync_all_render_sections(camera_position)?;
-        // docs/tactical/163: first (cold) sync, so the transient rebuilt payload
-        // is the full section set; the resident cache no longer retains CPU
-        // meshes. Seed the initial draw resources directly from it.
-        let sections = &section_update.rebuilt_sections;
+        // docs/tactical/167: seed the initial draw resources from the startup
+        // pump's render seed rather than recompiling the resident cache.
+        let sections = startup_sections;
         if sections.is_empty() {
             bail!(
-                "Android {host_label} runtime produced no render sections: loaded_chunks={} rebuilt_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
+                "Android {host_label} runtime produced no render sections: loaded_chunks={} render_seed_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
                 scene.loaded_chunk_count(),
-                section_update.rebuilt_section_count(),
-                section_update.submitted_compile_section_count,
-                section_update.completed_compile_section_count,
-                section_update.pending_compile_jobs
+                final_step.render_seed_section_count,
+                final_step.submitted_compile_section_count,
+                final_step.completed_compile_section_count,
+                final_step.pending_compile_jobs
             );
         }
 
-        let upload_report = TexturedSectionUploadReport {
-            uploaded_section_count: section_update.rebuilt_section_count(),
-            removed_section_count: section_update.removed_section_count(),
-            uploaded_vertex_count: section_update.rebuilt_vertex_count,
-            uploaded_index_count: section_update.rebuilt_index_count,
-        };
         let mut draw = TexturedSectionDrawResources::new(
             device,
             queue,
             format,
-            sections,
+            &sections,
             scene.mesh_assets().atlas.as_upload(),
         )?;
         draw.set_traversal_ready_sections(
@@ -2197,20 +2199,18 @@ mod android {
         );
 
         let index_count = draw.index_count();
-        let mut render_stats = RenderStreamStats {
+        let render_stats = RenderStreamStats {
             section_count: draw.section_count(),
             face_count: quad_face_count_from_indices(index_count),
             index_count,
             ..RenderStreamStats::default()
         };
-        record_render_section_update_stats(&mut render_stats, &section_update, upload_report);
         log::info!(
-            "Mclone Android uploaded {host_label} render sections: sections={} faces={} indices={} rebuilt_sections={} visibility_graph_count={}",
+            "Mclone Android uploaded {host_label} render sections: sections={} faces={} indices={} drawable_sections={}",
             render_stats.section_count,
             render_stats.face_count,
             render_stats.index_count,
-            section_update.rebuilt_section_count(),
-            section_update.visibility_graph_stats.build_count
+            final_step.render_seed_drawable_section_count,
         );
 
         Ok(StartedAndroidRenderScene {

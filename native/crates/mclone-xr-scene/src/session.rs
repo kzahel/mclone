@@ -1316,7 +1316,7 @@ pub(crate) fn start_xr_terrain_runtime<S>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
-    mut runtime: NativeSessionRuntime<S>,
+    runtime: NativeSessionRuntime<S>,
     movement_speed_multiplier: f32,
     startup_view_pose: Option<XrStartupViewPose>,
 ) -> Result<StartedXrTerrainRuntime<S>>
@@ -1329,10 +1329,22 @@ where
     let session_label = active_session_label(runtime.active_session());
     let mut camera = EngineCameraController::spawn_for_chunk(center);
     camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
+    // docs/tactical/167 Slice 3: drive the shared startup pump synchronously to a
+    // drawable active view instead of `poll_until_idle` + `sync_all_render_sections`.
+    // The seed reflects the initial spawn camera; the pose correction below runs
+    // after completion and normal streaming reconciles any interest drift (shared
+    // camera/interest reconciliation is Slice 4).
     let initial_poll_start = Instant::now();
-    let (initial_poll_count, initial_poll_ms) = runtime
-        .poll_until_idle()
+    let startup_camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
+    let completion = NativeSessionStartupPump::from_runtime(runtime)
+        .drive_to_ready(startup_camera_position)
         .context("wait for initial XR terrain chunks")?;
+    let NativeSessionStartupCompletion {
+        mut runtime,
+        startup_sections,
+        final_step,
+    } = completion;
+
     let mut initial_pose_changed =
         apply_pending_engine_camera_position_updates_for_runtime(&mut runtime, &mut camera)
             .context("accept initial XR terrain player pose")?;
@@ -1352,19 +1364,14 @@ where
         )?;
     }
     if initial_pose_changed {
-        let _ = runtime
-            .poll_until_idle()
-            .context("wait for XR terrain chunks after player pose")?;
+        log::info!("XR terrain runtime applied initial player pose correction");
     }
 
     let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
-    let section_update = runtime
-        .sync_all_render_sections(camera_position)
-        .context("compile initial XR terrain render sections")?;
-    // docs/tactical/163: the resident cache no longer retains CPU meshes. This is
-    // the first (cold) terrain sync, so the transient rebuilt payload is the full
-    // section set and seeds the initial draw resources directly.
-    let sections = &section_update.rebuilt_sections;
+    // docs/tactical/167: seed the initial draw resources from the startup pump's
+    // render seed rather than recompiling the resident cache; traversal-ready
+    // publication below still uses the final startup camera position.
+    let sections = startup_sections;
     if sections.is_empty() {
         bail!(
             "XR terrain host={} center=({}, {}) render_distance={} produced no render sections",
@@ -1378,7 +1385,7 @@ where
         device,
         queue,
         color_format,
-        sections,
+        &sections,
         runtime.mesh_assets().atlas.as_upload(),
     )
     .context("upload initial XR terrain render sections")?;
@@ -1386,19 +1393,12 @@ where
         &runtime.traversal_ready_render_section_keys(camera_position),
     );
 
-    let initial_upload = TexturedSectionUploadReport {
-        uploaded_section_count: section_update.rebuilt_section_count(),
-        removed_section_count: section_update.removed_section_count(),
-        uploaded_vertex_count: section_update.rebuilt_vertex_count,
-        uploaded_index_count: section_update.rebuilt_index_count,
-    };
-    let mut render_stats = RenderStreamStats {
+    let render_stats = RenderStreamStats {
         section_count: draw.section_count(),
         index_count: draw.index_count(),
         face_count: quad_face_count_from_indices(draw.index_count()),
         ..RenderStreamStats::default()
     };
-    record_render_section_update_stats(&mut render_stats, &section_update, initial_upload);
     log::info!(
         "mclone XR terrain runtime: host={} session={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
         host_label,
@@ -1410,8 +1410,8 @@ where
         render_stats.section_count,
         render_stats.face_count,
         render_stats.index_count,
-        initial_poll_count,
-        initial_poll_ms,
+        final_step.poll_count,
+        final_step.poll_ms,
         elapsed_ms(initial_poll_start.elapsed())
     );
     Ok(StartedXrTerrainRuntime {

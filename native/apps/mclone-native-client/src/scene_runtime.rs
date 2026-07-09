@@ -7,10 +7,11 @@ use glam::Vec3;
 use mclone_app_runtime::far_lod::{FarTerrainLodConfig, StartupLodPrewarmConfig};
 use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
 use mclone_app_runtime::native_session_runtime::{
-    IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedSceneRuntime,
-    LocalIntegratedStartupPump, LocalIntegratedStartupStep, NativeSceneRuntime,
+    IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneRuntime,
+    NativeSessionStartupPump, NativeSessionStartupStep, StartupReadinessPolicy,
     build_local_integrated_client_runtime,
 };
+use mclone_app_runtime::session::RemoteSessionEndpoint;
 use mclone_app_runtime::{
     GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
     SingleViewRuntimeStats, TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
@@ -170,13 +171,65 @@ pub(crate) struct WindowSceneRuntime {
     pub(crate) actor_textures: ActorTextureAssets,
 }
 
+/// Desktop startup pump wrapper over the host-neutral
+/// [`NativeSessionStartupPump`] (docs/tactical/167 Slice 3). It drives both local
+/// integrated and remote dedicated startup through one shared contract and hands
+/// the platform a transient render-section seed for a one-shot draw upload; no
+/// startup path recompiles the resident cache.
 #[derive(Debug)]
 pub(crate) struct WindowSceneStartupPump {
-    pump: LocalIntegratedStartupPump,
+    pump: NativeSessionStartupPump<RemoteServerSession>,
     actor_textures: ActorTextureAssets,
 }
 
 impl WindowSceneStartupPump {
+    /// Build a startup pump for either host mode from the scene: remote when the
+    /// scene names a remote address, otherwise local integrated. Local worlds
+    /// anchor interest to the seed's spawn center for the non-blocking
+    /// loading-screen path.
+    pub(crate) fn from_scene(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
+        if scene.remote_addr.is_some() {
+            Self::new_remote(scene, assets)
+        } else {
+            Self::new_local(scene, assets)
+        }
+    }
+
+    /// Build a startup pump for either host mode, keeping local interest at the
+    /// scene center rather than overriding it to the seed's spawn center. Used by
+    /// the blocking startup lane (desktop remote join, offscreen idle screenshots,
+    /// and tests), matching the pre-tactical `make_runtime` behavior.
+    pub(crate) fn from_scene_at_scene_center(
+        scene: &SceneOptions,
+        assets: &WindowSceneAssets,
+    ) -> Result<Self> {
+        if scene.remote_addr.is_some() {
+            Self::new_remote(scene, assets)
+        } else {
+            Self::with_local_options(local_integrated_scene_options(scene)?, assets)
+        }
+    }
+
+    /// Interest center of the pump's runtime, used to derive the fixed startup
+    /// camera for the blocking startup drive.
+    pub(crate) fn interest_center(&self) -> ChunkPos {
+        self.pump.runtime().interest_center()
+    }
+
+    /// Fixed startup camera position for the blocking drive: the interest-center
+    /// chunk column at the spectator spawn height, so camera-targeted section
+    /// compilation reaches a drawable view regardless of the pre-start camera.
+    pub(crate) fn startup_camera_position(&self) -> Vec3 {
+        let center = self.interest_center();
+        // Match the spectator spawn height in `SpectatorCamera::spawn_for_scene`.
+        const STARTUP_CAMERA_HEIGHT: f32 = 88.0;
+        Vec3::new(
+            mclone_core::chunk_middle_block_coord(center.x) as f32,
+            STARTUP_CAMERA_HEIGHT,
+            mclone_core::chunk_middle_block_coord(center.z) as f32,
+        )
+    }
+
     pub(crate) fn new_local(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
         Self::with_local_options(
             local_integrated_scene_options(scene)?.with_initial_spawn_center(),
@@ -189,13 +242,51 @@ impl WindowSceneStartupPump {
         assets: &WindowSceneAssets,
     ) -> Result<Self> {
         Ok(Self {
-            pump: LocalIntegratedStartupPump::with_mesh_assets(options, assets.mesh_assets.clone())
-                .context("failed to create local world startup pump")?,
+            pump: NativeSessionStartupPump::local_with_mesh_assets(
+                options,
+                assets.mesh_assets.clone(),
+            )
+            .context("failed to create local world startup pump")?,
             actor_textures: assets.actor_textures.clone(),
         })
     }
 
-    pub(crate) fn step(&mut self, camera_position: Vec3) -> Result<LocalIntegratedStartupStep> {
+    pub(crate) fn new_remote(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
+        let render_distance = scene_render_distance(scene)?;
+        let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
+        let remote_addr = scene
+            .remote_addr
+            .as_deref()
+            .context("remote startup pump requires a remote address")?;
+        let session = RemoteServerSession::connect(remote_addr)?;
+        let pump = NativeSessionStartupPump::remote_dedicated_with_mesh_assets(
+            RemoteSessionEndpoint::new(remote_addr.to_owned()),
+            SingleViewHostOptions::new(center, render_distance)
+                .with_render_compile_worker_count(scene.render_compile_worker_count)
+                .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+                .with_render_compile_worker_timing_enabled(
+                    scene.render_compile_worker_timing_enabled,
+                ),
+            session,
+            assets.mesh_assets.clone(),
+        )
+        .with_context(|| {
+            format!("failed to initialize desktop remote dedicated startup pump from {remote_addr}")
+        })?;
+        Ok(Self {
+            pump,
+            actor_textures: assets.actor_textures.clone(),
+        })
+    }
+
+    /// Select the startup readiness policy (`Playable` default; `Idle` for
+    /// screenshot/diagnostics waits).
+    pub(crate) fn with_readiness(mut self, readiness: StartupReadinessPolicy) -> Self {
+        self.pump = self.pump.with_readiness(readiness);
+        self
+    }
+
+    pub(crate) fn step(&mut self, camera_position: Vec3) -> Result<NativeSessionStartupStep> {
         self.pump.step(camera_position)
     }
 
@@ -206,14 +297,54 @@ impl WindowSceneStartupPump {
     /// Consume the pump into the runtime plus the transient startup render seed
     /// batch for a one-shot draw upload (docs/tactical/167), instead of
     /// recompiling every resident section after startup.
-    pub(crate) fn into_runtime_with_startup_sections(
+    pub(crate) fn complete(
         self,
-    ) -> (WindowSceneRuntime, Vec<TexturedRenderSectionMesh>) {
-        let (runtime, sections) = self.pump.into_runtime_with_startup_sections();
+    ) -> (
+        WindowSceneRuntime,
+        Vec<TexturedRenderSectionMesh>,
+        NativeSessionStartupStep,
+    ) {
+        let Self {
+            pump,
+            actor_textures,
+        } = self;
+        let completion = pump.complete();
         (
-            WindowSceneRuntime::from_local_runtime(runtime, self.actor_textures),
-            sections,
+            WindowSceneRuntime::from_scene_runtime(
+                completion.runtime.into_runtime(),
+                actor_textures,
+            ),
+            completion.startup_sections,
+            completion.final_step,
         )
+    }
+
+    /// Drive the pump synchronously to startup readiness, then hand back the
+    /// runtime, transient render seed, and final step (docs/tactical/167 Slice 3
+    /// blocking startup lane). Replaces the former `poll_until_idle` +
+    /// `sync_all_render_sections` desktop remote/idle path.
+    pub(crate) fn drive_to_ready_with_timeout(
+        self,
+        camera_position: Vec3,
+        timeout: Duration,
+    ) -> Result<(
+        WindowSceneRuntime,
+        Vec<TexturedRenderSectionMesh>,
+        NativeSessionStartupStep,
+    )> {
+        let Self {
+            pump,
+            actor_textures,
+        } = self;
+        let completion = pump.drive_to_ready_with_timeout(camera_position, timeout)?;
+        Ok((
+            WindowSceneRuntime::from_scene_runtime(
+                completion.runtime.into_runtime(),
+                actor_textures,
+            ),
+            completion.startup_sections,
+            completion.final_step,
+        ))
     }
 }
 
@@ -229,12 +360,12 @@ impl WindowSceneRuntime {
         })
     }
 
-    fn from_local_runtime(
-        runtime: LocalIntegratedSceneRuntime,
+    fn from_scene_runtime(
+        scene: NativeWindowSceneRuntime,
         actor_textures: ActorTextureAssets,
     ) -> Self {
         Self {
-            scene: NativeWindowSceneRuntime::Local(runtime),
+            scene,
             actor_textures,
         }
     }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use mclone_app_runtime::native_session_runtime::StartupReadinessPolicy;
 use mclone_app_runtime::{RuntimePollDiagnostics, debug_block_palette_overlay, debug_hotbar_icons};
 use mclone_assets::AssetSource;
 #[cfg(test)]
@@ -935,11 +936,9 @@ impl ChunkApp {
         }
         let device = self.surface.as_ref().map(|surface| &surface.device);
         let assets = &self.assets;
-        let update = self.driver.finish_pending_session_start(
-            device,
-            |scene| WindowSceneRuntime::with_assets(scene, assets),
-            |scene| WindowSceneStartupPump::new_local(scene, assets),
-        );
+        let update = self.driver.finish_pending_session_start(device, |scene| {
+            WindowSceneStartupPump::from_scene(scene, assets)
+        });
         self.apply_session_update(update);
     }
 
@@ -1148,10 +1147,12 @@ impl ChunkApp {
     fn start_world_from_scene(&mut self, scene: SceneOptions) -> Result<()> {
         let assets = &self.assets;
         let device = self.surface.as_ref().map(|surface| &surface.device);
-        self.driver
-            .start_world_from_scene(scene, device, &mut |scene| {
-                WindowSceneRuntime::with_assets(scene, assets)
-            })
+        self.driver.start_world_from_scene(
+            scene,
+            device,
+            StartupReadinessPolicy::Playable,
+            &mut |scene| WindowSceneStartupPump::from_scene_at_scene_center(scene, assets),
+        )
     }
 
     #[cfg(test)]
