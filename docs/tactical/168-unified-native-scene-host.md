@@ -445,23 +445,51 @@ slice.
 
 Goal: the scene host can render a single flat view.
 
+**Scope boundary (clarified 2026-07-09): this slice migrates only the
+headless consumers that do NOT sit on `FlatClientDriver`.** The
+`--screenshot` path and `offscreen_flat_client.rs` are `FlatClientDriver`
+consumers; they stay on that driver until Slice 7, which is chartered to
+repoint them ("CLI, screenshot, timedemo, perf harnesses repoint at the host
+through the offscreen driver from Slice 3"). Slice 3 *builds* the
+`OffscreenDriver` and proves it on the headless dual-view path; Slice 7
+*adopts* it for everything that currently rides `FlatClientDriver`. Pulling
+the `--screenshot` harness forward into this slice would start Slice 7's work
+before Slices 4–6 land (violating the sequencing guardrail) and would force
+either duplicated effects/admission wiring or a behavior change (violating
+the no-behavior-smuggling guardrail).
+
 Deliverables:
 
 - Add `Mono` topology to the host, rendering through the existing shared
   `render_full_frame_for_view*` entry points
   (`mclone-app-runtime/src/frame_render.rs`), including far-LOD variant.
-- Screen-space UI presentation strategy (HUD assembly on the host; the
-  world-quad XR presentation remains the other strategy).
-- Port the headless/offscreen screenshot path (`headless.rs` frame assembly,
-  `offscreen_flat_client.rs`) to consume the host as an `OffscreenDriver`,
-  deleting the third copy of frame-input assembly (`headless.rs:844-891`).
+  The existing Stereo/Multiview paths are untouched; XR output must be
+  byte-identical.
+- Screen-space UI presentation strategy on the host, at **capture grade**
+  for this slice: what the headless path renders today via
+  `GameUiHost::new_ingame()` (HUD/crosshair/hotbar overlay on a mono frame).
+  Full interactive menu/effects wiring on the mono topology arrives with
+  Slice 7, not here.
+- An `OffscreenDriver` that renders the host's Mono topology to a texture.
+- Port the headless dual-view frame assembly (`headless.rs:844-891`,
+  `write_headless_dual_view_frame`, which drives `WindowSceneRuntime`
+  directly) onto the host + `OffscreenDriver`, deleting that third copy of
+  frame-input assembly. Do **not** touch `offscreen_flat_client.rs` or the
+  `--screenshot` path in this slice.
 
-Tripwires: offscreen screenshots via the host are pixel-equivalent (or
-reviewed-equivalent) to pre-slice captures; XR device smokes unchanged.
+Tripwires: captures from the ported headless verbs are pixel-equivalent (or
+reviewed-equivalent) to pre-slice baselines; `--screenshot` output is
+byte-unchanged (it still rides `FlatClientDriver` — it is a canary here, not
+a consumer); XR device smokes unchanged.
 
-Validation: standard battery + `pnpm native:desktop-offscreen:smoke` +
-compare `/tmp/mclone-desktop-offscreen.png` against a pre-slice capture, plus
-one Quest session-smoke to prove no XR regression.
+Validation: standard battery, plus:
+
+- **Positive validation** — run the headless verb(s) that exercise the ported
+  dual-view path, comparing `/tmp` captures against pre-slice baselines.
+- **Canary** — `pnpm native:desktop-offscreen:smoke` and compare
+  `/tmp/mclone-desktop-offscreen.png` against a pre-slice capture (must be
+  unchanged; this path is not migrated in this slice).
+- One Quest session-smoke to prove no XR regression.
 
 ### Slice 4: Shared OpenXR frame driver
 
