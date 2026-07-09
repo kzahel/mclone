@@ -1,8 +1,10 @@
 # 168: Unified Native Scene Host
 
 Status: approved direction 2026-07-09; Slice 0 (bug-grade parity pre-fixes)
-landed 2026-07-09. Slices 1+ not started; Slice 1 is ready to begin with no
-other context beyond this document and the referenced code.
+landed 2026-07-09; Slice 2 (web-shaped runner-generic seam) landed 2026-07-09.
+Slice 1 and Slices 3+ not started; Slice 1 is ready to begin with no other
+context beyond this document and the referenced code. (Slices 0–2 are
+independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
 
 Workstream: native Rust shared runtime convergence. This tactical collapses the
 four native client runtimes (desktop flat, desktop XR, flat Android, Android
@@ -373,7 +375,7 @@ MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 Exit criteria: identical on-device behavior (same session-smoke log lines and
 seed section counts as the pre-slice baseline — capture the baseline first).
 
-### Slice 2: Web-shaped seam — runner-generic local host mode
+### Slice 2: Web-shaped seam — runner-generic local host mode — DONE (2026-07-09)
 
 Goal: make `NativeSessionRuntime`'s local mode generic over the existing
 `IntegratedServerRunner` trait instead of hard-coding
@@ -382,12 +384,40 @@ callers keep using the native runner via a default/alias; nothing about web is
 migrated — this slice only removes the seam that would otherwise bake the fork
 in permanently.
 
+Landed shape:
+
+- `LocalIntegratedConnection` and `LocalIntegratedSceneRuntime` are now generic
+  over `R: IntegratedServerRunner` with `R = NativeIntegratedServerRunner` as
+  the default type parameter, so every existing native caller
+  (`LocalIntegratedSceneRuntime`, the `NativeSceneRuntime::Local` variant,
+  `as_local`/`expect_local_scene`, the startup pump/prewarm) compiles unchanged
+  — the default fills `R` and no `S`/`R` threading was needed through
+  `NativeSceneRuntime<S>` / `NativeSessionRuntime<S>`.
+- The native-runner-building constructors (`new`, `with_mesh_assets`) stay on
+  `impl LocalIntegratedSceneRuntime<NativeIntegratedServerRunner>`; the shared
+  scene wiring moved to a runner-generic
+  `with_mesh_assets_and_runner(options, mesh_assets, runner: R)` that a web
+  build can call with its own runner.
+- Three methods the local connection needs (`refresh_fast_diagnostics`,
+  `set_simulation_cadence`, `flush_persistence`) moved from inherent methods on
+  `NativeIntegratedServerRunner` onto the `IntegratedServerRunner` trait, each
+  with a behavior-preserving default (no-op counter refresh / cadence
+  unsupported / no flush point) and a native override carrying the existing
+  bodies. `WebIntegratedServerRunner` picks up the defaults for free; no web
+  behavior changed.
+
 Tripwires: app-runtime tests pass; no public API breakage for existing native
 callers beyond mechanical type-parameter additions; wasm check clean.
 
-Validation: the standard check/test battery from Slice 1 (no device smoke
-needed — no behavior change — but run the desktop offscreen screenshot as a
-cheap pixel canary: `pnpm native:desktop-offscreen:smoke`).
+Validation (all green 2026-07-09): `cargo fmt --all --check`, workspace
+`cargo check`, `cargo test -p mclone-server -p mclone-app-runtime
+-p mclone-native-client` (server 185 + app-runtime 179 + native-client 375,
+0 failed), `cargo check -p mclone-web-client --target wasm32-unknown-unknown`,
+`cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+-p mclone-android-xr-client`, and the desktop offscreen pixel canary
+`pnpm native:desktop-offscreen:smoke` (64 sections / 11 drawn, terrain + mobs
+render unchanged). No device smoke needed — behavior-preserving structural
+slice.
 
 ### Slice 3: Mono view topology + first flat consumer (offscreen/headless)
 

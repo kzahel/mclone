@@ -256,10 +256,15 @@ impl LocalIntegratedSceneOptions {
     }
 }
 
+/// Local-integrated scene host, generic over the integrated-server runner
+/// (docs/tactical/168 Slice 2). `R` defaults to [`NativeIntegratedServerRunner`]
+/// so every existing native caller writes `LocalIntegratedSceneRuntime`
+/// unchanged; the parameter only removes the hard-coded-runner seam that would
+/// otherwise permanently fork web out of the shared local host mode.
 #[derive(Debug)]
-pub struct LocalIntegratedSceneRuntime {
+pub struct LocalIntegratedSceneRuntime<R = NativeIntegratedServerRunner> {
     core: SingleViewRuntime,
-    connection: LocalIntegratedConnection,
+    connection: LocalIntegratedConnection<R>,
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
@@ -270,13 +275,19 @@ pub struct LocalIntegratedSceneRuntime {
     last_runner_diagnostics_poll_at: Option<Instant>,
 }
 
+/// Local-integrated server connection, generic over the integrated-server runner
+/// (docs/tactical/168 Slice 2). Native callers use the default
+/// [`NativeIntegratedServerRunner`]; the type parameter is the seam that keeps
+/// web from being permanently forked out of the local host mode — a web build can
+/// eventually plug its own [`IntegratedServerRunner`] here without a second copy
+/// of this connection wiring.
 #[derive(Debug)]
-struct LocalIntegratedConnection {
-    runner: NativeIntegratedServerRunner,
+struct LocalIntegratedConnection<R = NativeIntegratedServerRunner> {
+    runner: R,
 }
 
-impl LocalIntegratedConnection {
-    fn new(runner: NativeIntegratedServerRunner) -> Self {
+impl<R: IntegratedServerRunner> LocalIntegratedConnection<R> {
+    fn new(runner: R) -> Self {
         Self { runner }
     }
 
@@ -300,7 +311,7 @@ impl LocalIntegratedConnection {
     }
 }
 
-impl ClientConnection for LocalIntegratedConnection {
+impl<R: IntegratedServerRunner> ClientConnection for LocalIntegratedConnection<R> {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
         self.runner
             .send_command(command)
@@ -1100,15 +1111,36 @@ fn expect_local_scene<S>(runtime: NativeSceneRuntime<S>) -> LocalIntegratedScene
     }
 }
 
-impl LocalIntegratedSceneRuntime {
+impl LocalIntegratedSceneRuntime<NativeIntegratedServerRunner> {
     pub fn new(options: LocalIntegratedSceneOptions) -> Result<Self> {
         let mesh_assets = load_textured_mesh_assets()?;
         Self::with_mesh_assets(options, mesh_assets)
     }
 
+    /// Build a local-integrated scene backed by the native threaded server
+    /// runner. Runner-agnostic construction lives in
+    /// [`Self::with_mesh_assets_and_runner`]; this only owns spawning the native
+    /// runner from the options (docs/tactical/168 Slice 2).
     pub fn with_mesh_assets(
         options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
+            .context("failed to start local integrated server runner")?;
+        Self::with_mesh_assets_and_runner(options, mesh_assets, server_runner)
+    }
+}
+
+impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
+    /// Runner-generic local-integrated scene construction (docs/tactical/168
+    /// Slice 2). The caller supplies an already-started [`IntegratedServerRunner`]
+    /// so the local host mode no longer hard-codes the native runner. The scene
+    /// wiring (render-compile dispatcher, far-LOD, deferred drop worker, initial
+    /// chunk view) is identical across runners.
+    pub fn with_mesh_assets_and_runner(
+        options: LocalIntegratedSceneOptions,
+        mesh_assets: TexturedMeshAssets,
+        server_runner: R,
     ) -> Result<Self> {
         let render_compile_dispatcher =
             NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
@@ -1119,8 +1151,6 @@ impl LocalIntegratedSceneRuntime {
                     .unwrap_or(options.render_compile_worker_count),
                 options.render_compile_worker_timing_enabled,
             )?;
-        let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
-            .context("failed to start local integrated server runner")?;
         let mut scene = Self {
             core: SingleViewRuntime::local_integrated_with_seed(
                 options.seed,

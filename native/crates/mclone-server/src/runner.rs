@@ -484,6 +484,34 @@ pub trait IntegratedServerRunner {
     fn poll_diagnostics(&self) -> ServerRunnerResult<ServerRunnerDiagnostics>;
     fn request_shutdown(&mut self);
     fn join_shutdown(&mut self) -> ServerRunnerResult<()>;
+
+    /// Refresh only the cheap, atomically-tracked counters on an existing
+    /// diagnostics snapshot. Runners whose `poll_diagnostics` already returns a
+    /// complete snapshot each call (e.g. the web worker) need no fast-path
+    /// refresh, so the default is a no-op. Making this part of the trait lets the
+    /// local host mode be generic over the runner (docs/tactical/168 Slice 2).
+    fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
+        let _ = diagnostics;
+    }
+
+    /// Change the running simulation cadence. Default: unsupported (the cadence
+    /// control the local host mode drives is a native-runner feature; other
+    /// runners keep their own cadence path), docs/tactical/168 Slice 2.
+    fn set_simulation_cadence(
+        &mut self,
+        cadence: SimulationCadenceConfig,
+    ) -> ServerRunnerResult<()> {
+        let _ = cadence;
+        Ok(())
+    }
+
+    /// Synchronously flush dirty chunks to persistent storage, returning the
+    /// number of chunks queued for write. Default: no synchronous flush point
+    /// (nothing durable to commit), docs/tactical/168 (Slice 0 lifecycle save,
+    /// generalized to the trait in Slice 2).
+    fn flush_persistence(&mut self) -> ServerRunnerResult<usize> {
+        Ok(0)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -860,8 +888,14 @@ mod native {
                 shutdown_requested: false,
             })
         }
+    }
 
-        pub fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
+    impl IntegratedServerRunner for NativeIntegratedServerRunner {
+        fn kind(&self) -> ServerRunnerKind {
+            ServerRunnerKind::NativeThread
+        }
+
+        fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
             diagnostics.command_queue_depth = self.command_queue_depth.load(Ordering::SeqCst);
             diagnostics.update_queue_depth = self.update_queue_depth.load(Ordering::SeqCst);
             diagnostics.update_queue_bytes = self.update_queue_bytes.load(Ordering::SeqCst);
@@ -870,7 +904,7 @@ mod native {
             }
         }
 
-        pub fn set_simulation_cadence(
+        fn set_simulation_cadence(
             &mut self,
             cadence: SimulationCadenceConfig,
         ) -> ServerRunnerResult<()> {
@@ -901,7 +935,7 @@ mod native {
         /// server thread has committed the save. Returns the number of chunks
         /// queued for write. Used by lifecycle save points so world edits survive
         /// an OS process kill (tactical 168 Slice 0).
-        pub fn flush_persistence(&mut self) -> ServerRunnerResult<usize> {
+        fn flush_persistence(&mut self) -> ServerRunnerResult<usize> {
             if self.shutdown_requested {
                 return Err(ServerRunnerError::CommandChannelClosed);
             }
@@ -919,12 +953,6 @@ mod native {
             ack_rx
                 .recv()
                 .map_err(|_| ServerRunnerError::CommandChannelClosed)?
-        }
-    }
-
-    impl IntegratedServerRunner for NativeIntegratedServerRunner {
-        fn kind(&self) -> ServerRunnerKind {
-            ServerRunnerKind::NativeThread
         }
 
         fn send_command(&mut self, command: ClientCommand) -> ServerRunnerResult<()> {
