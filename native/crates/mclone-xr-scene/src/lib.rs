@@ -317,6 +317,19 @@ impl<S> XrMcloneTerrainState<S>
 where
     S: RemoteDedicatedServerSession,
 {
+    /// Synchronously flush world edits to persistent storage without tearing
+    /// down the session. Backs the lifecycle save point so Quest world edits
+    /// survive an activity Pause -> OS kill, which previously only saved on the
+    /// Drop-driven `shutdown_persistence` (tactical 168 Slice 0). Returns the
+    /// number of chunks queued for write; a no-op (`Ok(0)`) before a runtime
+    /// exists or in remote host modes.
+    pub fn flush_persistence(&mut self) -> Result<usize> {
+        match self.runtime.as_mut() {
+            Some(runtime) => runtime.flush_persistence(),
+            None => Ok(0),
+        }
+    }
+
     pub fn render_frame(
         &mut self,
         device: &wgpu::Device,

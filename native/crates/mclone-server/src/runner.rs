@@ -733,6 +733,15 @@ mod native {
             cadence: SimulationCadenceConfig,
             tick_interval: Duration,
         },
+        /// Synchronously flush dirty chunks to the world store without tearing
+        /// down the session. Used for lifecycle save points (e.g. Android
+        /// activity Pause) so world edits survive an OS kill before the
+        /// Drop-driven `shutdown_persistence` would otherwise run. The ack
+        /// carries the queued-chunk count so the caller can block until the save
+        /// has been committed (tactical 168 Slice 0).
+        FlushPersistence {
+            ack: mpsc::Sender<ServerRunnerResult<usize>>,
+        },
         Shutdown,
     }
 
@@ -886,6 +895,30 @@ mod native {
                 return Err(ServerRunnerError::CommandChannelClosed);
             }
             Ok(())
+        }
+
+        /// Synchronously flush dirty chunks to the world store, blocking until the
+        /// server thread has committed the save. Returns the number of chunks
+        /// queued for write. Used by lifecycle save points so world edits survive
+        /// an OS process kill (tactical 168 Slice 0).
+        pub fn flush_persistence(&mut self) -> ServerRunnerResult<usize> {
+            if self.shutdown_requested {
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            let (ack_tx, ack_rx) = mpsc::channel();
+            self.command_queue_depth.fetch_add(1, Ordering::SeqCst);
+            let send_result = self
+                .command_tx
+                .as_ref()
+                .ok_or(ServerRunnerError::CommandChannelClosed)?
+                .send(NativeRunnerControl::FlushPersistence { ack: ack_tx });
+            if send_result.is_err() {
+                self.command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            ack_rx
+                .recv()
+                .map_err(|_| ServerRunnerError::CommandChannelClosed)?
         }
     }
 
@@ -1277,6 +1310,14 @@ mod native {
     ) -> ServerRunnerResult<bool> {
         match control {
             NativeRunnerControl::Shutdown => Ok(false),
+            NativeRunnerControl::FlushPersistence { ack } => {
+                let result = server.save_dirty_chunks().map_err(ServerRunnerError::from);
+                command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                // The caller may have gone away (e.g. the process is being
+                // killed); dropping the ack is not a runner error.
+                let _ = ack.send(result);
+                Ok(true)
+            }
             NativeRunnerControl::SetSimulationCadence {
                 cadence,
                 tick_interval,

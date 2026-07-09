@@ -294,6 +294,10 @@ impl LocalIntegratedConnection {
     fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
         self.runner.refresh_fast_diagnostics(diagnostics);
     }
+
+    fn flush_persistence(&mut self) -> mclone_server::ServerRunnerResult<usize> {
+        self.runner.flush_persistence()
+    }
 }
 
 impl ClientConnection for LocalIntegratedConnection {
@@ -1690,6 +1694,15 @@ impl LocalIntegratedSceneRuntime {
         Ok(())
     }
 
+    /// Synchronously flush the integrated server's dirty chunks to disk. Backs
+    /// the shared lifecycle save point so world edits survive an OS kill without
+    /// tearing down the session (tactical 168 Slice 0).
+    fn flush_persistence(&mut self) -> Result<usize> {
+        self.connection
+            .flush_persistence()
+            .context("failed to flush local integrated world persistence")
+    }
+
     /// Honest local spawn-authority gate: the playable chunk is server-ready and
     /// its client snapshot is present. Render-seed drawability and startup LOD
     /// prewarm are layered on by the shared startup pump, never here.
@@ -1824,6 +1837,16 @@ where
         match self {
             Self::Local(scene) => scene.startup_progress_overlay(),
             Self::RemoteDedicated(_) => None,
+        }
+    }
+
+    /// Flush world edits to persistent storage without tearing down the session.
+    /// No-op for remote host modes: the dedicated server owns its own persistence
+    /// and this client holds no authoritative world state (tactical 168 Slice 0).
+    pub fn flush_persistence(&mut self) -> Result<usize> {
+        match self {
+            Self::Local(scene) => scene.flush_persistence(),
+            Self::RemoteDedicated(_) => Ok(0),
         }
     }
 

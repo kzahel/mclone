@@ -3394,7 +3394,11 @@ mod android {
         let mut session_smoke_ready = false;
 
         loop {
-            if !poll_android_events(app, Some(Duration::from_millis(0)))? {
+            let lifecycle = poll_android_lifecycle(app, Some(Duration::from_millis(0)))?;
+            if lifecycle.paused {
+                flush_terrain_on_android_pause(terrain);
+            }
+            if !lifecycle.keep_running {
                 log::info!("Android activity destroyed; exiting OpenXR loop");
                 return Ok(());
             }
@@ -3418,7 +3422,11 @@ mod android {
                     return Ok(());
                 }
                 OpenXrPollStatus::Idle if !session_running => {
-                    if !poll_android_events(app, Some(SESSION_IDLE_POLL_INTERVAL))? {
+                    let lifecycle = poll_android_lifecycle(app, Some(SESSION_IDLE_POLL_INTERVAL))?;
+                    if lifecycle.paused {
+                        flush_terrain_on_android_pause(terrain);
+                    }
+                    if !lifecycle.keep_running {
                         log::info!("Android activity destroyed while waiting for OpenXR READY");
                         return Ok(());
                     }
@@ -7537,8 +7545,21 @@ mod android {
         );
     }
 
-    fn poll_android_events(app: &AndroidApp, timeout: Option<Duration>) -> Result<bool> {
+    /// Result of an Android lifecycle poll. `paused` is set when a Pause/Stop
+    /// transition was observed this poll so the caller can flush world
+    /// persistence before a possible OS kill (tactical 168 Slice 0).
+    #[derive(Clone, Copy, Debug)]
+    struct AndroidLifecyclePoll {
+        keep_running: bool,
+        paused: bool,
+    }
+
+    fn poll_android_lifecycle(
+        app: &AndroidApp,
+        timeout: Option<Duration>,
+    ) -> Result<AndroidLifecyclePoll> {
         let mut keep_running = true;
+        let mut paused = false;
         app.poll_events(timeout, |event| {
             if let PollEvent::Main(main) = event {
                 match main {
@@ -7551,15 +7572,44 @@ mod android {
                     }
                     MainEvent::GainedFocus => log::info!("Android activity gained focus"),
                     MainEvent::LostFocus => log::info!("Android activity lost focus"),
-                    MainEvent::Pause => log::info!("Android activity paused"),
-                    MainEvent::Stop => log::info!("Android activity stopped"),
+                    MainEvent::Pause => {
+                        log::info!("Android activity paused");
+                        paused = true;
+                    }
+                    MainEvent::Stop => {
+                        log::info!("Android activity stopped");
+                        paused = true;
+                    }
                     MainEvent::Destroy => keep_running = false,
                     MainEvent::InputAvailable => drain_android_input_events(app),
                     _ => {}
                 }
             }
         });
-        Ok(keep_running)
+        Ok(AndroidLifecyclePoll {
+            keep_running,
+            paused,
+        })
+    }
+
+    fn poll_android_events(app: &AndroidApp, timeout: Option<Duration>) -> Result<bool> {
+        Ok(poll_android_lifecycle(app, timeout)?.keep_running)
+    }
+
+    /// Flush the Quest world's dirty chunks to disk on an activity Pause. Saving
+    /// was previously Drop-driven only, so a Pause -> OS kill lost placed/broken
+    /// blocks; this is the explicit lifecycle save point (tactical 168 Slice 0).
+    fn flush_terrain_on_android_pause(terrain: &mut AndroidXrTerrainState) {
+        match terrain.flush_persistence() {
+            Ok(count) => {
+                log::info!("MCLONE_ANDROID_XR_PAUSE_SAVE flushed_chunks={count}");
+            }
+            Err(error) => {
+                log::warn!(
+                    "MCLONE_ANDROID_XR_PAUSE_SAVE failed to flush world persistence: {error:#}"
+                );
+            }
+        }
     }
 
     fn drain_android_input_events(app: &AndroidApp) {
