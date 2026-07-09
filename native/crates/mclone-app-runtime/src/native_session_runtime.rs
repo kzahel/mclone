@@ -1151,8 +1151,13 @@ impl LocalIntegratedSceneRuntime {
 
     /// Recompile every resident render section and return the transient full
     /// mesh batch for a one-shot GPU (re)upload, without the resident cache ever
-    /// retaining CPU meshes (docs/tactical/163). Used to seed draw resources at
-    /// startup and to rebuild them after a surface/renderer reset.
+    /// retaining CPU meshes (docs/tactical/163).
+    ///
+    /// docs/tactical/167: this is a renderer/surface **resource-rebuild** path,
+    /// not a startup seeding path. New startup callers must take their draw seed
+    /// from the startup pump's render seed; do not add startup uses of this
+    /// function. Migrating the remaining startup callers off it is tracked by
+    /// tactical 167.
     pub fn compile_all_render_section_meshes(
         &mut self,
         camera_position: Vec3,
@@ -1660,6 +1665,8 @@ where
         }
     }
 
+    /// See [`LocalIntegratedSceneRuntime::compile_all_render_section_meshes`].
+    /// docs/tactical/167: resource-rebuild only — not for startup draw seeding.
     pub fn compile_all_render_section_meshes(
         &mut self,
         camera_position: Vec3,
@@ -2510,8 +2517,13 @@ where
 
     /// Recompile every resident render section and return the transient full
     /// mesh batch for a one-shot GPU (re)upload, without the resident cache ever
-    /// retaining CPU meshes (docs/tactical/163). Used to seed draw resources at
-    /// startup and to rebuild them after a surface/renderer reset.
+    /// retaining CPU meshes (docs/tactical/163).
+    ///
+    /// docs/tactical/167: this is a renderer/surface **resource-rebuild** path,
+    /// not a startup seeding path. New startup callers must take their draw seed
+    /// from the startup pump's render seed; do not add startup uses of this
+    /// function. Migrating the remaining startup callers off it is tracked by
+    /// tactical 167.
     pub fn compile_all_render_section_meshes(
         &mut self,
         camera_position: Vec3,

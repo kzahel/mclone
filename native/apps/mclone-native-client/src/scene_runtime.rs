@@ -479,6 +479,9 @@ impl WindowSceneRuntime {
 
     /// Recompile every resident render section and return the transient full
     /// mesh batch for a one-shot GPU (re)upload (docs/tactical/163).
+    ///
+    /// docs/tactical/167: resource-rebuild/probe path only. The desktop startup
+    /// seed must come from the startup pump, not this dirty-all recompile.
     pub(crate) fn compile_all_render_section_meshes(
         &mut self,
         camera_position: Vec3,
