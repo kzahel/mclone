@@ -14,6 +14,12 @@ Script options:
   --release              Run the optimized release build.
   --build-only           Build the XR binary without launching it.
   --check-only           Check the XR feature without building an executable.
+  --desktop-xr           Real persistent desktop XR run verb: renders the
+                         mclone world until you quit (companion window Close or
+                         headset menu), with a 2D companion window. Not a smoke;
+                         does not inject --frames. Cannot combine with --smoke.
+  --no-window            Suppress the desktop companion window (requires
+                         --desktop-xr; the smoke gates are already windowless).
   --smoke clear|mclone   Select the smoke mode. Default: clear.
   --runtime wivrn|active|json|environment
                          Select the OpenXR runtime bootstrap. Default: wivrn
@@ -29,7 +35,9 @@ Script options:
                          headset UI validation. Requires --smoke mclone.
   --wivrn-usb            Start/reuse the local macOS WiVRn host, install an ADB
                          reverse tunnel, and launch the Quest WiVRn client.
-  --frames N             Set the XR smoke frame budget. Default: 120.
+  --frames N             Set the XR smoke frame budget (or bound a --desktop-xr
+                         run). Default: 120 for smokes; unbounded for
+                         --desktop-xr unless set.
   -h, --help             Show this help.
 
 Examples:
@@ -37,6 +45,8 @@ Examples:
   scripts/start-xr.sh --frames 2
   scripts/start-xr.sh --smoke mclone --view-pose 0,72,0,0 --frames 120
   scripts/start-xr.sh --wivrn-usb --frames 2
+  scripts/start-xr.sh --wivrn-usb --desktop-xr
+  scripts/start-xr.sh --wivrn-usb --desktop-xr --frames 240
 
 On macOS, this follows the Playbox WiVRn defaults:
   HOST_BUILD_DIR=$HOME/code/wivrn-macos/build/wivrn
@@ -265,10 +275,14 @@ build_only=0
 check_only=0
 wivrn_usb=0
 smoke=clear
+smoke_explicit=0
+desktop_xr=0
+no_window=0
 runtime=auto
 runtime_json=""
 view_pose=""
 frames=120
+frames_explicit=0
 wivrn_host_pid=""
 wivrn_host_log=""
 mclone_args=()
@@ -301,6 +315,7 @@ while [ "$#" -gt 0 ]; do
             case "$2" in
                 clear|mclone)
                     smoke="$2"
+                    smoke_explicit=1
                     ;;
                 *)
                     echo "--smoke requires clear or mclone, got $2" >&2
@@ -308,6 +323,14 @@ while [ "$#" -gt 0 ]; do
                     ;;
             esac
             shift 2
+            ;;
+        --desktop-xr)
+            desktop_xr=1
+            shift
+            ;;
+        --no-window)
+            no_window=1
+            shift
             ;;
         --runtime)
             if [ "$#" -lt 2 ]; then
@@ -348,6 +371,7 @@ while [ "$#" -gt 0 ]; do
                 exit 1
             fi
             frames="$2"
+            frames_explicit=1
             shift 2
             ;;
         -h|--help)
@@ -365,6 +389,15 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ "${desktop_xr}" -eq 1 ] && [ "${smoke_explicit}" -eq 1 ]; then
+    echo "--desktop-xr is the real persistent run verb; it renders the mclone world and cannot be combined with --smoke." >&2
+    exit 1
+fi
+if [ "${no_window}" -eq 1 ] && [ "${desktop_xr}" -ne 1 ]; then
+    echo "--no-window requires --desktop-xr (the smoke gates are already windowless)." >&2
+    exit 1
+fi
 
 need_cmd cargo
 
@@ -444,12 +477,28 @@ if [ "${release}" -eq 1 ]; then
     cargo_build_cmd=(cargo build --release --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
     cargo_run_cmd=(cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client --features xr)
 fi
-if [ "${smoke}" = "mclone" ]; then
+if [ "${desktop_xr}" -eq 1 ]; then
+    # Real desktop XR run verb: persistent by default (no --frames injection so
+    # the run holds until quit), companion window on unless --no-window. An
+    # explicit --frames still bounds it for a validation run; --xr-forever in
+    # extra args is accepted (and redundant) by the CLI.
+    app_args=(--desktop-xr)
+    if [ "${no_window}" -eq 1 ]; then
+        app_args+=(--no-window)
+    fi
+    if [ "${frames_explicit}" -eq 1 ]; then
+        app_args+=(--frames "${frames}")
+    fi
+    if [ -n "${view_pose}" ]; then
+        app_args+=(--view-pose "${view_pose}")
+    fi
+    app_args+=("${mclone_args[@]}")
+elif [ "${smoke}" = "mclone" ]; then
     app_args=(--xr-mclone-smoke --frames "${frames}" "${mclone_args[@]}")
 else
     app_args=(--xr-clear-smoke --frames "${frames}" "${mclone_args[@]}")
 fi
-if [ -n "${view_pose}" ]; then
+if [ "${desktop_xr}" -ne 1 ] && [ -n "${view_pose}" ]; then
     if [ "${smoke}" != "mclone" ]; then
         echo "--view-pose requires --smoke mclone" >&2
         exit 1
@@ -485,7 +534,15 @@ fi
 
 export RUST_LOG="${RUST_LOG:-warn,mclone_native_client=info}"
 
-echo "Starting mclone XR smoke..."
+if [ "${desktop_xr}" -eq 1 ]; then
+    if [ "${frames_explicit}" -eq 1 ]; then
+        echo "Starting mclone desktop XR run (bounded to ${frames} frames)..."
+    else
+        echo "Starting mclone desktop XR run (persistent; close the companion window or headset menu to quit)..."
+    fi
+else
+    echo "Starting mclone XR smoke..."
+fi
 printf 'Command:'
 quote_command "${cargo_run_cmd[@]}" -- "${app_args[@]}"
 (

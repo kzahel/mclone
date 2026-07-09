@@ -10,6 +10,6 @@ if not exist "%START_XR%" (
 )
 
 echo Starting interactive mclone desktop OpenXR...
-echo Command: "%START_XR%" --vdxr --mclone --forever %*
-call "%START_XR%" --vdxr --mclone --forever %*
+echo Command: "%START_XR%" --vdxr --desktop-xr %*
+call "%START_XR%" --vdxr --desktop-xr %*
 exit /b %ERRORLEVEL%

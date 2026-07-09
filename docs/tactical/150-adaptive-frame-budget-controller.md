@@ -383,7 +383,7 @@ Host-loop inventory (2026-07-06; raw material for the mapping table):
 | Flat Android winit | `apps/mclone-android-client` | `render()` in `src/lib.rs`, inline against `NativeSingleViewSessionRuntime` |
 | Web RAF + workers | `apps/mclone-web-client` | `tickFrame` (`www/mclone-web-app.ts`) -> `web_canvas.rs` streaming-frame path; server tick `web_server_worker.rs::tick` on a worker `setInterval`; separate render-compile worker |
 | Android XR OpenXR | `apps/mclone-android-xr-client` | `run_mclone_frame_loop` (`src/lib.rs`), plus the proof/perf harness loops |
-| Desktop XR OpenXR | `apps/mclone-native-client` | `xr_clear_smoke::run_mclone` |
+| Desktop XR OpenXR | `apps/mclone-native-client` | `desktop_xr::run_mclone` / `desktop_xr::run_desktop` |
 | Headless/offscreen/perf | `apps/mclone-native-client` | `headless.rs`, `offscreen_flat_client.rs`, `perf.rs` fixed-frame loops |
 | Integrated server runner | `crates/mclone-server` | `runner.rs::run_native_integrated_server_loop` (wall-clock, cadence-driven) |
 | Dedicated server | `apps/mclone-dedicated-server` | `run_server_loop_inner` (`src/main.rs`) — command-driven, one gameplay tick per client command, no wall-clock slack |

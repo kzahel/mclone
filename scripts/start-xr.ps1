@@ -6,6 +6,8 @@ param(
     [string]$Smoke = "clear",
     [int]$Frames = 120,
     [switch]$Forever,
+    [switch]$DesktopXr,
+    [switch]$NoWindow,
     [ValidateSet("virtual-desktop", "active", "json", "environment")]
     [string]$Runtime = "virtual-desktop",
     [switch]$UseActiveRuntime,
@@ -59,6 +61,12 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 
 if ($Forever -and $PSBoundParameters.ContainsKey("Frames")) {
     Write-Error "-Forever cannot be combined with -Frames."
+}
+if ($DesktopXr -and $PSBoundParameters.ContainsKey("Smoke")) {
+    Write-Error "-DesktopXr is the real persistent run verb; it renders the mclone world and cannot be combined with -Smoke."
+}
+if ($NoWindow -and -not $DesktopXr) {
+    Write-Error "-NoWindow requires -DesktopXr (the smoke gates are already windowless)."
 }
 
 $platformSupported =
@@ -164,29 +172,49 @@ try {
         $env:RUST_LOG = "warn,mclone_native_client=info"
     }
 
-    $smokeFlag = if ($Smoke -eq "mclone") { "--xr-mclone-smoke" } else { "--xr-clear-smoke" }
-    if ($ViewPose -and $Smoke -ne "mclone") {
-        Write-Error "-ViewPose requires -Smoke mclone."
-    }
-    $appArgs = @($smokeFlag)
-    if ($Forever) {
-        $appArgs += "--xr-forever"
-    } else {
-        $appArgs += @("--frames", "$Frames")
-    }
-    if ($ViewPose) {
-        $appArgs += @("--view-pose", $ViewPose)
-    }
-    if ($XrUnderwaterMode) {
-        if ($Smoke -ne "mclone") {
-            Write-Error "-XrUnderwaterMode requires -Smoke mclone."
+    if ($DesktopXr) {
+        # Real desktop XR run verb: persistent by default (no --frames injection),
+        # companion window on unless -NoWindow. An explicit -Frames still bounds a
+        # validation run.
+        $appArgs = @("--desktop-xr")
+        if ($NoWindow) {
+            $appArgs += "--no-window"
         }
-        $appArgs += @("--xr-underwater-mode", $XrUnderwaterMode)
+        if ($PSBoundParameters.ContainsKey("Frames")) {
+            $appArgs += @("--frames", "$Frames")
+        }
+        if ($ViewPose) {
+            $appArgs += @("--view-pose", $ViewPose)
+        }
+        if ($XrUnderwaterMode) {
+            $appArgs += @("--xr-underwater-mode", $XrUnderwaterMode)
+        }
+    } else {
+        $smokeFlag = if ($Smoke -eq "mclone") { "--xr-mclone-smoke" } else { "--xr-clear-smoke" }
+        if ($ViewPose -and $Smoke -ne "mclone") {
+            Write-Error "-ViewPose requires -Smoke mclone."
+        }
+        $appArgs = @($smokeFlag)
+        if ($Forever) {
+            $appArgs += "--xr-forever"
+        } else {
+            $appArgs += @("--frames", "$Frames")
+        }
+        if ($ViewPose) {
+            $appArgs += @("--view-pose", $ViewPose)
+        }
+        if ($XrUnderwaterMode) {
+            if ($Smoke -ne "mclone") {
+                Write-Error "-XrUnderwaterMode requires -Smoke mclone."
+            }
+            $appArgs += @("--xr-underwater-mode", $XrUnderwaterMode)
+        }
     }
     $appArgs += $McloneArgs
     $runCommand = $cargoRun + @("--") + $appArgs
 
-    Write-Host "Starting mclone XR $Smoke smoke..."
+    $runLabel = if ($DesktopXr) { "desktop XR run" } else { "$Smoke smoke" }
+    Write-Host "Starting mclone $runLabel..."
     Write-CommandLine $runCommand
     Push-Location $RepoRoot
     try {

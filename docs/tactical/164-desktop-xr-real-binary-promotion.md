@@ -1,8 +1,9 @@
 # 164: Desktop XR Real-Binary Promotion
 
-Status: active 2026-07-09; Slices 1 (module rename) + 2 (real `--desktop-xr`
-verb, persistent default, `--no-window`) + 3 (companion window, graceful quit)
-landed. Remaining: Slice 4 (launcher persistent path + docs).
+Status: complete 2026-07-09; all four slices landed — 1 (module rename), 2 (real
+`--desktop-xr` verb, persistent default, `--no-window`), 3 (companion window,
+graceful quit), 4 (launcher persistent path + docs). Follow-up outside this doc:
+the headset mirror into the companion window (see Non-Goals).
 
 Workstream: native Rust desktop platform glue (`mclone-native-client`) plus the
 shared XR frame interior it already drives. Desktop validation first; the frame
@@ -213,19 +214,56 @@ Ordered so each slice lands independently and keeps `native:xr:*` green.
   was driven by bringing the WiVRn host/adb/Quest client up manually and
   launching the binary directly with the WiVRn runtime env.
 
-### Slice 4 — Launcher + docs
+### Slice 4 — Launcher + docs — LANDED 2026-07-09
 
-- `scripts/start-xr.sh`: add a persistent/real launch path that does **not**
-  inject `--frames` (so `--xr-forever` / the real verb is reachable), default
-  the interactive launcher to `--smoke mclone`, and add a `--headless` / window
-  passthrough. Keep the bounded `--frames N` path for CI. Mirror the equivalent
-  on `scripts/start-xr.ps1` / `start-xr.bat` / `start-desktop-xr.bat` and add a
-  `pnpm` script for the real run alongside the existing `native:xr:*` gates.
-- Docs: update `docs/platforms.md` (the Desktop OpenXR row, line ~20, currently
-  "active XR lane" described only via smoke gates) to describe the real desktop
-  XR run mode plus the retained smoke/headless gates; refresh the CLI usage
-  strings (`cli.rs:1880-1881`); and update this doc + the README index as slices
-  land.
+- **`scripts/start-xr.sh`**: added `--desktop-xr` (and `--no-window`) script
+  flags selecting the real verb. The real path emits `--desktop-xr` and does
+  **not** inject `--frames` (persistent by default); an explicit `--frames N`
+  still bounds a validation run, and `--no-window` passes through. Guards mirror
+  the CLI: `--desktop-xr` cannot combine with `--smoke` (it always renders the
+  mclone world), and `--no-window` requires `--desktop-xr`. The bounded smoke
+  path (`--smoke clear|mclone --frames N`) is untouched, so the `native:xr:*` CI
+  gates keep their exact args. `--wivrn-usb --desktop-xr` brings the WiVRn host
+  up and the cleanup trap tears it down on quit.
+  - Decision: I did **not** flip the global `--smoke clear` default to `mclone`.
+    "Default the interactive launcher to mclone" is satisfied by `--desktop-xr`
+    always rendering the world; flipping the smoke default would silently change
+    the CI gates that call `start-xr.sh` without `--smoke`. The interactive real
+    run is `--desktop-xr`; smoke defaults stay conservative.
+- **`scripts/start-xr.ps1`**: added `-DesktopXr` / `-NoWindow` switches with the
+  same semantics (no `--frames` unless `-Frames` explicit; guards for
+  `-DesktopXr`+`-Smoke` and `-NoWindow` without `-DesktopXr`).
+- **`scripts/start-xr.bat`**: added `--desktop-xr`/`--no-window` (and PascalCase
+  aliases) passthrough to the PowerShell launcher, plus help/example lines.
+- **`scripts/start-desktop-xr.bat`**: the Windows interactive launcher now calls
+  `--vdxr --desktop-xr` instead of `--vdxr --mclone --forever`, so it uses the
+  real verb (companion window + non-headset quit) rather than the windowless
+  persistent smoke.
+- **`package.json`**: added `native:xr:mac:wivrn:desktop`
+  (`start-xr.sh --runtime wivrn --wivrn-usb --desktop-xr`) and a generic
+  `native:xr:desktop`; the existing `native:xr:windows:interactive`
+  (`start-desktop-xr.bat`) now drives the real verb. All bounded `native:xr:*`
+  gates are unchanged.
+- **Docs**: `docs/platforms.md` Desktop OpenXR row now describes the two run
+  intents (real persistent `--desktop-xr` run vs the retained bounded
+  smoke/headless gates) and the single graceful quit, and the validation block
+  gained the real-run commands. The CLI `--help` string (already accurate from
+  Slice 2) gained the quit-path sentence. The living cross-refs to the old
+  module path were repointed: `docs/frame-pipeline-accounting.md` →
+  `desktop_xr.rs`/`run_smoke_frames`, `tactical/150` §386 →
+  `desktop_xr::run_mclone` / `run_desktop`. Historical tactical records
+  (081/083/086/130/144/145/158) are intentionally left as-is.
+- **Validated (Mac WiVRn USB, headset connected):** `bash -n start-xr.sh` clean;
+  the new guards reject `--desktop-xr --smoke mclone` and `--no-window` alone;
+  `start-xr.sh --desktop-xr --check-only` still just checks. End-to-end via the
+  launcher: `start-xr.sh --wivrn-usb --desktop-xr --frames 120` printed
+  "Starting mclone desktop XR run (bounded to 120 frames)", rendered the world
+  (165 sections, 2 actors), hit EXITING and "run complete"; and
+  `start-xr.sh --wivrn-usb --desktop-xr` (no `--frames`) ran unbounded with the
+  companion window up and the WiVRn host reaped by the trap on exit. The Windows
+  launcher edits (`start-xr.ps1`/`.bat`/`start-desktop-xr.bat`) are mechanical
+  mirrors and were **not** run this session (no Windows host); a Windows VDXR
+  pass via `native:xr:windows:interactive` is the residual check.
 
 ## Non-Goals / Follow-ups
 

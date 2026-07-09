@@ -50,6 +50,8 @@
     "native:xr:mac:wivrn:check": "bash ./scripts/start-xr.sh --runtime wivrn --check-only",
     "native:xr:mac:wivrn:smoke": "bash ./scripts/start-xr.sh --runtime wivrn --wivrn-usb --frames 2",
     "native:xr:mac:wivrn:mclone": "bash ./scripts/start-xr.sh --runtime wivrn --wivrn-usb --smoke mclone --frames 120",
+    "native:xr:mac:wivrn:desktop": "bash ./scripts/start-xr.sh --runtime wivrn --wivrn-usb --desktop-xr",
+    "native:xr:desktop": "bash ./scripts/start-xr.sh --desktop-xr",
     "native:xr:mac:wivrn:underwater:midpoint": "bash ./scripts/start-xr.sh --runtime wivrn --wivrn-usb --smoke mclone --xr-underwater-mode midpoint --frames 120",
     "native:xr:mac:wivrn:underwater:per-eye": "bash ./scripts/start-xr.sh --runtime wivrn --wivrn-usb --smoke mclone --xr-underwater-mode per-eye --frames 120",
     "native:xr:windows:check": "scripts\\start-xr.bat --check-only --runtime environment --no-pause",

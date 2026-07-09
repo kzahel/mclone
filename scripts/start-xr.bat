@@ -140,6 +140,26 @@ if /I "%~1"=="-Forever" (
     shift
     goto parse_args
 )
+if /I "%~1"=="--desktop-xr" (
+    call :append_arg "-DesktopXr"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-DesktopXr" (
+    call :append_arg "-DesktopXr"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="--no-window" (
+    call :append_arg "-NoWindow"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-NoWindow" (
+    call :append_arg "-NoWindow"
+    shift
+    goto parse_args
+)
 if /I "%~1"=="--view-pose" goto parse_view_pose
 if /I "%~1"=="-ViewPose" goto parse_view_pose
 if /I "%~1"=="--xr-underwater-mode" (
@@ -298,8 +318,11 @@ echo   --vdxr                 Alias for --runtime virtual-desktop.
 echo   --active-runtime       Alias for --runtime active.
 echo   --smoke clear^|mclone   Select the smoke mode. Default: clear.
 echo   --mclone               Alias for --smoke mclone.
-echo   --frames N             Set the XR smoke frame budget. Default: 120.
+echo   --frames N             Set the XR smoke frame budget (or bound a --desktop-xr run). Default: 120.
 echo   --forever              Run until the OpenXR session exits or the app is closed.
+echo   --desktop-xr           Real persistent desktop XR run verb (renders the mclone
+echo                          world with a companion window; quit via window Close or headset menu).
+echo   --no-window            Suppress the companion window (requires --desktop-xr).
 echo   --view-pose X,Y,Z,YAW  Map headset startup pose to mclone world pose.
 echo   --no-quest-launch      Reuse an already-connected headset session.
 echo   --no-quest-restore     Leave Quest wake/proximity state untouched after run.
@@ -314,6 +337,7 @@ echo   scripts\start-xr.bat --check-only --runtime environment
 echo   scripts\start-xr.bat --vdxr --frames 2
 echo   scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --frames 120
 echo   scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --forever --no-quest-restore
+echo   scripts\start-xr.bat --vdxr --desktop-xr
 exit /b 0
 
 :args_done
