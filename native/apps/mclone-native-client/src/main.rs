@@ -9,7 +9,6 @@ mod camera;
 mod cli;
 mod flat_client_driver;
 mod frame_pacing;
-mod frame_pipeline_accounting;
 mod headless;
 mod offscreen_flat_client;
 mod perf;

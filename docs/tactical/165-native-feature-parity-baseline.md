@@ -1,7 +1,8 @@
 # 165: Native Feature-Parity Baseline And Exception Burn-Down
 
 Status: active 2026-07-09. Slice 1 (baseline mechanism + flat-Android far LOD)
-landed in `da719dda`; the remaining exceptions are open burn-down slices.
+landed in `da719dda`. Slice 2a (shared frame-pipeline accountant owner) landed
+2026-07-09; the remaining exceptions are open burn-down slices.
 
 Workstream: native Rust shared client-experience policy in `mclone-app-runtime`,
 desktop flat, shared XR scene, flat Android, and Android XR. Web is the one
@@ -119,10 +120,34 @@ still rejects.
 | Platform | Feature | Current gap |
 |---|---|---|
 | Flat Android | `TravelAssist` | Effect handler is a silent no-op; needs camera travel-assist wiring. |
-| Flat Android | `FramePipelineOverlay` | Effect handler rejects; needs an Android overlay renderer. |
-| Flat Android | `DebugDiagnostics` | Effect handler rejects; needs an Android diagnostics panel. |
+| Flat Android | `FramePipelineOverlay` | **Not a renderer gap** — the overlay renderer (`render_frame_pipeline_overlay`) is already shared and drives desktop *and* XR. The gap is a missing *data source*: the frame-pipeline accountant lives in the desktop app crate (`DesktopFramePipelineAccounting`), so Android has no `FramePipelineReport` producer to attach and stubs the effect + hard-codes visibility `false`. |
+| Flat Android | `DebugDiagnostics` | Same shape: the draw path (`render_debug_overlay_at`) is shared, but the stats aggregator (`DebugPaneStats`) is desktop-app-local. Android already owns every input it aggregates but has no shared aggregator to build the `DebugOverlay`. |
 | Flat Android | `ServerSimulationCadence` | Effect handler rejects; needs integrated-server cadence wiring. |
 | XR (desktop + Android) | `ServerSimulationCadence` | Not yet wired on the XR scene path. |
+
+### Diagnostics producer ownership (root cause behind the two overlay rows)
+
+The `FramePipelineOverlay` and `DebugDiagnostics` rows are **not** independent
+"write an Android panel" tasks — they share one root cause: the diagnostics
+*content renderers* are correctly shared in `mclone-ui` (and consumed unchanged by
+flat desktop, flat Android's HUD path, and XR world-quads alike), but the
+diagnostics *data producers* are stranded in the desktop app crate. This is the
+same "no shared owner" gravity that produced the original profile drift, one layer
+down. Symptom of the drift: XR already hand-rolls a near-1:1 duplicate of the
+desktop accountant (`XrFramePipelineReporter` vs `DesktopFramePipelineAccounting`),
+so a naive Android port would create a *third* copy.
+
+Owner decision: **`mclone-app-runtime`.** The crate graph makes this the only
+non-cyclic home for code that needs `mclone-ui` and runtime types together
+(`mclone-ui`, `mclone-diagnostics`, and `mclone-render-session` each already sit
+*below* `mclone-app-runtime`, so hosting there would cycle). It also already owns
+the accountant's inputs (`SingleViewRuntimeStats`, `RenderStreamStats`) and the
+`client_experience` effect vocabulary — diagnostics production is runtime
+orchestration, the same engine-policy class this tactical already keeps there.
+The only genuinely app-local inputs are three frame-pacing POD structs
+(`FramePacingMode`, `FramePacingDebugStats`, `FrameTimingStats`), which are pure
+data merely co-located with the winit-bound `FramePacing` driver and can be split
+out cleanly.
 
 Web keeps `FarLod`, `TravelAssist`, `FramePipelineOverlay`, `DebugDiagnostics`,
 and `ServerSimulationCadence` gated with explicit reasons; decided separately on
@@ -133,10 +158,53 @@ threading/perf grounds (far LOD "measure on web first", Tactical 162).
 1. **Flat-Android travel assist.** Wire `SetTravelAssistMode` into the Android
    camera/movement path (desktop `flat_client_driver` is the reference); drop the
    ledger entry and flip the capability.
-2. **Flat-Android frame-pipeline overlay.** Route the shared frame-pipeline
-   overlay through the Android GUI path; drop the ledger entry.
-3. **Flat-Android debug diagnostics.** Route the shared debug-diagnostics panel
-   through the Android GUI path; drop the ledger entry.
+2. **Promote the frame-pipeline accountant to a shared owner, then wire flat
+   Android.** This is primarily a shared-owner refactor, not an Android renderer.
+   - **[LANDED 2026-07-09 — slice 2a]** Relocated `DesktopFramePipelineAccounting`
+     into `mclone_app_runtime::frame_pipeline_accounting` as the surface-neutral
+     `FramePipelineAccountant` (shared `FrameAccumulator` + queue trackers +
+     revision/latest-report bookkeeping; each surface still feeds its own measured
+     stage/surface timings — that feeding is legitimately per-loop). Its inputs
+     (`SingleViewRuntimeStats`, `RenderStreamStats`, `RenderSectionSyncTiming`)
+     already lived in `mclone-app-runtime`, so the move added no new crate edges.
+     Desktop `flat_client_driver` repoints to the shared type; the desktop-local
+     module and its tests are deleted. Validated: `mclone-app-runtime` tests
+     (incl. the two moved accountant tests) pass; desktop and wasm builds clean.
+   - **[deferred — slice 2c]** Collapse `XrFramePipelineReporter` onto the shared
+     accountant. Reading it in full showed it is **not** a mechanical duplicate:
+     it uses a single-shot `record_frame` feed (vs the desktop push API), a
+     `NearestRank` percentile config, `completed_results` enqueue/dequeue queue-age
+     semantics (vs plain `reconcile_depth`), an XR-only peer-thread panel, and
+     XR-local `XrTerrain*` input types. Collapsing it changes XR-pixel-visible
+     output and, per the XR render-path guardrail, needs desktop-XR + Android-XR
+     capture validation — so it is its own slice, not a rider on the relocation.
+     Recommended shape: generalize the shared accountant to accept a
+     `FrameAccountingConfig` directly plus a `record_prebuilt(observation,
+     queue_panel, extras)` entry point (extras = optional peer-thread + budget
+     panels), and factor a neutral queue-depth input struct so both surfaces feed
+     one queue-tracker set; preserve XR's percentile and age semantics exactly and
+     re-run the XR captures.
+   - **[next — slice 2b]** On flat Android, instantiate the shared accountant,
+     un-gate the profile, replace the `SetFramePipelineOverlayVisible(_)` no-op
+     with a real `bool` handler, feed the flag through `current_ui_render_state`,
+     and populate `hud.frame_pipeline`. The draw link already exists, but note:
+     the Android render loop currently instruments **no** per-stage timings, so
+     this slice must first add `Instant` brackets across its loop (frame-active
+     wall, runtime-poll, the `_timed` section-sync variant, upload-apply, render,
+     surface acquire/submit/present) and a target-frame-period source before the
+     accountant has anything to report. Then drop the ledger entry and capture a
+     tablet-AVD frame-pipeline overlay screenshot.
+3. **Promote the debug-stats aggregator, then wire flat Android.** Same pattern.
+   - Move the three frame-pacing POD structs out of the winit-bound
+     `frame_pacing.rs` into a shared `mclone-app-runtime` location (leave the
+     `FramePacing` driver in the desktop app), then relocate the
+     `DebugPaneStats -> DebugOverlay` aggregator beside them.
+   - On flat Android, feed the aggregator from its existing inputs, un-gate the
+     profile, replace the `SetDebugDiagnosticsVisible(_)` no-op with a real `bool`
+     handler, feed the flag through `current_ui_render_state`, and populate
+     `hud.debug`. Drop the ledger entry. (XR may later converge its own
+     `debug_diagnostics_overlay` stat assembly onto the shared aggregator, but
+     that is optional and not required to clear this Android row.)
 4. **Server simulation cadence on XR + flat Android.** Wire cadence into the
    integrated-server option path for the XR scene runtime and the Android
    renderer; drop both ledger entries. Cadence is only meaningful for

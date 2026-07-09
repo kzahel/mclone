@@ -1,31 +1,42 @@
+//! Shared frame-pipeline accountant.
+//!
+//! Turns a single-view render loop's per-frame stage/surface timing and runtime
+//! stats into a [`FramePipelineReport`] for the shared frame-pipeline overlay. It
+//! is surface-neutral: its inputs ([`SingleViewRuntimeStats`], [`RenderStreamStats`],
+//! [`RenderSectionSyncTiming`]) are all shared runtime types, so flat desktop, flat
+//! Android, and any other single-view native surface feed the same accountant. Each
+//! surface still measures its own stage timings — that feeding is legitimately
+//! per-loop; only the accounting structure is shared.
+
 use std::sync::Arc;
 
-use mclone_app_runtime::frame_render::RenderStreamStats;
-use mclone_app_runtime::{RenderSectionSyncTiming, SingleViewRuntimeStats};
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator,
     FrameObservation, FramePipelineReport, QueueAgeReport, QueueAgeTracker, QueueId,
     QueuePanelReport, StageId, StageSpan,
 };
 
+use crate::frame_render::RenderStreamStats;
+use crate::{RenderSectionSyncTiming, SingleViewRuntimeStats};
+
 #[derive(Clone, Debug)]
-pub(crate) struct DesktopFramePipelineAccounting {
+pub struct FramePipelineAccountant {
     target_period_ms: Option<f64>,
     accumulator: FrameAccumulator,
     pending: Option<FrameObservation>,
-    queue_trackers: DesktopFrameQueueTrackers,
+    queue_trackers: FramePipelineQueueTrackers,
     now_ms: f64,
     latest_report: Option<Arc<FramePipelineReport>>,
     revision: u64,
 }
 
-impl Default for DesktopFramePipelineAccounting {
+impl Default for FramePipelineAccountant {
     fn default() -> Self {
         Self {
             target_period_ms: None,
             accumulator: FrameAccumulator::new(frame_accounting_config(None)),
             pending: None,
-            queue_trackers: DesktopFrameQueueTrackers::new(),
+            queue_trackers: FramePipelineQueueTrackers::new(),
             now_ms: 0.0,
             latest_report: None,
             revision: 0,
@@ -33,23 +44,23 @@ impl Default for DesktopFramePipelineAccounting {
     }
 }
 
-impl DesktopFramePipelineAccounting {
+impl FramePipelineAccountant {
     /// Opens a new frame. `frame_period_ms` is the real inter-frame interval and
     /// only advances the queue-age clock; the observation's wall is not the period
     /// but the frame's own active span, stamped in `finish_frame` so that it covers
     /// exactly the stage spans recorded for this frame (see conservation invariant).
-    pub(crate) fn begin_frame(&mut self, frame_period_ms: f64, target_period_ms: Option<f64>) {
+    pub fn begin_frame(&mut self, frame_period_ms: f64, target_period_ms: Option<f64>) {
         self.refresh_target(target_period_ms);
         self.now_ms += sanitize_ms(frame_period_ms);
         let frame_index = self.accumulator.len() as u64 + 1;
         self.pending = Some(FrameObservation::new(frame_index, 0.0));
     }
 
-    pub(crate) fn record_runtime_poll(&mut self, elapsed_ms: f64) {
+    pub fn record_runtime_poll(&mut self, elapsed_ms: f64) {
         self.push_stage(StageSpan::new(StageId::HostSessionCommands, elapsed_ms));
     }
 
-    pub(crate) fn record_render_section_sync(
+    pub fn record_render_section_sync(
         &mut self,
         timing: RenderSectionSyncTiming,
         total_sync_ms: f64,
@@ -59,7 +70,7 @@ impl DesktopFramePipelineAccounting {
         }
     }
 
-    pub(crate) fn record_upload_apply(&mut self, upload_ms: f64) {
+    pub fn record_upload_apply(&mut self, upload_ms: f64) {
         self.push_stage(StageSpan::new(StageId::UploadApply, upload_ms));
     }
 
@@ -67,7 +78,8 @@ impl DesktopFramePipelineAccounting {
     /// span (frame start to post-present), measured from the same clock as the
     /// stage spans, so it is guaranteed to cover their sum and satisfy the
     /// accumulator's conservation invariant regardless of pacing sleep or hitches.
-    pub(crate) fn finish_frame(
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_frame(
         &mut self,
         frame_active_ms: f64,
         render_ms: f64,
@@ -106,7 +118,7 @@ impl DesktopFramePipelineAccounting {
         self.latest_report = Some(Arc::new(report));
     }
 
-    pub(crate) fn latest_report(&self) -> Option<(Arc<FramePipelineReport>, u64)> {
+    pub fn latest_report(&self) -> Option<(Arc<FramePipelineReport>, u64)> {
         self.latest_report
             .as_ref()
             .map(|report| (report.clone(), self.revision))
@@ -133,7 +145,7 @@ impl DesktopFramePipelineAccounting {
 }
 
 #[derive(Clone, Debug)]
-struct DesktopFrameQueueTrackers {
+struct FramePipelineQueueTrackers {
     inbound_updates: QueueAgeTracker,
     host_publication: QueueAgeTracker,
     host_publication_runner: QueueAgeTracker,
@@ -144,7 +156,7 @@ struct DesktopFrameQueueTrackers {
     upload_work: QueueAgeTracker,
 }
 
-impl DesktopFrameQueueTrackers {
+impl FramePipelineQueueTrackers {
     fn new() -> Self {
         Self {
             inbound_updates: QueueAgeTracker::new(QueueId::InboundUpdates),
@@ -304,8 +316,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_accounting_builds_latest_report_with_queues() {
-        let mut accounting = DesktopFramePipelineAccounting::default();
+    fn accountant_builds_latest_report_with_queues() {
+        let mut accounting = FramePipelineAccountant::default();
         accounting.begin_frame(16.0, Some(16.0));
         accounting.record_runtime_poll(1.0);
         accounting.record_upload_apply(2.0);
@@ -340,8 +352,8 @@ mod tests {
     }
 
     #[test]
-    fn desktop_accounting_marks_remote_host_publication_queue() {
-        let mut accounting = DesktopFramePipelineAccounting::default();
+    fn accountant_marks_remote_host_publication_queue() {
+        let mut accounting = FramePipelineAccountant::default();
         accounting.begin_frame(16.0, Some(16.0));
         accounting.finish_frame(
             16.0,
@@ -350,7 +362,7 @@ mod tests {
             0.25,
             0.5,
             Some(runtime_stats(
-                mclone_app_runtime::host_mode::SingleViewHostMode::RemoteDedicated,
+                crate::host_mode::SingleViewHostMode::RemoteDedicated,
             )),
             RenderStreamStats::default(),
             BudgetDecisionPanelReport::empty(),
@@ -382,9 +394,7 @@ mod tests {
         assert_eq!(inbound_updates.depth, 2);
     }
 
-    fn runtime_stats(
-        host_mode: mclone_app_runtime::host_mode::SingleViewHostMode,
-    ) -> SingleViewRuntimeStats {
+    fn runtime_stats(host_mode: crate::host_mode::SingleViewHostMode) -> SingleViewRuntimeStats {
         SingleViewRuntimeStats {
             host_mode,
             server_runner_kind: None,

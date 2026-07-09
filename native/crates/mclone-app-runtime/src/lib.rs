@@ -7,6 +7,7 @@ pub mod client_connection;
 pub mod client_experience;
 pub mod client_session_policy;
 pub mod far_lod;
+pub mod frame_pipeline_accounting;
 pub mod frame_render;
 pub mod host_mode;
 pub mod lod_coverage;

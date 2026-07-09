@@ -19,6 +19,7 @@ use mclone_app_runtime::client_session_policy::{
 use mclone_app_runtime::far_lod::{
     MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
+use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
@@ -88,7 +89,6 @@ use mclone_ui::{
 use crate::camera::SpectatorCamera;
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{FramePacingMode, FramePacingUiState, FrameTimingStats};
-use crate::frame_pipeline_accounting::DesktopFramePipelineAccounting;
 use crate::scene_runtime::{
     WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
 };
@@ -167,7 +167,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
-    frame_pipeline_accounting: DesktopFramePipelineAccounting,
+    frame_pipeline_accounting: FramePipelineAccountant,
     latest_target_frame_ms: Option<f64>,
     render_budget: DesktopRenderBudgetController,
     world_catalog: Option<NativeWorldCatalog>,
@@ -470,7 +470,7 @@ impl FlatClientDriver {
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
-            frame_pipeline_accounting: DesktopFramePipelineAccounting::default(),
+            frame_pipeline_accounting: FramePipelineAccountant::default(),
             latest_target_frame_ms: None,
             render_budget: DesktopRenderBudgetController::default(),
             world_catalog: scene.world_root.clone().map(NativeWorldCatalog::new),
@@ -2689,7 +2689,7 @@ impl FlatClientDriver {
         self.interaction = ClientInteractionController::new();
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
-        self.frame_pipeline_accounting = DesktopFramePipelineAccounting::default();
+        self.frame_pipeline_accounting = FramePipelineAccountant::default();
         self.latest_target_frame_ms = None;
         self.render_budget = DesktopRenderBudgetController::default();
         self.underwater_effect.reset();
