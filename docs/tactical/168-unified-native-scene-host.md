@@ -15,7 +15,8 @@ per-frame loop onto the shared Mono host) landed 2026-07-10; Slice 7d
 host) landed 2026-07-10; Slice 7e (shared optional camera-reconcile timing and
 scene-local timed-fork deletion) landed 2026-07-10; Slice 8 (flat Android onto
 the shared Mono host, shared touch semantics, and native capability-ledger
-closeout) landed 2026-07-10. (Slices 0–2 are
+closeout) landed 2026-07-10; Slice 9 (headset-free synthetic stereo capture
+and keyboard-fed XR semantics) landed 2026-07-10. (Slices 0–2 are
 independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
 Post-Slice-3
 review corrections landed
@@ -1340,7 +1341,7 @@ Result:
   construction, or remote transport adapter. The existing shared-host
   startup-ready log wording is now visible in Android logcat.
 
-### Slice 9: XR-emulation lane on desktop (acceptance proof)
+### Slice 9: XR-emulation lane on desktop (acceptance proof) — DONE (2026-07-10)
 
 Goal: prove the unification by running the stereo scene with a synthetic head
 — no headset, no OpenXR runtime, no OpenXR loader initialization.
@@ -1383,6 +1384,55 @@ real stereo path is untouched.
 Exit criteria: the acceptance sentence from the top of this doc holds —
 "desktop can run the stereo scene with a fake head" — demonstrated by a
 committed-to-`/tmp` capture and a documented command (docs land in Slice 10).
+
+Implementation (2026-07-10): the default, non-`xr` desktop binary now exposes
+`--xr-emulation-screenshot <path>`. `OffscreenDriver` selects Mono or Stereo
+target ownership while the same `mclone-scene` host retains startup, runtime,
+UI, locomotion, admission, and per-eye rendering. The Stereo path constructs
+two host-neutral views at a fixed 0.064-block IPD with a symmetric 90-degree
+vertical FoV, renders ordinary per-eye textures, reads them back, and stitches
+one side-by-side PNG. It does not reference or initialize the OpenXR host,
+loader, session, or swapchain code.
+
+The optional repeatable `--xr-emulation-key <physical-code>` input goes through
+`KeyboardMouseInputAdapter`, then the shared `mclone-input` flat-frame to
+neutral-controller projection, then `mclone-scene::apply_frame_locomotion`.
+WASD/arrow turn/jump/descend/sprint/sneak therefore exercise the real XR
+left-stick, right-stick snap-turn, and button semantics rather than a second
+camera path. The synthetic tracked head remains fixed in stage space; the
+scene's tracking transform maps it to the engine camera/player root, so engine
+locomotion and snap-turn drive the captured head. Gamepad adoption remains the
+explicit Slice 10 decision; a full interactive window remains out of scope.
+
+Reproduce the headset-free acceptance capture from the repository root:
+
+```bash
+pnpm native:xr-emulation:smoke
+```
+
+This writes `/tmp/mclone-xr-emulation.png`. `--width` and `--height` are
+per-eye. To exercise keyboard-fed XR locomotion before the final capture, add
+repeatable physical codes and a frame count to the underlying command, for
+example `--xr-emulation-key KeyW --xr-emulation-key ArrowLeft
+--xr-emulation-input-frames 8`.
+
+Validation (2026-07-10): the inspected 1280x640 side-by-side capture has 166
+resident sections, 24 drawn sections, 32 GUI commands, two world-panel eye
+composites, and 268,570 differing eye pixels. Both eyes show terrain and the
+same world-space menu through distinct projections; the near tree trunk and
+foliage visibly shift while distant canopy geometry moves much less. A second
+`KeyW` + `ArrowLeft` executable capture retained two UI composites and 140,148
+differing eye pixels after running the shared locomotion/snap-turn path.
+
+The full workspace tests, existing desktop offscreen pixel smoke, browser WASM
+build, scene-host and OpenXR-frame-driver purity gates, flat Android APK, and
+Android XR APK pass; the default native-client dependency graph contains no
+OpenXR or XR-host/graphics crate. The attached Quest 3 session smoke reaches
+OpenXR READY and draws the original world (123 sections / 33 drawn), then
+reaches replacement
+READY for seed 246813579 (43 sections / 10 drawn). No unresolved Slice 9
+correctness issue remains; durable platform/architecture wording and the
+gamepad decision are Slice 10 work.
 
 ### Slice 10: Cleanup, enforcement, docs
 
@@ -1530,8 +1580,7 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 9; Slices 0–8 are implemented. Add the headset-free synthetic
-stereo acceptance lane without initializing OpenXR, then inspect the side-by-side
-capture before Slice 10 cleanup and neutral host renaming. Do not reintroduce
-app-local polling, section upload, diagnostics, session policy, or render
-admission while adding the emulation driver.
+Start with Slice 10; Slices 0–9 are implemented. Preserve the inspected
+headset-free stereo gate while doing cleanup, enforcement, durable docs, and
+neutral host renaming. Do not fold deferred web adoption or unrelated feature
+work into the closeout slice.

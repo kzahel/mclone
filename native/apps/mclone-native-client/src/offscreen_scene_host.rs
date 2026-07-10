@@ -8,13 +8,17 @@ use mclone_app_runtime::frame_pacing::{
 };
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_diagnostics::{BudgetDecisionPanelReport, FrameHostKind};
-use mclone_input::{FlatInputAction, FlatInputFrame, TouchControlsMode};
+use mclone_input::{
+    FlatInputAction, FlatInputFrame, TouchControlsMode, xr_emulation_controllers_from_flat_frame,
+};
 use mclone_mesh::VisibilityGraphBuildStats;
 use mclone_render::chunk::{ChunkCamera, ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+use mclone_render_session::XrView;
 use mclone_scene::{
     HostEffects, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
-    XrStartupViewPose, record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
+    XrStartupViewPose, XrTerrainEyeTarget, XrTerrainFrameSummary, record_mono_frame_pipeline,
+    xr_frame_pipeline_accounting_config,
 };
 use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point};
 
@@ -35,9 +39,26 @@ pub(crate) struct OffscreenFrameClock {
     pub(crate) target_frame_ms: Option<f64>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum OffscreenViewTopology {
+    #[default]
+    Mono,
+    Stereo,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct OffscreenDriverOptions {
     pub(crate) freeze_scheduled_fluid_ticks: bool,
+    view_topology: OffscreenViewTopology,
+}
+
+impl OffscreenDriverOptions {
+    pub(crate) fn mono_with_frozen_scheduled_fluid_ticks(freeze: bool) -> Self {
+        Self {
+            freeze_scheduled_fluid_ticks: freeze,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for OffscreenFrameClock {
@@ -111,6 +132,7 @@ impl HostEffects for OffscreenHostEffects {
 pub(crate) struct OffscreenDriver {
     host: DesktopMonoSceneHost,
     depth: ChunkDepthTarget,
+    right_depth: Option<ChunkDepthTarget>,
     color_format: wgpu::TextureFormat,
     size: [u32; 2],
     clock: OffscreenFrameClock,
@@ -177,24 +199,32 @@ impl OffscreenDriver {
                 freeze_scheduled_fluid_ticks: options.freeze_scheduled_fluid_ticks,
             },
         )?;
-        let mut ui = GameUiHost::new_ingame();
-        ui.set_join_remote_addr(
-            scene
-                .remote_addr
-                .clone()
-                .unwrap_or_else(|| mclone_ui::DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
-        );
-        host.configure_mono_ui(ui, MonoUiContext::default());
+        if options.view_topology == OffscreenViewTopology::Mono {
+            let mut ui = GameUiHost::new_ingame();
+            ui.set_join_remote_addr(
+                scene
+                    .remote_addr
+                    .clone()
+                    .unwrap_or_else(|| mclone_ui::DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
+            );
+            host.configure_mono_ui(ui, MonoUiContext::default());
+        }
         host.set_frame_host_kind(FrameHostKind::HeadlessOffscreenPerf);
-        host.set_display_refresh_hz(None);
+        host.set_display_refresh_hz(
+            (options.view_topology == OffscreenViewTopology::Stereo).then_some(60.0),
+        );
         if let Some(camera) = startup_camera {
             set_host_camera(&mut host, camera);
         }
         let size = [size[0].max(1), size[1].max(1)];
-        host.set_mono_ui_scale(GuiScale::from_pixels(size[0], size[1]));
+        if options.view_topology == OffscreenViewTopology::Mono {
+            host.set_mono_ui_scale(GuiScale::from_pixels(size[0], size[1]));
+        }
         Ok(Self {
             host,
             depth: ChunkDepthTarget::new(device, size[0], size[1]),
+            right_depth: (options.view_topology == OffscreenViewTopology::Stereo)
+                .then(|| ChunkDepthTarget::new(device, size[0], size[1])),
             color_format,
             size,
             clock: OffscreenFrameClock::default(),
@@ -207,12 +237,44 @@ impl OffscreenDriver {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_stereo_emulation(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        size: [u32; 2],
+        scene: &SceneOptions,
+        render_options: TexturedSectionRenderOptions,
+        assets: &WindowSceneAssets,
+        asset_source: &impl mclone_assets::AssetSource,
+    ) -> Result<Self> {
+        Self::new_with_options(
+            device,
+            queue,
+            color_format,
+            size,
+            scene,
+            render_options,
+            assets,
+            asset_source,
+            None,
+            OffscreenDriverOptions {
+                view_topology: OffscreenViewTopology::Stereo,
+                ..OffscreenDriverOptions::default()
+            },
+        )
+    }
+
     pub(crate) fn host(&self) -> &DesktopMonoSceneHost {
         &self.host
     }
 
     pub(crate) fn host_mut(&mut self) -> &mut DesktopMonoSceneHost {
         &mut self.host
+    }
+
+    pub(crate) fn stereo_ui_is_active(&self) -> bool {
+        self.host.mono_ui_is_active()
     }
 
     pub(crate) fn set_clock(&mut self, clock: OffscreenFrameClock) {
@@ -249,6 +311,109 @@ impl OffscreenDriver {
         hud_visible: bool,
     ) -> Result<MonoSceneFrameSummary> {
         self.render_inner(frame, ui, hud_visible, false)
+    }
+
+    pub(crate) fn render_stereo(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [XrView; 2],
+        left_color_view: &wgpu::TextureView,
+        right_color_view: &wgpu::TextureView,
+    ) -> Result<XrTerrainFrameSummary> {
+        let right_depth = self
+            .right_depth
+            .as_ref()
+            .context("stereo render requested from a mono offscreen driver")?;
+        self.host.render_frame(
+            device,
+            queue,
+            views,
+            XrTerrainEyeTarget {
+                color_view: left_color_view,
+                depth: &self.depth,
+                size: self.size,
+            },
+            XrTerrainEyeTarget {
+                color_view: right_color_view,
+                depth: right_depth,
+                size: self.size,
+            },
+        )
+    }
+
+    pub(crate) fn apply_stereo_input_frame(
+        &mut self,
+        frame: FlatInputFrame,
+        views: [XrView; 2],
+    ) -> Result<()> {
+        let controllers = xr_emulation_controllers_from_flat_frame(frame);
+        self.host
+            .apply_frame_locomotion(&controllers, views, None)
+            .context("apply synthetic stereo locomotion")?;
+        Ok(())
+    }
+
+    pub(crate) fn drive_stereo_until_streamed(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [XrView; 2],
+    ) -> Result<()> {
+        if self.right_depth.is_none() {
+            bail!("stereo warmup requested from a mono offscreen driver");
+        }
+        let output_size = self.size;
+        self.resize_target(device, [1, 1]);
+        let make_scratch = |label| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+        };
+        let left = make_scratch("mclone_offscreen_stereo_warmup_left");
+        let right = make_scratch("mclone_offscreen_stereo_warmup_right");
+        let left_view = left.create_view(&wgpu::TextureViewDescriptor::default());
+        let right_view = right.create_view(&wgpu::TextureViewDescriptor::default());
+        let result = (|| {
+            let mut stable = 0usize;
+            for _ in 0..MAX_WARMUP_FRAMES {
+                self.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+                let summary = self.render_stereo(device, queue, views, &left_view, &right_view)?;
+                let eye = self.host.camera_snapshot().eye;
+                let pending = self.host.pending_stream_work(glam::Vec3::new(
+                    eye.x as f32,
+                    eye.y as f32,
+                    eye.z as f32,
+                ));
+                if self.host.local_startup_complete()
+                    && self.host.has_runtime()
+                    && summary.drawn_section_count > 0
+                    && pending == 0
+                {
+                    stable += 1;
+                } else {
+                    stable = 0;
+                }
+                if stable >= STREAM_STABLE_FRAMES {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            bail!("offscreen stereo scene host did not settle after {MAX_WARMUP_FRAMES} frames")
+        })();
+        self.resize_target(device, output_size);
+        result
     }
 
     fn render_inner(
@@ -493,8 +658,12 @@ impl OffscreenDriver {
     fn resize_target(&mut self, device: &wgpu::Device, size: [u32; 2]) {
         self.size = [size[0].max(1), size[1].max(1)];
         self.depth = ChunkDepthTarget::new(device, self.size[0], self.size[1]);
-        self.host
-            .set_mono_ui_scale(GuiScale::from_pixels(self.size[0], self.size[1]));
+        if self.right_depth.is_some() {
+            self.right_depth = Some(ChunkDepthTarget::new(device, self.size[0], self.size[1]));
+        } else {
+            self.host
+                .set_mono_ui_scale(GuiScale::from_pixels(self.size[0], self.size[1]));
+        }
     }
 
     pub(crate) fn apply_input_frame(

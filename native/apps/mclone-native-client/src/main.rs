@@ -21,6 +21,7 @@ mod render_compile_capacity;
 mod scene_runtime;
 mod torch_light_probe;
 mod winit_frame_driver;
+mod xr_emulation;
 
 use crate::app::run_window;
 #[cfg(test)]
@@ -33,8 +34,8 @@ use crate::cli::{
     HeadlessScreenshotUi, LoadingSettlePerfOptions, MovementPerfOptions,
     RemotePlayerVisualSmokeOptions, RendererRebuildSmokeOptions, SceneOptions,
     StartupStreamingPerfOptions, TimedemoOptions, TorchLightProbeOptions, WindowFrameReportOptions,
-    WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
-    parse_screenshot_ui_arg,
+    WindowStartIntent, XrClearSmokeOptions, XrEmulationScreenshotOptions, XrMcloneSmokeOptions,
+    XrUnderwaterMode, XrViewPose, parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, run_renderer_rebuild_smoke, write_actor_review_sheet,
@@ -46,6 +47,7 @@ use crate::perf::{
 };
 use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
 use crate::torch_light_probe::run_torch_light_probe;
+use crate::xr_emulation::run_xr_emulation_screenshot;
 use anyhow::Result;
 #[cfg(test)]
 use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkPos, ChunkSnapshot};
@@ -139,6 +141,24 @@ fn main() -> Result<()> {
                     report.gui_command_count
                 );
             }
+            Ok(())
+        }
+        Cli::XrEmulationScreenshot { options } => {
+            let report = run_xr_emulation_screenshot(&options)?;
+            println!(
+                "XR emulation side-by-side screenshot saved to {} ({}x{} total, {}x{} per eye, {} bytes, {} differing eye pixels, {} sections, {} drawn sections, {} GUI commands, {} eye UI composites)",
+                report.path.display(),
+                report.width,
+                report.height,
+                report.eye_width,
+                report.eye_height,
+                report.byte_len,
+                report.eye_pixel_difference_count,
+                report.section_count,
+                report.drawn_section_count,
+                report.gui_command_count,
+                report.ui_panel_composite_count,
+            );
             Ok(())
         }
         Cli::HeadlessActorReviewSheet { options } => {

@@ -3606,9 +3606,9 @@ pub(crate) fn run_startup_streaming_perf(
                 &assets,
                 &asset_source,
                 Some(&startup_spectator),
-                crate::offscreen_scene_host::OffscreenDriverOptions {
+                crate::offscreen_scene_host::OffscreenDriverOptions::mono_with_frozen_scheduled_fluid_ticks(
                     freeze_scheduled_fluid_ticks,
-                },
+                ),
             )?;
             let playable = driver.drive_to_wait_policy(
                 device,

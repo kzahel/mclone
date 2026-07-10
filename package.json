@@ -44,6 +44,7 @@
     "native:loading-settle:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --loading-settle-perf --loading-settle-distances 5 --debug-passive-showcase false",
     "native:loading-settle:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --loading-settle-perf --loading-settle-distances 5,10,15,20 --debug-passive-showcase false",
     "native:xr:check": "bash ./scripts/start-xr.sh --check-only",
+    "native:xr-emulation:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --xr-emulation-screenshot /tmp/mclone-xr-emulation.png --width 640 --height 640 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time",
     "native:xr:smoke": "bash ./scripts/start-xr.sh --runtime wivrn --frames 2",
     "native:xr:mclone": "bash ./scripts/start-xr.sh --runtime wivrn --smoke mclone --frames 120",
     "native:xr:wivrn-usb": "bash ./scripts/start-xr.sh --runtime wivrn --wivrn-usb --frames 2",

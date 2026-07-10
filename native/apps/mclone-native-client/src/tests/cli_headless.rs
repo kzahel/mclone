@@ -54,6 +54,69 @@ fn cli_parses_headless_dual_view_hud() {
 }
 
 #[test]
+fn cli_parses_xr_emulation_screenshot_and_keyboard_input() {
+    let cli = Cli::parse([
+        "--xr-emulation-screenshot".to_owned(),
+        "/tmp/mclone-xr-emulation.png".to_owned(),
+        "--width".to_owned(),
+        "800".to_owned(),
+        "--height".to_owned(),
+        "700".to_owned(),
+        "--xr-emulation-key".to_owned(),
+        "KeyW".to_owned(),
+        "--xr-emulation-key".to_owned(),
+        "ArrowLeft".to_owned(),
+        "--xr-emulation-input-frames".to_owned(),
+        "12".to_owned(),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        cli,
+        Cli::XrEmulationScreenshot {
+            options: XrEmulationScreenshotOptions {
+                path: PathBuf::from("/tmp/mclone-xr-emulation.png"),
+                eye_width: 800,
+                eye_height: 700,
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+                held_keys: vec![
+                    mclone_input::KeyboardKey::KeyW,
+                    mclone_input::KeyboardKey::ArrowLeft,
+                ],
+                input_frames: 12,
+            },
+        }
+    );
+}
+
+#[test]
+fn cli_rejects_xr_emulation_input_without_capture_mode() {
+    let error = Cli::parse(["--xr-emulation-key".to_owned(), "KeyW".to_owned()]).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("XR emulation input options require --xr-emulation-screenshot")
+    );
+}
+
+#[test]
+fn cli_rejects_xr_emulation_input_frames_without_key() {
+    let error = Cli::parse([
+        "--xr-emulation-screenshot".to_owned(),
+        "/tmp/mclone-xr-emulation.png".to_owned(),
+        "--xr-emulation-input-frames".to_owned(),
+        "4".to_owned(),
+    ])
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("--xr-emulation-input-frames requires --xr-emulation-key")
+    );
+}
+
+#[test]
 fn cli_rejects_headless_dual_view_hud_without_dual_view_capture() {
     let error = Cli::parse([
         "--headless-dual-view-hud".to_owned(),

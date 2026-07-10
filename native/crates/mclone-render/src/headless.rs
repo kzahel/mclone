@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh,
 };
@@ -87,6 +87,26 @@ pub struct HeadlessFrameReport {
     pub height: u32,
     pub byte_len: usize,
     pub non_clear_rgb_pixel_count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessStereoFrameOptions {
+    pub path: PathBuf,
+    /// Width of one eye. The saved side-by-side image is twice this width.
+    pub eye_width: u32,
+    pub eye_height: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeadlessStereoFrameReport {
+    pub path: PathBuf,
+    pub eye_width: u32,
+    pub eye_height: u32,
+    pub width: u32,
+    pub height: u32,
+    pub byte_len: usize,
+    pub non_clear_rgb_pixel_count: usize,
+    pub eye_pixel_difference_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -454,6 +474,92 @@ where
         pixels,
         render_output,
     ))
+}
+
+/// Render two ordinary per-eye textures, read them back, and save one
+/// side-by-side PNG. The callback owns submission because stereo scene hosts
+/// commonly submit each eye through their existing renderer path rather than
+/// a caller-owned command encoder.
+pub fn write_headless_stereo_frame_png<T, F>(
+    options: HeadlessStereoFrameOptions,
+    render: F,
+) -> Result<(HeadlessStereoFrameReport, T)>
+where
+    F: FnOnce(
+        &wgpu::Device,
+        &wgpu::Queue,
+        wgpu::TextureFormat,
+        [u32; 2],
+        &wgpu::TextureView,
+        &wgpu::TextureView,
+    ) -> Result<T>,
+{
+    let eye_width = options.eye_width.max(1);
+    let eye_height = options.eye_height.max(1);
+    let width = eye_width
+        .checked_mul(2)
+        .context("headless stereo output width overflow")?;
+    let (device, queue) = create_headless_device()?;
+    let left = OffscreenTarget::new(&device, eye_width, eye_height, HEADLESS_FORMAT);
+    let right = OffscreenTarget::new(&device, eye_width, eye_height, HEADLESS_FORMAT);
+    let output = render(
+        &device,
+        &queue,
+        HEADLESS_FORMAT,
+        [eye_width, eye_height],
+        &left.view,
+        &right.view,
+    )?;
+    device
+        .poll(wgpu::PollType::Wait)
+        .context("device poll failed after stereo render")?;
+    let left_pixels = read_rgba8(&device, &queue, &left.texture, eye_width, eye_height)?;
+    let right_pixels = read_rgba8(&device, &queue, &right.texture, eye_width, eye_height)?;
+    let eye_pixel_difference_count = left_pixels
+        .chunks_exact(BYTES_PER_PIXEL as usize)
+        .zip(right_pixels.chunks_exact(BYTES_PER_PIXEL as usize))
+        .filter(|(left, right)| left != right)
+        .count();
+    let pixels = stitch_rgba8_side_by_side(eye_width, eye_height, &left_pixels, &right_pixels)?;
+    save_rgba_png(&options.path, width, eye_height, &pixels)?;
+    Ok((
+        HeadlessStereoFrameReport {
+            path: options.path,
+            eye_width,
+            eye_height,
+            width,
+            height: eye_height,
+            byte_len: pixels.len(),
+            non_clear_rgb_pixel_count: count_non_clear_rgb_pixels(&pixels),
+            eye_pixel_difference_count,
+        },
+        output,
+    ))
+}
+
+fn stitch_rgba8_side_by_side(
+    eye_width: u32,
+    eye_height: u32,
+    left: &[u8],
+    right: &[u8],
+) -> Result<Vec<u8>> {
+    let row_bytes = eye_width as usize * BYTES_PER_PIXEL as usize;
+    let expected = row_bytes * eye_height as usize;
+    if left.len() != expected || right.len() != expected {
+        bail!(
+            "invalid stereo readback sizes: expected {expected} bytes per eye, left={} right={}",
+            left.len(),
+            right.len()
+        );
+    }
+    let mut pixels = Vec::with_capacity(expected * 2);
+    for row in 0..eye_height as usize {
+        let start = row * row_bytes;
+        let end = start + row_bytes;
+        pixels.extend_from_slice(&left[start..end]);
+        pixels.extend_from_slice(&right[start..end]);
+    }
+    Ok(pixels)
 }
 
 pub fn run_headless_textured_sections_timedemo(

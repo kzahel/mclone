@@ -36,6 +36,55 @@ pub struct XrControllerSnapshot {
     pub thumbstick_pressed: bool,
 }
 
+/// Translate a flat input frame into the neutral controller facts consumed by
+/// XR scene policy. This is intentionally an emulation adapter rather than a
+/// second locomotion implementation: desktop headset-free tools can feed
+/// keyboard input through the same stick/button semantics as a real headset.
+///
+/// Mouse look is not projected here. In XR, head orientation owns pitch and
+/// the configured turn policy owns yaw; desktop emulation drives the synthetic
+/// head from the engine camera and maps held keyboard turn bindings to the
+/// right stick so snap-turn remains exercisable.
+pub fn xr_emulation_controllers_from_flat_frame(
+    frame: FlatInputFrame,
+) -> [XrControllerSnapshot; 2] {
+    let mut left = empty_xr_controller(XrHand::Left);
+    left.thumbstick = Vec2::new(
+        clamp_axis(-frame.movement.left),
+        clamp_axis(frame.movement.forward),
+    );
+    left.select_pressed = frame.open_menu;
+    left.thumbstick_pressed = frame.open_block_palette;
+    left.y_pressed = frame.sprint;
+
+    let mut right = empty_xr_controller(XrHand::Right);
+    right.thumbstick = Vec2::new(clamp_axis(frame.keyboard_turn), 0.0);
+    right.a_pressed = frame.jump;
+    right.b_pressed = frame.descend;
+    right.thumbstick_pressed = frame.sneak;
+    right.trigger = f32::from(frame.attack);
+    right.squeeze = f32::from(frame.use_item);
+    [left, right]
+}
+
+fn empty_xr_controller(hand: XrHand) -> XrControllerSnapshot {
+    XrControllerSnapshot {
+        hand,
+        aim_position: None,
+        aim_direction: None,
+        grip_position: None,
+        grip_orientation: None,
+        trigger: 0.0,
+        squeeze: 0.0,
+        select_pressed: false,
+        a_pressed: false,
+        b_pressed: false,
+        y_pressed: false,
+        thumbstick: Vec2::ZERO,
+        thumbstick_pressed: false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InputDeviceKind {
@@ -2532,6 +2581,46 @@ mod tests {
 
         adapter.clear_held();
         assert!(adapter.held_frame().is_none());
+    }
+
+    #[test]
+    fn xr_emulation_projects_keyboard_frames_to_controller_semantics() {
+        let mut adapter = KeyboardMouseInputAdapter::new();
+        adapter.handle_key(KeyboardKey::KeyW, true, false);
+        adapter.handle_key(KeyboardKey::KeyA, true, false);
+        adapter.handle_key(KeyboardKey::ArrowLeft, true, false);
+        adapter.handle_key(KeyboardKey::Space, true, false);
+        adapter.handle_key(KeyboardKey::ControlLeft, true, false);
+        adapter.handle_key(KeyboardKey::ShiftLeft, true, false);
+        let controllers = xr_emulation_controllers_from_flat_frame(
+            adapter.held_frame().expect("held keyboard frame"),
+        );
+
+        assert_eq!(controllers[0].hand, XrHand::Left);
+        assert_eq!(controllers[0].thumbstick, Vec2::new(-1.0, 1.0));
+        assert!(controllers[0].y_pressed);
+        assert_eq!(controllers[1].hand, XrHand::Right);
+        assert_eq!(controllers[1].thumbstick, Vec2::X);
+        assert!(controllers[1].a_pressed);
+        assert!(controllers[1].thumbstick_pressed);
+    }
+
+    #[test]
+    fn xr_emulation_projects_menu_and_world_actions() {
+        let controllers = xr_emulation_controllers_from_flat_frame(FlatInputFrame {
+            open_menu: true,
+            open_block_palette: true,
+            attack: true,
+            use_item: true,
+            descend: true,
+            ..FlatInputFrame::default()
+        });
+
+        assert!(controllers[0].select_pressed);
+        assert!(controllers[0].thumbstick_pressed);
+        assert_eq!(controllers[1].trigger, 1.0);
+        assert_eq!(controllers[1].squeeze, 1.0);
+        assert!(controllers[1].b_pressed);
     }
 
     #[test]
