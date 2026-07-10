@@ -32,6 +32,15 @@ series implements the same concern, normally reuse the document slug in its
 
 ## Current Topics
 
+- [`multiplayer-networking.md`](multiplayer-networking.md): wire protocol,
+  transports, session lifecycle, server tick/publication cadence — current
+  state, structural gaps (lockstep request/response wire, tick-per-command
+  dedicated server, no session layer), and the phased plan toward a
+  vanilla-shaped push protocol with configurable tick rates.
+- [`client-prediction.md`](client-prediction.md): player movement authority —
+  vanilla-shaped client-authoritative interim, planned server validation
+  checks, the preserved sequenced-input-replay path, and remote-actor
+  interpolation divergence.
 - [`platform-parity.md`](platform-parity.md): cross-platform parity tracker —
   per-platform-class target state, the feature × platform matrix, the
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
@@ -43,6 +52,10 @@ series implements the same concern, normally reuse the document slug in its
   baselines, and Java-shaped render/scheduling follow-ups.
   The broader frame/terrain/host accounting model lives in
   [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
+- [`vanilla/networking.md`](vanilla/networking.md): Minecraft Java 1.17.1
+  vanilla networking reference — connection pipeline, login/join sequence,
+  50 ms tick loop, chunk/entity sync cadences, movement validation and
+  teleport acks, interpolation, and a constants quick-reference table.
 
 ## Update Policy
 
