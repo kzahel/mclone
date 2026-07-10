@@ -8,15 +8,14 @@ use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 use mclone_app_runtime::client_experience::{
-    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
-    ClientExperienceController, ClientExperienceEffects, ClientExperienceGameplayEffect,
-    ClientExperienceProfile, ClientExperienceProjectionEffect, ClientExperienceSettingEffect,
+    ClientExperienceActionContext, ClientExperienceController, ClientExperienceEffects,
+    ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
     ClientExperienceSettingsEffects, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection, xr_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
-    ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
-    ClientSessionTransitionEffects, ClientSessionUiEffects, client_session_failed_start_ui_effects,
+    ClientSessionEffects, ClientSessionStatusProjection, ClientSessionTransitionEffects,
+    ClientSessionUiEffects, client_session_failed_start_ui_effects,
     client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
     client_session_status_projection,
 };
@@ -66,7 +65,9 @@ use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind, FramePipelineReport, WorkWindow,
 };
-use mclone_input::{InputPromptKind, ResolvedFlatInput, XrControllerSnapshot, XrHand};
+use mclone_input::{
+    InputPromptKind, ResolvedFlatInput, TouchControlsMode, XrControllerSnapshot, XrHand,
+};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
@@ -107,15 +108,17 @@ use mclone_render_session::{
 use mclone_server::WorkerFrameMetrics;
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, GameCollisionMode,
-    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameTravelAssistMode,
-    GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale,
-    LoadingProgressOverlay, Point, Rect, StatusOverlay, UiDrawCacheStats, UiPanelRevision,
-    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence,
+    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState,
+    GameXrTurnMode, GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
+    UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay,
+    render_status_overlay,
 };
 
 mod comfort;
 mod diagnostic_panel;
 mod frame_pipeline_reporter;
+mod host_effects;
 mod locomotion;
 mod mono;
 mod options;
@@ -127,6 +130,7 @@ mod tracking;
 mod ui_panels;
 
 pub use comfort::*;
+pub use host_effects::*;
 pub use locomotion::*;
 pub use mono::*;
 pub use options::*;

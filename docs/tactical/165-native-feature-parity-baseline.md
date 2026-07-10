@@ -3,7 +3,8 @@
 Status: active 2026-07-09. Slice 1 (baseline mechanism + flat-Android far LOD)
 landed in `da719dda`. Slice 2a (shared frame-pipeline accountant owner) landed
 2026-07-09; Slice 2c (XR/flat accountant convergence) landed through tactical
-168 Slice 5 on 2026-07-10; the remaining exceptions are open burn-down slices.
+168 Slice 5 and the frame-pacing/debug-data promotion landed through tactical
+168 Slice 7a on 2026-07-10; the remaining exceptions are open burn-down slices.
 Coordination update 2026-07-10: tactical 168 now owns the runtime/host plumbing
 that clears the remaining native rows; do not grow the soon-to-be-deleted
 Android or desktop loops to complete them independently.
@@ -125,7 +126,7 @@ still rejects.
 |---|---|---|
 | Flat Android | `TravelAssist` | Effect handler is a silent no-op; needs camera travel-assist wiring. |
 | Flat Android | `FramePipelineOverlay` | **Not a renderer gap** — the overlay renderer (`render_frame_pipeline_overlay`) is already shared and drives desktop *and* XR. The gap is a missing *data source*: the frame-pipeline accountant lives in the desktop app crate (`DesktopFramePipelineAccounting`), so Android has no `FramePipelineReport` producer to attach and stubs the effect + hard-codes visibility `false`. |
-| Flat Android | `DebugDiagnostics` | Same shape: the draw path (`render_debug_overlay_at`) is shared, but the stats aggregator (`DebugPaneStats`) is desktop-app-local. Android already owns every input it aggregates but has no shared aggregator to build the `DebugOverlay`. |
+| Flat Android | `DebugDiagnostics` | The draw path (`render_debug_overlay_at`) and, as of tactical 168 Slice 7a, the `DebugPaneStats -> DebugOverlay` aggregator are shared. Android already owns the inputs but does not feed the shared aggregator until 168 Slice 8 replaces its loop. |
 | Flat Android | `ServerSimulationCadence` | Effect handler rejects; needs integrated-server cadence wiring. |
 | XR (desktop + Android) | `ServerSimulationCadence` | Not yet wired on the XR scene path. |
 
@@ -148,10 +149,10 @@ non-cyclic home for code that needs `mclone-ui` and runtime types together
 the accountant's inputs (`SingleViewRuntimeStats`, `RenderStreamStats`) and the
 `client_experience` effect vocabulary — diagnostics production is runtime
 orchestration, the same engine-policy class this tactical already keeps there.
-The only genuinely app-local inputs are three frame-pacing POD structs
-(`FramePacingMode`, `FramePacingDebugStats`, `FrameTimingStats`), which are pure
-data merely co-located with the winit-bound `FramePacing` driver and can be split
-out cleanly.
+The formerly app-local frame-pacing POD structs (`FramePacingMode`,
+`FramePacingUiState`, `FramePacingDebugStats`, `FrameTimingStats`) and the
+debug-overlay aggregator moved to `mclone-app-runtime` in tactical 168 Slice
+7a. The winit-bound `FramePacing` driver remains correctly desktop-local.
 
 Web keeps `FarLod`, `TravelAssist`, `FramePipelineOverlay`, `DebugDiagnostics`,
 and `ServerSimulationCadence` gated with explicit reasons; decided separately on
@@ -165,8 +166,8 @@ capability acceptance requirements, but their implementation routing changed:
 - travel assist and server cadence land through the shared scene host during
   168 Slices 7/8, not as Android-loop additions;
 - accountant convergence (2c) is 168 Slice 5;
-- frame-pacing POD/debug-aggregator promotion is coordinated with 168 Slices
-  7a/8;
+- frame-pacing POD/debug-aggregator promotion landed in 168 Slice 7a; Android
+  consumption remains part of Slice 8;
 - Android frame-pipeline wiring is inherited when the old Android loop is
   deleted in 168 Slice 8. Do **not** execute the old "next — slice 2b" recipe by
   adding timing brackets to that app-local loop; it would create code that Slice
@@ -210,7 +211,7 @@ plumbing, as required by this tactical's enforcement tests.
      accountant has anything to report. Then drop the ledger entry and capture a
      tablet-AVD frame-pipeline overlay screenshot.
 3. **Promote the debug-stats aggregator, then wire flat Android.** Same pattern.
-   - Move the three frame-pacing POD structs out of the winit-bound
+   - **[LANDED 2026-07-10 — promotion via tactical 168 Slice 7a]** Move the three frame-pacing POD structs out of the winit-bound
      `frame_pacing.rs` into a shared `mclone-app-runtime` location (leave the
      `FramePacing` driver in the desktop app), then relocate the
      `DebugPaneStats -> DebugOverlay` aggregator beside them.

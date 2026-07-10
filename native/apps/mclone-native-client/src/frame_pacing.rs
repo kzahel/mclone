@@ -1,39 +1,14 @@
 use std::time::{Duration, Instant};
 
-use mclone_diagnostics::OverBudgetTiers;
+pub(crate) use mclone_app_runtime::frame_pacing::{
+    DEFAULT_FPS_CAP, FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
+};
 use mclone_render::native::{
     NativeSurfaceContext, SurfacePresentModePreference, surface_present_mode_label,
 };
 use winit::window::Window;
 
-pub(crate) const DEFAULT_FPS_CAP: u32 = 120;
 const FPS_CAPS: [u32; 6] = [60, 90, 120, 144, 165, 240];
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum FramePacingMode {
-    #[default]
-    Vsync,
-    Capped,
-    Uncapped,
-}
-
-impl FramePacingMode {
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Vsync => "VSync",
-            Self::Capped => "Max FPS",
-            Self::Uncapped => "Uncapped",
-        }
-    }
-
-    fn next(self) -> Self {
-        match self {
-            Self::Vsync => Self::Capped,
-            Self::Capped => Self::Uncapped,
-            Self::Uncapped => Self::Vsync,
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FramePacing {
@@ -133,108 +108,6 @@ impl FramePacing {
             target_frame_ms: self.target_frame_ms(),
             active_present_mode_label: self.active_present_mode_label,
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct FramePacingUiState {
-    pub(crate) mode: FramePacingMode,
-    pub(crate) fps_cap: u32,
-}
-
-impl Default for FramePacingUiState {
-    fn default() -> Self {
-        Self {
-            mode: FramePacingMode::Vsync,
-            fps_cap: DEFAULT_FPS_CAP,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct FramePacingDebugStats {
-    pub(crate) mode: FramePacingMode,
-    pub(crate) fps_cap: u32,
-    pub(crate) monitor_refresh_hz: Option<f32>,
-    pub(crate) target_frame_ms: Option<f64>,
-    pub(crate) active_present_mode_label: &'static str,
-}
-
-impl Default for FramePacingDebugStats {
-    fn default() -> Self {
-        FramePacing::default().debug_stats()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct FrameTimingStats {
-    pub(crate) frame_count: u64,
-    pub(crate) over_budget_count: u64,
-    pub(crate) double_budget_count: u64,
-    pub(crate) quad_budget_count: u64,
-    pub(crate) last_frame_ms: f64,
-    pub(crate) worst_frame_ms: f64,
-    pub(crate) budget_ms: Option<f64>,
-    pub(crate) last_runtime_poll_ms: f64,
-    pub(crate) last_remesh_ms: f64,
-    pub(crate) last_upload_ms: f64,
-    pub(crate) last_render_ms: f64,
-    pub(crate) last_surface_acquire_ms: f64,
-    pub(crate) last_surface_encode_ms: f64,
-    pub(crate) last_surface_submit_ms: f64,
-    pub(crate) last_surface_present_ms: f64,
-}
-
-impl FrameTimingStats {
-    pub(crate) fn begin_frame(&mut self, frame_ms: f64, budget_ms: Option<f64>) {
-        self.frame_count = self.frame_count.saturating_add(1);
-        self.last_frame_ms = frame_ms;
-        self.worst_frame_ms = self.worst_frame_ms.max(frame_ms);
-        self.budget_ms = budget_ms;
-        self.last_runtime_poll_ms = 0.0;
-        self.last_remesh_ms = 0.0;
-        self.last_upload_ms = 0.0;
-        self.last_render_ms = 0.0;
-        self.last_surface_acquire_ms = 0.0;
-        self.last_surface_encode_ms = 0.0;
-        self.last_surface_submit_ms = 0.0;
-        self.last_surface_present_ms = 0.0;
-
-        let mut tiers = OverBudgetTiers::default();
-        tiers.observe(frame_ms, budget_ms);
-        self.over_budget_count = self
-            .over_budget_count
-            .saturating_add(tiers.single_period_frames());
-        self.double_budget_count = self
-            .double_budget_count
-            .saturating_add(tiers.double_period_frames());
-        self.quad_budget_count = self
-            .quad_budget_count
-            .saturating_add(tiers.quad_period_frames());
-    }
-
-    pub(crate) fn record_runtime_poll(&mut self, ms: f64) {
-        self.last_runtime_poll_ms = ms;
-    }
-
-    pub(crate) fn record_remesh_upload(&mut self, remesh_ms: f64, upload_ms: f64) {
-        self.last_remesh_ms = remesh_ms;
-        self.last_upload_ms = upload_ms;
-    }
-
-    pub(crate) fn record_surface_frame(
-        &mut self,
-        render_ms: f64,
-        acquire_ms: f64,
-        encode_ms: f64,
-        submit_ms: f64,
-        present_ms: f64,
-    ) {
-        self.last_render_ms = render_ms;
-        self.last_surface_acquire_ms = acquire_ms;
-        self.last_surface_encode_ms = encode_ms;
-        self.last_surface_submit_ms = submit_ms;
-        self.last_surface_present_ms = present_ms;
     }
 }
 

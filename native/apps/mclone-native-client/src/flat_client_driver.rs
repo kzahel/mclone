@@ -2,17 +2,17 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 use mclone_app_runtime::client_experience::{
-    ClientExperienceActionContext, ClientExperienceCapabilityProjection,
-    ClientExperienceController, ClientExperienceEffects, ClientExperienceGameplayEffect,
-    ClientExperienceProjectionEffect, ClientExperienceSettingEffect, ClientExperienceSettingsState,
-    client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
+    ClientExperienceActionContext, ClientExperienceController, ClientExperienceEffects,
+    ClientExperienceGameplayEffect, ClientExperienceProjectionEffect,
+    ClientExperienceSettingsState, client_experience_should_apply_ui_projection,
+    desktop_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
-    ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
-    ClientSessionTransitionEffects, ClientSessionUiEffects, client_session_failed_start_ui_effects,
+    ClientSessionEffects, ClientSessionStatusProjection, ClientSessionTransitionEffects,
+    ClientSessionUiEffects, client_session_failed_start_ui_effects,
     client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
     client_session_start_transition, client_session_status_projection,
 };
@@ -71,7 +71,11 @@ use mclone_render_session::{
     engine_debug_world_lines, local_player_actor_instance_for_view,
     render_pose_from_snapshot_with_view_mode,
 };
-use mclone_scene::{RenderAdmissionPolicy, merge_budget_decision_panels};
+use mclone_scene::{
+    ClientExperienceSettingsHost, HostEffects, RenderAdmissionPolicy,
+    apply_client_experience_settings_effects, apply_client_session_host_action,
+    merge_budget_decision_panels,
+};
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, FramePipelineHudOverlay,
@@ -335,6 +339,50 @@ pub(crate) struct FlatClientUiActionResult {
     pub(crate) session_start_queued: bool,
     pub(crate) preserve_pointer_state: bool,
     pub(crate) clear_gameplay_input: bool,
+}
+
+struct FlatClientHostEffects<'a> {
+    result: &'a mut FlatClientUiActionResult,
+}
+
+impl HostEffects for FlatClientHostEffects<'_> {
+    fn request_mouse_lock(&mut self, requested: bool) -> Result<()> {
+        self.result.mouse_lock_requested = Some(requested);
+        Ok(())
+    }
+
+    fn cycle_frame_pacing(&mut self) -> Result<()> {
+        self.result.host_action = Some(FlatClientHostAction::CycleFramePacing);
+        Ok(())
+    }
+
+    fn cycle_fps_cap(&mut self) -> Result<()> {
+        self.result.host_action = Some(FlatClientHostAction::CycleFpsCap);
+        Ok(())
+    }
+
+    fn set_touch_controls_mode(&mut self, mode: TouchControlsMode) -> Result<()> {
+        self.result.host_action = Some(FlatClientHostAction::SetTouchControlsMode(mode));
+        log::info!("touch controls set to {}", touch_controls_mode_label(mode));
+        Ok(())
+    }
+
+    fn quit_to_title(&mut self) -> Result<()> {
+        self.result.host_action = Some(FlatClientHostAction::QuitToTitle);
+        Ok(())
+    }
+
+    fn exit(&mut self) -> Result<()> {
+        self.result.host_action = Some(FlatClientHostAction::Quit);
+        Ok(())
+    }
+}
+
+fn request_flat_mouse_lock(result: &mut FlatClientUiActionResult, requested: bool) {
+    let mut host = FlatClientHostEffects { result };
+    if let Err(err) = host.request_mouse_lock(requested) {
+        log::error!("failed to request desktop mouse lock: {err:#}");
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1044,10 +1092,24 @@ impl FlatClientDriver {
     ) -> bool {
         if self.apply_world_catalog_effects(effects.catalog, arm_mouse_lock) {
             result.session_start_queued = true;
-            result.mouse_lock_requested = Some(false);
+            request_flat_mouse_lock(result, false);
         }
         self.apply_client_session_effects(effects.session, arm_mouse_lock, result);
-        if !self.apply_client_experience_settings_effects(effects.settings, result) {
+        let settings_ok = {
+            let mut host = FlatClientHostEffects { result };
+            match apply_client_experience_settings_effects(self, &mut host, effects.settings) {
+                Ok(ok) => ok,
+                Err(err) => {
+                    log::error!("failed to apply client settings: {err:#}");
+                    self.status_overlay = StatusOverlay::new(
+                        format!("Failed to apply client settings: {err}"),
+                        false,
+                    );
+                    false
+                }
+            }
+        };
+        if !settings_ok {
             return false;
         }
         for effect in effects.gameplay {
@@ -1090,12 +1152,12 @@ impl FlatClientDriver {
                 SessionStartRequest::CreateLocalWorld { options } => {
                     self.request_local_world_start(options.seed, arm_mouse_lock);
                     result.session_start_queued = true;
-                    result.mouse_lock_requested = Some(false);
+                    request_flat_mouse_lock(result, false);
                 }
                 SessionStartRequest::JoinRemote { endpoint } => {
                     self.request_remote_session_start(endpoint.address, arm_mouse_lock);
                     result.session_start_queued = true;
-                    result.mouse_lock_requested = Some(false);
+                    request_flat_mouse_lock(result, false);
                 }
                 SessionStartRequest::OpenLocalWorld { .. } | SessionStartRequest::Unknown => {
                     log::warn!(
@@ -1105,229 +1167,9 @@ impl FlatClientDriver {
             }
         }
         if let Some(host_action) = effects.host_action {
-            result.host_action = Some(match host_action {
-                ClientSessionHostAction::QuitToTitle => FlatClientHostAction::QuitToTitle,
-                ClientSessionHostAction::Quit => FlatClientHostAction::Quit,
-            });
-        }
-    }
-
-    fn apply_client_experience_settings_effects(
-        &mut self,
-        effects: mclone_app_runtime::client_experience::ClientExperienceSettingsEffects,
-        result: &mut FlatClientUiActionResult,
-    ) -> bool {
-        let mut ok = true;
-        let has_setting_effects = !effects.setting_effects.is_empty();
-        let has_unavailable =
-            !effects.capability_projection.is_empty() || !effects.rejections.is_empty();
-        for effect in effects.setting_effects {
-            match effect {
-                ClientExperienceSettingEffect::SetSectionOcclusionCulling(enabled) => {
-                    self.render_options.section_occlusion_culling = enabled;
-                    log::info!(
-                        "section occlusion culling {}",
-                        if enabled { "enabled" } else { "disabled" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetFullbright(enabled) => {
-                    self.render_options.force_fullbright = enabled;
-                    log::info!(
-                        "fullbright {}",
-                        if enabled { "enabled" } else { "disabled" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetFarLod {
-                    enabled,
-                    extra_radius_chunks,
-                } => {
-                    self.scene.far_lod = self
-                        .scene
-                        .far_lod
-                        .with_extra_radius_chunks(extra_radius_chunks);
-                    self.scene.far_lod.enabled = enabled;
-                    log::info!(
-                        "far LOD {}",
-                        if self.scene.far_lod.enabled {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    );
-                    log::info!(
-                        "far LOD range set to {} chunks beyond render distance",
-                        self.scene.far_lod.extra_radius_chunks
-                    );
-                }
-                ClientExperienceSettingEffect::ClearFarLod => {
-                    if let Some(runtime) = &mut self.runtime {
-                        runtime.clear_far_lod();
-                    }
-                }
-                ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
-                    self.player_collision_box_visible = visible;
-                    log::info!(
-                        "player collision box debug {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetFirstPersonPlayerVisible(visible) => {
-                    self.camera.set_first_person_player_visible(visible);
-                    self.scene.first_person_player_visible = visible;
-                    log::info!(
-                        "first-person player body {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetCrosshairVisible(visible) => {
-                    self.crosshair_visible = visible;
-                    log::info!("crosshair {}", if visible { "visible" } else { "hidden" });
-                }
-                ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(visible) => {
-                    self.frame_pipeline_overlay_visible = visible;
-                    log::info!(
-                        "frame pipeline overlay {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(visible) => {
-                    self.debug_diagnostics_visible = visible;
-                    log::info!(
-                        "debug diagnostics {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetPlayerModel(model) => {
-                    self.player_model = model;
-                    log::info!(
-                        "player model set to {} ({})",
-                        model.label(),
-                        actor_figure_id_for_player_model(model).as_str()
-                    );
-                }
-                ClientExperienceSettingEffect::SyncPlayerAppearance => {
-                    if let Err(err) = self.sync_player_appearance() {
-                        log::warn!("failed to sync player appearance to server: {err:#}");
-                    }
-                }
-                ClientExperienceSettingEffect::SetMovementMode(movement_mode) => {
-                    self.camera
-                        .set_movement_mode(engine_movement_mode(movement_mode));
-                    let movement_mode = self.camera.movement_mode();
-                    log::info!("player movement mode {}", movement_mode.label());
-                }
-                ClientExperienceSettingEffect::SetCollisionMode(collision_mode) => {
-                    self.camera
-                        .set_collision_mode(engine_collision_mode(collision_mode));
-                    let collision_mode = self.camera.collision_mode();
-                    log::info!("player collision mode {}", collision_mode.label());
-                }
-                ClientExperienceSettingEffect::SetTravelAssistMode(travel_assist_mode) => {
-                    self.travel_assist_mode = travel_assist_mode;
-                    if self.travel_assist_mode != GameTravelAssistMode::Blink {
-                        self.clear_desktop_blink_debug();
-                    }
-                    log::info!("player travel assist {}", travel_assist_mode.label());
-                }
-                ClientExperienceSettingEffect::SetTurnMode(_) => {}
-                ClientExperienceSettingEffect::SetXrTurnMode(_) => {}
-                ClientExperienceSettingEffect::CycleFramePacing => {
-                    result.host_action = Some(FlatClientHostAction::CycleFramePacing);
-                }
-                ClientExperienceSettingEffect::CycleFpsCap => {
-                    result.host_action = Some(FlatClientHostAction::CycleFpsCap);
-                }
-                ClientExperienceSettingEffect::SetRenderDistance(render_distance_chunks) => {
-                    let render_distance =
-                        i32::try_from(render_distance_chunks).unwrap_or(MAX_RENDER_DISTANCE);
-                    self.scene.render_distance = render_distance;
-                    if let Some(runtime) = &mut self.runtime {
-                        match runtime.set_render_distance(render_distance_chunks) {
-                            Ok(true) => {
-                                log::info!(
-                                    "render distance set to {} (chunk tracking radius {})",
-                                    render_distance,
-                                    runtime.chunk_tracking_radius()
-                                );
-                            }
-                            Ok(false) => {}
-                            Err(err) => {
-                                log::error!(
-                                    "failed to set render distance to {render_distance}: {err:#}"
-                                );
-                                ok = false;
-                            }
-                        }
-                    } else {
-                        log::info!("new-world render distance set to {render_distance}");
-                    }
-                }
-                ClientExperienceSettingEffect::SetFlySpeedMultiplier(multiplier) => {
-                    self.camera.set_fly_speed_multiplier(f64::from(multiplier));
-                    log::info!(
-                        "fly speed set to {:.1}x ({:.0} blocks/s)",
-                        self.camera.fly_speed_multiplier(),
-                        self.camera.speed_blocks_per_second()
-                    );
-                }
-                ClientExperienceSettingEffect::SetMovementSpeedMultiplier(multiplier) => {
-                    self.camera
-                        .set_movement_speed_multiplier(f64::from(multiplier));
-                    let multiplier = self.camera.movement_speed_multiplier() as f32;
-                    self.scene.movement_speed_multiplier = multiplier;
-                    log::info!(
-                        "movement speed multiplier set to {:.1}x",
-                        self.camera.movement_speed_multiplier()
-                    );
-                }
-                ClientExperienceSettingEffect::SetTouchLookSensitivity(_) => {}
-                ClientExperienceSettingEffect::SetTouchControlsMode(mode) => {
-                    result.host_action = Some(FlatClientHostAction::SetTouchControlsMode(mode));
-                    log::info!("touch controls set to {}", touch_controls_mode_label(mode));
-                }
-                ClientExperienceSettingEffect::SetServerSimulationCadence(cadence) => {
-                    let config = simulation_cadence_config_from_game(cadence);
-                    if let Some(runtime) = &mut self.runtime {
-                        match runtime.set_simulation_cadence(config) {
-                            Ok(true) => {
-                                self.scene.simulation_cadence = config;
-                                log::info!("local server cadence set to {}", cadence.label());
-                            }
-                            Ok(false) => {
-                                self.scene.simulation_cadence = config;
-                            }
-                            Err(err) => {
-                                log::error!("failed to set local server cadence: {err:#}");
-                                ok = false;
-                            }
-                        }
-                    } else {
-                        self.scene.simulation_cadence = config;
-                        log::info!("local server cadence preset set to {}", cadence.label());
-                    }
-                }
-            }
-        }
-        self.apply_client_experience_capability_projection(effects.capability_projection);
-        for rejection in effects.rejections {
-            log::error!("{}", rejection.message);
-            self.status_overlay = StatusOverlay::new(rejection.message, false);
-            ok = false;
-        }
-        if has_setting_effects && !has_unavailable {
-            self.status_overlay = StatusOverlay::hidden();
-        }
-        ok
-    }
-
-    fn apply_client_experience_capability_projection(
-        &mut self,
-        projection: ClientExperienceCapabilityProjection,
-    ) {
-        if let Some(unavailable) = projection.first_unavailable() {
-            if let Some(message) = unavailable.status.message() {
-                log::warn!("{message}");
-                self.status_overlay = StatusOverlay::new(message, unavailable.status.ok());
+            let mut host = FlatClientHostEffects { result };
+            if let Err(err) = apply_client_session_host_action(host_action, &mut host) {
+                log::error!("failed to apply client session host action: {err:#}");
             }
         }
     }
@@ -1496,15 +1338,7 @@ impl FlatClientDriver {
     ) -> FlatClientUiActionResult {
         let mut result = FlatClientUiActionResult {
             host_action: None,
-            mouse_lock_requested: (context.from_pointer_click
-                && matches!(
-                    action,
-                    GameUiAction::StartWorld
-                        | GameUiAction::Resume
-                        | GameUiAction::JoinRemote
-                        | GameUiAction::AssignHotbarBlock { .. }
-                ))
-            .then_some(true),
+            mouse_lock_requested: None,
             session_start_queued: false,
             preserve_pointer_state: matches!(
                 action,
@@ -1521,6 +1355,17 @@ impl FlatClientDriver {
             ),
             clear_gameplay_input: true,
         };
+        if context.from_pointer_click
+            && matches!(
+                action,
+                GameUiAction::StartWorld
+                    | GameUiAction::Resume
+                    | GameUiAction::JoinRemote
+                    | GameUiAction::AssignHotbarBlock { .. }
+            )
+        {
+            request_flat_mouse_lock(&mut result, true);
+        }
 
         if context.session_starting && !matches!(action, GameUiAction::Quit) {
             result.clear_gameplay_input = false;
@@ -2646,6 +2491,204 @@ impl FlatClientDriver {
     }
 }
 
+impl ClientExperienceSettingsHost for FlatClientDriver {
+    fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()> {
+        self.render_options.section_occlusion_culling = enabled;
+        log::info!(
+            "section occlusion culling {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Ok(())
+    }
+
+    fn set_fullbright(&mut self, enabled: bool) -> Result<()> {
+        self.render_options.force_fullbright = enabled;
+        log::info!(
+            "fullbright {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Ok(())
+    }
+
+    fn set_far_lod(&mut self, enabled: bool, extra_radius_chunks: u32) -> Result<()> {
+        self.scene.far_lod = self
+            .scene
+            .far_lod
+            .with_extra_radius_chunks(extra_radius_chunks);
+        self.scene.far_lod.enabled = enabled;
+        log::info!("far LOD {}", if enabled { "enabled" } else { "disabled" });
+        log::info!(
+            "far LOD range set to {} chunks beyond render distance",
+            self.scene.far_lod.extra_radius_chunks
+        );
+        Ok(())
+    }
+
+    fn clear_far_lod(&mut self) -> Result<()> {
+        if let Some(runtime) = &mut self.runtime {
+            runtime.clear_far_lod();
+        }
+        Ok(())
+    }
+
+    fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()> {
+        self.player_collision_box_visible = visible;
+        log::info!(
+            "player collision box debug {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()> {
+        self.camera.set_first_person_player_visible(visible);
+        self.scene.first_person_player_visible = visible;
+        log::info!(
+            "first-person player body {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_crosshair_visible(&mut self, visible: bool) -> Result<()> {
+        self.crosshair_visible = visible;
+        log::info!("crosshair {}", if visible { "visible" } else { "hidden" });
+        Ok(())
+    }
+
+    fn set_frame_pipeline_overlay_visible(&mut self, visible: bool) -> Result<()> {
+        self.frame_pipeline_overlay_visible = visible;
+        log::info!(
+            "frame pipeline overlay {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_debug_diagnostics_visible(&mut self, visible: bool) -> Result<()> {
+        self.debug_diagnostics_visible = visible;
+        log::info!(
+            "debug diagnostics {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_player_model(&mut self, model: GamePlayerModel) -> Result<()> {
+        self.player_model = model;
+        log::info!(
+            "player model set to {} ({})",
+            model.label(),
+            actor_figure_id_for_player_model(model).as_str()
+        );
+        Ok(())
+    }
+
+    fn sync_player_appearance(&mut self) -> Result<()> {
+        if let Err(err) = FlatClientDriver::sync_player_appearance(self) {
+            log::warn!("failed to sync player appearance to server: {err:#}");
+        }
+        Ok(())
+    }
+
+    fn set_movement_mode(&mut self, movement_mode: GameMovementMode) -> Result<()> {
+        self.camera
+            .set_movement_mode(engine_movement_mode(movement_mode));
+        log::info!(
+            "player movement mode {}",
+            self.camera.movement_mode().label()
+        );
+        Ok(())
+    }
+
+    fn set_collision_mode(&mut self, collision_mode: GameCollisionMode) -> Result<()> {
+        self.camera
+            .set_collision_mode(engine_collision_mode(collision_mode));
+        log::info!(
+            "player collision mode {}",
+            self.camera.collision_mode().label()
+        );
+        Ok(())
+    }
+
+    fn set_travel_assist_mode(&mut self, travel_assist_mode: GameTravelAssistMode) -> Result<()> {
+        self.travel_assist_mode = travel_assist_mode;
+        if travel_assist_mode != GameTravelAssistMode::Blink {
+            self.clear_desktop_blink_debug();
+        }
+        log::info!("player travel assist {}", travel_assist_mode.label());
+        Ok(())
+    }
+
+    fn set_turn_mode(&mut self, _mode: mclone_ui::GameTurnMode) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_xr_turn_mode(&mut self, _mode: mclone_ui::GameXrTurnMode) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_render_distance(&mut self, render_distance_chunks: u32) -> Result<()> {
+        let render_distance = i32::try_from(render_distance_chunks).unwrap_or(MAX_RENDER_DISTANCE);
+        self.scene.render_distance = render_distance;
+        if let Some(runtime) = &mut self.runtime {
+            if runtime.set_render_distance(render_distance_chunks)? {
+                log::info!(
+                    "render distance set to {} (chunk tracking radius {})",
+                    render_distance,
+                    runtime.chunk_tracking_radius()
+                );
+            }
+        } else {
+            log::info!("new-world render distance set to {render_distance}");
+        }
+        Ok(())
+    }
+
+    fn set_fly_speed_multiplier(&mut self, multiplier: f32) -> Result<()> {
+        self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+        log::info!(
+            "fly speed set to {:.1}x ({:.0} blocks/s)",
+            self.camera.fly_speed_multiplier(),
+            self.camera.speed_blocks_per_second()
+        );
+        Ok(())
+    }
+
+    fn set_movement_speed_multiplier(&mut self, multiplier: f32) -> Result<()> {
+        self.camera
+            .set_movement_speed_multiplier(f64::from(multiplier));
+        self.scene.movement_speed_multiplier = self.camera.movement_speed_multiplier() as f32;
+        log::info!(
+            "movement speed multiplier set to {:.1}x",
+            self.camera.movement_speed_multiplier()
+        );
+        Ok(())
+    }
+
+    fn set_touch_look_sensitivity(&mut self, _sensitivity: f32) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_server_simulation_cadence(&mut self, cadence: GameSimulationCadence) -> Result<()> {
+        let config = simulation_cadence_config_from_game(cadence);
+        if let Some(runtime) = &mut self.runtime {
+            if runtime.set_simulation_cadence(config)? {
+                log::info!("local server cadence set to {}", cadence.label());
+            }
+            self.scene.simulation_cadence = config;
+        } else {
+            self.scene.simulation_cadence = config;
+            log::info!("local server cadence preset set to {}", cadence.label());
+        }
+        Ok(())
+    }
+
+    fn set_status_overlay(&mut self, status: StatusOverlay) {
+        self.status_overlay = status;
+    }
+}
+
 fn runtime_budget_host_mode(runtime: &WindowSceneRuntime) -> BudgetHostMode {
     match runtime.stats().host_mode {
         SingleViewHostMode::LocalIntegrated => BudgetHostMode::LocalIntegrated,
@@ -3195,6 +3238,27 @@ mod tests {
 
         assert!(result.host_action.is_none());
         assert!(driver.player_collision_box_visible);
+    }
+
+    #[test]
+    fn desktop_host_effects_route_pacing_quit_and_mouse_lock_requests() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        let pacing = driver.apply_ui_action(GameUiAction::CycleFramePacing, ui_action_context());
+        assert_eq!(
+            pacing.host_action,
+            Some(FlatClientHostAction::CycleFramePacing)
+        );
+
+        let fps_cap = driver.apply_ui_action(GameUiAction::CycleFpsCap, ui_action_context());
+        assert_eq!(fps_cap.host_action, Some(FlatClientHostAction::CycleFpsCap));
+
+        let quit = driver.apply_ui_action(GameUiAction::Quit, ui_action_context());
+        assert_eq!(quit.host_action, Some(FlatClientHostAction::Quit));
+
+        let resume = driver.apply_ui_action(GameUiAction::Resume, ui_action_context());
+        assert_eq!(resume.mouse_lock_requested, Some(true));
     }
 
     #[test]

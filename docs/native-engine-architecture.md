@@ -73,6 +73,11 @@ Shared engine crates own:
 - adaptive client render-section admission (`mclone-scene`), consuming the
   shared frame report and timed sync costs; platform drivers provide only their
   target frame period, while an XR upload cap is an optional grant clamp
+- one exhaustive native client-experience settings dispatcher
+  (`mclone-scene`); thin `HostEffects` adapters own mouse lock, desktop frame
+  pacing requests, touch-mode forwarding, and host/session exit requests
+- surface-neutral frame-pacing/timing snapshots and debug-overlay aggregation
+  (`mclone-app-runtime`); the winit pacing driver remains desktop-app-local
 - shared Rust/WebGPU UI model and draw list
 
 Platform app crates own:

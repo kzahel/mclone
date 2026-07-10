@@ -7,7 +7,8 @@ landed 2026-07-09; Slice 3 (mono view topology + screen-space HUD strategy +
 offscreen driver) landed 2026-07-09; Slice 4 (shared OpenXR frame driver)
 landed 2026-07-10; Slice 5 (shared diagnostics accounting and presentation)
 landed 2026-07-10; Slice 6 (shared adaptive render admission) landed
-2026-07-10. (Slices 0–2 are independent per the sequencing guardrail, so
+2026-07-10; Slice 7a (shared effects/`HostEffects` and frame-pacing/debug POD
+promotion) landed 2026-07-10. (Slices 0–2 are independent per the sequencing guardrail, so
 Slice 2 landed ahead of Slice 1.) Post-Slice-3 review corrections landed
 2026-07-10: truthful offscreen-settle failure, an exercised mono-HUD capture
 lane, a shared lifecycle `on_background()` policy, durable-flush regression
@@ -1001,7 +1002,7 @@ host's existing wiring that desktop will adopt
 
 Recommended sub-slice order:
 
-- **7a — Effects/HostEffects.** Generalize the host's effect applier
+- **7a — Effects/HostEffects. [LANDED 2026-07-10]** Generalize the host's effect applier
   (today's `apply_xr_settings_effects`) into the single applier with a
   `HostEffects` trait for the genuinely platform hooks. Known desktop-only
   arms to design for: mouse-lock arm/release, `CycleFramePacing`/`CycleFpsCap`
@@ -1012,6 +1013,23 @@ Recommended sub-slice order:
   copies die in Slice 8 / the web follow-up. Frame-pacing POD stats structs
   move shared per **165 Slice 3** (coordinate, don't duplicate); the
   `FramePacing` winit driver itself stays app-local.
+
+  Landed shape: one exhaustive shared dispatcher and capability/rejection
+  projection in `mclone-scene`, plus a narrow `HostEffects` trait for mouse
+  lock, pacing/cap requests, touch-mode forwarding, quit-to-title, and exit.
+  Desktop and XR consume it; the desktop 24-arm match and capability-projection
+  copy are gone. `FramePacingMode`, `FramePacingUiState`,
+  `FramePacingDebugStats`, `FrameTimingStats`, and the
+  `DebugPaneStats -> DebugOverlay` aggregator now live in
+  `mclone-app-runtime`; only winit cadence/surface control remains in the app.
+
+  Follow-ups intentionally retained: `ClientExperienceSettingsHost` has a
+  temporary `FlatClientDriver` compatibility implementation until 7c deletes
+  that orchestrator; Android's and web's old effect matches remain for Slice 8
+  and the web follow-up; flat Android still needs to feed the now-shared debug
+  aggregator in Slice 8. XR pacing/mouse/touch hooks remain harmless adapters
+  behind the existing visible capability policy rather than changing XR
+  behavior in 7a.
 - **7b — Session start/replacement.** Desktop routes world create/open/join
   and mid-session replacement through the host's session-runtime factory;
   delete the pending-start state machine (`app.rs:928-948`,
@@ -1350,8 +1368,8 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 7a; Slices 0–6 are implemented. Read the shared
-client-experience facade/effect applier and the desktop copies named in Slice
-7a. Keep `RenderAdmissionPolicy` on the scene host while moving desktop flat
+Start with Slice 7b; Slices 0–7a are implemented. Read the shared session
+startup/runtime factory, desktop pending-start machine, and remote adapters
+named in Slice 7b. Keep `RenderAdmissionPolicy` on the scene host while moving desktop flat
 onto that host in the ordered 7a–7e sequence; do not move diagnostics or budget
 policy back into a platform loop handler.

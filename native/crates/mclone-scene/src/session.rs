@@ -1061,15 +1061,12 @@ where
             scene_replaced = self.start_session_for_request(device, queue, request)?;
         }
         if let Some(host_action) = effects.host_action {
-            match host_action {
-                ClientSessionHostAction::QuitToTitle => {
-                    let transition = client_session_quit_to_title_transition(self.session.state());
-                    self.apply_xr_session_transition_effects(transition, device, queue)?;
-                }
-                ClientSessionHostAction::Quit => {
-                    log::info!("XR menu quit action ignored by shared scene");
-                }
-            }
+            let mut host = XrSessionHostEffects {
+                scene: self,
+                device,
+                queue,
+            };
+            apply_client_session_host_action(host_action, &mut host)?;
         }
         Ok(scene_replaced)
     }
@@ -1095,180 +1092,8 @@ where
         &mut self,
         effects: ClientExperienceSettingsEffects,
     ) -> Result<bool> {
-        let has_setting_effects = !effects.setting_effects.is_empty();
-        let has_unavailable =
-            !effects.capability_projection.is_empty() || !effects.rejections.is_empty();
-        for effect in effects.setting_effects {
-            match effect {
-                ClientExperienceSettingEffect::SetSectionOcclusionCulling(enabled) => {
-                    self.render_options.section_occlusion_culling = enabled;
-                    log::info!(
-                        "XR section occlusion culling {}",
-                        if enabled { "enabled" } else { "disabled" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetFullbright(enabled) => {
-                    self.render_options.force_fullbright = enabled;
-                    log::info!(
-                        "XR fullbright {}",
-                        if enabled { "enabled" } else { "disabled" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetFarLod {
-                    enabled,
-                    extra_radius_chunks,
-                } => {
-                    self.scene.far_lod = self
-                        .scene
-                        .far_lod
-                        .with_extra_radius_chunks(extra_radius_chunks);
-                    self.scene.far_lod.enabled = enabled;
-                    log::info!(
-                        "XR far LOD {}",
-                        if enabled { "enabled" } else { "disabled" }
-                    );
-                    log::info!(
-                        "XR far LOD range set to {} chunks beyond render distance",
-                        self.scene.far_lod.extra_radius_chunks
-                    );
-                }
-                ClientExperienceSettingEffect::ClearFarLod => {
-                    if let Some(runtime) = &mut self.runtime {
-                        runtime.clear_far_lod();
-                    }
-                }
-                ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
-                    self.player_collision_box_visible = visible;
-                    log::info!(
-                        "XR player collision box debug {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetFirstPersonPlayerVisible(visible) => {
-                    self.camera.set_first_person_player_visible(visible);
-                    log::info!(
-                        "XR first-person player body {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetCrosshairVisible(_) => {}
-                ClientExperienceSettingEffect::SetFramePipelineOverlayVisible(visible) => {
-                    self.diagnostic_panel.set_frame_metrics_visible(visible);
-                    log::info!(
-                        "XR frame pipeline overlay {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(visible) => {
-                    self.diagnostic_panel.set_debug_diagnostics_visible(visible);
-                    log::info!(
-                        "XR debug diagnostics {}",
-                        if visible { "visible" } else { "hidden" }
-                    );
-                }
-                ClientExperienceSettingEffect::SetPlayerModel(model) => {
-                    self.player_model = model;
-                    log::info!("XR player model set to {}", model.label());
-                }
-                ClientExperienceSettingEffect::SyncPlayerAppearance => {
-                    if let Err(error) = self.sync_player_appearance() {
-                        log::warn!("failed to sync XR player appearance: {error:#}");
-                    }
-                }
-                ClientExperienceSettingEffect::SetMovementMode(movement_mode) => {
-                    self.camera
-                        .set_movement_mode(engine_movement_mode(movement_mode));
-                    let movement_mode = self.camera.movement_mode();
-                    log::info!("XR player movement mode {}", movement_mode.label());
-                }
-                ClientExperienceSettingEffect::SetCollisionMode(collision_mode) => {
-                    self.camera
-                        .set_collision_mode(engine_collision_mode(collision_mode));
-                    let collision_mode = self.camera.collision_mode();
-                    log::info!("XR player collision mode {}", collision_mode.label());
-                }
-                ClientExperienceSettingEffect::SetTravelAssistMode(travel_assist_mode) => {
-                    self.travel_assist_mode = travel_assist_mode;
-                    if self.travel_assist_mode != GameTravelAssistMode::Blink {
-                        self.clear_xr_blink_teleport();
-                    }
-                    log::info!("XR travel assist {}", travel_assist_mode.label());
-                }
-                ClientExperienceSettingEffect::SetTurnMode(turn_mode) => {
-                    let turn_mode = GameXrTurnMode::from(turn_mode);
-                    self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
-                    log::info!("XR turn mode {}", turn_mode.label());
-                }
-                ClientExperienceSettingEffect::SetXrTurnMode(turn_mode) => {
-                    self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
-                    log::info!("XR turn mode {}", turn_mode.label());
-                }
-                ClientExperienceSettingEffect::CycleFramePacing => {
-                    log::info!("XR frame pacing cycle ignored by scene host");
-                }
-                ClientExperienceSettingEffect::CycleFpsCap => {
-                    log::info!("XR FPS cap cycle ignored by scene host");
-                }
-                ClientExperienceSettingEffect::SetRenderDistance(render_distance) => {
-                    if let Some(runtime) = &mut self.runtime {
-                        if runtime
-                            .set_render_distance(render_distance)
-                            .context("set XR render distance from menu")?
-                        {
-                            log::info!(
-                                "XR render distance set to {} (chunk tracking radius {})",
-                                render_distance,
-                                runtime.chunk_tracking_radius()
-                            );
-                        }
-                    }
-                    self.scene.render_distance = render_distance;
-                }
-                ClientExperienceSettingEffect::SetFlySpeedMultiplier(multiplier) => {
-                    self.camera.set_fly_speed_multiplier(f64::from(multiplier));
-                    log::info!(
-                        "XR fly speed set to {:.1}x ({:.0} blocks/s)",
-                        self.camera.fly_speed_multiplier(),
-                        self.camera.speed_blocks_per_second()
-                    );
-                }
-                ClientExperienceSettingEffect::SetMovementSpeedMultiplier(multiplier) => {
-                    self.camera
-                        .set_movement_speed_multiplier(f64::from(multiplier));
-                    self.scene.movement_speed_multiplier =
-                        self.camera.movement_speed_multiplier() as f32;
-                    log::info!(
-                        "XR movement speed multiplier set to {:.1}x",
-                        self.camera.movement_speed_multiplier()
-                    );
-                }
-                ClientExperienceSettingEffect::SetTouchLookSensitivity(_) => {}
-                ClientExperienceSettingEffect::SetTouchControlsMode(_) => {}
-                ClientExperienceSettingEffect::SetServerSimulationCadence(_) => {}
-            }
-        }
-        self.apply_client_experience_capability_projection(effects.capability_projection);
-        for rejection in effects.rejections {
-            log::error!("{}", rejection.message);
-            self.status_overlay = StatusOverlay::new(rejection.message, false);
-            return Ok(false);
-        }
-        if has_setting_effects && !has_unavailable {
-            self.status_overlay = StatusOverlay::hidden();
-        }
-        Ok(true)
-    }
-
-    pub(crate) fn apply_client_experience_capability_projection(
-        &mut self,
-        projection: ClientExperienceCapabilityProjection,
-    ) {
-        if let Some(unavailable) = projection.first_unavailable() {
-            if let Some(message) = unavailable.status.message() {
-                log::warn!("{message}");
-                self.status_overlay = StatusOverlay::new(message, unavailable.status.ok());
-            }
-        }
+        let mut host = XrSettingsHostEffects;
+        apply_client_experience_settings_effects(self, &mut host, effects)
     }
 
     pub(crate) fn apply_xr_session_ui_effects(&mut self, effects: ClientSessionUiEffects) {
@@ -1308,6 +1133,269 @@ where
             self.menu_panel_recenter_pending = true;
         }
         self.ui.apply_action(action);
+    }
+}
+
+struct XrSettingsHostEffects;
+
+impl HostEffects for XrSettingsHostEffects {
+    fn request_mouse_lock(&mut self, _requested: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn cycle_frame_pacing(&mut self) -> Result<()> {
+        log::info!("XR frame pacing cycle ignored by scene host");
+        Ok(())
+    }
+
+    fn cycle_fps_cap(&mut self) -> Result<()> {
+        log::info!("XR FPS cap cycle ignored by scene host");
+        Ok(())
+    }
+
+    fn set_touch_controls_mode(&mut self, _mode: TouchControlsMode) -> Result<()> {
+        Ok(())
+    }
+
+    fn quit_to_title(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn exit(&mut self) -> Result<()> {
+        log::info!("XR menu quit action ignored by shared scene");
+        Ok(())
+    }
+}
+
+struct XrSessionHostEffects<'a, 'device, S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    scene: &'a mut XrMcloneTerrainState<S>,
+    device: &'device wgpu::Device,
+    queue: &'device wgpu::Queue,
+}
+
+impl<S> HostEffects for XrSessionHostEffects<'_, '_, S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    fn request_mouse_lock(&mut self, _requested: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn cycle_frame_pacing(&mut self) -> Result<()> {
+        log::info!("XR frame pacing cycle ignored by scene host");
+        Ok(())
+    }
+
+    fn cycle_fps_cap(&mut self) -> Result<()> {
+        log::info!("XR FPS cap cycle ignored by scene host");
+        Ok(())
+    }
+
+    fn set_touch_controls_mode(&mut self, _mode: TouchControlsMode) -> Result<()> {
+        Ok(())
+    }
+
+    fn quit_to_title(&mut self) -> Result<()> {
+        let transition = client_session_quit_to_title_transition(self.scene.session.state());
+        self.scene
+            .apply_xr_session_transition_effects(transition, self.device, self.queue)
+    }
+
+    fn exit(&mut self) -> Result<()> {
+        log::info!("XR menu quit action ignored by shared scene");
+        Ok(())
+    }
+}
+
+impl<S> ClientExperienceSettingsHost for XrMcloneTerrainState<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()> {
+        self.render_options.section_occlusion_culling = enabled;
+        log::info!(
+            "XR section occlusion culling {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Ok(())
+    }
+
+    fn set_fullbright(&mut self, enabled: bool) -> Result<()> {
+        self.render_options.force_fullbright = enabled;
+        log::info!(
+            "XR fullbright {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Ok(())
+    }
+
+    fn set_far_lod(&mut self, enabled: bool, extra_radius_chunks: u32) -> Result<()> {
+        self.scene.far_lod = self
+            .scene
+            .far_lod
+            .with_extra_radius_chunks(extra_radius_chunks);
+        self.scene.far_lod.enabled = enabled;
+        log::info!(
+            "XR far LOD {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        log::info!(
+            "XR far LOD range set to {} chunks beyond render distance",
+            self.scene.far_lod.extra_radius_chunks
+        );
+        Ok(())
+    }
+
+    fn clear_far_lod(&mut self) -> Result<()> {
+        if let Some(runtime) = &mut self.runtime {
+            runtime.clear_far_lod();
+        }
+        Ok(())
+    }
+
+    fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()> {
+        self.player_collision_box_visible = visible;
+        log::info!(
+            "XR player collision box debug {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()> {
+        self.camera.set_first_person_player_visible(visible);
+        log::info!(
+            "XR first-person player body {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_crosshair_visible(&mut self, _visible: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_frame_pipeline_overlay_visible(&mut self, visible: bool) -> Result<()> {
+        self.diagnostic_panel.set_frame_metrics_visible(visible);
+        log::info!(
+            "XR frame pipeline overlay {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_debug_diagnostics_visible(&mut self, visible: bool) -> Result<()> {
+        self.diagnostic_panel.set_debug_diagnostics_visible(visible);
+        log::info!(
+            "XR debug diagnostics {}",
+            if visible { "visible" } else { "hidden" }
+        );
+        Ok(())
+    }
+
+    fn set_player_model(&mut self, model: GamePlayerModel) -> Result<()> {
+        self.player_model = model;
+        log::info!("XR player model set to {}", model.label());
+        Ok(())
+    }
+
+    fn sync_player_appearance(&mut self) -> Result<()> {
+        if let Err(error) = XrMcloneTerrainState::sync_player_appearance(self) {
+            log::warn!("failed to sync XR player appearance: {error:#}");
+        }
+        Ok(())
+    }
+
+    fn set_movement_mode(&mut self, mode: GameMovementMode) -> Result<()> {
+        self.camera.set_movement_mode(engine_movement_mode(mode));
+        log::info!(
+            "XR player movement mode {}",
+            self.camera.movement_mode().label()
+        );
+        Ok(())
+    }
+
+    fn set_collision_mode(&mut self, mode: GameCollisionMode) -> Result<()> {
+        self.camera.set_collision_mode(engine_collision_mode(mode));
+        log::info!(
+            "XR player collision mode {}",
+            self.camera.collision_mode().label()
+        );
+        Ok(())
+    }
+
+    fn set_travel_assist_mode(&mut self, mode: GameTravelAssistMode) -> Result<()> {
+        self.travel_assist_mode = mode;
+        if self.travel_assist_mode != GameTravelAssistMode::Blink {
+            self.clear_xr_blink_teleport();
+        }
+        log::info!("XR travel assist {}", mode.label());
+        Ok(())
+    }
+
+    fn set_turn_mode(&mut self, mode: GameTurnMode) -> Result<()> {
+        let mode = GameXrTurnMode::from(mode);
+        self.set_turn_policy(XrTurnPolicy::from_game_mode(mode));
+        log::info!("XR turn mode {}", mode.label());
+        Ok(())
+    }
+
+    fn set_xr_turn_mode(&mut self, mode: GameXrTurnMode) -> Result<()> {
+        self.set_turn_policy(XrTurnPolicy::from_game_mode(mode));
+        log::info!("XR turn mode {}", mode.label());
+        Ok(())
+    }
+
+    fn set_render_distance(&mut self, render_distance: u32) -> Result<()> {
+        if let Some(runtime) = &mut self.runtime
+            && runtime
+                .set_render_distance(render_distance)
+                .context("set XR render distance from menu")?
+        {
+            log::info!(
+                "XR render distance set to {} (chunk tracking radius {})",
+                render_distance,
+                runtime.chunk_tracking_radius()
+            );
+        }
+        self.scene.render_distance = render_distance;
+        Ok(())
+    }
+
+    fn set_fly_speed_multiplier(&mut self, multiplier: f32) -> Result<()> {
+        self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+        log::info!(
+            "XR fly speed set to {:.1}x ({:.0} blocks/s)",
+            self.camera.fly_speed_multiplier(),
+            self.camera.speed_blocks_per_second()
+        );
+        Ok(())
+    }
+
+    fn set_movement_speed_multiplier(&mut self, multiplier: f32) -> Result<()> {
+        self.camera
+            .set_movement_speed_multiplier(f64::from(multiplier));
+        self.scene.movement_speed_multiplier = self.camera.movement_speed_multiplier() as f32;
+        log::info!(
+            "XR movement speed multiplier set to {:.1}x",
+            self.camera.movement_speed_multiplier()
+        );
+        Ok(())
+    }
+
+    fn set_touch_look_sensitivity(&mut self, _sensitivity: f32) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_server_simulation_cadence(&mut self, _cadence: GameSimulationCadence) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_status_overlay(&mut self, status: StatusOverlay) {
+        self.status_overlay = status;
     }
 }
 
