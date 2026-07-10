@@ -455,7 +455,30 @@ Exit criteria: desktop flat can stage and apply all four well-known optional
 pack combinations from the UI, including fallback-only, with accurate status
 and provenance labels.
 
+**Required next-work checkpoint:** do not automatically continue from this
+slice into all of Slice 5 merely because it is numerically next. Re-read
+[`170`](170-web-scene-host-adoption.md) and the current topic status. The
+default recommendation after the shared replacement/UI contract is stable is
+to start or resume Tactical 170 so browser adoption lands on
+`McloneSceneHost`, not on the production `WebChunkRenderSession` orchestrator
+that Tactical 170 deletes. Non-web discovery/staging work from Slice 5 may
+still proceed first when it is the immediate platform priority, but an agent
+proposing the next slice must call out this handoff explicitly.
+
 ### Slice 5 - Platform Discovery and Adoption
+
+This is a cross-tactical adoption slice, not a requirement to modify every
+current platform host in place. Native, Android, XR, and offscreen adoption may
+land independently against the shared contract. The web item is coordinated
+with Tactical 170:
+
+- if Tactical 170's production cutover has not landed, switch to Tactical 170
+  before implementing web asset-pack lifecycle or UI policy;
+- do not add selection, compiler-epoch, resource-replacement, or UI policy to
+  `WebChunkRenderSession` merely to complete this checklist; and
+- implement the web item through Tactical 170's browser service adapters and
+  shared-host cutover, then return here to record the platform evidence and
+  finish this tactical's acceptance/audit work.
 
 - [ ] Desktop: project local loose/packed discovery into the shared catalog;
   preserve environment variables as launch/CI defaults rather than live UI
@@ -465,9 +488,10 @@ and provenance labels.
   path.
 - [ ] Desktop XR: use the same shared scene/UI state with no app-local pack
   selector.
-- [ ] Web: fetch/stage pack descriptors and bytes, compose/reinitialize its
-  resident compiler worker under the shared selection/epoch contract, and show
-  the same native-rendered UI screen.
+- [ ] Web, coordinated with Tactical 170: fetch/stage pack descriptors and
+  bytes, compose/reinitialize its resident compiler worker under the shared
+  selection/epoch contract, and show the same native-rendered UI screen through
+  `McloneSceneHost`; do not extend the old production orchestrator.
 - [ ] Offscreen and synthetic-stereo: add programmatic selection inputs for
   deterministic validation without inventing a separate product policy.
 - [ ] Update the platform parity capability/exception ledger if any host cannot
@@ -476,6 +500,12 @@ and provenance labels.
 Exit criteria: the Asset Packs screen is accessible and truthful on every
 supported client lane; each lane either applies the selection or carries an
 explicit temporary parity exception with reason and follow-up.
+
+If the only unfinished Slice 5 item is web adoption and Tactical 170 has not
+yet cut production over, the recommended next work is Tactical 170 rather than
+an implementation against the soon-to-be-deleted web host. This tactical stays
+open and resumes after that handoff; the explicit exception above is a truthful
+intermediate state, not permission to claim Slice 5 complete.
 
 ### Slice 6 - Persistence, Audit, and Closeout
 
@@ -562,3 +592,9 @@ recommended work. Related commits should normally carry:
 ```text
 Topic: asset-pack-profiles
 ```
+
+When Slice 4 lands, the topic's recommended-next section must compare the
+remaining non-web Slice 5 work with Tactical 170 instead of mechanically
+recommending the next number. When web is the next missing adoption lane, it
+must recommend Tactical 170 until the shared browser host/cutover is ready,
+then route back here for Slice 5 evidence and Slice 6 closeout.

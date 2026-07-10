@@ -331,6 +331,18 @@ introduce asset epochs for compiler results, keep the old selection drawable
 until the new visible set is ready, and commit all source-backed presentation
 consumers together without reconnecting or mutating world/session state.
 
+Forward routing is intentionally non-numeric. After Slice 3, complete the
+shared Asset Packs UI in Slice 4, then make the required cross-tactical
+checkpoint recorded in Tactical 169. The default recommendation at that point
+is to start or resume
+[`170`](../tactical/170-web-scene-host-adoption.md) before the web portion of
+169 Slice 5. Do not add asset selection, compiler-epoch, replacement, or UI
+policy to `WebChunkRenderSession`, because Tactical 170 deletes that production
+orchestrator. Native/Android/XR/offscreen discovery work may proceed first when
+it is the immediate priority; web adoption should land through the new
+`McloneSceneHost` browser adapters/cutover, after which work returns to 169 for
+platform evidence, persistence, audit, and closeout.
+
 ## Slice 0 Evidence
 
 Focused validation on 2026-07-10:
