@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
-use crate::{AssetPath, AssetResult};
+use crate::{
+    AssetError, AssetPackCatalog, AssetPackId, AssetPackOrigin, AssetPackSelection, AssetPath,
+    AssetResolutionOrigin, AssetResult,
+};
 
 pub trait AssetSource {
     fn read(&self, path: &AssetPath) -> AssetResult<Option<Vec<u8>>>;
@@ -54,7 +57,18 @@ impl AssetSource for MemoryAssetSource {
 
 #[derive(Default)]
 pub struct AssetSourceChain {
-    sources: Vec<Box<dyn AssetSource>>,
+    sources: Vec<AssetSourceEntry>,
+}
+
+struct AssetSourceEntry {
+    identity: AssetResolutionOrigin,
+    source: Box<dyn AssetSource>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NamedAssetResolution {
+    pub bytes: Vec<u8>,
+    pub source: AssetResolutionOrigin,
 }
 
 impl AssetSourceChain {
@@ -63,7 +77,50 @@ impl AssetSourceChain {
     }
 
     pub fn push(&mut self, source: impl AssetSource + 'static) {
-        self.sources.push(Box::new(source));
+        self.sources.push(AssetSourceEntry {
+            identity: AssetResolutionOrigin::anonymous(),
+            source: Box::new(source),
+        });
+    }
+
+    pub fn push_named(
+        &mut self,
+        pack_id: AssetPackId,
+        origin: AssetPackOrigin,
+        source: impl AssetSource + 'static,
+    ) {
+        self.push_named_boxed(pack_id, origin, Box::new(source));
+    }
+
+    pub fn from_selection(
+        catalog: &AssetPackCatalog,
+        selection: &AssetPackSelection,
+        sources: impl IntoIterator<Item = (AssetPackId, Box<dyn AssetSource>)>,
+    ) -> AssetResult<Self> {
+        let mut sources = sources.into_iter().collect::<BTreeMap<_, _>>();
+        let mut chain = Self::new();
+        for descriptor in catalog.source_order(selection)? {
+            let source = sources.remove(&descriptor.id).ok_or_else(|| {
+                AssetError::InvalidAssetPack(format!(
+                    "selected asset pack `{}` has no readable source",
+                    descriptor.id
+                ))
+            })?;
+            chain.push_named_boxed(descriptor.id.clone(), descriptor.origin, source);
+        }
+        Ok(chain)
+    }
+
+    pub fn resolve(&self, path: &AssetPath) -> AssetResult<Option<NamedAssetResolution>> {
+        for entry in &self.sources {
+            if let Some(bytes) = entry.source.read(path)? {
+                return Ok(Some(NamedAssetResolution {
+                    bytes,
+                    source: entry.identity.clone(),
+                }));
+            }
+        }
+        Ok(None)
     }
 
     pub fn len(&self) -> usize {
@@ -72,6 +129,18 @@ impl AssetSourceChain {
 
     pub fn is_empty(&self) -> bool {
         self.sources.is_empty()
+    }
+
+    fn push_named_boxed(
+        &mut self,
+        pack_id: AssetPackId,
+        origin: AssetPackOrigin,
+        source: Box<dyn AssetSource>,
+    ) {
+        self.sources.push(AssetSourceEntry {
+            identity: AssetResolutionOrigin::named(pack_id, origin),
+            source,
+        });
     }
 }
 
@@ -85,18 +154,13 @@ impl std::fmt::Debug for AssetSourceChain {
 
 impl AssetSource for AssetSourceChain {
     fn read(&self, path: &AssetPath) -> AssetResult<Option<Vec<u8>>> {
-        for source in &self.sources {
-            if let Some(bytes) = source.read(path)? {
-                return Ok(Some(bytes));
-            }
-        }
-        Ok(None)
+        Ok(self.resolve(path)?.map(|resolution| resolution.bytes))
     }
 
     fn list(&self, prefix: &str, suffix: &str) -> AssetResult<Vec<AssetPath>> {
         let mut paths = std::collections::BTreeSet::new();
-        for source in &self.sources {
-            paths.extend(source.list(prefix, suffix)?);
+        for entry in &self.sources {
+            paths.extend(entry.source.list(prefix, suffix)?);
         }
         Ok(paths.into_iter().collect())
     }
@@ -256,6 +320,70 @@ mod tests {
                 "assets/minecraft/blockstates/stone.json"
             ]
         );
+    }
+
+    #[test]
+    fn selected_named_chain_cannot_resolve_from_disabled_reference_pack() {
+        let authored_id = AssetPackId::new("mclone-authored");
+        let reference_id = AssetPackId::new("minecraft-1.17.1-reference");
+        let fallback_id = AssetPackId::new("mclone-generated");
+        let catalog = AssetPackCatalog::new([
+            crate::AssetPackDescriptor::new(
+                authored_id.clone(),
+                "Mclone authored",
+                AssetPackOrigin::FirstParty,
+                10,
+            )
+            .unwrap(),
+            crate::AssetPackDescriptor::new(
+                reference_id.clone(),
+                "Minecraft reference",
+                AssetPackOrigin::MinecraftReference,
+                20,
+            )
+            .unwrap(),
+            crate::AssetPackDescriptor::new(
+                fallback_id.clone(),
+                "Generated fallback",
+                AssetPackOrigin::Generated,
+                30,
+            )
+            .unwrap()
+            .required(),
+        ])
+        .unwrap();
+        let selection = AssetPackSelection::new([authored_id.clone()]);
+        let path = AssetPath::new("assets/minecraft/textures/block/stone.png");
+        let reference_only = AssetPath::new("assets/minecraft/reference-only.txt");
+
+        let mut authored = MemoryAssetSource::new();
+        authored.insert_text(path.clone(), "authored");
+        let mut reference = MemoryAssetSource::new();
+        reference.insert_text(path.clone(), "minecraft");
+        reference.insert_text(reference_only.clone(), "must stay disabled");
+        let mut fallback = MemoryAssetSource::new();
+        fallback.insert_text(path.clone(), "generated");
+        let chain = AssetSourceChain::from_selection(
+            &catalog,
+            &selection,
+            [
+                (
+                    authored_id.clone(),
+                    Box::new(authored) as Box<dyn AssetSource>,
+                ),
+                (reference_id, Box::new(reference) as Box<dyn AssetSource>),
+                (fallback_id, Box::new(fallback) as Box<dyn AssetSource>),
+            ],
+        )
+        .unwrap();
+
+        let resolution = chain.resolve(&path).unwrap().unwrap();
+        assert_eq!(resolution.bytes, b"authored");
+        assert_eq!(resolution.source.pack_id, Some(authored_id));
+        assert_eq!(resolution.source.origin, AssetPackOrigin::FirstParty);
+
+        assert!(chain.resolve(&reference_only).unwrap().is_none());
+        assert_eq!(chain.len(), 2, "disabled source was not admitted to chain");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

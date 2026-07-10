@@ -8,7 +8,10 @@ use std::path::Path;
 use flate2::read::DeflateDecoder;
 use serde::Deserialize;
 
-use crate::{AssetError, AssetPath, AssetResult, AssetSource};
+use crate::{
+    AssetError, AssetPackDescriptor, AssetPackDiscovery, AssetPackId, AssetPackOrigin,
+    AssetPackRole, AssetPath, AssetResult, AssetSource,
+};
 
 pub const PACK_FORMAT_VERSION: u32 = 1;
 pub const DEFAULT_PACK_MANIFEST_PATH: &str = "mclone-pack.json";
@@ -30,6 +33,44 @@ pub struct AssetPackManifest {
     pub format_version: u32,
     pub asset_set: String,
     pub file_count: usize,
+    pub pack_id: Option<AssetPackId>,
+    pub display_name: Option<String>,
+    pub origin: AssetPackOrigin,
+    pub roles: BTreeSet<AssetPackRole>,
+    pub asset_schema: Option<String>,
+    pub content_fingerprint: Option<String>,
+}
+
+impl AssetPackManifest {
+    pub fn descriptor(
+        &self,
+        discovery: AssetPackDiscovery,
+        priority: u16,
+    ) -> AssetResult<AssetPackDescriptor> {
+        let origin = match self.origin {
+            AssetPackOrigin::Unknown => discovery.trusted_origin.unwrap_or_default(),
+            declared => declared,
+        };
+        let roles = if self.roles.is_empty() {
+            discovery.trusted_roles
+        } else {
+            self.roles.clone()
+        };
+        let mut descriptor = AssetPackDescriptor::new(
+            self.pack_id.clone().unwrap_or(discovery.fallback_id),
+            self.display_name
+                .clone()
+                .unwrap_or(discovery.fallback_display_name),
+            origin,
+            priority,
+        )?
+        .with_roles(roles);
+        descriptor.asset_schema.clone_from(&self.asset_schema);
+        descriptor
+            .content_fingerprint
+            .clone_from(&self.content_fingerprint);
+        Ok(descriptor)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -114,6 +155,14 @@ struct RawAssetPackManifest {
     format_version: u32,
     asset_set: String,
     file_count: usize,
+    pack_id: Option<String>,
+    display_name: Option<String>,
+    #[serde(default)]
+    origin: AssetPackOrigin,
+    #[serde(default)]
+    roles: BTreeSet<AssetPackRole>,
+    asset_schema: Option<String>,
+    content_fingerprint: Option<String>,
     files: Vec<RawAssetPackFile>,
 }
 
@@ -140,6 +189,27 @@ fn validate_raw_manifest(
     }
     if raw.asset_set.is_empty() {
         return Err(pack_error("manifest asset_set must not be empty"));
+    }
+    if raw
+        .display_name
+        .as_ref()
+        .is_some_and(|display_name| display_name.trim().is_empty())
+    {
+        return Err(pack_error("manifest display_name must not be empty"));
+    }
+    if raw
+        .asset_schema
+        .as_ref()
+        .is_some_and(|schema| schema.trim().is_empty())
+    {
+        return Err(pack_error("manifest asset_schema must not be empty"));
+    }
+    if raw
+        .content_fingerprint
+        .as_ref()
+        .is_some_and(|fingerprint| fingerprint.trim().is_empty())
+    {
+        return Err(pack_error("manifest content_fingerprint must not be empty"));
     }
     if raw.file_count != raw.files.len() {
         return Err(pack_error(format!(
@@ -196,6 +266,12 @@ fn validate_raw_manifest(
         format_version: raw.format_version,
         asset_set: raw.asset_set,
         file_count: raw.file_count,
+        pack_id: raw.pack_id.map(AssetPackId::try_new).transpose()?,
+        display_name: raw.display_name,
+        origin: raw.origin,
+        roles: raw.roles,
+        asset_schema: raw.asset_schema,
+        content_fingerprint: raw.content_fingerprint,
     };
     Ok(PackedAssetSource {
         bytes,
@@ -472,6 +548,9 @@ mod tests {
         let source = PackedAssetSource::from_bytes(bytes).unwrap();
 
         assert_eq!(source.manifest().asset_set, "mclone-test");
+        assert_eq!(source.manifest().pack_id, None);
+        assert_eq!(source.manifest().origin, AssetPackOrigin::Unknown);
+        assert!(source.manifest().roles.is_empty());
         assert_eq!(source.file_count(), 1);
         assert_eq!(
             source
@@ -479,6 +558,81 @@ mod tests {
                 .unwrap(),
             Some(b"{}".to_vec())
         );
+    }
+
+    #[test]
+    fn manifest_parses_optional_pack_identity_and_provenance() {
+        let manifest = br#"{
+            "format_version": 1,
+            "asset_set": "mclone-authored",
+            "file_count": 0,
+            "pack_id": "mclone-authored",
+            "display_name": "Mclone Original Assets",
+            "origin": "first_party",
+            "roles": ["authored_override", "render_content"],
+            "asset_schema": "mclone-visuals-v1",
+            "content_fingerprint": "sha256:test",
+            "files": []
+        }"#
+        .to_vec();
+        let bytes = test_zip(vec![test_entry(
+            DEFAULT_PACK_MANIFEST_PATH,
+            manifest,
+            METHOD_DEFLATE,
+        )]);
+
+        let source = PackedAssetSource::from_bytes(bytes).unwrap();
+        let manifest = source.manifest();
+
+        assert_eq!(manifest.pack_id, Some(AssetPackId::new("mclone-authored")));
+        assert_eq!(
+            manifest.display_name.as_deref(),
+            Some("Mclone Original Assets")
+        );
+        assert_eq!(manifest.origin, AssetPackOrigin::FirstParty);
+        assert_eq!(
+            manifest.roles,
+            BTreeSet::from([
+                AssetPackRole::AuthoredOverride,
+                AssetPackRole::RenderContent,
+            ])
+        );
+        assert_eq!(manifest.asset_schema.as_deref(), Some("mclone-visuals-v1"));
+        assert_eq!(manifest.content_fingerprint.as_deref(), Some("sha256:test"));
+    }
+
+    #[test]
+    fn legacy_manifest_stays_unknown_without_trusted_discovery_identity() {
+        let bytes = test_zip(vec![test_entry(
+            DEFAULT_PACK_MANIFEST_PATH,
+            manifest_bytes(vec![]),
+            METHOD_DEFLATE,
+        )]);
+        let source = PackedAssetSource::from_bytes(bytes).unwrap();
+
+        let untrusted = source
+            .manifest()
+            .descriptor(
+                AssetPackDiscovery::untrusted(AssetPackId::new("legacy-pack"), "Legacy pack"),
+                20,
+            )
+            .unwrap();
+        assert_eq!(untrusted.origin, AssetPackOrigin::Unknown);
+
+        let trusted = source
+            .manifest()
+            .descriptor(
+                AssetPackDiscovery::trusted(
+                    AssetPackId::new("minecraft-1.17.1-reference"),
+                    "Minecraft 1.17.1 Reference",
+                    AssetPackOrigin::MinecraftReference,
+                    [AssetPackRole::ReferenceBase],
+                ),
+                20,
+            )
+            .unwrap();
+        assert_eq!(trusted.origin, AssetPackOrigin::MinecraftReference);
+        assert!(trusted.roles.contains(&AssetPackRole::ReferenceBase));
     }
 
     #[test]

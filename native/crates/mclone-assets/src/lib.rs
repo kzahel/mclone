@@ -3,8 +3,10 @@
 mod atlas;
 mod block_registry;
 mod figure;
+mod inventory;
 mod model;
 mod pack;
+mod profile;
 mod resource;
 mod source;
 
@@ -25,6 +27,11 @@ pub use figure::{
     default_player_figure_id, default_player_figure_path, load_figure_asset,
     upright_bear_figure_id, upright_bear_figure_path,
 };
+pub use inventory::{
+    AssetConsumerKind, AssetRequirementPolicy, CanonicalAssetRequirement,
+    CanonicalFirstPartyAssetInventory, FirstPartyBlockVisual, FirstPartyVisualClass,
+    canonical_first_party_asset_inventory,
+};
 pub use model::{
     BakedBlockModel, BakedBlockModelFace, BlockModel, BlockModelElement, BlockModelFace,
     BlockModelLibrary, ModelFaceDirection, TextureMaterial, TextureReference,
@@ -32,8 +39,13 @@ pub use model::{
 pub use pack::{
     AssetPackManifest, DEFAULT_PACK_MANIFEST_PATH, PACK_FORMAT_VERSION, PackedAssetSource,
 };
+pub use profile::{
+    AssetPackAvailability, AssetPackCatalog, AssetPackDescriptor, AssetPackDiscovery, AssetPackId,
+    AssetPackOrigin, AssetPackRole, AssetPackSelection, AssetProvenanceEntry,
+    AssetProvenanceReport, AssetProvenanceSummary, AssetResolutionOrigin, AssetResolutionOutcome,
+};
 pub use resource::{AssetPath, ResourceLocation};
-pub use source::{AssetSource, AssetSourceChain, MemoryAssetSource};
+pub use source::{AssetSource, AssetSourceChain, MemoryAssetSource, NamedAssetResolution};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::FilesystemAssetSource;
