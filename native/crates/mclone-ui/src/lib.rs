@@ -1051,6 +1051,178 @@ impl Default for WorldCatalogUiState {
     }
 }
 
+pub const ASSET_PACK_UI_ROW_CAPACITY: usize = 8;
+
+/// Compact, copyable handle used by [`GameUiAction`] instead of an owned pack
+/// id. The shared client-experience controller resolves it against its current
+/// catalog before changing the staged selection.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct AssetPackUiId(pub u64);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AssetPackUiOrigin {
+    FirstParty,
+    Generated,
+    MinecraftReference,
+    #[default]
+    Unknown,
+}
+
+impl AssetPackUiOrigin {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FirstParty => "First-party / authored",
+            Self::Generated => "First-party / generated",
+            Self::MinecraftReference => "Local only / proprietary",
+            Self::Unknown => "Unknown origin",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AssetPackUiRowStatus {
+    #[default]
+    Disabled,
+    Enabled,
+    Unavailable,
+    Preparing,
+    Active,
+    Failed,
+}
+
+impl AssetPackUiRowStatus {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Disabled => "Disabled",
+            Self::Enabled => "Enabled",
+            Self::Unavailable => "Unavailable",
+            Self::Preparing => "Preparing",
+            Self::Active => "Active",
+            Self::Failed => "Failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AssetPackUiApplyState {
+    #[default]
+    Idle,
+    PreparingAssets,
+    PreparingMeshes,
+    Failed,
+}
+
+impl AssetPackUiApplyState {
+    pub const fn is_preparing(self) -> bool {
+        matches!(self, Self::PreparingAssets | Self::PreparingMeshes)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AssetPackUiCoverage {
+    pub authored: usize,
+    pub required: usize,
+    pub generated: usize,
+    pub minecraft: usize,
+    pub unknown: usize,
+    pub suppressed: usize,
+    pub missing: usize,
+    pub proprietary_free: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AssetPackUiRow {
+    pub ui_id: AssetPackUiId,
+    pub pack_id: WorldCatalogUiText,
+    pub display_name: WorldCatalogUiText,
+    pub origin: AssetPackUiOrigin,
+    pub status: AssetPackUiRowStatus,
+    pub enabled: bool,
+    pub active: bool,
+    pub available: bool,
+    pub disableable: bool,
+    pub detail: WorldCatalogUiText,
+}
+
+impl AssetPackUiRow {
+    pub fn new(
+        ui_id: AssetPackUiId,
+        pack_id: &str,
+        display_name: &str,
+        origin: AssetPackUiOrigin,
+    ) -> Self {
+        Self {
+            ui_id,
+            pack_id: WorldCatalogUiText::new(pack_id),
+            display_name: WorldCatalogUiText::new(display_name),
+            origin,
+            status: AssetPackUiRowStatus::Disabled,
+            enabled: false,
+            active: false,
+            available: true,
+            disableable: true,
+            detail: WorldCatalogUiText::empty(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AssetPacksUiState {
+    pub rows: [Option<AssetPackUiRow>; ASSET_PACK_UI_ROW_CAPACITY],
+    pub effective_label: WorldCatalogUiText,
+    pub coverage: AssetPackUiCoverage,
+    pub dirty: bool,
+    pub apply_state: AssetPackUiApplyState,
+    pub message: WorldCatalogUiText,
+}
+
+impl AssetPacksUiState {
+    pub const fn empty() -> Self {
+        Self {
+            rows: [None; ASSET_PACK_UI_ROW_CAPACITY],
+            effective_label: WorldCatalogUiText::empty(),
+            coverage: AssetPackUiCoverage {
+                authored: 0,
+                required: 0,
+                generated: 0,
+                minecraft: 0,
+                unknown: 0,
+                suppressed: 0,
+                missing: 0,
+                proprietary_free: false,
+            },
+            dirty: false,
+            apply_state: AssetPackUiApplyState::Idle,
+            message: WorldCatalogUiText::empty(),
+        }
+    }
+
+    pub fn set_rows(&mut self, rows: &[AssetPackUiRow]) {
+        self.rows = [None; ASSET_PACK_UI_ROW_CAPACITY];
+        for (slot, row) in self.rows.iter_mut().zip(rows.iter().copied()) {
+            *slot = Some(row);
+        }
+    }
+
+    pub fn row_count(&self) -> usize {
+        self.rows.iter().flatten().count()
+    }
+
+    pub fn row(&self, id: AssetPackUiId) -> Option<&AssetPackUiRow> {
+        self.rows.iter().flatten().find(|row| row.ui_id == id)
+    }
+
+    pub fn can_apply(&self) -> bool {
+        self.dirty && !self.apply_state.is_preparing()
+    }
+}
+
+impl Default for AssetPacksUiState {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameScreen {
     Title,
@@ -1074,6 +1246,9 @@ pub enum GameScreen {
         category: GameOptionsCategory,
     },
     ServerSettings {
+        parent: GameOptionsParent,
+    },
+    AssetPacks {
         parent: GameOptionsParent,
     },
 }
@@ -1489,6 +1664,10 @@ pub enum GameUiAction {
     OpenOptions(GameOptionsParent),
     OpenOptionsCategory(GameOptionsParent, GameOptionsCategory),
     OpenServerSettings(GameOptionsParent),
+    OpenAssetPacks(GameOptionsParent),
+    ToggleAssetPack(AssetPackUiId),
+    ApplyAssetPacks,
+    CancelAssetPacks,
     BackToTitle,
     BackToPause,
     QuitToTitle,
@@ -1587,6 +1766,7 @@ impl GameTouchSettings {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameUiRenderState {
     pub world_catalog: WorldCatalogUiState,
+    pub asset_packs: AssetPacksUiState,
     pub render_distance: i32,
     pub min_render_distance: i32,
     pub max_render_distance: i32,
@@ -1625,6 +1805,7 @@ impl Default for GameUiRenderState {
     fn default() -> Self {
         Self {
             world_catalog: WorldCatalogUiState::default(),
+            asset_packs: AssetPacksUiState::default(),
             render_distance: 2,
             min_render_distance: 2,
             max_render_distance: 16,

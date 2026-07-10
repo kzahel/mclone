@@ -88,6 +88,21 @@ pub(crate) struct OffscreenFlatClientHost {
     driver: OffscreenDriver,
     camera: SpectatorCamera,
     asset_replacement_smoke: Option<AssetReplacementSmoke>,
+    asset_pack_ui_smoke: Option<AssetPackUiSmoke>,
+}
+
+struct AssetPackUiSmoke {
+    phase: AssetPackUiSmokePhase,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AssetPackUiSmokePhase {
+    Start,
+    WaitingOriginal,
+    WaitingHybrid,
+    WaitingFallback,
+    WaitingVanilla,
+    Complete,
 }
 
 struct AssetReplacementSmoke {
@@ -134,7 +149,104 @@ impl OffscreenFlatClientHost {
             driver,
             camera: startup_camera,
             asset_replacement_smoke: None,
+            asset_pack_ui_smoke: None,
         })
+    }
+
+    fn enable_asset_pack_ui_smoke(&mut self) {
+        self.driver
+            .host_mut()
+            .set_mono_ui_screen(Some(mclone_ui::GameScreen::AssetPacks {
+                parent: mclone_ui::GameOptionsParent::Pause,
+            }));
+        self.asset_pack_ui_smoke = Some(AssetPackUiSmoke {
+            phase: AssetPackUiSmokePhase::Start,
+        });
+    }
+
+    fn asset_pack_ui_row_id(&self, pack_id: &str) -> Result<mclone_ui::AssetPackUiId> {
+        self.driver
+            .host()
+            .asset_pack_ui_state()
+            .rows
+            .iter()
+            .flatten()
+            .find(|row| row.pack_id.as_str() == pack_id)
+            .map(|row| row.ui_id)
+            .with_context(|| format!("asset pack UI row {pack_id} is missing"))
+    }
+
+    fn advance_asset_pack_ui_smoke(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        let Some(phase) = self.asset_pack_ui_smoke.as_ref().map(|smoke| smoke.phase) else {
+            return Ok(());
+        };
+        if let mclone_scene::AssetReplacementStatus::Failed {
+            active_epoch,
+            message,
+        } = self.driver.host().asset_replacement_status()
+        {
+            bail!(
+                "asset pack UI smoke failed with active epoch {active_epoch} retained: {message}"
+            );
+        }
+        let active_epoch = self.driver.host().active_asset_epoch();
+        let authored = self.asset_pack_ui_row_id(
+            mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID,
+        )?;
+        let reference = self.asset_pack_ui_row_id(
+            mclone_app_runtime::prepared_assets::MINECRAFT_REFERENCE_PACK_ID,
+        )?;
+        let actions: Option<(AssetPackUiSmokePhase, Vec<mclone_ui::GameUiAction>)> = match phase {
+            AssetPackUiSmokePhase::Start if active_epoch == 0 => Some((
+                AssetPackUiSmokePhase::WaitingOriginal,
+                vec![
+                    mclone_ui::GameUiAction::ToggleAssetPack(authored),
+                    mclone_ui::GameUiAction::ToggleAssetPack(reference),
+                    mclone_ui::GameUiAction::ApplyAssetPacks,
+                ],
+            )),
+            AssetPackUiSmokePhase::WaitingOriginal if active_epoch == 1 => Some((
+                AssetPackUiSmokePhase::WaitingHybrid,
+                vec![
+                    mclone_ui::GameUiAction::ToggleAssetPack(reference),
+                    mclone_ui::GameUiAction::ApplyAssetPacks,
+                ],
+            )),
+            AssetPackUiSmokePhase::WaitingHybrid if active_epoch == 2 => Some((
+                AssetPackUiSmokePhase::WaitingFallback,
+                vec![
+                    mclone_ui::GameUiAction::ToggleAssetPack(authored),
+                    mclone_ui::GameUiAction::ToggleAssetPack(reference),
+                    mclone_ui::GameUiAction::ApplyAssetPacks,
+                ],
+            )),
+            AssetPackUiSmokePhase::WaitingFallback if active_epoch == 3 => Some((
+                AssetPackUiSmokePhase::WaitingVanilla,
+                vec![
+                    mclone_ui::GameUiAction::ToggleAssetPack(reference),
+                    mclone_ui::GameUiAction::ApplyAssetPacks,
+                ],
+            )),
+            AssetPackUiSmokePhase::WaitingVanilla if active_epoch == 4 => Some((
+                AssetPackUiSmokePhase::Complete,
+                vec![mclone_ui::GameUiAction::ToggleAssetPack(authored)],
+            )),
+            _ => None,
+        };
+        if let Some((next, actions)) = actions {
+            for action in actions {
+                self.driver.apply_ui_action(action, device, queue)?;
+            }
+            self.asset_pack_ui_smoke
+                .as_mut()
+                .expect("asset pack UI smoke remains configured")
+                .phase = next;
+        }
+        Ok(())
     }
 
     fn enable_asset_replacement_smoke(&mut self, authored: PathBuf, fallback: PathBuf) {
@@ -374,8 +486,15 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     options: &HeadlessScreenshotOptions,
 ) -> Result<OffscreenFlatClientScreenshotReport> {
     let asset_replacement_smoke = asset_replacement_smoke_paths()?;
+    let asset_pack_ui_sources = asset_pack_ui_source_paths()?;
+    let asset_pack_ui_smoke = asset_pack_ui_smoke_enabled();
+    if asset_pack_ui_smoke && asset_pack_ui_sources.is_none() {
+        bail!(
+            "MCLONE_ASSET_PACK_UI_SMOKE requires MCLONE_ASSET_PACK_UI_AUTHORED and MCLONE_ASSET_PACK_UI_FALLBACK"
+        );
+    }
     let assets = WindowSceneAssets::load()?;
-    let asset_source = load_asset_source()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let startup_wait = options.startup_wait;
@@ -387,6 +506,9 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     };
     if asset_replacement_smoke.is_some() {
         frame_count = frame_count.max(180);
+    }
+    if asset_pack_ui_smoke {
+        frame_count = frame_count.max(480);
     }
     let (loop_report, frame_pixels, mut host) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
@@ -407,17 +529,41 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 &asset_source,
                 startup_camera,
             )?;
+            if let Some((authored, fallback)) = &asset_pack_ui_sources {
+                let registry = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::from_files_with_reference(
+                    authored,
+                    fallback,
+                    asset_source.clone(),
+                )?;
+                host.driver.host_mut().configure_asset_pack_sources(
+                    registry,
+                    mclone_assets::AssetPackSelection::new([mclone_assets::AssetPackId::new(
+                        mclone_app_runtime::prepared_assets::MINECRAFT_REFERENCE_PACK_ID,
+                    )]),
+                )?;
+            }
             host.start_scene_with_wait_policy(device, queue, startup_wait)?;
             configure_screenshot_scene(&mut host, options, device, queue)?;
             if let Some((authored, fallback)) = &asset_replacement_smoke {
                 host.enable_asset_replacement_smoke(authored.clone(), fallback.clone());
             }
+            if asset_pack_ui_smoke {
+                host.enable_asset_pack_ui_smoke();
+            }
             Ok(host)
         },
         |index, frame, host| {
+            let device = frame.device;
+            let queue = frame.queue;
             host.render_frame(frame, OffscreenFlatClientFrameOptions { hud: options.hud })?;
             host.advance_asset_replacement_smoke(index)?;
-            if host.asset_replacement_smoke.is_some() {
+            host.advance_asset_pack_ui_smoke(device, queue)?;
+            let diagnostic_needs_pacing = host.asset_replacement_smoke.is_some()
+                || host
+                    .asset_pack_ui_smoke
+                    .as_ref()
+                    .is_some_and(|smoke| smoke.phase != AssetPackUiSmokePhase::Complete);
+            if diagnostic_needs_pacing {
                 std::thread::sleep(Duration::from_millis(50));
             }
             Ok(())
@@ -517,6 +663,28 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         );
     }
 
+    if let Some(smoke) = &host.asset_pack_ui_smoke {
+        if smoke.phase != AssetPackUiSmokePhase::Complete {
+            bail!(
+                "asset pack UI smoke did not complete within {frame_count} frames: phase={:?} status={:?}",
+                smoke.phase,
+                host.driver.host().asset_replacement_status()
+            );
+        }
+        let state = host.driver.host().asset_pack_ui_state();
+        if host.driver.host().active_asset_epoch() != 4
+            || state.effective_label.as_str() != "Hybrid Authoring"
+            || !state.dirty
+        {
+            bail!("asset pack UI smoke finished with an unexpected active/staged selection");
+        }
+        println!(
+            "asset pack UI smoke applied Original, Hybrid, Fallback, and Vanilla at epochs 1..4; final staged label={} rows={}",
+            state.effective_label.as_str(),
+            state.row_count()
+        );
+    }
+
     let pixels = frame_pixels
         .last()
         .context("offscreen flat client screenshot produced no captured frame")?;
@@ -572,6 +740,23 @@ fn asset_replacement_smoke_paths() -> Result<Option<(PathBuf, PathBuf)>> {
             "MCLONE_ASSET_REPLACEMENT_AUTHORED and MCLONE_ASSET_REPLACEMENT_FALLBACK must be set together"
         ),
     }
+}
+
+fn asset_pack_ui_source_paths() -> Result<Option<(PathBuf, PathBuf)>> {
+    let authored = std::env::var_os("MCLONE_ASSET_PACK_UI_AUTHORED").map(PathBuf::from);
+    let fallback = std::env::var_os("MCLONE_ASSET_PACK_UI_FALLBACK").map(PathBuf::from);
+    match (authored, fallback) {
+        (None, None) => Ok(None),
+        (Some(authored), Some(fallback)) => Ok(Some((authored, fallback))),
+        _ => bail!(
+            "MCLONE_ASSET_PACK_UI_AUTHORED and MCLONE_ASSET_PACK_UI_FALLBACK must be set together"
+        ),
+    }
+}
+
+fn asset_pack_ui_smoke_enabled() -> bool {
+    std::env::var("MCLONE_ASSET_PACK_UI_SMOKE")
+        .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
 }
 
 fn screenshot_startup_camera(

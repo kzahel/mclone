@@ -402,6 +402,7 @@ pub(crate) enum HeadlessScreenshotUi {
     OptionsDisplayPause,
     OptionsDebugPause,
     ServerSettingsPause,
+    AssetPacksPause,
 }
 
 impl HeadlessScreenshotUi {
@@ -444,6 +445,9 @@ impl HeadlessScreenshotUi {
                 category: GameOptionsCategory::Debug,
             }),
             Self::ServerSettingsPause => Some(GameScreen::ServerSettings {
+                parent: GameOptionsParent::Pause,
+            }),
+            Self::AssetPacksPause => Some(GameScreen::AssetPacks {
                 parent: GameOptionsParent::Pause,
             }),
         }
@@ -2031,7 +2035,7 @@ pub(crate) fn parse_screenshot_ui_arg(
 ) -> Result<HeadlessScreenshotUi> {
     let value = value.with_context(|| {
         format!(
-            "{flag} requires none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, or server-settings-pause"
+            "{flag} requires none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, server-settings-pause, or asset-packs-pause"
         )
     })?;
     match value.as_str() {
@@ -2056,8 +2060,11 @@ pub(crate) fn parse_screenshot_ui_arg(
         "server-settings-pause" | "server_settings_pause" | "server-settings" => {
             Ok(HeadlessScreenshotUi::ServerSettingsPause)
         }
+        "asset-packs-pause" | "asset_packs_pause" | "asset-packs" => {
+            Ok(HeadlessScreenshotUi::AssetPacksPause)
+        }
         _ => bail!(
-            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, options-graphics, options-movement, options-display, options-debug, or server-settings-pause, got `{value}`"
+            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, help/controls, block-palette, options-title, options-pause, options-graphics, options-movement, options-display, options-debug, server-settings-pause, or asset-packs-pause, got `{value}`"
         ),
     }
 }
@@ -2079,7 +2086,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --xr-emulation-screenshot /tmp/mclone-xr-emulation.png [--width 960] [--height 960] [--xr-emulation-key KeyW] [--xr-emulation-key ArrowLeft] [--xr-emulation-input-frames 8] [scene/render options as --screenshot]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--headless-dual-view-hud true|false] [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\

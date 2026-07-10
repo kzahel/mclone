@@ -1,8 +1,9 @@
 use super::*;
 
+use mclone_app_runtime::asset_pack_ui::ClientAssetPackEffect;
 use mclone_app_runtime::prepared_assets::{
-    AssetPreparePoll, PreparedAssetReplacement, PreparedAssetReplacementRequest,
-    PreparedSceneAssets, PreparedSceneAssetsRequest,
+    AssetPackSourceRegistry, AssetPreparePoll, PreparedAssetReplacement,
+    PreparedAssetReplacementRequest, PreparedSceneAssets, PreparedSceneAssetsRequest,
 };
 use mclone_mesh::RenderSectionKey;
 
@@ -37,6 +38,10 @@ where
         &self.asset_replacement_status
     }
 
+    pub fn asset_pack_ui_state(&self) -> mclone_ui::AssetPacksUiState {
+        self.client_experience.asset_packs().ui_state()
+    }
+
     pub const fn active_asset_epoch(&self) -> u64 {
         self.active_assets.epoch
     }
@@ -47,6 +52,51 @@ where
         self.asset_replacement = Some(SceneAssetReplacementPending::Assets(request));
         self.asset_replacement_status = AssetReplacementStatus::PreparingAssets { epoch };
         Ok(())
+    }
+
+    pub fn configure_asset_pack_sources(
+        &mut self,
+        registry: AssetPackSourceRegistry,
+        active_selection: mclone_assets::AssetPackSelection,
+    ) -> Result<()> {
+        registry
+            .catalog()
+            .source_order(&active_selection)
+            .context("active asset selection is invalid for configured sources")?;
+        self.active_assets.selection = active_selection.clone();
+        self.active_assets.provenance.selection = active_selection.clone();
+        self.client_experience.asset_packs_mut().configure(
+            registry.catalog().clone(),
+            active_selection,
+            &self.active_assets.provenance,
+            self.active_assets.coverage,
+        )?;
+        self.asset_pack_sources = Some(registry);
+        Ok(())
+    }
+
+    pub(crate) fn apply_asset_pack_effects(&mut self, effects: Vec<ClientAssetPackEffect>) {
+        for effect in effects {
+            match effect {
+                ClientAssetPackEffect::ApplySelection(selection) => {
+                    let result = (|| {
+                        let registry = self
+                            .asset_pack_sources
+                            .clone()
+                            .context("asset pack sources are not configured on this platform")?;
+                        let epoch = self.active_assets.epoch.saturating_add(1);
+                        let request =
+                            PreparedSceneAssetsRequest::from_registry(epoch, registry, selection)?;
+                        self.begin_asset_replacement(request)
+                    })();
+                    if let Err(error) = result {
+                        self.client_experience
+                            .asset_packs_mut()
+                            .mark_failed(format!("{error:#}"));
+                    }
+                }
+            }
+        }
     }
 
     pub fn begin_prepared_asset_replacement(&mut self, assets: PreparedSceneAssets) -> Result<()> {
@@ -116,6 +166,9 @@ where
                     self.asset_replacement = Some(SceneAssetReplacementPending::Meshes(request));
                     self.asset_replacement_status =
                         AssetReplacementStatus::PreparingMeshes { epoch };
+                    self.client_experience
+                        .asset_packs_mut()
+                        .mark_preparing_meshes();
                 }
                 AssetPreparePoll::Failed(message) => self.fail_asset_replacement(message),
             },
@@ -221,6 +274,11 @@ where
             active_epoch: self.active_assets.epoch,
             message,
         };
+        if let AssetReplacementStatus::Failed { message, .. } = &self.asset_replacement_status {
+            self.client_experience
+                .asset_packs_mut()
+                .mark_failed(message.clone());
+        }
     }
 
     fn commit_asset_replacement(
@@ -325,6 +383,11 @@ where
         self.asset_replacement_status = AssetReplacementStatus::Active {
             epoch: self.active_assets.epoch,
         };
+        self.client_experience.asset_packs_mut().mark_active(
+            self.active_assets.selection.clone(),
+            &self.active_assets.provenance,
+            self.active_assets.coverage,
+        );
         self.last_asset_replacement_commit = Some(report);
         Ok(())
     }

@@ -3346,6 +3346,11 @@ impl WebChunkRenderSession {
     }
 
     fn apply_client_experience_effects(&mut self, effects: ClientExperienceEffects) {
+        if !effects.asset_packs.is_empty() {
+            self.client_experience
+                .asset_packs_mut()
+                .mark_failed("Web asset replacement awaits the Tactical 170 shared-host cutover");
+        }
         self.apply_client_session_effects(effects.session);
         self.apply_client_experience_settings_effects(effects.settings);
         for effect in effects.gameplay {
@@ -3471,7 +3476,7 @@ impl WebChunkRenderSession {
         if let Some(action) = action {
             set_string(&object, "action", ui_action_label(action))?;
             match action {
-                GameUiAction::OpenOptions(parent) => {
+                GameUiAction::OpenOptions(parent) | GameUiAction::OpenAssetPacks(parent) => {
                     set_string(&object, "actionParent", options_parent_label(parent))?;
                 }
                 GameUiAction::CreateWorld(seed) => {
@@ -3526,6 +3531,9 @@ impl WebChunkRenderSession {
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
                 | GameUiAction::OpenServerSettings(_)
+                | GameUiAction::ToggleAssetPack(_)
+                | GameUiAction::ApplyAssetPacks
+                | GameUiAction::CancelAssetPacks
                 | GameUiAction::OpenOptionsCategory(_, _)
                 | GameUiAction::RerollSeed
                 | GameUiAction::Resume
@@ -3667,6 +3675,7 @@ impl WebChunkRenderSession {
                 .client_experience
                 .catalog()
                 .ui_state_with_active_world(self.active_local_world_id()),
+            asset_packs: self.client_experience.asset_packs().ui_state(),
             render_distance: i32::try_from(radius_chunks)
                 .unwrap_or(i32::MAX)
                 .clamp(WEB_MIN_RENDER_DISTANCE, WEB_MAX_RENDER_DISTANCE),
@@ -5357,6 +5366,7 @@ fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
         Some(GameScreen::Options { .. }) => "options",
         Some(GameScreen::OptionsCategory { .. }) => "optionsCategory",
         Some(GameScreen::ServerSettings { .. }) => "serverSettings",
+        Some(GameScreen::AssetPacks { .. }) => "assetPacks",
         None => "none",
     }
 }
@@ -5391,6 +5401,10 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::OpenOptions(_) => "openOptions",
         GameUiAction::OpenOptionsCategory(_, _) => "openOptionsCategory",
         GameUiAction::OpenServerSettings(_) => "openServerSettings",
+        GameUiAction::OpenAssetPacks(_) => "openAssetPacks",
+        GameUiAction::ToggleAssetPack(_) => "toggleAssetPack",
+        GameUiAction::ApplyAssetPacks => "applyAssetPacks",
+        GameUiAction::CancelAssetPacks => "cancelAssetPacks",
         GameUiAction::BackToTitle => "backToTitle",
         GameUiAction::BackToPause => "backToPause",
         GameUiAction::QuitToTitle => "quitToTitle",

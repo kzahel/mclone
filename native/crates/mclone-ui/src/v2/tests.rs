@@ -98,6 +98,7 @@ fn world_catalog_render_state() -> GameUiRenderState {
     }
 }
 
+mod asset_packs;
 mod catalog_palette;
 mod core_layout;
 mod hud;

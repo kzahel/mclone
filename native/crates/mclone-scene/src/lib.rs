@@ -43,7 +43,7 @@ use mclone_app_runtime::native_session_runtime::{
     LocalIntegratedStartupStep, NativeSceneRuntime, NativeSessionRuntime,
     NativeSessionStartupCompletion, NativeSessionStartupPump,
 };
-use mclone_app_runtime::prepared_assets::PreparedSceneAssets;
+use mclone_app_runtime::prepared_assets::{AssetPackSourceRegistry, PreparedSceneAssets};
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
@@ -299,6 +299,7 @@ where
     asset_replacement: Option<SceneAssetReplacementPending>,
     asset_replacement_status: AssetReplacementStatus,
     last_asset_replacement_commit: Option<AssetReplacementCommitReport>,
+    asset_pack_sources: Option<AssetPackSourceRegistry>,
     runtime: Option<NativeSessionRuntime<S>>,
     local_startup: Option<SceneLocalStartup>,
     session: GameSessionCoordinator<ScenePendingSessionStart>,

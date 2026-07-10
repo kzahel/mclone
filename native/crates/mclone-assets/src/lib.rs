@@ -54,7 +54,7 @@ pub use profile::{
 pub use resource::{AssetPath, ResourceLocation};
 pub use source::{
     AssetSource, AssetSourceChain, MemoryAssetSource, NamedAssetResolution,
-    ProvenanceTrackingAssetSource,
+    ProvenanceTrackingAssetSource, SharedAssetSource,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

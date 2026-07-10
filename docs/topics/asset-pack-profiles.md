@@ -3,8 +3,10 @@
 Topic: asset-pack-profiles
 
 Status: active implementation. Tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-3 landed
-2026-07-10; Slice 4 shared Asset Packs UI is next.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-4 landed
+2026-07-10. Its required checkpoint recommends Tactical
+[`170`](../tactical/170-web-scene-host-adoption.md) Slice 0 next, before web or
+full Slice 5 adoption.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -127,6 +129,19 @@ Minecraft pack is not sufficient.
   textures. Stereo retains parallax and both UI composites. Multiview consumers
   share the replaced resources and pass their distinct-view data tests; this
   Mac's headless adapter lacks the optional wgpu GPU multiview feature.
+- The shared Asset Packs screen is reachable through title and pause Options.
+  It owns compact copyable rows/actions, staged Apply/Cancel, fixed priority,
+  locked fallback, unavailable reasons, effective labels, exact active
+  provenance/coverage, preparation phases, and retryable failure text.
+- The client-experience facade resolves copyable row ids against its catalog
+  and emits full selection effects to `mclone-scene`; successful scene commits
+  refresh the active selection and provenance projection, while failure leaves
+  the draft and old active facts visible.
+- A UI-driven desktop-flat smoke applied all four well-known optional
+  combinations in one world at epochs 1 through 4. The inspected 480x320
+  `/tmp/mclone-asset-packs-ui.png` capture shows a staged Hybrid selection,
+  locked fallback, local/proprietary warning, resolved coverage, and enabled
+  Apply/Cancel controls.
 - `mclone-app-runtime::render_assets` discovers environment/platform paths and
   constructs one source chain at startup. `MCLONE_ASSET_OVERLAY_PACK` inserts
   one or more authored overlays before loose or packed Minecraft sources.
@@ -334,29 +349,28 @@ resolve when their logical pack is disabled.
   standalone outputs for new first-party work.
 - Web's resident compiler worker and single-byte-pack bootstrap need a
   replacement epoch/reinitialization path.
-- The native transaction is programmatic; shared selection/UI actions are not
-  wired yet.
+- Platform discovery/adoption is not wired to the shared catalog yet; the
+  desktop offscreen source registry is a deterministic validation injection,
+  not product discovery policy.
+- Web projects the shared screen/actions and reports an explicit Tactical 170
+  cutover requirement on Apply. Its active-set lifecycle must land through the
+  new shared scene host rather than `WebChunkRenderSession`.
 - Asset selection persistence has no shared cross-platform preference adapter.
 
 ## Recommended Next Work
 
-Implement only tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 4 next. Add the
-shared Asset Packs screen, staged selection/Apply/Cancel state, copyable row
-actions, effective label and provenance/coverage presentation, title/pause
-entry points, input routing, tests, and a rendered offscreen UI capture. Do not
-add persistence or platform-specific discovery in that slice.
+Start tactical
+[`170`](../tactical/170-web-scene-host-adoption.md) Slice 0 next. Its current
+status is draft with no adoption code landed, and its baseline/tripwire locks
+must precede browser asset lifecycle work. Do not start the web portion of 169
+Slice 5 or add asset selection/compiler-epoch policy to
+`WebChunkRenderSession`, because Tactical 170 deletes that orchestrator.
 
-Forward routing is intentionally non-numeric. After Slice 4, make the required
-cross-tactical checkpoint recorded in Tactical 169. The default recommendation
-at that point is to start or resume
-[`170`](../tactical/170-web-scene-host-adoption.md) before the web portion of
-169 Slice 5. Do not add asset selection, compiler-epoch, replacement, or UI
-policy to `WebChunkRenderSession`, because Tactical 170 deletes that production
-orchestrator. Native/Android/XR/offscreen discovery work may proceed first when
-it is the immediate priority; web adoption should land through the new
-`McloneSceneHost` browser adapters/cutover, after which work returns to 169 for
-platform evidence, persistence, audit, and closeout.
+After the shared browser host/cutover is ready, return to Tactical 169 Slice 5
+for platform discovery/adoption evidence, then Slice 6 persistence, audit, and
+closeout. Non-web discovery could proceed independently if it becomes the
+explicit immediate priority, but it is not the default recommendation at this
+checkpoint.
 
 ## Slice 0 Evidence
 
@@ -460,6 +474,31 @@ The inspected XR image shows two distinct vanilla eyes after the round trip.
 Commit reports prove session/camera and command/update counts did not change.
 The retired-result test proves old compiler results and in-flight state are
 discarded when the fresh catalog-bound compiler instance becomes active.
+
+## Slice 4 Evidence
+
+Focused validation on 2026-07-10:
+
+```text
+assets + UI + app-runtime + scene library suites
+  409 passed; 0 failed
+native client/CLI suite
+  130 passed; 0 failed
+UI-driven desktop-flat selection smoke
+  Original -> Hybrid -> Fallback -> Vanilla
+  epochs 1 -> 2 -> 3 -> 4 in one active world
+WASM check for assets/UI/app-runtime/web client
+  passed
+```
+
+The final staged-Hybrid screen was rendered at 480x320 and inspected at
+`/tmp/mclone-asset-packs-ui.png`. All three rows are legible with stable ids,
+origin, Enabled/Active state, and locked fallback. The active Vanilla
+provenance summary reports 1,252 Minecraft resolutions, while the staged
+Hybrid warning is explicitly local/proprietary and Apply remains a separate
+enabled action. Widget tests cover title/pause entry, pointer activation,
+locked/unavailable rows, Apply/Cancel, preparation gating, failure text, and
+Escape. The shared action enum remains copyable and no hotkey was added.
 
 ## Non-Goals
 

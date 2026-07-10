@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod asset_pack_ui;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod camera_reconcile;
 #[cfg(not(target_arch = "wasm32"))]

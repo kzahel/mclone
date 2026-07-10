@@ -1,8 +1,8 @@
 # 169: Runtime Asset Pack Selection
 
-Status: active implementation parent 2026-07-10; Slices 0-3 landed. Stop
-boundary honored after transactional native scene replacement; Slice 4 is
-next.
+Status: active implementation parent 2026-07-10; Slices 0-4 landed. Stop
+boundary honored after the shared Asset Packs UI. The required next-work
+checkpoint recommends Tactical 170 Slice 0 before web/Slice 5 adoption.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
@@ -503,21 +503,76 @@ cargo check -p mclone-assets -p mclone-audio \
 
 ### Slice 4 - Shared Asset Packs UI
 
-- [ ] Add shared Asset Packs screen state, row projection, effective-selection
+- [x] Add shared Asset Packs screen state, row projection, effective-selection
   label, coverage summary, staged selection, Apply, Cancel, progress, and error
   presentation in `mclone-ui`.
-- [ ] Add copyable pack-row UI actions and classify/route them through the
+- [x] Add copyable pack-row UI actions and classify/route them through the
   shared client-experience facade.
-- [ ] Reach the screen from title and pause options.
-- [ ] Keep fallback visible/locked and unavailable reference packs legible.
-- [ ] Ensure pointer, controller, touch, and keyboard navigation all use normal
+- [x] Reach the screen from title and pause options.
+- [x] Keep fallback visible/locked and unavailable reference packs legible.
+- [x] Ensure pointer, controller, touch, and keyboard navigation all use normal
   shared UI contracts.
-- [ ] Add shared widget/action tests and a rendered offscreen UI capture.
-- [ ] Do not add a hotkey.
+- [x] Add shared widget/action tests and a rendered offscreen UI capture.
+- [x] Do not add a hotkey.
 
 Exit criteria: desktop flat can stage and apply all four well-known optional
 pack combinations from the UI, including fallback-only, with accurate status
 and provenance labels.
+
+Landed evidence (2026-07-10):
+
+- `mclone-ui` owns a fixed-capacity `AssetPacksUiState` with copyable rows,
+  compact `AssetPackUiId`, active/staged flags, all six row statuses,
+  effective label, provenance/coverage counts, progress phase, and concise
+  failure text. The generated fallback is rendered checked and locked.
+- `GameUiAction` remains Copy and now carries Open/Toggle/Apply/Cancel asset
+  actions. The client-experience facade resolves deterministic compact ids
+  against the current catalog, rejects collisions/capacity overflow, owns the
+  draft, validates Apply, and emits one `AssetPackSelection` effect.
+- `Options -> Asset Packs` is present in both title and pause contexts. The
+  retained UI surface provides the same pointer path used by mouse, touch, and
+  XR controller-ray adapters; Escape uses the shared Cancel action and is
+  suppressed while an Apply is preparing. No hotkey was added.
+- The screen shows stable ids, first-party/generated/reference/unknown origin,
+  unavailable reasons, active/enabled/preparing/failed status, exact resolved
+  coverage, and an explicit local/proprietary warning for a staged reference
+  selection. Apply/Cancel disable while preparation is in flight.
+- A platform-neutral source registry prepares authored/reference/generated
+  combinations through the Slice 3 request. Reference-enabled selections use
+  the Minecraft catalog adapter; reference-disabled selections use the native
+  first-party visual catalog and enforce zero reference/unknown resolutions.
+  Offscreen injects this registry only for validation; platform discovery and
+  persistence remain later work.
+- One desktop-flat UI/facade smoke applied Mclone Original, Hybrid Authoring,
+  Generated Fallback Only, and Vanilla Reference in one active world at epochs
+  1 through 4. It then staged Hybrid without applying, proving Apply remains a
+  separate user decision.
+- The final 480x320 capture at `/tmp/mclone-asset-packs-ui.png` was inspected.
+  It legibly shows three rows, stable ids, enabled/active/locked states,
+  reference provenance warning, resolved coverage, staged Hybrid label, and
+  enabled Cancel/Apply buttons.
+- Web receives the same screen/action projection and compiles for WASM, but an
+  Apply reports the explicit Tactical 170 cutover requirement. No asset policy
+  or compiler lifecycle was added to `WebChunkRenderSession`.
+
+Focused validation:
+
+```text
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-assets -p mclone-ui -p mclone-app-runtime \
+  -p mclone-scene --lib
+  409 passed; 0 failed
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-native-client --bin mclone-native-client
+  130 passed; 0 failed
+UI-driven four-selection desktop-flat smoke
+  passed; epochs 1..4; final staged label Hybrid Authoring
+rendered Asset Packs capture
+  passed and inspected at /tmp/mclone-asset-packs-ui.png
+cargo check -p mclone-assets -p mclone-ui -p mclone-app-runtime \
+  -p mclone-web-client --target wasm32-unknown-unknown
+  passed (two pre-existing mclone-server warnings)
+```
 
 **Required next-work checkpoint:** do not automatically continue from this
 slice into all of Slice 5 merely because it is numerically next. Re-read

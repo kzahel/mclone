@@ -66,6 +66,7 @@ fn options_hub_lists_categories_and_navigation_only() {
         );
     }
     assert!(layout.widget(UI_V2_OPTIONS_SERVER_SETTINGS).is_some());
+    assert!(layout.widget(UI_V2_OPTIONS_ASSET_PACKS).is_some());
     assert!(layout.widget(UI_V2_OPTIONS_CONTROLS).is_some());
     assert!(layout.widget(UI_V2_OPTIONS_BACK).is_some());
     // Individual settings rows moved to the per-category sub-panels.
@@ -243,6 +244,10 @@ fn options_hub_navigation_buttons_emit_expected_actions() {
             ..GameUiRenderState::default()
         },
         &[
+            (
+                UI_V2_OPTIONS_ASSET_PACKS,
+                GameUiAction::OpenAssetPacks(GameOptionsParent::Pause),
+            ),
             (
                 UI_V2_OPTIONS_SERVER_SETTINGS,
                 GameUiAction::OpenServerSettings(GameOptionsParent::Pause),

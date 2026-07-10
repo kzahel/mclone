@@ -14,10 +14,13 @@ use mclone_ui::{
     GameUiRenderState, GameXrTurnMode,
 };
 
+use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientExperienceController {
     profile: ClientExperienceProfile,
     catalog: ClientCatalogController,
+    asset_packs: ClientAssetPackController,
     settings: ClientExperienceSettingsController,
 }
 
@@ -32,6 +35,7 @@ impl ClientExperienceController {
         Self {
             profile,
             catalog: ClientCatalogController::new(),
+            asset_packs: ClientAssetPackController::default(),
             settings: ClientExperienceSettingsController::default(),
         }
     }
@@ -50,6 +54,14 @@ impl ClientExperienceController {
 
     pub fn catalog_mut(&mut self) -> &mut ClientCatalogController {
         &mut self.catalog
+    }
+
+    pub fn asset_packs(&self) -> &ClientAssetPackController {
+        &self.asset_packs
+    }
+
+    pub fn asset_packs_mut(&mut self) -> &mut ClientAssetPackController {
+        &mut self.asset_packs
     }
 
     pub fn settings(&self) -> &ClientExperienceSettingsController {
@@ -141,6 +153,21 @@ impl ClientExperienceController {
             | GameUiAction::SetServerSimulationCadence(_) => {
                 effects.settings = self.settings.apply_ui_action(action, self.profile.settings);
             }
+            GameUiAction::OpenAssetPacks(_)
+            | GameUiAction::ToggleAssetPack(_)
+            | GameUiAction::ApplyAssetPacks
+            | GameUiAction::CancelAssetPacks => {
+                if let Some(effect) =
+                    self.asset_packs
+                        .apply_ui_action(action)
+                        .unwrap_or_else(|error| {
+                            self.asset_packs.mark_failed(format!("{error:#}"));
+                            None
+                        })
+                {
+                    effects.asset_packs.push(effect);
+                }
+            }
             GameUiAction::AssignHotbarBlock { slot, block_state } => {
                 effects
                     .gameplay
@@ -192,6 +219,7 @@ pub struct ClientExperienceEffects {
     pub catalog: ClientCatalogEffects,
     pub session: ClientSessionEffects,
     pub settings: ClientExperienceSettingsEffects,
+    pub asset_packs: Vec<ClientAssetPackEffect>,
     pub gameplay: Vec<ClientExperienceGameplayEffect>,
     pub projection: Vec<ClientExperienceProjectionEffect>,
 }
@@ -1346,6 +1374,10 @@ pub enum ClientExperienceActionKind {
     OpenOptions,
     OpenOptionsCategory,
     OpenServerSettings,
+    OpenAssetPacks,
+    ToggleAssetPack,
+    ApplyAssetPacks,
+    CancelAssetPacks,
     BackToTitle,
     BackToPause,
     QuitToTitle,
@@ -1399,6 +1431,10 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::OpenOptions(_) => ClientExperienceActionKind::OpenOptions,
         GameUiAction::OpenOptionsCategory(_, _) => ClientExperienceActionKind::OpenOptionsCategory,
         GameUiAction::OpenServerSettings(_) => ClientExperienceActionKind::OpenServerSettings,
+        GameUiAction::OpenAssetPacks(_) => ClientExperienceActionKind::OpenAssetPacks,
+        GameUiAction::ToggleAssetPack(_) => ClientExperienceActionKind::ToggleAssetPack,
+        GameUiAction::ApplyAssetPacks => ClientExperienceActionKind::ApplyAssetPacks,
+        GameUiAction::CancelAssetPacks => ClientExperienceActionKind::CancelAssetPacks,
         GameUiAction::BackToTitle => ClientExperienceActionKind::BackToTitle,
         GameUiAction::BackToPause => ClientExperienceActionKind::BackToPause,
         GameUiAction::QuitToTitle => ClientExperienceActionKind::QuitToTitle,
@@ -1451,6 +1487,10 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::ConfirmDeleteWorld
         | ClientExperienceActionKind::DeleteWorld
         | ClientExperienceActionKind::CancelDeleteWorld
+        | ClientExperienceActionKind::OpenAssetPacks
+        | ClientExperienceActionKind::ToggleAssetPack
+        | ClientExperienceActionKind::ApplyAssetPacks
+        | ClientExperienceActionKind::CancelAssetPacks
         | ClientExperienceActionKind::OpenNewWorld
         | ClientExperienceActionKind::OpenJoinRemote
         | ClientExperienceActionKind::RerollSeed
@@ -1532,7 +1572,10 @@ mod tests {
     use super::*;
     use crate::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS;
     use crate::world_catalog::{WorldCatalogCapabilities, WorldCatalogRequest};
-    use mclone_ui::{GameHelpParent, GameOptionsParent, WorldCatalogUiWorldId};
+    use mclone_ui::{
+        AssetPackUiId, GameHelpParent, GameOptionsCategory, GameOptionsParent,
+        WorldCatalogUiWorldId,
+    };
 
     fn context() -> ClientExperienceActionContext<'static> {
         ClientExperienceActionContext {
@@ -1666,7 +1709,15 @@ mod tests {
                 block_state: 1,
             },
             GameUiAction::OpenOptions(GameOptionsParent::Title),
+            GameUiAction::OpenOptionsCategory(
+                GameOptionsParent::Title,
+                GameOptionsCategory::Graphics,
+            ),
             GameUiAction::OpenServerSettings(GameOptionsParent::Title),
+            GameUiAction::OpenAssetPacks(GameOptionsParent::Title),
+            GameUiAction::ToggleAssetPack(AssetPackUiId(1)),
+            GameUiAction::ApplyAssetPacks,
+            GameUiAction::CancelAssetPacks,
             GameUiAction::BackToTitle,
             GameUiAction::BackToPause,
             GameUiAction::QuitToTitle,
@@ -1696,7 +1747,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 48);
+        assert_eq!(samples.len(), 53);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }

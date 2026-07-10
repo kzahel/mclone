@@ -6,9 +6,11 @@ use mclone_assets::{
     PackedAssetSource, ProvenanceTrackingAssetSource,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use mclone_assets::{AssetProvenanceEntry, AssetResolutionOrigin};
+use mclone_assets::{AssetProvenanceEntry, AssetResolutionOrigin, SharedAssetSource};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_audio::PreparedAudioAssets;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_mesh::load_textured_terrain_assets;
 use mclone_mesh::{TexturedTerrainAssets, load_first_party_textured_terrain_assets};
 use mclone_render::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use mclone_render::screen_effect::{ScreenEffectTextureAssets, load_screen_effect_texture_assets};
@@ -17,6 +19,8 @@ use crate::far_lod::FarTerrainLodMaterialPalette;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::{collections::BTreeMap, path::Path};
 
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_core::ChunkSnapshot;
@@ -34,6 +38,7 @@ use crate::render_assets::TexturedMeshAssets;
 
 pub const AUTHORED_FIRST_PARTY_PACK_ID: &str = "mclone-authored";
 pub const GENERATED_FALLBACK_PACK_ID: &str = "mclone-generated-fallback";
+pub const MINECRAFT_REFERENCE_PACK_ID: &str = "minecraft-1.17.1-reference";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PreparedAssetCoverage {
@@ -88,11 +93,14 @@ impl PreparedSceneAssets {
         screen_effects: ScreenEffectTextureAssets,
         audio: PreparedAudioAssets,
     ) -> Self {
-        let selection = AssetPackSelection::default();
+        let selection = AssetPackSelection::new([AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID)]);
         let mut provenance = AssetProvenanceReport::new(epoch, selection.clone());
         provenance.record(AssetProvenanceEntry {
             path: mclone_assets::AssetPath::new("assets/mclone/runtime-startup-source"),
-            source: AssetResolutionOrigin::anonymous(),
+            source: AssetResolutionOrigin::named(
+                AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID),
+                AssetPackOrigin::MinecraftReference,
+            ),
             outcome: AssetResolutionOutcome::Resolved,
         });
         Self {
@@ -129,6 +137,98 @@ impl PreparedAssetSet {
             provenance: self.provenance,
             coverage: Some(self.coverage),
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug)]
+pub struct AssetPackSourceRegistry {
+    catalog: AssetPackCatalog,
+    sources: BTreeMap<AssetPackId, SharedAssetSource>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AssetPackSourceRegistry {
+    pub fn new(
+        catalog: AssetPackCatalog,
+        sources: impl IntoIterator<Item = (AssetPackId, SharedAssetSource)>,
+    ) -> Result<Self> {
+        let sources = sources.into_iter().collect::<BTreeMap<_, _>>();
+        for descriptor in catalog.descriptors() {
+            if descriptor.availability.is_available() && !sources.contains_key(&descriptor.id) {
+                bail!(
+                    "available asset pack {} has no readable source",
+                    descriptor.id
+                );
+            }
+        }
+        Ok(Self { catalog, sources })
+    }
+
+    pub fn from_files_with_reference(
+        authored_path: impl AsRef<Path>,
+        generated_fallback_path: impl AsRef<Path>,
+        reference: SharedAssetSource,
+    ) -> Result<Self> {
+        let authored = PackedAssetSource::from_file(authored_path.as_ref()).with_context(|| {
+            format!(
+                "failed to open authored asset pack {}",
+                authored_path.as_ref().display()
+            )
+        })?;
+        let generated = PackedAssetSource::from_file(generated_fallback_path.as_ref())
+            .with_context(|| {
+                format!(
+                    "failed to open generated fallback pack {}",
+                    generated_fallback_path.as_ref().display()
+                )
+            })?;
+        let authored_descriptor = first_party_descriptor(
+            &authored,
+            AUTHORED_FIRST_PARTY_PACK_ID,
+            AssetPackOrigin::FirstParty,
+            10,
+        )?;
+        let reference_descriptor = AssetPackDescriptor::new(
+            AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID),
+            "Minecraft 1.17.1 Reference",
+            AssetPackOrigin::MinecraftReference,
+            20,
+        )?;
+        let fallback_descriptor = first_party_descriptor(
+            &generated,
+            GENERATED_FALLBACK_PACK_ID,
+            AssetPackOrigin::Generated,
+            30,
+        )?
+        .required();
+        let authored_id = authored_descriptor.id.clone();
+        let reference_id = reference_descriptor.id.clone();
+        let fallback_id = fallback_descriptor.id.clone();
+        Self::new(
+            AssetPackCatalog::new([
+                authored_descriptor,
+                reference_descriptor,
+                fallback_descriptor,
+            ])?,
+            [
+                (authored_id, SharedAssetSource::new(authored)),
+                (reference_id, reference),
+                (fallback_id, SharedAssetSource::new(generated)),
+            ],
+        )
+    }
+
+    pub fn catalog(&self) -> &AssetPackCatalog {
+        &self.catalog
+    }
+
+    pub fn prepare(
+        &self,
+        epoch: u64,
+        selection: AssetPackSelection,
+    ) -> Result<PreparedSceneAssets> {
+        prepare_scene_asset_selection(epoch, &self.catalog, selection, &self.sources)
     }
 }
 
@@ -174,6 +274,14 @@ impl PreparedSceneAssetsRequest {
         })
     }
 
+    pub fn from_registry(
+        epoch: u64,
+        registry: AssetPackSourceRegistry,
+        selection: AssetPackSelection,
+    ) -> Result<Self> {
+        Self::spawn(epoch, move || registry.prepare(epoch, selection))
+    }
+
     pub const fn epoch(&self) -> u64 {
         self.epoch
     }
@@ -188,6 +296,116 @@ impl PreparedSceneAssetsRequest {
             }
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn prepare_scene_asset_selection(
+    epoch: u64,
+    catalog: &AssetPackCatalog,
+    selection: AssetPackSelection,
+    registered_sources: &BTreeMap<AssetPackId, SharedAssetSource>,
+) -> Result<PreparedSceneAssets> {
+    let source_order = catalog.source_order(&selection)?;
+    let reference_enabled = source_order
+        .iter()
+        .any(|descriptor| descriptor.origin == AssetPackOrigin::MinecraftReference);
+    let source = AssetSourceChain::from_selection(
+        catalog,
+        &selection,
+        registered_sources
+            .iter()
+            .map(|(id, source)| (id.clone(), Box::new(source.clone()) as Box<dyn AssetSource>)),
+    )?;
+    let tracker = ProvenanceTrackingAssetSource::new(&source);
+    let terrain = if reference_enabled {
+        load_textured_terrain_assets(&tracker)
+            .context("failed to prepare Minecraft-reference terrain assets")?
+    } else {
+        load_first_party_textured_terrain_assets(&tracker)
+            .context("failed to prepare first-party terrain assets")?
+    };
+    let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(&tracker)
+        .context("failed to prepare selected Far LOD metadata")?;
+    let actors = load_actor_texture_assets(&tracker)
+        .context("failed to prepare selected actor and figure assets")?;
+    let screen_effects = load_screen_effect_texture_assets(&tracker)
+        .context("failed to prepare selected screen-effect assets")?;
+
+    let (audio, audio_policy, missing_registry) = if reference_enabled {
+        (
+            PreparedAudioAssets::load(&tracker)
+                .context("failed to prepare selected reference audio")?,
+            FirstPartyAudioPolicy {
+                suppressed: Default::default(),
+            },
+            None,
+        )
+    } else {
+        let policy = FirstPartyAudioPolicy::load(&tracker)
+            .context("failed to prepare first-party audio policy")?;
+        let registry = MissingAssetRegistry::load(&tracker)
+            .context("failed to prepare generated missing-resource registry")?;
+        let policy_origin = tracker
+            .resolved_origin(&mclone_assets::AssetPath::new(
+                FIRST_PARTY_AUDIO_POLICY_PATH,
+            ))
+            .context("audio policy resolution did not retain a named source")?;
+        for path in &policy.suppressed {
+            tracker.record_suppressed(path.clone(), policy_origin.clone());
+        }
+        (PreparedAudioAssets::silent(), policy, Some(registry))
+    };
+
+    let provenance = tracker.report(epoch, selection.clone());
+    if !reference_enabled && !provenance.allows_proprietary_free_claim() {
+        bail!("reference-disabled preparation resolved reference or unknown content");
+    }
+    if let Some(registry) = &missing_registry {
+        for entry in provenance.entries() {
+            if entry.outcome == AssetResolutionOutcome::Resolved
+                && entry.source.origin == AssetPackOrigin::Generated
+                && entry.path.as_str().ends_with(".png")
+                && registry.get(&entry.path).is_none()
+            {
+                bail!(
+                    "generated fallback resource {} has no missing-resource registry id",
+                    entry.path.as_str()
+                );
+            }
+        }
+    }
+    let summary = provenance.summary();
+    let coverage = PreparedAssetCoverage {
+        block_states: terrain.catalog.len(),
+        atlas_sprites: terrain.atlas_sprite_count,
+        actor_figures: actors.figures.len(),
+        far_lod_colors: far_lod_materials
+            .as_ref()
+            .map_or(0, FarTerrainLodMaterialPalette::color_count),
+        missing_registry_entries: missing_registry
+            .as_ref()
+            .map_or(0, MissingAssetRegistry::len),
+        first_party_resolutions: summary.first_party,
+        generated_resolutions: summary.generated,
+        suppressed_audio: summary.suppressed,
+        missing_optional: summary.missing,
+    };
+    drop(tracker);
+    Ok(PreparedSceneAssets {
+        epoch,
+        selection,
+        mesh: TexturedMeshAssets {
+            catalog: terrain.catalog,
+            atlas: terrain.atlas.into(),
+            far_lod_materials,
+        },
+        actors,
+        screen_effects,
+        audio,
+        audio_policy,
+        provenance,
+        coverage: Some(coverage),
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]

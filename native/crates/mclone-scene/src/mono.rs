@@ -766,6 +766,7 @@ where
             self.apply_xr_catalog_effects(effects.catalog, device, queue)?;
         let session_scene_replaced =
             self.apply_mono_session_effects(effects.session, device, queue, host)?;
+        self.apply_asset_pack_effects(effects.asset_packs);
         if !apply_client_experience_settings_effects(self, host, effects.settings)? {
             return Ok(catalog_scene_replaced || session_scene_replaced);
         }

@@ -1,4 +1,5 @@
 use crate::{
+    AssetPackUiApplyState, AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState,
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsCategory,
     GameOptionsParent, GameScreen, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList,
@@ -44,6 +45,9 @@ pub enum UiScreenId {
     ServerSettings {
         parent: GameOptionsParent,
     },
+    AssetPacks {
+        parent: GameOptionsParent,
+    },
     Help {
         parent: GameHelpParent,
     },
@@ -65,6 +69,7 @@ impl UiScreenId {
                 Some(Self::OptionsCategory { parent, category })
             }
             Some(GameScreen::ServerSettings { parent }) => Some(Self::ServerSettings { parent }),
+            Some(GameScreen::AssetPacks { parent }) => Some(Self::AssetPacks { parent }),
             Some(GameScreen::Help { parent }) => Some(Self::Help { parent }),
             None => None,
         }
@@ -130,6 +135,11 @@ pub enum UiWidgetKind {
         selected: bool,
         locked: bool,
         compatible: bool,
+    },
+    AssetPackRow {
+        checked: bool,
+        locked: bool,
+        status: AssetPackUiRowStatus,
     },
     PaletteSlot {
         icon: Option<GuiTextureUv>,
@@ -244,6 +254,29 @@ impl UiWidget {
             enabled: true,
             action: None,
             value: Some(value.into()),
+        }
+    }
+
+    fn asset_pack_row(id: UiWidgetId, rect: Rect, row: AssetPackUiRow) -> Self {
+        let mut value = format!("{} / {}", row.origin.label(), row.status.label());
+        if !row.detail.is_empty() {
+            value.push_str(" / ");
+            value.push_str(row.detail.as_str());
+        }
+        Self {
+            id,
+            kind: UiWidgetKind::AssetPackRow {
+                checked: row.enabled,
+                locked: !row.disableable,
+                status: row.status,
+            },
+            rect,
+            label: format!("{}  [{}]", row.display_name.as_str(), row.pack_id.as_str()),
+            enabled: row.available && row.disableable,
+            value: Some(value),
+            action: Some(UiWidgetAction::Static(GameUiAction::ToggleAssetPack(
+                row.ui_id,
+            ))),
         }
     }
 
@@ -674,6 +707,18 @@ impl UiSurface {
                 true,
                 Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
             ),
+            (Some(UiScreenId::AssetPacks { .. }), GuiKey::Escape)
+                if self.render_state.asset_packs.apply_state.is_preparing() =>
+            {
+                (true, None)
+            }
+            (Some(UiScreenId::AssetPacks { .. }), GuiKey::Escape) => {
+                (true, Some(GameUiAction::CancelAssetPacks))
+            }
+            (Some(UiScreenId::AssetPacks { parent }), GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
+            ),
             (Some(UiScreenId::Help { parent }), GuiKey::Escape | GuiKey::F1) => {
                 (true, Some(GameUiAction::CloseHelp(parent)))
             }
@@ -703,6 +748,7 @@ impl UiSurface {
             Some(UiScreenId::ServerSettings { parent }) => {
                 self.render_server_settings(&mut draw, parent)
             }
+            Some(UiScreenId::AssetPacks { parent }) => self.render_asset_packs(&mut draw, parent),
             Some(UiScreenId::Help { parent }) => self.render_help(&mut draw, parent),
             None => {}
         }
@@ -756,6 +802,12 @@ impl UiSurface {
             Some(UiScreenId::ServerSettings { parent }) => {
                 server_settings_layout(self.scale, self.layout_revision, parent, self.render_state)
             }
+            Some(UiScreenId::AssetPacks { parent }) => asset_packs_layout(
+                self.scale,
+                self.layout_revision,
+                parent,
+                self.render_state.asset_packs,
+            ),
             Some(UiScreenId::Help { parent }) => {
                 help_layout(self.scale, self.layout_revision, parent)
             }
@@ -1145,6 +1197,96 @@ impl UiSurface {
         let _ = parent;
     }
 
+    fn render_asset_packs(&self, draw: &mut GuiDrawList, parent: GameOptionsParent) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 150),
+        );
+        let state = self.render_state.asset_packs;
+        let panel = asset_packs_panel_rect(self.scale);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 248),
+            Color::rgba(15, 20, 22, 248),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered_atlas(
+            draw,
+            "ASSET PACKS",
+            panel.center_x(),
+            panel.y + 10.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+
+        let summary_y = panel.bottom() - 70.0;
+        self.font.draw_shadow_atlas(
+            draw,
+            &format!("Effective: {}", state.effective_label.as_str()),
+            panel.x + 14.0,
+            summary_y,
+            Color::rgba(226, 239, 219, 255),
+        );
+        self.font.draw_shadow_atlas(
+            draw,
+            &format!(
+                "Authored {} / Required {} / Generated {} / Minecraft {}",
+                state.coverage.authored,
+                state.coverage.required,
+                state.coverage.generated,
+                state.coverage.minecraft
+            ),
+            panel.x + 14.0,
+            summary_y + 12.0,
+            Color::rgba(178, 204, 190, 255),
+        );
+        let staged_minecraft =
+            state.rows.iter().flatten().any(|row| {
+                row.enabled && row.origin == crate::AssetPackUiOrigin::MinecraftReference
+            });
+        let provenance_label = if staged_minecraft {
+            "STAGED: LOCAL / PROPRIETARY REFERENCE CONTENT"
+        } else if state.coverage.proprietary_free {
+            "ACTIVE PROVENANCE: PROPRIETARY-FREE"
+        } else {
+            "ACTIVE PROVENANCE: REFERENCE OR UNKNOWN CONTENT"
+        };
+        self.font.draw_shadow_atlas(
+            draw,
+            provenance_label,
+            panel.x + 14.0,
+            summary_y + 24.0,
+            if staged_minecraft {
+                Color::rgba(255, 198, 142, 255)
+            } else {
+                Color::rgba(178, 204, 190, 255)
+            },
+        );
+        let status = match state.apply_state {
+            AssetPackUiApplyState::Idle if state.dirty => "CHANGES STAGED",
+            AssetPackUiApplyState::Idle => "ACTIVE SELECTION",
+            AssetPackUiApplyState::PreparingAssets => "PREPARING ASSETS...",
+            AssetPackUiApplyState::PreparingMeshes => "PREPARING VISIBLE MESHES...",
+            AssetPackUiApplyState::Failed => state.message.as_str(),
+        };
+        self.font.draw_shadow_atlas(
+            draw,
+            status,
+            panel.x + 14.0,
+            summary_y + 36.0,
+            if state.apply_state == AssetPackUiApplyState::Failed {
+                Color::rgba(255, 178, 178, 255)
+            } else {
+                Color::rgba(190, 224, 196, 255)
+            },
+        );
+        let _ = parent;
+    }
+
     fn render_help(&self, draw: &mut GuiDrawList, parent: GameHelpParent) {
         if help_parent_covers_world(parent) {
             draw.fill_gradient(
@@ -1384,6 +1526,64 @@ impl UiSurface {
                         value_x,
                         widget.rect.y + 6.0,
                         value_color,
+                    );
+                }
+                draw.pop_clip();
+            }
+            UiWidgetKind::AssetPackRow {
+                checked,
+                locked,
+                status,
+            } => {
+                let hovered = widget.enabled && interaction.is_hovered(widget.rect);
+                let fill = if hovered {
+                    Color::rgba(45, 62, 60, 235)
+                } else {
+                    Color::rgba(19, 27, 28, 220)
+                };
+                let border = match status {
+                    AssetPackUiRowStatus::Active => Color::rgba(166, 214, 146, 255),
+                    AssetPackUiRowStatus::Preparing => Color::rgba(222, 205, 126, 255),
+                    AssetPackUiRowStatus::Failed => Color::rgba(220, 126, 126, 255),
+                    _ => Color::rgba(72, 92, 88, 220),
+                };
+                draw.fill(widget.rect, fill);
+                draw.outline(widget.rect, border);
+                let box_rect = Rect::new(widget.rect.x + 6.0, widget.rect.y + 10.0, 10.0, 10.0);
+                draw.fill(box_rect, Color::rgba(8, 12, 13, 255));
+                draw.outline(box_rect, border);
+                if *checked {
+                    draw.fill(box_rect.inset(2.0), Color::rgba(174, 220, 154, 255));
+                }
+                let text_color = if *status == AssetPackUiRowStatus::Unavailable {
+                    Color::rgba(150, 158, 153, 255)
+                } else {
+                    Color::rgba(235, 242, 232, 255)
+                };
+                draw.push_clip(widget.rect.inset(3.0));
+                self.font.draw_shadow_atlas(
+                    draw,
+                    &widget.label,
+                    widget.rect.x + 22.0,
+                    widget.rect.y + 5.0,
+                    text_color,
+                );
+                if let Some(value) = widget.value.as_deref() {
+                    self.font.draw_shadow_atlas(
+                        draw,
+                        value,
+                        widget.rect.x + 22.0,
+                        widget.rect.y + 18.0,
+                        Color::rgba(166, 190, 179, 255),
+                    );
+                }
+                if *locked {
+                    self.font.draw_shadow_atlas(
+                        draw,
+                        "LOCKED",
+                        widget.rect.right() - 48.0,
+                        widget.rect.y + 5.0,
+                        Color::rgba(222, 205, 126, 255),
                     );
                 }
                 draw.pop_clip();
@@ -2028,6 +2228,11 @@ impl GameUiHost {
         ) || matches!(
             self.screen,
             Some(GameScreen::Help { parent }) if help_parent_covers_world(parent)
+        ) || matches!(
+            self.screen,
+            Some(GameScreen::AssetPacks {
+                parent: GameOptionsParent::Title
+            })
         )
     }
 
@@ -2111,6 +2316,14 @@ impl GameUiHost {
             GameUiAction::OpenServerSettings(parent) => {
                 self.screen = Some(GameScreen::ServerSettings { parent });
             }
+            GameUiAction::OpenAssetPacks(parent) => {
+                self.screen = Some(GameScreen::AssetPacks { parent });
+            }
+            GameUiAction::CancelAssetPacks => {
+                if let Some(GameScreen::AssetPacks { parent }) = self.screen {
+                    self.screen = Some(GameScreen::Options { parent });
+                }
+            }
             GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
                 self.screen = Some(GameScreen::Title);
             }
@@ -2118,6 +2331,8 @@ impl GameUiHost {
             GameUiAction::CreateWorld(_) | GameUiAction::JoinRemote => self.screen = None,
             GameUiAction::RerollSeed => {}
             GameUiAction::ToggleSectionOcclusion
+            | GameUiAction::ToggleAssetPack(_)
+            | GameUiAction::ApplyAssetPacks
             | GameUiAction::ToggleFullbright
             | GameUiAction::ToggleFarLod
             | GameUiAction::TogglePlayerCollisionBox
@@ -2331,6 +2546,10 @@ const UI_V2_OPTIONS_CAT_GRAPHICS: UiWidgetId = UiWidgetId(125);
 const UI_V2_OPTIONS_CAT_MOVEMENT: UiWidgetId = UiWidgetId(126);
 const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
 const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
+const UI_V2_OPTIONS_ASSET_PACKS: UiWidgetId = UiWidgetId(129);
+const UI_V2_ASSET_PACK_ROW_BASE: u64 = 1300;
+const UI_V2_ASSET_PACK_CANCEL: UiWidgetId = UiWidgetId(1310);
+const UI_V2_ASSET_PACK_APPLY: UiWidgetId = UiWidgetId(1311);
 const UI_V2_SERVER_SETTINGS_HOST_RATE: UiWidgetId = UiWidgetId(701);
 const UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE: UiWidgetId = UiWidgetId(702);
 const UI_V2_SERVER_SETTINGS_PHYSICS_RATE: UiWidgetId = UiWidgetId(703);
@@ -2834,6 +3053,16 @@ fn options_layout(
         y += 24.0;
     }
 
+    layout.push(
+        UiWidget::button(
+            UI_V2_OPTIONS_ASSET_PACKS,
+            Rect::new(x, y, width, 20.0),
+            "Asset Packs",
+        )
+        .action(GameUiAction::OpenAssetPacks(parent)),
+    );
+    y += 24.0;
+
     // Server Settings stays a first-class sub-panel; shown disabled when the
     // local server is authoritative so its availability is visible per platform.
     layout.push(
@@ -3266,11 +3495,70 @@ fn push_cycle(
 }
 
 fn options_panel_rect(scale: GuiScale, _state: GameUiRenderState) -> Rect {
-    // The hub is a fixed short list: category buttons + Server Settings +
-    // Controls Help + Back.
+    // The hub is a fixed short list: categories + Asset Packs + Server
+    // Settings + Controls Help + Back.
     let panel_width = (scale.width - 18.0).clamp(242.0, 360.0);
-    let panel_height = 214.0f32.min((scale.height - 4.0).max(1.0));
+    let panel_height = 238.0f32.min((scale.height - 4.0).max(1.0));
     centered_panel(scale, panel_width, panel_height)
+}
+
+fn asset_packs_panel_rect(scale: GuiScale) -> Rect {
+    centered_panel(
+        scale,
+        (scale.width - 12.0).clamp(300.0, 456.0),
+        (scale.height - 4.0).clamp(220.0, 286.0),
+    )
+}
+
+fn asset_pack_row_id(index: usize) -> UiWidgetId {
+    UiWidgetId(UI_V2_ASSET_PACK_ROW_BASE + index as u64)
+}
+
+fn asset_packs_layout(
+    scale: GuiScale,
+    revision: u64,
+    parent: GameOptionsParent,
+    state: AssetPacksUiState,
+) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::AssetPacks { parent }), revision);
+    let panel = asset_packs_panel_rect(scale);
+    let row_count = state.row_count().max(1);
+    let available_height = (panel.height - 116.0).max(72.0);
+    let row_height = (available_height / row_count as f32).clamp(32.0, 42.0);
+    for (index, row) in state.rows.iter().flatten().copied().enumerate() {
+        let mut widget = UiWidget::asset_pack_row(
+            asset_pack_row_id(index),
+            Rect::new(
+                panel.x + 14.0,
+                panel.y + 28.0 + index as f32 * (row_height + 3.0),
+                panel.width - 28.0,
+                row_height,
+            ),
+            row,
+        );
+        widget.enabled &= !state.apply_state.is_preparing();
+        layout.push(widget);
+    }
+    let footer_y = panel.bottom() - 27.0;
+    layout.push(
+        UiWidget::button(
+            UI_V2_ASSET_PACK_CANCEL,
+            Rect::new(panel.center_x() - 96.0, footer_y, 90.0, 20.0),
+            "Cancel",
+        )
+        .enabled(!state.apply_state.is_preparing())
+        .action(GameUiAction::CancelAssetPacks),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_ASSET_PACK_APPLY,
+            Rect::new(panel.center_x() + 6.0, footer_y, 90.0, 20.0),
+            "Apply",
+        )
+        .enabled(state.can_apply())
+        .action(GameUiAction::ApplyAssetPacks),
+    );
+    layout
 }
 
 fn options_category_panel_rect(scale: GuiScale, category: GameOptionsCategory) -> Rect {

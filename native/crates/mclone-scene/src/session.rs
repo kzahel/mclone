@@ -151,6 +151,7 @@ where
             asset_replacement: None,
             asset_replacement_status: AssetReplacementStatus::Active { epoch: 0 },
             last_asset_replacement_commit: None,
+            asset_pack_sources: None,
             runtime: None,
             local_startup: Some(SceneLocalStartup {
                 request: request.clone(),
@@ -303,6 +304,7 @@ where
             asset_replacement: None,
             asset_replacement_status: AssetReplacementStatus::Active { epoch: 0 },
             last_asset_replacement_commit: None,
+            asset_pack_sources: None,
             runtime: Some(started.runtime),
             local_startup: None,
             session,
@@ -992,6 +994,7 @@ where
             self.apply_xr_catalog_effects(effects.catalog, device, queue)?;
         let session_scene_replaced =
             self.apply_xr_session_effects(effects.session, device, queue)?;
+        self.apply_asset_pack_effects(effects.asset_packs);
         if !self.apply_xr_settings_effects(effects.settings)? {
             return Ok(catalog_scene_replaced || session_scene_replaced);
         }

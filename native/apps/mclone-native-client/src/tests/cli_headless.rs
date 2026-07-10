@@ -440,6 +440,10 @@ fn parse_screenshot_ui_accepts_named_screens() {
             .unwrap(),
         HeadlessScreenshotUi::ServerSettingsPause
     );
+    assert_eq!(
+        parse_screenshot_ui_arg("--screenshot-ui", Some("asset-packs-pause".to_owned())).unwrap(),
+        HeadlessScreenshotUi::AssetPacksPause
+    );
     assert!(parse_screenshot_ui_arg("--screenshot-ui", Some("bad".to_owned())).is_err());
 }
 

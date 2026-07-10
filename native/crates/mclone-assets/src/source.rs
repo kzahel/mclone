@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
@@ -13,6 +13,31 @@ use crate::{
 pub trait AssetSource: Send + Sync {
     fn read(&self, path: &AssetPath) -> AssetResult<Option<Vec<u8>>>;
     fn list(&self, prefix: &str, suffix: &str) -> AssetResult<Vec<AssetPath>>;
+}
+
+#[derive(Clone)]
+pub struct SharedAssetSource(Arc<dyn AssetSource>);
+
+impl SharedAssetSource {
+    pub fn new(source: impl AssetSource + 'static) -> Self {
+        Self(Arc::new(source))
+    }
+}
+
+impl std::fmt::Debug for SharedAssetSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SharedAssetSource(..)")
+    }
+}
+
+impl AssetSource for SharedAssetSource {
+    fn read(&self, path: &AssetPath) -> AssetResult<Option<Vec<u8>>> {
+        self.0.read(path)
+    }
+
+    fn list(&self, prefix: &str, suffix: &str) -> AssetResult<Vec<AssetPath>> {
+        self.0.list(prefix, suffix)
+    }
 }
 
 #[derive(Clone, Debug, Default)]

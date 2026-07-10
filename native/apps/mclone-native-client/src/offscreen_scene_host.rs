@@ -760,6 +760,18 @@ impl OffscreenDriver {
         Ok(action)
     }
 
+    pub(crate) fn apply_ui_action(
+        &mut self,
+        action: GameUiAction,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        let mut effects = OffscreenHostEffects;
+        self.host
+            .apply_mono_ui_action(action, false, device, queue, &mut effects)?;
+        Ok(())
+    }
+
     pub(crate) fn latest_budget_decision_panel(&self) -> BudgetDecisionPanelReport {
         self.host.latest_budget_decision_panel()
     }
