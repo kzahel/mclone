@@ -94,8 +94,12 @@ These are mostly cascades from six real boundary families:
 5. the host concretely owns `NativeTeleportPreviewWorker`; and
 6. reachable scene timing and deadlines use `std::time::Instant` directly.
 
-The implementation should eliminate these root causes, not patch the ensuing
-type-inference errors one at a time.
+Families 1-5 produce the compile errors; family 6 compiles on
+`wasm32-unknown-unknown` and panics at runtime instead, so a green direct
+WASM gate proves compile portability only — browser runnability is
+established by the Slice 4 proof, never by `cargo check`. The implementation
+should eliminate these root causes, not patch the ensuing type-inference
+errors one at a time.
 
 ## Scope And Non-Goals
 
@@ -340,12 +344,26 @@ Work:
    operations without exposing a large public generic stack.
 4. Adapt all existing native host constructors to assemble the new services.
    Desktop, offscreen, Android, desktop XR, and Quest remain consumers of the
-   same host API.
+   same host API. Delete the superseded `native_session_runtime` policy entry
+   points in the same slice; no compatibility wrapper may keep the old call
+   graph alive beside the shell.
 5. Decide deferred-drop representation using Slice 0 measurements: reuse a
    target-neutral bounded queue contract, with native thread and web drain/worker
    implementations outside the host.
 6. Add ownership and teardown tests: service replacement cannot leak an old
    compiler, connection, catalog operation, or drop queue into a new epoch.
+7. Land the split move-first: mechanical relocation commits with function
+   bodies unchanged (reviewable with `git diff --color-moved`), followed by
+   separate small seam-introduction commits. Move commits intend zero native
+   behavior change.
+8. Add executor-equivalence tests: drive one scripted session scenario
+   through an immediate-completion executor and a deferred-completion
+   executor and assert identical host state and policy decisions, pinning the
+   invariant that native has no distinct policy path for typed operations.
+9. Extend the scene-host/thin-adapter purity gates to the new native
+   service-assembly modules: assembly code may construct services but may not
+   match on session, settings, catalog, or camera policy. This is the native
+   mirror of the Slice 5 web tripwires.
 
 Exit criteria:
 
@@ -354,7 +372,15 @@ Exit criteria:
 - every native driver remains thin and passes the existing purity gates;
 - service construction is platform-specific while policy is not;
 - deferred-drop behavior and backlog accounting have a selected web-capable
-  contract; and
+  contract;
+- move commits show relocation rather than rewrite, and the superseded native
+  runtime entry points are deleted rather than wrapped;
+- immediate and deferred operation executors are proven equivalent by shared
+  tests;
+- native service-assembly modules pass the extended purity gates;
+- representative desktop, offscreen pixel-canary (compared against a
+  pre-slice capture), flat Android, desktop XR, and Quest evidence is
+  recorded in this tactical before Slice 3 begins; and
 - any remaining WASM failures name missing browser implementations, not
   native-only scene policy.
 

@@ -94,8 +94,13 @@ families:
 6. startup deadlines, frame admission, locomotion attribution, and render
    timing use bare `std::time::Instant` throughout the reachable scene path.
 
-The missing-type errors then erase the host runtime type and produce most of
-the remaining inference errors. Treat this as a short list of architectural
+Families 1-5 are the compile-error roots: the missing types erase the host
+runtime type and produce most of the remaining inference errors. Family 6 is
+different in kind: `std::time::Instant` compiles on `wasm32-unknown-unknown`
+and panics at runtime instead (the reachable scene path has 68
+`Instant::now()` call sites). A green direct WASM gate therefore proves
+compile portability only, not browser runnability; the Slice 4 browser proof
+is the runtime gate. Treat all of this as a short list of architectural
 boundaries, not 95 independent fixes.
 
 ## Locked Decisions
@@ -194,7 +199,10 @@ separately reviewable.
   evidence, not yet the final shared-host contract.
 - **Hidden-tab behavior:** decide whether scene frames pause while the server
   worker continues, and how queued updates are budget-drained on resume. Lock
-  this in the direct browser proof slice.
+  this in the direct browser proof slice. The same decision must state which
+  browser event, if any, maps to the host's lifecycle save trigger; web
+  persistence currently flows continuously through the runner with no
+  `pagehide`/`visibilitychange` hook.
 - **Deferred drops:** measure the current browser cost before choosing a
   frame-budgeted main-thread executor or another Worker lane.
 - **WebGPU device/surface loss:** the cutover must at least preserve current
@@ -206,6 +214,18 @@ separately reviewable.
 - **Web feature exceptions:** far LOD, travel assist, frame-pipeline overlay,
   debug diagnostics, and server cadence retain their current reason-bearing
   state until individually validated.
+- **Physics engines sit outside the parity framework:** `physics-rapier` and
+  `physics-box3d` are opt-in `mclone-server` cargo features exposed only
+  through the desktop client, not `ClientExperienceProfile` entries, so the
+  Slice 6 parity audit will not surface the native/web physics disparity. If
+  a physics engine graduates from opt-in, give it an explicit profile or
+  ledger entry before claiming web parity.
+- **Slice 2 native regression risk:** the neutral runtime-shell split rewrites
+  the session runtime all five native targets converged on in Tactical 168.
+  Tactical 170 Slice 2 carries explicit defenses: move-first commits, deletion
+  of superseded native entry points, executor-equivalence tests,
+  native-assembly purity gates, and a recorded platform-matrix hold point
+  before Slice 3.
 - **Asset-pack work:** Tactical 169 also touches web asset payload and compiler
   lifecycle. Portable prerequisite work may proceed independently, but the
   atomic cutover must consume Tactical 169's active asset-set/epoch contract
@@ -246,7 +266,9 @@ Production adoption must preserve:
 ## Code And Documentation Map
 
 - [`../tactical/170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md): implementation slices and acceptance.
-- [`../tactical/168-unified-native-scene-host.md`](../tactical/168-unified-native-scene-host.md): parent host convergence and original web blocker audit.
+- [`../tactical/168-unified-native-scene-host.md`](../tactical/168-unified-native-scene-host.md): parent host convergence and
+  original web blocker audit; the neutral mesh-asset boundary (family 2 above)
+  is newly identified in this topic and absent from that audit.
 - [`../tactical/062-shared-threading-topology.md`](../tactical/062-shared-threading-topology.md): browser runner/worldgen/light worker topology.
 - [`../tactical/067-shared-render-worker-architecture.md`](../tactical/067-shared-render-worker-architecture.md): resident shared-memory render compiler.
 - [`../tactical/085-web-host-mode-convergence.md`](../tactical/085-web-host-mode-convergence.md): web local/remote host-mode seams.
