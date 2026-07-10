@@ -1688,6 +1688,7 @@ dependencies = [
  "mclone-client",
  "mclone-core",
  "mclone-diagnostics",
+ "mclone-frame-budget",
  "mclone-input",
  "mclone-mesh",
  "mclone-protocol",

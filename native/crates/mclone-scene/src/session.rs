@@ -199,6 +199,10 @@ where
             blink_teleport: XrBlinkTeleportState::default(),
             blink_teleport_worker: None,
             display_refresh_hz: None,
+            render_admission_policy: RenderAdmissionPolicy::new(
+                FrameHostKind::HeadlessOffscreenPerf,
+                WorkWindow::BeforeRender,
+            ),
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
@@ -321,6 +325,10 @@ where
             blink_teleport: XrBlinkTeleportState::default(),
             blink_teleport_worker: None,
             display_refresh_hz: None,
+            render_admission_policy: RenderAdmissionPolicy::new(
+                FrameHostKind::HeadlessOffscreenPerf,
+                WorkWindow::BeforeRender,
+            ),
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
@@ -355,11 +363,14 @@ where
     }
 
     pub fn set_frame_pipeline_report(&mut self, report: Arc<FramePipelineReport>, revision: u64) {
+        self.render_admission_policy
+            .set_frame_pipeline_report(report.clone());
         self.diagnostic_panel
             .set_frame_pipeline_report(report, revision);
     }
 
     pub fn clear_frame_pipeline_report(&mut self) {
+        self.render_admission_policy.clear_frame_pipeline_report();
         self.diagnostic_panel.clear_frame_pipeline_report();
     }
 
@@ -808,6 +819,7 @@ where
         self.prefetched_live_upload = None;
         self.traversal_ready_sections.clear();
         self.section_uploads.clear();
+        self.render_admission_policy.reset();
     }
 
     pub(crate) fn teardown_world(

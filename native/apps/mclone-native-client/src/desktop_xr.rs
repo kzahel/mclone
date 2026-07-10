@@ -49,6 +49,8 @@ use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_app_runtime::{elapsed_ms, frame_pipeline_accounting::FramePipelineAccountant};
 #[cfg(not(target_os = "android"))]
 use mclone_audio::{AudioEngine, AudioSettings};
+#[cfg(not(target_os = "android"))]
+use mclone_diagnostics::FrameHostKind;
 
 #[cfg(not(target_os = "android"))]
 mod companion_window;
@@ -148,6 +150,10 @@ fn run_desktop_xr(mode: DesktopXrMode) -> Result<()> {
     let mut enabled_extensions = xr::ExtensionSet::default();
     let graphics_extension =
         enable_platform_graphics_extension(&available, &mut enabled_extensions)?;
+    let display_refresh_supported = available.fb_display_refresh_rate;
+    if display_refresh_supported {
+        enabled_extensions.fb_display_refresh_rate = true;
+    }
 
     println!("OpenXR entry: {entry_source}");
     println!(
@@ -217,6 +223,7 @@ fn run_desktop_xr(mode: DesktopXrMode) -> Result<()> {
         system,
         stereo_config,
         environment_blend_mode,
+        display_refresh_supported,
         mode,
     )?;
 
@@ -253,6 +260,7 @@ fn create_graphics_session_probe(
     system: xr::SystemId,
     stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
+    display_refresh_supported: bool,
     mode: DesktopXrMode,
 ) -> Result<()> {
     let graphics = graphics_metal::create_graphics_session(instance, system)
@@ -263,7 +271,14 @@ fn create_graphics_session_probe(
         graphics.required_device_name, graphics.adapter_name
     );
     println!("OpenXR reference space: STAGE");
-    run_smoke_frames(graphics, stage, stereo_config, environment_blend_mode, mode)?;
+    run_smoke_frames(
+        graphics,
+        stage,
+        stereo_config,
+        environment_blend_mode,
+        display_refresh_supported,
+        mode,
+    )?;
     Ok(())
 }
 
@@ -273,6 +288,7 @@ fn create_graphics_session_probe(
     system: xr::SystemId,
     stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
+    display_refresh_supported: bool,
     mode: DesktopXrMode,
 ) -> Result<()> {
     let graphics = graphics_vulkan::create_graphics_session(instance, system)
@@ -285,7 +301,14 @@ fn create_graphics_session_probe(
         graphics.queue_family_index
     );
     println!("OpenXR reference space: STAGE");
-    run_smoke_frames(graphics, stage, stereo_config, environment_blend_mode, mode)?;
+    run_smoke_frames(
+        graphics,
+        stage,
+        stereo_config,
+        environment_blend_mode,
+        display_refresh_supported,
+        mode,
+    )?;
     Ok(())
 }
 
@@ -531,8 +554,21 @@ fn run_smoke_frames(
     stage: xr::Space,
     stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
+    display_refresh_supported: bool,
     mode: DesktopXrMode,
 ) -> Result<()> {
+    let display_refresh = mclone_xr_host::query_display_refresh_snapshot(
+        &graphics.session,
+        display_refresh_supported,
+    );
+    println!(
+        "OpenXR display refresh: current={} supported={}",
+        display_refresh
+            .current_rate
+            .map(|hz| format!("{hz:.1} Hz"))
+            .unwrap_or_else(|| "unknown".to_owned()),
+        mclone_xr_host::display_refresh_rates_label(&display_refresh.supported_rates)
+    );
     let frame_limit = match &mode {
         DesktopXrMode::Clear { frame_limit } => *frame_limit,
         DesktopXrMode::Mclone { options } | DesktopXrMode::Real { options, .. } => {
@@ -599,6 +635,9 @@ fn run_smoke_frames(
                 .context("initialize mclone XR terrain state")?,
         ),
     };
+    if let Some(mclone) = mclone.as_mut() {
+        mclone.set_display_refresh_hz(display_refresh.current_rate);
+    }
 
     // Real `--desktop-xr` run: give the operator a desktop presence and a
     // non-headset quit. App-local winit glue, status surface only (no mirror /
@@ -642,7 +681,7 @@ fn run_smoke_frames(
         controller_actions: &controller_actions,
         controller_summary: XrControllerInputSummary::default(),
         frame_pipeline_accountant: FramePipelineAccountant::new(
-            xr_frame_pipeline_accounting_config(None),
+            xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),
         ),
         companion: &mut companion,
         companion_running_announced: false,
@@ -757,6 +796,7 @@ fn create_mclone_terrain_state(
     }
     .context("initialize shared mclone XR terrain scene")?;
     state.set_audio_engine(audio);
+    state.set_frame_host_kind(FrameHostKind::DesktopXrOpenXr);
     state.set_session_runtime_factory(|request, scene, mesh_assets| {
         let desktop_scene = desktop_scene_options_for_xr_request(&request, &scene);
         let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;

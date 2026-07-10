@@ -225,6 +225,10 @@ where
         self.display_refresh_hz = display_refresh_hz.filter(|hz| hz.is_finite() && *hz > 0.0);
     }
 
+    pub fn set_frame_host_kind(&mut self, host_kind: FrameHostKind) {
+        self.render_admission_policy.set_host_kind(host_kind);
+    }
+
     pub fn set_render_split_timing_enabled(&mut self, enabled: bool) {
         self.render_split_timing_enabled = enabled;
     }

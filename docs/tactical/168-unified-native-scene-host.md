@@ -6,8 +6,9 @@ Slice 1 (OpenXR-free scene crate + `mclone-xr-scene` -> `mclone-scene` rename)
 landed 2026-07-09; Slice 3 (mono view topology + screen-space HUD strategy +
 offscreen driver) landed 2026-07-09; Slice 4 (shared OpenXR frame driver)
 landed 2026-07-10; Slice 5 (shared diagnostics accounting and presentation)
-landed 2026-07-10. (Slices 0–2 are independent per the sequencing guardrail,
-so Slice 2 landed ahead of Slice 1.) Post-Slice-3 review corrections landed
+landed 2026-07-10; Slice 6 (shared adaptive render admission) landed
+2026-07-10. (Slices 0–2 are independent per the sequencing guardrail, so
+Slice 2 landed ahead of Slice 1.) Post-Slice-3 review corrections landed
 2026-07-10: truthful offscreen-settle failure, an exercised mono-HUD capture
 lane, a shared lifecycle `on_background()` policy, durable-flush regression
 coverage, the WASM-built runner connection adapter, and early completion of
@@ -319,8 +320,8 @@ or pull a prerequisite earlier when a native slice naturally touches it:
 ## Implementation slices
 
 Every slice must independently satisfy the **cross-slice guardrails** at the
-bottom of this doc. Slices 0–5 are complete; Slice 6 is the next implementation
-slice.
+bottom of this doc. Slices 0–6 are complete; Slice 7 is the next implementation
+slice and must land through its ordered sub-slices.
 
 ### Slice 0: Bug-grade parity pre-fixes — DONE (2026-07-09)
 
@@ -886,7 +887,7 @@ formatter set, one accountant type; XR percentile, queue-age, remote-lane, and
 peer-window semantics have regression coverage; 165 Slice 2c is resolved in
 both docs.
 
-### Slice 6: Shared adaptive render-admission policy
+### Slice 6: Shared adaptive render-admission policy — DONE (2026-07-10)
 
 Goal: one client-side upload-admission policy, owned by the scene host.
 
@@ -945,9 +946,36 @@ Validation: standard battery + `pnpm native:frame-budget:smoke` +
 `pnpm native:android-xr:sky-terrain-multiview-perf`, comparing frame-time
 percentiles against the baseline.
 
-Exit criteria: `DesktopRenderBudgetController` gone from the app crate; one
-policy type in the host consumed by both topologies; desktop probe output
-matches baseline; Quest percentiles within noise of baseline.
+Implementation (2026-07-10): `mclone-scene::RenderAdmissionPolicy` now owns
+the surviving `BudgetController`, EWMA cost estimator, frame-report pressure
+window, grant conversion, and scheduler/render decision-panel merge. The host
+consumes the preceding shared `FramePipelineReport`, observes the timed sync,
+and applies the grant's elapsed deadline plus compile-request limit. The former
+XR upload cap remains the upload-drain limit and additionally clamps the
+adaptive compile-request grant; the existing pre-sync drain rule is unchanged.
+Desktop flat uses the same policy type without its former local controller or
+helper set, preserving its opt-in flag until Slice 7 moves the remaining flat
+orchestration onto the host. Android XR and desktop XR supply compositor refresh
+periods; desktop XR now enables/queries `XR_FB_display_refresh_rate` when the
+runtime exposes it. Session replacement resets policy history while preserving
+the selected host address.
+
+Validation (2026-07-10): the pre-slice desktop frame-budget and Quest
+sky/terrain multiview baselines are under `/tmp/mclone-slice6-before-*`. Full
+workspace tests, web/WASM build, both Android APK scripts, scene/frame-driver
+purity gates, startup-streaming smoke, frame-budget smoke, the inspected
+desktop offscreen capture, and desktop WiVRn 120-frame mclone smoke pass. The
+desktop probe retains its report shape and zero conservation violations. Quest
+sky/terrain multiview retains 6 sections, 15,924 indices per eye, and nearly
+identical p95 (`3.960` -> `3.963 ms`). The live uncapped Quest policy reaches
+the adaptive ceiling of 4; an explicit cap of 2 emits and enforces
+`max_units=2`. Both 10-second runs sustain about 72 submitted FPS with zero
+accounting violations and no app-work frame-period overruns.
+
+Exit criteria (met): `DesktopRenderBudgetController` is gone from the app
+crate; one policy type is consumed by mono and XR topologies; desktop report
+shape and controller semantics are preserved; Quest percentiles are within
+noise of baseline.
 
 ### Slice 7: Desktop flat onto the host (delete `FlatClientDriver` orchestration)
 
@@ -1322,8 +1350,8 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 6; Slices 0–5 are implemented. Read the shared
-`FramePipelineAccountant`, the neutral queue/peer inputs, and the surviving
-desktop/XR admission controllers named in Slice 6. Feed the single accountant's
-report into the shared admission policy; do not move formatting, diagnostics,
-or budget policy back into a platform loop handler.
+Start with Slice 7a; Slices 0–6 are implemented. Read the shared
+client-experience facade/effect applier and the desktop copies named in Slice
+7a. Keep `RenderAdmissionPolicy` on the scene host while moving desktop flat
+onto that host in the ordered 7a–7e sequence; do not move diagnostics or budget
+policy back into a platform loop handler.

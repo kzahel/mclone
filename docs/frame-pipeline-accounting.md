@@ -154,7 +154,7 @@ render compile can run in separate workers.
 
 Android XR (`FrameHostKind::AndroidXrOpenXr`) and desktop XR
 (`FrameHostKind::DesktopXrOpenXr`) have different session shells but share the
-same `mclone-xr-scene` terrain frame interior. Quest has the tighter headroom
+same `mclone-scene` terrain frame interior. Quest has the tighter headroom
 budget; at 72 Hz the period is `13.889 ms`, and useful signals are
 `app_work_*`, `headroom_*`, and `app_over_period_*`, not legacy paced frame wall
 time. XR frame overlap is a work-window shape, not a separate policy fork.
@@ -194,13 +194,13 @@ window.
 | `WebRafWorkers` | `WorkerPoll` | `HostSessionCommands`, `TerrainGeneration`, `LightComputeStatus`, `SchedulerPublication`, `CpuMeshCompile` | `web_server_worker.rs` `tick`, `poll`, and `handleCommandFrame` service the integrated server worker; `www/mclone-server-job-worker.ts` handles worldgen/light jobs; `www/mclone-render-compiler-worker.ts` `handleCompile` runs render compile work and returns completed results. |
 | `WebRafWorkers` | `PostSubmitOverlapSlack` | window does not exist on this host today | Browser RAF has no blocking present wait that Rust owns. Once the RAF callback returns, scheduling is back in the browser; any background work must be a worker window. |
 | `WebRafWorkers` | `TickSlack` | window does not exist on this host today | The web server worker is timer/message driven; it does not own a native blocking wait-until-next-tick slack loop. |
-| `AndroidXrOpenXr` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `GpuExecutionPresentationWait`, `UiDebug` | `apps/mclone-android-xr-client/src/lib.rs` `run_mclone_frame_loop` polls Android/OpenXR events, waits/begins the frame, polls controllers, then calls `render_mclone_frame` / `render_mclone_multiview_frame`; `mclone-xr-scene/src/lib.rs` `render_prepared_frame*` and `poll_runtime_and_upload` own runtime sync, accept/upload, records, encode, and waits. |
-| `AndroidXrOpenXr` | `PostSubmitOverlapSlack` | `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords` | In the per-eye frame-overlap path, `mclone-xr-scene/src/lib.rs` `render_prepared_frame` defers eye waits, runs `poll_runtime_and_upload` as `overlap_runtime_prefetch`, then waits for the deferred submission. This is the Quest overlap window. |
-| `AndroidXrOpenXr` | `WorkerPoll` | `CpuMeshCompile` | XR render compile workers use `mclone-app-runtime/src/render_assets.rs` `RenderSectionCompileWorker`; `mclone-xr-scene` submits/accepts results in `BeforeRender` or overlap prefetch. |
+| `AndroidXrOpenXr` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `GpuExecutionPresentationWait`, `UiDebug` | `apps/mclone-android-xr-client/src/lib.rs` `run_mclone_frame_loop` polls Android/OpenXR events, waits/begins the frame, polls controllers, then calls `render_mclone_frame` / `render_mclone_multiview_frame`; `mclone-scene/src/lib.rs` `render_prepared_frame*` and `poll_runtime_and_upload` own runtime sync, accept/upload, records, encode, and waits. |
+| `AndroidXrOpenXr` | `PostSubmitOverlapSlack` | `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords` | In the per-eye frame-overlap path, `mclone-scene/src/lib.rs` `render_prepared_frame` defers eye waits, runs `poll_runtime_and_upload` as `overlap_runtime_prefetch`, then waits for the deferred submission. This is the Quest overlap window. |
+| `AndroidXrOpenXr` | `WorkerPoll` | `CpuMeshCompile` | XR render compile workers use `mclone-app-runtime/src/render_assets.rs` `RenderSectionCompileWorker`; `mclone-scene` submits/accepts results in `BeforeRender` or overlap prefetch. |
 | `AndroidXrOpenXr` | `GameplayTick` | window does not exist on this host | Local integrated server cadence is addressed to `IntegratedServerRunner`; the XR shell only observes its queued effects. |
 | `AndroidXrOpenXr` | `TickSlack` | window does not exist on this host | Local integrated server slack is addressed to `IntegratedServerRunner`, not the OpenXR shell. |
-| `DesktopXrOpenXr` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `GpuExecutionPresentationWait`, `UiDebug` | `apps/mclone-native-client/src/desktop_xr.rs` `run_smoke_frames` polls OpenXR events, waits/begins frames, polls controllers, and calls `render_mclone_frame` for `--xr-mclone-smoke` / `--desktop-xr`; that calls the same `mclone-xr-scene` terrain frame interior. |
-| `DesktopXrOpenXr` | `PostSubmitOverlapSlack` | conditional shared-XR window; window does not exist in the current smoke unless overlap is enabled | The window is the same `mclone-xr-scene` deferred-eye-wait / `overlap_runtime_prefetch` path used by Android XR, but desktop smoke currently runs the serial path. |
+| `DesktopXrOpenXr` | `BeforeRender` | `InputPoseEvents`, `HostSessionCommands`, `TransportDecode`, `ClientUpdateApply`, `CompletedResultAcceptance`, `RenderSectionAdmission`, `RenderAdmission*`, `UploadApply`, `GpuUpload`, `PreparedDrawRecords`, `DrawEncode`, `GpuExecutionPresentationWait`, `UiDebug` | `apps/mclone-native-client/src/desktop_xr.rs` `run_smoke_frames` polls OpenXR events, waits/begins frames, polls controllers, and calls `render_mclone_frame` for `--xr-mclone-smoke` / `--desktop-xr`; that calls the same `mclone-scene` terrain frame interior. |
+| `DesktopXrOpenXr` | `PostSubmitOverlapSlack` | conditional shared-XR window; window does not exist in the current smoke unless overlap is enabled | The window is the same `mclone-scene` deferred-eye-wait / `overlap_runtime_prefetch` path used by Android XR, but desktop smoke currently runs the serial path. |
 | `DesktopXrOpenXr` | `WorkerPoll` | `CpuMeshCompile` | Desktop XR terrain compile uses the same shared native render compile worker path as Android XR when mclone terrain is active. |
 | `DesktopXrOpenXr` | `GameplayTick` | window does not exist on this host | Server cadence is not owned by the OpenXR session loop. |
 | `DesktopXrOpenXr` | `TickSlack` | window does not exist on this host | Server slack is not owned by the OpenXR session loop. |
@@ -256,7 +256,7 @@ Accounting math and the report vocabulary get exactly one shared owner: a
 small leaf crate, working name `mclone-diagnostics`, with no engine
 dependencies. Producers span the whole stack — `mclone-server` tick and
 publication timing, `mclone-app-runtime` streaming stats, `mclone-render`
-pass timing, `mclone-xr-scene` frame timing, app frame loops, and benchmark
+pass timing, `mclone-scene` frame timing, app frame loops, and benchmark
 binaries — so the owner must sit below all of them. `mclone-app-runtime` is
 too high in the dependency graph to serve `mclone-server`, which is why this
 noun gets a dedicated crate while the client-experience core stayed an
@@ -315,6 +315,12 @@ accounting-smoke JSON, and the desktop flat overlay use the same report structs
 and render-admission/upload stage names for completed-result acceptance,
 dirty/ready scan, request build, worker submit, prepared-record
 maintenance, admission remainder, and upload apply.
+
+Tactical 168 Slice 6 makes that report an input to the single adaptive
+`mclone-scene::RenderAdmissionPolicy`. The driver supplies a target period;
+the policy derives frame/queue pressure from the preceding report, combines it
+with EWMA timed-sync unit costs, and returns one elapsed/request grant. XR's
+configured upload cap clamps that grant rather than creating another policy.
 
 ### Per-Lane Time-Source Authority
 

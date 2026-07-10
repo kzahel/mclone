@@ -198,6 +198,11 @@ and terrain-scene behavior where possible. They should diverge only at runtime
 discovery, Android loader/activity glue, packaging, headset wake/restore, and
 other true platform concerns.
 
+Both XR adapters query compositor refresh through `mclone-xr-host` and pass the
+result to the shared `mclone-scene` render-admission policy. Static Quest upload
+limits remain optional clamps on that shared adaptive grant, not a separate
+platform controller.
+
 ## Validation Policy
 
 Every supported platform lane has an executable gate. Use `/tmp` for screenshots

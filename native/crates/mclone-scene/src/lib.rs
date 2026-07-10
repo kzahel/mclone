@@ -63,7 +63,9 @@ use mclone_client::{
     view_vector_from_rot_degrees,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
-use mclone_diagnostics::{BudgetDecisionPanelReport, FramePipelineReport};
+use mclone_diagnostics::{
+    BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind, FramePipelineReport, WorkWindow,
+};
 use mclone_input::{InputPromptKind, ResolvedFlatInput, XrControllerSnapshot, XrHand};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -117,6 +119,7 @@ mod frame_pipeline_reporter;
 mod locomotion;
 mod mono;
 mod options;
+mod render_admission;
 mod session;
 mod teleport;
 mod timing;
@@ -127,6 +130,7 @@ pub use comfort::*;
 pub use locomotion::*;
 pub use mono::*;
 pub use options::*;
+pub use render_admission::*;
 pub use session::*;
 pub(crate) use teleport::*;
 pub use timing::*;
@@ -316,6 +320,7 @@ where
     blink_teleport: XrBlinkTeleportState,
     blink_teleport_worker: Option<NativeTeleportPreviewWorker>,
     display_refresh_hz: Option<f32>,
+    render_admission_policy: RenderAdmissionPolicy,
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
     overlap_runtime_prefetch_enabled: bool,
@@ -1036,9 +1041,14 @@ where
     }
 
     fn render_compile_frame_deadline(&self) -> Option<Instant> {
+        self.render_admission_target_period_ms()
+            .map(|period_ms| Instant::now() + Duration::from_secs_f64(period_ms / 1_000.0))
+    }
+
+    fn render_admission_target_period_ms(&self) -> Option<f64> {
         self.display_refresh_hz
             .filter(|hz| hz.is_finite() && *hz > 0.0)
-            .map(|hz| Instant::now() + Duration::from_secs_f64(1.0 / f64::from(hz)))
+            .map(|hz| 1_000.0 / f64::from(hz))
     }
 
     fn next_per_view_uniform_frame(&mut self) -> u32 {
@@ -1803,6 +1813,16 @@ where
                 runtime.has_pending_render_work(camera_position),
             )
         };
+        let target_period_ms = self.render_admission_target_period_ms();
+        let budget_host_mode = match self.runtime_host_mode() {
+            XrTerrainHostMode::LocalIntegrated => BudgetHostMode::LocalIntegrated,
+            XrTerrainHostMode::RemoteDedicated => BudgetHostMode::RemoteHost,
+        };
+        let render_admission_grant = self.render_admission_policy.decide(
+            target_period_ms,
+            budget_host_mode,
+            self.render_section_upload_budget,
+        );
         if !poll_changed && !has_runtime_render_work && !self.section_uploads.has_pending_work() {
             let traversal_ready_section_count =
                 self.refresh_traversal_ready_sections(camera_position, false, false, timing);
@@ -1875,7 +1895,18 @@ where
         let should_sync_render_sections = upload_frame_decision.should_sync_render_sections;
         let sync_start = Instant::now();
         let timed_section_update = if should_sync_render_sections {
-            if let Some(deadline) = frame_deadline {
+            if let Some(grant) = render_admission_grant {
+                let admission_deadline = Instant::now() + grant.elapsed_budget;
+                let deadline = frame_deadline
+                    .map(|frame_deadline| frame_deadline.min(admission_deadline))
+                    .unwrap_or(admission_deadline);
+                self.sync_render_sections_until_deadline_with_admission_budget_timed(
+                    camera_position,
+                    deadline,
+                    grant.max_compile_requests,
+                )
+                .context("sync XR terrain render sections with adaptive admission")?
+            } else if let Some(deadline) = frame_deadline {
                 self.sync_render_sections_until_deadline_timed(camera_position, deadline)
                     .context("sync XR terrain render sections until deadline")?
             } else {
@@ -1885,6 +1916,8 @@ where
         } else {
             mclone_app_runtime::TimedRenderSectionCacheUpdate::default()
         };
+        self.render_admission_policy
+            .observe_sync(target_period_ms, &timed_section_update);
         timing.runtime_sync_ms = elapsed_ms(sync_start.elapsed());
         timing.runtime_result_accept_ms = timed_section_update.timing.completed_result_accept_ms;
         timing.runtime_dirty_seed_ms = timed_section_update.timing.dirty_seed_ms;
@@ -2333,14 +2366,16 @@ where
     }
 
     pub fn latest_budget_decision_panel(&self) -> BudgetDecisionPanelReport {
-        self.runtime
+        let scheduler = self
+            .runtime
             .as_ref()
             .map(|runtime| {
                 runtime
                     .last_poll_diagnostics()
                     .scheduler_budget_decision_panel
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        merge_budget_decision_panels(scheduler, self.render_admission_policy.panel())
     }
 
     fn runtime_host_mode(&self) -> XrTerrainHostMode {
@@ -2744,6 +2779,24 @@ where
             .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
                 camera_position,
                 deadline,
+                completed_result_accept_budget,
+            )
+    }
+
+    fn sync_render_sections_until_deadline_with_admission_budget_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        max_compile_requests: usize,
+    ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
+        let completed_result_accept_budget = self.render_completed_result_accept_budget;
+        self.runtime
+            .as_mut()
+            .context("XR terrain runtime is not active")?
+            .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+                camera_position,
+                deadline,
+                max_compile_requests,
                 completed_result_accept_budget,
             )
     }

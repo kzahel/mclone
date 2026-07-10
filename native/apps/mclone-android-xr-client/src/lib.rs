@@ -99,8 +99,8 @@ mod android {
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_diagnostics::{
-        BudgetDecisionPanelReport, FrameAccumulator, FramePipelineReport, FrameSummaryReport,
-        PercentileMethod, QueuePanelReport, percentile_sorted_ms,
+        BudgetDecisionPanelReport, FrameAccumulator, FrameHostKind, FramePipelineReport,
+        FrameSummaryReport, PercentileMethod, QueuePanelReport, percentile_sorted_ms,
     };
     use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
     use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -2094,6 +2094,7 @@ mod android {
             }
         };
         terrain.set_audio_engine(audio);
+        terrain.set_frame_host_kind(FrameHostKind::AndroidXrOpenXr);
         terrain.set_session_runtime_factory(|request, scene_options, mesh_assets| {
             android_xr_scene_runtime_for_request(request, scene_options, mesh_assets)
         });
@@ -3826,34 +3827,24 @@ mod android {
                 }
             }
 
-            let frame_pipeline_overlay_open = self.terrain.frame_metrics_visible();
-            let budget_decision_panel = if cfg!(feature = "perf-diagnostics")
-                || self.perf_probe.is_recording()
-                || frame_pipeline_overlay_open
-            {
-                self.terrain.latest_budget_decision_panel()
-            } else {
-                BudgetDecisionPanelReport::empty()
-            };
-            if cfg!(feature = "perf-diagnostics") || frame_pipeline_overlay_open {
-                let (frame_pipeline_report, frame_pipeline_revision) = record_xr_frame_pipeline(
-                    &mut self.frame_pipeline_accountant,
-                    XrFramePipelineHostTiming {
-                        frame_wall_ms: self.frame_timing.frame_wall_ms,
-                        wait_frame_ms: self.frame_timing.wait_frame_ms,
-                        controller_poll_ms: self.frame_timing.controller_poll_ms,
-                        rendered: rendered_frame.is_some(),
-                        thread_cpu_ms: self
-                            .frame_timing
-                            .thread_cpu_valid
-                            .then_some(self.frame_timing.thread_cpu_ms),
-                    },
-                    rendered_frame.map(|rendered| rendered.summary),
-                    budget_decision_panel.clone(),
-                );
-                self.terrain
-                    .set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
-            }
+            let budget_decision_panel = self.terrain.latest_budget_decision_panel();
+            let (frame_pipeline_report, frame_pipeline_revision) = record_xr_frame_pipeline(
+                &mut self.frame_pipeline_accountant,
+                XrFramePipelineHostTiming {
+                    frame_wall_ms: self.frame_timing.frame_wall_ms,
+                    wait_frame_ms: self.frame_timing.wait_frame_ms,
+                    controller_poll_ms: self.frame_timing.controller_poll_ms,
+                    rendered: rendered_frame.is_some(),
+                    thread_cpu_ms: self
+                        .frame_timing
+                        .thread_cpu_valid
+                        .then_some(self.frame_timing.thread_cpu_ms),
+                },
+                rendered_frame.map(|rendered| rendered.summary),
+                budget_decision_panel.clone(),
+            );
+            self.terrain
+                .set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
             if !perf_started_after_ready && self.perf_probe.is_recording() {
                 self.perf_probe.record_frame(
                     self.frame_timing,

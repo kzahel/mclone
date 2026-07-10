@@ -70,6 +70,9 @@ Shared engine crates own:
 - client frame-pipeline accounting, neutral queue/peer builders, and shared
   report presentation (`mclone-app-runtime`, over the leaf
   `mclone-diagnostics` schema/math)
+- adaptive client render-section admission (`mclone-scene`), consuming the
+  shared frame report and timed sync costs; platform drivers provide only their
+  target frame period, while an XR upload cap is an optional grant clamp
 - shared Rust/WebGPU UI model and draw list
 
 Platform app crates own:
