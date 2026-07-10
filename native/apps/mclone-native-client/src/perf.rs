@@ -11,11 +11,7 @@ use mclone_app_runtime::frame_pipeline_accounting::{
     FramePipelineQueueDepths, FramePipelineReportExtras, render_section_sync_stage_spans,
 };
 use mclone_app_runtime::frame_pipeline_presentation::frame_pipeline_report_json_field_lines;
-use mclone_app_runtime::frame_render::{
-    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
-};
 use mclone_app_runtime::{RenderSectionSyncTiming, RuntimeUpdatePumpBudget};
-use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, FrameAccountingConfig, FrameAccumulator, FrameObservation,
@@ -23,27 +19,14 @@ use mclone_diagnostics::{
     StageSpan,
 };
 use mclone_frame_budget::RenderCompileMeshFootprint;
-use mclone_mesh::{
-    RenderSectionKey, TexturedChunkVertex, VisibilityGraphBuildStats, quad_face_count_from_indices,
-};
+use mclone_mesh::{TexturedChunkVertex, VisibilityGraphBuildStats, quad_face_count_from_indices};
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionUploadReport,
-    textured_section_visibility_stats_with_options_and_ready_sections,
+    ChunkCamera, textured_section_visibility_stats_with_options_and_ready_sections,
 };
-use mclone_render::entity::ActorDrawResources;
-use mclone_render::gui::GuiRenderer;
-use mclone_render::headless::{
-    HeadlessFrameLoopOptions, HeadlessTimedemoOptions, run_headless_frame_loop,
-    run_headless_textured_sections_timedemo,
-};
-use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
-use mclone_render::sky_render::SkyRenderer;
-use mclone_render::target::RenderFrameContext;
-use mclone_render_session::{actor_instances_from_presentations, render_section_chunk_pos};
+use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_frame_loop};
 use mclone_server::{
     LightStatusMailboxMetrics, SqliteWorldStore, WorkerFrameMetrics, initial_spawn_center_for_seed,
 };
-use mclone_ui::{GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiScale};
 
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
@@ -52,21 +35,17 @@ use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, LoadingSettlePerfOptions, MovementPerfOptions,
     SceneOptions, StartupStreamingPerfOptions, TimedemoOptions,
 };
-use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
-use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
+use crate::frame_pacing::elapsed_ms;
 use crate::render_cache::load_asset_source;
 use crate::render_compile_capacity::{
     RenderCompileCapacityHostKind, preflight_render_compile_capacity_report,
     render_compile_capacity_report,
 };
 use crate::scene_runtime::{
-    WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, build_scene_textured_sections,
-    chunk_tracking_radius_for_render_distance, local_integrated_scene_options,
+    WindowSceneAssets, WindowSceneRuntime, chunk_tracking_radius_for_render_distance,
     poll_window_runtime_until_idle, poll_window_runtime_until_idle_with_timeout, square_count,
 };
-use crate::{
-    MAX_RENDER_DISTANCE, MAX_STARTUP_STREAMING_PERF_FRAMES, json_escape, print_benchmark_metadata,
-};
+use crate::{MAX_RENDER_DISTANCE, json_escape, print_benchmark_metadata};
 
 const LOADING_SETTLE_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -832,61 +811,34 @@ impl Default for FrameBudgetProbeFrameReport {
     }
 }
 
-impl FrameBudgetProbeFrameReport {
-    fn add_section_timing(&mut self, timing: FrameBudgetProbeSectionTiming) {
-        self.remesh_ms += timing.remesh_ms;
-        self.upload_ms += timing.upload_ms;
-        self.section_sync_timing.merge(timing.sync_timing);
-        self.rebuilt_sections += timing.rebuilt_sections;
-        self.removed_sections += timing.removed_sections;
-        self.submitted_compile_sections += timing.submitted_compile_sections;
-        self.deadline_skipped_compile_requests += timing.deadline_skipped_compile_requests;
-        self.accepted_compile_results += timing.accepted_compile_results;
-        self.queued_completed_compile_results += timing.queued_completed_compile_results;
-        self.completed_compile_sections += timing.completed_compile_sections;
-        self.stale_compile_sections += timing.stale_compile_sections;
-        self.uploaded_sections += timing.uploaded_sections;
-        self.upload_removed_sections += timing.upload_removed_sections;
-        self.uploaded_vertices += timing.uploaded_vertices;
-        self.uploaded_indices += timing.uploaded_indices;
-    }
-}
-
 struct FrameBudgetProbeState {
-    runtime: WindowSceneRuntime,
-    actor_interpolation: ActorInterpolationState,
-    depth: ChunkDepthTarget,
-    sky: SkyRenderer,
-    draw: TexturedSectionDrawResources,
-    actors: ActorDrawResources,
-    screen_effects: ScreenEffectsRenderer,
-    gui: GuiRenderer,
-    ui: GameUiHost,
-    render_stats: RenderStreamStats,
+    driver: crate::offscreen_scene_host::OffscreenDriver,
     frame_accounting: Option<FrameAccumulator>,
+    runtime_setup_ms: f64,
+    initial_poll_count: usize,
+    initial_poll_ms: f64,
+    initial_remesh_ms: f64,
+    initial_section_count: usize,
+    initial_face_count: u32,
+    initial_index_count: u32,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct FrameBudgetProbeSectionTiming {
-    remesh_ms: f64,
-    upload_ms: f64,
-    sync_timing: RenderSectionSyncTiming,
-    rebuilt_sections: usize,
-    removed_sections: usize,
-    submitted_compile_sections: usize,
-    deadline_skipped_compile_requests: usize,
-    accepted_compile_results: usize,
-    queued_completed_compile_results: usize,
-    completed_compile_sections: usize,
-    stale_compile_sections: usize,
-    uploaded_sections: usize,
-    upload_removed_sections: usize,
-    target_rebuilt_sections: usize,
-    non_target_rebuilt_sections: usize,
-    target_removed_sections: usize,
-    non_target_removed_sections: usize,
-    uploaded_vertices: u32,
-    uploaded_indices: u32,
+struct TimedemoState {
+    driver: crate::offscreen_scene_host::OffscreenDriver,
+    warmup: crate::offscreen_scene_host::OffscreenWarmupReport,
+    drawn_sections: usize,
+    max_drawn_sections: usize,
+    frustum_sections: usize,
+    max_frustum_sections: usize,
+    graph_cull_frames: usize,
+    graph_culled_sections: usize,
+    max_graph_culled_sections: usize,
+    drawn_indices: u64,
+    max_drawn_indices: u32,
+    frustum_indices: u64,
+    max_frustum_indices: u32,
+    graph_culled_indices: u64,
+    max_graph_culled_indices: u32,
 }
 
 impl TimedemoReport {
@@ -3047,28 +2999,6 @@ fn print_frame_accounting_json_field(report: &FramePipelineReport, trailing_comm
     }
 }
 
-fn render_section_in_target(
-    key: RenderSectionKey,
-    interest_center: ChunkPos,
-    render_distance: u32,
-) -> bool {
-    let distance = i32::try_from(render_distance).unwrap_or(i32::MAX);
-    let pos = render_section_chunk_pos(key);
-    (pos.x - interest_center.x)
-        .abs()
-        .max((pos.z - interest_center.z).abs())
-        <= distance
-}
-
-fn count_target_section_keys(
-    keys: impl Iterator<Item = RenderSectionKey>,
-    interest_center: ChunkPos,
-    render_distance: u32,
-) -> usize {
-    keys.filter(|key| render_section_in_target(*key, interest_center, render_distance))
-        .count()
-}
-
 fn startup_streaming_frame_pipeline_report(
     frames: &[StartupStreamingFrameReport],
     headless_frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
@@ -3626,6 +3556,7 @@ pub(crate) fn run_startup_streaming_perf(
 
     let asset_start = Instant::now();
     let assets = WindowSceneAssets::load().context("failed to load window scene assets")?;
+    let asset_source = load_asset_source()?;
     let asset_load_ms = elapsed_ms(asset_start.elapsed());
     let mut scene = options.scene.clone();
     let spawn_center = initial_spawn_center_for_seed(scene.seed);
@@ -3646,55 +3577,15 @@ pub(crate) fn run_startup_streaming_perf(
         None
     };
     let spectator = SpectatorCamera::spawn_for_scene(&scene);
+    let startup_spectator = spectator.clone();
     let frame_duration = Duration::from_secs_f64(1.0 / options.target_hz.max(1.0));
-
-    let startup_options = local_integrated_scene_options(&scene)?
-        .with_initial_spawn_center()
-        .with_freeze_scheduled_fluid_ticks(options.freeze_scheduled_fluid_ticks);
-    let mut startup = WindowSceneStartupPump::with_local_options(startup_options, &assets)?;
-    let startup_start = Instant::now();
-    let mut startup_playable_frame = 0_usize;
-    let playable_step = loop {
-        let frame_start = Instant::now();
-        let step = startup.step(spectator.position)?;
-        if step.startup_ready {
-            break step;
-        }
-        startup_playable_frame += 1;
-        if startup_playable_frame > MAX_STARTUP_STREAMING_PERF_FRAMES {
-            bail!(
-                "startup streaming perf did not reach playable within {} startup frames",
-                MAX_STARTUP_STREAMING_PERF_FRAMES
-            );
-        }
-        let elapsed = frame_start.elapsed();
-        if elapsed < frame_duration {
-            std::thread::sleep(frame_duration - elapsed);
-        }
-    };
-    let startup_playable_ms = elapsed_ms(startup_start.elapsed());
-    let startup_progress = playable_step.local_progress.as_ref();
-    let startup_target_ready_chunks =
-        startup_progress.map_or(0, |progress| progress.target_ready_chunks);
-    let startup_target_chunk_count =
-        startup_progress.map_or(0, |progress| progress.target_chunk_count);
-    let startup_target_percent = startup_progress.map_or(0, |progress| progress.percent());
-    // docs/tactical/167: seed the probe draw resources from the startup pump's
-    // render seed instead of a redundant recompile of the resident cache.
-    let (runtime, initial_sections, _startup_step) = startup.complete();
-    if initial_sections.is_empty() {
-        bail!("startup streaming perf entered playable with no cached render sections");
-    }
-    let initial_index_count = initial_sections
-        .iter()
-        .map(|section| section.stats().index_count)
-        .sum::<u32>();
-
+    let target_frame_ms = 1_000.0 / options.target_hz.max(1.0);
+    let freeze_scheduled_fluid_ticks = options.freeze_scheduled_fluid_ticks;
+    let render_options = options.render_options;
+    let streaming_start = Instant::now();
     let mut frame_reports = Vec::with_capacity(options.frames);
     let mut first_full_view_ready_frame = None;
     let mut first_full_view_ready_ms = None;
-    let render_options = options.render_options;
-    let streaming_start = Instant::now();
 
     let (headless, state) = run_headless_frame_loop(
         HeadlessFrameLoopOptions {
@@ -3704,269 +3595,67 @@ pub(crate) fn run_startup_streaming_perf(
             pace_frame_duration: Some(frame_duration),
         },
         move |device, queue, format, size| {
-            let depth = ChunkDepthTarget::new(device, size[0], size[1]);
-            let mut draw = TexturedSectionDrawResources::new(
+            let startup_start = Instant::now();
+            let mut driver = crate::offscreen_scene_host::OffscreenDriver::new_with_options(
                 device,
                 queue,
                 format,
-                &initial_sections,
-                runtime.mesh_assets().atlas.as_upload(),
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+                Some(&startup_spectator),
+                crate::offscreen_scene_host::OffscreenDriverOptions {
+                    freeze_scheduled_fluid_ticks,
+                },
             )?;
-            draw.set_traversal_ready_sections(
-                &runtime.traversal_ready_render_section_keys(spectator.position),
-            );
-            let sky =
-                SkyRenderer::new_with_color_profile(device, format, render_options.color_profile);
-            let actors = ActorDrawResources::new(
+            let playable = driver.drive_to_wait_policy(
                 device,
                 queue,
-                format,
-                runtime.actor_textures.atlas.as_upload(),
-                Some(&runtime.actor_textures.figures),
+                crate::cli::StartupWaitPolicy::Playable,
             )?;
-            let asset_source = load_asset_source()?;
-            let screen_effects = ScreenEffectsRenderer::new(device, queue, format, &asset_source)?;
-            let gui = GuiRenderer::new(device, format);
-            let render_stats = RenderStreamStats {
-                section_count: draw.section_count(),
-                index_count: initial_index_count,
-                face_count: quad_face_count_from_indices(initial_index_count),
-                ..RenderStreamStats::default()
-            };
-            let mut ui = GameUiHost::new();
-            ui.set_screen(None);
-            ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
-            Ok(FrameBudgetProbeState {
-                runtime,
-                actor_interpolation: ActorInterpolationState::new(),
-                depth,
-                sky,
-                draw,
-                actors,
-                screen_effects,
-                gui,
-                ui,
-                render_stats,
-                frame_accounting: None,
+            let startup_playable_ms = elapsed_ms(startup_start.elapsed());
+            let progress = driver.host().mono_view_readiness_overlay();
+            let startup_cached_sections = driver
+                .host()
+                .render_stats()
+                .resident_cpu_mesh_section_count
+                .max(driver.host().render_stats().section_count);
+            driver.set_clock(crate::offscreen_scene_host::OffscreenFrameClock {
+                frame_ms: target_frame_ms,
+                target_frame_ms: Some(target_frame_ms),
+            });
+            Ok(StartupStreamingState {
+                driver,
+                startup_playable_frame: playable.frame_count,
+                startup_playable_ms,
+                startup_cached_sections,
+                startup_target_ready_chunks: progress
+                    .as_ref()
+                    .map_or(0, |progress| progress.target_ready_chunks),
+                startup_target_chunk_count: progress
+                    .as_ref()
+                    .map_or(0, |progress| progress.target_chunk_count),
+                startup_target_percent: progress.as_ref().map_or(0, |progress| progress.percent()),
             })
         },
         |index, frame, state| {
-            let frame_start = Instant::now();
-            let frame_deadline = frame_start + frame_duration;
+            state.driver.set_camera(&spectator);
+            let summary =
+                state
+                    .driver
+                    .render(frame, mclone_scene::MonoUiPresentation::None, false)?;
             let mut report = StartupStreamingFrameReport {
                 elapsed_ms: elapsed_ms(streaming_start.elapsed()),
                 ..StartupStreamingFrameReport::default()
             };
-
-            let poll_start = Instant::now();
-            let _runtime_changed = state.runtime.poll()?;
-            report.poll_ms = elapsed_ms(poll_start.elapsed());
-            let poll_diagnostics = state.runtime.last_poll_diagnostics();
-            report.poll_server_reported_total_ms = poll_diagnostics.server_reported_total_ms;
-            report.poll_scheduler_publish_completed_ms =
-                poll_diagnostics.scheduler_publish_completed_ms;
-            report.scheduler_adaptive_publication_budget_enabled =
-                poll_diagnostics.scheduler_adaptive_publication_budget_enabled;
-            report.scheduler_feature_publish_budget_max_units =
-                poll_diagnostics.scheduler_feature_publish_budget_max_units;
-            report.scheduler_feature_publish_budget_ms =
-                poll_diagnostics.scheduler_feature_publish_budget_ms;
-            report.scheduler_feature_publish_spent_units =
-                poll_diagnostics.scheduler_feature_publish_spent_units;
-            report.scheduler_feature_publish_spent_ms =
-                poll_diagnostics.scheduler_feature_publish_spent_ms;
-            report.scheduler_feature_publish_estimated_unit_ms =
-                poll_diagnostics.scheduler_feature_publish_estimated_unit_ms;
-            report.scheduler_light_publish_budget_max_units =
-                poll_diagnostics.scheduler_light_publish_budget_max_units;
-            report.scheduler_light_publish_budget_ms =
-                poll_diagnostics.scheduler_light_publish_budget_ms;
-            report.scheduler_light_publish_spent_units =
-                poll_diagnostics.scheduler_light_publish_spent_units;
-            report.scheduler_light_publish_spent_ms =
-                poll_diagnostics.scheduler_light_publish_spent_ms;
-            report.scheduler_light_publish_estimated_unit_ms =
-                poll_diagnostics.scheduler_light_publish_estimated_unit_ms;
-            report.scheduler_pending_worldgen_publication_chunk_limit =
-                poll_diagnostics.scheduler_pending_worldgen_publication_chunk_limit;
-            report.poll_fluid_due_ticks = poll_diagnostics.fluid_due_ticks;
-            report.poll_fluid_executed_ticks = poll_diagnostics.fluid_executed_ticks;
-            report.poll_fluid_deferred_ticks = poll_diagnostics.fluid_deferred_ticks;
-            report.poll_fluid_mutated_blocks = poll_diagnostics.fluid_mutated_blocks;
-            report.poll_scheduled_fluid_ticks = poll_diagnostics.scheduled_fluid_ticks;
-            report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
-            report.poll_dirty_mark_ms = poll_diagnostics.dirty_mark_ms;
-            report.poll_client_apply_updates_ms = poll_diagnostics.client_apply_updates_ms;
-            report.poll_producer_read_ms = poll_diagnostics.producer_read_ms;
-            report.poll_producer_decode_ms = poll_diagnostics.producer_decode_ms;
-            report.poll_producer_response_sequence = poll_diagnostics.producer_response_sequence;
-            report.update_pump_stalled = poll_diagnostics.update_pump_stalled;
-            report.server_update_queue_depth = poll_diagnostics.server_update_queue_depth;
-            report.server_update_queue_bytes = poll_diagnostics.server_update_queue_bytes;
-            report.server_update_oldest_applied_age_ms =
-                poll_diagnostics.server_update_oldest_applied_age_ms;
-            report.scheduler_completed_feature_jobs_drained =
-                poll_diagnostics.scheduler_completed_feature_jobs_drained;
-            report.scheduler_feature_chunks_published =
-                poll_diagnostics.scheduler_feature_chunks_published;
-            report.scheduler_feature_chunks_skipped =
-                poll_diagnostics.scheduler_feature_chunks_skipped;
-            report.scheduler_feature_jobs_completed =
-                poll_diagnostics.scheduler_feature_jobs_completed;
-            report.scheduler_feature_snapshot_ready_events =
-                poll_diagnostics.scheduler_feature_snapshot_ready_events;
-            report.scheduler_light_status_batches_enqueued =
-                poll_diagnostics.scheduler_light_status_batches_enqueued;
-            report.scheduler_completed_light_statuses_drained =
-                poll_diagnostics.scheduler_completed_light_statuses_drained;
-            report.scheduler_light_statuses_published =
-                poll_diagnostics.scheduler_light_statuses_published;
-            report.scheduler_light_statuses_skipped =
-                poll_diagnostics.scheduler_light_statuses_skipped;
-            report.scheduler_light_snapshot_ready_events =
-                poll_diagnostics.scheduler_light_snapshot_ready_events;
-            report.scheduler_pending_worldgen_publication_jobs =
-                poll_diagnostics.scheduler_pending_worldgen_publication_jobs;
-            report.scheduler_pending_worldgen_publication_chunks =
-                poll_diagnostics.scheduler_pending_worldgen_publication_chunks;
-            report.scheduler_pending_light_publications =
-                poll_diagnostics.scheduler_pending_light_publications;
-            report.scheduler_worldgen_mailbox_pending_jobs =
-                poll_diagnostics.scheduler_worldgen_mailbox_pending_jobs;
-            report.scheduler_light_mailbox_pending_statuses =
-                poll_diagnostics.scheduler_light_mailbox_pending_statuses;
-            report.runner_frame_metrics = poll_diagnostics.runner_frame_metrics;
-            report.worldgen_job_frame_metrics = poll_diagnostics.worldgen_job_frame_metrics;
-            report.light_status_job_frame_metrics = poll_diagnostics.light_status_job_frame_metrics;
-            report.light_status_mailbox_metrics = poll_diagnostics.light_status_mailbox_metrics;
-
-            if state.runtime.has_pending_render_work(spectator.position) {
-                let update =
-                    probe_sync_upload_sections(&frame, state, spectator.position, frame_deadline)?;
-                report.remesh_ms = update.remesh_ms;
-                report.upload_ms = update.upload_ms;
-                report.section_sync_timing = update.sync_timing;
-                report.submitted_compile_sections = update.submitted_compile_sections;
-                report.accepted_compile_results = update.accepted_compile_results;
-                report.queued_completed_compile_results = update.queued_completed_compile_results;
-                report.completed_compile_sections = update.completed_compile_sections;
-                report.uploaded_sections = update.uploaded_sections;
-                report.uploaded_vertices = update.uploaded_vertices;
-                report.uploaded_indices = update.uploaded_indices;
-                report.upload_removed_sections = update.upload_removed_sections;
-                report.target_rebuilt_sections = update.target_rebuilt_sections;
-                report.non_target_rebuilt_sections = update.non_target_rebuilt_sections;
-                report.target_removed_sections = update.target_removed_sections;
-                report.non_target_removed_sections = update.non_target_removed_sections;
-                report.deadline_skipped_compile_requests = update.deadline_skipped_compile_requests;
-            }
-
-            let camera = spectator.camera(state.runtime.render_distance());
-            let underwater_overlay =
-                state
-                    .runtime
-                    .camera_inside_water(spectator.position)
-                    .then(|| {
-                        UnderwaterOverlay::vanilla_from_native_camera(
-                            spectator.yaw,
-                            spectator.pitch,
-                        )
-                    });
-            let sky_clear_color = state.runtime.sky_clear_color();
-            let time_of_day = state.runtime.time_of_day();
-            let sun_angle = state.runtime.sun_angle();
-            state
-                .actor_interpolation
-                .reconcile_authoritative(state.runtime.client().actor_presentations());
-            state.actor_interpolation.step(
-                (1.0 / options.target_hz.max(1.0)) as f32,
-                ActorInterpolationConfig::default(),
+            fill_startup_streaming_report_from_scene(
+                &mut report,
+                &summary,
+                state.driver.host(),
+                spectator.position,
             );
-            let actor_instances = actor_instances_from_presentations(
-                &state.actor_interpolation.presentations(),
-                state.runtime.client(),
-            );
-            state.draw.set_traversal_ready_sections(
-                &state
-                    .runtime
-                    .traversal_ready_render_section_keys(spectator.position),
-            );
-            let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
-                render_distance: state.runtime.render_distance() as i32,
-                render_options,
-                far_lod_enabled: false,
-                far_lod_range_chunks:
-                    mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
-                frame_pacing: FramePacingUiState::default(),
-                movement_mode: GameMovementMode::Walk,
-                collision_mode: GameCollisionMode::Normal,
-                travel_assist_mode: GameTravelAssistMode::Off,
-                fly_speed_multiplier: 1.0,
-                movement_speed_multiplier: 1.0,
-                player_collision_box_visible: false,
-                first_person_player_visible: false,
-                crosshair_visible: true,
-                frame_pipeline_overlay_visible: false,
-                debug_diagnostics_visible: false,
-                player_model: Default::default(),
-                server_cadence: None,
-            });
-            let gui_scale = state.ui.scale();
-            let gui_state = FullFrameGui::new(
-                state.ui.is_active(),
-                state.ui.covers_world(),
-                [gui_scale.width, gui_scale.height],
-            );
-            let ui_draw = state.ui.render_draw_list(ui_render_state);
-            let render_start = Instant::now();
-            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
-            render_full_frame_for_view(
-                frame,
-                &state.depth,
-                &state.sky,
-                &mut state.draw,
-                Some(&mut state.actors),
-                Some(&mut state.screen_effects),
-                Some(&mut state.gui),
-                render_view,
-                &actor_instances,
-                underwater_overlay,
-                sky_clear_color,
-                time_of_day,
-                sun_angle,
-                render_options,
-                gui_state,
-                |_| ui_draw,
-                &mut state.render_stats,
-            )?;
-            report.render_ms = elapsed_ms(render_start.elapsed());
-
-            let view_progress = state.runtime.view_readiness_overlay();
-            report.target_ready_chunks = view_progress
-                .as_ref()
-                .map_or(0, |progress| progress.target_ready_chunks);
-            report.target_chunk_count = view_progress
-                .as_ref()
-                .map_or(0, |progress| progress.target_chunk_count);
-            report.target_percent = view_progress
-                .as_ref()
-                .map_or(0, |progress| progress.percent());
-            let stats = state.runtime.stats();
-            report.loaded_chunks = stats.loaded_chunks;
-            report.simulation_tick = stats.last_simulation_tick;
-            report.cached_sections = state.draw.section_count();
-            report.pending_jobs = stats.pending_jobs;
-            report.pending_publications = stats.pending_publications;
-            report.pending_render_chunks = stats.pending_render_chunks;
-            report.ready_render_work_pending =
-                state.runtime.has_pending_render_work(spectator.position);
-            report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
-            report.inflight_render_sections = stats.inflight_render_sections;
-            let target_render_work = state.runtime.target_render_work_stats(spectator.position);
-            report.target_pending_render_chunks = target_render_work.pending_render_chunks;
-            report.target_ready_render_work_pending = target_render_work.ready_render_work_pending;
-            report.target_inflight_render_sections = target_render_work.inflight_render_sections;
-
             let full_view_ready = report.target_chunk_count > 0
                 && report.target_ready_chunks == report.target_chunk_count;
             if full_view_ready && first_full_view_ready_frame.is_none() {
@@ -3977,32 +3666,29 @@ pub(crate) fn run_startup_streaming_perf(
             Ok(())
         },
     )?;
+
     let (first_render_quiescent_frame, first_render_quiescent_ms) =
         first_stable_startup_streaming_render_quiescent(&frame_reports);
     let (first_target_render_quiescent_frame, first_target_render_quiescent_ms) =
         first_stable_startup_streaming_target_render_quiescent(&frame_reports);
     let (first_initial_target_render_complete_frame, first_initial_target_render_complete_ms) =
         first_startup_streaming_initial_target_render_complete(&frame_reports);
-    let budget_decision_panel = state
-        .runtime
-        .last_poll_diagnostics()
-        .scheduler_budget_decision_panel;
 
     Ok(StartupStreamingPerfReport {
         options: options.clone(),
         world_dir,
         prewarm,
         asset_load_ms,
-        startup_playable_frame,
-        startup_playable_ms,
-        startup_cached_sections: playable_step.cached_section_count,
-        startup_target_ready_chunks,
-        startup_target_chunk_count,
-        startup_target_percent,
+        startup_playable_frame: state.startup_playable_frame,
+        startup_playable_ms: state.startup_playable_ms,
+        startup_cached_sections: state.startup_cached_sections,
+        startup_target_ready_chunks: state.startup_target_ready_chunks,
+        startup_target_chunk_count: state.startup_target_chunk_count,
+        startup_target_percent: state.startup_target_percent,
         streaming_wall_ms: elapsed_ms(streaming_start.elapsed()),
         headless,
         frames: frame_reports,
-        budget_decision_panel,
+        budget_decision_panel: state.driver.latest_budget_decision_panel(),
         first_full_view_ready_frame,
         first_full_view_ready_ms,
         first_initial_target_render_complete_frame,
@@ -4014,127 +3700,265 @@ pub(crate) fn run_startup_streaming_perf(
     })
 }
 
+struct StartupStreamingState {
+    driver: crate::offscreen_scene_host::OffscreenDriver,
+    startup_playable_frame: usize,
+    startup_playable_ms: f64,
+    startup_cached_sections: usize,
+    startup_target_ready_chunks: usize,
+    startup_target_chunk_count: usize,
+    startup_target_percent: u8,
+}
+
+fn fill_startup_streaming_report_from_scene(
+    report: &mut StartupStreamingFrameReport,
+    summary: &mclone_scene::MonoSceneFrameSummary,
+    host: &crate::desktop_scene_host::DesktopMonoSceneHost,
+    camera_position: Vec3,
+) {
+    report.poll_ms = summary.timing.runtime_poll_ms;
+    report.remesh_ms = summary.timing.runtime_sync_ms;
+    report.upload_ms = summary.timing.runtime_gpu_upload_ms;
+    report.render_ms = summary.timing.render_views_ms;
+    report.section_sync_timing = summary.upload.section_sync_timing;
+    report.submitted_compile_sections = summary.upload.submitted_compile_section_count;
+    report.accepted_compile_results = summary.upload.accepted_compile_result_count;
+    report.queued_completed_compile_results = summary.upload.queued_completed_compile_result_count;
+    report.completed_compile_sections = summary.upload.completed_compile_section_count;
+    report.uploaded_sections = summary.upload.uploaded_section_count;
+    report.uploaded_vertices = summary.upload.uploaded_vertex_count;
+    report.uploaded_indices = summary.upload.uploaded_index_count;
+    report.upload_removed_sections = summary.upload.upload_removed_section_count;
+    report.target_rebuilt_sections = summary.upload.target_rebuilt_section_count;
+    report.non_target_rebuilt_sections = summary.upload.non_target_rebuilt_section_count;
+    report.target_removed_sections = summary.upload.target_removed_section_count;
+    report.non_target_removed_sections = summary.upload.non_target_removed_section_count;
+    report.deadline_skipped_compile_requests =
+        summary.upload.deadline_skipped_compile_request_count;
+
+    let progress = host.mono_view_readiness_overlay();
+    report.target_ready_chunks = progress
+        .as_ref()
+        .map_or(0, |progress| progress.target_ready_chunks);
+    report.target_chunk_count = progress
+        .as_ref()
+        .map_or(0, |progress| progress.target_chunk_count);
+    report.target_percent = progress.as_ref().map_or(0, |progress| progress.percent());
+    if let Some(stats) = host.runtime_stats() {
+        report.loaded_chunks = stats.loaded_chunks;
+        report.simulation_tick = stats.last_simulation_tick;
+        report.pending_jobs = stats.pending_jobs;
+        report.pending_publications = stats.pending_publications;
+        report.pending_render_chunks = stats.pending_render_chunks;
+        report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
+        report.inflight_render_sections = stats.inflight_render_sections;
+    }
+    report.cached_sections = host
+        .render_stats()
+        .resident_cpu_mesh_section_count
+        .max(host.render_stats().section_count);
+    report.ready_render_work_pending = host.pending_stream_work(camera_position) > 0;
+    let target = host.mono_target_render_work_stats(camera_position);
+    report.target_pending_render_chunks = target.pending_render_chunks;
+    report.target_ready_render_work_pending = target.ready_render_work_pending;
+    report.target_inflight_render_sections = target.inflight_render_sections;
+    if let Some(diagnostics) = host.runtime_poll_diagnostics() {
+        fill_startup_streaming_poll_diagnostics(report, &diagnostics);
+    }
+}
+
+fn fill_startup_streaming_poll_diagnostics(
+    report: &mut StartupStreamingFrameReport,
+    diagnostics: &mclone_app_runtime::RuntimePollDiagnostics,
+) {
+    report.poll_server_reported_total_ms = diagnostics.server_reported_total_ms;
+    report.poll_scheduler_publish_completed_ms = diagnostics.scheduler_publish_completed_ms;
+    report.scheduler_adaptive_publication_budget_enabled =
+        diagnostics.scheduler_adaptive_publication_budget_enabled;
+    report.scheduler_feature_publish_budget_max_units =
+        diagnostics.scheduler_feature_publish_budget_max_units;
+    report.scheduler_feature_publish_budget_ms = diagnostics.scheduler_feature_publish_budget_ms;
+    report.scheduler_feature_publish_spent_units =
+        diagnostics.scheduler_feature_publish_spent_units;
+    report.scheduler_feature_publish_spent_ms = diagnostics.scheduler_feature_publish_spent_ms;
+    report.scheduler_feature_publish_estimated_unit_ms =
+        diagnostics.scheduler_feature_publish_estimated_unit_ms;
+    report.scheduler_light_publish_budget_max_units =
+        diagnostics.scheduler_light_publish_budget_max_units;
+    report.scheduler_light_publish_budget_ms = diagnostics.scheduler_light_publish_budget_ms;
+    report.scheduler_light_publish_spent_units = diagnostics.scheduler_light_publish_spent_units;
+    report.scheduler_light_publish_spent_ms = diagnostics.scheduler_light_publish_spent_ms;
+    report.scheduler_light_publish_estimated_unit_ms =
+        diagnostics.scheduler_light_publish_estimated_unit_ms;
+    report.scheduler_pending_worldgen_publication_chunk_limit =
+        diagnostics.scheduler_pending_worldgen_publication_chunk_limit;
+    report.poll_fluid_due_ticks = diagnostics.fluid_due_ticks;
+    report.poll_fluid_executed_ticks = diagnostics.fluid_executed_ticks;
+    report.poll_fluid_deferred_ticks = diagnostics.fluid_deferred_ticks;
+    report.poll_fluid_mutated_blocks = diagnostics.fluid_mutated_blocks;
+    report.poll_scheduled_fluid_ticks = diagnostics.scheduled_fluid_ticks;
+    report.poll_apply_updates_ms = diagnostics.apply_updates_ms;
+    report.poll_dirty_mark_ms = diagnostics.dirty_mark_ms;
+    report.poll_client_apply_updates_ms = diagnostics.client_apply_updates_ms;
+    report.poll_producer_read_ms = diagnostics.producer_read_ms;
+    report.poll_producer_decode_ms = diagnostics.producer_decode_ms;
+    report.poll_producer_response_sequence = diagnostics.producer_response_sequence;
+    report.update_pump_stalled = diagnostics.update_pump_stalled;
+    report.server_update_queue_depth = diagnostics.server_update_queue_depth;
+    report.server_update_queue_bytes = diagnostics.server_update_queue_bytes;
+    report.server_update_oldest_applied_age_ms = diagnostics.server_update_oldest_applied_age_ms;
+    report.scheduler_completed_feature_jobs_drained =
+        diagnostics.scheduler_completed_feature_jobs_drained;
+    report.scheduler_feature_chunks_published = diagnostics.scheduler_feature_chunks_published;
+    report.scheduler_feature_chunks_skipped = diagnostics.scheduler_feature_chunks_skipped;
+    report.scheduler_feature_jobs_completed = diagnostics.scheduler_feature_jobs_completed;
+    report.scheduler_feature_snapshot_ready_events =
+        diagnostics.scheduler_feature_snapshot_ready_events;
+    report.scheduler_light_status_batches_enqueued =
+        diagnostics.scheduler_light_status_batches_enqueued;
+    report.scheduler_completed_light_statuses_drained =
+        diagnostics.scheduler_completed_light_statuses_drained;
+    report.scheduler_light_statuses_published = diagnostics.scheduler_light_statuses_published;
+    report.scheduler_light_statuses_skipped = diagnostics.scheduler_light_statuses_skipped;
+    report.scheduler_light_snapshot_ready_events =
+        diagnostics.scheduler_light_snapshot_ready_events;
+    report.scheduler_pending_worldgen_publication_jobs =
+        diagnostics.scheduler_pending_worldgen_publication_jobs;
+    report.scheduler_pending_worldgen_publication_chunks =
+        diagnostics.scheduler_pending_worldgen_publication_chunks;
+    report.scheduler_pending_light_publications = diagnostics.scheduler_pending_light_publications;
+    report.scheduler_worldgen_mailbox_pending_jobs =
+        diagnostics.scheduler_worldgen_mailbox_pending_jobs;
+    report.scheduler_light_mailbox_pending_statuses =
+        diagnostics.scheduler_light_mailbox_pending_statuses;
+    report.runner_frame_metrics = diagnostics.runner_frame_metrics;
+    report.worldgen_job_frame_metrics = diagnostics.worldgen_job_frame_metrics;
+    report.light_status_job_frame_metrics = diagnostics.light_status_job_frame_metrics;
+    report.light_status_mailbox_metrics = diagnostics.light_status_mailbox_metrics;
+}
+
 pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
     if options.scene.remote_addr.is_some() {
         bail!("--timedemo currently requires the local integrated server path");
     }
     let loaded_scene = timedemo_loaded_scene(options)?;
-    let scene_start = Instant::now();
-    let scene_mesh = build_scene_textured_sections(&loaded_scene)?;
-    let scene_build_ms = elapsed_ms(scene_start.elapsed());
+    let loaded_render_distance = loaded_scene.render_distance;
     let cameras = timedemo_cameras(&options.scene, options.path_radius_chunks, options.frames);
-    let render = run_headless_textured_sections_timedemo(
-        HeadlessTimedemoOptions {
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = load_asset_source()?;
+    let render_options = options.render_options;
+    let startup_camera = SpectatorCamera::spawn_for_scene(&loaded_scene);
+    let frame_cameras = cameras.clone();
+    let (headless, state) = run_headless_frame_loop(
+        HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
-            color: mclone_render::default_clear_color(),
-            cameras,
-            render_options: options.render_options,
+            frame_count: cameras.len(),
+            pace_frame_duration: None,
         },
-        &scene_mesh.sections,
-        scene_mesh.atlas.as_upload(),
+        move |device, queue, format, size| {
+            let mut driver = crate::offscreen_scene_host::OffscreenDriver::new(
+                device,
+                queue,
+                format,
+                size,
+                &loaded_scene,
+                render_options,
+                &assets,
+                &asset_source,
+                Some(&startup_camera),
+            )?;
+            let warmup = driver.drive_until_target_complete(device, queue)?;
+            Ok(TimedemoState {
+                driver,
+                warmup,
+                drawn_sections: 0,
+                max_drawn_sections: 0,
+                frustum_sections: 0,
+                max_frustum_sections: 0,
+                graph_cull_frames: 0,
+                graph_culled_sections: 0,
+                max_graph_culled_sections: 0,
+                drawn_indices: 0,
+                max_drawn_indices: 0,
+                frustum_indices: 0,
+                max_frustum_indices: 0,
+                graph_culled_indices: 0,
+                max_graph_culled_indices: 0,
+            })
+        },
+        |index, frame, state| {
+            let summary = state.driver.render_chunk_camera_frozen(
+                frame,
+                frame_cameras[index],
+                mclone_scene::MonoUiPresentation::None,
+            )?;
+            let render = summary.render;
+            state.drawn_sections += render.drawn_section_count;
+            state.max_drawn_sections = state.max_drawn_sections.max(render.drawn_section_count);
+            state.frustum_sections += render.frustum_section_count;
+            state.max_frustum_sections =
+                state.max_frustum_sections.max(render.frustum_section_count);
+            state.graph_cull_frames += usize::from(render.graph_cull_enabled);
+            state.graph_culled_sections += render.graph_culled_section_count;
+            state.max_graph_culled_sections = state
+                .max_graph_culled_sections
+                .max(render.graph_culled_section_count);
+            state.drawn_indices += u64::from(render.drawn_index_count);
+            state.max_drawn_indices = state.max_drawn_indices.max(render.drawn_index_count);
+            state.frustum_indices += u64::from(render.frustum_index_count);
+            state.max_frustum_indices = state.max_frustum_indices.max(render.frustum_index_count);
+            state.graph_culled_indices += u64::from(render.graph_culled_index_count);
+            state.max_graph_culled_indices = state
+                .max_graph_culled_indices
+                .max(render.graph_culled_index_count);
+            Ok(())
+        },
     )?;
 
-    let vertex_count = scene_mesh
-        .sections
-        .iter()
-        .map(|section| section.stats().vertex_count)
-        .sum();
-    let index_count = scene_mesh
-        .sections
-        .iter()
-        .map(|section| section.stats().index_count)
-        .sum();
+    let frame_count = headless.frame_count.max(1);
+    let divisor = frame_count as f64;
+    let stream = state.driver.host().render_stats();
+    let section_count = stream
+        .resident_cpu_mesh_section_count
+        .max(stream.section_count);
+    let vertex_count = state.driver.host().mono_render_vertex_count();
+    let index_count = stream.index_count;
+    let render = mclone_render::headless::HeadlessTimedemoReport {
+        width: headless.width,
+        height: headless.height,
+        frame_count: headless.frame_count,
+        setup_ms: headless.setup_ms,
+        total_frame_ms: headless.total_frame_ms,
+        average_frame_ms: headless.average_frame_ms,
+        min_frame_ms: headless.min_frame_ms,
+        max_frame_ms: headless.max_frame_ms,
+        loaded_section_count: stream.section_count,
+        average_drawn_section_count: state.drawn_sections as f64 / divisor,
+        max_drawn_section_count: state.max_drawn_sections,
+        average_frustum_section_count: state.frustum_sections as f64 / divisor,
+        max_frustum_section_count: state.max_frustum_sections,
+        graph_cull_enabled_frame_count: state.graph_cull_frames,
+        average_graph_culled_section_count: state.graph_culled_sections as f64 / divisor,
+        max_graph_culled_section_count: state.max_graph_culled_sections,
+        loaded_index_count: stream.index_count,
+        average_drawn_index_count: state.drawn_indices as f64 / divisor,
+        max_drawn_index_count: state.max_drawn_indices,
+        average_frustum_index_count: state.frustum_indices as f64 / divisor,
+        max_frustum_index_count: state.max_frustum_indices,
+        average_graph_culled_index_count: state.graph_culled_indices as f64 / divisor,
+        max_graph_culled_index_count: state.max_graph_culled_indices,
+    };
     Ok(TimedemoReport {
         options: options.clone(),
-        loaded_render_distance: loaded_scene.render_distance,
-        visibility_graph_stats: scene_mesh.visibility_graph_stats,
-        scene_build_ms,
-        section_count: scene_mesh.sections.len(),
+        loaded_render_distance,
+        visibility_graph_stats: state.warmup.visibility_graph,
+        scene_build_ms: state.warmup.elapsed_ms,
+        section_count,
         vertex_count,
         face_count: quad_face_count_from_indices(index_count),
         index_count,
         render,
-    })
-}
-
-fn probe_sync_upload_sections(
-    frame: &RenderFrameContext<'_>,
-    state: &mut FrameBudgetProbeState,
-    camera_position: Vec3,
-    deadline: Instant,
-) -> Result<FrameBudgetProbeSectionTiming> {
-    let remesh_start = Instant::now();
-    let timed_section_update = state
-        .runtime
-        .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
-            camera_position,
-            deadline,
-            None,
-        )?;
-    let sync_timing = timed_section_update.timing;
-    let section_update = timed_section_update.cache_update;
-    let remesh_ms = elapsed_ms(remesh_start.elapsed());
-    let upload_start = Instant::now();
-    let upload_report = state
-        .draw
-        .apply_section_updates(
-            frame.device,
-            &section_update.rebuilt_sections,
-            &section_update.removed_section_keys,
-        )
-        .context("failed to upload frame-budget probe section updates")?;
-    let upload_ms = elapsed_ms(upload_start.elapsed());
-    let runtime_stats = state.runtime.stats();
-    let target_rebuilt_sections = count_target_section_keys(
-        section_update
-            .rebuilt_sections
-            .iter()
-            .map(|section| section.key),
-        runtime_stats.interest_center,
-        runtime_stats.render_distance,
-    );
-    let target_removed_sections = count_target_section_keys(
-        section_update.removed_section_keys.iter().copied(),
-        runtime_stats.interest_center,
-        runtime_stats.render_distance,
-    );
-    let rebuilt_section_count = section_update.rebuilt_section_count();
-    let removed_section_count = section_update.removed_section_count();
-    state
-        .runtime
-        .release_render_compile_jobs(section_update.accepted_compile_result_count);
-
-    state.render_stats.section_count = state.draw.section_count();
-    state.render_stats.index_count = state.draw.index_count();
-    state.render_stats.face_count = quad_face_count_from_indices(state.render_stats.index_count);
-    state.render_stats.drawn_section_count = 0;
-    state.render_stats.drawn_face_count = 0;
-    state.render_stats.drawn_index_count = 0;
-    record_render_section_update_stats(&mut state.render_stats, &section_update, upload_report);
-    state.render_stats.last_remesh_ms = remesh_ms;
-    state.render_stats.last_upload_ms = upload_ms;
-
-    Ok(FrameBudgetProbeSectionTiming {
-        remesh_ms,
-        upload_ms,
-        sync_timing,
-        rebuilt_sections: section_update.rebuilt_section_count(),
-        removed_sections: section_update.removed_section_count(),
-        submitted_compile_sections: section_update.submitted_compile_section_count,
-        deadline_skipped_compile_requests: section_update.deadline_skipped_compile_request_count,
-        accepted_compile_results: section_update.accepted_compile_result_count,
-        queued_completed_compile_results: section_update.queued_completed_compile_result_count,
-        completed_compile_sections: section_update.completed_compile_section_count,
-        stale_compile_sections: section_update.stale_compile_section_count,
-        uploaded_sections: upload_report.uploaded_section_count,
-        upload_removed_sections: upload_report.removed_section_count,
-        target_rebuilt_sections,
-        non_target_rebuilt_sections: rebuilt_section_count.saturating_sub(target_rebuilt_sections),
-        target_removed_sections,
-        non_target_removed_sections: removed_section_count.saturating_sub(target_removed_sections),
-        uploaded_vertices: upload_report.uploaded_vertex_count,
-        uploaded_indices: upload_report.uploaded_index_count,
     })
 }
 
@@ -4144,50 +3968,30 @@ pub(crate) fn run_frame_budget_probe(
     if options.scene.remote_addr.is_some() {
         bail!("frame-budget probes currently require the local integrated server path");
     }
+    if options.frames == 0 {
+        bail!("frame-budget probe requires at least one frame");
+    }
+    if !options.target_hz.is_finite() || options.target_hz <= 0.0 {
+        bail!("frame-budget probe target Hz must be finite and greater than zero");
+    }
+    if matches!(options.mode, FrameBudgetProbeMode::MovementWalk)
+        && (!options.movement_speed.is_finite() || options.movement_speed <= 0.0)
+    {
+        bail!("movement frame probe speed must be finite and greater than zero");
+    }
 
-    let runtime_setup_start = Instant::now();
     let initial_spectator = frame_budget_probe_spectator(options, 0);
     let initial_center = initial_spectator.chunk_pos();
     let mut runtime_scene = options.scene.clone();
     runtime_scene.chunk_x = initial_center.x;
     runtime_scene.chunk_z = initial_center.z;
-    let mut runtime = WindowSceneRuntime::new(&runtime_scene)?;
-    let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
-    let initial_remesh_start = Instant::now();
-    let initial_update = runtime.sync_all_render_sections(initial_spectator.position)?;
-    // docs/tactical/163: first (cold) sync, so the transient rebuilt payload is
-    // the full section set; clone it to seed the probe draw resources since the
-    // resident cache no longer retains CPU meshes.
-    let initial_sections = initial_update.rebuilt_sections.clone();
-    let initial_remesh_ms = elapsed_ms(initial_remesh_start.elapsed());
-    if initial_sections.is_empty() {
-        bail!(
-            "frame-budget probe seed={} center=({}, {}) render_distance={} produced no initial render sections",
-            options.scene.seed,
-            options.scene.chunk_x,
-            options.scene.chunk_z,
-            options.scene.render_distance
-        );
-    }
-    let initial_index_count = initial_sections
-        .iter()
-        .map(|section| section.stats().index_count)
-        .sum::<u32>();
-    let initial_section_count = initial_sections.len();
-    let initial_face_count = quad_face_count_from_indices(initial_index_count);
-    let runtime_setup_ms = elapsed_ms(runtime_setup_start.elapsed());
-
-    let mut frame_reports = Vec::with_capacity(options.frames);
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = load_asset_source()?;
     let probe_options = options.clone();
     let render_options = options.render_options;
-    let initial_upload = TexturedSectionUploadReport {
-        uploaded_section_count: initial_update.rebuilt_section_count(),
-        removed_section_count: initial_update.removed_section_count(),
-        uploaded_vertex_count: initial_update.rebuilt_vertex_count,
-        uploaded_index_count: initial_update.rebuilt_index_count,
-    };
 
-    let (headless, _state) = run_headless_frame_loop(
+    let mut frame_reports = Vec::with_capacity(options.frames);
+    let (headless, state) = run_headless_frame_loop(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
@@ -4195,278 +3999,66 @@ pub(crate) fn run_frame_budget_probe(
             pace_frame_duration: None,
         },
         move |device, queue, format, size| {
-            let depth = ChunkDepthTarget::new(device, size[0], size[1]);
-            let draw = TexturedSectionDrawResources::new(
+            let setup_start = Instant::now();
+            let mut driver = crate::offscreen_scene_host::OffscreenDriver::new(
                 device,
                 queue,
                 format,
-                &initial_sections,
-                runtime.mesh_assets().atlas.as_upload(),
+                size,
+                &runtime_scene,
+                render_options,
+                &assets,
+                &asset_source,
+                Some(&initial_spectator),
             )?;
-            let mut draw = draw;
-            draw.set_traversal_ready_sections(
-                &runtime.traversal_ready_render_section_keys(initial_spectator.position),
-            );
-            let sky =
-                SkyRenderer::new_with_color_profile(device, format, render_options.color_profile);
-            let actors = ActorDrawResources::new(
-                device,
-                queue,
-                format,
-                runtime.actor_textures.atlas.as_upload(),
-                Some(&runtime.actor_textures.figures),
-            )?;
-            let asset_source = load_asset_source()?;
-            let screen_effects = ScreenEffectsRenderer::new(device, queue, format, &asset_source)?;
-            let gui = GuiRenderer::new(device, format);
-            let mut render_stats = RenderStreamStats {
-                section_count: draw.section_count(),
-                index_count: draw.index_count(),
-                face_count: quad_face_count_from_indices(draw.index_count()),
-                ..RenderStreamStats::default()
-            };
-            record_render_section_update_stats(&mut render_stats, &initial_update, initial_upload);
-            let mut ui = GameUiHost::new();
-            ui.set_screen(None);
-            ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
+            let warmup = driver.drive_until_target_complete(device, queue)?;
+            driver.set_clock(crate::offscreen_scene_host::OffscreenFrameClock {
+                frame_ms: 1_000.0 / probe_options.target_hz,
+                target_frame_ms: Some(1_000.0 / probe_options.target_hz),
+            });
+            let render_stats = driver.host().render_stats();
             Ok(FrameBudgetProbeState {
-                runtime,
-                actor_interpolation: ActorInterpolationState::new(),
-                depth,
-                sky,
-                draw,
-                actors,
-                screen_effects,
-                gui,
-                ui,
-                render_stats,
-                frame_accounting: options.frame_accounting_enabled.then(|| {
+                initial_poll_count: warmup.frame_count,
+                initial_poll_ms: warmup.poll_ms,
+                initial_remesh_ms: warmup.sync_ms,
+                initial_section_count: render_stats
+                    .resident_cpu_mesh_section_count
+                    .max(render_stats.section_count),
+                initial_face_count: render_stats.face_count,
+                initial_index_count: render_stats.index_count,
+                runtime_setup_ms: elapsed_ms(setup_start.elapsed()),
+                frame_accounting: probe_options.frame_accounting_enabled.then(|| {
                     FrameAccumulator::new(headless_frame_accounting_config(target_frame_ms(
-                        options.target_hz,
+                        probe_options.target_hz,
                     )))
                 }),
+                driver,
             })
         },
         |index, frame, state| {
             let frame_start = Instant::now();
-            let frame_deadline =
-                frame_start + Duration::from_secs_f64(1.0 / probe_options.target_hz.max(1.0));
             let spectator = frame_budget_probe_spectator(&probe_options, index);
             let center = spectator.chunk_pos();
+            let before_stats = state.driver.host().runtime_stats();
+            let set_interest_start = Instant::now();
+            state.driver.set_camera(&spectator);
+            let interest_updates_changed = state.driver.commit_camera()?;
+            let set_interest_ms = elapsed_ms(set_interest_start.elapsed());
+            let summary =
+                state
+                    .driver
+                    .render(frame, mclone_scene::MonoUiPresentation::None, false)?;
+
             let mut report = FrameBudgetProbeFrameReport {
                 index,
                 center,
+                interest_center_changed: before_stats
+                    .is_some_and(|stats| stats.interest_center != center),
+                interest_updates_changed,
+                set_interest_ms,
                 ..FrameBudgetProbeFrameReport::default()
             };
-
-            let set_interest_start = Instant::now();
-            report.interest_center_changed = state.runtime.interest_center() != center;
-            report.interest_updates_changed = state.runtime.set_interest_center(center)?;
-            report.set_interest_ms = elapsed_ms(set_interest_start.elapsed());
-            let poll_start = Instant::now();
-            report.runtime_changed = state.runtime.poll()?;
-            report.poll_ms = elapsed_ms(poll_start.elapsed());
-            let poll_diagnostics = state.runtime.last_poll_diagnostics();
-            report.poll_flush_commands_ms = poll_diagnostics.flush_commands_ms;
-            report.poll_server_tick_ms = poll_diagnostics.server_tick_ms;
-            report.poll_server_reported_total_ms = poll_diagnostics.server_reported_total_ms;
-            report.poll_scheduler_tick_ms = poll_diagnostics.scheduler_tick_ms;
-            report.poll_scheduler_report_ms = poll_diagnostics.scheduler_report_ms;
-            report.poll_scheduler_purge_stale_tickets_ms =
-                poll_diagnostics.scheduler_purge_stale_tickets_ms;
-            report.poll_scheduler_reconcile_holders_ms =
-                poll_diagnostics.scheduler_reconcile_holders_ms;
-            report.poll_scheduler_publish_completed_ms =
-                poll_diagnostics.scheduler_publish_completed_ms;
-            report.poll_scheduler_adaptive_publication_budget_enabled =
-                poll_diagnostics.scheduler_adaptive_publication_budget_enabled;
-            report.poll_scheduler_feature_publish_budget_max_units =
-                poll_diagnostics.scheduler_feature_publish_budget_max_units;
-            report.poll_scheduler_feature_publish_budget_ms =
-                poll_diagnostics.scheduler_feature_publish_budget_ms;
-            report.poll_scheduler_feature_publish_spent_units =
-                poll_diagnostics.scheduler_feature_publish_spent_units;
-            report.poll_scheduler_feature_publish_spent_ms =
-                poll_diagnostics.scheduler_feature_publish_spent_ms;
-            report.poll_scheduler_feature_publish_estimated_unit_ms =
-                poll_diagnostics.scheduler_feature_publish_estimated_unit_ms;
-            report.poll_scheduler_light_publish_budget_max_units =
-                poll_diagnostics.scheduler_light_publish_budget_max_units;
-            report.poll_scheduler_light_publish_budget_ms =
-                poll_diagnostics.scheduler_light_publish_budget_ms;
-            report.poll_scheduler_light_publish_spent_units =
-                poll_diagnostics.scheduler_light_publish_spent_units;
-            report.poll_scheduler_light_publish_spent_ms =
-                poll_diagnostics.scheduler_light_publish_spent_ms;
-            report.poll_scheduler_light_publish_estimated_unit_ms =
-                poll_diagnostics.scheduler_light_publish_estimated_unit_ms;
-            report.poll_scheduler_pending_worldgen_publication_chunk_limit =
-                poll_diagnostics.scheduler_pending_worldgen_publication_chunk_limit;
-            report.poll_scheduler_pending_unload_ms = poll_diagnostics.scheduler_pending_unload_ms;
-            report.poll_scheduler_apply_events_ms = poll_diagnostics.scheduler_apply_events_ms;
-            report.poll_scheduler_completed_feature_jobs_drained =
-                poll_diagnostics.scheduler_completed_feature_jobs_drained;
-            report.poll_scheduler_feature_chunks_published =
-                poll_diagnostics.scheduler_feature_chunks_published;
-            report.poll_scheduler_feature_chunks_skipped =
-                poll_diagnostics.scheduler_feature_chunks_skipped;
-            report.poll_scheduler_feature_jobs_completed =
-                poll_diagnostics.scheduler_feature_jobs_completed;
-            report.poll_scheduler_feature_snapshot_ready_events =
-                poll_diagnostics.scheduler_feature_snapshot_ready_events;
-            report.poll_scheduler_light_status_batches_enqueued =
-                poll_diagnostics.scheduler_light_status_batches_enqueued;
-            report.poll_scheduler_completed_light_statuses_drained =
-                poll_diagnostics.scheduler_completed_light_statuses_drained;
-            report.poll_scheduler_light_statuses_published =
-                poll_diagnostics.scheduler_light_statuses_published;
-            report.poll_scheduler_light_statuses_skipped =
-                poll_diagnostics.scheduler_light_statuses_skipped;
-            report.poll_scheduler_light_snapshot_ready_events =
-                poll_diagnostics.scheduler_light_snapshot_ready_events;
-            report.poll_scheduler_pending_worldgen_publication_jobs =
-                poll_diagnostics.scheduler_pending_worldgen_publication_jobs;
-            report.poll_scheduler_pending_worldgen_publication_chunks =
-                poll_diagnostics.scheduler_pending_worldgen_publication_chunks;
-            report.poll_scheduler_pending_light_publications =
-                poll_diagnostics.scheduler_pending_light_publications;
-            report.poll_scheduler_worldgen_mailbox_pending_jobs =
-                poll_diagnostics.scheduler_worldgen_mailbox_pending_jobs;
-            report.poll_scheduler_light_mailbox_pending_statuses =
-                poll_diagnostics.scheduler_light_mailbox_pending_statuses;
-            report.poll_block_tick_ms = poll_diagnostics.block_tick_ms;
-            report.poll_fluid_tick_ms = poll_diagnostics.fluid_tick_ms;
-            report.poll_fluid_event_apply_ms = poll_diagnostics.fluid_event_apply_ms;
-            report.poll_fluid_due_scan_ms = poll_diagnostics.fluid_due_scan_ms;
-            report.poll_fluid_remove_due_ms = poll_diagnostics.fluid_remove_due_ms;
-            report.poll_fluid_tick_fluid_ms = poll_diagnostics.fluid_tick_fluid_ms;
-            report.poll_fluid_set_block_ms = poll_diagnostics.fluid_set_block_ms;
-            report.poll_entity_tick_ms = poll_diagnostics.entity_tick_ms;
-            report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
-            report.poll_dirty_mark_ms = poll_diagnostics.dirty_mark_ms;
-            report.poll_client_apply_updates_ms = poll_diagnostics.client_apply_updates_ms;
-            report.poll_producer_read_ms = poll_diagnostics.producer_read_ms;
-            report.poll_producer_decode_ms = poll_diagnostics.producer_decode_ms;
-            report.poll_producer_response_sequence = poll_diagnostics.producer_response_sequence;
-            report.update_pump_stalled = poll_diagnostics.update_pump_stalled;
-            report.update_pump_stall_count = poll_diagnostics.update_pump_stall_count;
-            report.server_update_queue_depth = poll_diagnostics.server_update_queue_depth;
-            report.server_update_queue_bytes = poll_diagnostics.server_update_queue_bytes;
-            report.server_update_applied_bytes = poll_diagnostics.server_update_applied_bytes;
-            report.server_update_oldest_applied_age_ms =
-                poll_diagnostics.server_update_oldest_applied_age_ms;
-            report.poll_scheduler_events = poll_diagnostics.scheduler_events;
-            report.poll_updates = poll_diagnostics.updates;
-            report.poll_snapshot_updates = poll_diagnostics.snapshot_updates;
-            report.poll_section_block_updates = poll_diagnostics.section_block_updates;
-            report.poll_unload_updates = poll_diagnostics.unload_updates;
-            report.poll_pending_unloads_processed = poll_diagnostics.pending_unloads_processed;
-            report.poll_fluid_due_ticks = poll_diagnostics.fluid_due_ticks;
-            report.poll_fluid_executed_ticks = poll_diagnostics.fluid_executed_ticks;
-            report.poll_fluid_deferred_ticks = poll_diagnostics.fluid_deferred_ticks;
-            report.poll_fluid_mutated_blocks = poll_diagnostics.fluid_mutated_blocks;
-            report.poll_fluid_snapshot_events = poll_diagnostics.fluid_snapshot_events;
-            report.poll_fluid_event_count = poll_diagnostics.fluid_event_count;
-            report.poll_scheduled_fluid_ticks = poll_diagnostics.scheduled_fluid_ticks;
-            if state.runtime.has_pending_render_work(spectator.position) {
-                let update =
-                    probe_sync_upload_sections(&frame, state, spectator.position, frame_deadline)?;
-                report.add_section_timing(update);
-            }
-
-            let camera = spectator.camera(state.runtime.render_distance());
-            let underwater_overlay =
-                state
-                    .runtime
-                    .camera_inside_water(spectator.position)
-                    .then(|| {
-                        UnderwaterOverlay::vanilla_from_native_camera(
-                            spectator.yaw,
-                            spectator.pitch,
-                        )
-                    });
-            let sky_clear_color = state.runtime.sky_clear_color();
-            let time_of_day = state.runtime.time_of_day();
-            let sun_angle = state.runtime.sun_angle();
-            state
-                .actor_interpolation
-                .reconcile_authoritative(state.runtime.client().actor_presentations());
-            state.actor_interpolation.step(
-                (1.0 / probe_options.target_hz.max(1.0)) as f32,
-                ActorInterpolationConfig::default(),
-            );
-            let actor_instances = actor_instances_from_presentations(
-                &state.actor_interpolation.presentations(),
-                state.runtime.client(),
-            );
-            state.draw.set_traversal_ready_sections(
-                &state
-                    .runtime
-                    .traversal_ready_render_section_keys(spectator.position),
-            );
-            let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
-                render_distance: state.runtime.render_distance() as i32,
-                render_options,
-                far_lod_enabled: false,
-                far_lod_range_chunks:
-                    mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
-                frame_pacing: FramePacingUiState::default(),
-                movement_mode: GameMovementMode::Walk,
-                collision_mode: GameCollisionMode::Normal,
-                travel_assist_mode: GameTravelAssistMode::Off,
-                fly_speed_multiplier: 1.0,
-                movement_speed_multiplier: 1.0,
-                player_collision_box_visible: false,
-                first_person_player_visible: false,
-                crosshair_visible: true,
-                frame_pipeline_overlay_visible: false,
-                debug_diagnostics_visible: false,
-                player_model: Default::default(),
-                server_cadence: None,
-            });
-            let gui_scale = state.ui.scale();
-            let gui_state = FullFrameGui::new(
-                state.ui.is_active(),
-                state.ui.covers_world(),
-                [gui_scale.width, gui_scale.height],
-            );
-            let ui_draw = state.ui.render_draw_list(ui_render_state);
-            let render_start = Instant::now();
-            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
-            render_full_frame_for_view(
-                frame,
-                &state.depth,
-                &state.sky,
-                &mut state.draw,
-                Some(&mut state.actors),
-                Some(&mut state.screen_effects),
-                Some(&mut state.gui),
-                render_view,
-                &actor_instances,
-                underwater_overlay,
-                sky_clear_color,
-                time_of_day,
-                sun_angle,
-                render_options,
-                gui_state,
-                |_| ui_draw,
-                &mut state.render_stats,
-            )?;
-            report.render_ms = elapsed_ms(render_start.elapsed());
-
-            let stats = state.runtime.stats();
-            report.loaded_chunks = stats.loaded_chunks;
-            report.pending_jobs = stats.pending_jobs;
-            report.pending_publications = stats.pending_publications;
-            report.pending_render_chunks = stats.pending_render_chunks;
-            report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
-            report.max_pending_render_compile_jobs =
-                state.runtime.render_compile_max_pending_job_count();
-            report.available_render_compile_slots =
-                state.runtime.render_compile_available_pending_job_slots();
-            report.inflight_render_sections = stats.inflight_render_sections;
-            report.drawn_sections = state.render_stats.drawn_section_count;
-            report.drawn_indices = state.render_stats.drawn_index_count;
+            fill_frame_budget_report_from_scene(&mut report, &summary, state.driver.host());
             if let Some(accounting) = state.frame_accounting.as_mut() {
                 let accounting_frame_ms = elapsed_ms(frame_start.elapsed());
                 let accounting_frame = accounting.len() as u64 + 1;
@@ -4482,23 +4074,160 @@ pub(crate) fn run_frame_budget_probe(
         },
     )?;
 
-    let frame_accounting = _state
+    let frame_accounting = state
         .frame_accounting
         .as_ref()
         .map(FrameAccumulator::summary_report);
     Ok(FrameBudgetProbeReport {
         options: options.clone(),
-        runtime_setup_ms,
-        initial_poll_count,
-        initial_poll_ms,
-        initial_remesh_ms,
-        initial_section_count,
-        initial_face_count,
-        initial_index_count,
+        runtime_setup_ms: state.runtime_setup_ms,
+        initial_poll_count: state.initial_poll_count,
+        initial_poll_ms: state.initial_poll_ms,
+        initial_remesh_ms: state.initial_remesh_ms,
+        initial_section_count: state.initial_section_count,
+        initial_face_count: state.initial_face_count,
+        initial_index_count: state.initial_index_count,
         headless,
         frame_accounting,
         frames: frame_reports,
     })
+}
+
+fn fill_frame_budget_report_from_scene(
+    report: &mut FrameBudgetProbeFrameReport,
+    summary: &mclone_scene::MonoSceneFrameSummary,
+    host: &crate::desktop_scene_host::DesktopMonoSceneHost,
+) {
+    report.runtime_changed = summary.upload.poll_changed;
+    report.poll_ms = summary.timing.runtime_poll_ms;
+    report.remesh_ms = summary.timing.runtime_sync_ms;
+    report.upload_ms = summary.timing.runtime_gpu_upload_ms;
+    report.render_ms = summary.timing.render_views_ms;
+    report.section_sync_timing = summary.upload.section_sync_timing;
+    report.rebuilt_sections = summary.upload.rebuilt_section_count;
+    report.removed_sections = summary.upload.removed_section_count;
+    report.submitted_compile_sections = summary.upload.submitted_compile_section_count;
+    report.deadline_skipped_compile_requests =
+        summary.upload.deadline_skipped_compile_request_count;
+    report.accepted_compile_results = summary.upload.accepted_compile_result_count;
+    report.queued_completed_compile_results = summary.upload.queued_completed_compile_result_count;
+    report.completed_compile_sections = summary.upload.completed_compile_section_count;
+    report.stale_compile_sections = summary.upload.stale_compile_section_count;
+    report.uploaded_sections = summary.upload.uploaded_section_count;
+    report.upload_removed_sections = summary.upload.upload_removed_section_count;
+    report.uploaded_vertices = summary.upload.uploaded_vertex_count;
+    report.uploaded_indices = summary.upload.uploaded_index_count;
+    report.max_pending_render_compile_jobs = summary.upload.max_pending_compile_jobs;
+    report.available_render_compile_slots = summary.upload.available_compile_slots_after;
+    report.drawn_sections = summary.render.drawn_section_count;
+    report.drawn_indices = summary.render.drawn_index_count;
+
+    if let Some(stats) = host.runtime_stats() {
+        report.loaded_chunks = stats.loaded_chunks;
+        report.pending_jobs = stats.pending_jobs;
+        report.pending_publications = stats.pending_publications;
+        report.pending_render_chunks = stats.pending_render_chunks;
+        report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
+        report.inflight_render_sections = stats.inflight_render_sections;
+    }
+    if let Some(diagnostics) = host.runtime_poll_diagnostics() {
+        fill_frame_budget_poll_diagnostics(report, &diagnostics);
+    }
+}
+
+fn fill_frame_budget_poll_diagnostics(
+    report: &mut FrameBudgetProbeFrameReport,
+    diagnostics: &mclone_app_runtime::RuntimePollDiagnostics,
+) {
+    report.poll_flush_commands_ms = diagnostics.flush_commands_ms;
+    report.poll_server_tick_ms = diagnostics.server_tick_ms;
+    report.poll_server_reported_total_ms = diagnostics.server_reported_total_ms;
+    report.poll_scheduler_tick_ms = diagnostics.scheduler_tick_ms;
+    report.poll_scheduler_report_ms = diagnostics.scheduler_report_ms;
+    report.poll_scheduler_purge_stale_tickets_ms = diagnostics.scheduler_purge_stale_tickets_ms;
+    report.poll_scheduler_reconcile_holders_ms = diagnostics.scheduler_reconcile_holders_ms;
+    report.poll_scheduler_publish_completed_ms = diagnostics.scheduler_publish_completed_ms;
+    report.poll_scheduler_adaptive_publication_budget_enabled =
+        diagnostics.scheduler_adaptive_publication_budget_enabled;
+    report.poll_scheduler_feature_publish_budget_max_units =
+        diagnostics.scheduler_feature_publish_budget_max_units;
+    report.poll_scheduler_feature_publish_budget_ms =
+        diagnostics.scheduler_feature_publish_budget_ms;
+    report.poll_scheduler_feature_publish_spent_units =
+        diagnostics.scheduler_feature_publish_spent_units;
+    report.poll_scheduler_feature_publish_spent_ms = diagnostics.scheduler_feature_publish_spent_ms;
+    report.poll_scheduler_feature_publish_estimated_unit_ms =
+        diagnostics.scheduler_feature_publish_estimated_unit_ms;
+    report.poll_scheduler_light_publish_budget_max_units =
+        diagnostics.scheduler_light_publish_budget_max_units;
+    report.poll_scheduler_light_publish_budget_ms = diagnostics.scheduler_light_publish_budget_ms;
+    report.poll_scheduler_light_publish_spent_units =
+        diagnostics.scheduler_light_publish_spent_units;
+    report.poll_scheduler_light_publish_spent_ms = diagnostics.scheduler_light_publish_spent_ms;
+    report.poll_scheduler_light_publish_estimated_unit_ms =
+        diagnostics.scheduler_light_publish_estimated_unit_ms;
+    report.poll_scheduler_pending_worldgen_publication_chunk_limit =
+        diagnostics.scheduler_pending_worldgen_publication_chunk_limit;
+    report.poll_scheduler_pending_unload_ms = diagnostics.scheduler_pending_unload_ms;
+    report.poll_scheduler_apply_events_ms = diagnostics.scheduler_apply_events_ms;
+    report.poll_scheduler_completed_feature_jobs_drained =
+        diagnostics.scheduler_completed_feature_jobs_drained;
+    report.poll_scheduler_feature_chunks_published = diagnostics.scheduler_feature_chunks_published;
+    report.poll_scheduler_feature_chunks_skipped = diagnostics.scheduler_feature_chunks_skipped;
+    report.poll_scheduler_feature_jobs_completed = diagnostics.scheduler_feature_jobs_completed;
+    report.poll_scheduler_feature_snapshot_ready_events =
+        diagnostics.scheduler_feature_snapshot_ready_events;
+    report.poll_scheduler_light_status_batches_enqueued =
+        diagnostics.scheduler_light_status_batches_enqueued;
+    report.poll_scheduler_completed_light_statuses_drained =
+        diagnostics.scheduler_completed_light_statuses_drained;
+    report.poll_scheduler_light_statuses_published = diagnostics.scheduler_light_statuses_published;
+    report.poll_scheduler_light_statuses_skipped = diagnostics.scheduler_light_statuses_skipped;
+    report.poll_scheduler_light_snapshot_ready_events =
+        diagnostics.scheduler_light_snapshot_ready_events;
+    report.poll_scheduler_pending_worldgen_publication_jobs =
+        diagnostics.scheduler_pending_worldgen_publication_jobs;
+    report.poll_scheduler_pending_worldgen_publication_chunks =
+        diagnostics.scheduler_pending_worldgen_publication_chunks;
+    report.poll_scheduler_pending_light_publications =
+        diagnostics.scheduler_pending_light_publications;
+    report.poll_scheduler_worldgen_mailbox_pending_jobs =
+        diagnostics.scheduler_worldgen_mailbox_pending_jobs;
+    report.poll_scheduler_light_mailbox_pending_statuses =
+        diagnostics.scheduler_light_mailbox_pending_statuses;
+    report.poll_block_tick_ms = diagnostics.block_tick_ms;
+    report.poll_fluid_tick_ms = diagnostics.fluid_tick_ms;
+    report.poll_fluid_event_apply_ms = diagnostics.fluid_event_apply_ms;
+    report.poll_fluid_due_scan_ms = diagnostics.fluid_due_scan_ms;
+    report.poll_fluid_remove_due_ms = diagnostics.fluid_remove_due_ms;
+    report.poll_fluid_tick_fluid_ms = diagnostics.fluid_tick_fluid_ms;
+    report.poll_fluid_set_block_ms = diagnostics.fluid_set_block_ms;
+    report.poll_entity_tick_ms = diagnostics.entity_tick_ms;
+    report.poll_apply_updates_ms = diagnostics.apply_updates_ms;
+    report.poll_dirty_mark_ms = diagnostics.dirty_mark_ms;
+    report.poll_client_apply_updates_ms = diagnostics.client_apply_updates_ms;
+    report.poll_producer_read_ms = diagnostics.producer_read_ms;
+    report.poll_producer_decode_ms = diagnostics.producer_decode_ms;
+    report.poll_producer_response_sequence = diagnostics.producer_response_sequence;
+    report.update_pump_stalled = diagnostics.update_pump_stalled;
+    report.update_pump_stall_count = diagnostics.update_pump_stall_count;
+    report.server_update_queue_depth = diagnostics.server_update_queue_depth;
+    report.server_update_queue_bytes = diagnostics.server_update_queue_bytes;
+    report.server_update_applied_bytes = diagnostics.server_update_applied_bytes;
+    report.server_update_oldest_applied_age_ms = diagnostics.server_update_oldest_applied_age_ms;
+    report.poll_scheduler_events = diagnostics.scheduler_events;
+    report.poll_updates = diagnostics.updates;
+    report.poll_snapshot_updates = diagnostics.snapshot_updates;
+    report.poll_section_block_updates = diagnostics.section_block_updates;
+    report.poll_unload_updates = diagnostics.unload_updates;
+    report.poll_pending_unloads_processed = diagnostics.pending_unloads_processed;
+    report.poll_fluid_due_ticks = diagnostics.fluid_due_ticks;
+    report.poll_fluid_executed_ticks = diagnostics.fluid_executed_ticks;
+    report.poll_fluid_deferred_ticks = diagnostics.fluid_deferred_ticks;
+    report.poll_fluid_mutated_blocks = diagnostics.fluid_mutated_blocks;
+    report.poll_fluid_snapshot_events = diagnostics.fluid_snapshot_events;
+    report.poll_fluid_event_count = diagnostics.fluid_event_count;
+    report.poll_scheduled_fluid_ticks = diagnostics.scheduled_fluid_ticks;
 }
 
 fn frame_budget_probe_spectator(

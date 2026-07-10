@@ -63,80 +63,60 @@ remote-frame streaming, and model framebuffer handoff should all be sinks over
 the same offscreen flat client host.
 
 Do not treat OpenXR runtime emulation as part of this target. A future headless
-stereo smoke can drive `mclone-xr-scene` with synthetic views and offscreen eye
+stereo smoke can drive `mclone-scene` with synthetic views and offscreen eye
 targets, but OpenXR loader/session/swapchain behavior should remain a separate
 platform/runtime validation concern.
 
-## Current Gap
+## Current Shape
 
-The existing code already has good low-level pieces:
+Tactical 168 Slice 7d completed the native convergence:
 
-- `mclone-render::target::RenderFrameContext` and `RenderFrameTarget` describe
-  renderer inputs without knowing about windows or canvases.
-- `mclone-render::headless` can create native offscreen GPU targets, submit a
-  frame, read pixels, and write PNGs.
-- `mclone-app-runtime::frame_render` contains the shared full-frame renderer.
-- `WindowSceneRuntime` already wraps the shared native
-  `NativeSingleViewSceneRuntime`, so local/remote session, runtime polling,
-  chunk interest, render-section sync, and sky/time facts are mostly shared.
+- `mclone-scene` owns session/startup/replacement, camera and interaction,
+  neutral input application, UI/HUD/debug state, actors, render admission,
+  section sync/upload, traversal readiness, and full Mono frame composition.
+- `WinitFrameDriver` owns the desktop surface, resize/render-scale targets,
+  raw winit input delegation, and presentation cadence.
+- `OffscreenDriver` owns native offscreen target sizing, deterministic cadence,
+  readiness loops, frame-accounting feedback, and calls into the same Mono host.
+- `offscreen_flat_client.rs` owns only screenshot scenarios, scripted neutral
+  input/UI actions, camera overrides, report projection, and the PNG sink.
+- timedemo, startup-streaming, frame-budget, movement-frame, and dual-view
+  captures all use `OffscreenDriver`; no harness polls, synchronizes, uploads,
+  or assembles render inputs independently.
 
-The gap is above those pieces. Desktop flat now has a native-client
-`FlatClientDriver` staging owner for runtime, camera, interaction, actor
-interpolation, render options, render stats, frame timing, `GameUi`,
-host-neutral menu action routing, session coordination, local startup lifetime,
-runtime replacement, and session status/failure UI. The desktop `winit` app
-shell still owns host execution for surface frames, frame pacing, mouse lock,
-input preferences, desktop runtime/startup factories, and desktop-only
-diagnostics.
-`mclone-native-client::offscreen_flat_client` now wraps that driver with native
-offscreen device/target callbacks, a deterministic frame clock, render-resource
-setup, runtime/startup factories, neutral `FlatInputFrame` application, section
-upload, full-frame rendering, a small internal `OffscreenScript` step runner,
-and the current screenshot PNG sink.
-`run_headless_screenshot` is now a one-frame use of that host, with
-screenshot-only scenario setup for camera override, requested UI screen, debug
-pane, remote settle delay, and scripted interaction. The remaining gap is a
-long-lived exposed offscreen mode that can run the same host for multiple frames
-with an input stream and explicit non-PNG frame sinks.
+The old app-local `FlatClientDriver` and deferred offscreen session-start
+staging are deleted. Desktop and offscreen construction share one native
+local/remote runtime factory. Screenshot readiness remains scenario-selectable
+through `--startup-wait`; performance probes use an explicit target-complete
+warmup while measured frames retain the requested target cadence.
 
-Desktop window startup and the offscreen screenshot host now share the
-`--startup-wait none|playable|idle|frames:N` CLI policy. Desktop defaults to
-`playable` and keeps startup nonblocking unless `idle` is requested. Screenshots
-default to `idle` for deterministic captures; `playable` uses the same flat
-startup pump as desktop, and `frames:N` renders warmup frames before saving the
-last offscreen capture. `none` means no extra host readiness wait beyond the
-minimum needed for the selected host to produce frames.
+The remaining product gap is the long-lived exposed offscreen mode: today the
+host is reusable internally, but CLI output is still screenshot/report oriented.
+A future remote UI, video, or model client needs a public input-source/frame-sink
+loop rather than a new renderer or client lifetime.
 
-## Desired Cleanup Shape
+## Next Cleanup Shape
 
-Introduce a host-neutral flat client driver with a real lifetime:
+Build future offscreen products as sources and sinks around the existing driver:
 
 ```text
-FlatClientDriver
-  owns: runtime/session, camera/input state, UI state, interaction state,
-        actor interpolation, render resources, render stats
-  methods: start/join/teardown, resize_target, apply_input, tick/poll,
-           render_frame, rebuild_render_resources
+InputSource
+  -> OffscreenDriver
+  -> mclone-scene Mono host
+  -> explicit RenderFrameTarget
+  -> FrameSink
 ```
 
-Desktop flat should become mostly:
+Likely additions are:
 
-- translate `winit` keyboard/mouse/focus/resize events into neutral input and
-  UI events
-- acquire a surface frame
-- call the shared driver
-- present and apply frame pacing
+- a bounded or continuous frame-loop command with explicit cadence;
+- pluggable frame sinks (PNG sequence, encoder, shared texture, network stream);
+- an input-source trait or channel for scripted/network/model actions;
+- lifecycle and backpressure policy for sinks that cannot consume every frame.
 
-Offscreen flat should become mostly:
-
-- construct the same driver
-- feed scripted, network, or model input
-- render to an offscreen target
-- read back or encode/deliver the frame
-
-The offscreen host should be able to run one screenshot, a deterministic frame
-loop, a long-lived remote dedicated client, or a future remote UI session
-without changing render/gameplay setup.
+Those additions must not move runtime polling, render-section work, UI assembly,
+or session policy back into `mclone-native-client`. Older chunk-only and
+renderer-rebuild helpers remain narrow renderer tests, not alternate clients.
 
 ## Validation Direction
 
@@ -170,9 +150,11 @@ cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone
 
 ## Related Tactical
 
-Implementation is tracked in
-[`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md).
-The older
+The shared-host implementation landed in
+[`tactical/168-unified-native-scene-host.md`](tactical/168-unified-native-scene-host.md)
+Slice 7d. The original target was developed in
+[`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md),
+and the older
 [`tactical/028-headless-window-frame-unification.md`](tactical/028-headless-window-frame-unification.md)
 landed the first full-frame screenshot direction and is now a historical
 precursor to this broader offscreen-client target.

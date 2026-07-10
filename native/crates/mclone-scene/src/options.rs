@@ -55,6 +55,8 @@ pub struct XrSceneOptions {
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
     pub debug_passive_showcase: bool,
+    pub use_initial_spawn_center: bool,
+    pub freeze_scheduled_fluid_ticks: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
     pub adaptive_chunk_publication_budget: bool,
@@ -87,6 +89,8 @@ impl Default for XrSceneOptions {
             day_time_override: None,
             freeze_time: false,
             debug_passive_showcase: true,
+            use_initial_spawn_center: true,
+            freeze_scheduled_fluid_ticks: false,
             lighting_enabled: true,
             light_status_batch_size:
                 mclone_app_runtime::startup_args::StartupSceneOptions::default()
@@ -124,6 +128,8 @@ impl XrSceneOptions {
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
             debug_passive_showcase: scene.debug_passive_showcase,
+            use_initial_spawn_center: true,
+            freeze_scheduled_fluid_ticks: false,
             lighting_enabled: scene.lighting_enabled,
             light_status_batch_size: scene.light_status_batch_size,
             adaptive_chunk_publication_budget: true,

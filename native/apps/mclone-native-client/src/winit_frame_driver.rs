@@ -1,12 +1,9 @@
 //! Thin desktop surface/cadence driver over the shared scene host's Mono
 //! topology (tactical 168 Slice 7c).
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::frame_render::{FlatScalePresentation, scaled_frame_size};
-use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
-use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
-use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_audio::AudioEngine;
 use mclone_diagnostics::FrameHostKind;
 use mclone_input::{FlatInputAction, FlatInputFrame, TouchControlsMode};
@@ -16,15 +13,14 @@ use mclone_render::target::RenderFrameContext;
 use mclone_render_session::{EngineCameraMovementMode, EngineCameraViewMode};
 use mclone_scene::{
     HostEffects, MonoBlinkCommitStatus, MonoSceneFrameSummary, MonoUiActionOutcome, MonoUiContext,
-    MonoUiPresentation, MonoWorldActionStatus, XrMcloneTerrainState, XrSceneOptions,
-    XrUnderwaterDetectionMode, record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
+    MonoUiPresentation, MonoWorldActionStatus, record_mono_frame_pipeline,
+    xr_frame_pipeline_accounting_config,
 };
 use mclone_ui::{GameUiAction, GameUiHost, GuiKey, GuiScale, Point, UiDebugSnapshot};
 
 use crate::cli::{SceneOptions, WindowStartIntent};
-use crate::scene_runtime::{WindowSceneAssets, native_window_scene_runtime_with_mesh_assets};
-
-pub(crate) type DesktopMonoSceneHost = XrMcloneTerrainState<NativeRemoteServerSession>;
+use crate::desktop_scene_host::{DesktopMonoSceneHost, create_desktop_mono_scene_host};
+use crate::scene_runtime::WindowSceneAssets;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct WinitHostEffectOutcome {
@@ -105,48 +101,20 @@ impl WinitFrameDriver {
         start_intent: WindowStartIntent,
         ui_v2_debug_overlay: bool,
     ) -> Result<Self> {
-        let host_scene = mono_scene_options_from_desktop(scene)?;
-        let mut host = if start_intent == WindowStartIntent::InWorld && scene.remote_addr.is_some()
-        {
-            let endpoint = RemoteSessionEndpoint::new(
-                scene
-                    .remote_addr
-                    .clone()
-                    .expect("remote address presence checked"),
-            );
-            let runtime = NativeSessionRuntime::from_active_runtime(
-                SessionStartRequest::JoinRemote {
-                    endpoint: endpoint.clone(),
-                },
-                native_window_scene_runtime_with_mesh_assets(scene, assets.mesh_assets.clone())?,
-            )?;
-            XrMcloneTerrainState::with_runtime(
-                device,
-                queue,
-                render_config.color_format,
-                host_scene,
-                runtime,
-                render_options,
-                assets.actor_textures.atlas.clone(),
-                assets.actor_textures.figures.clone(),
-                asset_source,
-                None,
-            )
-        } else {
-            XrMcloneTerrainState::start_local_async(
-                device,
-                queue,
-                render_config.color_format,
-                host_scene,
-                render_options,
-                assets.mesh_assets.clone(),
-                assets.actor_textures.atlas.clone(),
-                assets.actor_textures.figures.clone(),
-                asset_source,
-                None,
-            )
+        let mut initial_scene = scene.clone();
+        if start_intent == WindowStartIntent::Menu {
+            initial_scene.remote_addr = None;
         }
-        .context("initialize desktop Mono scene host")?;
+        let mut host = create_desktop_mono_scene_host(
+            device,
+            queue,
+            render_config.color_format,
+            &initial_scene,
+            render_options,
+            assets,
+            asset_source,
+            None,
+        )?;
 
         if start_intent == WindowStartIntent::Menu {
             host.enter_mono_title(device, queue)?;
@@ -165,15 +133,6 @@ impl WinitFrameDriver {
         host.configure_mono_ui(ui, MonoUiContext::default());
         host.set_frame_host_kind(FrameHostKind::DesktopFlatWinit);
         host.set_display_refresh_hz(None);
-        host.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
-            let desktop_scene = desktop_scene_options_for_remote(&endpoint, &scene);
-            let runtime =
-                native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
-            NativeSessionRuntime::from_active_runtime(
-                SessionStartRequest::JoinRemote { endpoint },
-                runtime,
-            )
-        });
 
         let target_size = [target_size[0].max(1), target_size[1].max(1)];
         Ok(Self {
@@ -285,12 +244,17 @@ impl WinitFrameDriver {
 
     pub(crate) fn resize(&mut self, device: &wgpu::Device, size: [u32; 2]) {
         let size = [size[0].max(1), size[1].max(1)];
+        self.resize_depth(device, size);
+        self.host
+            .set_mono_ui_scale(GuiScale::from_pixels(size[0], size[1]));
+    }
+
+    fn resize_depth(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+        let size = [size[0].max(1), size[1].max(1)];
         if self.target_size != size {
             self.target_size = size;
             self.depth = ChunkDepthTarget::new(device, size[0], size[1]);
         }
-        self.host
-            .set_mono_ui_scale(GuiScale::from_pixels(size[0], size[1]));
     }
 
     pub(crate) fn render(
@@ -307,12 +271,14 @@ impl WinitFrameDriver {
         if let Some(scale) = &mut self.scale_presentation {
             scale.resize(device, output_target.size, self.render_config.render_scale);
         }
-        let world_size = if self.scale_presentation.is_some() {
-            scaled_frame_size(output_target.size, self.render_config.render_scale)
-        } else {
-            output_target.size
-        };
-        self.resize(device, world_size);
+        let (world_size, ui_size) = winit_frame_sizes(
+            output_target.size,
+            self.scale_presentation.is_some(),
+            self.render_config.render_scale,
+        );
+        self.resize_depth(device, world_size);
+        self.host
+            .set_mono_ui_scale(GuiScale::from_pixels(ui_size[0], ui_size[1]));
         let world_target = self
             .scale_presentation
             .as_ref()
@@ -325,14 +291,29 @@ impl WinitFrameDriver {
         );
         self.host.set_mono_ui_context(context);
         let view = self.host.mono_render_view(world_target.size)?;
-        let summary = self.host.render_mono_scene_frame(
+        let split_native_ui = self.scale_presentation.is_some();
+        let mut summary = self.host.render_mono_scene_frame(
             RenderFrameContext::new(device, queue, encoder, world_target),
             &self.depth,
             view,
-            MonoUiPresentation::ScreenSpaceHud,
+            if split_native_ui {
+                MonoUiPresentation::None
+            } else {
+                MonoUiPresentation::ScreenSpaceHud
+            },
         )?;
         if let Some(scale) = &self.scale_presentation {
             scale.present(encoder, output_target);
+            let (gui_command_count, retained_cache) =
+                self.host
+                    .render_mono_screen_space_ui(RenderFrameContext::new(
+                        device,
+                        queue,
+                        encoder,
+                        output_target,
+                    ))?;
+            summary.render.gui_command_count = gui_command_count;
+            summary.render.flat_hud_retained_cache = retained_cache;
         }
         if self.arm_mouse_lock_after_start
             && self.host.has_runtime()
@@ -509,179 +490,36 @@ impl WinitFrameDriver {
     }
 }
 
-fn mono_scene_options_from_desktop(scene: &SceneOptions) -> Result<XrSceneOptions> {
-    XrSceneOptions {
-        seed: scene.seed,
-        chunk_x: scene.chunk_x,
-        chunk_z: scene.chunk_z,
-        render_distance: u32::try_from(scene.render_distance)
-            .context("desktop render distance must fit u32")?,
-        render_compile_worker_count: scene.render_compile_worker_count,
-        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-        render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
-        movement_speed_multiplier: scene.movement_speed_multiplier,
-        simulation_cadence: scene.simulation_cadence,
-        first_person_player_visible: scene.first_person_player_visible,
-        day_time_override: scene.day_time_override,
-        freeze_time: scene.freeze_time,
-        debug_passive_showcase: scene.debug_passive_showcase,
-        lighting_enabled: scene.lighting_enabled,
-        light_status_batch_size: scene.light_status_batch_size,
-        adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
-        adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-        far_lod: scene.far_lod,
-        startup_lod_prewarm: scene.startup_lod_prewarm,
-        underwater_detection_mode: XrUnderwaterDetectionMode::Midpoint,
-        debug_ui_screen: None,
-        skip_actors: false,
-        world_root: scene.world_root.clone(),
-        world_dir: scene.world_dir.clone(),
-    }
-    .validated()
-}
-
-fn desktop_scene_options_for_remote(
-    endpoint: &RemoteSessionEndpoint,
-    scene: &XrSceneOptions,
-) -> SceneOptions {
-    SceneOptions {
-        seed: scene.seed,
-        chunk_x: scene.chunk_x,
-        chunk_z: scene.chunk_z,
-        render_distance: scene.render_distance as i32,
-        render_compile_worker_count: scene.render_compile_worker_count,
-        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-        render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
-        movement_speed_multiplier: scene.movement_speed_multiplier,
-        simulation_cadence: scene.simulation_cadence,
-        remote_addr: Some(endpoint.address.clone()),
-        day_time_override: scene.day_time_override,
-        freeze_time: scene.freeze_time,
-        debug_passive_showcase: scene.debug_passive_showcase,
-        first_person_player_visible: scene.first_person_player_visible,
-        lighting_enabled: scene.lighting_enabled,
-        light_status_batch_size: scene.light_status_batch_size,
-        adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
-        adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-        far_lod: scene.far_lod,
-        startup_lod_prewarm: scene.startup_lod_prewarm,
-        world_root: scene.world_root.clone(),
-        world_dir: None,
-        ..SceneOptions::default()
-    }
+fn winit_frame_sizes(
+    output_size: [u32; 2],
+    scaled_world: bool,
+    render_scale: f32,
+) -> ([u32; 2], [u32; 2]) {
+    let world_size = if scaled_world {
+        scaled_frame_size(output_size, render_scale)
+    } else {
+        output_size
+    };
+    (world_size, output_size)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use mclone_app_runtime::far_lod::FarTerrainLodConfig;
-    use mclone_server::SimulationCadenceConfig;
-
     use super::*;
 
-    fn customized_scene() -> SceneOptions {
-        SceneOptions {
-            seed: -42,
-            chunk_x: 7,
-            chunk_z: -9,
-            render_distance: 6,
-            render_compile_worker_count: 3,
-            render_compile_max_pending_jobs: Some(11),
-            render_compile_worker_timing_enabled: false,
-            movement_speed_multiplier: 1.25,
-            simulation_cadence: SimulationCadenceConfig::new(30, 30, 60)
-                .with_max_catch_up_host_frames(7),
-            day_time_override: Some(13_000),
-            freeze_time: true,
-            first_person_player_visible: true,
-            debug_passive_showcase: false,
-            lighting_enabled: false,
-            light_status_batch_size: 5,
-            adaptive_chunk_publication_budget: false,
-            adaptive_render_admission_budget: true,
-            far_lod: FarTerrainLodConfig::enabled().with_extra_radius_chunks(8),
-            startup_lod_prewarm: false,
-            world_root: Some(PathBuf::from("world-root")),
-            world_dir: Some(PathBuf::from("world-dir")),
-            ..SceneOptions::default()
-        }
+    #[test]
+    fn scaled_world_keeps_screen_space_ui_at_output_resolution() {
+        let (world, ui) = winit_frame_sizes([1920, 1080], true, 0.5);
+
+        assert_eq!(world, [960, 540]);
+        assert_eq!(ui, [1920, 1080]);
     }
 
     #[test]
-    fn desktop_scene_options_survive_mono_host_conversion() {
-        let scene = customized_scene();
-        let mono = mono_scene_options_from_desktop(&scene).expect("valid Mono scene");
+    fn unscaled_world_and_ui_share_output_resolution() {
+        let (world, ui) = winit_frame_sizes([1280, 720], false, 1.0);
 
-        assert_eq!(mono.seed, scene.seed);
-        assert_eq!(mono.chunk_x, scene.chunk_x);
-        assert_eq!(mono.chunk_z, scene.chunk_z);
-        assert_eq!(mono.render_distance, scene.render_distance as u32);
-        assert_eq!(
-            mono.render_compile_worker_count,
-            scene.render_compile_worker_count
-        );
-        assert_eq!(
-            mono.render_compile_max_pending_jobs,
-            scene.render_compile_max_pending_jobs
-        );
-        assert_eq!(
-            mono.render_compile_worker_timing_enabled,
-            scene.render_compile_worker_timing_enabled
-        );
-        assert_eq!(
-            mono.movement_speed_multiplier,
-            scene.movement_speed_multiplier
-        );
-        assert_eq!(mono.simulation_cadence, scene.simulation_cadence);
-        assert_eq!(
-            mono.first_person_player_visible,
-            scene.first_person_player_visible
-        );
-        assert_eq!(mono.day_time_override, scene.day_time_override);
-        assert_eq!(mono.freeze_time, scene.freeze_time);
-        assert_eq!(mono.debug_passive_showcase, scene.debug_passive_showcase);
-        assert_eq!(mono.lighting_enabled, scene.lighting_enabled);
-        assert_eq!(mono.light_status_batch_size, scene.light_status_batch_size);
-        assert_eq!(
-            mono.adaptive_chunk_publication_budget,
-            scene.adaptive_chunk_publication_budget
-        );
-        assert_eq!(
-            mono.adaptive_render_admission_budget,
-            scene.adaptive_render_admission_budget
-        );
-        assert_eq!(mono.far_lod, scene.far_lod);
-        assert_eq!(mono.startup_lod_prewarm, scene.startup_lod_prewarm);
-        assert_eq!(mono.world_root, scene.world_root);
-        assert_eq!(mono.world_dir, scene.world_dir);
-    }
-
-    #[test]
-    fn remote_runtime_scene_preserves_shared_host_options() {
-        let scene = customized_scene();
-        let mono = mono_scene_options_from_desktop(&scene).expect("valid Mono scene");
-        let endpoint = RemoteSessionEndpoint::new("127.0.0.1:25565");
-        let remote = desktop_scene_options_for_remote(&endpoint, &mono);
-
-        assert_eq!(remote.remote_addr.as_deref(), Some("127.0.0.1:25565"));
-        assert_eq!(remote.simulation_cadence, scene.simulation_cadence);
-        assert_eq!(
-            remote.render_compile_worker_timing_enabled,
-            scene.render_compile_worker_timing_enabled
-        );
-        assert_eq!(
-            remote.first_person_player_visible,
-            scene.first_person_player_visible
-        );
-        assert_eq!(remote.debug_passive_showcase, scene.debug_passive_showcase);
-        assert_eq!(
-            remote.adaptive_render_admission_budget,
-            scene.adaptive_render_admission_budget
-        );
-        assert_eq!(remote.far_lod, scene.far_lod);
-        assert_eq!(remote.startup_lod_prewarm, scene.startup_lod_prewarm);
-        assert_eq!(remote.world_root, scene.world_root);
-        assert_eq!(remote.world_dir, None);
+        assert_eq!(world, [1280, 720]);
+        assert_eq!(ui, [1280, 720]);
     }
 }

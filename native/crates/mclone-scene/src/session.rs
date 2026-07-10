@@ -1675,8 +1675,13 @@ pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
 pub fn local_integrated_scene_options(scene: &XrSceneOptions) -> LocalIntegratedSceneOptions {
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
-    LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
-        .with_initial_spawn_center()
+    let mut options =
+        LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance);
+    if scene.use_initial_spawn_center {
+        options = options.with_initial_spawn_center();
+    }
+    options
+        .with_freeze_scheduled_fluid_ticks(scene.freeze_scheduled_fluid_ticks)
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)
         .with_cadence(scene.simulation_cadence)

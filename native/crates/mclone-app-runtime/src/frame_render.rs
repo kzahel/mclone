@@ -109,8 +109,13 @@ pub struct RenderStreamStats {
 pub struct FullFrameRenderSummary {
     pub section_count: usize,
     pub drawn_section_count: usize,
+    pub frustum_section_count: usize,
+    pub graph_cull_enabled: bool,
+    pub graph_culled_section_count: usize,
     pub index_count: u32,
     pub drawn_index_count: u32,
+    pub frustum_index_count: u32,
+    pub graph_culled_index_count: u32,
     pub gui_command_count: usize,
     pub flat_hud_retained_cache: UiDrawCacheStats,
     pub actor_count: usize,
@@ -1530,6 +1535,7 @@ where
         .with_fog(fog);
     let mut actor_stats = ActorRenderStats::default();
 
+    let mut terrain_stats = TexturedSectionRenderStats::default();
     if !gui.covers_world {
         let sky_start = timing.is_some().then(std::time::Instant::now);
         let background_clear_color = if fog.enabled {
@@ -1613,6 +1619,7 @@ where
             terrain_phase,
             timing.as_deref_mut(),
         )?;
+        terrain_stats = frame_stats;
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), terrain_start) {
             timing.terrain_opaque_ms += start.elapsed().as_secs_f64() * 1000.0;
         }
@@ -1709,8 +1716,13 @@ where
     Ok(FullFrameRenderSummary {
         section_count: draw.section_count(),
         drawn_section_count: render_stats.drawn_section_count,
+        frustum_section_count: terrain_stats.frustum_section_count,
+        graph_cull_enabled: terrain_stats.graph_cull_enabled,
+        graph_culled_section_count: terrain_stats.graph_culled_section_count,
         index_count: draw.index_count(),
         drawn_index_count: render_stats.drawn_index_count,
+        frustum_index_count: terrain_stats.frustum_index_count,
+        graph_culled_index_count: terrain_stats.graph_culled_index_count,
         gui_command_count,
         flat_hud_retained_cache: UiDrawCacheStats::default(),
         actor_count: actor_instances.len(),

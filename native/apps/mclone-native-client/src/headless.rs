@@ -18,21 +18,17 @@ use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats}
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameCollisionMode, GameMovementMode, GameTravelAssistMode, GameUiHost, GuiScale};
+use mclone_ui::{GameUiHost, GuiDrawList, GuiScale};
 
 use crate::actor_assets::load_actor_texture_assets;
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessActorReviewSheetOptions, HeadlessActorWalkReviewOptions, HeadlessDualViewOptions,
-    HeadlessScreenshotOptions, RendererRebuildSmokeOptions, SceneOptions,
+    HeadlessScreenshotOptions, RendererRebuildSmokeOptions,
 };
-use crate::flat_client_driver::{
-    FlatClientUiRenderOptions, game_simulation_cadence_from_config, game_ui_render_state,
-};
-use crate::frame_pacing::FramePacingUiState;
-use crate::offscreen_scene_host::MonoOffscreenSceneHost;
+use crate::offscreen_scene_host::OffscreenDriver;
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
+use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, poll_window_runtime_until_idle};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HeadlessScreenshotReport {
@@ -789,8 +785,10 @@ pub(crate) fn write_headless_dual_view(
         options.scene.render_distance,
     );
     let cameras = dual_view_cameras(base_camera);
-    let scene = dual_view_scene_options(&options.scene)?;
+    let scene = options.scene.clone();
     let render_options = options.render_options;
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = load_asset_source()?;
     let ui = if options.hud {
         mclone_scene::MonoUiPresentation::ScreenSpaceHud
     } else {
@@ -808,20 +806,23 @@ pub(crate) fn write_headless_dual_view(
             frame_count: cameras.len(),
             pace_frame_duration: None,
         },
-        move |device, queue, _format, size| {
-            let mut host = MonoOffscreenSceneHost::new(
+        move |device, queue, format, size| {
+            let mut host = OffscreenDriver::new(
                 device,
                 queue,
+                format,
                 size,
-                scene,
+                &scene,
                 render_options,
-                base_camera,
+                &assets,
+                &asset_source,
+                None,
             )?;
             host.drive_until_streamed(device, queue)?;
             Ok(host)
         },
         |index, frame, host| {
-            host.render_camera_frozen(frame, cameras[index].1, ui)?;
+            host.render_chunk_camera_frozen(frame, cameras[index].1, ui)?;
             Ok(())
         },
     )?;
@@ -842,8 +843,8 @@ pub(crate) fn write_headless_dual_view(
         save_rgba_png(&path, loop_report.width, loop_report.height, pixels)?;
         let summary = summaries
             .get(index)
-            .copied()
-            .with_context(|| format!("dual-view {view_name} capture recorded no summary"))?;
+            .with_context(|| format!("dual-view {view_name} capture recorded no summary"))?
+            .render;
         if options.hud && summary.gui_command_count == 0 {
             bail!("headless dual-view {view_name} HUD capture emitted no GUI commands");
         }
@@ -862,42 +863,6 @@ pub(crate) fn write_headless_dual_view(
         });
     }
     Ok(reports)
-}
-
-/// Adapt the CLI's flat `SceneOptions` into the scene host's `XrSceneOptions`
-/// for the offscreen dual-view capture (tactical 168 Slice 3). Mirrors
-/// `desktop_xr::xr_scene_options_from_desktop_scene` but with review-friendly
-/// defaults (midpoint underwater detection, no debug UI screen, actors shown).
-fn dual_view_scene_options(scene: &SceneOptions) -> Result<mclone_scene::XrSceneOptions> {
-    mclone_scene::XrSceneOptions {
-        seed: scene.seed,
-        chunk_x: scene.chunk_x,
-        chunk_z: scene.chunk_z,
-        render_distance: u32::try_from(scene.render_distance)
-            .context("dual-view render distance must fit u32")?,
-        render_compile_worker_count: scene.render_compile_worker_count,
-        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-        render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
-        movement_speed_multiplier: scene.movement_speed_multiplier,
-        simulation_cadence: scene.simulation_cadence,
-        first_person_player_visible: scene.first_person_player_visible,
-        day_time_override: scene.day_time_override,
-        freeze_time: scene.freeze_time,
-        debug_passive_showcase: scene.debug_passive_showcase,
-        lighting_enabled: scene.lighting_enabled,
-        light_status_batch_size: scene.light_status_batch_size,
-        adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
-        adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-        far_lod: scene.far_lod,
-        startup_lod_prewarm: scene.startup_lod_prewarm,
-        underwater_detection_mode: mclone_scene::XrUnderwaterDetectionMode::Midpoint,
-        debug_ui_screen: None,
-        skip_actors: false,
-        world_root: scene.world_root.clone(),
-        world_dir: scene.world_dir.clone(),
-    }
-    .validated()
-    .context("validate dual-view scene options")
 }
 
 fn dual_view_cameras(base: ChunkCamera) -> [(&'static str, ChunkCamera); 2] {
@@ -1197,37 +1162,13 @@ fn render_renderer_rebuild_smoke_frame(
         &state.actor_interpolation.presentations(),
         state.runtime.client(),
     );
-    let server_cadence = state
-        .runtime
-        .simulation_cadence()
-        .map(game_simulation_cadence_from_config);
-    let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
-        render_distance: state.runtime.render_distance() as i32,
-        render_options: state.render_options,
-        far_lod_enabled: false,
-        far_lod_range_chunks:
-            mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
-        frame_pacing: FramePacingUiState::default(),
-        movement_mode: GameMovementMode::Walk,
-        collision_mode: GameCollisionMode::Normal,
-        travel_assist_mode: GameTravelAssistMode::Off,
-        fly_speed_multiplier: 1.0,
-        movement_speed_multiplier: 1.0,
-        player_collision_box_visible: false,
-        first_person_player_visible: false,
-        crosshair_visible: true,
-        frame_pipeline_overlay_visible: false,
-        debug_diagnostics_visible: false,
-        player_model: Default::default(),
-        server_cadence,
-    });
     let gui_scale = state.ui.scale();
     let gui_state = FullFrameGui::new(
         state.ui.is_active(),
         state.ui.covers_world(),
         [gui_scale.width, gui_scale.height],
     );
-    let ui_draw = state.ui.render_draw_list(ui_render_state);
+    let ui_draw = GuiDrawList::new();
     state.resources.render_full_frame(
         frame,
         state.camera,

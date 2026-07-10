@@ -24,11 +24,8 @@ pub trait HostEffects {
     fn exit(&mut self) -> Result<()>;
 }
 
-/// Temporary compatibility seam for applying shared settings to both the
-/// mature scene host and desktop's pre-Slice-7c flat state.
-///
-/// The desktop implementation disappears when `FlatClientDriver` moves onto
-/// the scene host; the exhaustive dispatcher remains shared.
+/// Shared settings contract used by the exhaustive client-experience effect
+/// dispatcher.
 pub trait ClientExperienceSettingsHost {
     fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()>;
     fn set_fullbright(&mut self, enabled: bool) -> Result<()>;

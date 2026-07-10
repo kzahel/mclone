@@ -158,8 +158,10 @@ unless they are temporary forks tracked in the platform parity matrix.
 The live desktop redraw path is already thin: its `WinitFrameDriver` owns the
 surface/depth/presentation rim and delegates session, input application,
 runtime/render orchestration, and screen-space UI assembly to `mclone-scene`.
-The remaining app-local flat orchestrator serves only the offscreen/perf
-harness migration tracked by tactical 168 Slice 7d.
+The native desktop and offscreen lanes no longer have an app-local flat
+orchestrator. `WinitFrameDriver` and `OffscreenDriver` both delegate session,
+input application, runtime/render orchestration, and UI assembly to
+`mclone-scene`; tactical 168 Slice 8 still owns flat Android convergence.
 
 `mclone-render` may depend on `wgpu` and own GPU resources, but host-facing
 entry points should continue to accept explicit render target and view data.

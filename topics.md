@@ -7,3 +7,5 @@ same continuing concern.
 Append a topic when its first commit is created. Do not reconstruct historical
 topics unless doing so is useful. Keep each string exact across its commit
 series so `git log --grep "Topic: ..."` finds the whole chain.
+
+- `unified-native-scene-host` — tactical 168 shared host/driver convergence

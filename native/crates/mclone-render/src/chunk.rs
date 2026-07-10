@@ -1607,6 +1607,7 @@ impl GpuChunkMesh {
 pub struct GpuTexturedChunkMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    vertex_count: u32,
     index_count: u32,
     solid_index_count: u32,
     opaque_index_count: u32,
@@ -1670,6 +1671,7 @@ impl GpuTexturedChunkMesh {
             Self {
                 vertex_buffer,
                 index_buffer,
+                vertex_count: mesh.vertices.len() as u32,
                 index_count: mesh.indices.len() as u32,
                 solid_index_count: mesh.solid_index_count().min(mesh.indices.len() as u32),
                 opaque_index_count: mesh.opaque_index_count().min(mesh.indices.len() as u32),
@@ -2807,6 +2809,10 @@ impl TexturedSectionDrawResources {
 
     pub fn index_count(&self) -> u32 {
         self.sections.values().map(|mesh| mesh.index_count()).sum()
+    }
+
+    pub fn vertex_count(&self) -> u32 {
+        self.sections.values().map(|mesh| mesh.vertex_count).sum()
     }
 
     pub fn render(

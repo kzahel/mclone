@@ -2080,9 +2080,32 @@ where
         timing.runtime_dispatcher_max_compile_worker_task_ms = timed_section_update
             .timing
             .dispatcher_max_compile_worker_task_ms;
+        let section_sync_timing = timed_section_update.timing;
         let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();
+        let runtime_stats = self
+            .runtime
+            .as_ref()
+            .expect("runtime presence checked before section sync")
+            .stats();
+        let target_distance = i32::try_from(runtime_stats.render_distance).unwrap_or(i32::MAX);
+        let in_target = |key: mclone_mesh::RenderSectionKey| {
+            (key.chunk_x - runtime_stats.interest_center.x)
+                .abs()
+                .max((key.chunk_z - runtime_stats.interest_center.z).abs())
+                <= target_distance
+        };
+        let target_rebuilt_section_count = section_update
+            .rebuilt_sections
+            .iter()
+            .filter(|section| in_target(section.key))
+            .count();
+        let target_removed_section_count = section_update
+            .removed_section_keys
+            .iter()
+            .filter(|key| in_target(**key))
+            .count();
         let rebuilt_vertex_count = section_update.rebuilt_vertex_count;
         let rebuilt_index_count = section_update.rebuilt_index_count;
         let neighbor_ready_section_count = section_update.neighbor_ready_section_count;
@@ -2202,6 +2225,13 @@ where
             removed_section_count,
             rebuilt_vertex_count,
             rebuilt_index_count,
+            target_rebuilt_section_count,
+            non_target_rebuilt_section_count: rebuilt_section_count
+                .saturating_sub(target_rebuilt_section_count),
+            target_removed_section_count,
+            non_target_removed_section_count: removed_section_count
+                .saturating_sub(target_removed_section_count),
+            section_sync_timing,
             neighbor_ready_section_count,
             near_exception_section_count,
             deferred_section_count,

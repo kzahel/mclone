@@ -66,6 +66,18 @@ baseline for Java-style leaf non-occlusion.
 
 For durable historical trends, use [`../performance-records.md`](../performance-records.md).
 
+Tactical 168 Slice 7d changed probe ownership, not the JSON contracts:
+timedemo, startup-streaming, frame-budget, and movement-frame now drive the
+same shared Mono scene host as desktop through `OffscreenDriver`. Timedemo and
+both frame-probe pre/post key-set comparisons are exact, and
+frame-budget/movement retain their 1,936-section initial target and accounting
+meanings. Timedemo no longer builds the retired
+static tracking-halo batch, so its resident/drawable counts and culling sample
+set moved to the host's actual target. Do not compare its old numeric baseline
+as a regression threshold; capture a fresh release-mode baseline before the
+next performance judgment. The detailed migration evidence and debug sample
+are recorded in [`168`](../tactical/168-unified-native-scene-host.md#slice-7-desktop-flat-onto-the-host-delete-flatclientdriver-orchestration).
+
 Standalone Quest Android XR is not covered by the desktop/headless
 movement-frame, timedemo, or desktop-hosted OpenXR baselines. Track headset
 frame pacing, real OpenXR refresh state, overlay diagnostics, and standalone

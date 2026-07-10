@@ -6329,6 +6329,21 @@ mod android {
             removed_section_count: a.removed_section_count.max(b.removed_section_count),
             rebuilt_vertex_count: a.rebuilt_vertex_count.max(b.rebuilt_vertex_count),
             rebuilt_index_count: a.rebuilt_index_count.max(b.rebuilt_index_count),
+            target_rebuilt_section_count: a
+                .target_rebuilt_section_count
+                .max(b.target_rebuilt_section_count),
+            non_target_rebuilt_section_count: a
+                .non_target_rebuilt_section_count
+                .max(b.non_target_rebuilt_section_count),
+            target_removed_section_count: a
+                .target_removed_section_count
+                .max(b.target_removed_section_count),
+            non_target_removed_section_count: a
+                .non_target_removed_section_count
+                .max(b.non_target_removed_section_count),
+            // This aggregator retains maxima rather than one coherent frame;
+            // the detailed per-frame sync timing is not meaningful here.
+            section_sync_timing: Default::default(),
             neighbor_ready_section_count: a
                 .neighbor_ready_section_count
                 .max(b.neighbor_ready_section_count),

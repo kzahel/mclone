@@ -50,6 +50,7 @@ pub(crate) type NativeWindowSceneRuntime = NativeSceneRuntime<NativeRemoteServer
 
 /// Shared camera/interest reconciliation lane for the desktop flat client
 /// (docs/tactical/167 Slice 4): send-only pose sync, `"desktop"` log lane.
+#[allow(dead_code)]
 const DESKTOP_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
     EngineCameraCommitContext::send_only("desktop");
 
@@ -72,6 +73,7 @@ fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
     u32::try_from(scene.render_distance).context("render distance must be non-negative")
 }
 
+#[allow(dead_code)]
 pub(crate) fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSections> {
     let client = build_scene_client_runtime(scene)?;
     let mesh_assets = load_textured_mesh_assets()?;
@@ -92,6 +94,7 @@ pub(crate) fn build_scene_textured_sections(scene: &SceneOptions) -> Result<Scen
     })
 }
 
+#[allow(dead_code)]
 fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     let render_distance = scene_render_distance(scene)?;
     let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
@@ -182,11 +185,13 @@ pub(crate) struct WindowSceneRuntime {
 /// the platform a transient render-section seed for a one-shot draw upload; no
 /// startup path recompiles the resident cache.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct WindowSceneStartupPump {
     pump: NativeSessionStartupPump<NativeRemoteServerSession>,
     actor_textures: ActorTextureAssets,
 }
 
+#[allow(dead_code)]
 impl WindowSceneStartupPump {
     /// Build a startup pump for either host mode from the scene: remote when the
     /// scene names a remote address, otherwise local integrated. Local worlds
@@ -353,6 +358,7 @@ impl WindowSceneStartupPump {
     }
 }
 
+#[allow(dead_code)]
 impl WindowSceneRuntime {
     pub(crate) fn new(scene: &SceneOptions) -> Result<Self> {
         Self::with_assets(scene, &WindowSceneAssets::load()?)

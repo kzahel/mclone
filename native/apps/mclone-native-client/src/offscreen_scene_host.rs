@@ -1,105 +1,434 @@
-//! Offscreen driver for the shared scene host's flat (mono) view topology
-//! (tactical 168 Slice 3).
-//!
-//! This is the flat/offscreen counterpart to the OpenXR frame drivers: it owns
-//! a headless GPU target and drives an [`XrMcloneTerrainState`] through its
-//! `render_mono_frame*` entries. The per-frame orchestration (session runtime,
-//! camera, budgeted section sync/upload, sky/time/sun/far-LOD frame-input
-//! assembly) lives entirely on the host; this driver only owns the depth
-//! target, the drive-to-ready loop, and the flat cameras it wants captured.
-//!
-//! Before this existed, the headless dual-view path hand-assembled its own
-//! sky/time/sun frame inputs and called the shared `render_full_frame_for_view`
-//! directly — the "third copy" the tactical deletes. It now consumes the host.
+//! Offscreen target/cadence driver over the shared scene host's Mono topology.
+
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use mclone_app_runtime::frame_render::FullFrameRenderSummary;
-use mclone_app_runtime::render_assets::{
-    load_actor_texture_assets_from_asset_source, load_textured_mesh_assets_from_source,
+use mclone_app_runtime::frame_pacing::{
+    FramePacingDebugStats, FramePacingUiState, FrameTimingStats,
 };
+use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
+use mclone_diagnostics::{BudgetDecisionPanelReport, FrameHostKind};
+use mclone_input::{FlatInputAction, FlatInputFrame, TouchControlsMode};
+use mclone_mesh::VisibilityGraphBuildStats;
 use mclone_render::chunk::{ChunkCamera, ChunkDepthTarget, TexturedSectionRenderOptions};
-use mclone_render::headless::HEADLESS_FORMAT;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-use mclone_scene::{MonoUiPresentation, XrMcloneTerrainState, XrSceneOptions};
+use mclone_scene::{
+    HostEffects, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
+    XrStartupViewPose, record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
+};
+use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point};
 
-use crate::render_cache::load_asset_source;
+use crate::camera::SpectatorCamera;
+use crate::cli::{SceneOptions, StartupWaitPolicy};
+use crate::desktop_scene_host::{
+    DesktopMonoSceneHost, DesktopMonoSceneHostOverrides,
+    create_desktop_mono_scene_host_with_overrides,
+};
+use crate::scene_runtime::WindowSceneAssets;
 
-/// Upper bound on drive-to-ready warmup frames. Local worldgen for a small
-/// review scene streams in well under this; the cap only guards against a world
-/// that never produces sections.
-const MAX_WARMUP_FRAMES: usize = 4096;
-/// Consecutive warmup frames with a non-growing loaded-section count before the
-/// world is considered streamed. Approximates the old cold full-sync without
-/// blocking the host's step-based streaming model.
+const MAX_WARMUP_FRAMES: usize = 65_536;
 const STREAM_STABLE_FRAMES: usize = 6;
 
-/// Offscreen driver over the scene host's mono topology.
-pub(crate) struct MonoOffscreenSceneHost {
-    host: XrMcloneTerrainState,
-    depth: ChunkDepthTarget,
-    size: [u32; 2],
-    warmup_camera: ChunkCamera,
-    captured: Vec<FullFrameRenderSummary>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct OffscreenFrameClock {
+    pub(crate) frame_ms: f64,
+    pub(crate) target_frame_ms: Option<f64>,
 }
 
-impl MonoOffscreenSceneHost {
-    /// Build the host for a local flat scene and its headless depth target. The
-    /// caller supplies the wgpu device/queue (typically the headless capture
-    /// loop's) and the target size; `warmup_camera` centers section streaming
-    /// during drive-to-ready.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct OffscreenDriverOptions {
+    pub(crate) freeze_scheduled_fluid_ticks: bool,
+}
+
+impl Default for OffscreenFrameClock {
+    fn default() -> Self {
+        Self {
+            frame_ms: 1_000.0 / 60.0,
+            target_frame_ms: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OffscreenWarmupReport {
+    pub(crate) frame_count: usize,
+    pub(crate) elapsed_ms: f64,
+    pub(crate) poll_ms: f64,
+    pub(crate) sync_ms: f64,
+    pub(crate) upload_ms: f64,
+    pub(crate) visibility_graph: VisibilityGraphBuildStats,
+    pub(crate) last_summary: Option<MonoSceneFrameSummary>,
+}
+
+impl OffscreenWarmupReport {
+    fn observe(&mut self, summary: MonoSceneFrameSummary) {
+        self.frame_count += 1;
+        self.poll_ms += summary.timing.runtime_poll_ms;
+        self.sync_ms += summary.timing.runtime_sync_ms;
+        self.upload_ms += summary.timing.runtime_gpu_upload_ms;
+        self.visibility_graph.build_count += summary.upload.visibility_graph_build_count;
+        self.visibility_graph.total_ms += summary.upload.visibility_graph_total_ms;
+        self.visibility_graph.worst_ms = self
+            .visibility_graph
+            .worst_ms
+            .max(summary.upload.visibility_graph_worst_ms);
+        self.last_summary = Some(summary);
+    }
+}
+
+#[derive(Default)]
+struct OffscreenHostEffects;
+
+impl HostEffects for OffscreenHostEffects {
+    fn request_mouse_lock(&mut self, _requested: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn cycle_frame_pacing(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn cycle_fps_cap(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_touch_controls_mode(&mut self, _mode: TouchControlsMode) -> Result<()> {
+        Ok(())
+    }
+
+    fn quit_to_title(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn exit(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Thin offscreen driver. Runtime/session/input/UI/render orchestration stays
+/// on `mclone-scene`; this type owns only target sizing, deterministic cadence,
+/// readiness loops, and frame-accounting feedback.
+pub(crate) struct OffscreenDriver {
+    host: DesktopMonoSceneHost,
+    depth: ChunkDepthTarget,
+    color_format: wgpu::TextureFormat,
+    size: [u32; 2],
+    clock: OffscreenFrameClock,
+    frame_timing: FrameTimingStats,
+    frame_pipeline_accounting: FramePipelineAccountant,
+    last_summary: Option<MonoSceneFrameSummary>,
+    captured: Vec<MonoSceneFrameSummary>,
+}
+
+impl OffscreenDriver {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
         size: [u32; 2],
-        scene: XrSceneOptions,
+        scene: &SceneOptions,
         render_options: TexturedSectionRenderOptions,
-        warmup_camera: ChunkCamera,
+        assets: &WindowSceneAssets,
+        asset_source: &impl mclone_assets::AssetSource,
+        startup_camera: Option<&SpectatorCamera>,
     ) -> Result<Self> {
-        let asset_source =
-            load_asset_source().context("load asset source for offscreen scene host")?;
-        let actor_assets = load_actor_texture_assets_from_asset_source(&asset_source)
-            .context("load actor texture assets for offscreen scene host")?;
-        let mesh_assets = load_textured_mesh_assets_from_source(&asset_source)
-            .context("load mesh assets for offscreen scene host")?;
-        let host = XrMcloneTerrainState::new(
+        Self::new_with_options(
             device,
             queue,
-            HEADLESS_FORMAT,
+            color_format,
+            size,
             scene,
             render_options,
-            mesh_assets,
-            actor_assets.atlas,
-            actor_assets.figures,
-            &asset_source,
-            None,
+            assets,
+            asset_source,
+            startup_camera,
+            OffscreenDriverOptions::default(),
         )
-        .context("initialize offscreen scene host")?;
-        let depth = ChunkDepthTarget::new(device, size[0], size[1]);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_options(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        size: [u32; 2],
+        scene: &SceneOptions,
+        render_options: TexturedSectionRenderOptions,
+        assets: &WindowSceneAssets,
+        asset_source: &impl mclone_assets::AssetSource,
+        startup_camera: Option<&SpectatorCamera>,
+        options: OffscreenDriverOptions,
+    ) -> Result<Self> {
+        let startup_view_pose = startup_camera.map(|camera| XrStartupViewPose {
+            position: camera.position.to_array(),
+            yaw_degrees: camera.yaw.to_degrees(),
+        });
+        let mut host = create_desktop_mono_scene_host_with_overrides(
+            device,
+            queue,
+            color_format,
+            scene,
+            render_options,
+            assets,
+            asset_source,
+            startup_view_pose,
+            DesktopMonoSceneHostOverrides {
+                freeze_scheduled_fluid_ticks: options.freeze_scheduled_fluid_ticks,
+            },
+        )?;
+        let mut ui = GameUiHost::new_ingame();
+        ui.set_join_remote_addr(
+            scene
+                .remote_addr
+                .clone()
+                .unwrap_or_else(|| mclone_ui::DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
+        );
+        host.configure_mono_ui(ui, MonoUiContext::default());
+        host.set_frame_host_kind(FrameHostKind::HeadlessOffscreenPerf);
+        host.set_display_refresh_hz(None);
+        if let Some(camera) = startup_camera {
+            set_host_camera(&mut host, camera);
+        }
+        let size = [size[0].max(1), size[1].max(1)];
+        host.set_mono_ui_scale(GuiScale::from_pixels(size[0], size[1]));
         Ok(Self {
             host,
-            depth,
+            depth: ChunkDepthTarget::new(device, size[0], size[1]),
+            color_format,
             size,
-            warmup_camera,
+            clock: OffscreenFrameClock::default(),
+            frame_timing: FrameTimingStats::default(),
+            frame_pipeline_accounting: FramePipelineAccountant::new(
+                xr_frame_pipeline_accounting_config(None),
+            ),
+            last_summary: None,
             captured: Vec::new(),
         })
     }
 
-    /// Per-camera render summaries, in the order [`Self::render_camera_frozen`]
-    /// was called.
-    pub(crate) fn captured(&self) -> &[FullFrameRenderSummary] {
+    pub(crate) fn host(&self) -> &DesktopMonoSceneHost {
+        &self.host
+    }
+
+    pub(crate) fn host_mut(&mut self) -> &mut DesktopMonoSceneHost {
+        &mut self.host
+    }
+
+    pub(crate) fn set_clock(&mut self, clock: OffscreenFrameClock) {
+        self.clock = clock;
+        self.frame_pipeline_accounting =
+            FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(
+                clock
+                    .target_frame_ms
+                    .filter(|period_ms| period_ms.is_finite() && *period_ms > 0.0)
+                    .map(|period_ms| 1_000.0 / period_ms),
+            ));
+    }
+
+    pub(crate) fn last_summary(&self) -> Option<MonoSceneFrameSummary> {
+        self.last_summary.clone()
+    }
+
+    pub(crate) fn captured(&self) -> &[MonoSceneFrameSummary] {
         &self.captured
     }
 
-    /// Stream the local world in against a scratch target until the loaded
-    /// section set stabilizes. Blocking drive-to-ready loops live in the driver
-    /// (not the host) per the tactical's step-based-API rule.
+    pub(crate) fn set_camera(&mut self, camera: &SpectatorCamera) {
+        set_host_camera(&mut self.host, camera);
+    }
+
+    pub(crate) fn commit_camera(&mut self) -> Result<bool> {
+        self.host.commit_mono_player_pose()
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        ui: MonoUiPresentation,
+        hud_visible: bool,
+    ) -> Result<MonoSceneFrameSummary> {
+        self.render_inner(frame, ui, hud_visible, false)
+    }
+
+    fn render_inner(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        ui: MonoUiPresentation,
+        hud_visible: bool,
+        frozen: bool,
+    ) -> Result<MonoSceneFrameSummary> {
+        let view = self.host.mono_render_view(frame.target.size)?;
+        self.render_view_inner(frame, view, ui, hud_visible, frozen)
+    }
+
+    fn render_view_inner(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        view: mclone_render::chunk::ChunkRenderView,
+        ui: MonoUiPresentation,
+        hud_visible: bool,
+        frozen: bool,
+    ) -> Result<MonoSceneFrameSummary> {
+        self.frame_timing
+            .begin_frame(self.clock.frame_ms, self.clock.target_frame_ms);
+        let target_hz = self
+            .clock
+            .target_frame_ms
+            .filter(|period_ms| period_ms.is_finite() && *period_ms > 0.0)
+            .map(|period_ms| (1_000.0 / period_ms) as f32);
+        self.host.set_display_refresh_hz(target_hz);
+        self.host.set_mono_ui_context(MonoUiContext {
+            frame_pacing: FramePacingUiState::default(),
+            pacing_debug: FramePacingDebugStats {
+                target_frame_ms: self.clock.target_frame_ms,
+                ..FramePacingDebugStats::default()
+            },
+            frame_timing: self.frame_timing,
+            render_scale: 1.0,
+            hud_visible,
+            ..MonoUiContext::default()
+        });
+        let frame_start = Instant::now();
+        let summary = if frozen {
+            self.host
+                .render_mono_scene_frame_frozen(frame, &self.depth, view, ui)?
+        } else {
+            self.host
+                .render_mono_scene_frame(frame, &self.depth, view, ui)?
+        };
+        let frame_ms = frame_start.elapsed().as_secs_f64() * 1_000.0;
+        self.frame_timing
+            .record_runtime_poll(summary.timing.runtime_poll_ms);
+        self.frame_timing.record_remesh_upload(
+            summary.timing.runtime_sync_ms,
+            summary.timing.runtime_gpu_upload_ms,
+        );
+        self.frame_timing.record_surface_frame(
+            summary.timing.render_views_ms,
+            0.0,
+            frame_ms,
+            0.0,
+            0.0,
+        );
+        let (report, revision) = record_mono_frame_pipeline(
+            &mut self.frame_pipeline_accounting,
+            frame_ms,
+            true,
+            Some(summary.clone()),
+            self.host.latest_budget_decision_panel(),
+        );
+        self.host.set_frame_pipeline_report(report, revision);
+        self.last_summary = Some(summary.clone());
+        Ok(summary)
+    }
+
+    pub(crate) fn render_chunk_camera_frozen(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        camera: ChunkCamera,
+        ui: MonoUiPresentation,
+    ) -> Result<MonoSceneFrameSummary> {
+        let spectator = spectator_from_chunk_camera(camera);
+        self.set_camera(&spectator);
+        let view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+        let summary = self.render_view_inner(frame, view, ui, true, true)?;
+        self.captured.push(summary.clone());
+        Ok(summary)
+    }
+
+    pub(crate) fn drive_to_wait_policy(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        startup_wait: StartupWaitPolicy,
+    ) -> Result<OffscreenWarmupReport> {
+        match startup_wait {
+            StartupWaitPolicy::None | StartupWaitPolicy::Frames(_) => {
+                Ok(OffscreenWarmupReport::default())
+            }
+            StartupWaitPolicy::Progress => self.drive_until(device, queue, |driver, _| {
+                driver
+                    .host
+                    .mono_loading_progress_overlay()
+                    .is_some_and(|progress| !progress.cells.is_empty())
+            }),
+            StartupWaitPolicy::Playable => self.drive_until(device, queue, |driver, summary| {
+                driver.host.local_startup_complete()
+                    && driver.host.has_runtime()
+                    && summary.render.section_count > 0
+            }),
+            StartupWaitPolicy::Idle => {
+                let mut stable = 0usize;
+                self.drive_until(device, queue, move |driver, summary| {
+                    let camera_position = driver.host.camera_snapshot().eye;
+                    let pending = driver.host.pending_stream_work(glam::Vec3::new(
+                        camera_position.x as f32,
+                        camera_position.y as f32,
+                        camera_position.z as f32,
+                    ));
+                    if pending == 0 && summary.render.drawn_section_count > 0 {
+                        stable += 1;
+                    } else {
+                        stable = 0;
+                    }
+                    stable >= STREAM_STABLE_FRAMES
+                })
+            }
+        }
+    }
+
     pub(crate) fn drive_until_streamed(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<()> {
+    ) -> Result<OffscreenWarmupReport> {
+        self.drive_to_wait_policy(device, queue, StartupWaitPolicy::Idle)
+    }
+
+    pub(crate) fn drive_until_target_complete(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<OffscreenWarmupReport> {
+        let mut stable = 0usize;
+        self.drive_until(device, queue, move |driver, summary| {
+            let eye = driver.host.camera_snapshot().eye;
+            let camera_position = glam::Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
+            let target_loaded = driver.host.runtime_stats().is_some_and(|stats| {
+                let diameter = stats.render_distance.saturating_mul(2).saturating_add(1);
+                stats.loaded_chunks >= (diameter as usize).saturating_pow(2)
+            });
+            let view_ready = driver
+                .host
+                .mono_view_readiness_overlay()
+                .is_none_or(|progress| {
+                    progress.target_chunk_count > 0
+                        && progress.target_ready_chunks == progress.target_chunk_count
+                });
+            if target_loaded
+                && view_ready
+                && driver.host.pending_stream_work(camera_position) == 0
+                && summary.render.drawn_section_count > 0
+            {
+                stable += 1;
+            } else {
+                stable = 0;
+            }
+            stable >= STREAM_STABLE_FRAMES
+        })
+    }
+
+    fn drive_until(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mut ready: impl FnMut(&Self, &MonoSceneFrameSummary) -> bool,
+    ) -> Result<OffscreenWarmupReport> {
+        let output_size = self.size;
+        self.resize_target(device, [1, 1]);
         let scratch = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mclone_mono_offscreen_warmup"),
+            label: Some("mclone_offscreen_driver_warmup"),
             size: wgpu::Extent3d {
                 width: self.size[0],
                 height: self.size[1],
@@ -108,78 +437,148 @@ impl MonoOffscreenSceneHost {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: HEADLESS_FORMAT,
+            format: self.color_format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
         let scratch_view = scratch.create_view(&wgpu::TextureViewDescriptor::default());
-        let warmup_view = self.warmup_camera.render_view(self.size[0], self.size[1]);
-
-        let mut stable = 0usize;
-        let mut drew_any = false;
-        let mut last_pending_stream_work = usize::MAX;
-        let mut last_drawn_section_count = 0usize;
-        for _ in 0..MAX_WARMUP_FRAMES {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("mclone_mono_offscreen_warmup_encoder"),
-            });
-            let summary = {
-                let frame = RenderFrameContext::new(
-                    device,
-                    queue,
-                    &mut encoder,
-                    RenderFrameTarget::color(&scratch_view, self.size),
-                );
-                self.host
-                    .render_mono_frame(frame, &self.depth, warmup_view, MonoUiPresentation::None)
-                    .context("warmup mono frame")?
-            };
-            queue.submit(std::iter::once(encoder.finish()));
-            device
-                .poll(wgpu::PollType::Wait)
-                .context("poll device during offscreen warmup")?;
-
-            drew_any |= summary.drawn_section_count > 0;
-            last_drawn_section_count = summary.drawn_section_count;
-            last_pending_stream_work = self.host.pending_stream_work(warmup_view.camera_position);
-            // Fully streamed = no pending server generation / compile / upload
-            // work (implies startup completed) and geometry has actually drawn.
-            // A short stable window absorbs single-frame lulls between async
-            // worldgen bursts.
-            if last_pending_stream_work == 0 && summary.drawn_section_count > 0 {
-                stable += 1;
-                if stable >= STREAM_STABLE_FRAMES {
-                    return Ok(());
+        let result = (|| {
+            let start = Instant::now();
+            let mut report = OffscreenWarmupReport::default();
+            for _ in 0..MAX_WARMUP_FRAMES {
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mclone_offscreen_driver_warmup_encoder"),
+                });
+                let summary = self.render(
+                    RenderFrameContext::new(
+                        device,
+                        queue,
+                        &mut encoder,
+                        RenderFrameTarget::color(&scratch_view, self.size),
+                    ),
+                    MonoUiPresentation::None,
+                    false,
+                )?;
+                queue.submit(std::iter::once(encoder.finish()));
+                device
+                    .poll(wgpu::PollType::Wait)
+                    .context("poll device during offscreen warmup")?;
+                report.observe(summary.clone());
+                if ready(self, &summary) {
+                    report.elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
+                    return Ok(report);
                 }
-            } else {
-                stable = 0;
+                std::thread::sleep(Duration::from_millis(1));
             }
-        }
-
-        if !drew_any {
+            let last = report.last_summary.as_ref();
             bail!(
-                "offscreen scene host streamed no render sections after {MAX_WARMUP_FRAMES} warmup frames"
-            );
-        }
-        bail!(
-            "offscreen scene host did not settle after {MAX_WARMUP_FRAMES} warmup frames: pending_stream_work={last_pending_stream_work} last_drawn_sections={last_drawn_section_count}"
-        )
+                "offscreen scene host did not reach requested readiness after {MAX_WARMUP_FRAMES} frames: runtime={} sections={} drawn={} pending={}",
+                self.host.has_runtime(),
+                last.map_or(0, |summary| summary.render.section_count),
+                last.map_or(0, |summary| summary.render.drawn_section_count),
+                {
+                    let eye = self.host.camera_snapshot().eye;
+                    self.host.pending_stream_work(glam::Vec3::new(
+                        eye.x as f32,
+                        eye.y as f32,
+                        eye.z as f32,
+                    ))
+                }
+            )
+        })();
+        self.resize_target(device, output_size);
+        result
     }
 
-    /// Render one flat camera into the caller-owned frame, with the runtime
-    /// held frozen (the world was streamed in during [`Self::drive_until_streamed`]).
-    pub(crate) fn render_camera_frozen(
+    fn resize_target(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+        self.size = [size[0].max(1), size[1].max(1)];
+        self.depth = ChunkDepthTarget::new(device, self.size[0], self.size[1]);
+        self.host
+            .set_mono_ui_scale(GuiScale::from_pixels(self.size[0], self.size[1]));
+    }
+
+    pub(crate) fn apply_input_frame(
         &mut self,
-        frame: RenderFrameContext<'_>,
-        camera: ChunkCamera,
-        ui: MonoUiPresentation,
-    ) -> Result<FullFrameRenderSummary> {
-        let render_view = camera.render_view(self.size[0], self.size[1]);
-        let summary = self
+        frame: FlatInputFrame,
+    ) -> Result<Vec<(FlatInputAction, MonoWorldActionStatus)>> {
+        if frame.open_menu {
+            self.host.open_mono_pause_menu();
+            self.host.clear_mono_camera_input();
+            return Ok(Vec::new());
+        }
+        if self.host.mono_ui_is_active() {
+            return Ok(Vec::new());
+        }
+        if let Some(slot) = frame.selected_hotbar_slot {
+            self.host.select_mono_hotbar_slot(slot);
+        }
+        if frame.hotbar_step != 0 {
+            self.host.step_mono_hotbar_slot(frame.hotbar_step);
+        }
+        if self
             .host
-            .render_mono_frame_frozen_runtime(frame, &self.depth, render_view, ui)
-            .context("render frozen mono camera")?;
-        self.captured.push(summary);
-        Ok(summary)
+            .apply_mono_movement_frame(frame, self.clock.frame_ms / 1_000.0)
+        {
+            self.host.commit_mono_player_pose()?;
+        }
+        let mut statuses = Vec::new();
+        if frame.attack {
+            statuses.push((
+                FlatInputAction::Attack,
+                self.host
+                    .handle_mono_world_action(FlatInputAction::Attack)?,
+            ));
+        }
+        if frame.use_item {
+            statuses.push((
+                FlatInputAction::Use,
+                self.host.handle_mono_world_action(FlatInputAction::Use)?,
+            ));
+        }
+        Ok(statuses)
+    }
+
+    pub(crate) fn apply_ui_pointer_click(
+        &mut self,
+        point: Point,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Option<GameUiAction>> {
+        self.host.mono_ui_pointer_down(point);
+        let (_, action) = self.host.mono_ui_pointer_up(point);
+        if let Some(action) = action {
+            let mut effects = OffscreenHostEffects;
+            self.host
+                .apply_mono_ui_action(action, true, device, queue, &mut effects)?;
+        }
+        Ok(action)
+    }
+
+    pub(crate) fn latest_budget_decision_panel(&self) -> BudgetDecisionPanelReport {
+        self.host.latest_budget_decision_panel()
+    }
+}
+
+fn set_host_camera(host: &mut DesktopMonoSceneHost, camera: &SpectatorCamera) {
+    host.set_mono_capture_camera(
+        mclone_core::Vec3d::new(
+            f64::from(camera.position.x),
+            f64::from(camera.position.y),
+            f64::from(camera.position.z),
+        ),
+        f64::from(camera.yaw),
+        f64::from(camera.pitch),
+        f64::from(camera.speed),
+    );
+}
+
+fn spectator_from_chunk_camera(camera: ChunkCamera) -> SpectatorCamera {
+    let eye = glam::Vec3::from_array(camera.eye);
+    let direction = (glam::Vec3::from_array(camera.target) - eye).normalize_or_zero();
+    SpectatorCamera {
+        position: eye,
+        yaw: direction.x.atan2(direction.z),
+        pitch: direction.y.clamp(-1.0, 1.0).asin(),
+        speed: crate::camera::SPECTATOR_BASE_SPEED,
     }
 }

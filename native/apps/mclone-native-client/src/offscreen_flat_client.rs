@@ -1,44 +1,25 @@
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_app_runtime::native_session_runtime::StartupReadinessPolicy;
-use mclone_app_runtime::{
-    debug_block_palette_overlay, debug_hotbar_icons, frame_render::FullFrameRenderSummary,
-};
-use mclone_client::{ActorPresentationId, ClientHost};
+use mclone_app_runtime::frame_render::FullFrameRenderSummary;
+use mclone_client::{ActorPresentationId, ClientHost, ClientRuntime};
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId};
-use mclone_input::{
-    FlatInputAction, FlatInputFrame, FlatInputIntent, InputCapabilities, InputCapabilityState,
-    InputPreferences,
-};
-use mclone_protocol::{ClientCommand, MovePlayerCommand};
-use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
+use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
-use mclone_render::target::RenderFrameContext;
+use mclone_scene::{MonoUiPresentation, MonoWorldActionStatus};
 use mclone_server::initial_spawn_center_for_seed;
-use mclone_ui::{
-    FlatHotbarOverlay, FlatHud, GameScreen, GuiScale, LoadingProgressCellStatus,
-    LoadingProgressOverlay, Point, StatusOverlay,
-};
+use mclone_ui::{GameTravelAssistMode, Point};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions, StartupWaitPolicy,
 };
-use crate::flat_client_driver::{
-    FlatClientDebugFrame, FlatClientDriver, FlatClientSessionStartPlan, FlatClientUiActionContext,
-    FlatClientUiFrame, FlatClientUiPointerClickReport, FlatClientUiRenderOptions,
-    FlatClientWorldActionStatus, game_collision_mode, game_movement_mode,
-};
-use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState};
+use crate::offscreen_scene_host::OffscreenDriver;
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump};
-use crate::ui::DebugPaneStats;
+use crate::scene_runtime::WindowSceneAssets;
 
-const DEFAULT_OFFSCREEN_FRAME_MS: f64 = 1000.0 / 60.0;
-const MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS: usize = 65_536;
 const OFFSCREEN_BLINK_DEBUG_PREVIEW_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,24 +36,8 @@ pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) underwater: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct OffscreenFlatClientFrameClock {
-    pub(crate) frame_ms: f64,
-    pub(crate) target_frame_ms: Option<f64>,
-}
-
-impl Default for OffscreenFlatClientFrameClock {
-    fn default() -> Self {
-        Self {
-            frame_ms: DEFAULT_OFFSCREEN_FRAME_MS,
-            target_frame_ms: None,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct OffscreenFlatClientFrameOptions {
-    pub(crate) debug_pane: bool,
     pub(crate) hud: bool,
 }
 
@@ -120,16 +85,12 @@ pub(crate) struct OffscreenScriptReport {
 }
 
 pub(crate) struct OffscreenFlatClientHost {
-    assets: WindowSceneAssets,
-    _asset_source: mclone_assets::AssetSourceChain,
-    pub(crate) driver: FlatClientDriver,
-    target_size: [u32; 2],
-    clock: OffscreenFlatClientFrameClock,
-    last_summary: Option<FullFrameRenderSummary>,
-    deferred_session_start: Option<FlatClientSessionStartPlan>,
+    driver: OffscreenDriver,
+    camera: SpectatorCamera,
 }
 
 impl OffscreenFlatClientHost {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -137,391 +98,75 @@ impl OffscreenFlatClientHost {
         target_size: [u32; 2],
         scene: &SceneOptions,
         render_options: mclone_render::chunk::TexturedSectionRenderOptions,
-        assets: WindowSceneAssets,
-        asset_source: mclone_assets::AssetSourceChain,
+        assets: &WindowSceneAssets,
+        asset_source: &impl mclone_assets::AssetSource,
+        startup_camera: SpectatorCamera,
     ) -> Result<Self> {
-        let render_config = RenderConfig::for_color_target(render_options.color_profile, format);
-        let mut driver = FlatClientDriver::new(scene, render_options);
-        driver.set_ui_scale(GuiScale::from_pixels(target_size[0], target_size[1]));
-        driver.rebuild_render_resources(
+        let driver = OffscreenDriver::new(
             device,
             queue,
+            format,
             target_size,
-            render_config,
-            assets.mesh_assets.atlas.as_upload(),
-            assets.actor_textures.atlas.as_upload(),
-            Some(&assets.actor_textures.figures),
-            &asset_source,
+            scene,
+            render_options,
+            assets,
+            asset_source,
+            Some(&startup_camera),
         )?;
         Ok(Self {
-            assets,
-            _asset_source: asset_source,
             driver,
-            target_size,
-            clock: OffscreenFlatClientFrameClock::default(),
-            last_summary: None,
-            deferred_session_start: None,
+            camera: startup_camera,
         })
     }
 
     pub(crate) fn start_scene_with_wait_policy(
         &mut self,
         device: &wgpu::Device,
-        scene: SceneOptions,
+        queue: &wgpu::Queue,
         startup_wait: StartupWaitPolicy,
     ) -> Result<()> {
-        match startup_wait {
-            StartupWaitPolicy::None | StartupWaitPolicy::Frames(_) => {
-                self.start_scene_nonblocking(device, scene)
-            }
-            StartupWaitPolicy::Progress => self.start_scene_progress(device, scene),
-            StartupWaitPolicy::Idle => self.start_scene_idle(device, scene),
-            StartupWaitPolicy::Playable => self.start_scene_playable(device, scene),
-        }
-    }
-
-    pub(crate) fn start_scene_idle(
-        &mut self,
-        device: &wgpu::Device,
-        scene: SceneOptions,
-    ) -> Result<()> {
-        let assets = &self.assets;
         self.driver
-            .start_world_from_scene(
-                scene,
-                Some(device),
-                StartupReadinessPolicy::Idle,
-                &mut |scene| WindowSceneStartupPump::from_scene_at_scene_center(scene, assets),
-            )
-            .context("failed to start offscreen flat client scene")?;
-        self.require_uploaded_sections()?;
-        Ok(())
-    }
-
-    fn start_scene_nonblocking(
-        &mut self,
-        device: &wgpu::Device,
-        scene: SceneOptions,
-    ) -> Result<()> {
-        self.anchor_local_playable_startup_camera(&scene);
-        self.driver.scene = scene;
-        let plan = self.driver.current_scene_start_plan(false, false)?;
-
-        let session_update = self.start_session_plan(device, plan)?;
-        if session_update.mouse_lock_requested.is_some() {
-            self.driver.clear_camera_input();
-        }
-        if self.driver.startup.is_none() && self.driver.runtime.is_none() {
-            bail!(
-                "offscreen flat client nonblocking startup did not create a session or startup pump"
-            );
+            .drive_to_wait_policy(device, queue, startup_wait)?;
+        if matches!(
+            startup_wait,
+            StartupWaitPolicy::Playable | StartupWaitPolicy::Idle
+        ) && self.driver.host().render_stats().section_count == 0
+        {
+            bail!("offscreen flat client reached readiness without render sections");
         }
         Ok(())
-    }
-
-    fn start_scene_progress(&mut self, device: &wgpu::Device, scene: SceneOptions) -> Result<()> {
-        if scene.remote_addr.is_some() {
-            bail!("offscreen loading-progress startup wait requires a local world");
-        }
-        self.start_scene_nonblocking(device, scene)?;
-        if loading_progress_overlay_has_visible_status(self.driver.startup_progress_overlay()) {
-            return Ok(());
-        }
-
-        for _ in 0..MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS {
-            if self.driver.startup.is_none() {
-                bail!(
-                    "offscreen loading-progress startup completed before a progress grid was available"
-                );
-            }
-            let startup_update = self.driver.advance_local_world_startup(Some(device));
-            if startup_update.mouse_lock_requested.is_some() {
-                self.driver.clear_camera_input();
-            }
-            if loading_progress_overlay_has_visible_status(self.driver.startup_progress_overlay()) {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-
-        bail!(
-            "offscreen flat client did not observe loading progress after {MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS} steps"
-        )
-    }
-
-    fn start_scene_playable(&mut self, device: &wgpu::Device, scene: SceneOptions) -> Result<()> {
-        self.anchor_local_playable_startup_camera(&scene);
-        self.driver.scene = scene;
-        let plan = self.driver.current_scene_start_plan(false, false)?;
-
-        let session_update = self.start_session_plan(device, plan)?;
-        if session_update.mouse_lock_requested.is_some() {
-            self.driver.clear_camera_input();
-        }
-
-        for _ in 0..MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS {
-            if self.driver.startup.is_none() {
-                break;
-            }
-            let startup_update = self.driver.advance_local_world_startup(Some(device));
-            if startup_update.mouse_lock_requested.is_some() {
-                self.driver.clear_camera_input();
-            }
-            if self.driver.startup.is_some() {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-        if self.driver.startup.is_some() {
-            bail!(
-                "offscreen flat client did not reach playable startup after {MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS} steps"
-            );
-        }
-        if self.driver.runtime.is_none() {
-            bail!("offscreen flat client startup did not create a runtime");
-        }
-        self.require_uploaded_sections()?;
-        Ok(())
-    }
-
-    fn anchor_local_playable_startup_camera(&mut self, scene: &SceneOptions) {
-        if scene.remote_addr.is_some() {
-            return;
-        }
-        let spawn = initial_spawn_center_for_seed(scene.seed);
-        let mut startup_scene = scene.clone();
-        startup_scene.chunk_x = spawn.x;
-        startup_scene.chunk_z = spawn.z;
-        let spectator = SpectatorCamera::spawn_for_scene(&startup_scene);
-        self.driver.set_spectator_camera(
-            spectator,
-            scene.movement_speed_multiplier,
-            scene.first_person_player_visible,
-        );
     }
 
     pub(crate) fn render_frame(
         &mut self,
-        index: usize,
-        frame: RenderFrameContext<'_>,
+        frame: mclone_render::target::RenderFrameContext<'_>,
         options: OffscreenFlatClientFrameOptions,
     ) -> Result<FullFrameRenderSummary> {
-        let frame_start = Instant::now();
-        self.driver
-            .tick_frame_timing(self.clock.frame_ms, self.clock.target_frame_ms);
-        self.driver.set_ui_scale(GuiScale::from_pixels(
-            self.target_size[0],
-            self.target_size[1],
-        ));
-
-        let session_update = if let Some(plan) = self.deferred_session_start.take() {
-            Some(self.start_session_plan(frame.device, plan)?)
-        } else {
-            None
-        };
-        let startup_update = self.driver.advance_local_world_startup(Some(frame.device));
-        if session_update.is_some_and(|update| update.mouse_lock_requested.is_some())
-            || startup_update.mouse_lock_requested.is_some()
-        {
-            self.driver.clear_camera_input();
-        }
-
-        if self.driver.poll_runtime()?.needs_section_upload {
-            self.driver
-                .upload_runtime_sections(frame.device, |elapsed| elapsed.as_secs_f64() * 1000.0)?;
-        }
-
-        let debug_stats = self.debug_pane_stats(self.driver.debug_diagnostics_visible);
-        let debug_view_readiness_overlay = debug_stats
-            .is_some()
-            .then(|| {
-                self.driver
-                    .runtime
-                    .as_ref()
-                    .and_then(WindowSceneRuntime::view_readiness_overlay)
-            })
-            .flatten();
-        let session_projection = self.driver.session_projection();
-        let hud = options
-            .hud
-            .then(|| self.current_flat_hud(session_projection.status_overlay.clone()));
-        let ui_frame = FlatClientUiFrame {
-            render_options: FlatClientUiRenderOptions {
-                render_distance: self
-                    .driver
-                    .current_render_distance(self.driver.scene.render_distance)
-                    as i32,
-                render_options: self.driver.render_options,
-                far_lod_enabled: self.driver.scene.far_lod.enabled,
-                far_lod_range_chunks: self.driver.scene.far_lod.extra_radius_chunks as i32,
-                frame_pacing: FramePacingUiState::default(),
-                movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
-                collision_mode: game_collision_mode(self.driver.camera.collision_mode()),
-                travel_assist_mode: self.driver.travel_assist_mode,
-                fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
-                movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
-                player_collision_box_visible: self.driver.player_collision_box_visible,
-                first_person_player_visible: self.driver.camera.first_person_player_visible(),
-                crosshair_visible: self.driver.crosshair_visible,
-                frame_pipeline_overlay_visible: self.driver.frame_pipeline_overlay_visible,
-                debug_diagnostics_visible: self.driver.debug_diagnostics_visible,
-                player_model: self.driver.player_model,
-                server_cadence: self.driver.server_simulation_cadence(),
-            },
-            block_palette: debug_block_palette_overlay(
-                &self.assets.mesh_assets.catalog,
-                self.driver.interaction.selected_hotbar_slot(),
-            ),
-            hud,
-            loading_progress_overlay: session_projection.loading_progress_overlay,
-            debug: FlatClientDebugFrame {
-                stats: debug_stats,
-                view_readiness_overlay: debug_view_readiness_overlay,
-            },
-        };
-        let render_start = Instant::now();
-        let summary = self.driver.render_full_frame_with_ui(
-            frame,
-            self.driver.scene.render_distance,
-            ui_frame,
-        )?;
-        self.driver.record_surface_frame_timing(
-            frame_start.elapsed().as_secs_f64() * 1000.0,
-            render_start.elapsed().as_secs_f64() * 1000.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        );
-        self.last_summary = Some(summary);
-        log::trace!(
-            "offscreen flat client rendered frame {} sections={} drawn_sections={}",
-            index,
-            summary.section_count,
-            summary.drawn_section_count
-        );
-        Ok(summary)
+        Ok(self
+            .driver
+            .render(frame, MonoUiPresentation::ScreenSpaceHud, options.hud)?
+            .render)
     }
 
-    fn current_flat_hud(&self, status_overlay: StatusOverlay) -> FlatHud {
-        let mut capabilities = InputCapabilities::NONE;
-        capabilities.keyboard = true;
-        capabilities.mouse = true;
-        let mut hud =
-            FlatHud::new(InputCapabilityState::new(capabilities).resolve(InputPreferences::AUTO));
-        let ui_active = self.driver.ui_is_active();
-        let palette_active = self.driver.ui_screen() == Some(GameScreen::BlockPalette);
-        hud.world_hud_visible = (!ui_active || palette_active) && self.driver.runtime.is_some();
-        hud.crosshair_visible =
-            self.driver.crosshair_visible && !ui_active && self.driver.runtime.is_some();
-        hud.hotbar = FlatHotbarOverlay::selected_with_icons(
-            self.driver.interaction.selected_hotbar_slot(),
-            debug_hotbar_icons(
-                self.driver.interaction.hotbar_items(),
-                &self.assets.mesh_assets.catalog,
-            ),
-        );
-        hud.status = status_overlay;
-        hud.frame_pipeline = self.driver.latest_frame_pipeline_overlay();
-        hud
-    }
-
-    pub(crate) fn apply_input_frame(
+    pub(crate) fn run_script(
         &mut self,
-        frame: FlatInputFrame,
-    ) -> Result<Vec<(FlatInputAction, FlatClientWorldActionStatus)>> {
-        if frame.open_menu {
-            self.driver.open_pause_menu();
-            self.driver.clear_camera_input();
-            return Ok(Vec::new());
-        }
-        if self.driver.ui_is_active() {
-            return Ok(Vec::new());
-        }
-
-        if let Some(slot) = frame.selected_hotbar_slot {
-            self.driver.select_hotbar_slot(slot);
-        }
-        if frame.hotbar_step != 0 {
-            self.driver.step_hotbar_slot(frame.hotbar_step);
-        }
-
-        let dt_seconds = self.clock.frame_ms / 1000.0;
-        if self.driver.apply_held_input_frame(frame, dt_seconds) {
-            self.driver.commit_player_pose_change()?;
-        }
-
-        let mut statuses = Vec::new();
-        if frame.attack {
-            statuses.push((
-                FlatInputAction::Attack,
-                self.driver.handle_world_action(FlatInputAction::Attack)?,
-            ));
-        }
-        if frame.use_item {
-            statuses.push((
-                FlatInputAction::Use,
-                self.driver.handle_world_action(FlatInputAction::Use)?,
-            ));
-        }
-        Ok(statuses)
-    }
-
-    pub(crate) fn apply_ui_pointer_click(
-        &mut self,
-        point: Point,
-    ) -> FlatClientUiPointerClickReport {
-        let fallback_remote_addr = self.driver.scene.remote_addr.clone();
-        let state = self.driver.current_ui_render_state(
-            FramePacingUiState::default(),
-            debug_block_palette_overlay(
-                &self.assets.mesh_assets.catalog,
-                self.driver.interaction.selected_hotbar_slot(),
-            ),
-        );
-        self.driver.commit_ui_render_state(state);
-        let mut report = self.driver.apply_ui_pointer_click(
-            point,
-            FlatClientUiActionContext {
-                session_starting: self.driver.session.is_starting(),
-                from_pointer_click: true,
-                fallback_remote_addr: fallback_remote_addr.as_deref(),
-            },
-        );
-        if let Some(result) = report.action_result.as_mut()
-            && let Some(plan) = result.session_start.take()
-        {
-            self.deferred_session_start = Some(plan);
-        }
-        report
-    }
-
-    fn start_session_plan(
-        &mut self,
+        script: &OffscreenScript,
         device: &wgpu::Device,
-        plan: FlatClientSessionStartPlan,
-    ) -> Result<crate::flat_client_driver::FlatClientSessionUpdate> {
-        if plan.transition.teardown_world {
-            self.driver.teardown_world(Some(device))?;
-        }
-        let assets = &self.assets;
-        Ok(self.driver.start_session_plan(plan, Some(device), |scene| {
-            WindowSceneStartupPump::from_scene(scene, assets)
-        }))
-    }
-
-    pub(crate) fn run_script(&mut self, script: &OffscreenScript) -> Result<OffscreenScriptReport> {
+        queue: &wgpu::Queue,
+    ) -> Result<OffscreenScriptReport> {
         let mut report = OffscreenScriptReport::default();
         for step in &script.steps {
             match *step {
                 OffscreenScriptStep::SetCameraLookAt { eye, target } => {
                     self.set_camera_look_at(eye, target);
+                    self.driver.commit_camera()?;
                 }
                 OffscreenScriptStep::InputFrame {
                     frame,
                     require_changed_action,
                 } => {
                     report.input_frame_count += 1;
-                    let statuses = self.apply_input_frame(frame)?;
+                    let statuses = self.driver.apply_input_frame(frame)?;
                     report.world_action_count += statuses.len();
                     if let Some(action) = require_changed_action {
                         require_world_action_changed(
@@ -536,19 +181,17 @@ impl OffscreenFlatClientHost {
                     require_action,
                 } => {
                     report.ui_pointer_click_count += 1;
-                    let click = self.apply_ui_pointer_click(point);
-                    if click.action.is_some() {
-                        report.ui_action_count += 1;
-                    }
-                    if let Some(action) = require_action
-                        && click.action != Some(action)
+                    let action = self.driver.apply_ui_pointer_click(point, device, queue)?;
+                    report.ui_action_count += usize::from(action.is_some());
+                    if let Some(required) = require_action
+                        && action != Some(required)
                     {
                         bail!(
                             "offscreen script UI pointer click at ({:.1}, {:.1}) emitted {:?}, expected {:?}",
                             point.x,
                             point.y,
-                            click.action,
-                            action
+                            action,
+                            required
                         );
                     }
                 }
@@ -557,75 +200,32 @@ impl OffscreenFlatClientHost {
         Ok(report)
     }
 
-    fn debug_pane_stats(&self, enabled: bool) -> Option<DebugPaneStats> {
-        if !enabled {
-            return None;
-        }
-        let runtime = self.driver.runtime.as_ref()?;
-        let frame_state = self.driver.camera.frame_state(&self.driver.interaction);
-        Some(DebugPaneStats {
-            position: self.driver.spectator.position,
-            speed: self.driver.spectator.speed,
-            movement_mode: format!(
-                "{}/{}",
-                frame_state.movement_mode_label(),
-                frame_state.collision_mode_label()
-            ),
-            on_ground: self.driver.camera.on_ground(),
-            seed: self.driver.scene.seed,
-            runtime: runtime.stats(),
-            render: self.driver.render_stats,
-            frame: self.driver.frame_timing,
-            pacing: FramePacingDebugStats::default(),
-            section_occlusion: self.driver.render_options.section_occlusion_culling,
-            force_fullbright: self.driver.render_options.force_fullbright,
-            color_profile: self.driver.render_options.color_profile.label(),
-            render_scale: self.driver.current_render_scale(DEFAULT_RENDER_SCALE),
-        })
-    }
-
-    fn require_uploaded_sections(&self) -> Result<()> {
-        if self.driver.render_stats.section_count == 0 {
-            bail!(
-                "offscreen flat client seed={} center=({}, {}) render_distance={} produced no render sections",
-                self.driver.scene.seed,
-                self.driver.scene.chunk_x,
-                self.driver.scene.chunk_z,
-                self.driver.scene.render_distance
-            );
-        }
-        Ok(())
-    }
-
     fn force_day_time(&mut self, day_time: u64) {
-        if let Some(runtime) = &mut self.driver.runtime {
-            runtime.force_day_time(day_time);
-        }
+        self.driver.host_mut().force_mono_day_time(day_time);
     }
 
     fn settle_remote_session(&mut self, remote_settle_ms: u64) -> Result<()> {
-        if remote_settle_ms == 0 {
+        if remote_settle_ms == 0
+            || !self
+                .driver
+                .host()
+                .mono_client()
+                .is_some_and(|client| client.host() == ClientHost::RemoteDedicated)
+        {
             return Ok(());
         }
-        let Some(runtime) = &mut self.driver.runtime else {
-            return Ok(());
-        };
-        if runtime.client().host() != ClientHost::RemoteDedicated {
-            return Ok(());
-        }
-
         std::thread::sleep(Duration::from_millis(remote_settle_ms));
-        runtime
-            .send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
-                on_ground: false,
-            }))
-            .context("failed to poll remote offscreen session after settle delay")?;
+        self.driver.commit_camera()?;
         Ok(())
     }
 
-    fn apply_scripted_interaction(&mut self) -> Result<()> {
+    fn apply_scripted_interaction(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
         let target = self.scripted_interaction_target()?;
-        let report = self.run_script(&scripted_interaction_script(target))?;
+        let report = self.run_script(&scripted_interaction_script(target), device, queue)?;
         if report.input_frame_count != 2 || report.world_action_count != 1 {
             bail!(
                 "scripted interaction expected 2 input frames and 1 world action, got {} input frames and {} world actions",
@@ -637,20 +237,21 @@ impl OffscreenFlatClientHost {
     }
 
     fn scripted_interaction_target(&self) -> Result<ScriptedInteractionTarget> {
-        let runtime = self
-            .driver
-            .runtime
-            .as_ref()
+        self.driver
+            .host()
+            .mono_client()
             .context("offscreen scripted interaction requires an active runtime")?;
-        let (base_x, base_z) = self.driver.spectator.block_column();
-        if let Some(target) = clear_scripted_interaction_target(runtime, base_x, base_z) {
+        let (base_x, base_z) = self.camera.block_column();
+        if let Some(target) = clear_scripted_interaction_target(self.driver.host(), base_x, base_z)
+        {
             return Ok(target);
         }
-
         let fallback_x = base_x;
         let fallback_z = base_z + 4;
-        let surface_y = runtime
-            .highest_non_air_block_y_at_world(fallback_x, fallback_z)
+        let surface_y = self
+            .driver
+            .host()
+            .mono_highest_non_air_block_y_at_world(fallback_x, fallback_z)
             .with_context(|| {
                 format!(
                     "no loaded surface for scripted interaction at ({fallback_x}, {fallback_z})"
@@ -664,93 +265,22 @@ impl OffscreenFlatClientHost {
     }
 
     fn frame_first_actor(&mut self) {
-        let mut spectator = self.driver.spectator.clone();
-        if let Some(runtime) = self.driver.runtime.as_ref() {
-            frame_first_actor(runtime, &mut spectator);
-        }
-        self.driver.set_spectator_camera(
-            spectator,
-            self.driver.scene.movement_speed_multiplier,
-            self.driver.scene.first_person_player_visible,
-        );
+        let Some(client) = self.driver.host().mono_client() else {
+            return;
+        };
+        frame_first_actor(client, &mut self.camera);
+        self.driver.set_camera(&self.camera);
     }
 
     fn set_eye_override(&mut self, eye: [f32; 3]) {
-        self.set_camera_position(Vec3::from_array(eye));
-    }
-
-    fn set_camera_position(&mut self, position: Vec3) {
-        let mut spectator = self.driver.spectator.clone();
-        spectator.position = position;
-        self.driver.set_spectator_camera(
-            spectator,
-            self.driver.scene.movement_speed_multiplier,
-            self.driver.scene.first_person_player_visible,
-        );
+        self.camera.position = Vec3::from_array(eye);
+        self.driver.set_camera(&self.camera);
     }
 
     fn set_camera_look_at(&mut self, eye: Vec3, target: Vec3) {
-        let mut spectator = self.driver.spectator.clone();
-        aim_spectator_at(&mut spectator, eye, target);
-        self.driver.set_spectator_camera(
-            spectator,
-            self.driver.scene.movement_speed_multiplier,
-            self.driver.scene.first_person_player_visible,
-        );
+        aim_spectator_at(&mut self.camera, eye, target);
+        self.driver.set_camera(&self.camera);
     }
-}
-
-fn clear_scripted_interaction_target(
-    runtime: &WindowSceneRuntime,
-    base_x: i32,
-    base_z: i32,
-) -> Option<ScriptedInteractionTarget> {
-    const X_OFFSETS: [i32; 7] = [0, -1, 1, -2, 2, -3, 3];
-    for dz in 3..=10 {
-        for dx in X_OFFSETS {
-            let x = base_x + dx;
-            let z = base_z + dz;
-            let Some(y) = runtime.highest_non_air_block_y_at_world(x, z) else {
-                continue;
-            };
-            if is_clear_torch_surface(runtime, x, y, z) {
-                return Some(ScriptedInteractionTarget { x, y, z });
-            }
-        }
-    }
-    None
-}
-
-fn loading_progress_overlay_has_visible_status(progress: Option<LoadingProgressOverlay>) -> bool {
-    progress.is_some_and(|progress| {
-        progress.cells.iter().any(|cell| {
-            matches!(
-                cell.status,
-                LoadingProgressCellStatus::Features
-                    | LoadingProgressCellStatus::Light
-                    | LoadingProgressCellStatus::TargetReady
-            )
-        })
-    })
-}
-
-fn is_clear_torch_surface(runtime: &WindowSceneRuntime, x: i32, y: i32, z: i32) -> bool {
-    let pos = BlockPos::new(x, y, z);
-    let above = pos.relative(mclone_core::Direction::Up);
-    let headroom = above.relative(mclone_core::Direction::Up);
-    let Some(surface) = runtime.client().block_state_at_block_pos(pos) else {
-        return false;
-    };
-    is_screenshot_surface_support(surface)
-        && runtime.client().block_state_at_block_pos(above) == Some(AIR_BLOCK_STATE_ID)
-        && runtime.client().block_state_at_block_pos(headroom) == Some(AIR_BLOCK_STATE_ID)
-}
-
-fn is_screenshot_surface_support(state: BlockStateId) -> bool {
-    matches!(
-        state.0,
-        1 | 4 | 5 | 6 | 7 | 13 | 14 | 15 | 33 | 34 | 38 | 40 | 52 | 53 | 88
-    )
 }
 
 pub(crate) fn run_offscreen_flat_client_screenshot(
@@ -761,6 +291,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let startup_wait = options.startup_wait;
+    let startup_camera = screenshot_startup_camera(&scene, startup_wait);
     let frame_count = if options.frame_pipeline_overlay {
         startup_wait.offscreen_capture_frame_count().max(2)
     } else {
@@ -781,22 +312,16 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 size,
                 &scene,
                 render_options,
-                assets,
-                asset_source,
+                &assets,
+                &asset_source,
+                startup_camera,
             )?;
-            host.start_scene_with_wait_policy(device, scene.clone(), startup_wait)?;
-            configure_screenshot_scene(&mut host, options)?;
+            host.start_scene_with_wait_policy(device, queue, startup_wait)?;
+            configure_screenshot_scene(&mut host, options, device, queue)?;
             Ok(host)
         },
-        |index, frame, host| {
-            host.render_frame(
-                index,
-                frame,
-                OffscreenFlatClientFrameOptions {
-                    debug_pane: options.debug_pane,
-                    hud: options.hud,
-                },
-            )?;
+        |_index, frame, host| {
+            host.render_frame(frame, OffscreenFlatClientFrameOptions { hud: options.hud })?;
             Ok(())
         },
     )?;
@@ -806,18 +331,14 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         .context("offscreen flat client screenshot produced no captured frame")?;
     save_rgba_png(&options.path, loop_report.width, loop_report.height, pixels)?;
     let summary = host
-        .last_summary
-        .context("offscreen flat client screenshot rendered no frame summary")?;
-    let remote_player_count = host
         .driver
-        .runtime
-        .as_ref()
-        .map_or(0, |runtime| runtime.client().remote_player_count());
-    let remote_actor_presentations = host
-        .driver
-        .runtime
-        .as_ref()
-        .map_or_else(Vec::new, |runtime| runtime.client().actor_presentations());
+        .last_summary()
+        .context("offscreen flat client screenshot rendered no frame summary")?
+        .render;
+    let client = host.driver.host().mono_client();
+    let remote_player_count = client.map_or(0, ClientRuntime::remote_player_count);
+    let remote_actor_presentations =
+        client.map_or_else(Vec::new, ClientRuntime::actor_presentations);
     let remote_actor_figures = remote_actor_presentations
         .iter()
         .filter_map(|actor| {
@@ -833,12 +354,8 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 .then_some(actor.walk_animation_distance)
         })
         .collect();
-    let entity_count = host
-        .driver
-        .runtime
-        .as_ref()
-        .map_or(0, |runtime| runtime.client().entity_count());
-    let underwater = host.underwater();
+    let entity_count = client.map_or(0, ClientRuntime::entity_count);
+    let underwater = host.driver.host().mono_underwater();
 
     Ok(OffscreenFlatClientScreenshotReport {
         path: options.path.clone(),
@@ -854,74 +371,138 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     })
 }
 
+fn screenshot_startup_camera(
+    scene: &SceneOptions,
+    startup_wait: StartupWaitPolicy,
+) -> SpectatorCamera {
+    if scene.remote_addr.is_some() || matches!(startup_wait, StartupWaitPolicy::Idle) {
+        return SpectatorCamera::spawn_for_scene(scene);
+    }
+    let spawn = initial_spawn_center_for_seed(scene.seed);
+    let mut startup_scene = scene.clone();
+    startup_scene.chunk_x = spawn.x;
+    startup_scene.chunk_z = spawn.z;
+    SpectatorCamera::spawn_for_scene(&startup_scene)
+}
+
 fn configure_screenshot_scene(
     host: &mut OffscreenFlatClientHost,
     options: &HeadlessScreenshotOptions,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
 ) -> Result<()> {
     if matches!(
         options.ui,
         HeadlessScreenshotUi::NewWorld | HeadlessScreenshotUi::WorldCreate
     ) {
-        host.driver.set_new_world_seed(options.scene.seed);
+        host.driver
+            .host_mut()
+            .set_mono_new_world_seed(options.scene.seed);
     }
-    host.driver.set_ui_screen(options.ui.game_screen());
+    host.driver
+        .host_mut()
+        .set_mono_ui_screen(options.ui.game_screen());
     if let Some(day_time) = options.scene.day_time_override {
         host.force_day_time(day_time);
     }
     host.settle_remote_session(options.remote_settle_ms)?;
     if options.scripted_interaction {
-        host.apply_scripted_interaction()?;
-    }
-    if !options.scripted_interaction {
+        host.apply_scripted_interaction(device, queue)?;
+    } else {
         host.frame_first_actor();
     }
     if let Some(eye) = options.eye {
         host.set_eye_override(eye);
     }
     if let Some(target) = options.target {
-        let eye = host.driver.spectator.position;
-        host.set_camera_look_at(eye, Vec3::from_array(target));
+        host.set_camera_look_at(host.camera.position, Vec3::from_array(target));
     }
-    host.driver.player_collision_box_visible = options.player_collision_box;
-    host.driver.frame_pipeline_overlay_visible = options.frame_pipeline_overlay;
-    host.driver.debug_diagnostics_visible = options.debug_pane;
-    host.driver.camera.set_view_mode(options.camera_view);
+    host.driver
+        .host_mut()
+        .set_mono_player_collision_box_visible(options.player_collision_box);
+    host.driver
+        .host_mut()
+        .set_mono_frame_pipeline_overlay_visible(options.frame_pipeline_overlay);
+    host.driver
+        .host_mut()
+        .set_mono_debug_diagnostics_visible(options.debug_pane);
+    host.driver
+        .host_mut()
+        .set_mono_camera_view(options.camera_view);
     if options.blink_debug {
-        if !host.driver.begin_desktop_blink_debug() {
+        host.driver
+            .host_mut()
+            .set_mono_travel_assist_mode(GameTravelAssistMode::Blink);
+        if !host.driver.host_mut().begin_mono_blink_debug() {
             bail!("offscreen Blink debug preview requires an active runtime");
         }
-        if !host
-            .driver
-            .wait_for_desktop_blink_debug_preview(OFFSCREEN_BLINK_DEBUG_PREVIEW_TIMEOUT)
-        {
-            bail!("offscreen Blink debug preview worker timed out");
+        let start = std::time::Instant::now();
+        while !host.driver.host().mono_blink_preview_ready() {
+            host.driver.host_mut().update_mono_blink_debug();
+            if start.elapsed() >= OFFSCREEN_BLINK_DEBUG_PREVIEW_TIMEOUT {
+                bail!("offscreen Blink debug preview worker timed out");
+            }
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
     Ok(())
 }
 
-impl OffscreenFlatClientHost {
-    fn underwater(&self) -> bool {
-        self.driver.runtime.as_ref().is_some_and(|runtime| {
-            runtime.camera_inside_water(self.driver.camera_view().render_eye)
-        })
+fn clear_scripted_interaction_target(
+    host: &crate::desktop_scene_host::DesktopMonoSceneHost,
+    base_x: i32,
+    base_z: i32,
+) -> Option<ScriptedInteractionTarget> {
+    let client = host.mono_client()?;
+    const X_OFFSETS: [i32; 7] = [0, -1, 1, -2, 2, -3, 3];
+    for dz in 3..=10 {
+        for dx in X_OFFSETS {
+            let x = base_x + dx;
+            let z = base_z + dz;
+            let Some(y) = host.mono_highest_non_air_block_y_at_world(x, z) else {
+                continue;
+            };
+            if is_clear_torch_surface(client, x, y, z) {
+                return Some(ScriptedInteractionTarget { x, y, z });
+            }
+        }
     }
+    None
 }
 
-fn frame_first_actor(runtime: &WindowSceneRuntime, spectator: &mut SpectatorCamera) {
-    let Some(actor) = runtime.client().actor_presentations().first().copied() else {
+fn is_clear_torch_surface(client: &ClientRuntime, x: i32, y: i32, z: i32) -> bool {
+    let pos = BlockPos::new(x, y, z);
+    let above = pos.relative(mclone_core::Direction::Up);
+    let headroom = above.relative(mclone_core::Direction::Up);
+    let Some(surface) = client.block_state_at_block_pos(pos) else {
+        return false;
+    };
+    is_screenshot_surface_support(surface)
+        && client.block_state_at_block_pos(above) == Some(AIR_BLOCK_STATE_ID)
+        && client.block_state_at_block_pos(headroom) == Some(AIR_BLOCK_STATE_ID)
+}
+
+fn is_screenshot_surface_support(state: BlockStateId) -> bool {
+    matches!(
+        state.0,
+        1 | 4 | 5 | 6 | 7 | 13 | 14 | 15 | 33 | 34 | 38 | 40 | 52 | 53 | 88
+    )
+}
+
+fn frame_first_actor(client: &ClientRuntime, spectator: &mut SpectatorCamera) {
+    let Some(actor) = client.actor_presentations().first().copied() else {
         return;
     };
-    let target = glam::Vec3::new(
+    let target = Vec3::new(
         actor.feet_position.x as f32,
         actor.feet_position.y as f32 + 1.0,
         actor.feet_position.z as f32,
     );
-    let eye = target + glam::Vec3::new(-2.2, 1.4, -4.8);
+    let eye = target + Vec3::new(-2.2, 1.4, -4.8);
     aim_spectator_at(spectator, eye, target);
 }
 
-fn aim_spectator_at(spectator: &mut SpectatorCamera, eye: glam::Vec3, target: glam::Vec3) {
+fn aim_spectator_at(spectator: &mut SpectatorCamera, eye: Vec3, target: Vec3) {
     let direction = target - eye;
     let Some(direction) = direction.try_normalize() else {
         return;
@@ -995,7 +576,7 @@ fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenSc
 }
 
 fn require_world_action_changed(
-    statuses: &[(FlatInputAction, FlatClientWorldActionStatus)],
+    statuses: &[(FlatInputAction, MonoWorldActionStatus)],
     action: FlatInputAction,
     label: &str,
 ) -> Result<()> {
@@ -1006,13 +587,13 @@ fn require_world_action_changed(
         bail!("{label} did not run");
     };
     match status {
-        FlatClientWorldActionStatus::Sent { changed: true, .. } => Ok(()),
-        FlatClientWorldActionStatus::Sent { changed: false, .. } => {
+        MonoWorldActionStatus::Sent { changed: true, .. } => Ok(()),
+        MonoWorldActionStatus::Sent { changed: false, .. } => {
             bail!("{label} sent a command but reported no world change")
         }
-        FlatClientWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
-        FlatClientWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
-        FlatClientWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),
+        MonoWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
+        MonoWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
+        MonoWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),
     }
 }
 

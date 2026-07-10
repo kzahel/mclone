@@ -57,6 +57,12 @@ features from re-forking.
 > Android XR both use the shared `mclone-xr-scene` multiview underwater path,
 > and user device validation says it works pretty well; flat Android and
 > web/WASM still need app-lane wiring.
+> Refreshed on 2026-07-10 after tactical 168 Slices 7c/7d moved both the live
+> desktop redraw path and all native offscreen/screenshot/timedemo/perf lanes
+> onto the shared `mclone-scene` Mono host. `FlatClientDriver` is deleted;
+> desktop/offscreen app code now owns only platform targets, cadence, raw input,
+> CLI scenarios, and report/frame sinks. Non-default desktop render scale keeps
+> world pixels scaled while composing host-owned UI at native output resolution.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -201,10 +207,10 @@ use (and should) · — n/a.
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
-The reuse story in one line: **desktop flat, current offscreen screenshot host,
-flat Android, desktop XR, and Android XR now share the native scene shells; web
-still carries the important runtime/render fork, and offscreen still lacks a
-long-lived no-window flat-client host.**
+The reuse story in one line: **desktop flat, offscreen/screenshot/perf, desktop
+XR, and Android XR now share `mclone-scene`; flat Android is the next native
+host migration, web still carries the important runtime/render fork, and
+offscreen still lacks an exposed long-lived source/sink mode.**
 Concretely:
 
 - The native flat single-view scene driver is shared:
@@ -212,19 +218,16 @@ Concretely:
   `NativeSingleViewSceneRuntime<S>`, while concrete TCP/property/config remains
   in the app crates. This landed in
   [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md).
-- The offscreen path currently gets shared scene/runtime facts through the same
-  native-client wrapper, and `run_headless_screenshot` now runs as a one-frame
-  `OffscreenFlatClientHost` capture around `FlatClientDriver`. That shares
-  render-resource rebuild, section upload, frame-input preparation, full-frame
-  render dispatch, `GameUi` ownership, a deterministic offscreen frame clock,
-  neutral `FlatInputFrame` attack/use for scripted screenshots, and
-  host-neutral menu/session/startup routing with desktop flat. It still lacks an
-  exposed long-lived offscreen client mode. Broader input lifetime and non-PNG
-  frame sinks still need to wrap that host before offscreen can behave as a real
-  no-window client rather than a one-shot screenshot scenario.
-  Tactical
-  [`105-offscreen-flat-client-host.md`](../tactical/105-offscreen-flat-client-host.md)
-  tracks the remaining long-lived no-window flat client work.
+- `OffscreenDriver` and `WinitFrameDriver` now drive the same Mono scene host.
+  Screenshot/script input, dual-view, timedemo, startup-streaming,
+  frame-budget, and movement-frame therefore share runtime polling, section
+  admission/upload, frame-input assembly, actors, `GameUi`, and full-frame
+  composition. The remaining offscreen work is an exposed long-lived
+  input-source/frame-sink mode (non-PNG sinks and backpressure), not another
+  client or renderer. Tactical
+  [`168`](../tactical/168-unified-native-scene-host.md) records the migration;
+  [`105`](../tactical/105-offscreen-flat-client-host.md) remains the original
+  product target.
 - The XR scene-driver fork is closed:
   `XrMcloneTerrainState<S>` composes `NativeSingleViewSessionRuntime<S>` around
   the shared native scene runtime, desktop XR passes the desktop TCP

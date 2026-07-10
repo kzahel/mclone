@@ -1489,6 +1489,7 @@ impl ApplicationHandler for ChunkApp {
                     pacing_debug: self.frame_pacing.debug_stats(),
                     frame_timing: self.frame_timing,
                     render_scale: self.current_render_scale(),
+                    hud_visible: true,
                 };
                 let render_start = Instant::now();
                 let mut scene_summary = None;

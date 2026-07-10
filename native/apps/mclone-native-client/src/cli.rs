@@ -13,6 +13,7 @@ use mclone_app_runtime::startup_args::{
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render_session::{ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, EngineCameraViewMode};
 use mclone_server::{DEFAULT_LIGHT_STATUS_BATCH_SIZE, SimulationCadenceConfig};
+use mclone_ui::{GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScreen};
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
 use crate::render_compile_capacity::{
@@ -383,6 +384,52 @@ pub(crate) enum HeadlessScreenshotUi {
     OptionsDisplayPause,
     OptionsDebugPause,
     ServerSettingsPause,
+}
+
+impl HeadlessScreenshotUi {
+    pub(crate) fn game_screen(self) -> Option<GameScreen> {
+        match self {
+            Self::None => None,
+            Self::Title => Some(GameScreen::Title),
+            Self::WorldList => Some(GameScreen::WorldList),
+            Self::WorldCreate => Some(GameScreen::WorldCreate),
+            Self::WorldDeleteConfirm => Some(GameScreen::WorldDeleteConfirm {
+                id: mclone_ui::WorldCatalogUiWorldId(0),
+            }),
+            Self::NewWorld => Some(GameScreen::NewWorld),
+            Self::JoinRemote => Some(GameScreen::JoinRemote),
+            Self::Pause => Some(GameScreen::Pause),
+            Self::Help => Some(GameScreen::Help {
+                parent: GameHelpParent::Game,
+            }),
+            Self::BlockPalette => Some(GameScreen::BlockPalette),
+            Self::OptionsTitle => Some(GameScreen::Options {
+                parent: GameOptionsParent::Title,
+            }),
+            Self::OptionsPause => Some(GameScreen::Options {
+                parent: GameOptionsParent::Pause,
+            }),
+            Self::OptionsGraphicsPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Graphics,
+            }),
+            Self::OptionsMovementPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Movement,
+            }),
+            Self::OptionsDisplayPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Display,
+            }),
+            Self::OptionsDebugPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::Debug,
+            }),
+            Self::ServerSettingsPause => Some(GameScreen::ServerSettings {
+                parent: GameOptionsParent::Pause,
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

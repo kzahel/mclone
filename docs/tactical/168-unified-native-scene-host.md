@@ -10,7 +10,9 @@ landed 2026-07-10; Slice 6 (shared adaptive render admission) landed
 2026-07-10; Slice 7a (shared effects/`HostEffects` and frame-pacing/debug POD
 promotion) landed 2026-07-10; Slice 7b (shared session-start planning and
 native remote-session adapter) landed 2026-07-10; Slice 7c (desktop live
-per-frame loop onto the shared Mono host) landed 2026-07-10. (Slices 0–2 are
+per-frame loop onto the shared Mono host) landed 2026-07-10; Slice 7d
+(offscreen, screenshot, timedemo, and perf harnesses onto the shared Mono
+host) landed 2026-07-10. (Slices 0–2 are
 independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
 Post-Slice-3
 review corrections landed
@@ -1103,17 +1105,52 @@ Recommended sub-slice order:
   timedemo, frame-budget, and two-client remote smokes; Quest new-world
   replacement ready; desktop WiVRn 120-frame smoke.
 
-  Open follow-up for 7d: non-default desktop render scale currently renders
-  the screen-space HUD/menu into the scaled world target before presentation.
-  Preserve the single host-owned UI assembly, but split world resolution from
-  output-resolution UI composition so F9 keeps crisp native-resolution UI and
-  its hit coordinates remain explicitly locked by a regression.
-- **7d — Harnesses.** CLI `--screenshot`, timedemo, frame-budget/movement
-  probes, and `perf.rs` consumers repoint at the host through the Slice 3
+  Follow-up closed in 7d: non-default desktop render scale now presents the
+  scaled world first and composes host-owned HUD/menu pixels at native output
+  resolution, with size-split regressions for scaled and unscaled paths.
+- **7d — Harnesses. [LANDED 2026-07-10]** CLI `--screenshot`, timedemo,
+  frame-budget/movement probes, and `perf.rs` consumers repoint at the host
+  through the Slice 3
   `OffscreenDriver`; `offscreen_flat_client.rs` is deleted or reduced to a
   thin driver instantiation. `perf.rs` is large (~4,900 lines) — it keeps
   measuring the same stages via the hooks that moved in Slices 5/6; budget
   extra time here.
+
+  Landed shape: `OffscreenDriver` is the one native no-surface cadence/target
+  driver over the Mono host. Screenshot/script input, dual-view capture,
+  timedemo, startup-streaming, frame-budget, and movement-frame all use it;
+  their former poll/sync/upload/frame-input copies are gone. The 3,619-line
+  `flat_client_driver.rs` and its test-only `ui.rs` companion are deleted.
+  `offscreen_flat_client.rs` is now scenario/script/PNG glue over the shared
+  host, with no deferred session-start slot or render orchestration.
+
+  The 7c render-scale follow-up is closed: scaled winit frames render the
+  world to the scaled target, present it, then ask the same host to compose
+  screen-space UI at native output resolution. Regression tests lock the
+  world/UI size split at both scaled and unscaled resolutions. Desktop Mono
+  construction also now distinguishes requested desktop scene centers from
+  XR's initial-spawn-center policy; this preserved the screenshot camera,
+  passive actors, and pixel composition during the migration.
+
+  Validation: 148 native-client, 194 app-runtime, 126 render, and 92 scene
+  tests; workspace, desktop-XR feature, and web/WASM checks; host-purity and
+  no-app-orchestration tripwires; flat Android and Android XR APK builds;
+  desktop offscreen, timedemo, frame-budget, and movement-frame smokes. The
+  1280x800 HUD/debug screenshot retained its pre-slice 64/11 section counts,
+  397 GUI commands, and 2/2 visible actors and was visually inspected with
+  the dual-view pair. Timedemo and both frame-probe JSON schemas are identical
+  to the pre-slice captures; the 60-frame probes had zero over-budget or
+  accounting-conservation violations.
+
+  Open follow-up: timedemo now measures the shared host's drawable target and
+  resident GPU set instead of the retired static helper's extra tracking-halo
+  batch. Its schema is stable, but the numeric baseline intentionally moved
+  (debug 60-frame sample: 1,936 resident CPU sections / 664 drawable GPU
+  sections versus the old 2,704 / 965 static batch). Capture and pin a fresh
+  release-mode timedemo baseline before using old numeric thresholds. The
+  broader old `WindowSceneRuntime` compatibility/test surface is no longer a
+  frame consumer; prune it in Slice 10 rather than mixing that mechanical
+  cleanup into 7d.
 - **7e — Camera-reconcile timed fork.** Shared
   `mclone_app_runtime::camera_reconcile` grows optional timing output;
   delete the `*_for_runtime_timed` fork
@@ -1430,10 +1467,8 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 7d; Slices 0–7c are implemented. Repoint screenshot,
-timedemo, frame-budget/movement, and remaining perf consumers through the
-Slice 3 `OffscreenDriver` and shared Mono host, then delete
-`FlatClientDriver`/its deferred session staging. Preserve the current harness
-outputs and accounting stage meanings, and resolve the render-scale
-world/output-resolution UI composition follow-up recorded under 7c. Do not
-move diagnostics, session policy, or render admission back into a harness.
+Start with Slice 7e; Slices 0–7d are implemented. Add optional timing output
+to shared camera reconciliation and delete the scene-local timed fork without
+changing camera or XR behavior. Keep the 7d harnesses on `OffscreenDriver`;
+do not reintroduce app-local polling, section upload, diagnostics, session
+policy, or render admission.

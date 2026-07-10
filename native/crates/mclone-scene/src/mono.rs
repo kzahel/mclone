@@ -49,6 +49,7 @@ pub struct MonoUiContext {
     pub pacing_debug: FramePacingDebugStats,
     pub frame_timing: FrameTimingStats,
     pub render_scale: f32,
+    pub hud_visible: bool,
 }
 
 impl Default for MonoUiContext {
@@ -66,6 +67,7 @@ impl Default for MonoUiContext {
             pacing_debug: FramePacingDebugStats::default(),
             frame_timing: FrameTimingStats::default(),
             render_scale: 1.0,
+            hud_visible: true,
         }
     }
 }
@@ -232,6 +234,107 @@ where
         self.runtime
             .as_ref()
             .map(|runtime| runtime.last_poll_diagnostics())
+    }
+
+    pub fn mono_client(&self) -> Option<&mclone_client::ClientRuntime> {
+        self.runtime.as_ref().map(|runtime| runtime.client())
+    }
+
+    pub fn mono_highest_non_air_block_y_at_world(&self, world_x: i32, world_z: i32) -> Option<i32> {
+        self.runtime
+            .as_ref()?
+            .highest_non_air_block_y_at_world(world_x, world_z)
+    }
+
+    pub fn mono_view_readiness_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.runtime
+            .as_ref()
+            .and_then(|runtime| runtime.view_readiness_overlay())
+    }
+
+    pub fn mono_target_render_work_stats(
+        &self,
+        camera_position: Vec3,
+    ) -> mclone_app_runtime::TargetRenderWorkStats {
+        self.runtime.as_ref().map_or_else(
+            mclone_app_runtime::TargetRenderWorkStats::default,
+            |runtime| runtime.target_render_work_stats(camera_position),
+        )
+    }
+
+    pub fn mono_render_vertex_count(&self) -> u32 {
+        self.draw.vertex_count()
+    }
+
+    pub fn force_mono_day_time(&mut self, day_time: u64) {
+        if let Some(runtime) = &mut self.runtime {
+            runtime.force_day_time(day_time);
+        }
+    }
+
+    pub fn set_mono_capture_camera(
+        &mut self,
+        eye: Vec3d,
+        yaw_radians: f64,
+        pitch_radians: f64,
+        speed_blocks_per_second: f64,
+    ) {
+        let mut camera = EngineCameraController::from_eye_pose(
+            eye,
+            yaw_radians,
+            pitch_radians,
+            speed_blocks_per_second,
+        );
+        camera.set_movement_speed_multiplier(f64::from(self.scene.movement_speed_multiplier));
+        camera.set_first_person_player_visible(self.scene.first_person_player_visible);
+        camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+        self.camera = camera;
+    }
+
+    pub fn set_mono_camera_view(&mut self, view_mode: EngineCameraViewMode) {
+        self.camera.set_view_mode(view_mode);
+    }
+
+    pub fn set_mono_ui_screen(&mut self, screen: Option<GameScreen>) {
+        self.ui.set_screen(screen);
+    }
+
+    pub fn set_mono_new_world_seed(&mut self, seed: i64) {
+        self.ui.set_new_world_seed(seed);
+    }
+
+    pub fn set_mono_player_collision_box_visible(&mut self, visible: bool) {
+        self.player_collision_box_visible = visible;
+    }
+
+    pub fn set_mono_frame_pipeline_overlay_visible(&mut self, visible: bool) {
+        self.diagnostic_panel.set_frame_metrics_visible(visible);
+    }
+
+    pub fn set_mono_debug_diagnostics_visible(&mut self, visible: bool) {
+        self.diagnostic_panel.set_debug_diagnostics_visible(visible);
+    }
+
+    pub fn set_mono_travel_assist_mode(&mut self, mode: GameTravelAssistMode) {
+        self.travel_assist_mode = mode;
+        if mode != GameTravelAssistMode::Blink {
+            self.clear_mono_blink_debug();
+        }
+    }
+
+    pub fn mono_blink_preview_ready(&self) -> bool {
+        self.mono_blink_debug.preview.is_some()
+    }
+
+    pub fn mono_loading_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.session_projection().loading_progress_overlay
+    }
+
+    pub fn mono_underwater(&self) -> bool {
+        let snapshot = self.camera.snapshot();
+        self.runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.camera_inside_water(glam_vec3_from_vec3d(snapshot.eye)))
     }
 
     pub fn current_render_distance(&self) -> u32 {
@@ -794,6 +897,22 @@ where
             .render)
     }
 
+    pub fn render_mono_scene_frame_frozen(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        depth: &ChunkDepthTarget,
+        render_view: ChunkRenderView,
+        ui: MonoUiPresentation,
+    ) -> Result<MonoSceneFrameSummary> {
+        self.render_mono_frame_inner(
+            frame,
+            depth,
+            render_view,
+            ui,
+            XrTerrainRuntimeUpdateMode::Frozen,
+        )
+    }
+
     /// Whether the local-world startup pump has finished promoting into a live
     /// runtime. Non-blocking; drivers own the drive-to-ready loop (Web posture
     /// rule: blocking convenience loops live in native drivers, not the host).
@@ -866,11 +985,12 @@ where
         let actor_instances = self.current_actor_instances();
 
         let gui_scale = GuiScale::from_pixels(target.size[0], target.size[1]);
-        let (full_frame_gui, gui_draw) = self.mono_gui_frame(gui_scale, ui);
+        let (full_frame_gui, gui_draw, hud_cache) = self.mono_gui_frame(gui_scale, ui);
         if matches!(ui, MonoUiPresentation::ScreenSpaceHud) {
             self.ensure_mono_gui(device, queue)?;
         }
 
+        let render_start = Instant::now();
         let far_lod_config = self.scene.far_lod;
         let far_lod_seed = self.scene.seed;
         let far_lod_center = self.camera.snapshot().chunk_pos;
@@ -951,6 +1071,7 @@ where
         }
 
         summary.gui_command_count = gui_draw.commands().len();
+        summary.flat_hud_retained_cache = hud_cache;
         if full_frame_gui.active {
             self.mono_gui
                 .as_mut()
@@ -970,6 +1091,7 @@ where
                 )
                 .context("render Mono screen-space UI")?;
         }
+        timing.render_views_ms = elapsed_ms(render_start.elapsed());
 
         self.render_stats = render_stats;
         self.rendered_frames = self.rendered_frames.wrapping_add(1);
@@ -980,6 +1102,45 @@ where
         })
     }
 
+    /// Compose only the flat screen-space UI into an already-rendered target.
+    /// Surface drivers use this after scaled world presentation so HUD/menu
+    /// pixels stay at the native output resolution.
+    pub fn render_mono_screen_space_ui(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+    ) -> Result<(usize, UiDrawCacheStats)> {
+        let RenderFrameContext {
+            device,
+            queue,
+            encoder,
+            target,
+        } = frame;
+        let gui_scale = GuiScale::from_pixels(target.size[0], target.size[1]);
+        let (gui, draw, hud_cache) =
+            self.mono_gui_frame(gui_scale, MonoUiPresentation::ScreenSpaceHud);
+        self.ensure_mono_gui(device, queue)?;
+        if gui.active {
+            self.mono_gui
+                .as_mut()
+                .expect("Mono GUI renderer initialized")
+                .render(
+                    device,
+                    queue,
+                    encoder,
+                    target,
+                    gui.scale,
+                    &draw,
+                    if gui.covers_world {
+                        GuiRenderOptions::clear(mclone_render::default_clear_color())
+                    } else {
+                        GuiRenderOptions::overlay()
+                    },
+                )
+                .context("render native-resolution Mono screen-space UI")?;
+        }
+        Ok((draw.commands().len(), hud_cache))
+    }
+
     /// Build the screen-space GUI draw list + `FullFrameGui` flags for a mono
     /// frame. Reuses the same [`GameUiHost`] draw list the stereo world-quad
     /// path renders, just laid out at the flat target resolution.
@@ -987,11 +1148,12 @@ where
         &mut self,
         gui_scale: GuiScale,
         ui: MonoUiPresentation,
-    ) -> (FullFrameGui, GuiDrawList) {
+    ) -> (FullFrameGui, GuiDrawList, UiDrawCacheStats) {
         match ui {
             MonoUiPresentation::None => (
                 FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                 GuiDrawList::new(),
+                UiDrawCacheStats::default(),
             ),
             MonoUiPresentation::ScreenSpaceHud => {
                 let ui_state = self.current_mono_ui_render_state();
@@ -1006,15 +1168,38 @@ where
                 );
                 let mut draw = panel.panel_draw;
                 draw.append(&panel.overlay_draw);
+                let mut hud_cache = UiDrawCacheStats::default();
                 // A full-screen menu covers the world; a bare HUD does not.
                 let covers_world = self.ui.is_active();
                 if let Some(hud) = self.mono_flat_hud(covers_world) {
                     let hud_draw = self.ui.render_flat_hud_draw_list(gui_scale, &hud);
                     draw.append(&hud_draw.draw);
+                    hud_cache = hud_draw.retained_cache;
+                }
+                if self.diagnostic_panel.debug_diagnostics_visible()
+                    && !covers_world
+                    && let Some(progress) = self
+                        .runtime
+                        .as_ref()
+                        .and_then(|runtime| runtime.view_readiness_overlay())
+                {
+                    self.ui.append_loading_progress_draw(
+                        gui_scale,
+                        &mut draw,
+                        &progress,
+                        mclone_ui::LoadingProgressOverlayLayer::panel(
+                            Point {
+                                x: (gui_scale.width - 132.0).max(4.0),
+                                y: 4.0,
+                            },
+                            "VIEW",
+                        ),
+                    );
                 }
                 (
                     FullFrameGui::new(true, covers_world, [gui_scale.width, gui_scale.height]),
                     draw,
+                    hud_cache,
                 )
             }
         }
@@ -1025,8 +1210,8 @@ where
         let context = self.mono_ui_context.clone().unwrap_or_default();
         let palette_active = self.ui.screen() == Some(GameScreen::BlockPalette);
         let mut hud = FlatHud::new(context.resolved_input);
-        hud.world_hud_visible = !menu_active || palette_active;
-        hud.crosshair_visible = self.crosshair_visible && !menu_active;
+        hud.world_hud_visible = context.hud_visible && (!menu_active || palette_active);
+        hud.crosshair_visible = context.hud_visible && self.crosshair_visible && !menu_active;
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(
             self.interaction.selected_hotbar_slot(),
             debug_hotbar_icons(
@@ -1035,7 +1220,11 @@ where
             ),
         );
         hud.status = self.session_projection().status_overlay;
-        hud.frame_pipeline = self.diagnostic_panel.frame_metrics_overlay();
+        hud.frame_pipeline = self
+            .diagnostic_panel
+            .frame_metrics_visible()
+            .then(|| self.diagnostic_panel.frame_metrics_overlay())
+            .flatten();
         if self.diagnostic_panel.debug_diagnostics_visible() && !menu_active {
             let camera = self.camera.frame_state(&self.interaction);
             let snapshot = self.camera.snapshot();
