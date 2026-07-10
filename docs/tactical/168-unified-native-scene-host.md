@@ -12,7 +12,8 @@ promotion) landed 2026-07-10; Slice 7b (shared session-start planning and
 native remote-session adapter) landed 2026-07-10; Slice 7c (desktop live
 per-frame loop onto the shared Mono host) landed 2026-07-10; Slice 7d
 (offscreen, screenshot, timedemo, and perf harnesses onto the shared Mono
-host) landed 2026-07-10. (Slices 0–2 are
+host) landed 2026-07-10; Slice 7e (shared optional camera-reconcile timing and
+scene-local timed-fork deletion) landed 2026-07-10. (Slices 0–2 are
 independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
 Post-Slice-3
 review corrections landed
@@ -1151,10 +1152,34 @@ Recommended sub-slice order:
   broader old `WindowSceneRuntime` compatibility/test surface is no longer a
   frame consumer; prune it in Slice 10 rather than mixing that mechanical
   cleanup into 7d.
-- **7e — Camera-reconcile timed fork.** Shared
+- **7e — Camera-reconcile timed fork. [LANDED 2026-07-10]** Shared
   `mclone_app_runtime::camera_reconcile` grows optional timing output;
   delete the `*_for_runtime_timed` fork
   (`mclone-scene/src/session.rs:1437-1540`).
+
+  Landed shape: `EngineCameraCommitTiming` is a neutral optional output from
+  the one shared camera commit. It retains the pose-command, queued-position,
+  and interest-command attribution that XR folds into its existing locomotion
+  fields; flat callers pass `None`. The scene-local timing record and four
+  runtime wrapper/helper functions are deleted, while XR report field names
+  and meanings remain stable.
+
+  The merge exposed one behavior discrepancy hidden by the fork: the old
+  untimed shared helper used a short-circuiting
+  `pose_sent || apply_pending_corrections` expression, so flat callers could
+  postpone a queued server correction when they also sent a pose. XR's timed
+  path always performed both operations, matching the helper's documented
+  contract. The unified path keeps XR behavior, applies both operations for
+  every caller, and has a focused regression for this case. The reconciled
+  startup regression now explicitly models the real order: accept the initial
+  server correction, apply the physical startup pose, then commit and re-pump
+  chunk interest.
+
+  Validation: 195 app-runtime, 148 native-client, and 92 scene tests; workspace,
+  web/WASM, desktop-XR feature, and scene-host-purity checks; flat Android and
+  Android XR APK builds; visually inspected 2560x1600 offscreen terrain; a
+  120-frame macOS WiVRn desktop-XR smoke that accepted the startup correction
+  and submitted all requested frames; and the Quest new-world session smoke.
 
 Out of scope: flat Android (Slice 8), any web code, XR behavior changes
 (7a/7e touch shared XR paths — those need XR validation but not XR behavior
@@ -1467,8 +1492,9 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 7e; Slices 0–7d are implemented. Add optional timing output
-to shared camera reconciliation and delete the scene-local timed fork without
-changing camera or XR behavior. Keep the 7d harnesses on `OffscreenDriver`;
-do not reintroduce app-local polling, section upload, diagnostics, session
-policy, or render admission.
+Start with Slice 8; Slices 0–7e are implemented. Replace flat Android's app-local
+frame loop with thin activity/surface/input glue over the shared Mono host,
+move touch semantics into `mclone-input`, and coordinate the inherited
+capability flips with tactical 165. Capture the three AVD baselines before the
+rewrite, keep Android XR unchanged, and do not reintroduce app-local polling,
+section upload, diagnostics, session policy, or render admission.

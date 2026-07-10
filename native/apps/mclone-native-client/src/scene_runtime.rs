@@ -473,6 +473,7 @@ impl WindowSceneRuntime {
             &mut self.scene,
             camera,
             DESKTOP_CAMERA_COMMIT_CONTEXT,
+            None,
         )
     }
 

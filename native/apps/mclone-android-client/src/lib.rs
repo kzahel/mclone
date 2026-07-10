@@ -2171,6 +2171,7 @@ mod android {
                         runtime,
                         &mut camera,
                         ANDROID_CAMERA_COMMIT_CONTEXT,
+                        None,
                     )?;
                     Ok(camera_position(&camera))
                 },
@@ -3167,6 +3168,7 @@ mod android {
             &mut **scene,
             camera,
             ANDROID_CAMERA_COMMIT_CONTEXT,
+            None,
         )
     }
 

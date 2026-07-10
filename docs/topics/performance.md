@@ -78,6 +78,11 @@ as a regression threshold; capture a fresh release-mode baseline before the
 next performance judgment. The detailed migration evidence and debug sample
 are recorded in [`168`](../tactical/168-unified-native-scene-host.md#slice-7-desktop-flat-onto-the-host-delete-flatclientdriver-orchestration).
 
+Slice 7e moved XR camera-commit attribution into the shared optional
+`EngineCameraCommitTiming` output. The existing XR locomotion/report fields and
+their meanings are unchanged; this is instrumentation ownership convergence,
+not a new performance baseline.
+
 Standalone Quest Android XR is not covered by the desktop/headless
 movement-frame, timedemo, or desktop-hosted OpenXR baselines. Track headset
 frame pacing, real OpenXR refresh state, overlay diagnostics, and standalone

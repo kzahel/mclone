@@ -57,12 +57,14 @@ features from re-forking.
 > Android XR both use the shared `mclone-xr-scene` multiview underwater path,
 > and user device validation says it works pretty well; flat Android and
 > web/WASM still need app-lane wiring.
-> Refreshed on 2026-07-10 after tactical 168 Slices 7c/7d moved both the live
+> Refreshed on 2026-07-10 after tactical 168 Slices 7c–7e moved both the live
 > desktop redraw path and all native offscreen/screenshot/timedemo/perf lanes
 > onto the shared `mclone-scene` Mono host. `FlatClientDriver` is deleted;
 > desktop/offscreen app code now owns only platform targets, cadence, raw input,
 > CLI scenarios, and report/frame sinks. Non-default desktop render scale keeps
 > world pixels scaled while composing host-owned UI at native output resolution.
+> XR camera commits now use optional timing from the same shared reconcile path
+> as flat clients; the scene-local timed policy fork is gone.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -228,6 +230,9 @@ Concretely:
   [`168`](../tactical/168-unified-native-scene-host.md) records the migration;
   [`105`](../tactical/105-offscreen-flat-client-host.md) remains the original
   product target.
+- Flat and XR camera commits now share pose-sync, pending-correction, and chunk
+  interest policy in `app-runtime::camera_reconcile`. Optional neutral timing
+  keeps XR's existing locomotion attribution without a scene-local policy fork.
 - The XR scene-driver fork is closed:
   `XrMcloneTerrainState<S>` composes `NativeSingleViewSessionRuntime<S>` around
   the shared native scene runtime, desktop XR passes the desktop TCP

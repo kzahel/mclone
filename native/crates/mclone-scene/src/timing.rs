@@ -154,73 +154,34 @@ pub struct XrLocomotionTiming {
     pub gameplay_interaction_ms: f64,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct XrCameraCommitTiming {
-    pub(super) server_command_ms: f64,
-    pub(super) server_command_send_ms: f64,
-    pub(super) server_command_drain_updates_ms: f64,
-    pub(super) server_command_apply_updates_ms: f64,
-    pub(super) server_command_apply_dirty_mark_ms: f64,
-    pub(super) server_command_apply_client_updates_ms: f64,
-    pub(super) server_command_updates: usize,
-    pub(super) server_command_snapshot_updates: usize,
-    pub(super) server_command_section_block_updates: usize,
-    pub(super) server_command_unload_updates: usize,
-    pub(super) position_updates_ms: f64,
-    pub(super) interest_ms: f64,
-    pub(super) interest_command_send_ms: f64,
-    pub(super) interest_command_drain_updates_ms: f64,
-    pub(super) interest_command_apply_updates_ms: f64,
-    pub(super) interest_command_apply_dirty_mark_ms: f64,
-    pub(super) interest_command_apply_client_updates_ms: f64,
-    pub(super) interest_command_updates: usize,
-    pub(super) interest_command_snapshot_updates: usize,
-    pub(super) interest_command_section_block_updates: usize,
-    pub(super) interest_command_unload_updates: usize,
-}
-
-impl XrCameraCommitTiming {
-    pub(crate) fn record_interest_command_timing(&mut self, timing: GameplayCommandTiming) {
-        self.interest_command_send_ms = timing.send_ms;
-        self.interest_command_drain_updates_ms = timing.drain_updates_ms;
-        self.interest_command_apply_updates_ms = timing.apply_updates_ms;
-        self.interest_command_apply_dirty_mark_ms = timing.apply_dirty_mark_ms;
-        self.interest_command_apply_client_updates_ms = timing.apply_client_updates_ms;
-        self.interest_command_updates = timing.updates;
-        self.interest_command_snapshot_updates = timing.snapshot_updates;
-        self.interest_command_section_block_updates = timing.section_block_updates;
-        self.interest_command_unload_updates = timing.unload_updates;
-    }
-}
-
 impl XrLocomotionTiming {
-    pub(crate) fn record_commit_timing(&mut self, timing: XrCameraCommitTiming) {
+    pub(crate) fn record_commit_timing(&mut self, timing: EngineCameraCommitTiming) {
         self.commit_server_command_ms = timing.server_command_ms;
-        self.commit_server_command_send_ms = timing.server_command_send_ms;
-        self.commit_server_command_drain_updates_ms = timing.server_command_drain_updates_ms;
-        self.commit_server_command_apply_updates_ms = timing.server_command_apply_updates_ms;
-        self.commit_server_command_apply_dirty_mark_ms = timing.server_command_apply_dirty_mark_ms;
+        self.commit_server_command_send_ms = timing.server_command.send_ms;
+        self.commit_server_command_drain_updates_ms = timing.server_command.drain_updates_ms;
+        self.commit_server_command_apply_updates_ms = timing.server_command.apply_updates_ms;
+        self.commit_server_command_apply_dirty_mark_ms = timing.server_command.apply_dirty_mark_ms;
         self.commit_server_command_apply_client_updates_ms =
-            timing.server_command_apply_client_updates_ms;
-        self.commit_server_command_updates = timing.server_command_updates;
-        self.commit_server_command_snapshot_updates = timing.server_command_snapshot_updates;
+            timing.server_command.apply_client_updates_ms;
+        self.commit_server_command_updates = timing.server_command.updates;
+        self.commit_server_command_snapshot_updates = timing.server_command.snapshot_updates;
         self.commit_server_command_section_block_updates =
-            timing.server_command_section_block_updates;
-        self.commit_server_command_unload_updates = timing.server_command_unload_updates;
+            timing.server_command.section_block_updates;
+        self.commit_server_command_unload_updates = timing.server_command.unload_updates;
         self.commit_position_updates_ms = timing.position_updates_ms;
         self.commit_interest_ms = timing.interest_ms;
-        self.commit_interest_command_send_ms = timing.interest_command_send_ms;
-        self.commit_interest_command_drain_updates_ms = timing.interest_command_drain_updates_ms;
-        self.commit_interest_command_apply_updates_ms = timing.interest_command_apply_updates_ms;
+        self.commit_interest_command_send_ms = timing.interest_command.send_ms;
+        self.commit_interest_command_drain_updates_ms = timing.interest_command.drain_updates_ms;
+        self.commit_interest_command_apply_updates_ms = timing.interest_command.apply_updates_ms;
         self.commit_interest_command_apply_dirty_mark_ms =
-            timing.interest_command_apply_dirty_mark_ms;
+            timing.interest_command.apply_dirty_mark_ms;
         self.commit_interest_command_apply_client_updates_ms =
-            timing.interest_command_apply_client_updates_ms;
-        self.commit_interest_command_updates = timing.interest_command_updates;
-        self.commit_interest_command_snapshot_updates = timing.interest_command_snapshot_updates;
+            timing.interest_command.apply_client_updates_ms;
+        self.commit_interest_command_updates = timing.interest_command.updates;
+        self.commit_interest_command_snapshot_updates = timing.interest_command.snapshot_updates;
         self.commit_interest_command_section_block_updates =
-            timing.interest_command_section_block_updates;
-        self.commit_interest_command_unload_updates = timing.interest_command_unload_updates;
+            timing.interest_command.section_block_updates;
+        self.commit_interest_command_unload_updates = timing.interest_command.unload_updates;
     }
 
     pub(crate) fn record_interest_command_timing(&mut self, timing: GameplayCommandTiming) {

@@ -54,10 +54,11 @@ use mclone_app_runtime::world_catalog::{
     LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalog, WorldCatalogError,
 };
 use mclone_app_runtime::{
-    EngineCameraCommitContext, GameplayCommandTiming, GameplayCommandUpdatePolicy,
-    RuntimePollDiagnostics, SingleViewRuntimeStats, TraversalReadySectionCache,
-    debug_block_palette_overlay, debug_hotbar_icons, elapsed_ms, execute_world_catalog_request,
-    micros_to_ms, refresh_world_catalog_controller, set_player_appearance_command_for_ui_model,
+    EngineCameraCommitContext, EngineCameraCommitTiming, GameplayCommandTiming,
+    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, SingleViewRuntimeStats,
+    TraversalReadySectionCache, debug_block_palette_overlay, debug_hotbar_icons, elapsed_ms,
+    execute_world_catalog_request, micros_to_ms, refresh_world_catalog_controller,
+    set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
@@ -2868,15 +2869,21 @@ where
             .poll()
     }
 
-    fn commit_engine_camera_player_pose_timed(&mut self) -> Result<(bool, XrCameraCommitTiming)> {
+    fn commit_engine_camera_player_pose_timed(
+        &mut self,
+    ) -> Result<(bool, EngineCameraCommitTiming)> {
         let Some(runtime) = self.runtime.as_mut() else {
-            return Ok((false, XrCameraCommitTiming::default()));
+            return Ok((false, EngineCameraCommitTiming::default()));
         };
-        commit_engine_camera_player_pose_for_runtime_timed(
-            runtime,
+        let mut timing = EngineCameraCommitTiming::default();
+        let changed = mclone_app_runtime::commit_engine_camera_player_pose(
+            &mut **runtime,
             &mut self.camera,
-            "sync XR terrain player pose",
+            XR_CAMERA_COMMIT_CONTEXT,
+            Some(&mut timing),
         )
+        .context("sync XR terrain player pose")?;
+        Ok((changed, timing))
     }
 
     fn play_landing_events(&mut self) {

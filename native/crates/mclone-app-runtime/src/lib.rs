@@ -31,9 +31,9 @@ pub mod world_catalog;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::camera_reconcile::{
-    EngineCameraCommitContext, apply_pending_engine_camera_position_updates,
-    commit_engine_camera_player_pose, sync_engine_camera_player_pose,
-    update_interest_from_engine_camera,
+    EngineCameraCommitContext, EngineCameraCommitTiming,
+    apply_pending_engine_camera_position_updates, commit_engine_camera_player_pose,
+    sync_engine_camera_player_pose, update_interest_from_engine_camera,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::catalog_executor::{

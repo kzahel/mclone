@@ -1504,9 +1504,9 @@ where
 }
 
 /// Shared camera/interest reconciliation lane for XR startup (docs/tactical/167
-/// Slice 4): send-only pose sync, `"XR terrain"` log lane. The per-frame timed
-/// variants below keep their own instrumentation for XR camera-commit profiling.
-const XR_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
+/// Slice 4): send-only pose sync, `"XR terrain"` log lane. Per-frame callers
+/// request optional shared instrumentation for XR camera-commit profiling.
+pub(crate) const XR_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
     EngineCameraCommitContext::send_only("XR terrain");
 
 /// Deadline for the XR startup drive, matching the shared default startup timeout.
@@ -1540,103 +1540,9 @@ where
         runtime,
         camera,
         XR_CAMERA_COMMIT_CONTEXT,
+        None,
     )?;
     Ok(changed)
-}
-
-pub(crate) fn commit_engine_camera_player_pose_for_runtime_timed<S>(
-    runtime: &mut NativeSessionRuntime<S>,
-    camera: &mut EngineCameraController,
-    context: &'static str,
-) -> Result<(bool, XrCameraCommitTiming)>
-where
-    S: RemoteDedicatedServerSession,
-{
-    let (server_changed, mut timing) =
-        sync_engine_camera_player_pose_for_runtime_timed(runtime, camera).context(context)?;
-    let interest_start = Instant::now();
-    let (interest_changed, interest_command_timing) =
-        update_interest_from_engine_camera_for_runtime_timed(runtime, camera)?;
-    timing.interest_ms = elapsed_ms(interest_start.elapsed());
-    timing.record_interest_command_timing(interest_command_timing);
-    Ok((server_changed || interest_changed, timing))
-}
-
-pub(crate) fn sync_engine_camera_player_pose_for_runtime_timed<S>(
-    runtime: &mut NativeSessionRuntime<S>,
-    camera: &mut EngineCameraController,
-) -> Result<(bool, XrCameraCommitTiming)>
-where
-    S: RemoteDedicatedServerSession,
-{
-    let mut timing = XrCameraCommitTiming::default();
-    let command_start = Instant::now();
-    let changed = if let Some(report) = camera.next_pose_sync_command() {
-        let (changed, command_timing) = runtime
-            .send_gameplay_command_with_update_policy_timed(
-                report.command,
-                GameplayCommandUpdatePolicy::SendOnly,
-            )
-            .context("failed to sync XR terrain player pose to server")?;
-        timing.server_command_send_ms = command_timing.send_ms;
-        timing.server_command_drain_updates_ms = command_timing.drain_updates_ms;
-        timing.server_command_apply_updates_ms = command_timing.apply_updates_ms;
-        timing.server_command_apply_dirty_mark_ms = command_timing.apply_dirty_mark_ms;
-        timing.server_command_apply_client_updates_ms = command_timing.apply_client_updates_ms;
-        timing.server_command_updates = command_timing.updates;
-        timing.server_command_snapshot_updates = command_timing.snapshot_updates;
-        timing.server_command_section_block_updates = command_timing.section_block_updates;
-        timing.server_command_unload_updates = command_timing.unload_updates;
-        changed
-    } else {
-        false
-    };
-    timing.server_command_ms = elapsed_ms(command_start.elapsed());
-    let position_updates_start = Instant::now();
-    let position_updates_changed =
-        apply_pending_engine_camera_position_updates_for_runtime(runtime, camera)?;
-    timing.position_updates_ms = elapsed_ms(position_updates_start.elapsed());
-    Ok((changed || position_updates_changed, timing))
-}
-
-pub(crate) fn apply_pending_engine_camera_position_updates_for_runtime<S>(
-    runtime: &mut NativeSessionRuntime<S>,
-    camera: &mut EngineCameraController,
-) -> Result<bool>
-where
-    S: RemoteDedicatedServerSession,
-{
-    mclone_app_runtime::apply_pending_engine_camera_position_updates(
-        &mut **runtime,
-        camera,
-        XR_CAMERA_COMMIT_CONTEXT,
-    )
-}
-
-pub(crate) fn update_interest_from_engine_camera_for_runtime_timed<S>(
-    runtime: &mut NativeSessionRuntime<S>,
-    camera: &EngineCameraController,
-) -> Result<(bool, GameplayCommandTiming)>
-where
-    S: RemoteDedicatedServerSession,
-{
-    let snapshot = camera.snapshot();
-    let center = snapshot.chunk_pos;
-    let (changed, timing) = runtime.set_interest_center_with_update_policy_timed(
-        center,
-        GameplayCommandUpdatePolicy::SendOnly,
-    )?;
-    if changed {
-        log::info!(
-            "XR terrain chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
-            center.x,
-            center.z,
-            snapshot.eye.x,
-            snapshot.eye.y,
-            snapshot.eye.z
-        );
-    }
-    Ok((changed, timing))
 }
 
 pub(crate) fn xr_game_ui_for_session(

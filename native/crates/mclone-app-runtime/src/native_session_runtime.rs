@@ -4042,7 +4042,8 @@ mod tests {
     #[test]
     fn reconciled_startup_repumps_seed_to_the_final_teleported_camera() {
         use crate::camera_reconcile::{
-            EngineCameraCommitContext, commit_engine_camera_player_pose,
+            EngineCameraCommitContext, EngineCameraCommitTiming,
+            apply_pending_engine_camera_position_updates, commit_engine_camera_player_pose,
         };
         use mclone_render_session::EngineCameraController;
 
@@ -4066,12 +4067,17 @@ mod tests {
         let mut applied = false;
         let completion = pump
             .drive_to_ready_reconciled(startup_camera, Duration::from_secs(60), |runtime| {
+                let context = EngineCameraCommitContext::send_only("test");
+                // Match the shared XR startup order: accept the server's initial
+                // spawn correction before applying the physical startup pose.
+                let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+                apply_pending_engine_camera_position_updates(runtime, &mut camera, context)?;
                 let mut camera = EngineCameraController::spawn_for_chunk(final_chunk);
-                commit_engine_camera_player_pose(
-                    runtime,
-                    &mut camera,
-                    EngineCameraCommitContext::send_only("test"),
-                )?;
+                let mut timing = EngineCameraCommitTiming::default();
+                commit_engine_camera_player_pose(runtime, &mut camera, context, Some(&mut timing))?;
+                assert!(timing.server_command_ms.is_finite());
+                assert!(timing.position_updates_ms.is_finite());
+                assert!(timing.interest_ms.is_finite());
                 applied = true;
                 let eye = camera.snapshot().eye;
                 Ok(Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32))
@@ -4099,6 +4105,51 @@ mod tests {
             near_final > 0,
             "reconciled completion seed must cover the final teleported camera"
         );
+    }
+
+    // Tactical 168 Slice 7e tripwire: the old untimed shared sync used a
+    // short-circuiting `pose_sent || apply_pending_corrections` expression,
+    // while XR's timed fork always did both. The unified path must retain XR's
+    // immediate correction behavior even when the camera also emits a pose.
+    #[test]
+    fn camera_commit_applies_pending_correction_after_pose_send() {
+        use crate::camera_reconcile::{
+            EngineCameraCommitContext, commit_engine_camera_player_pose,
+        };
+        use mclone_render_session::EngineCameraController;
+
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let render_distance = 1;
+        let pump = NativeSessionStartupPump::<LocalOnlySession>::local_with_mesh_assets(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
+                .with_lighting_enabled(false),
+            mesh_assets,
+        )
+        .unwrap();
+
+        let startup_camera = Vec3::new(8.0, 80.0, 8.0);
+        let attempted_chunk = ChunkPos::new(3, 0);
+        let corrected_chunk = ChunkPos::new(0, 0);
+        let completion = pump
+            .drive_to_ready_reconciled(startup_camera, Duration::from_secs(60), |runtime| {
+                let mut camera = EngineCameraController::spawn_for_chunk(attempted_chunk);
+                commit_engine_camera_player_pose(
+                    runtime,
+                    &mut camera,
+                    EngineCameraCommitContext::send_only("test"),
+                    None,
+                )?;
+                assert_eq!(camera.snapshot().chunk_pos, corrected_chunk);
+                let eye = camera.snapshot().eye;
+                Ok(Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32))
+            })
+            .unwrap();
+
+        assert_eq!(completion.runtime.interest_center(), corrected_chunk);
     }
 
     #[test]

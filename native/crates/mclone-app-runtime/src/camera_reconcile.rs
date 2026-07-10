@@ -8,12 +8,14 @@
 //! inputs stay platform-local: flat spectator placement, Android touch/startup
 //! camera options, and the XR `XrStartupViewPose` + tracking-origin policy.
 
+use std::time::Instant;
+
 use anyhow::{Context, Result};
 use mclone_render_session::EngineCameraController;
 
-use crate::GameplayCommandUpdatePolicy;
 use crate::host_mode::RemoteDedicatedServerSession;
 use crate::native_session_runtime::NativeSceneRuntime;
+use crate::{GameplayCommandTiming, GameplayCommandUpdatePolicy, elapsed_ms};
 
 /// Platform-supplied labels plus the one genuinely divergent policy for the
 /// shared camera/interest reconciliation. Everything else about the reconcile is
@@ -51,6 +53,20 @@ impl EngineCameraCommitContext {
     }
 }
 
+/// Optional host-neutral attribution for one camera pose/interest commit.
+///
+/// XR folds this into its locomotion/frame diagnostics. Flat hosts normally
+/// pass `None`, keeping the reconcile policy and instrumentation on one path
+/// without requiring every caller to retain timing state.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EngineCameraCommitTiming {
+    pub server_command_ms: f64,
+    pub server_command: GameplayCommandTiming,
+    pub position_updates_ms: f64,
+    pub interest_ms: f64,
+    pub interest_command: GameplayCommandTiming,
+}
+
 /// Sync the camera pose to the server, accept pending server position
 /// corrections, and follow chunk interest to the final camera position. Returns
 /// whether anything changed (server pose, an accepted correction, or the
@@ -59,12 +75,22 @@ pub fn commit_engine_camera_player_pose<S>(
     runtime: &mut NativeSceneRuntime<S>,
     camera: &mut EngineCameraController,
     context: EngineCameraCommitContext,
+    mut timing: Option<&mut EngineCameraCommitTiming>,
 ) -> Result<bool>
 where
     S: RemoteDedicatedServerSession,
 {
-    let server_changed = sync_engine_camera_player_pose(runtime, camera, context)?;
-    let interest_changed = update_interest_from_engine_camera(runtime, camera, context)?;
+    if let Some(timing) = timing.as_deref_mut() {
+        *timing = EngineCameraCommitTiming::default();
+    }
+    let server_changed = sync_engine_camera_player_pose_with_timing(
+        runtime,
+        camera,
+        context,
+        timing.as_deref_mut(),
+    )?;
+    let interest_changed =
+        update_interest_from_engine_camera_with_timing(runtime, camera, context, timing)?;
     Ok(server_changed || interest_changed)
 }
 
@@ -78,14 +104,43 @@ pub fn sync_engine_camera_player_pose<S>(
 where
     S: RemoteDedicatedServerSession,
 {
+    sync_engine_camera_player_pose_with_timing(runtime, camera, context, None)
+}
+
+fn sync_engine_camera_player_pose_with_timing<S>(
+    runtime: &mut NativeSceneRuntime<S>,
+    camera: &mut EngineCameraController,
+    context: EngineCameraCommitContext,
+    mut timing: Option<&mut EngineCameraCommitTiming>,
+) -> Result<bool>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let command_start = timing.is_some().then(Instant::now);
     let changed = if let Some(report) = camera.next_pose_sync_command() {
-        runtime
-            .send_gameplay_command_with_update_policy(report.command, context.pose_sync_policy)
-            .with_context(|| format!("failed to sync {} player pose to server", context.lane))?
+        let (changed, command_timing) = runtime
+            .send_gameplay_command_with_update_policy_timed(
+                report.command,
+                context.pose_sync_policy,
+            )
+            .with_context(|| format!("failed to sync {} player pose to server", context.lane))?;
+        if let Some(timing) = timing.as_deref_mut() {
+            timing.server_command = command_timing;
+        }
+        changed
     } else {
         false
     };
-    Ok(changed || apply_pending_engine_camera_position_updates(runtime, camera, context)?)
+    if let (Some(start), Some(timing)) = (command_start, timing.as_deref_mut()) {
+        timing.server_command_ms = elapsed_ms(start.elapsed());
+    }
+    let position_updates_start = timing.is_some().then(Instant::now);
+    let position_updates_changed =
+        apply_pending_engine_camera_position_updates(runtime, camera, context)?;
+    if let (Some(start), Some(timing)) = (position_updates_start, timing) {
+        timing.position_updates_ms = elapsed_ms(start.elapsed());
+    }
+    Ok(changed || position_updates_changed)
 }
 
 /// Accept every queued server player-position correction, acknowledge it,
@@ -141,9 +196,30 @@ pub fn update_interest_from_engine_camera<S>(
 where
     S: RemoteDedicatedServerSession,
 {
+    update_interest_from_engine_camera_with_timing(runtime, camera, context, None)
+}
+
+fn update_interest_from_engine_camera_with_timing<S>(
+    runtime: &mut NativeSceneRuntime<S>,
+    camera: &EngineCameraController,
+    context: EngineCameraCommitContext,
+    timing: Option<&mut EngineCameraCommitTiming>,
+) -> Result<bool>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let interest_start = timing.is_some().then(Instant::now);
     let snapshot = camera.snapshot();
     let center = snapshot.chunk_pos;
-    if runtime.set_interest_center(center)? {
+    let (changed, command_timing) = runtime.set_interest_center_with_update_policy_timed(
+        center,
+        GameplayCommandUpdatePolicy::SendOnly,
+    )?;
+    if let (Some(start), Some(timing)) = (interest_start, timing) {
+        timing.interest_ms = elapsed_ms(start.elapsed());
+        timing.interest_command = command_timing;
+    }
+    if changed {
         log::info!(
             "{} chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
             context.lane,
@@ -153,7 +229,6 @@ where
             snapshot.eye.y,
             snapshot.eye.z
         );
-        return Ok(true);
     }
-    Ok(false)
+    Ok(changed)
 }
