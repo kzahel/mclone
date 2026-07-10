@@ -5,8 +5,8 @@ use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 use mclone_app_runtime::far_lod::StartupLodPrewarmConfig;
 use mclone_app_runtime::host_mode::SingleViewHostOptions;
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
-use mclone_app_runtime::native_session_runtime::{
-    IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneRuntime,
+use mclone_app_runtime::native_service_assembly::{
+    IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneServices,
 };
 pub(crate) use mclone_app_runtime::{chunk_tracking_radius_for_render_distance, square_count};
 use mclone_core::ChunkPos;
@@ -66,25 +66,25 @@ pub(crate) fn local_integrated_scene_options(
 #[cfg_attr(not(feature = "xr"), allow(dead_code))]
 pub(crate) fn native_window_scene_runtime(
     scene: &SceneOptions,
-) -> Result<NativeSceneRuntime<NativeRemoteServerSession>> {
+) -> Result<NativeSceneServices<NativeRemoteServerSession>> {
     native_window_scene_runtime_with_mesh_assets(scene, load_textured_mesh_assets()?)
 }
 
 pub(crate) fn native_window_scene_runtime_with_mesh_assets(
     scene: &SceneOptions,
     mesh_assets: TexturedMeshAssets,
-) -> Result<NativeSceneRuntime<NativeRemoteServerSession>> {
+) -> Result<NativeSceneServices<NativeRemoteServerSession>> {
     let render_distance = scene_render_distance(scene)?;
     let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
     let Some(remote_addr) = &scene.remote_addr else {
-        return NativeSceneRuntime::local_with_mesh_assets(
+        return NativeSceneServices::local_with_mesh_assets(
             local_integrated_scene_options(scene)?,
             mesh_assets,
         );
     };
 
     let session = NativeRemoteServerSession::connect(remote_addr.as_str(), "desktop")?;
-    NativeSceneRuntime::remote_dedicated_with_mesh_assets(
+    NativeSceneServices::remote_dedicated_with_mesh_assets(
         SingleViewHostOptions::new(center, render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
             .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
@@ -98,13 +98,13 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
 }
 
 pub(crate) fn poll_window_runtime_until_idle(
-    runtime: &mut NativeSceneRuntime<NativeRemoteServerSession>,
+    runtime: &mut NativeSceneServices<NativeRemoteServerSession>,
 ) -> Result<(usize, f64)> {
     runtime.poll_until_idle_with_timeout(DEFAULT_STARTUP_READINESS_TIMEOUT)
 }
 
 pub(crate) fn poll_window_runtime_until_idle_with_timeout(
-    runtime: &mut NativeSceneRuntime<NativeRemoteServerSession>,
+    runtime: &mut NativeSceneServices<NativeRemoteServerSession>,
     timeout: Duration,
 ) -> Result<(usize, f64)> {
     runtime.poll_until_idle_with_timeout(timeout)

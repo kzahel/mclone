@@ -6,7 +6,7 @@ use crate::host_mode::{
     RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
     SingleViewHostOptions,
 };
-use crate::native_session_runtime::NativeSessionRuntime;
+use crate::native_service_assembly::NativeSessionServices;
 use crate::render_asset_data::TexturedMeshAssets;
 use crate::session::RemoteSessionEndpoint;
 
@@ -15,9 +15,14 @@ pub fn connect_native_remote_session_runtime(
     options: SingleViewHostOptions,
     mesh_assets: TexturedMeshAssets,
     host_label: &'static str,
-) -> Result<NativeSessionRuntime<NativeRemoteServerSession>> {
+) -> Result<NativeSessionServices<NativeRemoteServerSession>> {
     let session = NativeRemoteServerSession::connect(endpoint.address.as_str(), host_label)?;
-    NativeSessionRuntime::remote_dedicated_with_mesh_assets(endpoint, options, session, mesh_assets)
+    NativeSessionServices::remote_dedicated_with_mesh_assets(
+        endpoint,
+        options,
+        session,
+        mesh_assets,
+    )
 }
 
 /// Native TCP-backed remote session shared by desktop and XR hosts.

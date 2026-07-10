@@ -9,6 +9,68 @@
 
 use std::collections::{HashMap, HashSet};
 
+/// Platform-owned execution behind the shared token/epoch policy.
+///
+/// Native adapters commonly make a completion available during `submit`;
+/// browser adapters may make it available after a promise or worker wakes.
+pub trait PlatformOperationExecutor<K, T, E>: std::fmt::Debug {
+    fn submit(&mut self, operation: PlatformOperation<K>);
+    fn try_recv_completion(&mut self) -> Option<PlatformOperationCompletion<T, E>>;
+}
+
+#[derive(Debug)]
+pub struct PlatformOperationService<K, R, T, E> {
+    ledger: PlatformOperationLedger<K, R>,
+    executor: Box<dyn PlatformOperationExecutor<K, T, E>>,
+}
+
+impl<K, R, T, E> PlatformOperationService<K, R, T, E> {
+    pub fn new(executor: Box<dyn PlatformOperationExecutor<K, T, E>>) -> Self {
+        Self {
+            ledger: PlatformOperationLedger::new(),
+            executor,
+        }
+    }
+
+    pub fn issue(&mut self, kind: K, failure_restore: R) -> PlatformOperationToken
+    where
+        K: Clone,
+    {
+        let operation = self.ledger.issue(kind, failure_restore);
+        let token = operation.token;
+        self.executor.submit(operation);
+        token
+    }
+
+    pub fn poll(&mut self) -> Vec<PlatformOperationResolution<K, R, T, E>> {
+        let mut resolutions = Vec::new();
+        while let Some(completion) = self.executor.try_recv_completion() {
+            resolutions.push(self.ledger.complete(completion));
+        }
+        resolutions
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.ledger.pending_len()
+    }
+
+    pub fn begin_epoch(&mut self) -> Vec<CancelledPlatformOperation<K, R>> {
+        self.ledger.teardown()
+    }
+
+    /// Replace the concrete executor at an epoch boundary. Pending neutral
+    /// restore state is returned, and late completions retained by the old
+    /// adapter cannot enter the new service.
+    pub fn replace_executor(
+        &mut self,
+        executor: Box<dyn PlatformOperationExecutor<K, T, E>>,
+    ) -> Vec<CancelledPlatformOperation<K, R>> {
+        let cancelled = self.ledger.teardown();
+        self.executor = executor;
+        cancelled
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PlatformOperationEpoch(u64);
 
@@ -194,6 +256,7 @@ impl<K, R> PlatformOperationLedger<K, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum TestOperation {
@@ -204,6 +267,52 @@ mod tests {
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct RestoreState(&'static str);
+
+    #[derive(Debug)]
+    struct ScriptedExecutor {
+        deferred: bool,
+        submitted: VecDeque<PlatformOperation<TestOperation>>,
+        ready: VecDeque<PlatformOperationCompletion<&'static str, &'static str>>,
+    }
+
+    impl ScriptedExecutor {
+        fn immediate() -> Self {
+            Self {
+                deferred: false,
+                submitted: VecDeque::new(),
+                ready: VecDeque::new(),
+            }
+        }
+
+        fn deferred() -> Self {
+            Self {
+                deferred: true,
+                submitted: VecDeque::new(),
+                ready: VecDeque::new(),
+            }
+        }
+    }
+
+    impl PlatformOperationExecutor<TestOperation, &'static str, &'static str> for ScriptedExecutor {
+        fn submit(&mut self, operation: PlatformOperation<TestOperation>) {
+            if self.deferred {
+                self.submitted.push_back(operation);
+            } else {
+                self.ready.push_back(ok(operation.token, "applied"));
+            }
+        }
+
+        fn try_recv_completion(
+            &mut self,
+        ) -> Option<PlatformOperationCompletion<&'static str, &'static str>> {
+            if self.ready.is_empty() && self.deferred {
+                if let Some(operation) = self.submitted.pop_front() {
+                    self.ready.push_back(ok(operation.token, "applied"));
+                }
+            }
+            self.ready.pop_front()
+        }
+    }
 
     fn ok(
         token: PlatformOperationToken,
@@ -324,5 +433,70 @@ mod tests {
             ledger.complete(err(second.token, "late indexeddb failure")),
             PlatformOperationResolution::Stale(_)
         ));
+    }
+
+    #[derive(Debug, Default, Eq, PartialEq)]
+    struct ScriptedSessionHostState {
+        local_session_active: bool,
+        catalog_open: bool,
+        reconnect_count: usize,
+    }
+
+    fn scripted_policy_trace(deferred: bool) -> ScriptedSessionHostState {
+        let executor: Box<dyn PlatformOperationExecutor<_, _, _>> = if deferred {
+            Box::new(ScriptedExecutor::deferred())
+        } else {
+            Box::new(ScriptedExecutor::immediate())
+        };
+        let mut service = PlatformOperationService::new(executor);
+        service.issue(TestOperation::StartLocal, RestoreState("title"));
+        service.issue(TestOperation::OpenCatalog, RestoreState("catalog"));
+        service.issue(TestOperation::Reconnect, RestoreState("disconnected"));
+
+        let mut state = ScriptedSessionHostState::default();
+        for resolution in service.poll() {
+            match resolution {
+                PlatformOperationResolution::Applied { kind, value, .. } => {
+                    assert_eq!(value, "applied");
+                    match kind {
+                        TestOperation::StartLocal => state.local_session_active = true,
+                        TestOperation::OpenCatalog => state.catalog_open = true,
+                        TestOperation::Reconnect => state.reconnect_count += 1,
+                    }
+                }
+                resolution => panic!("unexpected resolution: {resolution:?}"),
+            }
+        }
+        state
+    }
+
+    #[test]
+    fn immediate_and_deferred_executors_have_identical_session_host_policy() {
+        assert_eq!(scripted_policy_trace(false), scripted_policy_trace(true));
+    }
+
+    #[test]
+    fn executor_replacement_cancels_old_epoch_work() {
+        let mut service = PlatformOperationService::new(Box::new(ScriptedExecutor::deferred()));
+        let token = service.issue(TestOperation::OpenCatalog, RestoreState("catalog"));
+        let cancelled = service.replace_executor(Box::new(ScriptedExecutor::immediate()));
+        assert_eq!(cancelled.len(), 1);
+        assert_eq!(cancelled[0].token, token);
+        assert_eq!(service.pending_len(), 0);
+    }
+
+    #[test]
+    fn service_epoch_change_rejects_old_executor_completion() {
+        let mut service = PlatformOperationService::new(Box::new(ScriptedExecutor::deferred()));
+        let token = service.issue(TestOperation::OpenCatalog, RestoreState("catalog"));
+        let cancelled = service.begin_epoch();
+        assert_eq!(cancelled.len(), 1);
+        assert_eq!(cancelled[0].token, token);
+        assert!(
+            service
+                .poll()
+                .into_iter()
+                .all(|resolution| matches!(resolution, PlatformOperationResolution::Stale(_)))
+        );
     }
 }

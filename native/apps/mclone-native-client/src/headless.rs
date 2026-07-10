@@ -9,7 +9,7 @@ use mclone_app_runtime::frame_render::{
     record_render_section_update_stats,
 };
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
-use mclone_app_runtime::native_session_runtime::NativeSceneRuntime;
+use mclone_app_runtime::native_service_assembly::NativeSceneServices;
 use mclone_client::ActorInterpolationState;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
@@ -136,7 +136,7 @@ struct RendererRebuildSmokePreservedState {
 
 impl RendererRebuildSmokePreservedState {
     fn capture(
-        runtime: &NativeSceneRuntime<NativeRemoteServerSession>,
+        runtime: &NativeSceneServices<NativeRemoteServerSession>,
         camera: ChunkCamera,
         ui: &GameUiHost,
     ) -> Self {
@@ -159,7 +159,7 @@ impl RendererRebuildSmokePreservedState {
 }
 
 struct RendererRebuildSmokeState {
-    runtime: NativeSceneRuntime<NativeRemoteServerSession>,
+    runtime: NativeSceneServices<NativeRemoteServerSession>,
     actor_textures: ActorTextureAssets,
     resources: FlatRenderResources,
     asset_source: mclone_assets::AssetSourceChain,

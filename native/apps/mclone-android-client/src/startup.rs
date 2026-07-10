@@ -186,7 +186,7 @@ fn android_startup_scene_defaults() -> StartupSceneOptions {
 }
 
 pub(crate) fn apply_startup_camera_options(
-    host: &mut McloneSceneHost<impl mclone_app_runtime::host_mode::RemoteDedicatedServerSession>,
+    host: &mut McloneSceneHost,
     options: StartupCameraOptions,
 ) {
     if options.eye.is_none() && options.target.is_none() {

@@ -3,19 +3,60 @@ use super::*;
 use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 use mclone_app_runtime::session::SessionStorageIntent;
 
-pub(crate) type SceneSessionRuntimeFactory<S> = Box<
-    dyn FnMut(
+pub(crate) trait SceneSessionRuntimeFactory {
+    fn start(
+        &mut self,
+        endpoint: RemoteSessionEndpoint,
+        scene: McloneSceneHostOptions,
+        mesh_assets: TexturedMeshAssets,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        movement_speed_multiplier: f32,
+        clock: &MonotonicClockHandle,
+    ) -> Result<StartedSceneRuntime>;
+}
+
+struct NativeSceneSessionRuntimeFactory<F, S> {
+    factory: F,
+    session: std::marker::PhantomData<fn() -> S>,
+}
+
+impl<F, S> SceneSessionRuntimeFactory for NativeSceneSessionRuntimeFactory<F, S>
+where
+    F: FnMut(
         RemoteSessionEndpoint,
         McloneSceneHostOptions,
         TexturedMeshAssets,
-    ) -> Result<NativeSessionRuntime<S>>,
->;
-
-pub(crate) struct StartedSceneRuntime<S>
-where
-    S: RemoteDedicatedServerSession,
+    ) -> Result<NativeSessionServices<S>>,
+    S: RemoteDedicatedServerSession + 'static,
 {
-    runtime: NativeSessionRuntime<S>,
+    fn start(
+        &mut self,
+        endpoint: RemoteSessionEndpoint,
+        scene: McloneSceneHostOptions,
+        mesh_assets: TexturedMeshAssets,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        movement_speed_multiplier: f32,
+        clock: &MonotonicClockHandle,
+    ) -> Result<StartedSceneRuntime> {
+        let runtime = (self.factory)(endpoint, scene, mesh_assets)?;
+        start_scene_runtime(
+            device,
+            queue,
+            color_format,
+            runtime,
+            movement_speed_multiplier,
+            None,
+            clock,
+        )
+    }
+}
+
+pub(crate) struct StartedSceneRuntime {
+    runtime: SceneSessionRuntime,
     camera: EngineCameraController,
     draw: TexturedSectionDrawResources,
     render_stats: RenderStreamStats,
@@ -38,24 +79,7 @@ pub(crate) enum SceneSessionStartOutcome {
     Started(ActiveSessionDescriptor),
 }
 
-#[derive(Debug)]
-pub enum SceneLocalOnlyRemoteSession {}
-
-impl RemoteDedicatedServerSession for SceneLocalOnlyRemoteSession {
-    fn send_command_only(&mut self, _command: mclone_protocol::ClientCommand) -> Result<()> {
-        match *self {}
-    }
-
-    fn drain_command_updates(&mut self) -> Result<Vec<mclone_protocol::ServerUpdate>> {
-        match *self {}
-    }
-
-    fn reconnect(&mut self) -> Result<()> {
-        match *self {}
-    }
-}
-
-impl McloneSceneHost<SceneLocalOnlyRemoteSession> {
+impl McloneSceneHost {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         device: &wgpu::Device,
@@ -86,10 +110,7 @@ impl McloneSceneHost<SceneLocalOnlyRemoteSession> {
     }
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     pub fn start_local_async(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -118,7 +139,10 @@ where
         );
         let request = SessionStartRequest::new_seed_local_world(scene.seed);
         let descriptor = request.active_descriptor();
-        let world_catalog = scene.world_root.clone().map(NativeWorldCatalog::new);
+        let catalog_operations = scene
+            .world_root
+            .clone()
+            .map(native_world_catalog_operations);
         let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
         camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
         camera.set_first_person_player_visible(scene.first_person_player_visible);
@@ -148,7 +172,12 @@ where
         session.begin_start(request.clone());
         let mut state = Self {
             scene: scene.clone(),
-            clock,
+            services: SceneHostServices {
+                clock,
+                catalog_operations,
+                teleport_preview: TeleportPreviewCapability::Unavailable,
+                audio: AudioOutputCapability::Unavailable,
+            },
             color_format,
             mesh_assets,
             active_assets,
@@ -168,7 +197,6 @@ where
             session,
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(xr_client_experience_profile()),
-            world_catalog,
             camera,
             interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
@@ -218,7 +246,6 @@ where
             turn_policy: XrTurnPolicy::default(),
             snap_turn_state: XrSnapTurnState::default(),
             blink_teleport: XrBlinkTeleportState::default(),
-            teleport_preview: TeleportPreviewCapability::Unavailable,
             mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
             render_admission_policy: RenderAdmissionPolicy::new(
@@ -246,28 +273,33 @@ where
             last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
             rendered_frames: 0,
-            audio: AudioOutputCapability::Unavailable,
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
         Ok(state)
     }
 
-    pub fn with_runtime(
+    pub fn with_runtime<S>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
         clock: MonotonicClockHandle,
         scene: McloneSceneHostOptions,
-        runtime: NativeSessionRuntime<S>,
+        runtime: NativeSessionServices<S>,
         render_options: TexturedSectionRenderOptions,
         actor_atlas: ActorTextureImage,
         actor_figures: ActorFigureSet,
         asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        S: RemoteDedicatedServerSession + 'static,
+    {
         let scene = scene.validated()?;
-        let world_catalog = scene.world_root.clone().map(NativeWorldCatalog::new);
+        let catalog_operations = scene
+            .world_root
+            .clone()
+            .map(native_world_catalog_operations);
         let started = start_scene_runtime(
             device,
             queue,
@@ -304,7 +336,12 @@ where
             .context("upload XR GUI atlas")?;
         let mut state = Self {
             scene: scene.clone(),
-            clock,
+            services: SceneHostServices {
+                clock,
+                catalog_operations,
+                teleport_preview: TeleportPreviewCapability::Unavailable,
+                audio: AudioOutputCapability::Unavailable,
+            },
             color_format,
             mesh_assets,
             active_assets,
@@ -317,7 +354,6 @@ where
             session,
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(xr_client_experience_profile()),
-            world_catalog,
             camera: started.camera,
             interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
@@ -367,7 +403,6 @@ where
             turn_policy: XrTurnPolicy::default(),
             snap_turn_state: XrSnapTurnState::default(),
             blink_teleport: XrBlinkTeleportState::default(),
-            teleport_preview: TeleportPreviewCapability::Unavailable,
             mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
             render_admission_policy: RenderAdmissionPolicy::new(
@@ -395,7 +430,6 @@ where
             last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
             rendered_frames: 0,
-            audio: AudioOutputCapability::Unavailable,
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state
@@ -407,11 +441,11 @@ where
     }
 
     pub fn set_audio_output(&mut self, audio: AudioOutputCapability) {
-        self.audio = audio;
+        self.services.audio = audio;
     }
 
     pub fn set_teleport_preview_capability(&mut self, capability: TeleportPreviewCapability) {
-        self.teleport_preview = capability;
+        self.services.teleport_preview = capability;
     }
 
     pub fn set_frame_pipeline_report(&mut self, report: Arc<FramePipelineReport>, revision: u64) {
@@ -433,16 +467,20 @@ where
         self.diagnostic_panel.frame_metrics_visible()
     }
 
-    pub fn set_session_runtime_factory<F>(&mut self, factory: F)
+    pub fn set_session_runtime_factory<F, S>(&mut self, factory: F)
     where
         F: FnMut(
                 RemoteSessionEndpoint,
                 McloneSceneHostOptions,
                 TexturedMeshAssets,
-            ) -> Result<NativeSessionRuntime<S>>
+            ) -> Result<NativeSessionServices<S>>
             + 'static,
+        S: RemoteDedicatedServerSession + 'static,
     {
-        self.session_runtime_factory = Some(Box::new(factory));
+        self.session_runtime_factory = Some(Box::new(NativeSceneSessionRuntimeFactory {
+            factory,
+            session: std::marker::PhantomData,
+        }));
     }
 
     pub fn start_session_for_request(
@@ -491,13 +529,29 @@ where
     }
 
     pub(crate) fn refresh_world_catalog_ui(&mut self, status: WorldCatalogUiStatus) {
-        let catalog = self.world_catalog.clone();
-        refresh_world_catalog_controller(
-            catalog.as_ref().map(|catalog| catalog as &dyn WorldCatalog),
-            self.client_experience.catalog_mut(),
+        let Some(mut operations) = self.services.catalog_operations.take() else {
+            self.client_experience.catalog_mut().set_worlds(
+                WorldCatalogCapabilities::default(),
+                Vec::new(),
+                status,
+            );
+            return;
+        };
+        let active_world = self.active_local_world_id().cloned();
+        let catalog = self.client_experience.catalog_mut();
+        catalog.set_worlds(
+            WorldCatalogCapabilities::persistent_local(),
+            Vec::new(),
             status,
-            "XR local",
         );
+        let requests = catalog.request_world_list();
+        for request in requests.catalog_requests {
+            operations.submit(request, active_world.clone());
+        }
+        let effects = operations.poll(catalog);
+        debug_assert!(effects.session_starts.is_empty());
+        debug_assert!(effects.catalog_requests.is_empty());
+        self.services.catalog_operations = Some(operations);
     }
 
     pub(crate) fn active_local_world_id(&self) -> Option<&LocalWorldId> {
@@ -512,17 +566,20 @@ where
             request,
             |options| Ok(self.local_world_options(options.seed)),
             |id| {
-                let catalog = self
-                    .world_catalog
+                let summary = self
+                    .client_experience
+                    .catalog()
+                    .world_summary(id)
+                    .cloned()
+                    .context("local world is not present in the catalog view")?;
+                let world_root = self
+                    .scene
+                    .world_root
                     .as_ref()
                     .context("Persistent worlds unavailable")?;
-                let opened = catalog.open_world(id)?;
                 Ok((
-                    self.catalog_world_scene(
-                        &opened.summary,
-                        catalog.world_dir(&opened.summary.id),
-                    ),
-                    ActiveSessionDescriptor::from_local_world_summary(&opened.summary),
+                    self.catalog_world_scene(&summary, world_root.join(summary.id.as_str())),
+                    ActiveSessionDescriptor::from_local_world_summary(&summary),
                 ))
             },
             |endpoint| Ok(self.remote_session_options(endpoint.address.clone())),
@@ -711,7 +768,7 @@ where
         // pose moves chunk interest, the reconciled drive re-pumps at the new camera
         // so the drained seed covers the final camera rather than the spawn camera.
         let startup_camera = glam_vec3_from_vec3d(camera.snapshot().eye);
-        let clock = self.clock.clone();
+        let clock = self.services.clock.clone();
         let (local_runtime, startup_sections) = pump
             .drive_to_ready_reconciled(
                 startup_camera,
@@ -722,10 +779,13 @@ where
                 },
             )
             .context("reconcile XR local startup pose")?;
-        let runtime = NativeSessionRuntime::<S>::from_active_runtime_with_descriptor(
+        let runtime: SceneSessionRuntime = NativeSessionServices::<
+            mclone_app_runtime::LocalOnlySession,
+        >::from_active_runtime_with_descriptor(
             descriptor.clone(),
-            NativeSceneRuntime::Local(local_runtime),
-        );
+            NativeSceneServices::Local(local_runtime),
+        )
+        .into();
 
         let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
         // docs/tactical/167: seed the initial draw resources from the startup
@@ -871,6 +931,14 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<()> {
+        if let Some(operations) = self.services.catalog_operations.as_mut() {
+            for request in operations.begin_epoch() {
+                let _ = self.client_experience.catalog_mut().apply_catalog_error(
+                    request.id,
+                    WorldCatalogError::unsupported("World catalog operation superseded"),
+                );
+            }
+        }
         self.local_startup = None;
         if self.runtime.take().is_some() {
             self.draw = TexturedSectionDrawResources::new(
@@ -905,22 +973,16 @@ where
             return Err(error);
         };
         let scene = scene.validated()?;
-        let runtime = match factory(endpoint.clone(), scene.clone(), mesh_assets) {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                log::error!("failed to start XR session {request:?}: {error:#}");
-                return Err(error);
-            }
-        };
         let movement_speed_multiplier = scene.movement_speed_multiplier;
-        let started = match start_scene_runtime(
+        let started = match factory.start(
+            endpoint.clone(),
+            scene.clone(),
+            mesh_assets,
             device,
             queue,
             self.color_format,
-            runtime,
             movement_speed_multiplier,
-            None,
-            &self.clock,
+            &self.services.clock,
         ) {
             Ok(started) => started,
             Err(error) => {
@@ -1042,13 +1104,13 @@ where
     ) -> Result<bool> {
         let mut scene_replaced = false;
         for start in effects.session_starts {
-            let Some(catalog) = self.world_catalog.clone() else {
+            let Some(world_root) = self.scene.world_root.clone() else {
                 let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
                 log::warn!("XR catalog session start failed: {error}");
                 continue;
             };
-            let scene =
-                self.catalog_world_scene(&start.summary, catalog.world_dir(&start.summary.id));
+            let scene = self
+                .catalog_world_scene(&start.summary, world_root.join(start.summary.id.as_str()));
             self.status_overlay = StatusOverlay::hidden();
             self.session.request_start(
                 start.request,
@@ -1074,18 +1136,18 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
-        // Clone the catalog before borrowing the controller mutably: the catalog
-        // lives on `self.world_catalog` and the controller on
-        // `self.client_experience`, so the executor needs an owned catalog handle
-        // (cheap: a `PathBuf`) alongside the mutable controller borrow.
-        let catalog = self.world_catalog.clone();
+        let Some(mut operations) = self.services.catalog_operations.take() else {
+            let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
+            let effects = self
+                .client_experience
+                .catalog_mut()
+                .apply_catalog_error(request.id, error);
+            return self.apply_xr_catalog_effects(effects, device, queue);
+        };
         let active_world = self.active_local_world_id().cloned();
-        let effects = execute_world_catalog_request(
-            catalog.as_ref().map(|catalog| catalog as &dyn WorldCatalog),
-            self.client_experience.catalog_mut(),
-            active_world.as_ref(),
-            request,
-        );
+        operations.submit(request, active_world);
+        let effects = operations.poll(self.client_experience.catalog_mut());
+        self.services.catalog_operations = Some(operations);
         self.apply_xr_catalog_effects(effects, device, queue)
     }
 
@@ -1217,19 +1279,13 @@ impl HostEffects for XrSettingsHostEffects {
     }
 }
 
-struct XrSessionHostEffects<'a, 'device, S>
-where
-    S: RemoteDedicatedServerSession,
-{
-    scene: &'a mut McloneSceneHost<S>,
+struct XrSessionHostEffects<'a, 'device> {
+    scene: &'a mut McloneSceneHost,
     device: &'device wgpu::Device,
     queue: &'device wgpu::Queue,
 }
 
-impl<S> HostEffects for XrSessionHostEffects<'_, '_, S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl HostEffects for XrSessionHostEffects<'_, '_> {
     fn request_mouse_lock(&mut self, _requested: bool) -> Result<()> {
         Ok(())
     }
@@ -1260,10 +1316,7 @@ where
     }
 }
 
-impl<S> ClientExperienceSettingsHost for McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl ClientExperienceSettingsHost for McloneSceneHost {
     fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()> {
         self.render_options.section_occlusion_culling = enabled;
         log::info!(
@@ -1464,13 +1517,13 @@ pub(crate) fn start_scene_runtime<S>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
-    runtime: NativeSessionRuntime<S>,
+    runtime: NativeSessionServices<S>,
     movement_speed_multiplier: f32,
     startup_view_pose: Option<XrStartupViewPose>,
     clock: &MonotonicClockHandle,
-) -> Result<StartedSceneRuntime<S>>
+) -> Result<StartedSceneRuntime>
 where
-    S: RemoteDedicatedServerSession,
+    S: RemoteDedicatedServerSession + 'static,
 {
     let center = runtime.interest_center();
     let render_distance = runtime.render_distance();
@@ -1550,7 +1603,7 @@ where
         elapsed_ms(clock.elapsed_since(initial_poll_start))
     );
     Ok(StartedSceneRuntime {
-        runtime,
+        runtime: runtime.into(),
         camera,
         draw,
         render_stats,
@@ -1571,13 +1624,13 @@ pub(crate) const XR_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
 /// startup view pose (validated on-device several chunks out) otherwise leaves the
 /// ready frame with nothing drawn near the camera.
 fn reconcile_xr_startup_pose<S>(
-    runtime: &mut NativeSceneRuntime<S>,
+    runtime: &mut NativeSceneServices<S>,
     camera: &mut EngineCameraController,
     startup_view_pose: Option<XrStartupViewPose>,
     clock: &MonotonicClockHandle,
 ) -> Result<bool>
 where
-    S: RemoteDedicatedServerSession,
+    S: RemoteDedicatedServerSession + 'static,
 {
     let mut changed = mclone_app_runtime::apply_pending_engine_camera_position_updates(
         runtime,

@@ -2,9 +2,10 @@
 
 Topic: web-scene-host-adoption
 
-Status: active 2026-07-10. Tactical 170 Slices 0-1 landed the executable
-browser baselines and portable scene prerequisites. Slice 2 is next. The
-implementation sequence is recorded in
+Status: active 2026-07-10. Tactical 170 Slices 0-2 landed the executable
+browser baselines, portable scene prerequisites, and neutral native-consumed
+scene-session shell. Slice 3 is next after the recorded physical-Quest hold is
+closed. The implementation sequence is recorded in
 [`170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md);
 production adoption has not started and the old web owner remains active.
 
@@ -76,28 +77,21 @@ contracts, but the top-level orchestration is still forked:
 - Client-experience, session, and catalog policy are shared, but web still
   applies their effects through app-local matches and asynchronous wrappers.
 
-The direct acceptance gate still fails before the runtime-shell split:
+The direct acceptance gate still fails before browser service assembly:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml \
   -p mclone-scene --target wasm32-unknown-unknown
 ```
 
-The Slice 0 baseline was 98 compiler errors across native runtime, neutral
-asset data, catalog, camera reconciliation, teleport, and bare `Instant`
-families. After Slice 1 it reports 87 errors. The six root diagnostics now name
-only:
-
-1. the native session runtime and its startup-readiness export;
-2. prepared-scene asset replacement request/services; and
-3. `NativeWorldCatalog` plus the synchronous native catalog executor.
-
-The other 81 errors are inference cascades after the missing native runtime
-type is erased. `TexturedMeshAssets`/compile defaults, camera reconciliation,
-teleport request/result/service types, and monotonic time no longer appear as
-WASM error roots. The reachable `mclone-scene` source has no
-`std::time::Instant` use. A green direct WASM gate will still prove compile
-portability only; the Slice 4 browser proof remains the runtime gate.
+The Slice 0 baseline was 98 compiler errors and Slice 1 reduced that to 87.
+After Slice 2 it reports five errors: four root diagnostics for the missing
+browser connection/compiler/drop assembly and prepared-scene asset services,
+plus one inference cascade. Concrete native catalog ownership and its
+synchronous executor are no longer error roots. The expected failure log is
+`/tmp/mclone-t170-slice2-scene-wasm.txt`. A green direct WASM gate will still
+prove compile portability only; the Slice 4 browser proof remains the runtime
+gate.
 
 ## Slice 0 Landed Evidence (2026-07-10)
 
@@ -167,6 +161,44 @@ No production owner, behavior, or feature-profile state moved in Slice 0.
   capture was committed.
 
 Production web still uses `WebChunkRenderSession`; Slice 1 added no alternate
+browser host or cutover toggle.
+
+## Slice 2 Landed Evidence (2026-07-10)
+
+- `McloneSceneHost` is no longer generic over a concrete remote session and
+  stores `SceneSessionRuntime`, whose neutral shell owns session identity and
+  host-facing runtime policy. Native assembly carries only an active descriptor
+  plus concrete service ownership; the old `native_session_runtime` module and
+  public `Native*Runtime` entry points were deleted.
+- `native_service_assembly` now owns native runner, render-compiler,
+  filesystem, and bounded drop-thread construction. Desktop, offscreen, flat
+  Android, desktop XR, and Quest assembly all install those services through
+  the same non-generic host API. The scene purity gate rejects concrete native
+  service fields and policy matches in native assembly.
+- The host's compact service container owns the injected monotonic clock,
+  typed catalog operations, optional teleport preview, and optional audio.
+  Connection/compiler/drop ownership is hidden behind the single
+  `SceneRuntimeService` boundary rather than widening the public host type.
+- Catalog UI policy remains shared, while native filesystem work completes
+  through the typed `PlatformOperationService`. Immediate and deferred scripted
+  executors produce identical session/catalog/reconnect host state; executor
+  replacement cancels the old epoch and rejects late work.
+- Deferred snapshot destruction uses `DeferredDropService`, with a portable
+  frame-drain queue and native bounded-thread implementation. The hard capacity
+  is 4,096 items versus Slice 0's measured 295-item peak; overflow destroys on
+  the caller and increments visible inline-fallback accounting. Queue
+  replacement and bound/fallback behavior are tested.
+- The direct scene WASM audit fell from 87 errors to five. Remaining roots are
+  browser service/prepared-asset implementations reserved for Slice 3, not
+  concrete native catalog or host policy ownership.
+- Desktop offscreen and synthetic-stereo captures were byte-identical to the
+  pre-slice canaries (`cdffd673...` and `18bbdadd...`) and were visually
+  inspected. The rebuilt flat-Android AVD produced a visible frozen-daytime
+  terrain/HUD frame. Desktop XR and Quest APK checks passed. No physical Quest
+  was attached, so a fresh on-device Quest run remains an explicit hold before
+  Slice 3 rather than being inferred from an APK build.
+
+Production web still uses `WebChunkRenderSession`; Slice 2 added no alternate
 browser host or cutover toggle.
 
 ## Locked Decisions
@@ -269,10 +301,9 @@ separately reviewable.
   browser event, if any, maps to the host's lifecycle save trigger; web
   persistence currently flows continuously through the runner with no
   `pagehide`/`visibilitychange` hook.
-- **Deferred drops:** Slice 0 observed path-dependent settled backlogs of 0,
-  70, and 295 items and confirmed that current web has no explicit drain.
-  Slice 2 must choose a bounded frame-budgeted executor or Worker lane and
-  retain backlog reporting.
+- **Deferred drops:** Slice 2 selected the bounded `DeferredDropService`
+  contract. Slice 3 must attach its browser frame-drain or worker backend and
+  preserve the 4,096-item capacity plus pending/fallback reporting.
 - **WebGPU device/surface loss:** the cutover must at least preserve current
   recovery or produce a controlled restart/error state; it may not silently
   wedge the session.
@@ -348,7 +379,8 @@ Production adoption must preserve:
 Primary code:
 
 - `native/crates/mclone-scene/`
-- `native/crates/mclone-app-runtime/src/native_session_runtime.rs`
+- `native/crates/mclone-app-runtime/src/scene_session_runtime.rs`
+- `native/crates/mclone-app-runtime/src/native_service_assembly.rs`
 - `native/crates/mclone-app-runtime/src/client_connection.rs`
 - `native/apps/mclone-web-client/src/web_canvas.rs`
 - `native/apps/mclone-web-client/src/web_server_worker.rs`
@@ -357,7 +389,9 @@ Primary code:
 
 ## Recommended Next Work
 
-Start Tactical 170 Slice 1: introduce the shared monotonic time contract, move
-neutral render-asset data out of native cfg islands, make camera reconciliation
-target-neutral, and replace concrete teleport/audio ownership with explicit
-optional capabilities. Keep production web on `WebChunkRenderSession`.
+1. Close the Slice 2 platform hold with an attached Quest: install the freshly
+built Android XR APK, run the standard local-world validation, and inspect its
+capture/log markers. Then start Tactical 170 Slice 3 by implementing browser
+clock, connection, compiler, catalog-operation, deferred-drop, prepared-asset,
+and explicit absent teleport/audio adapters behind the neutral shell. Keep
+production web on `WebChunkRenderSession`.

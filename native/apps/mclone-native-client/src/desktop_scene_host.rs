@@ -3,8 +3,7 @@
 //! and cadence.
 
 use anyhow::{Context, Result};
-use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
-use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
+use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_scene::{McloneSceneHost, McloneSceneHostOptions, XrStartupViewPose};
@@ -12,7 +11,7 @@ use mclone_scene::{McloneSceneHost, McloneSceneHostOptions, XrStartupViewPose};
 use crate::cli::SceneOptions;
 use crate::scene_runtime::{WindowSceneAssets, native_window_scene_runtime_with_mesh_assets};
 
-pub(crate) type DesktopSceneHost = McloneSceneHost<NativeRemoteServerSession>;
+pub(crate) type DesktopSceneHost = McloneSceneHost;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DesktopSceneHostOverrides {
@@ -64,7 +63,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
                 .clone()
                 .expect("remote address presence checked"),
         );
-        let runtime = NativeSessionRuntime::from_active_runtime(
+        let runtime = NativeSessionServices::from_active_runtime(
             SessionStartRequest::JoinRemote {
                 endpoint: endpoint.clone(),
             },
@@ -105,7 +104,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
     host.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
         let desktop_scene = desktop_scene_options_for_remote(&endpoint, &scene);
         let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
-        NativeSessionRuntime::from_active_runtime(
+        NativeSessionServices::from_active_runtime(
             SessionStartRequest::JoinRemote { endpoint },
             runtime,
         )

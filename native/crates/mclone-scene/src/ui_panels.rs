@@ -551,10 +551,7 @@ pub(crate) fn xr_game_ui_panel_height_blocks() -> f32 {
     XR_GAME_UI_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     pub(crate) fn current_ui_render_state(&self) -> GameUiRenderState {
         let render_distance = self.local_startup.as_ref().map_or_else(
             || {

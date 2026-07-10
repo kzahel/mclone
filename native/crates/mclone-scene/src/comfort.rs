@@ -145,10 +145,7 @@ pub(crate) fn xr_head_comfort_fade_overlays(
     [overlay, overlay]
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     pub(crate) fn update_head_comfort_state(
         &mut self,
         transform: XrStageToWorld,

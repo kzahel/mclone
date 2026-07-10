@@ -36,9 +36,8 @@ use crate::scene_runtime::{
     native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
 };
 #[cfg(not(target_os = "android"))]
-use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 #[cfg(not(target_os = "android"))]
-use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
+use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::render_assets::{
     load_actor_texture_assets_from_asset_source, load_textured_mesh_assets_from_source,
@@ -74,7 +73,7 @@ type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
 >;
 
 #[cfg(not(target_os = "android"))]
-type DesktopXrSceneHost = McloneSceneHost<NativeRemoteServerSession>;
+type DesktopXrSceneHost = McloneSceneHost;
 
 #[cfg(target_os = "android")]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
@@ -764,7 +763,7 @@ fn create_mclone_terrain_state(
     });
     let mut state = if options.scene.remote_addr.is_some() {
         let request = session_start_request_for_desktop_scene(&options.scene);
-        let runtime = NativeSessionRuntime::from_active_runtime(
+        let runtime = NativeSessionServices::from_active_runtime(
             request,
             native_window_scene_runtime(&options.scene)?,
         )?;
@@ -806,7 +805,7 @@ fn create_mclone_terrain_state(
     state.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
         let desktop_scene = desktop_scene_options_for_xr_remote(&endpoint, &scene);
         let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
-        NativeSessionRuntime::from_active_runtime(
+        NativeSessionServices::from_active_runtime(
             SessionStartRequest::JoinRemote { endpoint },
             runtime,
         )

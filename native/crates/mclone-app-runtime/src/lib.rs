@@ -2,13 +2,13 @@
 
 pub mod asset_pack_ui;
 pub mod camera_reconcile;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod catalog_executor;
 pub mod client_catalog_policy;
 pub mod client_connection;
 pub mod client_experience;
 pub mod client_session_policy;
 pub mod debug_overlay;
+pub mod deferred_drop;
 pub mod far_lod;
 pub mod frame_pacing;
 pub mod frame_pipeline_accounting;
@@ -20,13 +20,14 @@ pub mod monotonic;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_remote_session;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod native_session_runtime;
+pub mod native_service_assembly;
 pub mod platform_operation;
 pub mod prepared_assets;
 pub mod render_asset_data;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod render_assets;
 pub mod render_compile_capacity;
+pub mod scene_session_runtime;
 pub mod seed_reroll;
 pub mod session;
 pub mod startup_args;
@@ -39,16 +40,12 @@ pub use crate::camera_reconcile::{
     sync_engine_camera_player_pose, update_interest_from_engine_camera,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use crate::catalog_executor::{
-    execute_world_catalog_request, refresh_world_catalog_controller,
+pub use crate::native_service_assembly::{
+    LocalOnlySession, NativeSessionStartupCompletion, NativeSessionStartupPump,
+    NativeSessionStartupStep,
 };
-#[cfg(not(target_arch = "wasm32"))]
-pub use crate::native_session_runtime::{
-    DEFAULT_STARTUP_READINESS_TIMEOUT, LocalOnlySession, NativeSessionStartupCompletion,
-    NativeSessionStartupPump, NativeSessionStartupStep, StartupReadinessPolicy,
-};
+pub use crate::scene_session_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, StartupReadinessPolicy};
 pub use crate::startup_render_seed::StartupRenderSectionSeed;
-#[cfg(not(target_arch = "wasm32"))]
 pub use crate::world_catalog::WorldCatalog;
 
 use std::collections::BTreeSet;

@@ -62,7 +62,7 @@ mod android {
     };
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
-    use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
+    use mclone_app_runtime::native_service_assembly::NativeSessionServices;
     use mclone_app_runtime::render_assets::{
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
@@ -119,8 +119,8 @@ mod android {
         graphics_vulkan::AppGraphics,
         graphics_vulkan::OpenXrStereoState,
     >;
-    type AndroidXrSceneRuntime = NativeSessionRuntime<NativeRemoteServerSession>;
-    type AndroidXrTerrainState = McloneSceneHost<NativeRemoteServerSession>;
+    type AndroidXrSceneRuntime = NativeSessionServices<NativeRemoteServerSession>;
+    type AndroidXrTerrainState = McloneSceneHost;
 
     const LOG_TAG: &str = "mclone_android_xr";
     const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";

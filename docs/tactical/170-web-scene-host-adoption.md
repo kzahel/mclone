@@ -583,6 +583,95 @@ Exit criteria:
 - any remaining WASM failures name missing browser implementations, not
   native-only scene policy.
 
+### Slice 2 Result
+
+The neutral runtime-shell implementation landed without starting browser
+adapter or production-cutover work:
+
+- `mclone_app_runtime::scene_session_runtime` owns the non-generic
+  `SceneSessionRuntime`, session coordinator, readiness contract, camera/runtime
+  access, diagnostics, lifecycle methods, and one object-safe runtime-service
+  boundary. `McloneSceneHost` stores that shell; it no longer has a remote
+  session type parameter or a concrete native runtime field.
+- The former `native_session_runtime.rs` entry point was deleted.
+  `native_service_assembly.rs` owns native runner, compiler, filesystem, and
+  bounded drop-thread construction, then type-erases them behind the shell.
+  Native session assembly retains only the active descriptor needed to install
+  the shell; it no longer carries a second `GameSessionCoordinator`.
+- `SceneHostServices` groups the monotonic clock, typed catalog operations,
+  optional teleport preview, and optional audio. Connection, compiler, and drop
+  ownership stay inside the single installed runtime service rather than
+  widening `McloneSceneHost` into public service generics.
+- The host no longer stores `NativeWorldCatalog`. Native assembly wraps it in
+  an immediate typed executor; the scene issues and folds tokened catalog
+  operations through `PlatformOperationService`. Immediate and deferred
+  scripted executors reach identical local-session/catalog/reconnect state.
+  Replacement cancels old-epoch work, and stale/duplicate/unknown completion
+  behavior remains observable.
+- `DeferredDropService` is the selected cross-target contract. Its portable
+  queue and native thread backend are bounded at 4,096 items, over 13 times the
+  Slice 0 measured peak of 295. Pending items, capacity, and inline-fallback
+  items are explicit; overflow cannot grow an unbounded channel. Bound,
+  fallback, queue replacement, and operation-executor replacement are covered
+  by focused tests.
+- Desktop, offscreen, flat Android, desktop XR, and Quest assembly call sites
+  now consume the same non-generic host. The extended purity gate rejects
+  concrete native service fields in `mclone-scene` and session/settings/
+  catalog/camera policy matches in native assembly.
+
+The direct scene WASM audit changed from 87 errors after Slice 1 to five errors:
+four root diagnostics for browser connection/compiler/drop assembly and
+prepared-scene asset services, then one type-inference cascade. Concrete native
+catalog ownership and the synchronous catalog executor are no longer roots.
+The expected failure log is `/tmp/mclone-t170-slice2-scene-wasm.txt`.
+
+Validation passed:
+
+```text
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml --workspace
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-app-runtime -p mclone-client -p mclone-audio -p mclone-scene
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-app-runtime --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:scene-host:purity
+pnpm native:thin-adapters:purity
+pnpm native:web:scene-host-adoption
+pnpm native:web:build
+pnpm native:web:typecheck
+pnpm native:desktop-offscreen:smoke
+pnpm native:xr-emulation:smoke
+pnpm native:xr:check
+pnpm native:android:apk:avd
+pnpm native:android-xr:apk
+MCLONE_ANDROID_ASSET_LOCK_CHECK=0 \
+  pnpm native:android:avd-smoke -- --skip-build --render-distance 2 \
+  --day-time 6000 --freeze-time --smoke-seconds 30
+```
+
+The first AVD capture reached the rendered-frame marker but was too dark to be
+useful, so it was rejected after inspection and rerun with frozen daytime. The
+following fresh `/tmp` captures were inspected and not committed:
+
+- `/tmp/mclone-desktop-offscreen.png`: 2560x1600 textured spruce terrain, cow
+  and chicken actors, 64 resident / 11 drawn sections. It is byte-identical to
+  `/tmp/mclone-t170-slice2-offscreen-before.png` (SHA-256 `cdffd673...`).
+- `/tmp/mclone-xr-emulation.png`: 1280x640 stereo forest/menu output, 268,570
+  differing eye pixels and 166 resident / 24 drawn sections. It is
+  byte-identical to `/tmp/mclone-t170-slice2-xr-before.png` (SHA-256
+  `18bbdadd...`).
+- `/tmp/mclone-android-avd-chunk.png`: rebuilt flat-Android frozen-daytime
+  terrain at the close leaf canopy with visible sky, HUD, and touch controls.
+
+The desktop OpenXR feature check and Quest APK build passed. `adb devices` had
+no attached physical Quest, so fresh on-device render evidence could not be
+collected. That limitation is recorded as a hard platform hold: do not begin
+Slice 3 until the standard attached-Quest local-world validation has run and
+its capture/log markers have been inspected. No production
+`WebChunkRenderSession` or TypeScript owner changed.
+
 ## Slice 3: Browser Service Adapters And Direct WASM Gate
 
 Purpose: assemble browser implementations behind the neutral host contracts

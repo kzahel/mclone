@@ -57,6 +57,13 @@ impl ClientCatalogController {
         self.ui.active = self.active_local_world_ui_id();
     }
 
+    pub fn world_summary(&self, id: &LocalWorldId) -> Option<&LocalWorldSummary> {
+        self.entries
+            .iter()
+            .find(|entry| &entry.summary.id == id)
+            .map(|entry| &entry.summary)
+    }
+
     pub fn set_create_display_name(&mut self, display_name: &str) {
         self.ui.create_display_name = if self.capabilities.create_supported {
             WorldCatalogUiText::new(display_name)

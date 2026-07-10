@@ -40,10 +40,36 @@ pub trait EngineCameraRuntime {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl<S> EngineCameraRuntime for crate::native_session_runtime::NativeSceneRuntime<S>
+impl<S> EngineCameraRuntime for crate::native_service_assembly::NativeSceneServices<S>
 where
     S: crate::host_mode::RemoteDedicatedServerSession,
 {
+    fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool> {
+        self.send_gameplay_command(command)
+    }
+
+    fn send_camera_command_with_policy_timed(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        self.send_gameplay_command_with_update_policy_timed(command, policy)
+    }
+
+    fn drain_camera_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
+        self.drain_player_position_updates()
+    }
+
+    fn set_camera_interest_center_timed(
+        &mut self,
+        center: ChunkPos,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        self.set_interest_center_with_update_policy_timed(center, policy)
+    }
+}
+
+impl EngineCameraRuntime for crate::scene_session_runtime::SceneSessionRuntime {
     fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool> {
         self.send_gameplay_command(command)
     }

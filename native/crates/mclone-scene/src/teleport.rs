@@ -231,10 +231,7 @@ pub(crate) fn horizontal_forward_from_player_yaw_degrees(yaw_degrees: f64) -> Ve
     Vec3d::new(forward.x, 0.0, forward.z)
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     pub(crate) fn update_xr_blink_teleport(
         &mut self,
         controllers: &[XrControllerSnapshot],
@@ -304,7 +301,7 @@ where
     }
 
     pub(crate) fn ensure_xr_blink_teleport_worker(&mut self) {
-        match self.teleport_preview.ensure_started() {
+        match self.services.teleport_preview.ensure_started() {
             Ok(_) => {}
             Err(error) => {
                 log::warn!("failed to start XR Blink teleport service: {error}");
@@ -341,6 +338,7 @@ where
         let config = xr_blink_teleport_config();
         let collision = TeleportCollisionSnapshot::capture(runtime.client(), intent, config);
         match self
+            .services
             .teleport_preview
             .submit_snapshot(intent, config, collision)
         {
@@ -354,19 +352,19 @@ where
             Ok(None) => Ok(false),
             Err(error) => {
                 log::warn!("XR Blink teleport preview submit failed: {error}");
-                self.teleport_preview.reset_service();
+                self.services.teleport_preview.reset_service();
                 Ok(false)
             }
         }
     }
 
     pub(crate) fn poll_xr_blink_teleport_worker(&mut self) -> bool {
-        match self.teleport_preview.try_recv_latest() {
+        match self.services.teleport_preview.try_recv_latest() {
             Ok(Some(result)) => self.accept_xr_blink_teleport_result(result),
             Ok(None) => false,
             Err(error) => {
                 log::warn!("XR Blink teleport service failed: {error}");
-                self.teleport_preview.reset_service();
+                self.services.teleport_preview.reset_service();
                 false
             }
         }

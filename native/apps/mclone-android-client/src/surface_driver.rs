@@ -12,7 +12,7 @@ use mclone_app_runtime::host_mode::SingleViewHostOptions;
 use mclone_app_runtime::native_remote_session::{
     NativeRemoteServerSession, connect_native_remote_session_runtime,
 };
-use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
+use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 use mclone_app_runtime::render_assets::{
     TexturedMeshAssets, load_actor_texture_assets_from_asset_source, load_asset_source,
     load_textured_mesh_assets_from_source,
@@ -1062,7 +1062,7 @@ fn android_remote_runtime(
     endpoint: &RemoteSessionEndpoint,
     scene: &McloneSceneHostOptions,
     mesh_assets: TexturedMeshAssets,
-) -> Result<NativeSessionRuntime<NativeRemoteServerSession>> {
+) -> Result<NativeSessionServices<NativeRemoteServerSession>> {
     connect_native_remote_session_runtime(
         endpoint.clone(),
         SingleViewHostOptions::new(scene.center(), scene.render_distance)

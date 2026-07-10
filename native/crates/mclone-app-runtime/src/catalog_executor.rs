@@ -1,23 +1,151 @@
-//! Shared native world-catalog request executor.
+//! Shared typed world-catalog operation executor.
 //!
-//! This owns the duplicated middle of every native catalog consumer (desktop
-//! flat, desktop XR, Android XR, flat Android): the missing-catalog guard →
-//! `handle_request` → `apply_catalog_response`/`apply_catalog_error` → return
-//! effects. It does **not** apply the effects; each app keeps its own
-//! `apply_*_catalog_effects` tail, which drives session/GPU lifecycle and
-//! recurses for nested catalog requests.
+//! The host issues tokened operations and folds typed completions through the
+//! shared catalog controller. It does **not** own filesystem or IndexedDB work,
+//! and it does not apply session/GPU lifecycle effects.
 //!
-//! Native-only (`#[cfg(not(target_arch = "wasm32"))]`) on purpose: web's
-//! executor is asynchronous and lives in JavaScript/IndexedDB, so it stays a
-//! separate `+1` over the already-shared request/response protocol.
+//! Native assembly supplies an immediate filesystem executor. Browser assembly
+//! can supply a deferred IndexedDB executor without changing controller policy.
+
+use std::collections::VecDeque;
 
 use crate::client_catalog_policy::{
     ClientCatalogController, ClientCatalogEffects, ClientCatalogRequest,
 };
-use crate::world_catalog::{
-    LocalWorldId, WorldCatalog, WorldCatalogCapabilities, WorldCatalogError,
+use crate::platform_operation::{
+    PlatformOperation, PlatformOperationCompletion, PlatformOperationExecutor,
+    PlatformOperationResolution, PlatformOperationService,
 };
+#[cfg(test)]
+use crate::world_catalog::WorldCatalogCapabilities;
+use crate::world_catalog::{LocalWorldId, WorldCatalog, WorldCatalogError, WorldCatalogResponse};
+#[cfg(test)]
 use mclone_ui::WorldCatalogUiStatus;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorldCatalogOperation {
+    pub request: ClientCatalogRequest,
+    pub active_world: Option<LocalWorldId>,
+}
+
+#[derive(Debug)]
+pub struct ImmediateWorldCatalogExecutor {
+    catalog: Box<dyn WorldCatalog>,
+    ready: VecDeque<PlatformOperationCompletion<WorldCatalogResponse, WorldCatalogError>>,
+}
+
+impl ImmediateWorldCatalogExecutor {
+    pub fn new(catalog: Box<dyn WorldCatalog>) -> Self {
+        Self {
+            catalog,
+            ready: VecDeque::new(),
+        }
+    }
+}
+
+impl PlatformOperationExecutor<WorldCatalogOperation, WorldCatalogResponse, WorldCatalogError>
+    for ImmediateWorldCatalogExecutor
+{
+    fn submit(&mut self, operation: PlatformOperation<WorldCatalogOperation>) {
+        let result = self.catalog.handle_request(
+            operation.kind.request.request.clone(),
+            operation.kind.active_world.as_ref(),
+        );
+        self.ready.push_back(PlatformOperationCompletion {
+            token: operation.token,
+            result,
+        });
+    }
+
+    fn try_recv_completion(
+        &mut self,
+    ) -> Option<PlatformOperationCompletion<WorldCatalogResponse, WorldCatalogError>> {
+        self.ready.pop_front()
+    }
+}
+
+impl std::fmt::Debug for dyn WorldCatalog {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("WorldCatalog")
+    }
+}
+
+#[derive(Debug)]
+pub struct WorldCatalogOperationService {
+    operations: PlatformOperationService<
+        WorldCatalogOperation,
+        ClientCatalogRequest,
+        WorldCatalogResponse,
+        WorldCatalogError,
+    >,
+}
+
+impl WorldCatalogOperationService {
+    pub fn new(
+        executor: Box<
+            dyn PlatformOperationExecutor<
+                    WorldCatalogOperation,
+                    WorldCatalogResponse,
+                    WorldCatalogError,
+                >,
+        >,
+    ) -> Self {
+        Self {
+            operations: PlatformOperationService::new(executor),
+        }
+    }
+
+    pub fn immediate(catalog: Box<dyn WorldCatalog>) -> Self {
+        Self::new(Box::new(ImmediateWorldCatalogExecutor::new(catalog)))
+    }
+
+    pub fn submit(&mut self, request: ClientCatalogRequest, active_world: Option<LocalWorldId>) {
+        self.operations.issue(
+            WorldCatalogOperation {
+                request: request.clone(),
+                active_world,
+            },
+            request,
+        );
+    }
+
+    pub fn poll(&mut self, controller: &mut ClientCatalogController) -> ClientCatalogEffects {
+        let mut effects = ClientCatalogEffects::default();
+        for resolution in self.operations.poll() {
+            let next = match resolution {
+                PlatformOperationResolution::Applied { kind, value, .. } => {
+                    controller.apply_catalog_response(kind.request.id, value)
+                }
+                PlatformOperationResolution::Failed {
+                    error,
+                    failure_restore,
+                    ..
+                } => {
+                    log::warn!("world catalog action failed: {error}");
+                    controller.apply_catalog_error(failure_restore.id, error)
+                }
+                PlatformOperationResolution::Stale(_)
+                | PlatformOperationResolution::Duplicate(_)
+                | PlatformOperationResolution::Unknown(_) => continue,
+            };
+            effects.session_starts.extend(next.session_starts);
+            effects.catalog_requests.extend(next.catalog_requests);
+        }
+        effects
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.operations.pending_len()
+    }
+
+    pub fn begin_epoch(&mut self) -> Vec<ClientCatalogRequest> {
+        self.operations
+            .begin_epoch()
+            .into_iter()
+            .map(|cancelled| cancelled.failure_restore)
+            .collect()
+    }
+}
 
 /// Run one `ClientCatalogRequest` against a native catalog backend and fold the
 /// result back through the shared `ClientCatalogController`.
@@ -25,7 +153,8 @@ use mclone_ui::WorldCatalogUiStatus;
 /// When `catalog` is `None` (genuinely transient targets: headless, initial
 /// local session), the request fails with the shared "Persistent worlds
 /// unavailable" error, exactly as the per-app copies did.
-pub fn execute_world_catalog_request(
+#[cfg(test)]
+fn execute_world_catalog_request(
     catalog: Option<&dyn WorldCatalog>,
     controller: &mut ClientCatalogController,
     active_world: Option<&LocalWorldId>,
@@ -46,7 +175,8 @@ pub fn execute_world_catalog_request(
 }
 
 /// Refresh a native catalog controller from the current backend list state.
-pub fn refresh_world_catalog_controller(
+#[cfg(test)]
+fn refresh_world_catalog_controller(
     catalog: Option<&dyn WorldCatalog>,
     controller: &mut ClientCatalogController,
     status: WorldCatalogUiStatus,
@@ -75,7 +205,6 @@ pub fn refresh_world_catalog_controller(
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use std::path::PathBuf;
 
     use super::*;
     use crate::client_catalog_policy::ClientCatalogActionContext;
@@ -92,7 +221,6 @@ mod tests {
     /// the filesystem or the clock, and records the last outcome so tests can
     /// assert the exact `WorldCatalogResponse` produced at each step.
     struct FakeWorldCatalog {
-        root: PathBuf,
         worlds: RefCell<Vec<LocalWorldSummary>>,
         last: RefCell<Option<WorldCatalogResult<WorldCatalogResponse>>>,
     }
@@ -100,7 +228,6 @@ mod tests {
     impl FakeWorldCatalog {
         fn new() -> Self {
             Self {
-                root: PathBuf::from("/fake/worlds"),
                 worlds: RefCell::new(Vec::new()),
                 last: RefCell::new(None),
             }
@@ -201,16 +328,41 @@ mod tests {
                 },
             }
         }
-
-        fn world_dir(&self, id: &LocalWorldId) -> PathBuf {
-            self.root.join(id.as_str())
-        }
     }
 
     fn persistent_controller() -> ClientCatalogController {
         let mut controller = ClientCatalogController::new();
         controller.set_capabilities(WorldCatalogCapabilities::persistent_local());
         controller
+    }
+
+    #[derive(Debug)]
+    struct ListOnlyCatalog {
+        world: LocalWorldSummary,
+    }
+
+    impl WorldCatalog for ListOnlyCatalog {
+        fn capabilities(&self) -> WorldCatalogCapabilities {
+            WorldCatalogCapabilities::persistent_local()
+        }
+
+        fn list_worlds(&self) -> WorldCatalogResult<Vec<LocalWorldSummary>> {
+            Ok(vec![self.world.clone()])
+        }
+
+        fn handle_request(
+            &self,
+            request: WorldCatalogRequest,
+            _active_world: Option<&LocalWorldId>,
+        ) -> WorldCatalogResult<WorldCatalogResponse> {
+            match request {
+                WorldCatalogRequest::ListWorlds => Ok(WorldCatalogResponse::WorldList {
+                    capabilities: self.capabilities(),
+                    worlds: self.list_worlds()?,
+                }),
+                _ => Err(WorldCatalogError::unsupported("list-only test catalog")),
+            }
+        }
     }
 
     fn context(seed: i64) -> ClientCatalogActionContext {
@@ -223,6 +375,31 @@ mod tests {
         assert!(effects.session_starts.is_empty());
         assert_eq!(effects.catalog_requests.len(), 1);
         effects.catalog_requests.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn immediate_operation_service_folds_completion_through_shared_policy() {
+        let world = LocalWorldSummary::new(
+            LocalWorldId::new("operation-world").unwrap(),
+            "Operation World",
+            42,
+            1_000,
+        )
+        .unwrap();
+        let mut controller = persistent_controller();
+        let request = only_request(controller.request_world_list());
+        let mut service = WorldCatalogOperationService::immediate(Box::new(ListOnlyCatalog {
+            world: world.clone(),
+        }));
+
+        service.submit(request, None);
+        let effects = service.poll(&mut controller);
+
+        assert_eq!(effects, ClientCatalogEffects::default());
+        assert_eq!(service.pending_len(), 0);
+        let state = controller.ui_state();
+        assert_eq!(state.entry_count(), 1);
+        assert_eq!(state.entries[0].as_ref().unwrap().seed, world.seed);
     }
 
     /// Behavior-equivalence tripwire (tactical 160, slices 1–2): drive the fixed

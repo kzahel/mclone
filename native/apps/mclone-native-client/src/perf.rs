@@ -12,7 +12,7 @@ use mclone_app_runtime::frame_pipeline_accounting::{
 };
 use mclone_app_runtime::frame_pipeline_presentation::frame_pipeline_report_json_field_lines;
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
-use mclone_app_runtime::native_session_runtime::NativeSceneRuntime;
+use mclone_app_runtime::native_service_assembly::NativeSceneServices;
 use mclone_app_runtime::{RenderSectionSyncTiming, RuntimeUpdatePumpBudget};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
@@ -3327,7 +3327,7 @@ pub(crate) fn run_loading_settle_perf(
 }
 
 fn poll_window_runtime_until_loading_target_settled(
-    runtime: &mut NativeSceneRuntime<NativeRemoteServerSession>,
+    runtime: &mut NativeSceneServices<NativeRemoteServerSession>,
     expected_target_chunks: usize,
     timeout: Duration,
 ) -> Result<(usize, f64)> {

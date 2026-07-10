@@ -714,15 +714,11 @@ impl NativeWorldCatalog {
     }
 }
 
-/// Native, synchronous world-catalog backend abstraction.
+/// Backend operation contract used by platform catalog executors.
 ///
-/// Extracted verbatim from `NativeWorldCatalog`'s existing inherent methods so
-/// the shared `execute_world_catalog_request` executor can drive any native
-/// catalog backend without knowing its concrete type. It is intentionally
-/// `#[cfg(not(target_arch = "wasm32"))]`: web catalog requests are asynchronous
-/// and answered in JavaScript over the shared request/response protocol, so web
-/// cannot implement a synchronous `handle_request`.
-#[cfg(not(target_arch = "wasm32"))]
+/// The host never owns this backend directly. Native assembly wraps
+/// `NativeWorldCatalog` in an immediate executor; browser assembly will submit
+/// the same request/response values to IndexedDB asynchronously.
 pub trait WorldCatalog {
     fn capabilities(&self) -> WorldCatalogCapabilities;
     fn list_worlds(&self) -> WorldCatalogResult<Vec<LocalWorldSummary>>;
@@ -731,7 +727,6 @@ pub trait WorldCatalog {
         request: WorldCatalogRequest,
         active_world: Option<&LocalWorldId>,
     ) -> WorldCatalogResult<WorldCatalogResponse>;
-    fn world_dir(&self, id: &LocalWorldId) -> PathBuf;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -750,10 +745,6 @@ impl WorldCatalog for NativeWorldCatalog {
         active_world: Option<&LocalWorldId>,
     ) -> WorldCatalogResult<WorldCatalogResponse> {
         NativeWorldCatalog::handle_request(self, request, active_world)
-    }
-
-    fn world_dir(&self, id: &LocalWorldId) -> PathBuf {
-        NativeWorldCatalog::world_dir(self, id)
     }
 }
 

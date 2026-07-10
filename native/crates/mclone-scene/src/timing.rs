@@ -412,10 +412,7 @@ impl XrTerrainFrameTiming {
     }
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     pub fn frame_summary(&self) -> XrTerrainFrameSummary {
         self.frame_summary_with_timing(
             XrTerrainFrameTiming::default(),

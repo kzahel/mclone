@@ -30,10 +30,7 @@ pub(crate) enum SceneAssetReplacementPending {
     Meshes(PreparedAssetReplacementRequest),
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     pub fn asset_replacement_status(&self) -> &AssetReplacementStatus {
         &self.asset_replacement_status
     }
@@ -342,6 +339,7 @@ where
         };
         let far_lod = FarTerrainLodRenderer::new(device, self.color_format);
         let audio = self
+            .services
             .audio
             .replacement(assets.audio.clone())
             .context("prepare replacement audio capability")?;
@@ -359,7 +357,7 @@ where
         self.world_gui_overlay_renderer = world_gui_overlay_renderer;
         self.mono_gui = mono_gui;
         self.far_lod = far_lod;
-        self.audio = audio;
+        self.services.audio = audio;
         self.active_assets = assets;
         self.traversal_ready_sections.clear();
         self.section_uploads.clear();

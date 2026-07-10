@@ -6,9 +6,10 @@
 //! every resident section dirty and recompiling. That dirty-all recompile is a
 //! renderer/surface **resource-rebuild** path and is deliberately named
 //! `recompile_all_render_section_meshes_for_resource_rebuild(...)`. It is owned
-//! by `mclone-app-runtime/src/native_session_runtime.rs` (definition + host-mode
-//! dispatch) and nothing else in the native tree may reference it: no startup
-//! path, no platform adapter, no probe. Real resource rebuilds already go
+//! by `mclone-app-runtime/src/native_service_assembly.rs` (definition + host-mode
+//! dispatch), with one declaration in the neutral scene-service contract, and
+//! nothing else in the native tree may reference it: no startup path, no
+//! platform adapter, no probe. Real resource rebuilds already go
 //! through `mark_all_render_sections_dirty_for_resource_rebuild(...)` +
 //! `sync_all_render_sections(...)` inline, so a fresh call site to the combined
 //! helper is almost certainly a startup path trying to bypass the seed — this
@@ -40,9 +41,19 @@ fn owner_file() -> PathBuf {
         .join("crates")
         .join("mclone-app-runtime")
         .join("src")
-        .join("native_session_runtime.rs")
+        .join("native_service_assembly.rs")
         .canonicalize()
         .expect("owner file exists")
+}
+
+fn shell_contract_file() -> PathBuf {
+    native_root()
+        .join("crates")
+        .join("mclone-app-runtime")
+        .join("src")
+        .join("scene_session_runtime.rs")
+        .canonicalize()
+        .expect("scene-session shell contract exists")
 }
 
 /// Recursively collect `.rs` files under `dir`, skipping the vendored tree.
@@ -71,6 +82,7 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 fn resource_rebuild_recompile_helper_is_confined_to_its_owner() {
     let native = native_root();
     let owner = owner_file();
+    let shell_contract = shell_contract_file();
 
     let mut files = Vec::new();
     collect_rs_files(&native.join("apps"), &mut files);
@@ -95,6 +107,11 @@ fn resource_rebuild_recompile_helper_is_confined_to_its_owner() {
                 continue;
             }
             if line.contains(FORBIDDEN_STARTUP_RECOMPILE) {
+                if file.canonicalize().ok().as_deref() == Some(shell_contract.as_path())
+                    && line.trim_start().starts_with("fn ")
+                {
+                    continue;
+                }
                 offenders.push(format!("{}:{}: {}", file.display(), index + 1, line.trim()));
             }
         }
@@ -103,7 +120,7 @@ fn resource_rebuild_recompile_helper_is_confined_to_its_owner() {
     assert!(
         offenders.is_empty(),
         "docs/tactical/167: `{FORBIDDEN_STARTUP_RECOMPILE}` is a resource-rebuild-only path owned by \
-         native_session_runtime.rs and must not be called elsewhere. Startup callers must seed \
+         native_service_assembly.rs and must not be called elsewhere. Startup callers must seed \
          from `NativeSessionStartupPump` completion sections. Offending references:\n{}",
         offenders.join("\n")
     );

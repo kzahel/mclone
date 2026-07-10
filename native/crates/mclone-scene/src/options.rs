@@ -220,10 +220,7 @@ impl XrViewAlignmentMode {
     }
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
         self.locomotion_mode = locomotion_mode;
     }

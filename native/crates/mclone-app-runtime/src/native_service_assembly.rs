@@ -1,3 +1,10 @@
+//! Native scene-service construction and concrete adapters.
+//!
+//! Shared session identity and the host-facing API live in
+//! `scene_session_runtime`. This module owns native runners, compile workers,
+//! filesystem storage, the bounded drop thread, and the type-erased adapter
+//! that installs them behind that shell.
+
 use std::collections::{BTreeSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -25,10 +32,14 @@ use mclone_server::{
 };
 use mclone_ui::LoadingProgressOverlay;
 
+use crate::catalog_executor::WorldCatalogOperationService;
 use crate::client_connection::{
     ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
     ConnectionUpdateDrainMode, IntegratedRunnerConnection, QueuedServerUpdate,
     pump_client_connection_updates_report,
+};
+use crate::deferred_drop::{
+    DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropBacklog, DeferredDropService,
 };
 use crate::far_lod::{
     FarTerrainLodCache, FarTerrainLodConfig, FarTerrainLodCoverage,
@@ -46,11 +57,13 @@ use crate::render_assets::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
     NativeRenderSectionCompileDispatcher, load_textured_mesh_assets,
 };
-use crate::session::{
-    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
-    SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
+use crate::scene_session_runtime::{
+    DEFAULT_STARTUP_READINESS_TIMEOUT, SceneRuntimeService, SceneSessionRuntime,
+    StartupReadinessPolicy,
 };
+use crate::session::{ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest};
 use crate::startup_render_seed::StartupRenderSectionSeed;
+use crate::world_catalog::NativeWorldCatalog;
 use crate::{
     DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET, DEFAULT_RENDER_CHUNK_MESH_BUDGET,
     GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimePollTiming,
@@ -62,13 +75,14 @@ use crate::{
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_LOCAL_INTEGRATED_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
-/// Default deadline for the shared synchronous startup drive
-/// (docs/tactical/167 Slice 3), matching the former `poll_until_idle` timeout.
-pub const DEFAULT_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
 /// Bound on startup camera/interest reconciliation re-pump passes
 /// (docs/tactical/167 Slice 4). One correction/view-pose settles in a single
 /// pass; the bound only guards a pathological correction cascade.
 const MAX_STARTUP_RECONCILE_PASSES: usize = 4;
+
+pub fn native_world_catalog_operations(root: PathBuf) -> WorldCatalogOperationService {
+    WorldCatalogOperationService::immediate(Box::new(NativeWorldCatalog::new(root)))
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalIntegratedSceneOptions {
@@ -275,21 +289,26 @@ pub struct LocalIntegratedSceneRuntime<R = NativeIntegratedServerRunner> {
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
     lod_coverage: LodCoverageCoordinator,
-    deferred_chunk_drop_worker: DeferredChunkDropWorker,
+    deferred_chunk_drops: Box<dyn DeferredDropService>,
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
     last_runner_diagnostics_poll_at: Option<Instant>,
 }
 
-struct DeferredChunkDropWorker {
-    sender: Option<mpsc::Sender<(ChunkSnapshot, usize)>>,
+struct NativeDeferredDropService {
+    sender: Option<mpsc::SyncSender<(ChunkSnapshot, usize)>>,
     pending_items: Arc<AtomicUsize>,
+    inline_fallback_items: usize,
+    max_items: usize,
     join_handle: Option<JoinHandle<()>>,
 }
 
-impl DeferredChunkDropWorker {
+impl NativeDeferredDropService {
     fn new() -> Result<Self> {
-        let (sender, receiver) = mpsc::channel::<(ChunkSnapshot, usize)>();
+        // Capacity is bounded both by messages and item accounting. Slice 0
+        // observed <=295 pending items; 64 messages and 4096 items leave ample
+        // native headroom without allowing unbounded frame-to-worker growth.
+        let (sender, receiver) = mpsc::sync_channel::<(ChunkSnapshot, usize)>(64);
         let pending_items = Arc::new(AtomicUsize::new(0));
         let worker_pending_items = Arc::clone(&pending_items);
         let join_handle = thread::Builder::new()
@@ -304,33 +323,63 @@ impl DeferredChunkDropWorker {
         Ok(Self {
             sender: Some(sender),
             pending_items,
+            inline_fallback_items: 0,
+            max_items: DEFAULT_DEFERRED_DROP_MAX_ITEMS,
             join_handle: Some(join_handle),
         })
     }
+}
 
-    fn enqueue(&self, snapshot: ChunkSnapshot, item_count: usize) {
+impl DeferredDropService for NativeDeferredDropService {
+    fn enqueue(&mut self, snapshot: ChunkSnapshot, item_count: usize) -> bool {
         if item_count == 0 {
-            return;
+            return true;
         }
-        self.pending_items.fetch_add(item_count, Ordering::AcqRel);
+        let reserved = self
+            .pending_items
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+                pending
+                    .checked_add(item_count)
+                    .filter(|next| *next <= self.max_items)
+            })
+            .is_ok();
+        if !reserved {
+            self.inline_fallback_items = self.inline_fallback_items.saturating_add(item_count);
+            drop(snapshot);
+            return false;
+        }
         let Some(sender) = &self.sender else {
             drop(snapshot);
             self.pending_items.fetch_sub(item_count, Ordering::AcqRel);
-            return;
+            self.inline_fallback_items = self.inline_fallback_items.saturating_add(item_count);
+            return false;
         };
-        if let Err(error) = sender.send((snapshot, item_count)) {
-            let (snapshot, item_count) = error.0;
-            drop(snapshot);
-            self.pending_items.fetch_sub(item_count, Ordering::AcqRel);
+        match sender.try_send((snapshot, item_count)) {
+            Ok(()) => true,
+            Err(mpsc::TrySendError::Full((snapshot, item_count)))
+            | Err(mpsc::TrySendError::Disconnected((snapshot, item_count))) => {
+                drop(snapshot);
+                self.pending_items.fetch_sub(item_count, Ordering::AcqRel);
+                self.inline_fallback_items = self.inline_fallback_items.saturating_add(item_count);
+                false
+            }
         }
     }
 
-    fn pending_item_count(&self) -> usize {
-        self.pending_items.load(Ordering::Acquire)
+    fn backlog(&self) -> DeferredDropBacklog {
+        DeferredDropBacklog {
+            pending_items: self.pending_items.load(Ordering::Acquire),
+            max_items: self.max_items,
+            inline_fallback_items: self.inline_fallback_items,
+        }
+    }
+
+    fn drain(&mut self, _item_budget: usize) -> usize {
+        0
     }
 }
 
-impl Drop for DeferredChunkDropWorker {
+impl Drop for NativeDeferredDropService {
     fn drop(&mut self) {
         self.sender.take();
         if let Some(join_handle) = self.join_handle.take() {
@@ -339,11 +388,11 @@ impl Drop for DeferredChunkDropWorker {
     }
 }
 
-impl std::fmt::Debug for DeferredChunkDropWorker {
+impl std::fmt::Debug for NativeDeferredDropService {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("DeferredChunkDropWorker")
-            .field("pending_items", &self.pending_item_count())
+            .debug_struct("NativeDeferredDropService")
+            .field("backlog", &self.backlog())
             .finish_non_exhaustive()
     }
 }
@@ -356,17 +405,10 @@ impl std::fmt::Debug for DeferredChunkDropWorker {
 /// screenshot / test option that additionally waits for the active view to have
 /// no pending render work; it must never be the hidden reason a platform startup
 /// behaves differently.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum StartupReadinessPolicy {
-    #[default]
-    Playable,
-    Idle,
-}
-
 /// Uninhabited [`RemoteDedicatedServerSession`] used to parameterize the shared
 /// startup pump for local-integrated startup, where no remote session exists.
 ///
-/// It lets [`NativeSessionStartupPump`] own a `NativeSessionRuntime<S>` for both
+/// It lets [`NativeSessionStartupPump`] own a `NativeSessionServices<S>` for both
 /// host modes while the local convenience constructors and the
 /// [`LocalIntegratedStartupPump`] wrapper stay session-type-free.
 #[derive(Debug)]
@@ -493,7 +535,7 @@ impl StartupLodPrewarm {
     }
 }
 
-/// One shared startup step over a [`NativeSessionRuntime`] (docs/tactical/167).
+/// One shared startup step over a [`NativeSessionServices`] (docs/tactical/167).
 ///
 /// Host-neutral: `local_progress` and the `lod_prewarm_*` / `spawn_authority_*`
 /// fields carry local-integrated diagnostics and stay `None`/zeroed for remote
@@ -568,14 +610,14 @@ impl NativeSessionStartupStep {
 
 /// Host-neutral native world startup pump (docs/tactical/167).
 ///
-/// Owns a [`NativeSessionRuntime`] plus the transient render-section seed, the
+/// Owns a [`NativeSessionServices`] plus the transient render-section seed, the
 /// startup LOD prewarm policy (local-integrated only), the poll/sync/compile-job
 /// release loop, and the shared readiness gate. Both local integrated and remote
 /// dedicated startup reach ready through this one contract: remote never falls
 /// back to `poll_until_idle` + `sync_all_render_sections`.
 #[derive(Debug)]
 pub struct NativeSessionStartupPump<S> {
-    runtime: NativeSessionRuntime<S>,
+    runtime: NativeSessionServices<S>,
     // Local-integrated startup LOD prewarm; remote pumps carry a disabled prewarm
     // that is always settled so the shared gate collapses to host evidence + seed.
     prewarm: StartupLodPrewarm,
@@ -593,7 +635,7 @@ pub struct NativeSessionStartupPump<S> {
 /// a one-shot platform draw-resource upload, and the final startup step.
 #[derive(Debug)]
 pub struct NativeSessionStartupCompletion<S> {
-    pub runtime: NativeSessionRuntime<S>,
+    pub runtime: NativeSessionServices<S>,
     pub startup_sections: Vec<TexturedRenderSectionMesh>,
     pub final_step: NativeSessionStartupStep,
 }
@@ -617,7 +659,7 @@ where
     ) -> Result<Self> {
         let prewarm =
             StartupLodPrewarm::new(options.startup_lod_prewarm, options.seed, options.center);
-        let runtime = NativeSessionRuntime::local_with_mesh_assets(options, mesh_assets)?;
+        let runtime = NativeSessionServices::local_with_mesh_assets(options, mesh_assets)?;
         Ok(Self::from_session_runtime(
             runtime,
             StartupReadinessPolicy::Playable,
@@ -641,7 +683,7 @@ where
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         let center = options.center;
-        let runtime = NativeSessionRuntime::remote_dedicated_with_mesh_assets(
+        let runtime = NativeSessionServices::remote_dedicated_with_mesh_assets(
             endpoint,
             options,
             session,
@@ -661,7 +703,7 @@ where
     /// remote runtimes; for local runtimes pass a prewarm built from the local
     /// options so startup coverage matches the direct constructors.
     fn from_session_runtime(
-        runtime: NativeSessionRuntime<S>,
+        runtime: NativeSessionServices<S>,
         readiness: StartupReadinessPolicy,
         prewarm: StartupLodPrewarm,
     ) -> Self {
@@ -687,7 +729,7 @@ where
     /// constructors, so wrapping an existing runtime preserves the pre-tactical
     /// `poll_until_idle` behavior (no prewarm) for these lanes while still routing
     /// them through the shared readiness gate and render seed.
-    pub fn from_runtime(runtime: NativeSessionRuntime<S>) -> Self {
+    pub fn from_runtime(runtime: NativeSessionServices<S>) -> Self {
         let center = runtime.interest_center();
         let prewarm = StartupLodPrewarm::new(StartupLodPrewarmConfig::disabled(), 0, center);
         Self::from_session_runtime(runtime, StartupReadinessPolicy::Playable, prewarm)
@@ -787,11 +829,11 @@ where
         self.poll_ms
     }
 
-    pub fn runtime(&self) -> &NativeSessionRuntime<S> {
+    pub fn runtime(&self) -> &NativeSessionServices<S> {
         &self.runtime
     }
 
-    pub fn runtime_mut(&mut self) -> &mut NativeSessionRuntime<S> {
+    pub fn runtime_mut(&mut self) -> &mut NativeSessionServices<S> {
         &mut self.runtime
     }
 
@@ -805,7 +847,7 @@ where
         self.render_seed.drawable_section_count()
     }
 
-    pub fn into_runtime(self) -> NativeSessionRuntime<S> {
+    pub fn into_runtime(self) -> NativeSessionServices<S> {
         self.runtime
     }
 
@@ -851,7 +893,7 @@ where
         mut self,
         initial_camera: Vec3,
         timeout: Duration,
-        mut reconcile: impl FnMut(&mut NativeSceneRuntime<S>) -> Result<Vec3>,
+        mut reconcile: impl FnMut(&mut NativeSceneServices<S>) -> Result<Vec3>,
     ) -> Result<NativeSessionStartupCompletion<S>> {
         let deadline = system_monotonic_clock().deadline_after(timeout);
         self.drive_until_ready(initial_camera, &deadline, None, timeout)?;
@@ -1014,7 +1056,7 @@ impl LocalIntegratedStartupPump {
         self,
         initial_camera: Vec3,
         timeout: Duration,
-        reconcile: impl FnMut(&mut NativeSceneRuntime<LocalOnlySession>) -> Result<Vec3>,
+        reconcile: impl FnMut(&mut NativeSceneServices<LocalOnlySession>) -> Result<Vec3>,
     ) -> Result<(LocalIntegratedSceneRuntime, Vec<TexturedRenderSectionMesh>)> {
         let completion =
             self.inner
@@ -1026,10 +1068,10 @@ impl LocalIntegratedStartupPump {
     }
 }
 
-fn expect_local_scene<S>(runtime: NativeSceneRuntime<S>) -> LocalIntegratedSceneRuntime {
+fn expect_local_scene<S>(runtime: NativeSceneServices<S>) -> LocalIntegratedSceneRuntime {
     match runtime {
-        NativeSceneRuntime::Local(scene) => scene,
-        NativeSceneRuntime::RemoteDedicated(_) => {
+        NativeSceneServices::Local(scene) => scene,
+        NativeSceneServices::RemoteDedicated(_) => {
             unreachable!("local startup pump always owns a local integrated runtime")
         }
     }
@@ -1087,7 +1129,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
             lod_coverage: LodCoverageCoordinator::new(),
-            deferred_chunk_drop_worker: DeferredChunkDropWorker::new()?,
+            deferred_chunk_drops: Box::new(NativeDeferredDropService::new()?),
             simulation_cadence: options.cadence,
             last_runner_diagnostics: None,
             last_runner_diagnostics_poll_at: None,
@@ -1122,15 +1164,14 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                 break;
             };
             handed_off_items += item_count;
-            self.deferred_chunk_drop_worker
-                .enqueue(snapshot, item_count);
+            self.deferred_chunk_drops.enqueue(snapshot, item_count);
         }
         handed_off_items
     }
 
     fn deferred_client_chunk_drop_backlog_items(&self) -> usize {
         self.core.deferred_client_chunk_drop_item_count()
-            + self.deferred_chunk_drop_worker.pending_item_count()
+            + self.deferred_chunk_drops.backlog().pending_items
     }
 
     pub const fn client(&self) -> &ClientRuntime {
@@ -1662,7 +1703,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     /// Refresh the cached server-runner diagnostics that back local startup
     /// readiness and the loading-progress overlay (docs/tactical/167 shared
     /// startup pump). Remote host modes have no runner and skip this.
-    fn refresh_startup_runner_diagnostics(&mut self) -> Result<()> {
+    pub(crate) fn refresh_startup_runner_diagnostics(&mut self) -> Result<()> {
         let diagnostics = self.server_runner_diagnostics()?;
         self.last_runner_diagnostics = Some(diagnostics);
         self.last_runner_diagnostics_poll_at = Some(Instant::now());
@@ -1704,18 +1745,18 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
 }
 
 #[derive(Debug)]
-pub enum NativeSceneRuntime<S> {
+pub enum NativeSceneServices<S> {
     Local(LocalIntegratedSceneRuntime),
     RemoteDedicated(RemoteDedicatedSceneRuntime<S>),
 }
 
 #[derive(Debug)]
-pub struct NativeSessionRuntime<S> {
-    session: GameSessionCoordinator<()>,
-    runtime: NativeSceneRuntime<S>,
+pub struct NativeSessionServices<S> {
+    descriptor: ActiveSessionDescriptor,
+    runtime: NativeSceneServices<S>,
 }
 
-impl<S> NativeSceneRuntime<S>
+impl<S> NativeSceneServices<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -1829,7 +1870,11 @@ where
     /// LOD prewarm which the shared startup pump owns (docs/tactical/167). Every
     /// lane uses the same [`StartupReadinessPolicy`]; the only divergence is the
     /// host-mode evidence (local spawn authority vs. remote drained active view).
-    fn startup_host_ready(&self, policy: StartupReadinessPolicy, camera_position: Vec3) -> bool {
+    pub(crate) fn startup_host_ready(
+        &self,
+        policy: StartupReadinessPolicy,
+        camera_position: Vec3,
+    ) -> bool {
         let host_evidence = match self {
             Self::Local(scene) => scene.startup_spawn_authority_ready(),
             Self::RemoteDedicated(scene) => scene.startup_host_ready(),
@@ -2386,13 +2431,13 @@ where
     }
 }
 
-impl<S> NativeSessionRuntime<S>
+impl<S> NativeSessionServices<S>
 where
     S: RemoteDedicatedServerSession,
 {
     pub fn local(options: LocalIntegratedSceneOptions) -> Result<Self> {
         let request = SessionStartRequest::new_seed_local_world(options.seed);
-        Self::start_with(request, || NativeSceneRuntime::local(options))
+        Self::start_with(request, || NativeSceneServices::local(options))
     }
 
     pub fn local_with_mesh_assets(
@@ -2401,7 +2446,7 @@ where
     ) -> Result<Self> {
         let request = SessionStartRequest::new_seed_local_world(options.seed);
         Self::start_with(request, || {
-            NativeSceneRuntime::local_with_mesh_assets(options, mesh_assets)
+            NativeSceneServices::local_with_mesh_assets(options, mesh_assets)
         })
     }
 
@@ -2412,7 +2457,7 @@ where
     ) -> Result<Self> {
         let request = SessionStartRequest::JoinRemote { endpoint };
         Self::start_with(request, || {
-            NativeSceneRuntime::remote_dedicated(options, session)
+            NativeSceneServices::remote_dedicated(options, session)
         })
     }
 
@@ -2424,13 +2469,13 @@ where
     ) -> Result<Self> {
         let request = SessionStartRequest::JoinRemote { endpoint };
         Self::start_with(request, || {
-            NativeSceneRuntime::remote_dedicated_with_mesh_assets(options, session, mesh_assets)
+            NativeSceneServices::remote_dedicated_with_mesh_assets(options, session, mesh_assets)
         })
     }
 
     pub fn from_active_runtime(
         request: SessionStartRequest,
-        runtime: NativeSceneRuntime<S>,
+        runtime: NativeSceneServices<S>,
     ) -> Result<Self> {
         let descriptor = request
             .active_descriptor()
@@ -2442,72 +2487,51 @@ where
 
     pub fn from_active_runtime_with_descriptor(
         descriptor: ActiveSessionDescriptor,
-        runtime: NativeSceneRuntime<S>,
+        runtime: NativeSceneServices<S>,
     ) -> Self {
-        let mut session = GameSessionCoordinator::new();
-        let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
-        session.apply_start_result(&result);
-        Self { session, runtime }
-    }
-
-    pub fn session(&self) -> &GameSessionCoordinator<()> {
-        &self.session
-    }
-
-    pub fn session_state(&self) -> &GameSessionState {
-        self.session.state()
-    }
-
-    pub fn active_session(&self) -> Option<&ActiveSessionDescriptor> {
-        match self.session.state() {
-            GameSessionState::Active { session } => Some(session),
-            GameSessionState::NoSession
-            | GameSessionState::Starting { .. }
-            | GameSessionState::Failed { .. } => None,
+        Self {
+            descriptor,
+            runtime,
         }
     }
 
-    pub fn session_status(&self) -> Option<SessionStatus> {
-        self.session.status()
+    pub fn active_session(&self) -> Option<&ActiveSessionDescriptor> {
+        Some(&self.descriptor)
     }
 
-    pub fn into_runtime(self) -> NativeSceneRuntime<S> {
+    pub fn into_runtime(self) -> NativeSceneServices<S> {
         self.runtime
     }
 
     fn start_with(
         request: SessionStartRequest,
-        start: impl FnOnce() -> Result<NativeSceneRuntime<S>>,
+        start: impl FnOnce() -> Result<NativeSceneServices<S>>,
     ) -> Result<Self> {
-        let mut session = GameSessionCoordinator::new();
-        session.begin_start(request.clone());
         let descriptor = request
             .active_descriptor()
             .context("native game session request did not describe an active session")?;
         match start() {
-            Ok(runtime) => {
-                let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
-                session.apply_start_result(&result);
-                Ok(Self { session, runtime })
-            }
+            Ok(runtime) => Ok(Self {
+                descriptor,
+                runtime,
+            }),
             Err(error) => {
                 log::error!("failed to start native game session {request:?}: {error:#}");
-                session.fail_start(SessionFailure::new(request.default_failure_message()));
                 Err(error)
             }
         }
     }
 }
 
-impl<S> Deref for NativeSessionRuntime<S> {
-    type Target = NativeSceneRuntime<S>;
+impl<S> Deref for NativeSessionServices<S> {
+    type Target = NativeSceneServices<S>;
 
     fn deref(&self) -> &Self::Target {
         &self.runtime
     }
 }
 
-impl<S> DerefMut for NativeSessionRuntime<S> {
+impl<S> DerefMut for NativeSessionServices<S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.runtime
     }
@@ -3291,6 +3315,241 @@ fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<Chu
         .iter()
         .map(|key| ChunkPos::new(key.chunk_x, key.chunk_z))
         .collect()
+}
+
+impl<S> SceneRuntimeService for NativeSceneServices<S>
+where
+    S: RemoteDedicatedServerSession + 'static,
+{
+    fn host_mode(&self) -> SingleViewHostMode {
+        NativeSceneServices::host_mode(self)
+    }
+
+    fn host_label(&self) -> &'static str {
+        NativeSceneServices::host_label(self)
+    }
+
+    fn core(&self) -> &SingleViewRuntime {
+        NativeSceneServices::core(self)
+    }
+
+    fn core_mut(&mut self) -> &mut SingleViewRuntime {
+        NativeSceneServices::core_mut(self)
+    }
+
+    fn mesh_assets(&self) -> &TexturedMeshAssets {
+        NativeSceneServices::mesh_assets(self)
+    }
+
+    fn replace_asset_epoch(
+        &mut self,
+        epoch: u64,
+        mesh_assets: TexturedMeshAssets,
+        sections: TexturedRenderSectionBuildReport,
+    ) -> Result<()> {
+        NativeSceneServices::replace_asset_epoch(self, epoch, mesh_assets, sections)
+    }
+
+    fn clear_far_lod(&mut self) {
+        NativeSceneServices::clear_far_lod(self);
+    }
+
+    fn prepare_far_lod_mesh(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        camera_position: Vec3,
+    ) -> Option<&FarTerrainLodMesh> {
+        NativeSceneServices::prepare_far_lod_mesh(self, config, seed, center, camera_position)
+    }
+
+    fn lod_coverage_counters(&self) -> LodReplacementCounters {
+        NativeSceneServices::lod_coverage_counters(self)
+    }
+
+    fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+        NativeSceneServices::release_render_compile_jobs(self, count)
+    }
+
+    fn simulation_cadence(&self) -> Option<SimulationCadenceConfig> {
+        NativeSceneServices::simulation_cadence(self)
+    }
+
+    fn set_simulation_cadence(&mut self, cadence: SimulationCadenceConfig) -> Result<bool> {
+        NativeSceneServices::set_simulation_cadence(self, cadence)
+    }
+
+    fn loaded_chunk_count(&self) -> usize {
+        NativeSceneServices::loaded_chunk_count(self)
+    }
+
+    fn set_chunk_view_with_update_policy_timed(
+        &mut self,
+        center: ChunkPos,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        NativeSceneServices::set_chunk_view_with_update_policy_timed(
+            self,
+            center,
+            render_distance,
+            chunk_tracking_radius,
+            policy,
+        )
+    }
+
+    fn send_gameplay_command_with_update_policy_timed(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        NativeSceneServices::send_gameplay_command_with_update_policy_timed(self, command, policy)
+    }
+
+    fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
+        NativeSceneServices::poll_with_update_budget(self, budget)
+    }
+
+    fn poll_until_idle_with_timeout(&mut self, timeout: Duration) -> Result<(usize, f64)> {
+        NativeSceneServices::poll_until_idle_with_timeout(self, timeout)
+    }
+
+    fn sync_render_sections_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        NativeSceneServices::sync_render_sections_with_completed_result_acceptance_timed(
+            self,
+            camera_position,
+            completed_result_accept_budget,
+        )
+    }
+
+    fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: MonotonicDeadline,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        NativeSceneServices::sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+            self,
+            camera_position,
+            deadline,
+            completed_result_accept_budget,
+        )
+    }
+
+    fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: MonotonicDeadline,
+        max_compile_requests: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        NativeSceneServices::sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+            self,
+            camera_position,
+            deadline,
+            max_compile_requests,
+            completed_result_accept_budget,
+        )
+    }
+
+    fn sync_all_render_sections(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<RenderSectionCacheUpdate> {
+        NativeSceneServices::sync_all_render_sections(self, camera_position)
+    }
+
+    fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        NativeSceneServices::resident_section_metadata(self)
+    }
+
+    fn cached_section_count(&self) -> usize {
+        NativeSceneServices::cached_section_count(self)
+    }
+
+    fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        NativeSceneServices::mark_all_render_sections_dirty_for_resource_rebuild(self)
+    }
+
+    fn recompile_all_render_section_meshes_for_resource_rebuild(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<Vec<TexturedRenderSectionMesh>> {
+        NativeSceneServices::recompile_all_render_section_meshes_for_resource_rebuild(
+            self,
+            camera_position,
+        )
+    }
+
+    fn traversal_ready_render_section_keys(
+        &self,
+        camera_position: Vec3,
+    ) -> BTreeSet<RenderSectionKey> {
+        NativeSceneServices::traversal_ready_render_section_keys(self, camera_position)
+    }
+
+    fn sky_clear_color(&self) -> wgpu::Color {
+        NativeSceneServices::sky_clear_color(self)
+    }
+
+    fn render_compile_pending_job_count(&self) -> usize {
+        NativeSceneServices::render_compile_pending_job_count(self)
+    }
+
+    fn render_compile_max_pending_job_count(&self) -> usize {
+        NativeSceneServices::render_compile_max_pending_job_count(self)
+    }
+
+    fn render_compile_available_pending_job_slots(&self) -> usize {
+        NativeSceneServices::render_compile_available_pending_job_slots(self)
+    }
+
+    fn render_compile_queue_health(&self) -> RenderSectionCompileQueueHealth {
+        NativeSceneServices::render_compile_queue_health(self)
+    }
+
+    fn view_readiness_overlay(&self) -> Option<LoadingProgressOverlay> {
+        NativeSceneServices::view_readiness_overlay(self)
+    }
+
+    fn flush_persistence(&mut self) -> Result<usize> {
+        NativeSceneServices::flush_persistence(self)
+    }
+
+    fn refresh_startup_diagnostics(&mut self) -> Result<()> {
+        NativeSceneServices::refresh_startup_runner_diagnostics(self)
+    }
+
+    fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        NativeSceneServices::startup_progress_overlay(self)
+    }
+
+    fn startup_host_ready(&self, policy: StartupReadinessPolicy, camera_position: Vec3) -> bool {
+        NativeSceneServices::startup_host_ready(self, policy, camera_position)
+    }
+
+    fn stats(&self) -> SingleViewRuntimeStats {
+        NativeSceneServices::stats(self)
+    }
+}
+
+impl<S> From<NativeSessionServices<S>> for SceneSessionRuntime
+where
+    S: RemoteDedicatedServerSession + 'static,
+{
+    fn from(runtime: NativeSessionServices<S>) -> Self {
+        let descriptor = runtime
+            .active_session()
+            .cloned()
+            .expect("native runtime conversion requires an active session");
+        SceneSessionRuntime::from_active_service(descriptor, Box::new(runtime.into_runtime()))
+    }
 }
 
 #[cfg(test)]
@@ -4267,7 +4526,7 @@ mod tests {
                 );
                 assert!(completion.runtime.loaded_chunk_count() > 0);
                 match &*completion.runtime {
-                    NativeSceneRuntime::RemoteDedicated(scene) => {
+                    NativeSceneServices::RemoteDedicated(scene) => {
                         assert_eq!(
                             scene.connection.session.blocking_drain_count, 1,
                             "shared remote startup must not poll_until_idle: only the \
@@ -4275,7 +4534,7 @@ mod tests {
                         );
                         assert_eq!(scene.startup_pending_update_backlog(), 0);
                     }
-                    NativeSceneRuntime::Local(_) => panic!("expected a remote runtime"),
+                    NativeSceneServices::Local(_) => panic!("expected a remote runtime"),
                 }
                 return;
             }
@@ -4286,40 +4545,33 @@ mod tests {
     }
 
     #[test]
-    fn native_session_runtime_records_local_session() {
+    fn native_service_assembly_records_local_session() {
         if !extracted_asset_root().exists() {
             return;
         }
 
-        let mut runtime = NativeSessionRuntime::<NoRemoteSession>::local(
+        let mut runtime = NativeSessionServices::<NoRemoteSession>::local(
             LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0),
         )
         .unwrap();
         runtime.poll_until_idle().unwrap();
 
         assert_eq!(
-            runtime.session_state(),
-            &GameSessionState::Active {
-                session: ActiveSessionDescriptor::new_seed_local_world(12345)
-            }
-        );
-        assert_eq!(
             runtime.active_session(),
             Some(&ActiveSessionDescriptor::new_seed_local_world(12345))
         );
-        assert_eq!(runtime.session_status(), None);
         assert_eq!(runtime.loaded_chunk_count(), 1);
     }
 
     #[test]
-    fn native_session_runtime_local_interest_change_defers_updates_until_poll() {
+    fn native_service_assembly_local_interest_change_defers_updates_until_poll() {
         if !extracted_asset_root().exists() {
             return;
         }
 
         let initial_center = ChunkPos::new(0, 0);
         let next_center = ChunkPos::new(1, 0);
-        let mut runtime = NativeSessionRuntime::<NoRemoteSession>::local(
+        let mut runtime = NativeSessionServices::<NoRemoteSession>::local(
             LocalIntegratedSceneOptions::new(12345, initial_center, 0).with_lighting_enabled(false),
         )
         .unwrap();

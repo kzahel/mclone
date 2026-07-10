@@ -136,10 +136,7 @@ pub enum MonoUiPresentation {
     ScreenSpaceHud,
 }
 
-impl<S> McloneSceneHost<S>
-where
-    S: RemoteDedicatedServerSession,
-{
+impl McloneSceneHost {
     /// Select the conventional flat-client capability/UI profile. This is a
     /// topology choice on the shared host, not a platform-owned gameplay path.
     pub fn configure_mono_ui(&mut self, ui: GameUiHost, context: MonoUiContext) {
@@ -491,7 +488,7 @@ where
     }
 
     fn ensure_mono_blink_worker(&mut self) -> bool {
-        match self.teleport_preview.ensure_started() {
+        match self.services.teleport_preview.ensure_started() {
             Ok(available) => available,
             Err(error) => {
                 log::warn!("failed to start Mono Blink preview service: {error}");
@@ -511,6 +508,7 @@ where
         let config = mono_blink_config();
         let collision = TeleportCollisionSnapshot::capture(runtime.client(), intent, config);
         match self
+            .services
             .teleport_preview
             .submit_snapshot(intent, config, collision)
         {
@@ -525,19 +523,19 @@ where
             Ok(None) => false,
             Err(error) => {
                 log::warn!("Mono Blink preview submit failed: {error}");
-                self.teleport_preview.reset_service();
+                self.services.teleport_preview.reset_service();
                 false
             }
         }
     }
 
     fn poll_mono_blink_worker(&mut self) -> bool {
-        match self.teleport_preview.try_recv_latest() {
+        match self.services.teleport_preview.try_recv_latest() {
             Ok(Some(result)) => self.accept_mono_blink_result(result),
             Ok(None) => false,
             Err(error) => {
                 log::warn!("Mono Blink preview service failed: {error}");
-                self.teleport_preview.reset_service();
+                self.services.teleport_preview.reset_service();
                 false
             }
         }
@@ -1025,7 +1023,7 @@ where
             self.ensure_mono_gui(device, queue)?;
         }
 
-        let render_start = self.clock.now();
+        let render_start = self.services.clock.now();
         let far_lod_config = self.scene.far_lod;
         let far_lod_seed = self.scene.seed;
         let far_lod_center = self.camera.snapshot().chunk_pos;
@@ -1126,7 +1124,7 @@ where
                 )
                 .context("render Mono screen-space UI")?;
         }
-        timing.render_views_ms = elapsed_ms(self.clock.elapsed_since(render_start));
+        timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_start));
 
         self.render_stats = render_stats;
         self.rendered_frames = self.rendered_frames.wrapping_add(1);
