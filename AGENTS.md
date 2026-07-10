@@ -42,6 +42,24 @@ The retired browser engine has been removed from the live tree. Git history is t
 
 Native Rust tactical docs live under `docs/tactical/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Historical legacy tacticals, if still present during cleanup, are not implementation guidance for new work.
 
+Focused, living topic docs live under `docs/topics/`. Before working on a
+continuing concern, look for a relevant topic doc and read it before changing
+the behavior it governs. Update it when the work changes its status, contract,
+evidence, validation, or recommended next direction. When no suitable topic
+exists and continuity across sessions or commits would be valuable, create a
+focused one. Do not broaden a nearby topic merely because it already exists;
+create a sibling topic when the concerns can evolve independently. Do not
+reorganize existing documentation solely to conform to this convention, and do
+not create a topic doc for every small standalone change. Architecture and
+reference docs own durable system shape and external facts; topic docs own the
+current state and decisions for a focused continuing concern; tactical docs own
+bounded implementation slices and execution records.
+
+When a commit series implements a documented topic, normally reuse the topic
+filename's slug in its `Topic:` trailers. This is a convention, not a one-to-one
+requirement: a durable topic may exist without an active commit series, and a
+small commit series may not warrant a durable topic doc.
+
 ## Workstream routing
 
 Default implementation target is the native Rust workspace under `native/`.
@@ -167,3 +185,55 @@ For rendered-output validation, use native headless captures where available and
 Seed parity against 1.17.1 vanilla overworld is the correctness bar. Detailed target notes, active pipeline, and disabled Caves & Cliffs Part 1 systems live in [`docs/reference-minecraft.md`](docs/reference-minecraft.md).
 
 Do not port `Aquifer`, `Cavifier`, `NoodleCavifier`, `OreVeinifier`, the disabled deepslate path, or other disabled Caves & Cliffs Part 1 worldgen paths for MVP. If asked to port any of these, push back and confirm the target has changed before writing code.
+
+## Commit Message Guidance
+
+Aim for a <=65 char subject, and strictly enforce a 72-column line wrap
+for the body. Prefer bullet lists in the commit body when items are
+numerous or complex; prose when the content is short and simple.
+
+**Maintainer**, here, means the human reviewer or a future agent
+(possibly you) re-reading this commit to understand or re-derive the
+change.
+
+For non-trivial commits, include a concise excerpt or synthesis of the
+originating instruction (or motivating observation, when the change
+wasn't user-prompted) that is feasible to land in the committed
+changes. Summarize the motivating request and key implementation
+direction so a Maintainer could paste the message, add their own
+adjustments, and recreate something close to the intended result. Prune
+digressions, secrets, and low-signal chat detail; do not aim for a
+verbatim or exhaustive transcript.
+
+The subject line is the conventional scannable headline result — keep
+it scannable in `git log --oneline`. The synthesis lives in the body.
+The 72-column body wrap applies to synthesis prose as well.
+
+**Exemption**: skip the synthesis for mechanical or small + self-evident
+changes — formatter passes, typo fixes, version bumps, trivial renames
+with no substantive user direction. The conventional one-line message
+alone is sufficient there.
+
+**Series threading**: when a commit is part of a related series, append one
+or more `Topic: <string>` trailers at the bottom of the body. The topic
+string is freeform (descriptive phrasing fine; not constrained to a short
+UPPERCASE codename). A series shares the exact same topic string across
+its commits for each topic name you include; "first in wins": later
+commits copy their topic lines verbatim so `git log --grep "Topic: ..."`
+finds the chain. Use multiple `Topic:` lines when one commit touches
+multiple topics, and switch a given topic only when it's obviously time for a
+new one. Standalone commits with no expected follow-up: no trailer.
+
+Example:
+```
+... body text ...
+Topic: session-liveness
+Topic: provider-model-glyphs
+```
+
+To avoid accidentally reusing a topic for an unrelated series, keep a
+project-level `topics.md` log at the repo root and append each new
+topic string to it when the series begins. The log is appended to
+whether or not it's tracked in git. Format is freeform (not a
+traditional ChangeLog) — typically a bulleted list with optional
+one-line notes. Scan `topics.md` before opening a new series.

@@ -1,15 +1,34 @@
 # Topics
 
-Durable subsystem progress indexes live here.
+Focused, living records of continuing concerns live here.
 
-Topic docs are the current map for a subsystem: status, Java reference anchors,
-native code map, active tactical links, latest validation notes, and recommended
-next slices. Tactical docs remain the implementation records for individual
-slices.
+Prefer the smallest coherent topic whose status, decisions, evidence, and next
+work benefit from continuity across sessions or commits. A topic can cover a
+contract, recurring problem, product decision, implementation campaign, status
+question, or investigation; it does not need to represent an entire subsystem.
+Split topics when their decisions or next work can evolve independently.
 
-Use a topic doc when a subsystem spans multiple tacticals, has durable
-reference-reading requirements, or needs an explicit "where are we now" answer
-between sessions.
+Adopt this convention incrementally. Existing architecture, reference, and
+status docs do not need to move here solely for consistency. Create or update a
+topic when current status is hard to answer, work spans multiple tacticals or
+commits, important invariants or decisions need to survive the current session,
+new evidence changes the direction, or the user explicitly asks for one. Do not
+create a topic for every small standalone change.
+
+Documentation roles:
+
+- Architecture and reference docs own durable system shape and external facts.
+- Topic docs own current truth, decisions, evidence, gaps, and direction for a
+  focused continuing concern.
+- Tactical docs under `docs/tactical/` own bounded implementation slices and
+  execution records.
+
+New topics should normally start with a crisp scope, a `Topic: <slug>` line,
+and an honest status. Add only the sections the concern needs, such as
+motivation, current state, contracts and invariants, code/documentation map,
+evidence and validation, known gaps, or recommended next work. When a commit
+series implements the same concern, normally reuse the document slug in its
+`Topic:` trailers.
 
 ## Current Topics
 
@@ -27,12 +46,13 @@ between sessions.
 
 ## Update Policy
 
-- Update a topic doc when a tactical lands, a recommendation changes, or a new
-  validation result changes the next step.
-- Keep detailed per-slice work in `docs/tactical/`; keep topic docs short
+- Read the relevant topic before changing the behavior it governs.
+- Update it when a tactical lands or its status, contract, evidence,
+  validation, gaps, or recommended direction changes.
+- Keep the main text as current truth rather than an append-only diary. Git and
+  motivation-preserving commit bodies retain the history.
+- Keep detailed per-slice execution in `docs/tactical/` and topic docs short
   enough to scan.
-- Link reference Java files and native modules explicitly so future work starts
-  from the right boundaries.
-- Prefer Java-shaped module boundaries in the native implementation. A topic doc
-  should call out when a subsystem is at risk of becoming a large catch-all
-  module.
+- Link relevant architecture/reference docs, Java files, native modules, and
+  tacticals so future work starts from the right boundaries.
+- Create a sibling topic instead of turning an existing topic into a catch-all.
