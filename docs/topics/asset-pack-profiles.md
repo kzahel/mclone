@@ -3,8 +3,8 @@
 Topic: asset-pack-profiles
 
 Status: active implementation. Tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 0 contract and
-baseline locks landed 2026-07-10; Slice 1 standalone pack construction is next.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-1 landed
+2026-07-10; Slice 2 first-party visual catalog/prepared set is next.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -70,6 +70,25 @@ Minecraft pack is not sufficient.
 - The `mclone-assets` focused suite includes a static native app/runtime source
   scan that rejects texture-lab TypeScript and pack-builder Python
   imports/invocations.
+- `pnpm assets:pack:first-party` now produces deterministic standalone
+  `mclone-authored.pbp` and `mclone-generated-fallback.pbp` artifacts without a
+  Minecraft reference prerequisite. Their manifests declare stable identity,
+  origin, roles, `mclone-visuals-v1`, and payload fingerprints.
+- The authored pack currently contains 94 canonical namespaced PNGs, 21
+  compatibility PNGs, far-LOD metadata, and three first-party figures (119
+  payload files). Canonical authored `mclone:block/*` materials can shadow the
+  generated layer. The fallback pack contains 139 labeled PNGs, the figures,
+  209 block visual records, a short-code registry, coverage facts, and
+  suppressed-audio policy (146 payload files).
+- Generated PNGs use deterministic checker colors, alternating magenta border,
+  and a checked-in 3x5 font. Prefix collisions extend deterministically and
+  full-hash collisions fail. Both PNG encoders use stored-DEFLATE streams to
+  avoid host-zlib byte drift. Representative material and actor PNGs were
+  enlarged under `/tmp` and inspected for contrast/code legibility.
+- The combined build stages byte-identical packs/sidecars plus a fingerprinted
+  catalog under ignored
+  `generated-assets/first-party-stage/first-party-packs/`. Platform installation
+  and runtime selection remain later slices.
 - `mclone-app-runtime::render_assets` discovers environment/platform paths and
   constructs one source chain at startup. `MCLONE_ASSET_OVERLAY_PACK` inserts
   one or more authored overlays before loose or packed Minecraft sources.
@@ -270,11 +289,11 @@ resolve when their logical pack is disabled.
 
 - The shared catalog/selection/provenance contracts are not yet projected from
   platform discovery or wired into scene/UI state.
-- Existing pack builders do not emit the new optional manifest provenance
-  fields yet; legacy outputs therefore remain `Unknown` until trusted discovery
-  identifies them.
-- The authored overlay is not standalone and current generated coverage is
-  incomplete.
+- Legacy reference/overlay builders do not emit the optional manifest
+  provenance fields; their outputs remain `Unknown` until trusted discovery
+  identifies them. The two new standalone first-party builders do emit them.
+- The compatibility overlay remains partial; use the authored + generated
+  standalone outputs for new first-party work.
 - There is no first-party replacement/fallback visual catalog for missing
   blockstate/model JSON.
 - Render compiler/catalog and GPU atlas replacement are startup-shaped.
@@ -286,12 +305,11 @@ resolve when their logical pack is disabled.
 ## Recommended Next Work
 
 Implement only tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 1 next. Make the
-authored and generated fallback pack builders consume the checked-in canonical
-inventory, emit the new identity/provenance/schema manifest facts, and prove
-byte determinism plus zero Minecraft-artifact prerequisite. Do not begin the
-prepared-set/runtime replacement or UI slices until both standalone pack
-artifacts satisfy Slice 1 exit criteria.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 2 next. Add the
+engine-native first-party visual adapter and prepare the authored + generated
+stack into one CPU asset set with an exact resolution ledger. Prove the staged
+packs produce a drawable offscreen first-party-only capture with zero
+Minecraft/unknown resolutions before beginning transactional live replacement.
 
 ## Slice 0 Evidence
 
@@ -314,6 +332,35 @@ catalog availability/order, always-active generated fallback admission,
 named first-source-wins resolution, disabled-reference non-resolution,
 unknown-origin claim suppression, the 209-state canonical inventory, direct
 consumer paths, and the authoring-tool dependency lock.
+
+## Slice 1 Evidence
+
+Focused validation on 2026-07-10:
+
+```text
+pnpm assets:pack:first-party:test
+  5 tests passed
+pnpm texture-lab:typecheck
+  passed
+cargo test --manifest-path native/Cargo.toml -p mclone-assets
+  41 unit tests + 1 boundary integration test passed
+pnpm assets:pack:first-party
+  authored: 119 payload files
+  generated fallback: 146 payload files
+  staged both packs, sidecars, and catalog
+second canonical build
+  pack and sidecar SHA-256 values unchanged
+first_party_pack.py verify <pack> --manifest <sidecar>
+  both packs passed
+```
+
+The Python tests build twice from isolated first-party fixtures, exercise
+short-code extension and full-collision failure, place proprietary sentinel
+bytes under a sibling `reference/minecraft-1.17.1/` tree, and verify that only
+the two canonical outputs reach staging. Archive inspection confirmed fixed
+timestamps, stored entries, declared fingerprints, no reference-root names,
+and no sentinel bytes. Enlarged generated stone (`E67C`) and cow (`BDE7`) PNGs
+were visually inspected for checker/border contrast and code legibility.
 
 ## Non-Goals
 

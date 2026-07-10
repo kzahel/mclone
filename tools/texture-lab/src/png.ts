@@ -143,9 +143,43 @@ export function encodePng(image: RgbaImage): Buffer {
   return Buffer.concat([
     PNG_SIGNATURE,
     chunk("IHDR", ihdr),
-    chunk("IDAT", zlib.deflateSync(filtered, { level: 9 })),
+    chunk("IDAT", zlibStore(filtered)),
     chunk("IEND", Buffer.alloc(0)),
   ]);
+}
+
+// A zlib stream made only of uncompressed DEFLATE blocks. This is larger than
+// deflateSync output, but byte-identical across Node/zlib versions and the PNGs
+// are stored (not recompressed) in first-party packs.
+function zlibStore(input: Buffer): Buffer {
+  const chunks: Buffer[] = [Buffer.from([0x78, 0x01])];
+  if (input.length === 0) {
+    chunks.push(Buffer.from([0x01, 0x00, 0x00, 0xff, 0xff]));
+  }
+  for (let offset = 0; offset < input.length; offset += 0xffff) {
+    const length = Math.min(0xffff, input.length - offset);
+    const final = offset + length === input.length;
+    const block = Buffer.alloc(5 + length);
+    block[0] = final ? 0x01 : 0x00;
+    block.writeUInt16LE(length, 1);
+    block.writeUInt16LE(~length & 0xffff, 3);
+    input.copy(block, 5, offset, offset + length);
+    chunks.push(block);
+  }
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(adler32(input), 0);
+  chunks.push(checksum);
+  return Buffer.concat(chunks);
+}
+
+function adler32(buffer: Buffer): number {
+  let a = 1;
+  let b = 0;
+  for (const byte of buffer) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  return ((b << 16) | a) >>> 0;
 }
 
 function chunk(type: string, data: Buffer): Buffer {

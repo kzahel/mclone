@@ -348,13 +348,20 @@ def build_manifest(version: str, entries: list[PackEntry]) -> dict[str, Any]:
     }
 
 
-def write_pack(output: Path, sidecar: Path, manifest: dict[str, Any], entries: list[PackEntry]) -> None:
+def write_pack(
+    output: Path,
+    sidecar: Path,
+    manifest: dict[str, Any],
+    entries: list[PackEntry],
+    *,
+    manifest_compression: str = "deflate",
+) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     manifest_bytes = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
     with zipfile.ZipFile(output, "w") as archive:
-        archive.writestr(zip_info(PACK_MANIFEST_PATH, "deflate"), manifest_bytes)
+        archive.writestr(zip_info(PACK_MANIFEST_PATH, manifest_compression), manifest_bytes)
         for entry in sorted(entries, key=lambda item: item.path):
             archive.writestr(
                 zip_info(entry.path, entry.compression),

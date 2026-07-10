@@ -10,6 +10,11 @@ pnpm assets:pack:check
 pnpm assets:pack:write-lock
 pnpm texture-lab:pack-overlay
 pnpm texture-lab:coverage
+pnpm texture-lab:pack-authored
+pnpm assets:pack:generated-fallback
+pnpm assets:pack:first-party
+pnpm assets:pack:first-party:test
+pnpm assets:stage:first-party
 ```
 
 The checked freshness lock lives in:
@@ -48,3 +53,45 @@ native terrain atlas material set and writes:
 ```text
 generated-assets/texture-lab/mclone-default-overlay-coverage.md
 ```
+
+## Standalone First-Party Packs
+
+`pnpm assets:pack:first-party` is the canonical build gate for the two
+standalone first-party inputs:
+
+```text
+generated-assets/texture-lab/mclone-authored.pbp
+generated-assets/texture-lab/mclone-generated-fallback.pbp
+```
+
+The command first performs a clean texture-lab runtime export with
+`--no-reference`, packages the accepted authored PNGs, far-LOD metadata, and
+repo-owned figures, exports the shared Rust inventory, and builds the generated
+fallback. `generated-assets/` remains ignored.
+
+The fallback contains deterministic labeled PNGs for every canonical material,
+generated cow/effect replacements, all required first-party figures, block
+visual definitions, a short-code registry, coverage/provenance facts, and an
+explicit suppressed-audio policy. Missing codes start at four hexadecimal
+characters; colliding prefixes extend deterministically and full-hash
+collisions fail the build. The tiny checked-in font is
+`missing_font.v1.json`.
+
+Both PNG encoders use stored-DEFLATE streams, and both archives use fixed ZIP
+timestamps and stored entries, so bytes do not vary with host zlib versions.
+Manifests declare pack id, origin, roles, asset schema, and payload fingerprint.
+The builder does not discover, read, fingerprint, or name
+`reference/minecraft-1.17.1/`; isolated tests place a sentinel reference tree
+beside the allowed inputs and prove it cannot enter either archive.
+
+The combined build finishes by staging byte-identical copies and their sidecars
+with a fingerprinted catalog under:
+
+```text
+generated-assets/first-party-stage/first-party-packs/
+```
+
+This directory is the canonical release/platform staging input. Runtime and
+platform adoption of the two-pack selection is intentionally deferred to later
+tactical 169 slices; do not substitute the partial
+`mclone-default-overlay.pbp` for either standalone artifact.

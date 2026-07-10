@@ -17,6 +17,7 @@ interface ExportArgs {
   authoringOnly: boolean;
   authoringRoles: AuthoringLayerRole[];
   runtimeCompat: boolean;
+  cleanRuntimePack: boolean;
   includeReference: boolean;
   referenceRoot: string | undefined;
 }
@@ -32,6 +33,10 @@ if (textures.length === 0) {
 }
 
 await fs.mkdir(args.outDir, { recursive: true });
+
+if (args.cleanRuntimePack) {
+  await fs.rm(path.join(args.outDir, "runtime-pack"), { force: true, recursive: true });
+}
 
 for (const texture of textures) {
   if (args.authoringRoles.length > 0) {
@@ -107,7 +112,7 @@ function parseArgs(argv: string[]): ExportArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
     throw new Error(
-      "Usage: tsx src/export.ts <texture.ts> [--out <dir>] [--texture <name>]... [--sheet-only] [--authoring-role <role>]... [--authoring-only] [--runtime-compat] [--reference-root <dir>] [--no-reference]",
+      "Usage: tsx src/export.ts <texture.ts> [--out <dir>] [--texture <name>]... [--sheet-only] [--authoring-role <role>]... [--authoring-only] [--runtime-compat] [--clean-runtime-pack] [--reference-root <dir>] [--no-reference]",
     );
   }
 
@@ -117,6 +122,7 @@ function parseArgs(argv: string[]): ExportArgs {
   let authoringOnly = false;
   const authoringRoles: AuthoringLayerRole[] = [];
   let runtimeCompat = false;
+  let cleanRuntimePack = false;
   let includeReference = true;
   let referenceRoot: string | undefined;
   for (let index = 1; index < argv.length; index += 1) {
@@ -160,6 +166,8 @@ function parseArgs(argv: string[]): ExportArgs {
       authoringOnly = true;
     } else if (arg === "--runtime-compat") {
       runtimeCompat = true;
+    } else if (arg === "--clean-runtime-pack") {
+      cleanRuntimePack = true;
     } else if (arg === "--no-reference") {
       includeReference = false;
     } else {
@@ -170,6 +178,9 @@ function parseArgs(argv: string[]): ExportArgs {
   if (authoringOnly && authoringRoles.length === 0) {
     throw new Error("--authoring-only requires at least one --authoring-role");
   }
+  if (cleanRuntimePack && (!runtimeCompat || textures.length > 0)) {
+    throw new Error("--clean-runtime-pack requires a full --runtime-compat export");
+  }
 
   return {
     input,
@@ -179,6 +190,7 @@ function parseArgs(argv: string[]): ExportArgs {
     authoringOnly,
     authoringRoles,
     runtimeCompat,
+    cleanRuntimePack,
     includeReference,
     referenceRoot,
   };

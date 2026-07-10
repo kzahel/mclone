@@ -14,6 +14,7 @@
     "promote-frozen": "tsx src/promote-frozen.ts packs/mclone-default/texture.ts",
     "promote-freeze-request": "tsx src/promote-freeze-request.ts packs/mclone-default/texture.ts",
     "runtime-compat": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat",
+    "runtime-compat:clean": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat --no-reference --clean-runtime-pack",
     "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only",
     "web:dev": "tsx src/web-server/server.ts",
     "web:build": "vite build --config src/web/vite.config.ts",

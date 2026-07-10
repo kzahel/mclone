@@ -1,7 +1,8 @@
 # 169: Runtime Asset Pack Selection
 
-Status: active implementation parent 2026-07-10; Slice 0 contract and baseline
-locks landed. Stop boundary honored after Slice 0; Slice 1 is next.
+Status: active implementation parent 2026-07-10; Slices 0-1 landed. Stop
+boundary honored after deterministic standalone pack construction; Slice 2 is
+next.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
@@ -275,24 +276,84 @@ cargo check --manifest-path native/Cargo.toml -p mclone-assets \
 
 ### Slice 1 - Deterministic Standalone Pack Build
 
-- [ ] Add canonical commands, expected names such as
+- [x] Add canonical commands, expected names such as
   `texture-lab:pack-authored`, `assets:pack:generated-fallback`, and a combined
   `assets:pack:first-party` convenience gate.
-- [ ] Package accepted texture-lab runtime output plus repo first-party assets
+- [x] Package accepted texture-lab runtime output plus repo first-party assets
   into the authored pack without local Minecraft payloads.
-- [ ] Generate missing texture PNGs, short ids, registry, fallback visual
+- [x] Generate missing texture PNGs, short ids, registry, fallback visual
   definitions, and coverage/provenance report into the generated pack.
-- [ ] Add deterministic-byte/fingerprint tests and short-id collision tests.
-- [ ] Build and verify both packs in an environment where the Minecraft
+- [x] Add deterministic-byte/fingerprint tests and short-id collision tests.
+- [x] Build and verify both packs in an environment where the Minecraft
   reference root is absent/unavailable.
-- [ ] Verify archive entries and fingerprints contain no reference-pack bytes
+- [x] Verify archive entries and fingerprints contain no reference-pack bytes
   or roots.
-- [ ] Keep generated packs/PNGs ignored while making release/platform staging
+- [x] Keep generated packs/PNGs ignored while making release/platform staging
   consume the canonical build outputs.
 
 Exit criteria: authored + generated packs form a standalone first-party input
 for the canonical asset inventory; missing art is visibly identifiable; pack
 generation has zero Minecraft artifact prerequisite.
+
+Landed evidence (2026-07-10):
+
+- `first_party_inventory` exports the shared Rust inventory as deterministic
+  JSON: 209 block states, 137 engine-owned materials, and 10 direct consumer
+  requirements. The export reads no filesystem asset/reference data.
+- `texture-lab:pack-authored` starts with a clean `--no-reference` export, then
+  packages 94 canonical namespaced authored PNGs, 21 compatibility PNGs,
+  far-LOD metadata, and three repo-owned figures as `mclone-authored.pbp` (119
+  payload files). Canonical `mclone:block/*` textures can therefore shadow the
+  generated material layer; compatibility paths remain available during
+  migration.
+- `assets:pack:generated-fallback` creates 139 labeled PNGs (137 materials plus
+  cow and underwater replacements), copies the three required first-party
+  figures, and emits block visuals, missing registry, coverage, and suppressed
+  audio policy as `mclone-generated-fallback.pbp` (146 payload files).
+- Missing PNGs use deterministic resource-derived checker colors, magenta
+  borders, the checked-in 3x5 hexadecimal font, and a visible short code.
+  Colliding four-character prefixes extend until unique; a full digest
+  collision fails.
+- Both pack manifests declare id, display name, origin, roles,
+  `mclone-visuals-v1`, and a SHA-256 payload fingerprint. All ZIP entries use a
+  fixed timestamp and stored compression; both PNG encoders use deterministic
+  stored-DEFLATE streams, so pack and image bytes are independent of host zlib
+  behavior.
+- Isolated tests build beside a sentinel
+  `reference/minecraft-1.17.1/` tree and prove neither the sentinel bytes nor
+  reference roots enter either pack. Two builds produce identical pack and
+  sidecar bytes.
+- Canonical generated outputs remain under ignored `generated-assets/`. The
+  combined gate copies both packs and sidecars byte-for-byte into
+  `generated-assets/first-party-stage/first-party-packs/` and writes a
+  fingerprinted staging catalog. Per-platform installation and live selection
+  adoption remain Slice 5 work.
+
+Focused validation:
+
+```text
+pnpm assets:pack:first-party:test
+  5 tests passed
+pnpm texture-lab:typecheck
+  passed
+cargo test --manifest-path native/Cargo.toml -p mclone-assets
+  41 unit tests + 1 boundary integration test passed
+pnpm assets:pack:first-party
+  mclone-authored.pbp: 119 payload files
+  mclone-generated-fallback.pbp: 146 payload files
+second canonical build
+  pack and sidecar SHA-256 values unchanged
+first_party_pack.py verify <pack> --manifest <sidecar>
+  both packs passed
+```
+
+Visual inspection:
+
+- `/tmp/mclone-missing-stone-256.png`: enlarged generated stone fallback;
+  inspected checker contrast, alternating magenta border, and legible `E67C`
+  code.
+- `/tmp/mclone-missing-cow-512.png`: enlarged 64x32 actor fallback; inspected
+  distinct checker/border treatment and legible `BDE7` code.
 
 ### Slice 2 - First-Party Visual Catalog and Prepared Set
 
