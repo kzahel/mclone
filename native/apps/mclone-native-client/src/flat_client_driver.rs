@@ -1,3 +1,8 @@
+// Tactical 168 Slice 7d will repoint the remaining deterministic/perf
+// harnesses and remove this compatibility orchestrator. Slice 7c deliberately
+// leaves only the subset those harnesses still call.
+#![allow(dead_code)]
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

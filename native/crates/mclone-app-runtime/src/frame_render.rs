@@ -586,6 +586,62 @@ struct FlatScalePresenter {
     sampler: wgpu::Sampler,
 }
 
+/// Optional intermediate color target + fullscreen presentation pass used by
+/// flat surface drivers when render scale differs from 1.0.
+pub struct FlatScalePresentation {
+    scaled: FlatScaledColorTarget,
+    presenter: FlatScalePresenter,
+    format: wgpu::TextureFormat,
+}
+
+impl FlatScalePresentation {
+    pub fn new(
+        device: &wgpu::Device,
+        output_size: [u32; 2],
+        format: wgpu::TextureFormat,
+        render_scale: f32,
+    ) -> Option<Self> {
+        if (render_scale - DEFAULT_RENDER_SCALE).abs() <= SCALE_EPSILON {
+            return None;
+        }
+        let presenter = FlatScalePresenter::new(device, format);
+        let scaled = FlatScaledColorTarget::new(
+            device,
+            scaled_frame_size(output_size, render_scale),
+            format,
+            &presenter.bind_group_layout,
+            &presenter.sampler,
+        );
+        Some(Self {
+            scaled,
+            presenter,
+            format,
+        })
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, output_size: [u32; 2], render_scale: f32) {
+        self.scaled.resize(
+            device,
+            scaled_frame_size(output_size, render_scale),
+            self.format,
+            &self.presenter.bind_group_layout,
+            &self.presenter.sampler,
+        );
+    }
+
+    pub fn render_target<'a>(&'a self, output: RenderFrameTarget<'a>) -> RenderFrameTarget<'a> {
+        output.gpu_timestamps.map_or_else(
+            || self.scaled.render_target(),
+            |timestamps| self.scaled.render_target().with_gpu_timestamps(timestamps),
+        )
+    }
+
+    pub fn present(&self, encoder: &mut wgpu::CommandEncoder, output: RenderFrameTarget<'_>) {
+        self.presenter
+            .present(encoder, &self.scaled, output.color_view);
+    }
+}
+
 impl FlatScalePresenter {
     fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

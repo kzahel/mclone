@@ -11,17 +11,22 @@ use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceController, ClientExperienceEffects,
     ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
     ClientExperienceSettingsEffects, ClientExperienceSettingsState,
-    client_experience_should_apply_ui_projection, xr_native_client_experience_profile,
+    client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
+    xr_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::{
-    ClientSessionEffects, ClientSessionStatusProjection, ClientSessionTransitionEffects,
-    ClientSessionUiEffects, client_session_failed_start_ui_effects,
+    ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
+    ClientSessionTransitionEffects, ClientSessionUiEffects, client_session_failed_start_ui_effects,
     client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
     client_session_status_projection,
 };
+use mclone_app_runtime::debug_overlay::DebugPaneStats;
 use mclone_app_runtime::far_lod::{
     FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
     MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+};
+use mclone_app_runtime::frame_pacing::{
+    FramePacingDebugStats, FramePacingUiState, FrameTimingStats,
 };
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
@@ -50,24 +55,25 @@ use mclone_app_runtime::world_catalog::{
 };
 use mclone_app_runtime::{
     EngineCameraCommitContext, GameplayCommandTiming, GameplayCommandUpdatePolicy,
-    RuntimePollDiagnostics, TraversalReadySectionCache, debug_block_palette_overlay,
-    debug_hotbar_icons, elapsed_ms, execute_world_catalog_request, micros_to_ms,
-    refresh_world_catalog_controller, set_player_appearance_command_for_ui_model,
+    RuntimePollDiagnostics, SingleViewRuntimeStats, TraversalReadySectionCache,
+    debug_block_palette_overlay, debug_hotbar_icons, elapsed_ms, execute_world_catalog_request,
+    micros_to_ms, refresh_world_catalog_controller, set_player_appearance_command_for_ui_model,
 };
-use mclone_assets::AssetSource;
+use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_client::{
     BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
     NativeTeleportPreviewWorker, TeleportConfig, TeleportIntent, TeleportPreview,
-    TeleportPreviewRequestId, TeleportPreviewResult, sphere_intersects_solid_blocks,
-    view_vector_from_rot_degrees,
+    TeleportPreviewRequestId, TeleportPreviewResult, TeleportValidityReason,
+    sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind, FramePipelineReport, WorkWindow,
 };
 use mclone_input::{
-    InputPromptKind, ResolvedFlatInput, TouchControlsMode, XrControllerSnapshot, XrHand,
+    FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, InputPromptKind, ResolvedFlatInput,
+    TouchControlsMode, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -82,7 +88,8 @@ use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, A
 use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{
-    GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats, WorldGuiRenderer,
+    GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats,
+    WorldGuiRenderer,
 };
 use mclone_render::screen_effect::{
     ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState, UnderwaterOverlay,
@@ -93,27 +100,30 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::{
     LEFT_EYE_VIEW_SLOT, PER_VIEW_UNIFORM_FRAME_COUNT, PerViewSlot, RIGHT_EYE_VIEW_SLOT,
+    SINGLE_VIEW_SLOT,
 };
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
-    EngineCameraCollisionMode, EngineCameraController, EngineCameraInput,
+    EngineCameraCollisionMode, EngineCameraController, EngineCameraFrameState, EngineCameraInput,
     EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraSnapshot,
-    EngineDebugVisualOptions, EngineHandPushInput, EngineRoomScaleReconciliation,
-    EngineThrusterHand, EngineThrusterInput, RenderSectionCacheUpdate,
-    RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy, RenderSectionUploadPhaseReport,
-    XrFov, XrRenderView, XrView, XrViewPose, actor_instances_from_presentations,
-    engine_debug_world_lines, render_view_from_world_pose,
+    EngineCameraViewMode, EngineDebugVisualOptions, EngineHandPushInput,
+    EngineRoomScaleReconciliation, EngineThrusterHand, EngineThrusterInput,
+    RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
+    RenderSectionUploadPhaseReport, XrFov, XrRenderView, XrView, XrViewPose,
+    actor_instances_from_presentations, engine_debug_world_lines,
+    local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
+    render_view_from_world_pose,
 };
-use mclone_server::WorkerFrameMetrics;
+use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, GameCollisionMode,
     GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence,
     GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState,
-    GameXrTurnMode, GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
-    UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay,
-    render_status_overlay,
+    GameXrTurnMode, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect,
+    StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
+    render_loading_progress_overlay, render_status_overlay,
 };
 
 mod comfort;
@@ -144,7 +154,7 @@ pub use ui_panels::*;
 
 use diagnostic_panel::XrDiagnosticPanel;
 pub use frame_pipeline_reporter::{
-    XrFramePipelineHostTiming, record_xr_frame_pipeline,
+    XrFramePipelineHostTiming, record_mono_frame_pipeline, record_xr_frame_pipeline,
     record_xr_frame_pipeline_with_peer_threads, xr_frame_pipeline_accounting_config,
     xr_frame_pipeline_observation, xr_frame_pipeline_peer_threads, xr_frame_pipeline_queue_depths,
     xr_frame_pipeline_stage_spans,
@@ -291,6 +301,7 @@ where
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     player_collision_box_visible: bool,
+    crosshair_visible: bool,
     travel_assist_mode: GameTravelAssistMode,
     player_model: GamePlayerModel,
     draw: TexturedSectionDrawResources,
@@ -308,6 +319,7 @@ where
     // screen-space-HUD mono render (needs device/queue + the chunk atlas), so it
     // stays `None` on headsets that never take the mono path.
     mono_gui: Option<GuiRenderer>,
+    mono_ui_context: Option<MonoUiContext>,
     diagnostic_panel: XrDiagnosticPanel,
     ui: GameUiHost,
     menu_overlay_cache: XrMenuPanelOverlayCache,
@@ -324,6 +336,7 @@ where
     snap_turn_state: XrSnapTurnState,
     blink_teleport: XrBlinkTeleportState,
     blink_teleport_worker: Option<NativeTeleportPreviewWorker>,
+    mono_blink_debug: MonoBlinkDebugState,
     display_refresh_hz: Option<f32>,
     render_admission_policy: RenderAdmissionPolicy,
     render_split_timing_enabled: bool,
@@ -2396,10 +2409,22 @@ where
             return Vec::new();
         }
         self.runtime.as_ref().map_or_else(Vec::new, |runtime| {
-            actor_instances_from_presentations(
+            let instances = actor_instances_from_presentations(
                 &runtime.client().actor_presentations(),
                 runtime.client(),
-            )
+            );
+            if self.mono_ui_context.is_some() {
+                instances
+                    .into_iter()
+                    .chain(local_player_actor_instance_for_view(
+                        &self.camera,
+                        runtime.client(),
+                        actor_figure_id_for_player_model(self.player_model),
+                    ))
+                    .collect()
+            } else {
+                instances
+            }
         })
     }
 

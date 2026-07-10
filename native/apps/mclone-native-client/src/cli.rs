@@ -47,6 +47,7 @@ const MAX_WINDOW_FRAME_REPORT_FRAMES: usize = 72000;
 // policy belongs in `mclone-app-runtime::startup_args::STARTUP_ARG_FLAGS`.
 // The source-scan test fails when a new double-dash flag appears in this file without
 // being classified in either shared startup or this desktop-local registry.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--actor-review-sheet",
     "--actor-walk-review",

@@ -3,22 +3,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use mclone_app_runtime::native_session_runtime::StartupReadinessPolicy;
-use mclone_app_runtime::{RuntimePollDiagnostics, debug_block_palette_overlay, debug_hotbar_icons};
+use mclone_app_runtime::RuntimePollDiagnostics;
 use mclone_assets::AssetSource;
-#[cfg(test)]
-use mclone_core::Vec3d;
 use mclone_input::{
     FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
     InputPreferences, KeyboardKey, KeyboardMouseInputAdapter, PointerButton,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
-use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
+use mclone_render::color_profile::DEFAULT_RENDER_SCALE;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
-use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameHelpParent, GameScreen, GameUiAction,
-    GameUiHost, GuiKey, GuiScale, Point, StatusOverlay,
-};
+use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, GuiScale, Point};
 use serde_json::{Value, json};
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -28,24 +22,16 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
-use crate::MAX_RENDER_DISTANCE;
 use crate::cli::{SceneOptions, StartupWaitPolicy, WindowFrameReportOptions, WindowStartIntent};
-use crate::flat_client_driver::{
-    DesktopBlinkDebugCommitStatus, FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver,
-    FlatClientHostAction, FlatClientSessionStartPlan, FlatClientUiActionContext, FlatClientUiFrame,
-    FlatClientUiRenderOptions, FlatClientWorldActionStatus, game_collision_mode,
-    game_movement_mode,
-};
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
     next_capped_redraw_deadline, redraw_schedule,
 };
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{
-    WindowRuntimeStats, WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump,
-};
-use crate::ui::DebugPaneStats;
-use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
+use crate::scene_runtime::{WindowRuntimeStats, WindowSceneAssets};
+use crate::winit_frame_driver::WinitFrameDriver;
+use mclone_audio::{AudioEngine, AudioSettings};
+use mclone_scene::{MonoBlinkCommitStatus, MonoUiContext, MonoWorldActionStatus};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const DESKTOP_BLINK_DEBUG_KEY: KeyCode = KeyCode::KeyT;
@@ -194,13 +180,15 @@ impl DesktopFlatInputAdapter {
 
 struct ChunkApp {
     assets: WindowSceneAssets,
-    driver: FlatClientDriver,
+    scene: SceneOptions,
+    render_options: TexturedSectionRenderOptions,
+    scene_driver: Option<WinitFrameDriver>,
     flat_input: DesktopFlatInputAdapter,
     input_preferences: InputPreferences,
     frame_pacing: FramePacing,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
-    audio: Option<AudioEngine>,
+    frame_timing: FrameTimingStats,
     mouse_locked: bool,
     mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
@@ -300,9 +288,9 @@ impl WindowFrameReportRecorder {
     fn json(&self, app: &ChunkApp) -> Value {
         let budget_counts = window_frame_budget_counts(&self.frames);
         let frame_pacing = app.frame_pacing.debug_stats();
-        let scene = &app.driver.scene;
-        let render_options = app.driver.render_options;
-        let final_timing = app.driver.frame_timing;
+        let scene = &app.scene;
+        let render_options = app.render_options;
+        let final_timing = app.frame_timing;
         let scene_json = json!({
             "seed": scene.seed,
             "chunk_x": scene.chunk_x,
@@ -355,15 +343,15 @@ impl WindowFrameReportRecorder {
             "budget_ms": final_timing.budget_ms,
         });
         let final_runtime_json = app
-            .driver
-            .runtime
+            .scene_driver
             .as_ref()
-            .map(|runtime| runtime_stats_json(runtime.stats()));
+            .and_then(|driver| driver.host().runtime_stats())
+            .map(runtime_stats_json);
         let final_scheduler_json = app
-            .driver
-            .runtime
+            .scene_driver
             .as_ref()
-            .map(|runtime| runtime_scheduler_json(runtime.last_poll_diagnostics()));
+            .and_then(|driver| driver.host().runtime_poll_diagnostics())
+            .map(runtime_scheduler_json);
         let samples_json = self
             .frames
             .iter()
@@ -571,24 +559,6 @@ fn runtime_scheduler_json(diagnostics: RuntimePollDiagnostics) -> Value {
 }
 
 impl ChunkApp {
-    #[cfg(test)]
-    fn new(
-        scene: SceneOptions,
-        assets: WindowSceneAssets,
-        render_options: TexturedSectionRenderOptions,
-        start_intent: WindowStartIntent,
-        startup_wait: StartupWaitPolicy,
-    ) -> Self {
-        Self::new_with_frame_report(
-            scene,
-            assets,
-            render_options,
-            start_intent,
-            startup_wait,
-            None,
-        )
-    }
-
     fn new_with_frame_report(
         scene: SceneOptions,
         assets: WindowSceneAssets,
@@ -597,31 +567,21 @@ impl ChunkApp {
         startup_wait: StartupWaitPolicy,
         frame_report: Option<WindowFrameReportOptions>,
     ) -> Self {
-        let mut ui = match start_intent {
-            WindowStartIntent::InWorld => GameUiHost::new_ingame(),
-            WindowStartIntent::Menu => GameUiHost::new(),
-        };
-        ui.set_join_remote_addr(
-            scene
-                .remote_addr
-                .clone()
-                .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
-        );
         let ui_v2_hit_debug = std::env::var_os(UI_V2_HIT_DEBUG_ENV).is_some();
-        let mut driver = FlatClientDriver::new_with_ui(&scene, render_options, ui);
-        driver.set_ui_v2_debug_overlay(ui_v2_hit_debug);
         if ui_v2_hit_debug {
             log::info!("{UI_V2_HIT_DEBUG_ENV}=1; UI v2 hit debug overlay/logging enabled");
         }
         Self {
-            driver,
+            scene: scene.clone(),
+            render_options,
+            scene_driver: None,
             assets,
             flat_input: DesktopFlatInputAdapter::new(),
             input_preferences: InputPreferences::AUTO,
             frame_pacing: FramePacing::default(),
             window: None,
             surface: None,
-            audio: None,
+            frame_timing: FrameTimingStats::default(),
             mouse_locked: false,
             mouse_lock_requested: false,
             last_cursor: None,
@@ -673,7 +633,7 @@ impl ChunkApp {
         let Some(recorder) = &mut self.frame_report else {
             return false;
         };
-        let timing = self.driver.frame_timing;
+        let timing = self.frame_timing;
         recorder.record(WindowFrameSample {
             status: surface_frame_status_label(status),
             frame_wall_ms: timing.last_frame_ms,
@@ -696,15 +656,6 @@ impl ChunkApp {
         recorder.write(self)
     }
 
-    fn window_camera_view(&self) -> FlatClientCameraView {
-        self.driver.camera_view()
-    }
-
-    fn current_render_distance(&self) -> u32 {
-        self.driver
-            .current_render_distance(self.driver.scene.render_distance)
-    }
-
     fn current_render_scale(&self) -> f32 {
         let fallback = self
             .surface
@@ -712,40 +663,39 @@ impl ChunkApp {
             .map_or(DEFAULT_RENDER_SCALE, |surface| {
                 surface.render_config.render_scale
             });
-        self.driver.current_render_scale(fallback)
+        fallback
     }
 
     fn update_camera_from_keys(&mut self, now: Instant) -> Result<()> {
         let frame_dt = now.duration_since(self.last_frame);
         let movement_dt = frame_dt.as_secs_f32().min(0.05);
         self.last_frame = now;
-        self.driver.tick_frame_timing(
+        self.frame_timing.begin_frame(
             frame_dt.as_secs_f64() * 1000.0,
             self.frame_pacing.target_frame_ms(),
         );
 
-        if self.driver.ui_is_active() {
+        let Some(driver) = self.scene_driver.as_mut() else {
+            return Ok(());
+        };
+        if driver.ui_is_active() {
             return Ok(());
         }
 
         let frame = self.flat_input.held_frame();
-        if self
-            .driver
-            .apply_held_input_frame(frame, f64::from(movement_dt))
-        {
-            self.play_landing_events();
-            self.commit_player_pose_change()?;
-        } else {
-            self.play_landing_events();
+        if driver.apply_movement_frame(frame, f64::from(movement_dt)) {
+            driver.commit_player_pose()?;
         }
-        self.driver.update_desktop_blink_debug_preview();
+        driver.update_blink_debug();
         Ok(())
     }
 
     fn clear_flat_gameplay_input(&mut self) {
         self.flat_input.clear_held();
-        self.driver.clear_camera_input();
-        self.driver.clear_desktop_blink_debug();
+        if let Some(driver) = &mut self.scene_driver {
+            driver.clear_camera_input();
+            driver.clear_blink_debug();
+        }
     }
 
     fn apply_flat_keyboard_frame(
@@ -755,7 +705,9 @@ impl ChunkApp {
     ) -> bool {
         if frame.open_menu {
             self.mouse_lock_requested = false;
-            self.driver.open_pause_menu();
+            if let Some(driver) = &mut self.scene_driver {
+                driver.open_pause_menu();
+            }
             self.clear_flat_gameplay_input();
             self.last_cursor = None;
             self.sync_mouse_lock();
@@ -764,7 +716,9 @@ impl ChunkApp {
         }
         if frame.open_block_palette {
             self.mouse_lock_requested = false;
-            self.driver.open_block_palette();
+            if let Some(driver) = &mut self.scene_driver {
+                driver.open_block_palette();
+            }
             self.clear_flat_gameplay_input();
             self.last_cursor = None;
             self.sync_mouse_lock();
@@ -773,7 +727,11 @@ impl ChunkApp {
         }
         if frame.open_help {
             self.mouse_lock_requested = false;
-            self.driver.open_help(GameHelpParent::Game);
+            self.apply_ui_action(
+                GameUiAction::OpenHelp(GameHelpParent::Game),
+                event_loop,
+                false,
+            );
             self.clear_flat_gameplay_input();
             self.last_cursor = None;
             self.sync_mouse_lock();
@@ -781,13 +739,20 @@ impl ChunkApp {
             return true;
         }
         if frame.toggle_camera_view {
-            let view_mode = self.driver.toggle_camera_view_mode();
+            let Some(driver) = &mut self.scene_driver else {
+                return false;
+            };
+            let view_mode = driver.toggle_camera_view();
             log::info!("camera view mode {}", view_mode.label());
             self.schedule_next_redraw(event_loop);
             return true;
         }
         if let Some(slot) = frame.selected_hotbar_slot {
-            if self.driver.select_hotbar_slot(slot) {
+            if self
+                .scene_driver
+                .as_mut()
+                .is_some_and(|driver| driver.select_hotbar_slot(slot))
+            {
                 log::info!("selected hotbar slot {}", slot + 1);
             }
             self.schedule_next_redraw(event_loop);
@@ -807,9 +772,11 @@ impl ChunkApp {
     }
 
     fn apply_flat_look_frame(&mut self, frame: FlatInputFrame, event_loop: &ActiveEventLoop) {
-        let changed = self.driver.apply_look_frame(frame);
-        let preview_changed = self.driver.update_desktop_blink_debug_preview();
-        if changed || preview_changed {
+        let changed = self
+            .scene_driver
+            .as_mut()
+            .is_some_and(|driver| driver.apply_look_frame(frame) | driver.update_blink_debug());
+        if changed {
             self.schedule_next_redraw(event_loop);
         }
     }
@@ -842,7 +809,12 @@ impl ChunkApp {
         gui_point: Point,
         action: Option<GameUiAction>,
     ) {
-        if !self.ui_v2_hit_debug || !self.driver.ui_v2_is_active() {
+        if !self.ui_v2_hit_debug
+            || !self
+                .scene_driver
+                .as_ref()
+                .is_some_and(WinitFrameDriver::ui_v2_is_active)
+        {
             return;
         }
         let window_size = self
@@ -856,7 +828,11 @@ impl ChunkApp {
             .as_ref()
             .map(|surface| [surface.config.width, surface.config.height])
             .unwrap_or([0, 0]);
-        let Some(snapshot) = self.driver.ui_v2_debug_snapshot() else {
+        let Some(snapshot) = self
+            .scene_driver
+            .as_mut()
+            .and_then(WinitFrameDriver::ui_v2_debug_snapshot)
+        else {
             return;
         };
         let widgets = snapshot
@@ -897,130 +873,61 @@ impl ChunkApp {
         );
     }
 
-    fn current_flat_hud(&self, status: StatusOverlay, ui_active: bool) -> FlatHud {
-        let mut hud = FlatHud::new(
-            self.flat_input
-                .capability_state
-                .resolve(self.input_preferences),
-        );
-        let palette_active = self.driver.ui_screen() == Some(GameScreen::BlockPalette);
-        hud.world_hud_visible = (!ui_active || palette_active) && self.driver.runtime.is_some();
-        hud.crosshair_visible =
-            self.driver.crosshair_visible && !ui_active && self.driver.runtime.is_some();
-        hud.hotbar = FlatHotbarOverlay::selected_with_icons(
-            self.driver.interaction.selected_hotbar_slot(),
-            debug_hotbar_icons(
-                self.driver.interaction.hotbar_items(),
-                &self.assets.mesh_assets.catalog,
-            ),
-        );
-        hud.status = status;
-        hud.frame_pipeline = self.driver.latest_frame_pipeline_overlay();
-        hud
-    }
-
-    fn apply_session_update(&mut self, update: crate::flat_client_driver::FlatClientSessionUpdate) {
-        if let Some(mouse_lock_requested) = update.mouse_lock_requested {
-            self.mouse_lock_requested = mouse_lock_requested;
-            self.sync_mouse_lock();
-        }
-    }
-
-    fn start_session_plan(&mut self, plan: FlatClientSessionStartPlan) {
-        if plan.transition.teardown_world {
-            if let Err(err) = self.teardown_world() {
-                log::error!(
-                    "failed to tear down world before starting replacement session: {err:#}"
-                );
-                return;
-            }
-        }
-        let device = self.surface.as_ref().map(|surface| &surface.device);
-        let assets = &self.assets;
-        let update = self.driver.start_session_plan(plan, device, |scene| {
-            WindowSceneStartupPump::from_scene(scene, assets)
-        });
-        self.apply_session_update(update);
-    }
-
-    fn advance_local_world_startup(&mut self) {
-        let device = self.surface.as_ref().map(|surface| &surface.device);
-        let update = self.driver.advance_local_world_startup(device);
-        self.apply_session_update(update);
-    }
-
     fn apply_ui_action(
         &mut self,
         action: GameUiAction,
         event_loop: &ActiveEventLoop,
         from_pointer_click: bool,
     ) {
-        let fallback_remote_addr = self.driver.scene.remote_addr.clone();
-        let session_starting = self.driver.session.is_starting();
-        let mut result = self.driver.apply_ui_action(
+        let Some(surface) = self.surface.as_ref() else {
+            return;
+        };
+        let Some(driver) = self.scene_driver.as_mut() else {
+            return;
+        };
+        let result = match driver.apply_ui_action(
             action,
-            FlatClientUiActionContext {
-                session_starting,
-                from_pointer_click,
-                fallback_remote_addr: fallback_remote_addr.as_deref(),
-            },
-        );
-
-        if let Some(host_action) = result.host_action {
-            match host_action {
-                FlatClientHostAction::QuitToTitle => {
-                    let transition = self.driver.quit_to_title_transition_effects();
-                    if transition.teardown_world {
-                        if let Err(err) = self.teardown_world() {
-                            log::error!("failed to tear down world: {err:#}");
-                            self.schedule_next_redraw(event_loop);
-                            return;
-                        }
-                    }
-                    self.driver
-                        .apply_client_session_transition_effects(transition);
-                }
-                FlatClientHostAction::Quit => {
-                    event_loop.exit();
-                    return;
-                }
-                FlatClientHostAction::CycleFramePacing => {
-                    self.frame_pacing.cycle_mode();
-                    self.next_redraw_at = None;
-                    if let Some(surface) = &mut self.surface {
-                        self.frame_pacing.apply_to_surface(surface);
-                    }
-                    log::info!(
-                        "frame pacing set to {} at cap {} fps",
-                        self.frame_pacing.mode.label(),
-                        self.frame_pacing.fps_cap
-                    );
-                }
-                FlatClientHostAction::CycleFpsCap => {
-                    self.frame_pacing.cycle_fps_cap();
-                    self.next_redraw_at = None;
-                    log::info!("fps cap set to {}", self.frame_pacing.fps_cap);
-                }
-                FlatClientHostAction::SetTouchControlsMode(mode) => {
-                    self.input_preferences.touch_controls = mode;
-                }
+            from_pointer_click,
+            &surface.device,
+            &surface.queue,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                log::error!("failed to apply desktop scene UI action: {error:#}");
+                self.schedule_next_redraw(event_loop);
+                return;
             }
-        }
+        };
 
-        if result.session_start.is_some() {
+        if result.host.exit {
+            event_loop.exit();
+            return;
+        }
+        if result.host.quit_to_title {
             self.mouse_lock_requested = false;
         }
-        if let Some(mouse_lock_requested) = result.mouse_lock_requested {
+        if result.host.cycle_frame_pacing {
+            self.frame_pacing.cycle_mode();
+            self.next_redraw_at = None;
+            if let Some(surface) = &mut self.surface {
+                self.frame_pacing.apply_to_surface(surface);
+            }
+        }
+        if result.host.cycle_fps_cap {
+            self.frame_pacing.cycle_fps_cap();
+            self.next_redraw_at = None;
+        }
+        if let Some(mode) = result.host.touch_controls_mode {
+            self.input_preferences.touch_controls = mode;
+        }
+        if let Some(mouse_lock_requested) = result.host.mouse_lock_requested {
             self.mouse_lock_requested = mouse_lock_requested;
         }
-        if result.clear_gameplay_input {
+        if result.scene.clear_gameplay_input {
             self.clear_flat_gameplay_input();
         }
-        if !result.preserve_pointer_state {
+        if !result.scene.preserve_pointer_state {
             self.last_cursor = None;
-        }
-        if let Some(plan) = result.session_start.take() {
-            self.start_session_plan(plan);
         }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
@@ -1029,75 +936,28 @@ impl ChunkApp {
     fn sync_mouse_lock(&mut self) {
         self.set_mouse_lock(
             self.mouse_lock_requested
-                && !self.driver.ui_is_active()
-                && self.driver.runtime.is_some(),
+                && self
+                    .scene_driver
+                    .as_ref()
+                    .is_some_and(|driver| !driver.ui_is_active() && driver.has_runtime()),
         );
     }
 
     fn toggle_movement_mode(&mut self) {
-        let movement_mode = self.driver.camera.toggle_movement_mode();
-        let collision_mode = self.driver.camera.collision_mode();
-        log::info!(
-            "player movement mode {} collision {}",
-            movement_mode.label(),
-            collision_mode.label()
-        );
+        if let Some(driver) = &mut self.scene_driver {
+            let movement_mode = driver.toggle_movement_mode();
+            log::info!("player movement mode {}", movement_mode.label());
+        }
     }
 
     fn rebuild_render_resources(&mut self, asset_source: &impl AssetSource) -> Result<()> {
-        let Some(render_config) = self.surface.as_ref().map(|surface| surface.render_config) else {
-            return Ok(());
-        };
-        self.rebuild_render_resources_with_config(asset_source, render_config)
-    }
-
-    fn rebuild_render_resources_with_config(
-        &mut self,
-        asset_source: &impl AssetSource,
-        render_config: RenderConfig,
-    ) -> Result<()> {
         let Some(surface) = self.surface.as_ref() else {
             return Ok(());
         };
-        let (previous_config, next_config) = self.driver.rebuild_render_resources(
-            &surface.device,
-            &surface.queue,
-            [surface.config.width, surface.config.height],
-            render_config,
-            self.assets.mesh_assets.atlas.as_upload(),
-            self.assets.actor_textures.atlas.as_upload(),
-            Some(&self.assets.actor_textures.figures),
-            asset_source,
-        )?;
-        if let Some(surface) = &mut self.surface {
-            surface.render_config = next_config;
-        }
-        if self.driver.runtime.is_some() {
-            self.upload_all_runtime_sections()
-                .context("failed to restore runtime sections after render resource rebuild")?;
-        }
-        match previous_config {
-            Some(previous) if previous == next_config => {
-                log::info!(
-                    "rebuilt desktop flat render resources with unchanged config: {}",
-                    next_config.diagnostic_label()
-                );
-            }
-            Some(previous) => {
-                log::info!(
-                    "rebuilt desktop flat render resources: {} -> {}",
-                    previous.diagnostic_label(),
-                    next_config.diagnostic_label()
-                );
-            }
-            None => {
-                log::info!(
-                    "initialized desktop flat render resources: {}",
-                    next_config.diagnostic_label()
-                );
-            }
-        }
-        Ok(())
+        let Some(driver) = self.scene_driver.as_mut() else {
+            return Ok(());
+        };
+        driver.rebuild_render_resources(&surface.device, &surface.queue, &self.assets, asset_source)
     }
 
     fn trigger_render_resource_rebuild(&mut self, event_loop: &ActiveEventLoop) {
@@ -1122,11 +982,19 @@ impl ChunkApp {
         };
         let next_scale = next_desktop_render_scale(current_config.render_scale);
         let next_config = current_config.with_render_scale(next_scale);
+        if let Some(surface) = &mut self.surface {
+            surface.render_config = next_config;
+            if let Some(driver) = &mut self.scene_driver {
+                driver.set_render_config(
+                    &surface.device,
+                    [surface.config.width, surface.config.height],
+                    next_config,
+                );
+            }
+        }
         let result = load_asset_source()
             .context("failed to load assets for render-scale rebuild")
-            .and_then(|asset_source| {
-                self.rebuild_render_resources_with_config(&asset_source, next_config)
-            });
+            .and_then(|asset_source| self.rebuild_render_resources(&asset_source));
         match result {
             Ok(()) => {
                 log::info!("desktop flat render scale set to {next_scale:.2}");
@@ -1136,35 +1004,6 @@ impl ChunkApp {
                 log::error!("desktop flat render scale rebuild failed: {err:#}");
             }
         }
-    }
-
-    fn teardown_world(&mut self) -> Result<()> {
-        let device = self.surface.as_ref().map(|surface| &surface.device);
-        self.driver.teardown_world(device)?;
-        self.flat_input.clear_held();
-        self.last_cursor = None;
-        self.mouse_lock_requested = false;
-        self.set_mouse_lock(false);
-        Ok(())
-    }
-
-    fn start_world_from_scene(&mut self, scene: SceneOptions) -> Result<()> {
-        let assets = &self.assets;
-        let device = self.surface.as_ref().map(|surface| &surface.device);
-        self.driver.start_world_from_scene(
-            scene,
-            device,
-            StartupReadinessPolicy::Playable,
-            &mut |scene| WindowSceneStartupPump::from_scene_at_scene_center(scene, assets),
-        )
-    }
-
-    #[cfg(test)]
-    fn start_local_world(&mut self, seed: i64) -> Result<()> {
-        let mut scene = self.driver.scene.clone();
-        scene.seed = seed;
-        scene.remote_addr = None;
-        self.start_world_from_scene(scene)
     }
 
     fn set_mouse_lock(&mut self, should_lock: bool) {
@@ -1208,130 +1047,12 @@ impl ChunkApp {
         }
     }
 
-    fn poll_runtime_and_upload(&mut self) -> Result<()> {
-        let poll_start = Instant::now();
-        let poll = self.driver.poll_runtime()?;
-        self.driver
-            .record_runtime_poll_timing(elapsed_ms(poll_start.elapsed()));
-        if !poll.needs_section_upload {
-            return Ok(());
-        }
-        self.upload_runtime_sections()?;
-        Ok(())
-    }
-
-    fn upload_runtime_sections(&mut self) -> Result<()> {
-        let Some(surface) = &self.surface else {
-            return Ok(());
-        };
-        let Some((sync, summary)) = self
-            .driver
-            .upload_runtime_sections(&surface.device, elapsed_ms)?
-        else {
-            return Ok(());
-        };
-        log::info!(
-            "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} cpu_mesh_bytes={} remesh_ms={:.3} upload_ms={:.3}",
-            sync.loaded_chunk_count,
-            summary.section_count,
-            summary.face_count,
-            summary.index_count,
-            sync.section_update.rebuilt_section_count(),
-            sync.section_update.visibility_graph_stats.build_count,
-            sync.section_update.visibility_graph_stats.total_ms,
-            sync.section_update.visibility_graph_stats.worst_ms,
-            self.driver.render_stats.last_uploaded_section_count,
-            self.driver.render_stats.last_uploaded_vertex_count,
-            self.driver.render_stats.last_uploaded_face_count,
-            self.driver.render_stats.last_uploaded_index_count,
-            self.driver.render_stats.last_upload_removed_section_count,
-            self.driver.render_stats.resident_cpu_mesh_owned_bytes,
-            sync.remesh_ms,
-            self.driver.render_stats.last_upload_ms
-        );
-        Ok(())
-    }
-
-    fn upload_all_runtime_sections(&mut self) -> Result<()> {
-        let Some(surface) = &self.surface else {
-            return Ok(());
-        };
-        let Some((sync, summary)) = self
-            .driver
-            .upload_all_runtime_sections(&surface.device, elapsed_ms)?
-        else {
-            return Ok(());
-        };
-        if sync.section_update.rebuilt_sections.is_empty() {
-            anyhow::bail!(
-                "world seed={} center=({}, {}) render_distance={} produced no render sections",
-                self.driver.scene.seed,
-                self.driver.scene.chunk_x,
-                self.driver.scene.chunk_z,
-                self.driver.scene.render_distance
-            );
-        }
-        log::info!(
-            "uploaded {} world render sections with {} vertices / {} faces / {} indices visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} remesh_ms={:.3} upload_ms={:.3}",
-            summary.section_count,
-            sync.section_update.rebuilt_vertex_count,
-            summary.face_count,
-            summary.index_count,
-            sync.section_update.visibility_graph_stats.build_count,
-            sync.section_update.visibility_graph_stats.total_ms,
-            sync.section_update.visibility_graph_stats.worst_ms,
-            sync.remesh_ms,
-            self.driver.render_stats.last_upload_ms
-        );
-        Ok(())
-    }
-
-    fn debug_pane_stats(&self, render_options: TexturedSectionRenderOptions) -> DebugPaneStats {
-        let camera_state = self.driver.camera_frame_state();
-        DebugPaneStats {
-            position: self.window_camera_view().eye,
-            speed: camera_state.camera.speed_blocks_per_second as f32,
-            movement_mode: format!(
-                "{}/{}",
-                camera_state.movement_mode_label(),
-                camera_state.collision_mode_label()
-            ),
-            on_ground: camera_state.on_ground,
-            seed: self.driver.scene.seed,
-            runtime: self
-                .driver
-                .runtime
-                .as_ref()
-                .expect("debug pane requires an active runtime")
-                .stats(),
-            render: self.driver.render_stats,
-            frame: self.driver.frame_timing,
-            pacing: self.frame_pacing.debug_stats(),
-            section_occlusion: render_options.section_occlusion_culling,
-            force_fullbright: render_options.force_fullbright,
-            color_profile: render_options.color_profile.label(),
-            render_scale: self.current_render_scale(),
-        }
-    }
-
-    fn commit_player_pose_change(&mut self) -> Result<bool> {
-        self.driver.commit_player_pose_change()
-    }
-
-    fn play_landing_events(&mut self) {
-        let events = self.driver.camera.take_landing_events();
-        let Some(audio) = &self.audio else {
-            return;
-        };
-        for event in events {
-            let (sound, gain) = landing_playback_for_impact(event.impact_speed);
-            audio.play(sound, gain);
-        }
-    }
-
     fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
-        if let FlatClientWorldActionStatus::Sent { target, changed } =
-            self.driver.handle_world_action(action)?
+        let Some(driver) = self.scene_driver.as_mut() else {
+            return Ok(());
+        };
+        if let MonoWorldActionStatus::Sent { target, changed } =
+            driver.handle_world_action(action)?
         {
             log::info!(
                 "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
@@ -1365,7 +1086,7 @@ impl ApplicationHandler for ChunkApp {
         };
         let mut surface = match NativeSurfaceContext::new_with_color_profile(
             window.clone(),
-            self.driver.render_options.color_profile,
+            self.render_options.color_profile,
         ) {
             Ok(surface) => surface,
             Err(err) => {
@@ -1384,14 +1105,34 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        self.driver.set_ui_scale(GuiScale::from_pixels(
-            surface.config.width,
-            surface.config.height,
-        ));
-        self.surface = Some(surface);
-        if let Err(err) = self.rebuild_render_resources(&asset_source) {
-            log::error!("failed to initialize desktop render resources: {err:#}");
-            self.surface = None;
+        let mut scene_driver = match WinitFrameDriver::new(
+            &surface.device,
+            &surface.queue,
+            surface.render_config,
+            [surface.config.width, surface.config.height],
+            &self.scene,
+            self.render_options,
+            &self.assets,
+            &asset_source,
+            self.start_intent,
+            self.ui_v2_hit_debug,
+        ) {
+            Ok(driver) => driver,
+            Err(err) => {
+                log::error!("failed to initialize desktop scene host: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        };
+        if self.start_intent == WindowStartIntent::InWorld
+            && self.startup_wait == StartupWaitPolicy::Idle
+            && let Err(error) = scene_driver.drive_until_idle(
+                &surface.device,
+                &surface.queue,
+                std::time::Duration::from_secs(120),
+            )
+        {
+            log::error!("failed to complete idle desktop startup: {error:#}");
             event_loop.exit();
             return;
         }
@@ -1402,36 +1143,18 @@ impl ApplicationHandler for ChunkApp {
                 None
             }
         };
-        self.audio = audio;
+        scene_driver.set_audio_engine(audio);
+        self.scene_driver = Some(scene_driver);
+        self.surface = Some(surface);
+        if self.scene_driver.is_none() {
+            event_loop.exit();
+            return;
+        }
         self.window = Some(window);
         self.last_frame = Instant::now();
-        self.driver.frame_timing = FrameTimingStats::default();
+        self.frame_timing = FrameTimingStats::default();
         self.next_redraw_at = None;
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
-        if self.start_intent == WindowStartIntent::InWorld {
-            match self.startup_wait {
-                StartupWaitPolicy::Idle => {
-                    if let Err(err) = self.start_world_from_scene(self.driver.scene.clone()) {
-                        log::error!("failed to complete idle desktop startup: {err:#}");
-                        event_loop.exit();
-                        return;
-                    }
-                }
-                StartupWaitPolicy::None
-                | StartupWaitPolicy::Progress
-                | StartupWaitPolicy::Playable
-                | StartupWaitPolicy::Frames(_) => {
-                    match self.driver.current_scene_start_plan(false, true) {
-                        Ok(plan) => self.start_session_plan(plan),
-                        Err(err) => {
-                            log::error!("failed to plan desktop startup: {err:#}");
-                            event_loop.exit();
-                            return;
-                        }
-                    }
-                }
-            }
-        }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
     }
@@ -1444,21 +1167,21 @@ impl ApplicationHandler for ChunkApp {
                     surface.resize(size);
                 }
                 if let Some(surface) = &self.surface {
-                    self.driver.resize_frame_targets(
-                        &surface.device,
-                        [surface.config.width, surface.config.height],
-                    );
-                    self.driver.set_ui_scale(GuiScale::from_pixels(
-                        surface.config.width,
-                        surface.config.height,
-                    ));
+                    if let Some(driver) = &mut self.scene_driver {
+                        driver.resize(
+                            &surface.device,
+                            [surface.config.width, surface.config.height],
+                        );
+                    }
                 }
                 self.schedule_next_redraw(event_loop);
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key_code) = event.physical_key {
                     if let Some(scale) = self.gui_scale() {
-                        self.driver.set_ui_scale(scale);
+                        if let Some(driver) = &mut self.scene_driver {
+                            driver.host_mut().set_mono_ui_scale(scale);
+                        }
                     }
                     self.flat_input.note_keyboard_activity();
                     if key_code == KeyCode::Backquote
@@ -1498,11 +1221,20 @@ impl ApplicationHandler for ChunkApp {
                         );
                         return;
                     }
-                    if event.state == ElementState::Pressed && self.driver.ui_is_active() {
+                    if event.state == ElementState::Pressed
+                        && self
+                            .scene_driver
+                            .as_ref()
+                            .is_some_and(WinitFrameDriver::ui_is_active)
+                    {
                         if !event.repeat
                             && let Some(gui_key) = gui_key_from_key_code(key_code)
                         {
-                            let (handled, action) = self.driver.ui_key_pressed(gui_key);
+                            let (handled, action) = self
+                                .scene_driver
+                                .as_mut()
+                                .expect("active scene driver")
+                                .ui_key_pressed(gui_key);
                             if let Some(action) = action {
                                 self.apply_ui_action(action, event_loop, false);
                             } else if handled {
@@ -1512,50 +1244,38 @@ impl ApplicationHandler for ChunkApp {
                         return;
                     }
                     if key_code == DESKTOP_BLINK_DEBUG_KEY && !event.repeat {
-                        match event.state {
+                        let status = match event.state {
                             ElementState::Pressed => {
-                                if self.driver.begin_desktop_blink_debug() {
-                                    log::info!("desktop Blink debug preview armed");
-                                } else {
-                                    log::debug!("desktop Blink debug preview ignored");
-                                }
+                                let armed = self
+                                    .scene_driver
+                                    .as_mut()
+                                    .is_some_and(WinitFrameDriver::begin_blink_debug);
+                                log::debug!("desktop Blink preview armed={armed}");
+                                None
                             }
-                            ElementState::Released => {
-                                match self.driver.commit_desktop_blink_debug() {
-                                    Ok(DesktopBlinkDebugCommitStatus::Committed {
-                                        target_feet,
-                                        changed,
-                                    }) => {
-                                        log::info!(
-                                            "desktop Blink debug committed feet=({:.2}, {:.2}, {:.2}) changed={}",
-                                            target_feet.x,
-                                            target_feet.y,
-                                            target_feet.z,
-                                            changed
-                                        );
-                                        self.play_landing_events();
-                                    }
-                                    Ok(DesktopBlinkDebugCommitStatus::NoValidPreview {
-                                        validity,
-                                    }) => {
-                                        log::info!(
-                                            "desktop Blink debug release had no valid preview: {:?}",
-                                            validity
-                                        );
-                                    }
-                                    Ok(status) => {
-                                        log::debug!(
-                                            "desktop Blink debug release ignored: {:?}",
-                                            status
-                                        );
-                                    }
-                                    Err(err) => {
-                                        log::error!("desktop Blink debug commit failed: {err:#}");
-                                        event_loop.exit();
-                                        return;
-                                    }
-                                }
+                            ElementState::Released => self
+                                .scene_driver
+                                .as_mut()
+                                .map(WinitFrameDriver::commit_blink_debug),
+                        };
+                        match status {
+                            Some(Ok(MonoBlinkCommitStatus::Committed {
+                                target_feet,
+                                changed,
+                            })) => log::info!(
+                                "desktop Blink committed feet=({:.2}, {:.2}, {:.2}) changed={changed}",
+                                target_feet.x,
+                                target_feet.y,
+                                target_feet.z
+                            ),
+                            Some(Ok(MonoBlinkCommitStatus::NoValidPreview { validity })) => {
+                                log::info!("desktop Blink had no valid preview: {validity:?}")
                             }
+                            Some(Ok(status)) => log::debug!("desktop Blink ignored: {status:?}"),
+                            Some(Err(error)) => {
+                                log::error!("desktop Blink commit failed: {error:#}")
+                            }
+                            None => {}
                         }
                         self.schedule_next_redraw(event_loop);
                         return;
@@ -1564,7 +1284,11 @@ impl ApplicationHandler for ChunkApp {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        match self.driver.shoot_debug_physics_cube() {
+                        match self
+                            .scene_driver
+                            .as_mut()
+                            .map_or(Ok(false), WinitFrameDriver::shoot_debug_physics_cube)
+                        {
                             Ok(true) => log::info!("shot debug physics cube"),
                             Ok(false) => log::debug!("debug physics cube shot ignored"),
                             Err(err) => log::error!("failed to shoot debug physics cube: {err:#}"),
@@ -1576,34 +1300,18 @@ impl ApplicationHandler for ChunkApp {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        self.driver.render_options.section_occlusion_culling =
-                            !self.driver.render_options.section_occlusion_culling;
-                        log::info!(
-                            "section occlusion culling {}",
-                            if self.driver.render_options.section_occlusion_culling {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            }
+                        self.apply_ui_action(
+                            GameUiAction::ToggleSectionOcclusion,
+                            event_loop,
+                            false,
                         );
-                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     if key_code == KeyCode::KeyL
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        self.driver.render_options.force_fullbright =
-                            !self.driver.render_options.force_fullbright;
-                        log::info!(
-                            "fullbright {}",
-                            if self.driver.render_options.force_fullbright {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            }
-                        );
-                        self.schedule_next_redraw(event_loop);
+                        self.apply_ui_action(GameUiAction::ToggleFullbright, event_loop, false);
                         return;
                     }
                     if key_code == NO_CLIP_TOGGLE_KEY
@@ -1626,18 +1334,28 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let input_frame = self.flat_input.handle_mouse_button(button, state);
-                if self.driver.ui_is_active() {
+                if self
+                    .scene_driver
+                    .as_ref()
+                    .is_some_and(WinitFrameDriver::ui_is_active)
+                {
                     if button == MouseButton::Left {
                         if let Some((x, y)) = self.last_cursor
                             && let Some(point) = self.gui_point(x, y)
                         {
                             match state {
                                 ElementState::Pressed => {
-                                    self.driver.ui_pointer_down(point);
+                                    if let Some(driver) = &mut self.scene_driver {
+                                        driver.ui_pointer_down(point);
+                                    }
                                     self.log_ui_v2_pointer_debug("down", (x, y), point, None);
                                 }
                                 ElementState::Released => {
-                                    let (_handled, action) = self.driver.ui_pointer_up(point);
+                                    let (_handled, action) = self
+                                        .scene_driver
+                                        .as_mut()
+                                        .expect("active scene driver")
+                                        .ui_pointer_up(point);
                                     self.log_ui_v2_pointer_debug("up", (x, y), point, action);
                                     if let Some(action) = action {
                                         self.apply_ui_action(action, event_loop, true);
@@ -1650,7 +1368,11 @@ impl ApplicationHandler for ChunkApp {
                     }
                     return;
                 }
-                if self.driver.runtime.is_none() {
+                if !self
+                    .scene_driver
+                    .as_ref()
+                    .is_some_and(WinitFrameDriver::has_runtime)
+                {
                     self.mouse_lock_requested = false;
                     self.sync_mouse_lock();
                     self.schedule_next_redraw(event_loop);
@@ -1676,10 +1398,18 @@ impl ApplicationHandler for ChunkApp {
             WindowEvent::CursorMoved { position, .. } => {
                 self.flat_input.note_mouse_activity();
                 let cursor = (position.x, position.y);
-                if self.driver.ui_is_active() {
+                if self
+                    .scene_driver
+                    .as_ref()
+                    .is_some_and(WinitFrameDriver::ui_is_active)
+                {
                     self.last_cursor = Some(cursor);
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
-                        let (_handled, action) = self.driver.ui_pointer_move(point);
+                        let (_handled, action) = self
+                            .scene_driver
+                            .as_mut()
+                            .expect("active scene driver")
+                            .ui_pointer_move(point);
                         self.log_ui_v2_pointer_debug("move", cursor, point, action);
                         if let Some(action) = action {
                             self.apply_ui_action(action, event_loop, true);
@@ -1702,17 +1432,25 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.flat_input.note_mouse_activity();
-                if self.driver.ui_is_active() {
+                if self
+                    .scene_driver
+                    .as_ref()
+                    .is_some_and(WinitFrameDriver::ui_is_active)
+                {
                     return;
                 }
                 let amount = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y * 0.12,
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
                 };
-                self.driver.adjust_camera_speed(f64::from(amount));
+                if let Some(driver) = &mut self.scene_driver {
+                    driver.adjust_camera_speed(f64::from(amount));
+                }
                 log::info!(
                     "no-clip speed {:.1} blocks/s",
-                    self.driver.camera.snapshot().speed_blocks_per_second
+                    self.scene_driver
+                        .as_ref()
+                        .map_or(0.0, WinitFrameDriver::camera_speed_blocks_per_second)
                 );
                 self.schedule_next_redraw(event_loop);
             }
@@ -1724,7 +1462,9 @@ impl ApplicationHandler for ChunkApp {
                 self.mouse_lock_requested = false;
                 self.clear_flat_gameplay_input();
                 self.last_cursor = None;
-                self.driver.clear_ui_input();
+                if let Some(driver) = &mut self.scene_driver {
+                    driver.clear_ui_input();
+                }
                 self.set_mouse_lock(false);
             }
             WindowEvent::Focused(true) => {
@@ -1740,94 +1480,61 @@ impl ApplicationHandler for ChunkApp {
                     event_loop.exit();
                     return;
                 }
-                if let Err(err) = self.poll_runtime_and_upload() {
-                    log::error!("failed to poll chunk runtime: {err:#}");
-                    event_loop.exit();
-                    return;
-                }
-                self.advance_local_world_startup();
-                let Some(gui_scale) = self.gui_scale() else {
-                    return;
-                };
-                self.driver.set_ui_scale(gui_scale);
-                let render_options = self.driver.effective_render_options();
-                let debug_stats = (self.driver.debug_diagnostics_visible
-                    && self.driver.runtime.is_some())
-                .then(|| self.debug_pane_stats(render_options));
-                let session_projection = self.driver.session_projection();
-                let flat_hud = self.current_flat_hud(
-                    session_projection.status_overlay.clone(),
-                    self.driver.ui_is_active(),
-                );
-                let loading_progress_overlay = session_projection.loading_progress_overlay;
-                let debug_view_readiness_overlay = (self.driver.debug_diagnostics_visible
-                    && loading_progress_overlay.is_none())
-                .then(|| {
-                    self.driver
-                        .runtime
-                        .as_ref()
-                        .and_then(WindowSceneRuntime::view_readiness_overlay)
-                })
-                .flatten();
-                let ui_render_options = FlatClientUiRenderOptions {
-                    render_distance: i32::try_from(self.current_render_distance())
-                        .unwrap_or(MAX_RENDER_DISTANCE),
-                    render_options: self.driver.render_options,
-                    far_lod_enabled: self.driver.scene.far_lod.enabled,
-                    far_lod_range_chunks: self.driver.scene.far_lod.extra_radius_chunks as i32,
+                let ui_context = MonoUiContext {
+                    resolved_input: self
+                        .flat_input
+                        .capability_state
+                        .resolve(self.input_preferences),
                     frame_pacing: self.frame_pacing.ui_state(),
-                    movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
-                    collision_mode: game_collision_mode(self.driver.camera.collision_mode()),
-                    travel_assist_mode: self.driver.travel_assist_mode,
-                    fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
-                    movement_speed_multiplier: self.driver.camera.movement_speed_multiplier()
-                        as f32,
-                    player_collision_box_visible: self.driver.player_collision_box_visible,
-                    first_person_player_visible: self.driver.camera.first_person_player_visible(),
-                    crosshair_visible: self.driver.crosshair_visible,
-                    frame_pipeline_overlay_visible: self.driver.frame_pipeline_overlay_visible,
-                    debug_diagnostics_visible: self.driver.debug_diagnostics_visible,
-                    player_model: self.driver.player_model,
-                    server_cadence: self.driver.server_simulation_cadence(),
-                };
-                let ui_frame = FlatClientUiFrame {
-                    render_options: ui_render_options,
-                    block_palette: debug_block_palette_overlay(
-                        &self.assets.mesh_assets.catalog,
-                        self.driver.interaction.selected_hotbar_slot(),
-                    ),
-                    hud: Some(flat_hud),
-                    loading_progress_overlay,
-                    debug: FlatClientDebugFrame {
-                        stats: debug_stats,
-                        view_readiness_overlay: debug_view_readiness_overlay,
-                    },
+                    pacing_debug: self.frame_pacing.debug_stats(),
+                    frame_timing: self.frame_timing,
+                    render_scale: self.current_render_scale(),
                 };
                 let render_start = Instant::now();
+                let mut scene_summary = None;
                 let result = {
                     let Some(surface) = &mut self.surface else {
                         return;
                     };
+                    let Some(driver) = &mut self.scene_driver else {
+                        return;
+                    };
                     self.frame_pacing.apply_to_surface(surface);
                     surface.render_with_report(|frame| {
-                        self.driver.render_full_frame_with_ui(
-                            frame,
-                            self.driver.scene.render_distance,
-                            ui_frame,
-                        )?;
+                        scene_summary = Some(driver.render(frame, ui_context)?);
                         Ok(())
                     })
                 };
                 match result {
                     Ok(report) => {
-                        self.driver.record_surface_frame_timing(
-                            elapsed_ms(frame_start.elapsed()),
+                        let frame_wall_ms = elapsed_ms(frame_start.elapsed());
+                        let rendered = scene_summary.is_some();
+                        if let Some(summary) = scene_summary.as_ref() {
+                            self.frame_timing
+                                .record_runtime_poll(summary.timing.runtime_poll_ms);
+                            self.frame_timing.record_remesh_upload(
+                                summary.timing.runtime_sync_ms,
+                                summary.timing.runtime_gpu_upload_ms,
+                            );
+                        }
+                        self.frame_timing.record_surface_frame(
                             elapsed_ms(render_start.elapsed()),
                             report.acquire_ms,
                             report.encode_ms,
                             report.submit_ms,
                             report.present_ms,
                         );
+                        if let Some(driver) = &mut self.scene_driver {
+                            driver.record_frame_pipeline(frame_wall_ms, rendered, scene_summary);
+                        }
+                        if let Some(requested) = self
+                            .scene_driver
+                            .as_mut()
+                            .and_then(WinitFrameDriver::take_deferred_mouse_lock_request)
+                        {
+                            self.mouse_lock_requested = requested;
+                            self.sync_mouse_lock();
+                        }
                         let frame_report_ready =
                             self.record_window_frame_report_sample(report.status);
                         match report.status {
@@ -1870,7 +1577,12 @@ impl ApplicationHandler for ChunkApp {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        if self.driver.ui_is_active() || !self.mouse_locked || self.driver.runtime.is_none() {
+        if !self.mouse_locked
+            || self
+                .scene_driver
+                .as_ref()
+                .is_none_or(|driver| driver.ui_is_active() || !driver.has_runtime())
+        {
             return;
         }
         if let DeviceEvent::MouseMotion { delta } = event {

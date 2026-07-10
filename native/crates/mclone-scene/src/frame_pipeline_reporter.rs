@@ -9,7 +9,9 @@ use mclone_diagnostics::{
     PercentileMethod, StageSpan,
 };
 
-use crate::{XrTerrainFrameSummary, XrTerrainFrameTiming, XrTerrainUploadSummary};
+use crate::{
+    MonoSceneFrameSummary, XrTerrainFrameSummary, XrTerrainFrameTiming, XrTerrainUploadSummary,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XrFramePipelineHostTiming {
@@ -42,6 +44,34 @@ pub fn record_xr_frame_pipeline(
         budget_decision_panel,
         None,
     )
+}
+
+pub fn record_mono_frame_pipeline(
+    accountant: &mut FramePipelineAccountant,
+    frame_wall_ms: f64,
+    rendered: bool,
+    summary: Option<MonoSceneFrameSummary>,
+    budget_decision_panel: BudgetDecisionPanelReport,
+) -> (Arc<FramePipelineReport>, u64) {
+    let frame_index = accountant.next_frame_index();
+    let frame_wall_ms = sanitize_ms(frame_wall_ms);
+    let mut observation = FrameObservation::new(frame_index, frame_wall_ms)
+        .with_wait_ms(0.0)
+        .with_app_work_ms(frame_wall_ms)
+        .with_rendered(rendered);
+    if let Some(summary) = summary.as_ref() {
+        for span in xr_frame_pipeline_stage_spans(summary.timing) {
+            observation = observation.with_stage_span(span);
+        }
+    }
+    let upload = summary.as_ref().map(|summary| summary.upload);
+    let queues = xr_frame_pipeline_queue_depths(upload);
+    let mut extras =
+        FramePipelineReportExtras::default().with_budget_decision_panel(budget_decision_panel);
+    if let Some(upload) = upload {
+        extras = extras.with_peer_threads(xr_frame_pipeline_peer_threads(upload));
+    }
+    accountant.record_prebuilt(observation, queues, extras)
 }
 
 pub fn record_xr_frame_pipeline_with_peer_threads(
@@ -200,6 +230,46 @@ mod tests {
         assert!(report.stage_spans.iter().any(|span| {
             span.stage == StageId::GpuExecutionPresentationWait && span.elapsed_ms == 2.0
         }));
+    }
+
+    #[test]
+    fn mono_reporter_records_shared_timing_and_queue_depths() {
+        let mut accountant =
+            FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(Some(60.0)));
+        let (report, revision) = record_mono_frame_pipeline(
+            &mut accountant,
+            16.0,
+            true,
+            Some(MonoSceneFrameSummary {
+                render: Default::default(),
+                timing: XrTerrainFrameTiming {
+                    runtime_poll_ms: 0.75,
+                    render_views_ms: 2.5,
+                    ..Default::default()
+                },
+                upload: XrTerrainUploadSummary {
+                    server_update_queue_depth: 4,
+                    pending_compile_jobs_after: 2,
+                    ..Default::default()
+                },
+            }),
+            BudgetDecisionPanelReport::empty(),
+        );
+
+        assert_eq!(revision, 1);
+        assert_eq!(report.frame_summary.frames, 1);
+        assert!(
+            report.stage_spans.iter().any(|span| {
+                span.stage == StageId::HostSessionCommands && span.elapsed_ms == 0.75
+            })
+        );
+        let inbound = report
+            .queue_panel
+            .queues
+            .iter()
+            .find(|queue| queue.queue == QueueId::InboundUpdates)
+            .expect("inbound queue");
+        assert_eq!(inbound.depth, 4);
     }
 
     #[test]

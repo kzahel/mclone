@@ -1,22 +1,6 @@
 use super::*;
 
 #[test]
-fn effective_render_options_disable_section_occlusion_inside_occluding_block() {
-    let enabled = TexturedSectionRenderOptions {
-        section_occlusion_culling: true,
-        ..TexturedSectionRenderOptions::default()
-    };
-    let disabled = TexturedSectionRenderOptions {
-        section_occlusion_culling: false,
-        ..TexturedSectionRenderOptions::default()
-    };
-
-    assert!(effective_render_options_for_camera(enabled, false).section_occlusion_culling);
-    assert!(!effective_render_options_for_camera(enabled, true).section_occlusion_culling);
-    assert!(!effective_render_options_for_camera(disabled, true).section_occlusion_culling);
-}
-
-#[test]
 fn desktop_render_scale_presets_cycle_from_default() {
     assert_eq!(next_desktop_render_scale(1.0), 0.5);
     assert_eq!(next_desktop_render_scale(0.5), 0.75);

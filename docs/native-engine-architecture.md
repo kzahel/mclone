@@ -106,6 +106,14 @@ platform input/lifecycle
 ```
 
 This covers desktop flat, offscreen flat, flat Android, and web canvas paths.
+The live desktop flat path now reaches this boundary through the app-local
+`WinitFrameDriver`: winit owns redraw cadence, surface acquisition,
+keyboard/mouse translation, mouse lock, and final presentation, while
+`mclone-scene` owns session startup/replacement, runtime polling, camera/input
+application, render admission/sync/upload, traversal, actors, world overlays,
+HUD/menu/status assembly, and frame-accounting feedback. Offscreen/perf still
+use a temporary legacy flat driver until tactical 168 Slice 7d; that is a
+bounded migration state, not an alternate desktop architecture.
 Player-controlled flat cameras cross this boundary as renderer-facing poses:
 `mclone-render-session` converts engine yaw/pitch snapshots into
 `PerspectiveRenderPose`, and `mclone-render` validates that pose while building

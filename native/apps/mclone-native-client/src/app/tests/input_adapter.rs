@@ -1,4 +1,5 @@
 use super::*;
+use mclone_render_session::EngineCameraMovementMode;
 
 #[test]
 fn native_key_codes_map_to_shared_flat_input_controls() {
@@ -129,14 +130,6 @@ fn desktop_adapter_builds_shared_frame_from_held_keys() {
     assert!(frame.jump);
     assert!(frame.sneak);
     assert!(input.capability_state.capabilities.keyboard);
-
-    let camera_input = engine_camera_input_from_flat_frame(frame, 0.016);
-    assert_eq!(camera_input.dt_seconds, 0.016);
-    assert!(camera_input.forward);
-    assert!(camera_input.backward);
-    assert!(camera_input.mouse_delta_x < 0.0);
-    assert!(camera_input.jump);
-    assert!(camera_input.shift);
 
     input.handle_keyboard_input(KeyCode::KeyW, ElementState::Released, false);
     let frame = input.held_frame();

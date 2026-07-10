@@ -155,6 +155,11 @@ not a bug, but
 new desktop-local gameplay, renderer policy, runtime startup policy, UI state,
 session lifecycle policy, persistence behavior, or input semantics are bugs
 unless they are temporary forks tracked in the platform parity matrix.
+The live desktop redraw path is already thin: its `WinitFrameDriver` owns the
+surface/depth/presentation rim and delegates session, input application,
+runtime/render orchestration, and screen-space UI assembly to `mclone-scene`.
+The remaining app-local flat orchestrator serves only the offscreen/perf
+harness migration tracked by tactical 168 Slice 7d.
 
 `mclone-render` may depend on `wgpu` and own GPU resources, but host-facing
 entry points should continue to accept explicit render target and view data.

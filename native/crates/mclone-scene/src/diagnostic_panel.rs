@@ -52,6 +52,10 @@ impl XrDiagnosticPanel {
         self.debug_diagnostics_visible
     }
 
+    pub(crate) fn frame_metrics_overlay(&self) -> Option<FramePipelineHudOverlay> {
+        self.frame_metrics.clone()
+    }
+
     pub(crate) fn set_debug_diagnostics_visible(&mut self, visible: bool) {
         if self.debug_diagnostics_visible != visible {
             self.debug_diagnostics_refresh_calls = 0;

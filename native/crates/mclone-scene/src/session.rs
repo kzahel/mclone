@@ -105,6 +105,7 @@ where
         let world_catalog = scene.world_root.clone().map(NativeWorldCatalog::new);
         let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
         camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
+        camera.set_first_person_player_visible(scene.first_person_player_visible);
         if let Some(view_pose) = startup_view_pose {
             apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
                 .context("apply initial XR local startup view pose")?;
@@ -155,6 +156,7 @@ where
             },
             render_options,
             player_collision_box_visible: false,
+            crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
             player_model: GamePlayerModel::default(),
             draw,
@@ -173,6 +175,7 @@ where
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
             mono_gui: None,
+            mono_ui_context: None,
             diagnostic_panel: XrDiagnosticPanel::new(device, color_format),
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
@@ -194,6 +197,7 @@ where
             snap_turn_state: XrSnapTurnState::default(),
             blink_teleport: XrBlinkTeleportState::default(),
             blink_teleport_worker: None,
+            mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
             render_admission_policy: RenderAdmissionPolicy::new(
                 FrameHostKind::HeadlessOffscreenPerf,
@@ -281,6 +285,7 @@ where
             },
             render_options,
             player_collision_box_visible: false,
+            crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
             player_model: GamePlayerModel::default(),
             draw: started.draw,
@@ -299,6 +304,7 @@ where
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
             mono_gui: None,
+            mono_ui_context: None,
             diagnostic_panel: XrDiagnosticPanel::new(device, color_format),
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
@@ -320,6 +326,7 @@ where
             snap_turn_state: XrSnapTurnState::default(),
             blink_teleport: XrBlinkTeleportState::default(),
             blink_teleport_worker: None,
+            mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
             render_admission_policy: RenderAdmissionPolicy::new(
                 FrameHostKind::HeadlessOffscreenPerf,
@@ -349,6 +356,9 @@ where
             audio: None,
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
+        state
+            .camera
+            .set_first_person_player_visible(scene.first_person_player_visible);
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
         state.apply_debug_ui_screen();
         Ok(state)
@@ -548,6 +558,7 @@ where
         .context("create XR local world startup pump")?;
         let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
         camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
+        camera.set_first_person_player_visible(scene.first_person_player_visible);
         self.local_startup = Some(XrLocalStartup {
             request: request.clone(),
             descriptor,
@@ -792,6 +803,7 @@ where
         self.last_underwater_update = None;
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
+        self.clear_mono_blink_debug();
         self.latest_controllers.clear();
         self.first_eye_summary = None;
         self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
@@ -869,6 +881,8 @@ where
         self.mesh_assets = started.runtime.mesh_assets().clone();
         self.runtime = Some(started.runtime);
         self.camera = started.camera;
+        self.camera
+            .set_first_person_player_visible(self.scene.first_person_player_visible);
         self.draw = started.draw;
         self.render_stats = started.render_stats;
         self.sync_player_appearance()
@@ -1257,7 +1271,8 @@ where
         Ok(())
     }
 
-    fn set_crosshair_visible(&mut self, _visible: bool) -> Result<()> {
+    fn set_crosshair_visible(&mut self, visible: bool) -> Result<()> {
+        self.crosshair_visible = visible;
         Ok(())
     }
 
@@ -1314,6 +1329,7 @@ where
         self.travel_assist_mode = mode;
         if self.travel_assist_mode != GameTravelAssistMode::Blink {
             self.clear_xr_blink_teleport();
+            self.clear_mono_blink_debug();
         }
         log::info!("XR travel assist {}", mode.label());
         Ok(())
@@ -1373,7 +1389,16 @@ where
         Ok(())
     }
 
-    fn set_server_simulation_cadence(&mut self, _cadence: GameSimulationCadence) -> Result<()> {
+    fn set_server_simulation_cadence(&mut self, cadence: GameSimulationCadence) -> Result<()> {
+        let cadence = SimulationCadenceConfig::new(
+            cadence.host_rate_hz,
+            cadence.gameplay_rate_hz,
+            cadence.physics_rate_hz,
+        );
+        if let Some(runtime) = &mut self.runtime {
+            runtime.set_simulation_cadence(cadence)?;
+        }
+        self.scene.simulation_cadence = cadence;
         Ok(())
     }
 
@@ -1654,11 +1679,19 @@ pub fn local_integrated_scene_options(scene: &XrSceneOptions) -> LocalIntegrated
         .with_initial_spawn_center()
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)
+        .with_cadence(scene.simulation_cadence)
         .with_debug_passive_showcase(scene.debug_passive_showcase)
         .with_lighting_enabled(scene.lighting_enabled)
         .with_light_status_batch_size(scene.light_status_batch_size)
         .with_render_compile_worker_count(scene.render_compile_worker_count)
         .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+        .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
+        .with_startup_lod_prewarm(
+            mclone_app_runtime::far_lod::StartupLodPrewarmConfig::for_far_lod(
+                scene.far_lod,
+                scene.startup_lod_prewarm,
+            ),
+        )
         .with_integrated_world_session_storage(storage)
 }
 
@@ -1666,6 +1699,7 @@ pub fn single_view_host_options(scene: &XrSceneOptions) -> SingleViewHostOptions
     SingleViewHostOptions::new(scene.center(), scene.render_distance)
         .with_render_compile_worker_count(scene.render_compile_worker_count)
         .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+        .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
 }
 
 pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {

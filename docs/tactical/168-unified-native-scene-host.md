@@ -9,8 +9,10 @@ landed 2026-07-10; Slice 5 (shared diagnostics accounting and presentation)
 landed 2026-07-10; Slice 6 (shared adaptive render admission) landed
 2026-07-10; Slice 7a (shared effects/`HostEffects` and frame-pacing/debug POD
 promotion) landed 2026-07-10; Slice 7b (shared session-start planning and
-native remote-session adapter) landed 2026-07-10. (Slices 0–2 are independent
-per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.) Post-Slice-3
+native remote-session adapter) landed 2026-07-10; Slice 7c (desktop live
+per-frame loop onto the shared Mono host) landed 2026-07-10. (Slices 0–2 are
+independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
+Post-Slice-3
 review corrections landed
 2026-07-10: truthful offscreen-settle failure, an exercised mono-HUD capture
 lane, a shared lifecycle `on_background()` policy, durable-flush regression
@@ -1064,7 +1066,8 @@ Recommended sub-slice order:
   offscreen harness keeps one deferred typed plan only because scripted UI
   clicks occur before a render-frame device is available; Slice 7d deletes
   that harness staging slot. Web transport remains unchanged.
-- **7c — Per-frame loop.** `WinitFrameDriver`: redraw-driven, builds the mono
+- **7c — Per-frame loop. [LANDED 2026-07-10]** `WinitFrameDriver`:
+  redraw-driven, builds the mono
   view from the engine camera, acquires the window surface texture, calls the
   host's Mono frame; poll/sync/upload/traversal-ready/frame-input assembly
   all delete from the app crate. HUD assembly (`current_flat_hud`,
@@ -1072,6 +1075,39 @@ Recommended sub-slice order:
   Slice 3 built at capture grade; this is where it becomes fully
   interactive). Desktop input events keep flowing through `mclone-input` to
   the host's input application.
+
+  Landed shape: app-local `WinitFrameDriver` owns only winit target sizing,
+  depth, render-scale presentation, surface cadence/accounting input, raw
+  input delegation, and `HostEffects` outputs. The shared Mono host now owns
+  live desktop local/remote runtime polling, startup/replacement, camera and
+  input application, section admission/sync/upload, traversal records,
+  selection/debug/Blink world overlays, actors, screen-space HUD/menu/status,
+  and frame-pipeline feedback. `ChunkApp` no longer builds a
+  `FlatClientUiFrame`, calls `current_flat_hud`, or performs runtime/render
+  section orchestration. Its former test-only shadow `FlatClientDriver` was
+  removed with the tests of that retired wiring.
+
+  Desktop-to-host scene conversion explicitly carries render-worker timing,
+  simulation cadence, first-person body visibility, adaptive render
+  admission, startup LOD prewarm, storage roots, and the other shared startup
+  facts; local and remote replacement conversions have regression coverage.
+  The remaining `FlatClientDriver` is compatibility code used only by the
+  offscreen/timedemo/perf harnesses scheduled for 7d, with dead live-app APIs
+  intentionally unavailable.
+
+  Validation: 171 native-client and 92 scene tests; workspace, desktop-XR
+  feature, and web/WASM builds; scene-host and OpenXR-frame-driver purity
+  gates; flat Android and Android XR APK scripts; visually inspected live
+  title/in-world windows and `/tmp/mclone-desktop-offscreen.png`; 180/180
+  presented live-window frames with all 81 RD3 target chunks ready; offscreen,
+  timedemo, frame-budget, and two-client remote smokes; Quest new-world
+  replacement ready; desktop WiVRn 120-frame smoke.
+
+  Open follow-up for 7d: non-default desktop render scale currently renders
+  the screen-space HUD/menu into the scaled world target before presentation.
+  Preserve the single host-owned UI assembly, but split world resolution from
+  output-resolution UI composition so F9 keeps crisp native-resolution UI and
+  its hit coordinates remain explicitly locked by a regression.
 - **7d — Harnesses.** CLI `--screenshot`, timedemo, frame-budget/movement
   probes, and `perf.rs` consumers repoint at the host through the Slice 3
   `OffscreenDriver`; `offscreen_flat_client.rs` is deleted or reduced to a
@@ -1394,8 +1430,10 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 7c; Slices 0–7b are implemented. Read the desktop redraw/frame
-assembly and the scene host's Mono topology named in Slice 7c. Keep
-`RenderAdmissionPolicy` on the scene host while moving desktop flat
-onto that host in the ordered 7a–7e sequence; do not move diagnostics or budget
-policy back into a platform loop handler.
+Start with Slice 7d; Slices 0–7c are implemented. Repoint screenshot,
+timedemo, frame-budget/movement, and remaining perf consumers through the
+Slice 3 `OffscreenDriver` and shared Mono host, then delete
+`FlatClientDriver`/its deferred session staging. Preserve the current harness
+outputs and accounting stage meanings, and resolve the render-scale
+world/output-resolution UI composition follow-up recorded under 7c. Do not
+move diagnostics, session policy, or render admission back into a harness.

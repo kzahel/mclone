@@ -21,6 +21,7 @@ mod render_compile_capacity;
 mod scene_runtime;
 mod torch_light_probe;
 mod ui;
+mod winit_frame_driver;
 
 use crate::app::run_window;
 #[cfg(test)]
