@@ -10,7 +10,10 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::ClientRuntime;
 use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot};
-use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, TexturedRenderSectionMetadata};
+use mclone_mesh::{
+    RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
+    TexturedRenderSectionMetadata,
+};
 use mclone_protocol::{ClientCommand, ServerUpdate, encode_server_update};
 use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
@@ -1136,6 +1139,27 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         &self.mesh_assets
     }
 
+    pub fn replace_asset_epoch(
+        &mut self,
+        epoch: u64,
+        mesh_assets: TexturedMeshAssets,
+        sections: TexturedRenderSectionBuildReport,
+    ) -> Result<()> {
+        let health = self.render_compile_dispatcher.queue_health();
+        let replacement =
+            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
+                mesh_assets.catalog.clone(),
+                health.compile_worker_count.max(1),
+                health.max_pending_jobs.max(1),
+                self.render_compile_dispatcher.worker_timing_enabled(),
+            )?;
+        let _ = self.core.replace_asset_epoch_sections(epoch, sections);
+        self.render_compile_dispatcher = replacement;
+        self.mesh_assets = mesh_assets;
+        self.clear_far_lod();
+        Ok(())
+    }
+
     pub fn clear_far_lod(&mut self) {
         self.far_lod_cache.clear();
         self.lod_coverage.clear();
@@ -1843,6 +1867,18 @@ where
         match self {
             Self::Local(scene) => scene.mesh_assets(),
             Self::RemoteDedicated(scene) => scene.mesh_assets(),
+        }
+    }
+
+    pub fn replace_asset_epoch(
+        &mut self,
+        epoch: u64,
+        mesh_assets: TexturedMeshAssets,
+        sections: TexturedRenderSectionBuildReport,
+    ) -> Result<()> {
+        match self {
+            Self::Local(scene) => scene.replace_asset_epoch(epoch, mesh_assets, sections),
+            Self::RemoteDedicated(scene) => scene.replace_asset_epoch(epoch, mesh_assets, sections),
         }
     }
 
@@ -2718,6 +2754,27 @@ where
 
     pub const fn mesh_assets(&self) -> &TexturedMeshAssets {
         &self.mesh_assets
+    }
+
+    pub fn replace_asset_epoch(
+        &mut self,
+        epoch: u64,
+        mesh_assets: TexturedMeshAssets,
+        sections: TexturedRenderSectionBuildReport,
+    ) -> Result<()> {
+        let health = self.render_compile_dispatcher.queue_health();
+        let replacement =
+            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
+                mesh_assets.catalog.clone(),
+                health.compile_worker_count.max(1),
+                health.max_pending_jobs.max(1),
+                self.render_compile_dispatcher.worker_timing_enabled(),
+            )?;
+        let _ = self.core.replace_asset_epoch_sections(epoch, sections);
+        self.render_compile_dispatcher = replacement;
+        self.mesh_assets = mesh_assets;
+        self.clear_far_lod();
+        Ok(())
     }
 
     pub fn clear_far_lod(&mut self) {

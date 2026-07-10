@@ -304,6 +304,7 @@ pub struct RenderSectionCompileWorker {
     pending_jobs: usize,
     max_pending_jobs: usize,
     worker_count: usize,
+    worker_timing_enabled: bool,
     metrics: RenderSectionCompileWorkerMetricsStore,
 }
 
@@ -368,6 +369,10 @@ impl NativeRenderSectionCompileDispatcher {
 
     pub fn queue_health(&self) -> RenderSectionCompileQueueHealth {
         RenderSectionCompileQueueHealth::from_compiler(&self.worker)
+    }
+
+    pub const fn worker_timing_enabled(&self) -> bool {
+        self.worker.worker_timing_enabled
     }
 }
 
@@ -519,6 +524,7 @@ impl RenderSectionCompileWorker {
             pending_jobs: 0,
             max_pending_jobs,
             worker_count,
+            worker_timing_enabled,
             metrics,
         })
     }

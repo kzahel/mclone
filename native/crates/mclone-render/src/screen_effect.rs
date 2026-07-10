@@ -240,6 +240,16 @@ impl ScreenEffectsRenderer {
         color_format: wgpu::TextureFormat,
         assets: &impl AssetSource,
     ) -> Result<Self> {
+        let assets = load_screen_effect_texture_assets(assets)?;
+        Self::new_with_assets(device, queue, color_format, &assets)
+    }
+
+    pub fn new_with_assets(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        assets: &ScreenEffectTextureAssets,
+    ) -> Result<Self> {
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("mclone_screen_effect_texture_bind_group_layout"),
@@ -262,7 +272,7 @@ impl ScreenEffectsRenderer {
                     },
                 ],
             });
-        let underwater_texture = create_underwater_texture_bind_group(
+        let underwater_texture = create_underwater_texture_bind_group_from_image(
             device,
             queue,
             &texture_bind_group_layout,
@@ -731,16 +741,15 @@ struct GpuScreenEffectTexture {
     bind_group: wgpu::BindGroup,
 }
 
-fn create_underwater_texture_bind_group(
+fn create_underwater_texture_bind_group_from_image(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-    assets: &impl AssetSource,
+    assets: &ScreenEffectTextureAssets,
 ) -> Result<GpuScreenEffectTexture> {
-    let assets = load_screen_effect_texture_assets(assets)?;
     let width = assets.underwater_width;
     let height = assets.underwater_height;
-    let rgba = assets.underwater_rgba;
+    let rgba = &assets.underwater_rgba;
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mclone_underwater_screen_effect_texture"),
         size: wgpu::Extent3d {
@@ -762,7 +771,7 @@ fn create_underwater_texture_bind_group(
             origin: Default::default(),
             aspect: Default::default(),
         },
-        &rgba,
+        rgba,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(width * 4),

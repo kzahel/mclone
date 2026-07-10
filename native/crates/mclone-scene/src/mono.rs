@@ -994,6 +994,7 @@ where
             encoder,
             target,
         } = frame;
+        self.poll_asset_replacement(device, queue)?;
         if matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live) {
             self.advance_local_startup(device, queue)?;
         }

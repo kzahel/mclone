@@ -43,6 +43,16 @@ impl EngineRenderSession {
         self.pending_completed_compile_results.len()
     }
 
+    /// Install metadata for a fully prepared asset epoch and discard every
+    /// pending result/in-flight marker owned by the retired compiler instance.
+    pub fn replace_asset_epoch_sections(
+        &mut self,
+        report: TexturedRenderSectionBuildReport,
+    ) -> RenderSectionCacheUpdate {
+        self.pending_completed_compile_results.clear();
+        self.render_session.replace_asset_epoch_sections(report)
+    }
+
     pub fn mark_chunk_neighborhood_dirty(&mut self, pos: ChunkPos) -> usize {
         let client = &self.client;
         self.render_session
@@ -455,6 +465,21 @@ impl EngineRenderSession {
 }
 
 impl RenderSectionSession {
+    pub fn replace_asset_epoch_sections(
+        &mut self,
+        report: TexturedRenderSectionBuildReport,
+    ) -> RenderSectionCacheUpdate {
+        let ready = report
+            .sections
+            .iter()
+            .map(|section| section.key)
+            .collect::<BTreeSet<_>>();
+        self.cache = CachedTexturedRenderSections::default();
+        self.dirty = RenderSectionDirtyState::default();
+        self.cache
+            .apply_build_report(&ready, report, &BTreeSet::new(), &BTreeSet::new())
+    }
+
     pub fn cache_is_empty(&self) -> bool {
         self.cache.is_empty()
     }

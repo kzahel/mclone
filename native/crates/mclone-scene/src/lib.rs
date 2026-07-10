@@ -43,6 +43,7 @@ use mclone_app_runtime::native_session_runtime::{
     LocalIntegratedStartupStep, NativeSceneRuntime, NativeSessionRuntime,
     NativeSessionStartupCompletion, NativeSessionStartupPump,
 };
+use mclone_app_runtime::prepared_assets::PreparedSceneAssets;
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
@@ -61,7 +62,7 @@ use mclone_app_runtime::{
     set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::{ActorFigureId, AssetSource};
-use mclone_audio::{AudioEngine, landing_playback_for_impact};
+use mclone_audio::{AudioEngine, PreparedAudioAssets, landing_playback_for_impact};
 use mclone_client::{
     BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
     NativeTeleportPreviewWorker, TeleportConfig, TeleportIntent, TeleportPreview,
@@ -77,6 +78,7 @@ use mclone_input::{
     TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::quad_face_count_from_indices;
+use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget, ChunkProjectionKind,
@@ -94,6 +96,7 @@ use mclone_render::gui::{
 };
 use mclone_render::screen_effect::{
     ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState, UnderwaterOverlay,
+    load_screen_effect_texture_assets,
 };
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky::overworld_clear_color;
@@ -127,6 +130,7 @@ use mclone_ui::{
     WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
+mod asset_replacement;
 mod comfort;
 mod diagnostic_panel;
 mod frame_pipeline_reporter;
@@ -291,6 +295,10 @@ where
     scene: McloneSceneHostOptions,
     color_format: wgpu::TextureFormat,
     mesh_assets: TexturedMeshAssets,
+    active_assets: PreparedSceneAssets,
+    asset_replacement: Option<SceneAssetReplacementPending>,
+    asset_replacement_status: AssetReplacementStatus,
+    last_asset_replacement_commit: Option<AssetReplacementCommitReport>,
     runtime: Option<NativeSessionRuntime<S>>,
     local_startup: Option<SceneLocalStartup>,
     session: GameSessionCoordinator<ScenePendingSessionStart>,
@@ -864,6 +872,7 @@ where
         runtime_mode: XrTerrainRuntimeUpdateMode,
         mut timing: XrTerrainFrameTiming,
     ) -> Result<XrTerrainFrameSummary> {
+        self.poll_asset_replacement(device, queue)?;
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let frame_deadline = self.render_compile_frame_deadline();
@@ -900,6 +909,7 @@ where
         runtime_mode: XrTerrainRuntimeUpdateMode,
         mut timing: XrTerrainFrameTiming,
     ) -> Result<XrTerrainFrameSummary> {
+        self.poll_asset_replacement(device, queue)?;
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let frame_deadline = self.render_compile_frame_deadline();
@@ -1133,6 +1143,7 @@ where
         include_sky: bool,
         include_actors: bool,
     ) -> Result<XrTerrainStereoFrameSummary> {
+        self.poll_asset_replacement(device, queue)?;
         let (terrain_views, terrain_options, _) =
             self.terrain_render_views_and_options(render_views);
         let actor_instances = if include_actors {
@@ -1340,6 +1351,7 @@ where
         include_actors: bool,
         include_overlays: bool,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
+        self.poll_asset_replacement(device, queue)?;
         self.render_prepared_terrain_multiview_frame_with_upload_inner(
             device,
             queue,
@@ -4772,3 +4784,4 @@ mod tests {
         }
     }
 }
+pub use asset_replacement::*;

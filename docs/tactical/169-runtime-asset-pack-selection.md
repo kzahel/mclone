@@ -1,8 +1,8 @@
 # 169: Runtime Asset Pack Selection
 
-Status: active implementation parent 2026-07-10; Slices 0-2 landed. Stop
-boundary honored after first-party visual catalog/prepared-set validation;
-Slice 3 is next.
+Status: active implementation parent 2026-07-10; Slices 0-3 landed. Stop
+boundary honored after transactional native scene replacement; Slice 4 is
+next.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
@@ -418,24 +418,88 @@ first-party-only native offscreen screenshot
 
 ### Slice 3 - Transactional Native Scene Replacement
 
-- [ ] Add an async/budget-respecting prepare request owned below app crates.
-- [ ] Add asset epochs to compiler requests/results or replace compiler
+- [x] Add an async/budget-respecting prepare request owned below app crates.
+- [x] Add asset epochs to compiler requests/results or replace compiler
   instances so stale results cannot cross a selection commit.
-- [ ] Recompile the current visible set and preserve the old drawable set until
+- [x] Recompile the current visible set and preserve the old drawable set until
   replacement readiness.
-- [ ] Add frame-boundary replacement for terrain draw resources, UI atlas
+- [x] Add frame-boundary replacement for terrain draw resources, UI atlas
   consumers, actors, effects, far LOD, and audio policy.
-- [ ] Preserve session/world/camera/player state and avoid server commands or
+- [x] Preserve session/world/camera/player state and avoid server commands or
   reconnects.
-- [ ] On error, retain the old selection/resources and expose a concise shared
+- [x] On error, retain the old selection/resources and expose a concise shared
   failure state.
-- [ ] Exercise the shared Mono and XR/multiview render paths; no per-eye-only
+- [x] Exercise the shared Mono and XR/multiview render paths; no per-eye-only
   resource replacement.
 
 Exit criteria: a scripted `Vanilla -> Mclone Original -> Vanilla` transition
 in one active world completes without reconnecting; old-epoch results are
 rejected; first and final frozen-camera vanilla captures agree within the
 existing deterministic render tolerance.
+
+Landed evidence (2026-07-10):
+
+- `PreparedSceneAssetsRequest` performs CPU pack preparation on a named worker
+  and reports Pending/Ready/Failed without blocking the frame path. A second
+  worker compiles the current resident section set plus neighbor snapshots
+  against the candidate catalog. If relevant snapshots or target sections
+  change before commit, the scene restarts that compile instead of installing
+  stale geometry.
+- `McloneSceneHost` owns one shared Active/PreparingAssets/PreparingMeshes/
+  Failed lifecycle. Mono, per-eye stereo, and full-frame multiview entry points
+  poll it at frame boundaries while the old draw set remains active.
+- A successful commit creates all fallible terrain, actor, screen-effect,
+  world/mono GUI atlas, far-LOD, and optional audio resources first. It then
+  installs a fresh catalog-bound compiler dispatcher, replaces resident cache
+  metadata from the prepared full-view report, clears far-LOD/upload state,
+  and swaps every presentation consumer without touching session authority.
+- Compiler-instance replacement drops the retired worker queue/results. The
+  render-session epoch reset clears queued completed results and in-flight
+  markers before accepting the prepared metadata; its focused stale-result
+  test passes.
+- `PreparedAudioAssets` makes sound-bank decode a CPU preparation product.
+  First-party selections install an explicit silent bank; an active audio
+  device is rebuilt from the candidate bank as part of the same fallible
+  transaction.
+- Failure is non-destructive. An invalid-pack diagnostic reached shared Failed
+  state with active epoch 0 retained and surfaced the pack-open error; no
+  resource/compiler commit occurred.
+
+Rendered validation:
+
+- Mono `/tmp/mclone-asset-replacement-vanilla-{baseline,first-party,restored}.png`:
+  one frozen active session completed epochs `0 -> 1 -> 2`; the middle frame
+  visibly used labeled first-party fallback textures, while baseline and
+  restored vanilla frames had 0 differing pixels. The commit report recorded
+  unchanged session, camera, command count, and update count.
+- Synthetic stereo `/tmp/mclone-asset-replacement-xr.png`: the same round trip
+  completed through the shared per-eye path, then rendered 24 sections, 49,723
+  differing eye pixels, 32 GUI commands, and two eye UI composites. The image
+  was inspected for vanilla terrain, stereo parallax, and two-eye UI.
+- The five multiview terrain/actor/effect/GUI/outline distinct-view uniform
+  tests pass. The existing headless GPU-layer proof reports a supported skip on
+  this Mac adapter because it does not expose wgpu `MULTIVIEW`; the same
+  replacement resources and frame-boundary poll are used by the compiled
+  full-frame multiview path.
+
+Focused validation:
+
+```text
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-assets -p mclone-audio -p mclone-render-session \
+  -p mclone-app-runtime -p mclone-render -p mclone-scene --lib
+  563 passed; 0 failed; 2 pre-existing GPU proofs ignored
+background prepare failure + retired epoch result tests
+  passed
+Mono Vanilla -> Original -> Vanilla offscreen smoke
+  passed; restored pixel difference 0.000%
+synthetic stereo Vanilla -> Original -> Vanilla smoke
+  passed; session/camera/command/update facts preserved
+cargo check -p mclone-assets -p mclone-audio \
+  -p mclone-render-session -p mclone-app-runtime \
+  --target wasm32-unknown-unknown
+  passed (two pre-existing mclone-server warnings)
+```
 
 ### Slice 4 - Shared Asset Packs UI
 

@@ -33,3 +33,6 @@ wgpu.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mclone-audio.workspace = true

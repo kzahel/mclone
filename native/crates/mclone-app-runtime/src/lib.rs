@@ -1122,6 +1122,7 @@ pub struct TargetRenderWorkStats {
 #[derive(Debug)]
 pub struct SingleViewRuntime {
     engine: EngineRenderSession,
+    asset_epoch: u64,
     render_distance: u32,
     chunk_tracking_radius: u32,
     interest_center: ChunkPos,
@@ -1157,6 +1158,7 @@ impl SingleViewRuntime {
     ) -> Self {
         Self {
             engine: EngineRenderSession::new(client),
+            asset_epoch: 0,
             render_distance,
             chunk_tracking_radius,
             interest_center,
@@ -1238,6 +1240,19 @@ impl SingleViewRuntime {
 
     pub const fn engine_mut(&mut self) -> &mut EngineRenderSession {
         &mut self.engine
+    }
+
+    pub const fn asset_epoch(&self) -> u64 {
+        self.asset_epoch
+    }
+
+    pub fn replace_asset_epoch_sections(
+        &mut self,
+        epoch: u64,
+        report: mclone_mesh::TexturedRenderSectionBuildReport,
+    ) -> mclone_render_session::RenderSectionCacheUpdate {
+        self.asset_epoch = epoch;
+        self.engine.replace_asset_epoch_sections(report)
     }
 
     pub const fn render_session(&self) -> &RenderSectionSession {

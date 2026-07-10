@@ -312,6 +312,15 @@ impl OffscreenDriver {
         self.render_inner(frame, ui, hud_visible, false)
     }
 
+    pub(crate) fn render_frozen(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        ui: MonoUiPresentation,
+        hud_visible: bool,
+    ) -> Result<MonoSceneFrameSummary> {
+        self.render_inner(frame, ui, hud_visible, true)
+    }
+
     pub(crate) fn render_stereo(
         &mut self,
         device: &wgpu::Device,
@@ -325,6 +334,35 @@ impl OffscreenDriver {
             .as_ref()
             .context("stereo render requested from a mono offscreen driver")?;
         self.host.render_frame(
+            device,
+            queue,
+            views,
+            XrTerrainEyeTarget {
+                color_view: left_color_view,
+                depth: &self.depth,
+                size: self.size,
+            },
+            XrTerrainEyeTarget {
+                color_view: right_color_view,
+                depth: right_depth,
+                size: self.size,
+            },
+        )
+    }
+
+    pub(crate) fn render_stereo_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [XrView; 2],
+        left_color_view: &wgpu::TextureView,
+        right_color_view: &wgpu::TextureView,
+    ) -> Result<XrTerrainFrameSummary> {
+        let right_depth = self
+            .right_depth
+            .as_ref()
+            .context("stereo render requested from a mono offscreen driver")?;
+        self.host.render_frame_frozen_runtime(
             device,
             queue,
             views,

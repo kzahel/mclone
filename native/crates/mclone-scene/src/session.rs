@@ -101,6 +101,18 @@ where
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
+        let active_assets = PreparedSceneAssets::startup(
+            0,
+            mesh_assets.clone(),
+            ActorTextureAssets {
+                atlas: actor_atlas.clone(),
+                figures: actor_figures.clone(),
+            },
+            load_screen_effect_texture_assets(asset_source)
+                .context("prepare initial scene screen-effect assets")?,
+            PreparedAudioAssets::load(asset_source)
+                .context("prepare initial scene audio assets")?,
+        );
         let request = SessionStartRequest::new_seed_local_world(scene.seed);
         let descriptor = request.active_descriptor();
         let world_catalog = scene.world_root.clone().map(NativeWorldCatalog::new);
@@ -135,6 +147,10 @@ where
             scene: scene.clone(),
             color_format,
             mesh_assets,
+            active_assets,
+            asset_replacement: None,
+            asset_replacement_status: AssetReplacementStatus::Active { epoch: 0 },
+            last_asset_replacement_commit: None,
             runtime: None,
             local_startup: Some(SceneLocalStartup {
                 request: request.clone(),
@@ -263,6 +279,18 @@ where
         let mut session = GameSessionCoordinator::new();
         session.complete_start(active_session);
         let mesh_assets = started.runtime.mesh_assets().clone();
+        let active_assets = PreparedSceneAssets::startup(
+            0,
+            mesh_assets.clone(),
+            ActorTextureAssets {
+                atlas: actor_atlas.clone(),
+                figures: actor_figures.clone(),
+            },
+            load_screen_effect_texture_assets(asset_source)
+                .context("prepare initial scene screen-effect assets")?,
+            PreparedAudioAssets::load(asset_source)
+                .context("prepare initial scene audio assets")?,
+        );
         let mut world_gui_renderer = WorldGuiRenderer::new(device, color_format);
         world_gui_renderer
             .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
@@ -271,6 +299,10 @@ where
             scene: scene.clone(),
             color_format,
             mesh_assets,
+            active_assets,
+            asset_replacement: None,
+            asset_replacement_status: AssetReplacementStatus::Active { epoch: 0 },
+            last_asset_replacement_commit: None,
             runtime: Some(started.runtime),
             local_startup: None,
             session,

@@ -1,5 +1,5 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Mutex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use crate::{
     AssetResult,
 };
 
-pub trait AssetSource {
+pub trait AssetSource: Send + Sync {
     fn read(&self, path: &AssetPath) -> AssetResult<Option<Vec<u8>>>;
     fn list(&self, prefix: &str, suffix: &str) -> AssetResult<Vec<AssetPath>>;
 }
@@ -175,31 +175,35 @@ impl AssetSource for AssetSourceChain {
 /// provenance for every read.
 pub struct ProvenanceTrackingAssetSource<'a> {
     chain: &'a AssetSourceChain,
-    entries: RefCell<BTreeMap<AssetPath, AssetProvenanceEntry>>,
+    entries: Mutex<BTreeMap<AssetPath, AssetProvenanceEntry>>,
 }
 
 impl<'a> ProvenanceTrackingAssetSource<'a> {
     pub fn new(chain: &'a AssetSourceChain) -> Self {
         Self {
             chain,
-            entries: RefCell::new(BTreeMap::new()),
+            entries: Mutex::new(BTreeMap::new()),
         }
     }
 
     pub fn record_suppressed(&self, path: AssetPath, source: AssetResolutionOrigin) {
-        self.entries.borrow_mut().insert(
-            path.clone(),
-            AssetProvenanceEntry {
-                path,
-                source,
-                outcome: AssetResolutionOutcome::Suppressed,
-            },
-        );
+        self.entries
+            .lock()
+            .expect("provenance ledger poisoned")
+            .insert(
+                path.clone(),
+                AssetProvenanceEntry {
+                    path,
+                    source,
+                    outcome: AssetResolutionOutcome::Suppressed,
+                },
+            );
     }
 
     pub fn resolved_origin(&self, path: &AssetPath) -> Option<AssetResolutionOrigin> {
         self.entries
-            .borrow()
+            .lock()
+            .expect("provenance ledger poisoned")
             .get(path)
             .filter(|entry| entry.outcome == AssetResolutionOutcome::Resolved)
             .map(|entry| entry.source.clone())
@@ -207,7 +211,12 @@ impl<'a> ProvenanceTrackingAssetSource<'a> {
 
     pub fn report(&self, epoch: u64, selection: AssetPackSelection) -> AssetProvenanceReport {
         let mut report = AssetProvenanceReport::new(epoch, selection);
-        for entry in self.entries.borrow().values() {
+        for entry in self
+            .entries
+            .lock()
+            .expect("provenance ledger poisoned")
+            .values()
+        {
             report.record(entry.clone());
         }
         report
@@ -229,14 +238,17 @@ impl AssetSource for ProvenanceTrackingAssetSource<'_> {
                 AssetResolutionOutcome::Missing,
             ),
         };
-        self.entries.borrow_mut().insert(
-            path.clone(),
-            AssetProvenanceEntry {
-                path: path.clone(),
-                source,
-                outcome,
-            },
-        );
+        self.entries
+            .lock()
+            .expect("provenance ledger poisoned")
+            .insert(
+                path.clone(),
+                AssetProvenanceEntry {
+                    path: path.clone(),
+                    source,
+                    outcome,
+                },
+            );
         Ok(bytes)
     }
 

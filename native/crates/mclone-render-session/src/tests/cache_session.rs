@@ -56,6 +56,46 @@ fn cached_sections_apply_build_report_and_remove_unloaded_chunks() {
 }
 
 #[test]
+fn asset_epoch_replacement_discards_retired_results_and_inflight_state() {
+    let mut engine = EngineRenderSession::new(ClientRuntime::local_integrated());
+    let retired = RenderSectionKey::new(0, 4, 0);
+    let replacement = RenderSectionKey::new(1, 4, 0);
+    engine.render_session_mut().mark_section_dirty(retired);
+    engine
+        .render_session_mut()
+        .dirty_mut()
+        .mark_compile_submitted(&BTreeSet::from([retired]));
+    engine
+        .drain_completed_compile_updates_with_acceptance_budget(
+            [RenderSectionCompileResult {
+                target_sections: BTreeSet::from([retired]),
+                section_revisions: BTreeMap::new(),
+                result: Ok(test_build_report([retired])),
+            }],
+            |_| 1,
+            1,
+            Some(0),
+        )
+        .unwrap();
+    assert_eq!(engine.pending_completed_compile_result_count(), 1);
+    assert!(
+        engine
+            .render_session()
+            .dirty()
+            .inflight_sections
+            .contains(&retired)
+    );
+
+    let update = engine.replace_asset_epoch_sections(test_build_report([replacement]));
+
+    assert_eq!(update.rebuilt_section_count(), 1);
+    assert_eq!(engine.pending_completed_compile_result_count(), 0);
+    assert!(engine.render_session().dirty_is_empty());
+    assert!(!engine.render_session().contains_section(retired));
+    assert!(engine.render_session().contains_section(replacement));
+}
+
+#[test]
 fn cached_sections_retain_metadata_without_owning_cpu_mesh_bytes() {
     let mut cache = CachedTexturedRenderSections::default();
     let key = RenderSectionKey::new(0, 4, 0);

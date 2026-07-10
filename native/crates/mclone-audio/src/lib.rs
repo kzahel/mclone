@@ -59,7 +59,11 @@ pub struct AudioEngine {
 
 impl AudioEngine {
     pub fn new(assets: &impl AssetSource, settings: AudioSettings) -> Result<Self> {
-        let bank = SoundBank::load(assets).context("failed to load audio sound bank")?;
+        Self::from_prepared(PreparedAudioAssets::load(assets)?, settings)
+    }
+
+    pub fn from_prepared(assets: PreparedAudioAssets, settings: AudioSettings) -> Result<Self> {
+        let bank = assets.bank;
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -125,6 +129,35 @@ impl AudioEngine {
                 log::warn!("audio command queue disconnected; dropping settings update");
             }
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct PreparedAudioAssets {
+    bank: SoundBank,
+}
+
+impl PreparedAudioAssets {
+    pub fn load(assets: &impl AssetSource) -> Result<Self> {
+        Ok(Self {
+            bank: SoundBank::load(assets).context("failed to load audio sound bank")?,
+        })
+    }
+
+    pub fn silent() -> Self {
+        Self {
+            bank: SoundBank {
+                samples: HashMap::new(),
+            },
+        }
+    }
+
+    pub fn sound_count(&self) -> usize {
+        self.bank.samples.len()
+    }
+
+    pub fn is_silent(&self) -> bool {
+        self.bank.samples.is_empty()
     }
 }
 

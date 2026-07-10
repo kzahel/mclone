@@ -87,6 +87,23 @@ pub(crate) struct OffscreenScriptReport {
 pub(crate) struct OffscreenFlatClientHost {
     driver: OffscreenDriver,
     camera: SpectatorCamera,
+    asset_replacement_smoke: Option<AssetReplacementSmoke>,
+}
+
+struct AssetReplacementSmoke {
+    authored: PathBuf,
+    fallback: PathBuf,
+    restore: Option<mclone_app_runtime::prepared_assets::PreparedSceneAssets>,
+    phase: AssetReplacementSmokePhase,
+    first_party_frame: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AssetReplacementSmokePhase {
+    Baseline,
+    FirstParty,
+    Restore,
+    Complete,
 }
 
 impl OffscreenFlatClientHost {
@@ -116,6 +133,72 @@ impl OffscreenFlatClientHost {
         Ok(Self {
             driver,
             camera: startup_camera,
+            asset_replacement_smoke: None,
+        })
+    }
+
+    fn enable_asset_replacement_smoke(&mut self, authored: PathBuf, fallback: PathBuf) {
+        self.asset_replacement_smoke = Some(AssetReplacementSmoke {
+            authored,
+            fallback,
+            restore: None,
+            phase: AssetReplacementSmokePhase::Baseline,
+            first_party_frame: None,
+        });
+    }
+
+    fn advance_asset_replacement_smoke(&mut self, frame_index: usize) -> Result<()> {
+        let Some(smoke) = self.asset_replacement_smoke.as_mut() else {
+            return Ok(());
+        };
+        match self.driver.host().asset_replacement_status() {
+            mclone_scene::AssetReplacementStatus::Failed {
+                active_epoch,
+                message,
+            } => {
+                bail!(
+                    "asset replacement smoke failed with active epoch {active_epoch} retained: {message}"
+                );
+            }
+            mclone_scene::AssetReplacementStatus::Active { epoch: 1 }
+                if smoke.phase == AssetReplacementSmokePhase::FirstParty =>
+            {
+                smoke.first_party_frame = Some(frame_index);
+                let restore = smoke
+                    .restore
+                    .take()
+                    .context("asset replacement smoke lost restore snapshot")?;
+                self.driver
+                    .host_mut()
+                    .begin_prepared_asset_replacement(restore)?;
+                smoke.phase = AssetReplacementSmokePhase::Restore;
+            }
+            mclone_scene::AssetReplacementStatus::Active { epoch: 2 }
+                if smoke.phase == AssetReplacementSmokePhase::Restore =>
+            {
+                smoke.phase = AssetReplacementSmokePhase::Complete;
+            }
+            _ if smoke.phase == AssetReplacementSmokePhase::Baseline => {
+                smoke.restore = Some(self.driver.host().active_asset_snapshot_for_epoch(2));
+                let request = mclone_app_runtime::prepared_assets::PreparedSceneAssetsRequest::first_party_from_files(
+                    1,
+                    smoke.authored.clone(),
+                    smoke.fallback.clone(),
+                )?;
+                self.driver.host_mut().begin_asset_replacement(request)?;
+                smoke.phase = AssetReplacementSmokePhase::FirstParty;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn asset_replacement_smoke_result(&self) -> Option<(bool, usize)> {
+        self.asset_replacement_smoke.as_ref().map(|smoke| {
+            (
+                smoke.phase == AssetReplacementSmokePhase::Complete,
+                smoke.first_party_frame.unwrap_or_default(),
+            )
         })
     }
 
@@ -142,10 +225,14 @@ impl OffscreenFlatClientHost {
         frame: mclone_render::target::RenderFrameContext<'_>,
         options: OffscreenFlatClientFrameOptions,
     ) -> Result<FullFrameRenderSummary> {
-        Ok(self
-            .driver
-            .render(frame, MonoUiPresentation::ScreenSpaceHud, options.hud)?
-            .render)
+        let summary = if self.asset_replacement_smoke.is_some() {
+            self.driver
+                .render_frozen(frame, MonoUiPresentation::ScreenSpaceHud, options.hud)?
+        } else {
+            self.driver
+                .render(frame, MonoUiPresentation::ScreenSpaceHud, options.hud)?
+        };
+        Ok(summary.render)
     }
 
     pub(crate) fn run_script(
@@ -286,18 +373,22 @@ impl OffscreenFlatClientHost {
 pub(crate) fn run_offscreen_flat_client_screenshot(
     options: &HeadlessScreenshotOptions,
 ) -> Result<OffscreenFlatClientScreenshotReport> {
+    let asset_replacement_smoke = asset_replacement_smoke_paths()?;
     let assets = WindowSceneAssets::load()?;
     let asset_source = load_asset_source()?;
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let startup_wait = options.startup_wait;
     let startup_camera = screenshot_startup_camera(&scene, startup_wait);
-    let frame_count = if options.frame_pipeline_overlay {
+    let mut frame_count = if options.frame_pipeline_overlay {
         startup_wait.offscreen_capture_frame_count().max(2)
     } else {
         startup_wait.offscreen_capture_frame_count()
     };
-    let (loop_report, frame_pixels, host) = run_headless_capture_loop(
+    if asset_replacement_smoke.is_some() {
+        frame_count = frame_count.max(180);
+    }
+    let (loop_report, frame_pixels, mut host) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
@@ -318,13 +409,113 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             )?;
             host.start_scene_with_wait_policy(device, queue, startup_wait)?;
             configure_screenshot_scene(&mut host, options, device, queue)?;
+            if let Some((authored, fallback)) = &asset_replacement_smoke {
+                host.enable_asset_replacement_smoke(authored.clone(), fallback.clone());
+            }
             Ok(host)
         },
-        |_index, frame, host| {
+        |index, frame, host| {
             host.render_frame(frame, OffscreenFlatClientFrameOptions { hud: options.hud })?;
+            host.advance_asset_replacement_smoke(index)?;
+            if host.asset_replacement_smoke.is_some() {
+                std::thread::sleep(Duration::from_millis(50));
+            }
             Ok(())
         },
     )?;
+
+    if let Some((complete, first_party_frame)) = host.asset_replacement_smoke_result() {
+        if !complete {
+            bail!(
+                "asset replacement smoke did not complete within {frame_count} frames: phase={:?} status={:?}",
+                host.asset_replacement_smoke
+                    .as_ref()
+                    .map(|smoke| smoke.phase),
+                host.driver.host().asset_replacement_status()
+            );
+        }
+        let commit = host
+            .driver
+            .host_mut()
+            .take_last_asset_replacement_commit()
+            .context("asset replacement smoke committed without a report")?;
+        if !commit.session_preserved
+            || !commit.camera_preserved
+            || !commit.command_count_unchanged
+            || !commit.update_count_unchanged
+        {
+            bail!("asset replacement smoke mutated session/camera/runtime facts");
+        }
+        let first_party_pixels = frame_pixels
+            .get(first_party_frame)
+            .context("asset replacement smoke did not retain its first-party frame")?;
+        let first_party_path = options.path.with_file_name(format!(
+            "{}-first-party.png",
+            options
+                .path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("mclone-asset-replacement")
+        ));
+        save_rgba_png(
+            &first_party_path,
+            loop_report.width,
+            loop_report.height,
+            first_party_pixels,
+        )?;
+        let baseline = frame_pixels
+            .first()
+            .context("asset replacement smoke produced no baseline frame")?;
+        let restored = frame_pixels
+            .last()
+            .context("asset replacement smoke produced no restored frame")?;
+        let differing_pixels = baseline
+            .chunks_exact(4)
+            .zip(restored.chunks_exact(4))
+            .filter(|(left, right)| left[..3] != right[..3])
+            .count();
+        let total_pixels = baseline.len() / 4;
+        let difference_ratio = differing_pixels as f64 / total_pixels.max(1) as f64;
+        let baseline_path = options.path.with_file_name(format!(
+            "{}-baseline.png",
+            options
+                .path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("mclone-asset-replacement")
+        ));
+        let restored_path = options.path.with_file_name(format!(
+            "{}-restored.png",
+            options
+                .path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("mclone-asset-replacement")
+        ));
+        save_rgba_png(
+            &baseline_path,
+            loop_report.width,
+            loop_report.height,
+            baseline,
+        )?;
+        save_rgba_png(
+            &restored_path,
+            loop_report.width,
+            loop_report.height,
+            restored,
+        )?;
+        if difference_ratio > 0.02 {
+            bail!(
+                "restored vanilla frame differs from baseline in {:.3}% of pixels",
+                difference_ratio * 100.0
+            );
+        }
+        println!(
+            "asset replacement smoke completed epochs 0 -> 1 -> 2; restored pixel difference {:.3}%; first-party frame {}",
+            difference_ratio * 100.0,
+            first_party_path.display()
+        );
+    }
 
     let pixels = frame_pixels
         .last()
@@ -369,6 +560,18 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         entity_count,
         underwater,
     })
+}
+
+fn asset_replacement_smoke_paths() -> Result<Option<(PathBuf, PathBuf)>> {
+    let authored = std::env::var_os("MCLONE_ASSET_REPLACEMENT_AUTHORED").map(PathBuf::from);
+    let fallback = std::env::var_os("MCLONE_ASSET_REPLACEMENT_FALLBACK").map(PathBuf::from);
+    match (authored, fallback) {
+        (None, None) => Ok(None),
+        (Some(authored), Some(fallback)) => Ok(Some((authored, fallback))),
+        _ => bail!(
+            "MCLONE_ASSET_REPLACEMENT_AUTHORED and MCLONE_ASSET_REPLACEMENT_FALLBACK must be set together"
+        ),
+    }
 }
 
 fn screenshot_startup_camera(

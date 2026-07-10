@@ -3,8 +3,8 @@
 Topic: asset-pack-profiles
 
 Status: active implementation. Tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-2 landed
-2026-07-10; Slice 3 transactional native scene replacement is next.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-3 landed
+2026-07-10; Slice 4 shared Asset Packs UI is next.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -110,6 +110,23 @@ Minecraft pack is not sufficient.
   `/tmp/mclone-first-party-slice2.png`. It used only the two standalone packed
   sources; authored terrain and conspicuous checker/code fallbacks were both
   visible.
+- Native asset Apply is now transactional below app crates. CPU pack loading
+  and resident-view mesh compilation run on background requests while the
+  active scene continues drawing. Relevant snapshot/target changes restart the
+  candidate compile rather than allowing a stale commit.
+- `mclone-scene` owns one frame-boundary commit for terrain/catalog/compiler,
+  actor atlas/figures, mono and world GUI atlas users, effects, far LOD, and
+  prepared audio. Compiler-instance replacement plus render-session reset
+  prevents retired queued results or in-flight markers from crossing epochs.
+- Apply failure retains the old active epoch/resources and exposes a concise
+  shared Failed status. Successful commit diagnostics verify that session,
+  camera, command count, and update count are unchanged.
+- Frozen Mono and synthetic-stereo `Vanilla -> Mclone Original -> Vanilla`
+  smokes complete in one session. Mono vanilla baseline/restored captures are
+  pixel-identical; the inspected middle capture uses generated labeled
+  textures. Stereo retains parallax and both UI composites. Multiview consumers
+  share the replaced resources and pass their distinct-view data tests; this
+  Mac's headless adapter lacks the optional wgpu GPU multiview feature.
 - `mclone-app-runtime::render_assets` discovers environment/platform paths and
   constructs one source chain at startup. `MCLONE_ASSET_OVERLAY_PACK` inserts
   one or more authored overlays before loose or packed Minecraft sources.
@@ -315,26 +332,24 @@ resolve when their logical pack is disabled.
   identifies them. The two new standalone first-party builders do emit them.
 - The compatibility overlay remains partial; use the authored + generated
   standalone outputs for new first-party work.
-- Render compiler/catalog and GPU atlas replacement are startup-shaped.
 - Web's resident compiler worker and single-byte-pack bootstrap need a
   replacement epoch/reinitialization path.
-- Prepared first-party actor/effect/audio inputs and strict suppression exist,
-  but live consumer replacement is not wired yet.
+- The native transaction is programmatic; shared selection/UI actions are not
+  wired yet.
 - Asset selection persistence has no shared cross-platform preference adapter.
 
 ## Recommended Next Work
 
 Implement only tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 3 next. Add the
-transactional native scene replacement path: prepare away from the frame path,
-introduce asset epochs for compiler results, keep the old selection drawable
-until the new visible set is ready, and commit all source-backed presentation
-consumers together without reconnecting or mutating world/session state.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 4 next. Add the
+shared Asset Packs screen, staged selection/Apply/Cancel state, copyable row
+actions, effective label and provenance/coverage presentation, title/pause
+entry points, input routing, tests, and a rendered offscreen UI capture. Do not
+add persistence or platform-specific discovery in that slice.
 
-Forward routing is intentionally non-numeric. After Slice 3, complete the
-shared Asset Packs UI in Slice 4, then make the required cross-tactical
-checkpoint recorded in Tactical 169. The default recommendation at that point
-is to start or resume
+Forward routing is intentionally non-numeric. After Slice 4, make the required
+cross-tactical checkpoint recorded in Tactical 169. The default recommendation
+at that point is to start or resume
 [`170`](../tactical/170-web-scene-host-adoption.md) before the web portion of
 169 Slice 5. Do not add asset selection, compiler-epoch, replacement, or UI
 policy to `WebChunkRenderSession`, because Tactical 170 deletes that production
@@ -418,6 +433,33 @@ scale, authored terrain remains visible, and actor/plant silhouettes remain
 drawable. The prepared-set validator rejects any Minecraft/unknown resolved
 origin and any generated PNG resolution without a matching missing-resource
 registry id.
+
+## Slice 3 Evidence
+
+Focused validation on 2026-07-10:
+
+```text
+six changed shared/native crate suites
+  563 passed; 0 failed; 2 pre-existing GPU proofs ignored
+Mono asset replacement smoke
+  epochs 0 -> 1 -> 2; 64 sections; 9 drawn
+  restored vanilla pixel difference 0.000%
+synthetic stereo asset replacement smoke
+  epochs 0 -> 1 -> 2; 24 drawn sections
+  49,723 differing eye pixels; 2 eye UI composites
+invalid-pack failure smoke
+  failed with active epoch 0 retained
+WASM check for changed shared crates
+  passed
+```
+
+The Mono baseline, first-party middle, and restored captures under `/tmp` were
+inspected. The first and final vanilla images are identical; the middle image
+shows the conspicuous generated material codes in the unchanged camera view.
+The inspected XR image shows two distinct vanilla eyes after the round trip.
+Commit reports prove session/camera and command/update counts did not change.
+The retired-result test proves old compiler results and in-flight state are
+discarded when the fresh catalog-bound compiler instance becomes active.
 
 ## Non-Goals
 

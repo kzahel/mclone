@@ -1446,6 +1446,7 @@ dependencies = [
  "js-sys",
  "log",
  "mclone-assets",
+ "mclone-audio",
  "mclone-client",
  "mclone-core",
  "mclone-diagnostics",

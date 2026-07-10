@@ -5,11 +5,32 @@ use mclone_assets::{
     AssetSourceChain, FIRST_PARTY_AUDIO_POLICY_PATH, FirstPartyAudioPolicy, MissingAssetRegistry,
     PackedAssetSource, ProvenanceTrackingAssetSource,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_assets::{AssetProvenanceEntry, AssetResolutionOrigin};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_audio::PreparedAudioAssets;
 use mclone_mesh::{TexturedTerrainAssets, load_first_party_textured_terrain_assets};
 use mclone_render::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use mclone_render::screen_effect::{ScreenEffectTextureAssets, load_screen_effect_texture_assets};
 
 use crate::far_lod::FarTerrainLodMaterialPalette;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_core::ChunkSnapshot;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_mesh::RenderSectionKey;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_mesh::TexturedRenderSectionBuildReport;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_render_session::{
+    build_render_sections_from_snapshots_with_biome_zoom_seed, render_section_keys_for_snapshot,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::render_assets::TexturedMeshAssets;
 
 pub const AUTHORED_FIRST_PARTY_PACK_ID: &str = "mclone-authored";
 pub const GENERATED_FALLBACK_PACK_ID: &str = "mclone-generated-fallback";
@@ -42,6 +63,204 @@ pub struct PreparedAssetSet {
     pub missing_registry: MissingAssetRegistry,
     pub provenance: AssetProvenanceReport,
     pub coverage: PreparedAssetCoverage,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub struct PreparedSceneAssets {
+    pub epoch: u64,
+    pub selection: AssetPackSelection,
+    pub mesh: TexturedMeshAssets,
+    pub actors: ActorTextureAssets,
+    pub screen_effects: ScreenEffectTextureAssets,
+    pub audio: PreparedAudioAssets,
+    pub audio_policy: FirstPartyAudioPolicy,
+    pub provenance: AssetProvenanceReport,
+    pub coverage: Option<PreparedAssetCoverage>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PreparedSceneAssets {
+    pub fn startup(
+        epoch: u64,
+        mesh: TexturedMeshAssets,
+        actors: ActorTextureAssets,
+        screen_effects: ScreenEffectTextureAssets,
+        audio: PreparedAudioAssets,
+    ) -> Self {
+        let selection = AssetPackSelection::default();
+        let mut provenance = AssetProvenanceReport::new(epoch, selection.clone());
+        provenance.record(AssetProvenanceEntry {
+            path: mclone_assets::AssetPath::new("assets/mclone/runtime-startup-source"),
+            source: AssetResolutionOrigin::anonymous(),
+            outcome: AssetResolutionOutcome::Resolved,
+        });
+        Self {
+            epoch,
+            selection: selection.clone(),
+            mesh,
+            actors,
+            screen_effects,
+            audio,
+            audio_policy: FirstPartyAudioPolicy {
+                suppressed: Default::default(),
+            },
+            provenance,
+            coverage: None,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PreparedAssetSet {
+    pub fn into_scene_assets(self) -> PreparedSceneAssets {
+        PreparedSceneAssets {
+            epoch: self.epoch,
+            selection: self.selection,
+            mesh: TexturedMeshAssets {
+                catalog: self.terrain.catalog,
+                atlas: self.terrain.atlas.into(),
+                far_lod_materials: self.far_lod_materials,
+            },
+            actors: self.actors,
+            screen_effects: self.screen_effects,
+            audio: PreparedAudioAssets::silent(),
+            audio_policy: self.audio_policy,
+            provenance: self.provenance,
+            coverage: Some(self.coverage),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub enum AssetPreparePoll<T> {
+    Pending,
+    Ready(T),
+    Failed(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub struct PreparedSceneAssetsRequest {
+    epoch: u64,
+    receiver: mpsc::Receiver<Result<PreparedSceneAssets>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PreparedSceneAssetsRequest {
+    pub fn spawn(
+        epoch: u64,
+        prepare: impl FnOnce() -> Result<PreparedSceneAssets> + Send + 'static,
+    ) -> Result<Self> {
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name(format!("mclone-asset-prepare-{epoch}"))
+            .spawn(move || {
+                let _ = sender.send(prepare());
+            })
+            .context("failed to spawn asset preparation worker")?;
+        Ok(Self { epoch, receiver })
+    }
+
+    pub fn first_party_from_files(
+        epoch: u64,
+        authored_path: impl Into<std::path::PathBuf>,
+        fallback_path: impl Into<std::path::PathBuf>,
+    ) -> Result<Self> {
+        let authored_path = authored_path.into();
+        let fallback_path = fallback_path.into();
+        Self::spawn(epoch, move || {
+            prepare_first_party_asset_set_from_files(epoch, authored_path, fallback_path)
+                .map(PreparedAssetSet::into_scene_assets)
+        })
+    }
+
+    pub const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn poll(&mut self) -> AssetPreparePoll<PreparedSceneAssets> {
+        match self.receiver.try_recv() {
+            Ok(Ok(assets)) => AssetPreparePoll::Ready(assets),
+            Ok(Err(error)) => AssetPreparePoll::Failed(format!("{error:#}")),
+            Err(mpsc::TryRecvError::Empty) => AssetPreparePoll::Pending,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                AssetPreparePoll::Failed("asset preparation worker disconnected".to_owned())
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub struct PreparedAssetReplacement {
+    pub assets: PreparedSceneAssets,
+    pub source_snapshots: Vec<ChunkSnapshot>,
+    pub target_sections: std::collections::BTreeSet<RenderSectionKey>,
+    pub sections: TexturedRenderSectionBuildReport,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub struct PreparedAssetReplacementRequest {
+    epoch: u64,
+    receiver: mpsc::Receiver<Result<PreparedAssetReplacement>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PreparedAssetReplacementRequest {
+    pub fn spawn(
+        assets: PreparedSceneAssets,
+        mut snapshots: Vec<ChunkSnapshot>,
+        target_sections: std::collections::BTreeSet<RenderSectionKey>,
+        biome_zoom_seed: Option<i64>,
+    ) -> Result<Self> {
+        let epoch = assets.epoch;
+        snapshots.sort_by_key(|snapshot| snapshot.pos);
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name(format!("mclone-asset-mesh-prepare-{epoch}"))
+            .spawn(move || {
+                let result = (|| {
+                    let compile_target_sections = if target_sections.is_empty() {
+                        snapshots
+                            .iter()
+                            .flat_map(render_section_keys_for_snapshot)
+                            .collect()
+                    } else {
+                        target_sections.clone()
+                    };
+                    let sections = build_render_sections_from_snapshots_with_biome_zoom_seed(
+                        &snapshots,
+                        &assets.mesh.catalog,
+                        &compile_target_sections,
+                        biome_zoom_seed,
+                    )
+                    .context("failed to compile replacement render sections")?;
+                    Ok(PreparedAssetReplacement {
+                        assets,
+                        source_snapshots: snapshots,
+                        target_sections,
+                        sections,
+                    })
+                })();
+                let _ = sender.send(result);
+            })
+            .context("failed to spawn replacement mesh preparation worker")?;
+        Ok(Self { epoch, receiver })
+    }
+
+    pub const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn poll(&mut self) -> AssetPreparePoll<PreparedAssetReplacement> {
+        match self.receiver.try_recv() {
+            Ok(Ok(replacement)) => AssetPreparePoll::Ready(replacement),
+            Ok(Err(error)) => AssetPreparePoll::Failed(format!("{error:#}")),
+            Err(mpsc::TryRecvError::Empty) => AssetPreparePoll::Pending,
+            Err(mpsc::TryRecvError::Disconnected) => AssetPreparePoll::Failed(
+                "replacement mesh preparation worker disconnected".to_owned(),
+            ),
+        }
+    }
 }
 
 pub fn prepare_first_party_asset_set(
@@ -183,4 +402,28 @@ fn first_party_descriptor(
         );
     }
     Ok(descriptor)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_prepare_surfaces_failure_without_blocking_caller() {
+        let mut request =
+            PreparedSceneAssetsRequest::spawn(7, || bail!("synthetic prepare failure")).unwrap();
+        assert_eq!(request.epoch(), 7);
+
+        for _ in 0..10_000 {
+            match request.poll() {
+                AssetPreparePoll::Pending => std::thread::yield_now(),
+                AssetPreparePoll::Ready(_) => panic!("failed prepare unexpectedly succeeded"),
+                AssetPreparePoll::Failed(message) => {
+                    assert!(message.contains("synthetic prepare failure"));
+                    return;
+                }
+            }
+        }
+        panic!("background prepare did not finish");
+    }
 }

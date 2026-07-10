@@ -59,6 +59,14 @@ pub(crate) fn run_xr_emulation_screenshot(
             )?;
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_streamed(device, queue, views)?;
+            drive_asset_replacement_roundtrip_if_requested(
+                &mut driver,
+                device,
+                queue,
+                views,
+                left_view,
+                right_view,
+            )?;
 
             if let Some(frame) = emulated_input {
                 // If startup leaves an XR screen open, close it through the
@@ -115,6 +123,75 @@ pub(crate) fn run_xr_emulation_screenshot(
         gui_command_count: summary.gui_command_count,
         ui_panel_composite_count: summary.ui_panel.composite_count,
     })
+}
+
+fn drive_asset_replacement_roundtrip_if_requested(
+    driver: &mut OffscreenDriver,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    views: [XrView; 2],
+    left_view: &wgpu::TextureView,
+    right_view: &wgpu::TextureView,
+) -> Result<()> {
+    let authored = std::env::var_os("MCLONE_ASSET_REPLACEMENT_AUTHORED").map(PathBuf::from);
+    let fallback = std::env::var_os("MCLONE_ASSET_REPLACEMENT_FALLBACK").map(PathBuf::from);
+    let (authored, fallback) = match (authored, fallback) {
+        (Some(authored), Some(fallback)) => (authored, fallback),
+        (None, None) => return Ok(()),
+        _ => {
+            bail!(
+                "MCLONE_ASSET_REPLACEMENT_AUTHORED and MCLONE_ASSET_REPLACEMENT_FALLBACK must be set together"
+            );
+        }
+    };
+
+    let restore = driver.host().active_asset_snapshot_for_epoch(2);
+    let request =
+        mclone_app_runtime::prepared_assets::PreparedSceneAssetsRequest::first_party_from_files(
+            1, authored, fallback,
+        )?;
+    driver.host_mut().begin_asset_replacement(request)?;
+    let mut restored = false;
+    for _ in 0..180 {
+        driver.render_stereo_frozen(device, queue, views, left_view, right_view)?;
+        match driver.host().asset_replacement_status() {
+            mclone_scene::AssetReplacementStatus::Active { epoch: 1 } if !restored => {
+                driver
+                    .host_mut()
+                    .begin_prepared_asset_replacement(restore.clone())?;
+                restored = true;
+            }
+            mclone_scene::AssetReplacementStatus::Active { epoch: 2 } => {
+                let report = driver
+                    .host_mut()
+                    .take_last_asset_replacement_commit()
+                    .context("XR asset replacement committed without a report")?;
+                if !report.session_preserved
+                    || !report.camera_preserved
+                    || !report.command_count_unchanged
+                    || !report.update_count_unchanged
+                {
+                    bail!("XR asset replacement mutated session/camera/runtime facts");
+                }
+                println!(
+                    "XR asset replacement smoke completed epochs 0 -> 1 -> 2 with {} sections",
+                    report.section_count
+                );
+                return Ok(());
+            }
+            mclone_scene::AssetReplacementStatus::Failed {
+                active_epoch,
+                message,
+            } => {
+                bail!(
+                    "XR asset replacement smoke failed with active epoch {active_epoch} retained: {message}"
+                );
+            }
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    bail!("XR asset replacement smoke did not complete within 180 frames")
 }
 
 fn held_xr_emulation_input(keys: &[mclone_input::KeyboardKey]) -> Result<Option<FlatInputFrame>> {
