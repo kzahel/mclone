@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+# Window/surface ownership is platform glue. Shared render consumers, including
+# `mclone-scene`, intentionally leave this disabled so they do not acquire a
+# transitive winit dependency (tactical 168 host-purity guardrail).
+native-surface = ["dep:winit"]
+
 [dependencies]
 anyhow.workspace = true
 glam.workspace = true
@@ -22,7 +29,7 @@ wgpu.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster.workspace = true
-winit.workspace = true
+winit = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true

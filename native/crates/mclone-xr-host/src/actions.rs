@@ -1,32 +1,7 @@
 use anyhow::{Context, Result};
 use glam::{Quat, Vec2, Vec3};
+use mclone_input::{XrControllerSnapshot, XrHand};
 use openxr as xr;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum XrHand {
-    Left,
-    Right,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct XrControllerSnapshot {
-    pub hand: XrHand,
-    pub aim_position: Option<Vec3>,
-    pub aim_direction: Option<Vec3>,
-    pub grip_position: Option<Vec3>,
-    /// Full grip-pose orientation. The OpenXR grip pose is palm-relative, so this
-    /// is the input a thruster/repulsor mode uses to derive a palm normal (see
-    /// tactical 157). `aim_direction` is only a pointing ray and is not enough.
-    pub grip_orientation: Option<Quat>,
-    pub trigger: f32,
-    pub squeeze: f32,
-    pub select_pressed: bool,
-    pub a_pressed: bool,
-    pub b_pressed: bool,
-    pub y_pressed: bool,
-    pub thumbstick: Vec2,
-    pub thumbstick_pressed: bool,
-}
 
 pub struct OpenXrControllerActions {
     action_set: xr::ActionSet,

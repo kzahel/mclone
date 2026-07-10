@@ -92,23 +92,24 @@ where
         self.local_startup.is_none()
     }
 
-    /// Total in-flight streaming work: server-side pending render chunks +
-    /// pending render-compile jobs + queued client section uploads. Offscreen
-    /// and tooling drivers poll this to learn when a freshly started local world
-    /// has fully streamed in — the step-based equivalent of the old blocking
-    /// full section sync (tactical 168 Slice 3). Returns [`usize::MAX`] while the
-    /// local startup pump is still promoting, so a finite result implies startup
-    /// has completed.
-    pub fn pending_stream_work(&self) -> usize {
+    /// In-flight render work relevant to the requested camera: target render
+    /// chunks/inflight sections plus queued client uploads. Tracking-halo dirt
+    /// outside the drawable render distance intentionally does not keep an
+    /// offscreen capture alive forever; target readiness is the same distinction
+    /// used by the startup-streaming probes. Returns [`usize::MAX`] while local
+    /// startup is still promoting.
+    pub fn pending_stream_work(&self, camera_position: Vec3) -> usize {
         if self.local_startup.is_some() {
             return usize::MAX;
         }
         let Some(runtime) = self.runtime.as_ref() else {
             return usize::MAX;
         };
+        let target = runtime.target_render_work_stats(camera_position);
         let upload = self.section_uploads.stats();
-        runtime.pending_render_chunk_count()
-            + runtime.render_compile_pending_job_count()
+        target.pending_render_chunks
+            + target.inflight_render_sections
+            + usize::from(target.ready_render_work_pending)
             + upload.queued_upload_sections
             + upload.queued_lifecycle_items
     }
@@ -232,12 +233,42 @@ where
                 draw.append(&panel.overlay_draw);
                 // A full-screen menu covers the world; a bare HUD does not.
                 let covers_world = self.ui.is_active();
+                if let Some(hud) = self.mono_flat_hud(covers_world) {
+                    let hud_draw = self.ui.render_flat_hud_draw_list(gui_scale, &hud);
+                    draw.append(&hud_draw.draw);
+                }
                 (
                     FullFrameGui::new(true, covers_world, [gui_scale.width, gui_scale.height]),
                     draw,
                 )
             }
         }
+    }
+
+    /// Capture-grade flat HUD assembled by the shared host. Slice 7 expands the
+    /// input/capability and diagnostic fields for the interactive desktop lane;
+    /// this baseline deliberately renders the shared crosshair + selected
+    /// hotbar/icons so the mono GUI renderer has a real pixel canary now.
+    fn mono_flat_hud(&self, menu_active: bool) -> Option<FlatHud> {
+        let runtime = self.runtime.as_ref()?;
+        let mut hud = FlatHud::new(ResolvedFlatInput {
+            preferred_prompt: Some(InputPromptKind::KeyboardMouse),
+            touch_controls_visible: false,
+            accepts_keyboard_mouse: true,
+            accepts_touch: false,
+            accepts_gamepad: false,
+            accepts_xr_controller: false,
+        });
+        hud.world_hud_visible = !menu_active;
+        hud.crosshair_visible = !menu_active;
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(
+            self.interaction.selected_hotbar_slot(),
+            debug_hotbar_icons(
+                self.interaction.hotbar_items(),
+                &runtime.mesh_assets().catalog,
+            ),
+        );
+        Some(hud)
     }
 
     fn ensure_mono_gui(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<()> {

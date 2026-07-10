@@ -9,5 +9,7 @@ publish.workspace = true
 anyhow.workspace = true
 glam.workspace = true
 log.workspace = true
+mclone-input.workspace = true
+mclone-render-session.workspace = true
 openxr.workspace = true
 wgpu.workspace = true

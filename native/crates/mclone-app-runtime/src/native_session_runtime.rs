@@ -17,14 +17,15 @@ use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueH
 use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
     NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
-    ServerRunnerDiagnostics, ServerUpdateEnvelope, SimulationCadenceConfig,
-    host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
+    ServerRunnerDiagnostics, SimulationCadenceConfig, host_tick_interval_for_rate_hz,
+    initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
 use crate::client_connection::{
     ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
-    ConnectionUpdateDrainMode, QueuedServerUpdate, pump_client_connection_updates_report,
+    ConnectionUpdateDrainMode, IntegratedRunnerConnection, QueuedServerUpdate,
+    pump_client_connection_updates_report,
 };
 use crate::far_lod::{
     FarTerrainLodCache, FarTerrainLodConfig, FarTerrainLodCoverage,
@@ -264,7 +265,7 @@ impl LocalIntegratedSceneOptions {
 #[derive(Debug)]
 pub struct LocalIntegratedSceneRuntime<R = NativeIntegratedServerRunner> {
     core: SingleViewRuntime,
-    connection: LocalIntegratedConnection<R>,
+    connection: IntegratedRunnerConnection<R>,
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
@@ -273,88 +274,6 @@ pub struct LocalIntegratedSceneRuntime<R = NativeIntegratedServerRunner> {
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
     last_runner_diagnostics_poll_at: Option<Instant>,
-}
-
-/// Local-integrated server connection, generic over the integrated-server runner
-/// (docs/tactical/168 Slice 2). Native callers use the default
-/// [`NativeIntegratedServerRunner`]; the type parameter is the seam that keeps
-/// web from being permanently forked out of the local host mode — a web build can
-/// eventually plug its own [`IntegratedServerRunner`] here without a second copy
-/// of this connection wiring.
-#[derive(Debug)]
-struct LocalIntegratedConnection<R = NativeIntegratedServerRunner> {
-    runner: R,
-}
-
-impl<R: IntegratedServerRunner> LocalIntegratedConnection<R> {
-    fn new(runner: R) -> Self {
-        Self { runner }
-    }
-
-    fn set_simulation_cadence(
-        &mut self,
-        cadence: SimulationCadenceConfig,
-    ) -> mclone_server::ServerRunnerResult<()> {
-        self.runner.set_simulation_cadence(cadence)
-    }
-
-    fn poll_diagnostics(&self) -> mclone_server::ServerRunnerResult<ServerRunnerDiagnostics> {
-        self.runner.poll_diagnostics()
-    }
-
-    fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
-        self.runner.refresh_fast_diagnostics(diagnostics);
-    }
-
-    fn flush_persistence(&mut self) -> mclone_server::ServerRunnerResult<usize> {
-        self.runner.flush_persistence()
-    }
-}
-
-impl<R: IntegratedServerRunner> ClientConnection for LocalIntegratedConnection<R> {
-    fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
-        self.runner
-            .send_command(command)
-            .context("failed to send local integrated server command")
-    }
-
-    fn drain_next_update(
-        &mut self,
-        _mode: ConnectionUpdateDrainMode,
-    ) -> Result<ClientConnectionDrainResult> {
-        let Some(envelope) = self
-            .runner
-            .try_recv_update()
-            .context("failed to receive local integrated server update")?
-        else {
-            return Ok(ClientConnectionDrainResult::default());
-        };
-        Ok(ClientConnectionDrainResult::with_update(
-            queued_update_from_runner_envelope(envelope),
-            0,
-            0,
-        ))
-    }
-
-    fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
-        let diagnostics = self
-            .runner
-            .poll_diagnostics()
-            .context("failed to poll local integrated server diagnostics")?;
-        Ok(ClientConnectionQueueMetrics::new(
-            diagnostics.update_queue_depth,
-            diagnostics.update_queue_bytes,
-        ))
-    }
-}
-
-fn queued_update_from_runner_envelope(envelope: ServerUpdateEnvelope) -> QueuedServerUpdate {
-    QueuedServerUpdate::single(
-        envelope.update,
-        envelope.encoded_len,
-        envelope.queued_age,
-        true,
-    )
 }
 
 struct DeferredChunkDropWorker {
@@ -1158,7 +1077,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                 options.render_distance,
                 options.chunk_tracking_radius(),
             ),
-            connection: LocalIntegratedConnection::new(server_runner),
+            connection: IntegratedRunnerConnection::new(server_runner),
             mesh_assets,
             render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),

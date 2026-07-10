@@ -1,8 +1,40 @@
+use glam::{Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 pub const FLAT_HOTBAR_SLOT_COUNT: u8 = 9;
 /// Mouse-delta units per second for held keyboard turning; intentionally slower than mouselook.
 pub const KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND: f64 = 270.0;
+
+/// Host-neutral tracked-controller side. OpenXR is one producer, while desktop
+/// XR emulation and future browser XR adapters can produce the same input data
+/// without introducing an OpenXR dependency into shared scene policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XrHand {
+    Left,
+    Right,
+}
+
+/// Host-neutral tracked-controller input/pose snapshot.
+///
+/// Platform adapters translate their controller APIs into this shared input
+/// contract; scene locomotion and interaction consume it.
+#[derive(Clone, Copy, Debug)]
+pub struct XrControllerSnapshot {
+    pub hand: XrHand,
+    pub aim_position: Option<Vec3>,
+    pub aim_direction: Option<Vec3>,
+    pub grip_position: Option<Vec3>,
+    /// Full palm-relative grip orientation used by thruster/repulsor input.
+    pub grip_orientation: Option<Quat>,
+    pub trigger: f32,
+    pub squeeze: f32,
+    pub select_pressed: bool,
+    pub a_pressed: bool,
+    pub b_pressed: bool,
+    pub y_pressed: bool,
+    pub thumbstick: Vec2,
+    pub thumbstick_pressed: bool,
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

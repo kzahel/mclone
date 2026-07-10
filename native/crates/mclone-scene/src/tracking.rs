@@ -151,8 +151,8 @@ pub fn xr_view_to_chunk_render_view(
     let stage_pose = view.pose;
     let (camera_position, camera_orientation) =
         transform.transform_pose(stage_pose.position, stage_pose.orientation);
-    let render_view = mclone_xr_host::render_view_from_world_pose(
-        mclone_xr_host::XrViewPose {
+    let render_view = render_view_from_world_pose(
+        XrViewPose {
             position: camera_position,
             orientation: camera_orientation,
         },
@@ -193,8 +193,8 @@ pub(crate) fn fixed_startup_view_pose_render_view(
     orientation: Quat,
     fov: XrFov,
 ) -> Result<ChunkRenderView> {
-    let render_view = mclone_xr_host::render_view_from_world_pose(
-        mclone_xr_host::XrViewPose {
+    let render_view = render_view_from_world_pose(
+        XrViewPose {
             position,
             orientation,
         },
@@ -205,9 +205,7 @@ pub(crate) fn fixed_startup_view_pose_render_view(
     Ok(chunk_render_view_from_xr_render_view(render_view))
 }
 
-pub fn chunk_render_view_from_xr_render_view(
-    view: mclone_xr_host::XrRenderView,
-) -> ChunkRenderView {
+pub fn chunk_render_view_from_xr_render_view(view: XrRenderView) -> ChunkRenderView {
     ChunkRenderView {
         view: view.view,
         projection: view.projection,

@@ -4,9 +4,14 @@ Status: approved direction 2026-07-09; Slice 0 (bug-grade parity pre-fixes)
 landed 2026-07-09; Slice 2 (web-shaped runner-generic seam) landed 2026-07-09;
 Slice 1 (OpenXR-free scene crate + `mclone-xr-scene` -> `mclone-scene` rename)
 landed 2026-07-09; Slice 3 (mono view topology + screen-space HUD strategy +
-offscreen driver) landed 2026-07-09. Slices 4+ not started; Slice 4 requires
+offscreen driver) landed 2026-07-09. The Slice 4 frame-driver work has not
+started; its dependency-direction prerequisite is complete. Slice 4 requires
 Slice 1 (done). (Slices 0–2 are independent per the sequencing guardrail, so
-Slice 2 landed ahead of Slice 1.)
+Slice 2 landed ahead of Slice 1.) Post-Slice-3 review corrections landed
+2026-07-10: truthful offscreen-settle failure, an exercised mono-HUD capture
+lane, a shared lifecycle `on_background()` policy, durable-flush regression
+coverage, the WASM-built runner connection adapter, and early completion of
+Slice 4's dependency-direction/host-purity prerequisite.
 
 Workstream: native Rust shared runtime convergence. This tactical collapses the
 four native client runtimes (desktop flat, desktop XR, flat Android, Android
@@ -19,7 +24,7 @@ and the structural completion of [`165`](165-native-feature-parity-baseline.md)
 ## Principle: delete, don't port
 
 The most mature orchestrator in the tree is the XR scene state
-(`mclone-xr-scene::XrMcloneTerrainState`). Both XR apps are already thin over
+(`mclone-scene::XrMcloneTerrainState`). Both XR apps are already thin over
 it, which is why desktop XR and Quest cannot diverge on gameplay semantics.
 The flat family has no equivalent: `FlatClientDriver` lives inside the desktop
 app crate, and flat Android re-implements the whole loop by hand, worse.
@@ -70,8 +75,8 @@ Five surfaces, four orchestrators, one of them shared:
 - Desktop XR: `native/apps/mclone-native-client/src/desktop_xr.rs` (~1,268
   lines) — thin over `mclone-xr-scene`, but hand-rolls the OpenXR session loop.
 - Android XR/Quest: `native/apps/mclone-android-xr-client/src/lib.rs` (~7,661
-  lines) — thin over `mclone-xr-scene` for gameplay, but hand-rolls the OpenXR
-  session loop **five more times** (main + proof/perf harnesses) and carries
+  lines) — thin over the shared scene for gameplay, but hand-rolls the OpenXR
+  session loop **four times** (main + three proof/perf harnesses) and carries
   ~2,500 lines of frame-report formatting duplicating shared builders.
 - Headless/offscreen/perf (`headless.rs`, `offscreen_flat_client.rs`,
   `perf.rs`): partly on the desktop driver, partly third copies of frame-input
@@ -90,8 +95,8 @@ Concrete duplication clusters (file:line spot checks, verified 2026-07-09):
    (`flat_client_driver.rs:1403`, `android lib.rs:1710`, `session.rs:1248`).
    UI-action orchestration, catalog-request wrappers, and session-effect
    plumbing follow the same 3–4-way copy pattern.
-2. **OpenXR session loop** — the poll -> idle/exit -> `wait_begin_frame` ->
-   render-or-skip -> end -> report skeleton exists six times: desktop
+2. **OpenXR session loop** — the poll -> idle/exit -> wait/begin ->
+   render-or-skip -> end -> report skeleton exists in five loop bodies: desktop
    `desktop_xr.rs:415` (`run_smoke_frames`), android-xr `lib.rs:3304`
    (`run_mclone_frame_loop`), `:2370`, `:2667`, `:3020` (harness loops), plus
    the per-frame `render_mclone_frame` twins (`desktop_xr.rs:972`,
@@ -217,32 +222,79 @@ behavior differs between surfaces it must be host-mode evidence, an explicit
 named policy value, or a reason-bearing 165 ledger entry — never a second copy
 of orchestration.
 
-### Web posture: seams now, migration later (explicitly out of scope)
+### Web posture: compile the seams now, migrate later (explicitly out of scope)
 
 Web is the reason the runtime count exploded, and it is NOT migrated in this
-tactical. But web already shares everything below orchestration
-(`mclone-server`, `-client`, `-ui`, `-input`, `-render-session`,
-`-app-runtime`; `WebIntegratedServerRunner` in `web_server_worker.rs:137`
-already implements the shared `IntegratedServerRunner` trait from
-`mclone-server/src/runner.rs:471`). The single structural seam that forked web
-is that `NativeSessionRuntime` hard-codes the concrete
-`NativeIntegratedServerRunner` (`native_session_runtime.rs:275`) instead of the
-trait. Rules that keep the host web-adoptable at near-zero cost:
+tactical. `WebIntegratedServerRunner` already implements the shared
+`IntegratedServerRunner`, but the post-Slice-3 review found that the runner was
+not the only structural seam: the entire `native_session_runtime` module is
+`cfg(not(wasm32))`, owns `NativeRenderSectionCompileDispatcher` and native
+deferred-drop workers, and `NativeSceneRuntime` fixes its local variant back to
+the native runner default. The scene also consumes native catalog/storage,
+camera-reconcile, and teleport-preview worker types. Therefore the earlier
+"near-zero cost" claim was too strong.
 
-1. Local host mode becomes generic over `IntegratedServerRunner` (Slice 2).
-2. The host's frame/startup API stays non-blocking and `step()`-based;
-   blocking `drive_to_ready*` convenience loops live in native drivers only.
-3. No bare `std::thread` or `std::time::Instant` in the host — use the
-   existing wasm cfg patterns in `mclone-app-runtime` (`lib.rs:2881+`).
-4. `cargo check -p mclone-web-client --target wasm32-unknown-unknown` stays in
-   every slice's validation.
-5. Web feature divergences remain reason-bearing via the 165 web ledger (e.g.
-   a threads/SIMD-hungry physics engine would be a recorded web exception;
-   rapier would need none).
+Corrections landed 2026-07-10:
+
+1. `IntegratedRunnerConnection<R>` moved into the WASM-built
+   `mclone-app-runtime::client_connection` module and has a worker-shaped
+   regression test. `LocalIntegratedSceneRuntime<R>` consumes that same adapter.
+   The command/update/diagnostics runner boundary is now compiled by the normal
+   app-runtime WASM check instead of living inside a native-only file.
+2. Neutral tracked-controller snapshots live in `mclone-input`; neutral
+   view/FOV/projection contracts live in `mclone-render-session`. The OpenXR rim
+   keeps only conversion functions. `mclone-scene` no longer depends on
+   `mclone-xr-host`.
+3. `mclone-render`'s winit surface module is behind the explicit
+   `native-surface` feature, enabled only by the desktop app. The scene host's
+   dependency tree is free of `openxr`, `winit`, Android activity, and JNI edges.
+
+Rules for the remaining work:
+
+1. The host's frame/startup API stays non-blocking and `step()`-based; blocking
+   `drive_to_ready*` loops live in native drivers only.
+2. `cargo check -p mclone-app-runtime --target wasm32-unknown-unknown` and the
+   existing web-client WASM check stay green in every slice; these compile the
+   shared runner connection seam.
+3. A direct `cargo check -p mclone-scene --target wasm32-unknown-unknown` is the
+   acceptance gate for the follow-up host-runtime split. It currently fails on
+   the explicit open items below and must become green before web adopts the
+   host. Do not hide the failure with a stub/empty WASM scene feature.
+4. Time-dependent host code must move behind the existing WASM-compatible timing
+   patterns as it is made reachable on WASM; no browser path may call native
+   thread/blocking convenience loops.
+5. Web feature divergences remain reason-bearing via the 165 web ledger.
 
 Web adoption of the host (rAF driver, WebSocket `S`, worker runner,
-`web_canvas.rs` collapse) is a follow-up tactical once the native shape has
-settled.
+`web_canvas.rs` collapse) remains a follow-up tactical once the native shape has
+settled and the direct scene WASM gate is green.
+
+### Open questions / follow-ups found by the 2026-07-10 review
+
+These are tracked here so the native convergence does not accidentally close
+over native-only types. Resolve them in a dedicated web-host-adoption tactical,
+or pull a prerequisite earlier when a native slice naturally touches it:
+
+1. **Runtime/compiler generics.** Decide whether `NativeSceneRuntime` /
+   `NativeSessionRuntime` gain a second runner/compiler type parameter or are
+   renamed and split into a platform-neutral session shell plus native/web local
+   implementations. `NativeRenderSectionCompileDispatcher` and
+   `DeferredChunkDropWorker` cannot remain hard-coded in the shared local variant.
+2. **Catalog/storage adapters.** Split `NativeWorldCatalog` and native filesystem
+   storage from the catalog/session policy so the browser can inject IndexedDB or
+   its existing storage adapter without forking scene orchestration.
+3. **Camera reconcile and teleport preview.** Make camera reconcile compile on
+   WASM and inject the teleport-preview worker/executor; do not make the host own
+   an OS thread.
+4. **Clock/deadline abstraction.** Replace scene-local bare `Instant` use with a
+   monotonic host clock/timing helper before the direct scene WASM gate is called
+   complete. Preserve native perf timing while allowing browser `performance.now`.
+5. **Audio backend.** Confirm that the shared audio owner can use the browser
+   backend without blocking/thread assumptions; record a reason-bearing web
+   exception if it cannot land with the first host adoption.
+6. **Naming cleanup.** Rename `XrMcloneTerrainState` / `XrSceneOptions` to the
+   neutral `McloneSceneHost` / scene-host options shape once compatibility aliases
+   are no longer needed (Slice 10 at the latest).
 
 ## Non-goals
 
@@ -260,9 +312,10 @@ settled.
 ## Implementation slices
 
 Every slice must independently satisfy the **cross-slice guardrails** at the
-bottom of this doc. Statuses below are all "not started".
+bottom of this doc. Slices 0–3 are complete except for Slice 0's explicitly
+open manual device acceptance; Slice 4 is the next implementation slice.
 
-### Slice 0: Bug-grade parity pre-fixes — DONE (2026-07-09)
+### Slice 0: Bug-grade parity pre-fixes — IMPLEMENTED; MANUAL DEVICE ACCEPTANCE OPEN
 
 Goal: fix the behavior divergences that exist today, before any structural
 work, so later slices migrate correct behavior instead of enshrining bugs.
@@ -286,8 +339,8 @@ Landed decisions (see deliverables below for the reasoning):
   (`poll_android_lifecycle`), logging `MCLONE_ANDROID_XR_PAUSE_SAVE`.
 
 Validation status: full compile/test battery green (fmt, workspace check, 77
-xr-scene tests + app-runtime/native-client/server, wasm check, `cargo ndk`
-check for both Android apps). Device: Quest session-smoke drew terrain
+scene tests + app-runtime/native-client/server, wasm check, scripted Android
+build gates for both apps). Device: Quest session-smoke drew terrain
 (sections=123, drawn_sections=32) with no regression; flat Android AVD session +
 touch smokes drew terrain and ran clean. The Quest Pause→force-stop→relaunch
 retains-blocks acceptance still needs a **worn-headset manual pass** (the VR
@@ -295,10 +348,18 @@ compositor terminates the window when the headset is off-head, so the app cannot
 be driven into the frame loop remotely); the flush path is compile- and
 logic-verified and fires from the lifecycle pump.
 
+Post-review strengthening (2026-07-10): the lifecycle decision now lives on
+the shared host as `on_background()` and the Quest adapter only reports the
+Pause/Stop transition. A runner regression test keeps the original server alive,
+calls the explicit flush, opens a second reader, and proves the edit is durable
+before any Drop/shutdown save can mask the result. The worn-headset
+Pause→force-stop→relaunch cycle remains the final device acceptance; do not mark
+that specific acceptance complete until it has been performed.
+
 Deliverables:
 
 1. **XR sprint + sneak.** Wire `sprint` and `shift` into the
-   `EngineCameraInput` built at `mclone-xr-scene/src/locomotion.rs:135-147`.
+   `EngineCameraInput` built at `mclone-scene/src/locomotion.rs:135-147`.
    This needs a controller-binding decision (suggested: left-thumbstick click
    = sprint, matching common VR Minecraft bindings; pick a sneak binding that
    does not collide with snap-turn on the right stick). If a binding is
@@ -328,10 +389,11 @@ Validation:
 
 ```bash
 cargo fmt --manifest-path native/Cargo.toml --all --check
-cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-app-runtime -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-scene -p mclone-app-runtime -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml --workspace
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
-cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client -p mclone-android-xr-client
+pnpm native:android:apk
+pnpm native:android-xr:apk
 # Quest 3 is attached to this machine:
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke   # sprint/sneak + pause-save on device
 # Flat Android tablet AVD (jstorrent-tablet):
@@ -349,21 +411,20 @@ Goal: neutralize the rim. Behavior-free.
 
 Landed shape:
 
-- Host-neutral view types live in `mclone-xr-host` (which keeps the `openxr`
-  rim): `XrFov` (four tangent half-angles) and `XrView` (a validated
-  `XrViewPose` + `XrFov`), each with a `from_openxr` conversion. The scene
-  crate's public render/locomotion/teleport/comfort signatures take
-  `XrView`/`XrFov` instead of `xr::View`/`xr::Fovf`. `render_view_from_world_pose`,
-  `xr_fov_to_projection_rh`, and `xr_fov_aspect` now take neutral `XrFov`.
+- Host-neutral view types (`XrViewPose`, `XrFov`, `XrView`, `XrRenderView`) and
+  pure projection helpers live in `mclone-render-session`. Neutral controller
+  snapshots and hand identity live in `mclone-input`. The names retain `Xr`
+  because they describe stereo/tracking data, but neither owner depends on
+  OpenXR.
 - The `openxr` -> neutral conversion happens at the OpenXR rim: the two XR apps
-  (`desktop_xr.rs`, `android-xr/lib.rs`) convert their located
-  `XrStereoFrameViews` with `XrView::from_openxr` at the call boundary before
-  handing views to the scene. Pose finiteness validation therefore moved from
-  inside the scene functions to that boundary (behavior-equivalent).
-- `openxr` removed from the scene crate's `Cargo.toml`. The scene crate still
-  depends on `mclone-xr-host` for the neutral types and controller snapshots;
-  fully shedding that transitive `openxr` link is a later-tactical (web
-  adoption) concern, not a Slice 1 deliverable.
+  call `mclone-xr-host` conversion functions at the boundary before handing
+  views to the scene. Pose finiteness validation therefore lives at that
+  boundary (behavior-equivalent).
+- `openxr` and `mclone-xr-host` are absent from the scene crate's dependency
+  graph. The post-review Slice 4 prerequisite also made `winit` an opt-in
+  `mclone-render/native-surface` feature owned by the desktop app, so the scene
+  graph is free of all platform-rim dependencies checked by
+  `pnpm native:scene-host:purity`.
 - Crate directory + package renamed `mclone-xr-scene` -> `mclone-scene` as a
   **separate mechanical commit** (imports/paths only): workspace member,
   dependency declarations in both consuming apps, and the `mclone_xr_scene`
@@ -377,8 +438,7 @@ Validation (all green 2026-07-09): `cargo fmt --all --check`, workspace
 `cargo check`, `cargo test -p mclone-scene -p mclone-app-runtime
 -p mclone-native-client` (77 scene + 185 + 179 + xr-host, 0 failed),
 `cargo check -p mclone-web-client --target wasm32-unknown-unknown`, and
-`cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
--p mclone-android-xr-client`. On-device Quest 3 session-smoke drew the seed
+the scripted flat/XR Android build gates. On-device Quest 3 session-smoke drew the seed
 world identically to the Slice 0 baseline (terrain ready summary
 `sections=123 drawn_sections=32 indices=599700 drawn_indices=265422 actors=2`),
 with the log now emitting from `mclone_scene::session` — confirming the renamed
@@ -390,7 +450,8 @@ Validation commands:
 cargo test --manifest-path native/Cargo.toml -p mclone-scene -p mclone-app-runtime -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml --workspace
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
-cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client -p mclone-android-xr-client
+pnpm native:android:apk
+pnpm native:android-xr:apk
 pnpm native:xr:desktop            # desktop XR smoke (see docs/platforms.md for runtime setup)
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 ```
@@ -428,6 +489,12 @@ Landed shape:
   unsupported / no flush point) and a native override carrying the existing
   bodies. `WebIntegratedServerRunner` picks up the defaults for free; no web
   behavior changed.
+- Post-review correction (2026-07-10): the generic connection adapter itself
+  moved out of the native-only runtime file into the WASM-built
+  `client_connection` module as `IntegratedRunnerConnection<R>`. This makes the
+  runner seam real and continuously compiled, but does **not** claim the whole
+  scene runtime is WASM-ready; the remaining compiler/catalog/worker seams are
+  listed in the web follow-ups above.
 
 Tripwires: app-runtime tests pass; no public API breakage for existing native
 callers beyond mechanical type-parameter additions; wasm check clean.
@@ -436,8 +503,7 @@ Validation (all green 2026-07-09): `cargo fmt --all --check`, workspace
 `cargo check`, `cargo test -p mclone-server -p mclone-app-runtime
 -p mclone-native-client` (server 185 + app-runtime 179 + native-client 375,
 0 failed), `cargo check -p mclone-web-client --target wasm32-unknown-unknown`,
-`cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
--p mclone-android-xr-client`, and the desktop offscreen pixel canary
+the scripted flat/XR Android build gates, and the desktop offscreen pixel canary
 `pnpm native:desktop-offscreen:smoke` (64 sections / 11 drawn, terrain + mobs
 render unchanged). No device smoke needed — behavior-preserving structural
 slice.
@@ -464,19 +530,22 @@ Landed shape:
   paths are untouched.
 - **Screen-space UI presentation strategy.** `MonoUiPresentation::{None,
   ScreenSpaceHud}` selects the strategy; the stereo world-quad panel remains the
-  other. `ScreenSpaceHud` draws the same `GameUiHost` draw list the stereo path
-  renders (via `prepare_xr_menu_panel_draw`) through the shared GUI slot at the
-  target resolution, backed by a lazily-built `mono_gui: Option<GuiRenderer>` on
-  the host (built on first HUD render; stays `None` on headsets). The dual-view
-  consumer uses `None` (world capture only), matching what the headless path
-  drew before.
+  other. `ScreenSpaceHud` draws the shared menu-panel list plus a capture-grade
+  `FlatHud` crosshair/hotbar through the shared GUI slot at the target resolution,
+  backed by a lazily-built `mono_gui: Option<GuiRenderer>` on the host (built on
+  first HUD render; stays `None` on headsets). The dual-view consumer defaults to
+  `None` (world capture only) and enables the pixel canary explicitly with
+  `--headless-dual-view-hud true`.
 - **Readiness seam.** New non-blocking `local_startup_complete()` and
-  `pending_stream_work()` host queries (server pending render chunks + pending
-  compile jobs + queued client uploads). The blocking drive-to-ready loop lives
-  in the native driver, not the host (Web posture rule).
+  `pending_stream_work(camera_position)` host queries (drawable-target pending
+  chunks/inflight sections + queued client uploads). Tracking-halo dirt outside
+  the requested render distance does not block a capture; this matches the
+  existing startup-streaming target-render quiescence distinction. The blocking
+  drive-to-ready loop lives in the native driver, not the host (Web posture rule).
 - **OffscreenDriver.** New `mclone-native-client/src/offscreen_scene_host.rs`
   `MonoOffscreenSceneHost` constructs the host for a local flat scene, streams
-  the world in against a scratch target until `pending_stream_work()` reaches
+  the world in against a scratch target until target-aware
+  `pending_stream_work(camera_position)` reaches
   zero (the step-based equivalent of the old cold full-sync), then renders flat
   cameras via the host mono topology. `write_headless_dual_view`
   (`--headless-dual-view`) now consumes it; the inline third copy of frame-input
@@ -484,15 +553,21 @@ Landed shape:
   `offscreen_flat_client.rs` and the `--screenshot` path are untouched (Slice 7).
 - **Dependency.** `mclone-scene` is now a non-optional dependency of
   `mclone-native-client` so the flat/offscreen lane links the openxr-free host.
-  The transitive `mclone-xr-host -> openxr` link remains the Slice 1 deferred
-  cleanup (a later web-adoption tactical sheds it).
+  The transitive `mclone-xr-host -> openxr` link was removed by the 2026-07-10
+  post-review dependency correction recorded under Slice 4.
+- **Truthful readiness failure (post-review).** `drive_until_streamed` now errors
+  with its last pending-work/drawn-section counts when the warmup cap is reached;
+  it no longer freezes and captures a partial scene merely because one section
+  happened to draw.
+- **Exercised mono HUD (post-review).** `--headless-dual-view-hud true` routes
+  the same capture through `MonoUiPresentation::ScreenSpaceHud`, so the new GUI
+  renderer/atlas/draw-list path has a reproducible pixel gate before Slice 7.
 
 Validation (all green 2026-07-09): `cargo fmt --all --check`, workspace
 `cargo check`, `cargo test -p mclone-scene -p mclone-app-runtime
 -p mclone-native-client` (77 scene + 185 app-runtime + 179 + native-client, 0
 failed), `cargo check -p mclone-web-client --target wasm32-unknown-unknown`, and
-`cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
--p mclone-android-xr-client`. `--headless-dual-view` (seed 12345, rd 3) rendered
+the scripted flat/XR Android build gates. `--headless-dual-view` (seed 12345, rd 3) rendered
 238 streamed sections through the host mono path (left/right offset overview
 captures reviewed in `/tmp/mclone-168-dualview/`). The `--screenshot` canary
 (`pnpm native:desktop-offscreen:smoke`) is **byte-identical** to the pre-slice
@@ -502,6 +577,25 @@ Desktop→Quest OpenXR session smoke over WiVRn-USB ran the full session lifecyc
 compiled in — no XR regression. A terrain-drawing worn-headset session-smoke
 remains the deeper on-device check (same worn-headset limitation noted in Slice
 0), but the stereo render path is byte-unchanged.
+
+Post-review validation adds:
+
+```bash
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --headless-dual-view /tmp/mclone-168-mono-hud \
+  --headless-dual-view-hud true --render-distance 3 --day-time 6000 --freeze-time
+```
+
+Inspect both captures for world pixels plus the screen-space crosshair/hotbar.
+The 2026-07-10 run rendered 238/238 sections and 1,148,178 drawn indices per
+view, emitted 98 GUI commands per view, and passed visual inspection. The
+desktop offscreen canary still reports 64 sections / 11 drawn / 0 GUI commands.
+The scripted flat and XR Android APK builds, Quest session-smoke (123 sections,
+33 drawn; replacement world ready), and terrain multiview proof (2,355,570
+different eye pixels) also pass. Desktop XR compilation succeeds, but its local
+runtime smoke is environment-blocked when the WiVRn/Monado service is not
+running; this is not a code acceptance failure and should be rerun with the
+service active before Slice 4 baselines are recorded.
 
 **Scope boundary (clarified 2026-07-09): this slice migrates only the
 headless consumers that do NOT sit on `FlatClientDriver`.** The
@@ -559,15 +653,16 @@ Validation: standard battery, plus:
 
 Goal: write the poll -> waitFrame -> locate -> render-or-skip -> end -> report
 loop **once**, in `mclone-xr-host` (or a new thin `mclone-xr-runtime` crate if
-dependency direction demands it), and remove the transitive `openxr` edge that
-Slice 1 left behind.
+dependency direction demands it). The transitive host-dependency cleanup that
+was originally part of this slice landed early after the Slice 3 review.
 
 Read first: `native/crates/mclone-xr-host/src/lib.rs` (the frame primitives:
 `poll_openxr_events`, `wait_begin_frame`, `end_skipped_frame`,
 `end_frame_with_layers`, `end_stereo_projection_frame`,
 `end_multiview_projection_frame`, `acquire_eye_target`/`acquire_stereo_target`,
 `locate_stereo_views`, the `XrEyeSwapchain`/`XrStereoSwapchain` traits, and the
-neutral `XrViewPose`/`XrFov`/`XrView` types at `lib.rs:76-114`);
+OpenXR→neutral conversion functions; neutral controller types now live in
+`mclone-input` and view/FOV/projection types in `mclone-render-session`);
 `desktop_xr.rs:415` (`run_smoke_frames`) as the simplest existing loop;
 android-xr `lib.rs:3343` (`run_mclone_frame_loop`) as the fullest one; then the
 three harness loops (`run_multiview_proof_loop` `:2370`,
@@ -575,7 +670,11 @@ three harness loops (`run_multiview_proof_loop` `:2370`,
 `:3053`).
 
 Context: xr-host owns every frame *step* but not the loop that sequences them,
-so the skeleton is copy-pasted six times. The only genuinely per-surface
+so the skeleton is copy-pasted across **five** loop bodies: desktop, Android
+main, and three Android proof/perf harnesses. The Android main loop directly
+calls `frame_wait.wait()` + `frame_stream.begin()` rather than the
+`wait_begin_frame` helper, which is why the earlier count and grep tripwire were
+misleading. The only genuinely per-surface
 pieces are: (a) the outer event pump (winit companion pump on desktop vs
 `poll_android_events`/`wait_for_android_resume` on Android), (b)
 frame-limit/timeout policy (desktop bounded smoke frames vs Android
@@ -584,27 +683,27 @@ swapchain traits). All three become injected values/hooks on the driver.
 
 Deliverables:
 
-1. **Dependency-direction fix (discovered post-Slice-1, required here).** The
-   neutral view types landed in `mclone-xr-host`, and `mclone-scene` depends
-   on `mclone-xr-host` (`mclone-scene/Cargo.toml:24`,
-   `mclone-scene/src/lib.rs:106` imports `XrControllerSnapshot, XrFov, XrHand,
-   XrView`) — so the scene crate still carries a **transitive** `openxr`
-   dependency, violating host purity (guardrail 5) the moment flat consumers
-   arrive. Move the neutral pose/view/fov/controller-snapshot types to an
-   openxr-free home so `mclone-scene` can drop its `mclone-xr-host` dep
-   entirely. Preferred home: an existing openxr-free crate both already
-   depend on (`mclone-render-session` beside `EngineCamera`, or
-   `mclone-app-runtime`); a tiny new types crate is acceptable if neither
-   fits cleanly. `mclone-xr-host` keeps only the `from_openxr` conversions.
-   Record the placement choice in this doc. Exit check:
-   `cargo tree --manifest-path native/Cargo.toml -p mclone-scene | grep -i openxr`
-   returns nothing.
+1. **Dependency-direction fix — DONE early (2026-07-10).** Controller
+   snapshots/hand identity moved to `mclone-input`; view pose/FOV/projected-view
+   contracts and pure projection helpers moved to `mclone-render-session`.
+   `mclone-xr-host` keeps OpenXR conversion functions and compatibility
+   re-exports for app callers. `mclone-scene` dropped `mclone-xr-host` entirely.
+   Separately, winit surface ownership in `mclone-render` is behind the explicit
+   `native-surface` feature enabled by the desktop app. The scene cargo tree is
+   empty for `openxr|mclone-xr-host|winit|android-activity|jni`; run
+   `pnpm native:scene-host:purity` as the permanent check.
 2. **`OpenXrFrameDriver`**, generic over the graphics session via the
    existing swapchain traits, taking: a per-frame render callback, a platform
    pump hook, frame-limit/timeout policy, and the idle poll interval.
    `SESSION_IDLE_POLL_INTERVAL` (declared identically at `desktop_xr.rs:103`
    and android-xr `lib.rs:150`) gets its single home here.
-3. **Migrate all six loops** onto the driver: `desktop_xr.rs:415`, android-xr
+   The driver must return a structured frame outcome containing session state,
+   predicted display time, should-render/submitted/skipped state, and measured
+   wait/begin durations. It must provide before-render/after-frame hooks (or an
+   equivalent observation callback) so Android perf accounting and smoke
+   replacement timing survive without moving diagnostics policy back into the
+   app loop.
+3. **Migrate all five loops** onto the driver: `desktop_xr.rs:415`, android-xr
    `lib.rs:3343` (main), `:2370`, `:2667`, `:3053` (harnesses). The harness
    loops become thin render-callback variants, not separate loops.
 4. **Unify the `render_mclone_frame` twins** — `desktop_xr.rs:972`, android-xr
@@ -629,8 +728,10 @@ validation scripts grep for specific log markers (e.g.
 `MCLONE_ANDROID_XR_REPLACEMENT_READY` in `android-xr/validate-quest-openxr.sh`)
 — those exact strings must survive the migration.
 
-Tripwires: `grep -rn "wait_begin_frame" native/apps` hits nothing (only the
-shared driver calls it); Quest smoke ready-summary lines
+Tripwires: app crates contain no `wait_begin_frame`, direct `frame_wait.wait()` /
+`frame_stream.begin()`, `poll_openxr_events`, or `end_*frame` calls (make the
+low-level primitives crate-private to the driver if feasible rather than relying
+only on grep); Quest smoke ready-summary lines
 (`sections=`/`drawn_sections=`/`drawn_indices=`) match pre-slice baselines;
 the `cargo tree` openxr check on `mclone-scene` is clean.
 
@@ -640,7 +741,7 @@ Validation: standard battery + `pnpm native:xr:desktop` +
 `pnpm native:android-xr:terrain-multiview-proof` (the harness loops must still
 pass after migrating onto the driver).
 
-Exit criteria: six loops replaced by one driver; both XR apps' loop code is
+Exit criteria: five loops replaced by one driver; both XR apps' loop code is
 render-callback + platform pump only; `mclone-scene` has no openxr edge,
 direct or transitive; device logs match baselines.
 
@@ -942,7 +1043,7 @@ its three enforcement tests pass.
 Validation:
 
 ```bash
-cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
+pnpm native:android:apk
 MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-smoke
 MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-touch-smoke
 MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-session-smoke
@@ -1028,11 +1129,12 @@ Deliverables:
    script (e.g. `scripts/check-native-thin-adapters.sh`) run in validation,
    or unit tests. Forbidden in `native/apps/*`:
    `ClientExperienceSettingEffect` matches, per-frame
-   `sync_render_sections`/section-upload calls, `wait_begin_frame`,
+   `sync_render_sections`/section-upload calls, `wait_begin_frame`, direct
+   `frame_wait.wait`/`frame_stream.begin`, app-local OpenXR poll/end-frame calls,
    `SessionStartRequest` dispatch matches, and `EngineCameraInput`
    field-by-field construction. Also enforce host purity:
-   `cargo tree -p mclone-scene | grep -i openxr` empty (plus no
-   winit/android-activity/jni edges).
+   `cargo tree -p mclone-scene | grep -Ei
+   'openxr|mclone-xr-host|winit|android-activity|jni'` empty.
 4. **Gamepad decision.** `GamepadInputAdapter`/`GamepadBindings` in
    `mclone-input` still have zero users. Decide and record: adopt (wire it on
    desktop + the Slice 9 emulation lane) or keep-as-contract with a dated
@@ -1048,6 +1150,10 @@ Deliverables:
 6. **Cross-tactical bookkeeping.** Update 165 (ledger end-state; Slices 2c/3
    resolution), 163 and 167 follow-up notes, and this doc's status +
    README index row to complete.
+7. **Neutral public names.** Rename `XrMcloneTerrainState` and `XrSceneOptions`
+   to `McloneSceneHost` and neutral scene-host options. Temporary aliases may
+   protect slice-by-slice callers, but remove them here; mono consumers must not
+   expose an XR-named core as the permanent architecture.
 
 Final acceptance checklist (run everything on this machine):
 
@@ -1069,7 +1175,9 @@ Final acceptance checklist (run everything on this machine):
 2. **Every slice leaves every surface shippable.** Minimum per-slice battery:
    `cargo fmt --all --check`, workspace `cargo check`, `cargo test` for
    touched crates, wasm `cargo check` for `mclone-web-client`,
-   `cargo ndk -t arm64-v8a --platform 28 check` for both Android apps.
+   and the scripted Android build gates (`pnpm native:android:apk` and
+   `pnpm native:android-xr:apk`; the scripts own NDK/toolchain discovery—do not
+   hand-roll `cargo ndk`).
 3. **Pixels get eyes.** Any slice touching code that produces pixels validates
    on the affected devices before it is called done — desktop offscreen
    screenshot, `pnpm native:xr:desktop` for desktop XR, Quest 3 (attached)
@@ -1085,7 +1193,10 @@ Final acceptance checklist (run everything on this machine):
    sequencing (Slices 4, 5, 6).
 5. **Host purity.** The scene host crate must never gain `openxr`, `winit`,
    `android-activity`, `jni`, or blocking-socket dependencies. Time via the
-   existing wasm-compatible patterns; no bare `std::thread` in the host.
+   existing wasm-compatible patterns; no bare `std::thread` in the host. The
+   pre-existing bare `Instant` use is a recorded web-adoption blocker above:
+   do not add more, and remove it behind the clock abstraction before declaring
+   the direct scene WASM gate green.
 6. **No behavior smuggling.** Structural slices (1, 2, 4, 5 builders-move, 7,
    8) must be behavior-preserving; behavior fixes live in Slice 0 or are
    called out explicitly with their own validation. If a migration would
@@ -1139,15 +1250,13 @@ Final acceptance checklist (run everything on this machine):
 | [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md) / [`154-client-ingress-adapter-cleanup.md`](154-client-ingress-adapter-cleanup.md) | Remote ingress is shared; the triplicated `RemoteServerSession` adapter dedup (Slice 7) must use the existing ingress contracts, not new request/response helpers. |
 | [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md) / [`062-shared-threading-topology.md`](062-shared-threading-topology.md) | Own the web worker/threading convergence that the deferred web-adoption tactical will build on; the seams in this doc (runner trait, step-based APIs) are prerequisites, not replacements. |
 
-## How to begin (for the implementing agent)
+## How to continue (for the implementing agent)
 
-Start with Slice 0. Read, in order:
-`native/crates/mclone-xr-scene/src/locomotion.rs` (sprint/sneak site),
-`native/apps/mclone-android-xr-client/src/lib.rs:7480-7573` (lifecycle pump),
-`native/crates/mclone-server/src/runner.rs` +
-`native/crates/mclone-server/src/integrated.rs` (Drop-driven save path),
-`native/apps/mclone-android-client/src/lib.rs:1940-1980` and `:3280-3330`
-(interaction + input-assembly fixes). Capture pre-fix baselines (Quest
-session-smoke log, AVD session screenshot) before editing. Land the four fixes
-as separate commits with the Slice 0 validation battery, then update this
-doc's slice status and the README index row.
+Start with Slice 4; Slices 0–3 are already implemented. First capture the
+desktop XR and Quest session-smoke baselines described in Slice 4, then read the
+five live loop bodies and the low-level primitives in `mclone-xr-host`. Preserve
+the Android main loop's direct wait/begin timing and all smoke/perf callbacks in
+the driver's structured outcome/hooks. Migrate one bounded harness first,
+validate its pixels/log markers, and only then move the main loops. Do not mark
+Slice 0's worn-headset Pause -> force-stop -> relaunch acceptance complete until
+that manual cycle has actually retained a world edit.

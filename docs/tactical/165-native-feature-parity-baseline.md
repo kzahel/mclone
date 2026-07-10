@@ -2,7 +2,10 @@
 
 Status: active 2026-07-09. Slice 1 (baseline mechanism + flat-Android far LOD)
 landed in `da719dda`. Slice 2a (shared frame-pipeline accountant owner) landed
-2026-07-09; the remaining exceptions are open burn-down slices.
+2026-07-09; the remaining exceptions are open burn-down slices. Coordination
+update 2026-07-10: tactical 168 now owns the runtime/host plumbing that clears
+the remaining native rows; do not grow the soon-to-be-deleted Android or desktop
+loops to complete them independently.
 
 Workstream: native Rust shared client-experience policy in `mclone-app-runtime`,
 desktop flat, shared XR scene, flat Android, and Android XR. Web is the one
@@ -87,13 +90,13 @@ reason-bearing, tracked exceptions.
 Validation:
 
 ```bash
-cargo fmt --manifest-path native/Cargo.toml --package mclone-app-runtime --package mclone-native-client --package mclone-xr-scene --package mclone-android-client --package mclone-android-xr-client --package mclone-web-client --check
+cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client
-cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-scene
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
-cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-client
-cargo ndk -t arm64-v8a --platform 28 check -p mclone-android-xr-client
+pnpm native:android:apk
+pnpm native:android-xr:apk
 # Pixel validation (temporary startup far-LOD toggle for the AVD capture, reverted after):
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --screenshot /tmp/mclone-desktop-farlod.png --render-distance 2 --far-lod true --day-time 6000 --freeze-time --startup-wait idle
 MCLONE_ANDROID_ABIS=arm64-v8a pnpm native:android:avd-smoke   # tablet AVD is arm64-v8a, not x86_64
@@ -155,6 +158,22 @@ threading/perf grounds (far LOD "measure on web first", Tactical 162).
 
 ## Remaining Slices
 
+**Coordination with tactical 168 (2026-07-10):** the items below remain the
+capability acceptance requirements, but their implementation routing changed:
+
+- travel assist and server cadence land through the shared scene host during
+  168 Slices 7/8, not as Android-loop additions;
+- accountant convergence (2c) is 168 Slice 5;
+- frame-pacing POD/debug-aggregator promotion is coordinated with 168 Slices
+  7a/8;
+- Android frame-pipeline wiring is inherited when the old Android loop is
+  deleted in 168 Slice 8. Do **not** execute the old "next — slice 2b" recipe by
+  adding timing brackets to that app-local loop; it would create code that Slice
+  8 immediately removes.
+
+Capability flips and ledger-row removal still happen atomically with the shared
+plumbing, as required by this tactical's enforcement tests.
+
 1. **Flat-Android travel assist.** Wire `SetTravelAssistMode` into the Android
    camera/movement path (desktop `flat_client_driver` is the reference); drop the
    ledger entry and flip the capability.
@@ -184,7 +203,7 @@ threading/perf grounds (far LOD "measure on web first", Tactical 162).
      panels), and factor a neutral queue-depth input struct so both surfaces feed
      one queue-tracker set; preserve XR's percentile and age semantics exactly and
      re-run the XR captures.
-   - **[next — slice 2b]** On flat Android, instantiate the shared accountant,
+   - **[subsumed by tactical 168 Slice 8 — do not implement app-locally]** On flat Android, instantiate the shared accountant,
      un-gate the profile, replace the `SetFramePipelineOverlayVisible(_)` no-op
      with a real `bool` handler, feed the flag through `current_ui_render_state`,
      and populate `hud.frame_pipeline`. The draw link already exists, but note:

@@ -32,8 +32,40 @@ fn cli_parses_headless_dual_view_scene_options() {
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
+                hud: false,
             },
         }
+    );
+}
+
+#[test]
+fn cli_parses_headless_dual_view_hud() {
+    let cli = Cli::parse([
+        "--headless-dual-view".to_owned(),
+        "/tmp/mclone-dual-view-hud".to_owned(),
+        "--headless-dual-view-hud".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+    let Cli::HeadlessDualView { options } = cli else {
+        panic!("expected headless dual-view CLI mode");
+    };
+    assert!(options.hud);
+}
+
+#[test]
+fn cli_rejects_headless_dual_view_hud_without_dual_view_capture() {
+    let error = Cli::parse([
+        "--headless-dual-view-hud".to_owned(),
+        "true".to_owned(),
+        "--headless-clear".to_owned(),
+        "/tmp/mclone-clear.png".to_owned(),
+    ])
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("--headless-dual-view-hud requires --headless-dual-view")
     );
 }
 

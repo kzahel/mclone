@@ -983,8 +983,8 @@ fn render_mclone_frame(
         mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)
             .context("locate OpenXR stereo views for mclone frame")?;
     let scene_views = [
-        mclone_xr_host::XrView::from_openxr(&stereo_views.left)?,
-        mclone_xr_host::XrView::from_openxr(&stereo_views.right)?,
+        mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
+        mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
     ];
     mclone.apply_locomotion_input(controllers, scene_views)?;
 

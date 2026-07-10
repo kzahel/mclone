@@ -48,9 +48,9 @@ use mclone_app_runtime::world_catalog::{
 };
 use mclone_app_runtime::{
     EngineCameraCommitContext, GameplayCommandTiming, GameplayCommandUpdatePolicy,
-    RuntimePollDiagnostics, TraversalReadySectionCache, debug_block_palette_overlay, elapsed_ms,
-    execute_world_catalog_request, micros_to_ms, refresh_world_catalog_controller,
-    set_player_appearance_command_for_ui_model,
+    RuntimePollDiagnostics, TraversalReadySectionCache, debug_block_palette_overlay,
+    debug_hotbar_icons, elapsed_ms, execute_world_catalog_request, micros_to_ms,
+    refresh_world_catalog_controller, set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
@@ -62,6 +62,7 @@ use mclone_client::{
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_diagnostics::{BudgetDecisionPanelReport, FramePipelineReport};
+use mclone_input::{InputPromptKind, ResolvedFlatInput, XrControllerSnapshot, XrHand};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
@@ -96,17 +97,17 @@ use mclone_render_session::{
     EngineDebugVisualOptions, EngineHandPushInput, EngineRoomScaleReconciliation,
     EngineThrusterHand, EngineThrusterInput, RenderSectionCacheUpdate,
     RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy, RenderSectionUploadPhaseReport,
-    actor_instances_from_presentations, engine_debug_world_lines,
+    XrFov, XrRenderView, XrView, XrViewPose, actor_instances_from_presentations,
+    engine_debug_world_lines, render_view_from_world_pose,
 };
 use mclone_server::WorkerFrameMetrics;
 use mclone_ui::{
-    Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, GameCollisionMode, GameFramePacingMode,
-    GameMovementMode, GamePlayerModel, GameScreen, GameTravelAssistMode, GameUiAction, GameUiHost,
-    GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale, LoadingProgressOverlay, Point, Rect,
-    StatusOverlay, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
-    render_loading_progress_overlay, render_status_overlay,
+    Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, GameCollisionMode,
+    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameTravelAssistMode,
+    GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale,
+    LoadingProgressOverlay, Point, Rect, StatusOverlay, UiDrawCacheStats, UiPanelRevision,
+    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
-use mclone_xr_host::{XrControllerSnapshot, XrFov, XrHand, XrView};
 
 mod comfort;
 mod diagnostic_panel;
@@ -339,6 +340,14 @@ where
             Some(runtime) => runtime.flush_persistence(),
             None => Ok(0),
         }
+    }
+
+    /// Shared lifecycle policy for a host entering the background. Native local
+    /// worlds synchronously commit durable edits; remote sessions are a no-op
+    /// because persistence belongs to the dedicated server. Platform drivers
+    /// report lifecycle transitions but do not choose the save policy.
+    pub fn on_background(&mut self) -> Result<usize> {
+        self.flush_persistence()
     }
 
     pub fn render_frame(
@@ -4550,7 +4559,7 @@ mod tests {
 
     fn test_xr_view(position: Vec3, orientation: Quat) -> XrView {
         XrView {
-            pose: mclone_xr_host::XrViewPose {
+            pose: XrViewPose {
                 position,
                 orientation,
             },

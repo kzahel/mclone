@@ -2,8 +2,12 @@ use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_server::{
+    IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerResult, ServerUpdateEnvelope,
+    SimulationCadenceConfig,
+};
 
 use crate::host_mode::update_drain_exchange;
 use crate::{RuntimeUpdatePumpBudget, RuntimeUpdatePumpReport, SingleViewRuntime, elapsed_ms};
@@ -137,6 +141,102 @@ pub trait ClientConnection {
     fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics>;
 }
 
+/// Shared client-side adapter for an [`IntegratedServerRunner`].
+///
+/// This is deliberately in the WASM-built connection module rather than the
+/// native session-runtime module: native threaded runners and browser worker
+/// runners must cross the same command/update/diagnostics boundary. The larger
+/// scene runtime still has native compiler/thread ownership to split before it
+/// can build for WASM, but this runner seam itself is now continuously compiled
+/// by the web-client gate (tactical 168 follow-up audit).
+#[derive(Debug)]
+pub struct IntegratedRunnerConnection<R> {
+    runner: R,
+}
+
+impl<R: IntegratedServerRunner> IntegratedRunnerConnection<R> {
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
+
+    pub fn set_simulation_cadence(
+        &mut self,
+        cadence: SimulationCadenceConfig,
+    ) -> ServerRunnerResult<()> {
+        self.runner.set_simulation_cadence(cadence)
+    }
+
+    pub fn poll_diagnostics(&self) -> ServerRunnerResult<ServerRunnerDiagnostics> {
+        self.runner.poll_diagnostics()
+    }
+
+    pub fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
+        self.runner.refresh_fast_diagnostics(diagnostics);
+    }
+
+    pub fn flush_persistence(&mut self) -> ServerRunnerResult<usize> {
+        self.runner.flush_persistence()
+    }
+
+    pub const fn runner(&self) -> &R {
+        &self.runner
+    }
+
+    pub const fn runner_mut(&mut self) -> &mut R {
+        &mut self.runner
+    }
+
+    pub fn into_runner(self) -> R {
+        self.runner
+    }
+}
+
+impl<R: IntegratedServerRunner> ClientConnection for IntegratedRunnerConnection<R> {
+    fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
+        self.runner
+            .send_command(command)
+            .context("failed to send local integrated server command")
+    }
+
+    fn drain_next_update(
+        &mut self,
+        _mode: ConnectionUpdateDrainMode,
+    ) -> Result<ClientConnectionDrainResult> {
+        let Some(envelope) = self
+            .runner
+            .try_recv_update()
+            .context("failed to receive local integrated server update")?
+        else {
+            return Ok(ClientConnectionDrainResult::default());
+        };
+        Ok(ClientConnectionDrainResult::with_update(
+            queued_update_from_runner_envelope(envelope),
+            0,
+            0,
+        ))
+    }
+
+    fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
+        let diagnostics = self
+            .runner
+            .poll_diagnostics()
+            .context("failed to poll local integrated server diagnostics")?;
+        Ok(ClientConnectionQueueMetrics::new(
+            diagnostics.update_queue_depth,
+            diagnostics.update_queue_bytes,
+        ))
+    }
+}
+
+fn queued_update_from_runner_envelope(envelope: ServerUpdateEnvelope) -> QueuedServerUpdate {
+    QueuedServerUpdate::single(
+        envelope.update,
+        envelope.encoded_len,
+        envelope.queued_age,
+        true,
+    )
+}
+
 pub fn pump_client_connection_updates_report<C>(
     core: &mut SingleViewRuntime,
     connection: &mut C,
@@ -237,11 +337,16 @@ mod tests {
 
     use anyhow::Result;
     use mclone_core::ChunkPos;
-    use mclone_protocol::{ClientCommand, ServerUpdate};
+    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+    use mclone_server::{
+        IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerKind, ServerRunnerResult,
+        ServerUpdateEnvelope,
+    };
 
     use super::{
         ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
-        ConnectionUpdateDrainMode, QueuedServerUpdate, pump_client_connection_updates_report,
+        ConnectionUpdateDrainMode, IntegratedRunnerConnection, QueuedServerUpdate,
+        pump_client_connection_updates_report,
     };
     use crate::{
         RuntimeUpdatePumpBudget, SingleViewRuntime, chunk_tracking_radius_for_render_distance,
@@ -310,6 +415,84 @@ mod tests {
                     .sum(),
             ))
         }
+    }
+
+    #[derive(Debug)]
+    struct ScriptedIntegratedRunner {
+        sent_commands: Vec<ClientCommand>,
+        queued_updates: VecDeque<ServerUpdateEnvelope>,
+        shutdown_requested: bool,
+    }
+
+    impl IntegratedServerRunner for ScriptedIntegratedRunner {
+        fn kind(&self) -> ServerRunnerKind {
+            ServerRunnerKind::WebWorker
+        }
+
+        fn send_command(&mut self, command: ClientCommand) -> ServerRunnerResult<()> {
+            self.sent_commands.push(command);
+            Ok(())
+        }
+
+        fn try_recv_update(&mut self) -> ServerRunnerResult<Option<ServerUpdateEnvelope>> {
+            Ok(self.queued_updates.pop_front())
+        }
+
+        fn poll_diagnostics(&self) -> ServerRunnerResult<ServerRunnerDiagnostics> {
+            let mut diagnostics =
+                ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, 12_345, 6_000);
+            diagnostics.update_queue_depth = self.queued_updates.len();
+            diagnostics.update_queue_bytes = self
+                .queued_updates
+                .iter()
+                .map(|update| update.encoded_len)
+                .sum();
+            Ok(diagnostics)
+        }
+
+        fn request_shutdown(&mut self) {
+            self.shutdown_requested = true;
+        }
+
+        fn join_shutdown(&mut self) -> ServerRunnerResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn integrated_runner_connection_adapts_worker_shaped_runner() {
+        let runner = ScriptedIntegratedRunner {
+            sent_commands: Vec::new(),
+            queued_updates: VecDeque::from([ServerUpdateEnvelope {
+                update: ServerUpdate::TimeUpdate { day_time: 9_000 },
+                encoded_len: 17,
+                queued_age: Duration::from_millis(4),
+            }]),
+            shutdown_requested: false,
+        };
+        let mut connection = IntegratedRunnerConnection::new(runner);
+
+        connection
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 2,
+                chunk_tracking_radius: 2,
+            }))
+            .unwrap();
+        assert_eq!(connection.runner().sent_commands.len(), 1);
+        assert_eq!(
+            connection.pending_update_metrics().unwrap().update_depth(),
+            1
+        );
+
+        let drained = connection
+            .drain_next_update(ConnectionUpdateDrainMode::ReadyOnly)
+            .unwrap();
+        assert_eq!(drained.update.unwrap().encoded_len(), 17);
+        assert_eq!(
+            connection.pending_update_metrics().unwrap().update_depth(),
+            0
+        );
     }
 
     #[test]

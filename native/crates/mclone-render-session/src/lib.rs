@@ -46,6 +46,7 @@ mod section_cache;
 mod server_updates;
 mod session;
 mod upload;
+mod view;
 
 pub use camera::*;
 pub use compile_queue::*;
@@ -56,6 +57,7 @@ pub use section_cache::*;
 pub use server_updates::*;
 pub use session::*;
 pub use upload::*;
+pub use view::*;
 
 #[cfg(test)]
 pub(crate) use camera::{ENGINE_DEBUG_HAND_SPHERE_SEGMENTS, hand_push_emulation_direction};

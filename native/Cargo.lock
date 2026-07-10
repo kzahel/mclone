@@ -1549,6 +1549,7 @@ dependencies = [
 name = "mclone-input"
 version = "0.0.0"
 dependencies = [
+ "glam 0.30.10",
  "serde",
 ]
 
@@ -1687,13 +1688,13 @@ dependencies = [
  "mclone-client",
  "mclone-core",
  "mclone-diagnostics",
+ "mclone-input",
  "mclone-mesh",
  "mclone-protocol",
  "mclone-render",
  "mclone-render-session",
  "mclone-server",
  "mclone-ui",
- "mclone-xr-host",
  "wgpu",
 ]
 
@@ -1776,6 +1777,8 @@ dependencies = [
  "anyhow",
  "glam 0.30.10",
  "log",
+ "mclone-input",
+ "mclone-render-session",
  "openxr",
  "wgpu",
 ]

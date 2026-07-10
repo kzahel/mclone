@@ -40,13 +40,15 @@ native/
     mclone_light
     mclone_mesh
     mclone_assets
+    mclone_input
+    mclone_audio
     mclone_render
     mclone_render_session
     mclone_app_runtime
     mclone_ui
     mclone_xr_host
     mclone_xr_graphics
-    mclone_xr_scene
+    mclone_scene
   apps/
     mclone-native-client
     mclone-dedicated-server
@@ -64,6 +66,7 @@ Shared engine crates own:
 - asset parsing and packed asset-source abstractions
 - render-section meshing, dirty/cache policy, and compile scheduling
 - renderer resources and frame drawing from explicit view/target facts
+- the shared native scene/session/UI/orchestration host (`mclone-scene`)
 - shared Rust/WebGPU UI model and draw list
 
 Platform app crates own:
@@ -76,12 +79,13 @@ Platform app crates own:
 
 ## Host Shapes
 
-Single-view hosts converge on shared runtime/render state and explicit frame facts:
+Native clients are converging on one `mclone-scene` host with thin cadence and
+surface drivers (tactical 168). Single-view hosts use the mono topology:
 
 ```text
 platform input/lifecycle
   -> platform adapter
-  -> shared client/runtime/render-session state
+  -> mclone-scene shared session/runtime/UI orchestration
   -> explicit single render view + render target
   -> mclone-render
 ```
@@ -94,18 +98,25 @@ finite `ChunkRenderView` matrices and camera bases. `ChunkCamera` remains a
 compatibility shape for fixed overview/headless diagnostics; new flat player
 camera paths should not reconstruct rendering from `eye + target + world_up`.
 
-Stereo XR hosts share OpenXR and terrain-scene behavior where practical:
+Stereo XR hosts use the same scene host with OpenXR confined to the rim:
 
 ```text
 OpenXR runtime/actions/swapchains
   -> platform XR adapter
-  -> shared XR host/graphics/scene helpers
-  -> shared client/runtime/render-session state
+  -> mclone-xr-host / mclone-xr-graphics frame and swapchain glue
+  -> mclone-scene shared session/runtime/UI orchestration
   -> explicit per-eye render views + targets
   -> mclone-render
 ```
 
 Desktop XR and Android XR should diverge only at runtime discovery, Android loader/activity glue, packaging, headset wake/restore, and other true platform concerns.
+
+Neutral tracked-controller snapshots and hand identity belong to
+`mclone-input`. Neutral view pose/FOV/projection contracts belong to
+`mclone-render-session`. `mclone-xr-host` translates OpenXR values into those
+contracts; `mclone-scene` does not depend on OpenXR or winit. Window surface
+support in `mclone-render` is feature-gated and enabled by the desktop app,
+not by shared scene consumers.
 
 ## Core Rules
 

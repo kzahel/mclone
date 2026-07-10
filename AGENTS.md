@@ -96,6 +96,15 @@ Default shared routing:
   and transient effects, entity AI/spawning, localization: define or extend a
   shared contract before adding app-local behavior.
 
+Native client frame orchestration converges on `mclone-scene`: session/runtime
+ownership, lifecycle save policy, camera reconcile, effects, UI/HUD assembly,
+render admission, and mono/stereo/multiview frame preparation belong there.
+App/platform code may own only the cadence/event pump, raw input translation,
+window/activity/OpenXR session and surface/swapchain targets, platform roots,
+and presentation. Neutral tracked-controller data belongs in `mclone-input`;
+neutral view/FOV/projection contracts belong in `mclone-render-session`.
+Do not add OpenXR or winit dependencies to `mclone-scene`.
+
 ## XR render-path guardrail
 
 World-space or per-view visual features must be multiview-aware. Prefer routing

@@ -505,9 +505,10 @@ Decided ownership (see [Decisions](#decisions-and-open-questions)):
   authority, replica, command/update, and transport contracts.
 - `mclone-render-session` and `mclone-render`: render-session policy and
   drawing from explicit view/target facts.
-- `mclone-xr-scene`: XR projection and scene shell only. Its private session
-  machine (V4) migrates onto the shared coordinator; what remains is the XR
-  world-panel projection, pose/ray plumbing, and comfort presentation.
+- `mclone-scene`: shared client scene/session/UI orchestration for mono, stereo,
+  and multiview topologies. OpenXR session/swapchain ownership stays in
+  `mclone-xr-host`/platform drivers; neutral controller and view contracts live
+  below the scene in `mclone-input` and `mclone-render-session`.
 
 The implementation should not start by creating a large new crate. It should
 move policy behind the shared facade in `mclone-app-runtime` while watching

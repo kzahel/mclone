@@ -1876,6 +1876,45 @@ mod native {
         }
 
         #[test]
+        fn native_runner_flush_persistence_is_visible_before_shutdown() {
+            let root = unique_temp_dir("native-runner-explicit-flush");
+            let seed = 12_345;
+
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(seed).with_persistent_world_dir(root.clone()),
+            )
+            .unwrap();
+            let (snapshot, mut updates) = load_chunk_snapshot(&mut runner, ChunkPos::new(0, 0));
+            acknowledge_initial_teleport(&mut runner, &updates);
+            let target = first_non_air_block(&snapshot).expect("generated chunk contains blocks");
+            move_player_near_block(&mut runner, target);
+            break_block(&mut runner, target);
+            updates = drain_until(&mut runner, |updates| {
+                has_block_delta_for_block(updates, target, AIR_BLOCK_STATE_ID)
+            });
+            assert!(has_block_delta_for_block(
+                &updates,
+                target,
+                AIR_BLOCK_STATE_ID
+            ));
+
+            assert!(runner.flush_persistence().unwrap() >= 1);
+
+            // Keep the original runner alive: the verifier must observe the
+            // explicit durable flush, not the Drop/join shutdown save path.
+            let mut verifier = NativeIntegratedServerRunner::new(
+                test_runner_config(seed).with_persistent_world_dir(root.clone()),
+            )
+            .unwrap();
+            let (snapshot, _updates) = load_chunk_snapshot(&mut verifier, target.chunk_pos());
+            assert_eq!(snapshot_block_state(&snapshot, target), AIR_BLOCK_STATE_ID);
+
+            verifier.join_shutdown().unwrap();
+            runner.join_shutdown().unwrap();
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
         fn diagnostics_detail_refresh_predicate_tracks_scheduler_visible_activity() {
             assert!(!should_force_detail_after_tick(
                 &tick_report_for_detail_refresh(0, 0, 0)

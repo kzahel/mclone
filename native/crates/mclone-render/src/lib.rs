@@ -26,7 +26,7 @@ pub use mclone_diagnostics::GpuPassId;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-surface"))]
 pub mod native;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

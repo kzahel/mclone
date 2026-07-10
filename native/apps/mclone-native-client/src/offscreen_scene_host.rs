@@ -117,6 +117,8 @@ impl MonoOffscreenSceneHost {
 
         let mut stable = 0usize;
         let mut drew_any = false;
+        let mut last_pending_stream_work = usize::MAX;
+        let mut last_drawn_section_count = 0usize;
         for _ in 0..MAX_WARMUP_FRAMES {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_mono_offscreen_warmup_encoder"),
@@ -138,11 +140,13 @@ impl MonoOffscreenSceneHost {
                 .context("poll device during offscreen warmup")?;
 
             drew_any |= summary.drawn_section_count > 0;
+            last_drawn_section_count = summary.drawn_section_count;
+            last_pending_stream_work = self.host.pending_stream_work(warmup_view.camera_position);
             // Fully streamed = no pending server generation / compile / upload
             // work (implies startup completed) and geometry has actually drawn.
             // A short stable window absorbs single-frame lulls between async
             // worldgen bursts.
-            if self.host.pending_stream_work() == 0 && summary.drawn_section_count > 0 {
+            if last_pending_stream_work == 0 && summary.drawn_section_count > 0 {
                 stable += 1;
                 if stable >= STREAM_STABLE_FRAMES {
                     return Ok(());
@@ -157,7 +161,9 @@ impl MonoOffscreenSceneHost {
                 "offscreen scene host streamed no render sections after {MAX_WARMUP_FRAMES} warmup frames"
             );
         }
-        Ok(())
+        bail!(
+            "offscreen scene host did not settle after {MAX_WARMUP_FRAMES} warmup frames: pending_stream_work={last_pending_stream_work} last_drawn_sections={last_drawn_section_count}"
+        )
     }
 
     /// Render one flat camera into the caller-owned frame, with the runtime
@@ -166,16 +172,12 @@ impl MonoOffscreenSceneHost {
         &mut self,
         frame: RenderFrameContext<'_>,
         camera: ChunkCamera,
+        ui: MonoUiPresentation,
     ) -> Result<FullFrameRenderSummary> {
         let render_view = camera.render_view(self.size[0], self.size[1]);
         let summary = self
             .host
-            .render_mono_frame_frozen_runtime(
-                frame,
-                &self.depth,
-                render_view,
-                MonoUiPresentation::None,
-            )
+            .render_mono_frame_frozen_runtime(frame, &self.depth, render_view, ui)
             .context("render frozen mono camera")?;
         self.captured.push(summary);
         Ok(summary)

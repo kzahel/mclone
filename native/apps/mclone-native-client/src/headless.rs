@@ -66,6 +66,7 @@ pub(crate) struct HeadlessDualViewReport {
     pub(crate) drawn_section_count: usize,
     pub(crate) index_count: u32,
     pub(crate) drawn_index_count: u32,
+    pub(crate) gui_command_count: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -790,6 +791,11 @@ pub(crate) fn write_headless_dual_view(
     let cameras = dual_view_cameras(base_camera);
     let scene = dual_view_scene_options(&options.scene)?;
     let render_options = options.render_options;
+    let ui = if options.hud {
+        mclone_scene::MonoUiPresentation::ScreenSpaceHud
+    } else {
+        mclone_scene::MonoUiPresentation::None
+    };
 
     // Drive the shared scene host's mono (flat) view topology (tactical 168
     // Slice 3): the host owns the session runtime, budgeted section streaming,
@@ -815,7 +821,7 @@ pub(crate) fn write_headless_dual_view(
             Ok(host)
         },
         |index, frame, host| {
-            host.render_camera_frozen(frame, cameras[index].1)?;
+            host.render_camera_frozen(frame, cameras[index].1, ui)?;
             Ok(())
         },
     )?;
@@ -838,6 +844,9 @@ pub(crate) fn write_headless_dual_view(
             .get(index)
             .copied()
             .with_context(|| format!("dual-view {view_name} capture recorded no summary"))?;
+        if options.hud && summary.gui_command_count == 0 {
+            bail!("headless dual-view {view_name} HUD capture emitted no GUI commands");
+        }
         reports.push(HeadlessDualViewReport {
             view_name,
             path,
@@ -849,6 +858,7 @@ pub(crate) fn write_headless_dual_view(
             drawn_section_count: summary.drawn_section_count,
             index_count: summary.index_count,
             drawn_index_count: summary.drawn_index_count,
+            gui_command_count: summary.gui_command_count,
         });
     }
     Ok(reports)
