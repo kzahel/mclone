@@ -8,16 +8,19 @@ use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::catalog_executor::WorldCatalogOperationService;
 use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::client_experience::xr_native_client_experience_profile;
 use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceController, ClientExperienceEffects,
     ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
     ClientExperienceSettingsEffects, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
-    xr_native_client_experience_profile,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::client_session_policy::client_session_failed_start_ui_effects;
 use mclone_app_runtime::client_session_policy::{
     ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
-    ClientSessionTransitionEffects, ClientSessionUiEffects, client_session_failed_start_ui_effects,
+    ClientSessionTransitionEffects, ClientSessionUiEffects,
     client_session_quit_to_title_transition, client_session_should_clear_inactive_status,
     client_session_status_projection,
 };
@@ -36,12 +39,13 @@ use mclone_app_runtime::frame_render::{
     render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot,
     render_view_with_underwater_effect,
 };
-use mclone_app_runtime::host_mode::{
-    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
+use mclone_app_runtime::host_mode::{SingleViewHostMode, SingleViewHostOptions};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::monotonic::system_monotonic_clock;
 use mclone_app_runtime::monotonic::{MonotonicClockHandle, MonotonicDeadline, MonotonicInstant};
+#[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::native_service_assembly::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedStartupPump,
     LocalIntegratedStartupStep, NativeSceneServices, NativeSessionServices,
@@ -52,10 +56,11 @@ use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
-    SessionFailure, SessionRuntimeKind, SessionStartPayload, SessionStartRequest,
-    plan_session_start,
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, SessionRuntimeKind,
+    SessionStartPayload, SessionStartRequest,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionFailure, plan_session_start};
 use mclone_app_runtime::world_catalog::{
     LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities, WorldCatalogError,
 };
@@ -66,7 +71,9 @@ use mclone_app_runtime::{
     micros_to_ms, set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::{ActorFigureId, AssetSource};
-use mclone_audio::{AudioOutputCapability, PreparedAudioAssets, landing_playback_for_impact};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_audio::PreparedAudioAssets;
+use mclone_audio::{AudioOutputCapability, landing_playback_for_impact};
 use mclone_client::{
     BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
     TeleportCollisionSnapshot, TeleportConfig, TeleportIntent, TeleportPreview,
@@ -82,6 +89,7 @@ use mclone_input::{
     TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::quad_face_count_from_indices;
+#[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
@@ -98,9 +106,10 @@ use mclone_render::gui::{
     GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats,
     WorldGuiRenderer,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_render::screen_effect::load_screen_effect_texture_assets;
 use mclone_render::screen_effect::{
     ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState, UnderwaterOverlay,
-    load_screen_effect_texture_assets,
 };
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky::overworld_clear_color;
@@ -312,6 +321,7 @@ pub struct McloneSceneHost {
     runtime: Option<SceneSessionRuntime>,
     local_startup: Option<SceneLocalStartup>,
     session: GameSessionCoordinator<ScenePendingSessionStart>,
+    #[cfg(not(target_arch = "wasm32"))]
     session_runtime_factory: Option<Box<dyn SceneSessionRuntimeFactory>>,
     client_experience: ClientExperienceController,
     camera: EngineCameraController,

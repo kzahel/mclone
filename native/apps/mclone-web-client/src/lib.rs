@@ -24,8 +24,12 @@ use mclone_render::RenderBackend;
 use mclone_render_session::{EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler};
 use mclone_server::{IntegratedServer, ServerRunnerDiagnostics, ServerRunnerKind};
 
+pub mod web_scene_protocol;
+
 #[cfg(target_arch = "wasm32")]
 mod web_canvas;
+#[cfg(target_arch = "wasm32")]
+pub use web_canvas::{WebSceneRuntimeService, prepare_web_scene_assets_from_pack};
 #[cfg(target_arch = "wasm32")]
 mod web_compile_timing;
 #[cfg(target_arch = "wasm32")]
@@ -359,6 +363,16 @@ impl WebRuntime {
 
     pub const fn client(&self) -> &ClientRuntime {
         self.core.client()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) const fn scene_core(&self) -> &SingleViewRuntime {
+        &self.core
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn scene_core_mut(&mut self) -> &mut SingleViewRuntime {
+        &mut self.core
     }
 
     pub const fn engine(&self) -> &EngineRenderSession {
@@ -822,6 +836,131 @@ pub extern "C" fn mclone_web_runtime_smoke_report() -> u32 {
     mclone_web_smoke()
 }
 
+const SCENE_ADAPTER_CLOCK_BIT: u32 = 1 << 0;
+const SCENE_ADAPTER_SUPERSESSION_BIT: u32 = 1 << 1;
+const SCENE_ADAPTER_RECONNECT_BIT: u32 = 1 << 2;
+const SCENE_ADAPTER_CATALOG_BIT: u32 = 1 << 3;
+const SCENE_ADAPTER_TEARDOWN_BIT: u32 = 1 << 4;
+
+pub fn web_scene_adapter_contract_bits() -> u32 {
+    use mclone_app_runtime::client_catalog_policy::{
+        ClientCatalogController, ClientCatalogRequest,
+    };
+    use mclone_app_runtime::platform_operation::PlatformOperationCompletion;
+    use mclone_app_runtime::session::{ActiveSessionDescriptor, RemoteSessionEndpoint};
+    use mclone_app_runtime::world_catalog::{
+        WorldCatalogCapabilities, WorldCatalogRequest, WorldCatalogRequestId, WorldCatalogResponse,
+    };
+    use web_scene_protocol::{
+        WebScenePlatformServices, WebSceneSessionCompletionDisposition, WebSceneSessionOperation,
+        WebSceneSessionOperationResult, WebSceneSessionState,
+    };
+
+    let (mut services, _clock, mut catalog_operations) = WebScenePlatformServices::new();
+    let observed = services.observe_frame_time_millis(12.5);
+    let regressed = services.observe_frame_time_millis(4.0);
+    let clock_ok = observed == regressed;
+
+    let first = services
+        .lifecycle_mut()
+        .begin_start(WebSceneSessionOperation::ConnectRemote {
+            url: "ws://old.invalid".to_owned(),
+        });
+    let second = services
+        .lifecycle_mut()
+        .begin_start(WebSceneSessionOperation::ConnectRemote {
+            url: "ws://new.invalid".to_owned(),
+        });
+    let stale = services
+        .lifecycle_mut()
+        .complete(PlatformOperationCompletion {
+            token: first.token,
+            result: Ok(WebSceneSessionOperationResult::Started(
+                ActiveSessionDescriptor::Remote {
+                    endpoint: RemoteSessionEndpoint::new("ws://old.invalid"),
+                },
+            )),
+        });
+    let applied = services
+        .lifecycle_mut()
+        .complete(PlatformOperationCompletion {
+            token: second.token,
+            result: Ok(WebSceneSessionOperationResult::Started(
+                ActiveSessionDescriptor::Remote {
+                    endpoint: RemoteSessionEndpoint::new("ws://new.invalid"),
+                },
+            )),
+        });
+    let supersession_ok = stale == WebSceneSessionCompletionDisposition::Stale
+        && applied == WebSceneSessionCompletionDisposition::Applied;
+
+    let reconnect = services
+        .lifecycle_mut()
+        .begin_reconnect("ws://new.invalid")
+        .expect("active remote adapter state can reconnect");
+    let reconnect_started = matches!(
+        services.lifecycle().state(),
+        WebSceneSessionState::Reconnecting { attempt: 1, .. }
+    );
+    let reconnect_applied = services
+        .lifecycle_mut()
+        .complete(PlatformOperationCompletion {
+            token: reconnect.token,
+            result: Ok(WebSceneSessionOperationResult::Reconnected),
+        });
+    let reconnect_ok =
+        reconnect_started && reconnect_applied == WebSceneSessionCompletionDisposition::Applied;
+
+    let request = ClientCatalogRequest {
+        id: WorldCatalogRequestId(1),
+        request: WorldCatalogRequest::ListWorlds,
+    };
+    catalog_operations.submit(request, None);
+    let submitted_catalog = services
+        .take_catalog_operation()
+        .expect("deferred catalog adapter receives typed request");
+    services.complete_catalog_operation(PlatformOperationCompletion {
+        token: submitted_catalog.token,
+        result: Ok(WorldCatalogResponse::WorldList {
+            capabilities: WorldCatalogCapabilities::persistent_local(),
+            worlds: Vec::new(),
+        }),
+    });
+    let mut catalog = ClientCatalogController::new();
+    let _ = catalog_operations.poll(&mut catalog);
+    let catalog_ok = catalog_operations.pending_len() == 0;
+
+    let late = services
+        .lifecycle_mut()
+        .begin_start(WebSceneSessionOperation::ConnectRemote {
+            url: "ws://late.invalid".to_owned(),
+        });
+    services.teardown();
+    let teardown_ok = services
+        .lifecycle_mut()
+        .complete(PlatformOperationCompletion {
+            token: late.token,
+            result: Ok(WebSceneSessionOperationResult::Started(
+                ActiveSessionDescriptor::Remote {
+                    endpoint: RemoteSessionEndpoint::new("ws://late.invalid"),
+                },
+            )),
+        })
+        == WebSceneSessionCompletionDisposition::Stale;
+
+    bool_bit(clock_ok, SCENE_ADAPTER_CLOCK_BIT)
+        | bool_bit(supersession_ok, SCENE_ADAPTER_SUPERSESSION_BIT)
+        | bool_bit(reconnect_ok, SCENE_ADAPTER_RECONNECT_BIT)
+        | bool_bit(catalog_ok, SCENE_ADAPTER_CATALOG_BIT)
+        | bool_bit(teardown_ok, SCENE_ADAPTER_TEARDOWN_BIT)
+}
+
+#[allow(unsafe_code)]
+#[unsafe(no_mangle)]
+pub extern "C" fn mclone_web_scene_adapter_contract_report() -> u32 {
+    web_scene_adapter_contract_bits()
+}
+
 const fn bool_bit(value: bool, bit: u32) -> u32 {
     if value { bit } else { 0 }
 }
@@ -854,6 +993,11 @@ mod tests {
                 loaded_chunk_count: 1,
             }
         );
+    }
+
+    #[test]
+    fn web_scene_adapter_contract_rejects_stale_work() {
+        assert_eq!(web_scene_adapter_contract_bits(), 0x1f);
     }
 
     #[test]

@@ -1,8 +1,10 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 use mclone_app_runtime::session::SessionStorageIntent;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) trait SceneSessionRuntimeFactory {
     fn start(
         &mut self,
@@ -17,11 +19,13 @@ pub(crate) trait SceneSessionRuntimeFactory {
     ) -> Result<StartedSceneRuntime>;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct NativeSceneSessionRuntimeFactory<F, S> {
     factory: F,
     session: std::marker::PhantomData<fn() -> S>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<F, S> SceneSessionRuntimeFactory for NativeSceneSessionRuntimeFactory<F, S>
 where
     F: FnMut(
@@ -55,6 +59,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct StartedSceneRuntime {
     runtime: SceneSessionRuntime,
     camera: EngineCameraController,
@@ -62,6 +67,7 @@ pub(crate) struct StartedSceneRuntime {
     render_stats: RenderStreamStats,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct SceneLocalStartup {
     pub(super) request: SessionStartRequest,
     pub(super) descriptor: Option<ActiveSessionDescriptor>,
@@ -71,8 +77,48 @@ pub(crate) struct SceneLocalStartup {
     pub(super) startup_view_pose: Option<XrStartupViewPose>,
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct SceneLocalStartup;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SceneLocalStartup {
+    pub(crate) fn replace_camera(&mut self, camera: EngineCameraController) {
+        self.camera = camera;
+    }
+
+    pub(crate) fn render_distance(&self, _fallback: u32) -> u32 {
+        self.scene.render_distance
+    }
+
+    pub(crate) fn mesh_catalog(&self) -> Option<&mclone_mesh::TexturedMeshCatalog> {
+        Some(&self.pump.runtime().mesh_assets().catalog)
+    }
+
+    pub(crate) fn progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.pump.progress_overlay()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl SceneLocalStartup {
+    pub(crate) fn replace_camera(&mut self, _camera: EngineCameraController) {}
+
+    pub(crate) fn render_distance(&self, fallback: u32) -> u32 {
+        fallback
+    }
+
+    pub(crate) fn mesh_catalog(&self) -> Option<&mclone_mesh::TexturedMeshCatalog> {
+        None
+    }
+
+    pub(crate) fn progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        None
+    }
+}
+
 pub(crate) type ScenePendingSessionStart = SessionStartPayload<McloneSceneHostOptions>;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SceneSessionStartOutcome {
     LocalStartupQueued,
@@ -111,6 +157,7 @@ impl McloneSceneHost {
 }
 
 impl McloneSceneHost {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn start_local_async(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -279,6 +326,7 @@ impl McloneSceneHost {
         Ok(state)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_runtime<S>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -440,6 +488,173 @@ impl McloneSceneHost {
         Ok(state)
     }
 
+    /// Construct the shared scene around an already-started, platform-neutral
+    /// runtime. Browser assembly uses this seam after its worker/socket promise
+    /// has completed; native callers may continue to use the startup pumps above.
+    /// The driver still owns the surface/canvas and presentation cadence.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_scene_runtime(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        clock: MonotonicClockHandle,
+        scene: McloneSceneHostOptions,
+        runtime: SceneSessionRuntime,
+        render_options: TexturedSectionRenderOptions,
+        active_assets: PreparedSceneAssets,
+        client_experience_profile: ClientExperienceProfile,
+        catalog_operations: Option<WorldCatalogOperationService>,
+        startup_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<Self> {
+        let scene = scene.validated()?;
+        let active_session = runtime
+            .active_session()
+            .cloned()
+            .context("scene runtime did not expose an active session")?;
+        if active_assets.mesh.catalog.len() != runtime.mesh_assets().catalog.len() {
+            bail!(
+                "prepared scene/runtime terrain catalogs disagree: prepared={} runtime={}",
+                active_assets.mesh.catalog.len(),
+                runtime.mesh_assets().catalog.len()
+            );
+        }
+        let mesh_assets = active_assets.mesh.clone();
+        let mut camera = EngineCameraController::spawn_for_chunk(runtime.interest_center());
+        camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
+        camera.set_first_person_player_visible(scene.first_person_player_visible);
+        if let Some(view_pose) = startup_view_pose {
+            apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
+                .context("apply initial scene startup view pose")?;
+        }
+
+        let draw = TexturedSectionDrawResources::new(
+            device,
+            queue,
+            color_format,
+            &[],
+            mesh_assets.atlas.as_upload(),
+        )
+        .context("initialize empty scene terrain draw resources")?;
+        let mut world_gui_renderer = WorldGuiRenderer::new(device, color_format);
+        world_gui_renderer
+            .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
+            .context("upload initial scene GUI atlas")?;
+        let actors = ActorDrawResources::new(
+            device,
+            queue,
+            color_format,
+            active_assets.actors.atlas.as_upload(),
+            Some(&active_assets.actors.figures),
+        )
+        .context("initialize scene actor draw resources")?;
+        let screen_effects = ScreenEffectsRenderer::new_with_assets(
+            device,
+            queue,
+            color_format,
+            &active_assets.screen_effects,
+        )
+        .context("initialize scene screen effects")?;
+        let ui = xr_game_ui_for_session(Some(&active_session), scene.seed);
+        let mut session = GameSessionCoordinator::new();
+        session.complete_start(active_session);
+        let mut state = Self {
+            scene: scene.clone(),
+            services: SceneHostServices {
+                clock,
+                catalog_operations,
+                teleport_preview: TeleportPreviewCapability::Unavailable,
+                audio: AudioOutputCapability::Unavailable,
+            },
+            color_format,
+            mesh_assets,
+            asset_replacement_status: AssetReplacementStatus::Active {
+                epoch: active_assets.epoch,
+            },
+            active_assets,
+            asset_replacement: None,
+            last_asset_replacement_commit: None,
+            asset_pack_sources: None,
+            runtime: Some(runtime),
+            local_startup: None,
+            session,
+            #[cfg(not(target_arch = "wasm32"))]
+            session_runtime_factory: None,
+            client_experience: ClientExperienceController::new(client_experience_profile),
+            camera,
+            interaction: ClientInteractionController::new(),
+            initial_alignment_mode: if startup_view_pose.is_some() {
+                XrViewAlignmentMode::ViewPose
+            } else {
+                XrViewAlignmentMode::PlayerSpawn
+            },
+            render_options,
+            player_collision_box_visible: false,
+            crosshair_visible: true,
+            travel_assist_mode: GameTravelAssistMode::Off,
+            player_model: GamePlayerModel::default(),
+            draw,
+            traversal_ready_sections: TraversalReadySectionCache::default(),
+            section_uploads: RenderSectionUploadCoordinator::default(),
+            actors,
+            far_lod: FarTerrainLodRenderer::new(device, color_format),
+            selection_outline: SelectionOutlineRenderer::new(device, color_format),
+            world_gui_renderer,
+            world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
+            mono_gui: None,
+            mono_ui_context: None,
+            diagnostic_panel: XrDiagnosticPanel::new(device, color_format),
+            ui,
+            menu_overlay_cache: XrMenuPanelOverlayCache::default(),
+            status_overlay: StatusOverlay::hidden(),
+            sky: SkyRenderer::new_with_color_profile(
+                device,
+                color_format,
+                render_options.color_profile,
+            ),
+            screen_effects,
+            underwater_effects: XrUnderwaterEffectStates::default(),
+            last_underwater_update: None,
+            head_comfort: XrHeadComfortState::default(),
+            render_stats: RenderStreamStats::default(),
+            tracking_origin: None,
+            locomotion_mode: XrLocomotionMode::default(),
+            turn_policy: XrTurnPolicy::default(),
+            snap_turn_state: XrSnapTurnState::default(),
+            blink_teleport: XrBlinkTeleportState::default(),
+            mono_blink_debug: MonoBlinkDebugState::default(),
+            display_refresh_hz: None,
+            render_admission_policy: RenderAdmissionPolicy::new(
+                FrameHostKind::HeadlessOffscreenPerf,
+                WorkWindow::BeforeRender,
+            ),
+            render_split_timing_enabled: false,
+            defer_eye_waits_enabled: false,
+            overlap_runtime_prefetch_enabled: false,
+            prefetched_live_upload: None,
+            render_section_upload_budget: None,
+            render_section_accept_budget: None,
+            render_completed_result_accept_budget: None,
+            per_view_uniform_frame: 0,
+            last_locomotion_update: None,
+            menu_toggle_down: false,
+            game_ui_toggle_down: false,
+            menu_pointer_down: false,
+            gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
+            menu_panel_pose: None,
+            menu_panel_anchor: XrUiPanelAnchor::Head,
+            menu_panel_recenter_pending: false,
+            latest_controllers: Vec::new(),
+            first_eye_summary: None,
+            last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
+            last_ui_draw_cache_stats: UiDrawCacheStats::default(),
+            rendered_frames: 0,
+            seed_reroll: NewWorldSeedReroll::new(scene.seed),
+        };
+        state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+        state.apply_debug_ui_screen();
+        Ok(state)
+    }
+
     pub fn set_audio_output(&mut self, audio: AudioOutputCapability) {
         self.services.audio = audio;
     }
@@ -467,6 +682,7 @@ impl McloneSceneHost {
         self.diagnostic_panel.frame_metrics_visible()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn set_session_runtime_factory<F, S>(&mut self, factory: F)
     where
         F: FnMut(
@@ -483,6 +699,7 @@ impl McloneSceneHost {
         }));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn start_session_for_request(
         &mut self,
         device: &wgpu::Device,
@@ -493,14 +710,26 @@ impl McloneSceneHost {
         self.start_pending_session(device, queue)
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn start_session_for_request(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _request: SessionStartRequest,
+    ) -> Result<bool> {
+        bail!("browser session starts must complete through the typed asynchronous service adapter")
+    }
+
     pub(crate) fn next_new_world_seed(&mut self) -> i64 {
         self.seed_reroll.next_seed()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn local_world_options(&self, seed: i64) -> McloneSceneHostOptions {
         self.scene_for_storage_intent(SessionStorageIntent::transient_local_world(seed))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_session_options(&self, remote_addr: String) -> McloneSceneHostOptions {
         self.scene_for_storage_intent(SessionStorageIntent::remote_session(remote_addr))
     }
@@ -561,6 +790,7 @@ impl McloneSceneHost {
         session.local_world_id()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn request_session_start(&mut self, request: SessionStartRequest) -> Result<()> {
         let plan = plan_session_start(
             request,
@@ -590,6 +820,7 @@ impl McloneSceneHost {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn start_pending_session(
         &mut self,
         device: &wgpu::Device,
@@ -621,6 +852,18 @@ impl McloneSceneHost {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn start_pending_session(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        bail!(
+            "browser pending sessions must complete through the typed asynchronous service adapter"
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn start_pending_session_payload(
         &mut self,
         device: &wgpu::Device,
@@ -646,6 +889,7 @@ impl McloneSceneHost {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn begin_local_session_start(
         &mut self,
         request: SessionStartRequest,
@@ -685,6 +929,7 @@ impl McloneSceneHost {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn advance_local_startup(
         &mut self,
         device: &wgpu::Device,
@@ -744,6 +989,16 @@ impl McloneSceneHost {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn advance_local_startup(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        Ok(false)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn complete_local_startup(
         &mut self,
         device: &wgpu::Device,
@@ -883,6 +1138,7 @@ impl McloneSceneHost {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn fail_local_startup(&mut self, startup: SceneLocalStartup, error: anyhow::Error) {
         log::error!(
             "failed to start XR local world {:?}: {error:#}",
@@ -955,6 +1211,7 @@ impl McloneSceneHost {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn start_replacement_session(
         &mut self,
         device: &wgpu::Device,
@@ -1221,6 +1478,7 @@ impl McloneSceneHost {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
         match descriptor {
             ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
@@ -1513,6 +1771,7 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn start_scene_runtime<S>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -1623,6 +1882,7 @@ pub(crate) const XR_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
 /// re-pumps at the new camera so the seed covers the final startup camera — a far
 /// startup view pose (validated on-device several chunks out) otherwise leaves the
 /// ready frame with nothing drawn near the camera.
+#[cfg(not(target_arch = "wasm32"))]
 fn reconcile_xr_startup_pose<S>(
     runtime: &mut NativeSceneServices<S>,
     camera: &mut EngineCameraController,
@@ -1678,12 +1938,14 @@ pub(crate) fn normalized_xr_remote_addr(addr: &str) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
     // Shared native profile owner; the XR crate keeps this thin crate-local alias
     // so its several call sites stay stable.
     xr_native_client_experience_profile()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn local_integrated_scene_options(
     scene: &McloneSceneHostOptions,
 ) -> LocalIntegratedSceneOptions {
@@ -1721,6 +1983,7 @@ pub fn single_view_host_options(scene: &McloneSceneHostOptions) -> SingleViewHos
         .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {
     match session {
         Some(ActiveSessionDescriptor::LocalWorld { seed, .. }) => {

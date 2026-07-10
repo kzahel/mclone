@@ -24,9 +24,20 @@ use mclone_app_runtime::client_session_policy::{
     client_session_start_transition, client_session_status_projection,
     client_session_ui_effects_for_request,
 };
+use mclone_app_runtime::deferred_drop::{
+    BoundedDeferredDropQueue, DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropService,
+};
+use mclone_app_runtime::far_lod::{FarTerrainLodConfig, FarTerrainLodMaterialPalette};
+use mclone_app_runtime::host_mode::SingleViewHostMode;
+use mclone_app_runtime::monotonic::MonotonicDeadline;
+use mclone_app_runtime::prepared_assets::PreparedSceneAssets;
+use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_app_runtime::render_compile_capacity::{
     RenderCompileCapacityHostKind, host_total_memory_bytes,
     preflight_render_compile_capacity_report,
+};
+use mclone_app_runtime::scene_session_runtime::{
+    SceneRuntimeService, SceneSessionRuntime, StartupReadinessPolicy,
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -44,9 +55,13 @@ use mclone_app_runtime::world_catalog::{
     validate_delete_inactive_world, validate_local_world_compatible, world_not_found,
 };
 use mclone_app_runtime::{
-    debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
+    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimeUpdatePumpBudget,
+    TimedRenderSectionCacheUpdate, debug_block_palette_overlay, debug_hotbar_icons,
+    loading_progress_overlay_from_diagnostics, set_player_appearance_command_for_ui_model,
+    view_readiness_overlay_from_diagnostics,
 };
 use mclone_assets::PackedAssetSource;
+use mclone_audio::PreparedAudioAssets;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController, ClientRuntime,
 };
@@ -64,9 +79,9 @@ use mclone_input::{
 };
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
-    load_textured_terrain_assets,
+    TexturedRenderSectionMesh, TexturedRenderSectionMetadata, load_textured_terrain_assets,
 };
-use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
+use mclone_protocol::{ClientCommand, ServerUpdate, decode_server_update, encode_server_update};
 use mclone_render::actor_assets::{ActorTextureImage, load_actor_texture_assets};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
@@ -75,7 +90,9 @@ use mclone_render::chunk::{
 };
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
 use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance};
+use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
+use mclone_render::screen_effect::load_screen_effect_texture_assets;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
@@ -84,22 +101,23 @@ use mclone_render_session::{
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, EngineCameraCollisionMode, EngineCameraController,
     EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     EngineCameraMovementMode, RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
-    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
-    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
-    RenderSectionViewSync, actor_instances_from_presentations, build_client_textured_sections,
-    build_render_sections_from_snapshots_with_biome_zoom_seed,
+    RenderSectionCompileQueueHealth, RenderSectionCompileRequest, RenderSectionCompileResult,
+    RenderSectionCompiler, RenderSectionNeighborReadiness, RenderSectionRemovalMode,
+    RenderSectionSyncPlan, RenderSectionViewSync, actor_instances_from_presentations,
+    build_client_textured_sections, build_render_sections_from_snapshots_with_biome_zoom_seed,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
     render_section_chunk_pos, render_section_neighbor_readiness, snapshot_contains_render_section,
     summarize_textured_render_section_build_report,
 };
-use mclone_server::ServerRunnerKind;
+use mclone_server::{ServerRunnerKind, SimulationCadenceConfig};
 use mclone_ui::{
     DebugOverlay, FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts,
     FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
     FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, FlatHudDebugOverlay,
     GameCollisionMode, GameFramePacingMode, GameHelpParent, GameMovementMode, GameOptionsParent,
     GamePlayerModel, GameScreen, GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState,
-    GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+    GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay, TouchJoystickOverlay,
+    TouchOverlay,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -123,6 +141,7 @@ const WEB_TOUCH_LOOK_SENSITIVITY_MAX: f32 = 5.0;
 // desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
 // resident cache stays visible while movement fills progressively.
 const WEB_RENDER_CHUNK_MESH_BUDGET: usize = 1;
+const WEB_DEFERRED_DROP_DRAIN_ITEM_BUDGET: usize = 256;
 // Y the overview-frame camera looks down from when streaming a deterministic chunk view;
 // only the horizontal component matters for near-camera readiness.
 const WEB_OVERVIEW_CAMERA_EYE_Y: f32 = 256.0;
@@ -2265,6 +2284,490 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
 
     fn pending_job_count(&self) -> usize {
         self.pending_jobs
+    }
+}
+
+/// Browser-owned compiler wake capability. The shared scene sees only
+/// `RenderSectionCompiler`; the JavaScript callback and doorbell object remain
+/// private to this adapter.
+#[derive(Clone)]
+struct WebRenderCompilerWakeSink {
+    callback: js_sys::Function,
+}
+
+impl std::fmt::Debug for WebRenderCompilerWakeSink {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WebRenderCompilerWakeSink")
+            .finish_non_exhaustive()
+    }
+}
+
+impl WebRenderCompilerWakeSink {
+    fn wake(&self, compiler: &WebRenderSectionCompiler) -> anyhow::Result<()> {
+        let doorbell = js_sys::Object::new();
+        if compiler
+            .write_doorbell(&doorbell)
+            .map_err(anyhow::Error::msg)?
+        {
+            self.callback
+                .call1(&JsValue::NULL, &doorbell)
+                .map_err(|error| anyhow::anyhow!("render-compiler wake failed: {error:?}"))?;
+        }
+        Ok(())
+    }
+}
+
+/// Browser implementation of the neutral scene runtime boundary.
+///
+/// It reuses the resident server worker/WebSocket connection and render
+/// compiler. Normal production still owns its existing `WebChunkRenderSession`
+/// until Slice 5; Slice 4 constructs this adapter only for the direct proof.
+pub struct WebSceneRuntimeService {
+    runtime: WebRuntime,
+    mesh_assets: TexturedMeshAssets,
+    render_compiler: WebRenderSectionCompiler,
+    compiler_wake: WebRenderCompilerWakeSink,
+    deferred_chunk_drops: BoundedDeferredDropQueue,
+}
+
+impl std::fmt::Debug for WebSceneRuntimeService {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WebSceneRuntimeService")
+            .field("runner_kind", &self.runtime.runner_kind())
+            .field(
+                "compiler_pending",
+                &self.render_compiler.pending_job_count(),
+            )
+            .field("deferred_drop", &self.deferred_chunk_drops.backlog())
+            .finish_non_exhaustive()
+    }
+}
+
+impl WebSceneRuntimeService {
+    pub async fn local_worker(
+        config: WebIntegratedServerRunnerConfig,
+        mesh_assets: TexturedMeshAssets,
+        compiler_wake: js_sys::Function,
+    ) -> Result<Self, String> {
+        let runtime = WebRuntime::web_worker_integrated(config).await?;
+        Ok(Self::new(runtime, mesh_assets, compiler_wake))
+    }
+
+    pub async fn remote_websocket(
+        url: impl Into<String>,
+        mesh_assets: TexturedMeshAssets,
+        compiler_wake: js_sys::Function,
+    ) -> Result<Self, String> {
+        let runtime = WebRuntime::websocket_remote(url).await?;
+        Ok(Self::new(runtime, mesh_assets, compiler_wake))
+    }
+
+    pub fn new(
+        runtime: WebRuntime,
+        mesh_assets: TexturedMeshAssets,
+        compiler_wake: js_sys::Function,
+    ) -> Self {
+        Self {
+            runtime,
+            mesh_assets,
+            render_compiler: WebRenderSectionCompiler::new(),
+            compiler_wake: WebRenderCompilerWakeSink {
+                callback: compiler_wake,
+            },
+            deferred_chunk_drops: BoundedDeferredDropQueue::new(DEFAULT_DEFERRED_DROP_MAX_ITEMS),
+        }
+    }
+
+    pub fn into_scene_session_runtime(
+        self,
+        descriptor: ActiveSessionDescriptor,
+    ) -> SceneSessionRuntime {
+        SceneSessionRuntime::from_active_service(descriptor, Box::new(self))
+    }
+
+    fn host_mode(&self) -> SingleViewHostMode {
+        if self.runtime.runner_kind() == ServerRunnerKind::RemoteWebSocket {
+            SingleViewHostMode::RemoteDedicated
+        } else {
+            SingleViewHostMode::LocalIntegrated
+        }
+    }
+
+    fn handoff_deferred_drops(&mut self) {
+        while let Some((snapshot, item_count)) = self
+            .runtime
+            .scene_core_mut()
+            .take_deferred_client_chunk_drop_snapshot()
+        {
+            let _ = self.deferred_chunk_drops.enqueue(snapshot, item_count);
+        }
+        let _ = self
+            .deferred_chunk_drops
+            .drain(WEB_DEFERRED_DROP_DRAIN_ITEM_BUDGET);
+    }
+
+    fn sync_render_sections_once(
+        &mut self,
+        camera_position: glam::Vec3,
+        chunk_budget: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> anyhow::Result<RenderSectionCacheUpdate> {
+        let previous_request = self.render_compiler.in_flight_request_id();
+        let compiler = &mut self.render_compiler;
+        let update = self
+            .runtime
+            .scene_core_mut()
+            .sync_render_sections_with_budget_and_completed_result_acceptance(
+                compiler,
+                camera_position,
+                chunk_budget,
+                completed_result_accept_budget,
+                |client, compiler| compiler.stage_streaming_delta(client),
+            )?;
+        let current_request = self.render_compiler.in_flight_request_id();
+        if current_request.is_some() && current_request != previous_request {
+            self.compiler_wake.wake(&self.render_compiler)?;
+        }
+        Ok(update)
+    }
+
+    fn timed_sync_once(
+        &mut self,
+        camera_position: glam::Vec3,
+        chunk_budget: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> anyhow::Result<TimedRenderSectionCacheUpdate> {
+        Ok(TimedRenderSectionCacheUpdate {
+            cache_update: self.sync_render_sections_once(
+                camera_position,
+                chunk_budget,
+                completed_result_accept_budget,
+            )?,
+            timing: Default::default(),
+        })
+    }
+
+    fn diagnostics(&self) -> mclone_server::ServerRunnerDiagnostics {
+        self.runtime.runner_diagnostics()
+    }
+}
+
+impl SceneRuntimeService for WebSceneRuntimeService {
+    fn host_mode(&self) -> SingleViewHostMode {
+        self.host_mode()
+    }
+
+    fn host_label(&self) -> &'static str {
+        match self.host_mode() {
+            SingleViewHostMode::LocalIntegrated => "web-worker-integrated",
+            SingleViewHostMode::RemoteDedicated => "websocket-remote",
+        }
+    }
+
+    fn core(&self) -> &mclone_app_runtime::SingleViewRuntime {
+        self.runtime.scene_core()
+    }
+
+    fn core_mut(&mut self) -> &mut mclone_app_runtime::SingleViewRuntime {
+        self.runtime.scene_core_mut()
+    }
+
+    fn mesh_assets(&self) -> &TexturedMeshAssets {
+        &self.mesh_assets
+    }
+
+    fn replace_asset_epoch(
+        &mut self,
+        epoch: u64,
+        mesh_assets: TexturedMeshAssets,
+        sections: TexturedRenderSectionBuildReport,
+    ) -> anyhow::Result<()> {
+        let _ = self
+            .runtime
+            .scene_core_mut()
+            .replace_asset_epoch_sections(epoch, sections);
+        self.render_compiler = WebRenderSectionCompiler::new();
+        self.mesh_assets = mesh_assets;
+        Ok(())
+    }
+
+    fn clear_far_lod(&mut self) {}
+
+    fn prepare_far_lod_mesh(
+        &mut self,
+        _config: FarTerrainLodConfig,
+        _seed: i64,
+        _center: ChunkPos,
+        _camera_position: glam::Vec3,
+    ) -> Option<&FarTerrainLodMesh> {
+        None
+    }
+
+    fn lod_coverage_counters(&self) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
+        Default::default()
+    }
+
+    fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+        self.render_compiler.release_completed_jobs(count)
+    }
+
+    fn simulation_cadence(&self) -> Option<SimulationCadenceConfig> {
+        (self.host_mode() == SingleViewHostMode::LocalIntegrated)
+            .then(|| self.diagnostics().simulation_cadence)
+    }
+
+    fn set_simulation_cadence(&mut self, cadence: SimulationCadenceConfig) -> anyhow::Result<bool> {
+        if self.simulation_cadence() == Some(cadence) {
+            return Ok(false);
+        }
+        anyhow::bail!(
+            "browser simulation cadence changes require the typed worker operation adapter"
+        )
+    }
+
+    fn loaded_chunk_count(&self) -> usize {
+        self.runtime.client().loaded_chunk_count()
+    }
+
+    fn set_chunk_view_with_update_policy_timed(
+        &mut self,
+        center: ChunkPos,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> anyhow::Result<(bool, GameplayCommandTiming)> {
+        let changed = self.runtime.scene_core().interest_center() != center
+            || self.runtime.scene_core().render_distance() != render_distance
+            || self.runtime.scene_core().chunk_tracking_radius() != chunk_tracking_radius;
+        if !changed {
+            return Ok((false, GameplayCommandTiming::default()));
+        }
+        let mut report = self
+            .runtime
+            .request_chunk_view_deferred(center, render_distance, chunk_tracking_radius)
+            .map_err(anyhow::Error::msg)?;
+        if policy == GameplayCommandUpdatePolicy::DrainImmediately {
+            let drained = self
+                .runtime
+                .drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())
+                .map_err(anyhow::Error::msg)?;
+            report.update_count = report.update_count.saturating_add(drained.update_count);
+        }
+        Ok((
+            true,
+            GameplayCommandTiming {
+                updates: report.update_count,
+                ..GameplayCommandTiming::default()
+            },
+        ))
+    }
+
+    fn send_gameplay_command_with_update_policy_timed(
+        &mut self,
+        command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> anyhow::Result<(bool, GameplayCommandTiming)> {
+        let mut report = self
+            .runtime
+            .send_gameplay_command_deferred(command)
+            .map_err(anyhow::Error::msg)?;
+        if policy == GameplayCommandUpdatePolicy::DrainImmediately {
+            let drained = self
+                .runtime
+                .drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())
+                .map_err(anyhow::Error::msg)?;
+            report.update_count = report.update_count.saturating_add(drained.update_count);
+        }
+        Ok((
+            true,
+            GameplayCommandTiming {
+                updates: report.update_count,
+                ..GameplayCommandTiming::default()
+            },
+        ))
+    }
+
+    fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> anyhow::Result<bool> {
+        let report = self
+            .runtime
+            .drain_pending_runner_updates_with_budget(budget)
+            .map_err(anyhow::Error::msg)?;
+        self.handoff_deferred_drops();
+        Ok(report.update_count > 0)
+    }
+
+    fn poll_until_idle_with_timeout(
+        &mut self,
+        _timeout: std::time::Duration,
+    ) -> anyhow::Result<(usize, f64)> {
+        let _ = self.poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())?;
+        let diagnostics = self.diagnostics();
+        if diagnostics.command_queue_depth == 0
+            && diagnostics.update_queue_depth == 0
+            && diagnostics.pending_jobs == 0
+            && diagnostics.pending_publications == 0
+            && self.render_compiler.pending_job_count() == 0
+            && self.deferred_chunk_drops.backlog().pending_items == 0
+        {
+            Ok((1, 0.0))
+        } else {
+            anyhow::bail!(
+                "browser runtime is not idle; continue stepping from requestAnimationFrame"
+            )
+        }
+    }
+
+    fn sync_render_sections_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: glam::Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> anyhow::Result<TimedRenderSectionCacheUpdate> {
+        self.timed_sync_once(
+            camera_position,
+            WEB_RENDER_CHUNK_MESH_BUDGET,
+            completed_result_accept_budget,
+        )
+    }
+
+    fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: glam::Vec3,
+        deadline: MonotonicDeadline,
+        completed_result_accept_budget: Option<usize>,
+    ) -> anyhow::Result<TimedRenderSectionCacheUpdate> {
+        if deadline.is_reached() {
+            return Ok(TimedRenderSectionCacheUpdate::default());
+        }
+        self.sync_render_sections_with_completed_result_acceptance_timed(
+            camera_position,
+            completed_result_accept_budget,
+        )
+    }
+
+    fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: glam::Vec3,
+        deadline: MonotonicDeadline,
+        max_compile_requests: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> anyhow::Result<TimedRenderSectionCacheUpdate> {
+        if deadline.is_reached() || max_compile_requests == 0 {
+            return Ok(TimedRenderSectionCacheUpdate::default());
+        }
+        self.sync_render_sections_with_completed_result_acceptance_timed(
+            camera_position,
+            completed_result_accept_budget,
+        )
+    }
+
+    fn sync_all_render_sections(
+        &mut self,
+        camera_position: glam::Vec3,
+    ) -> anyhow::Result<RenderSectionCacheUpdate> {
+        self.sync_render_sections_once(camera_position, usize::MAX, None)
+    }
+
+    fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
+        self.runtime.scene_core().resident_section_metadata()
+    }
+
+    fn cached_section_count(&self) -> usize {
+        self.runtime.scene_core().cached_section_count()
+    }
+
+    fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
+        self.runtime
+            .scene_core_mut()
+            .mark_all_render_sections_dirty_for_resource_rebuild()
+    }
+
+    fn recompile_all_render_section_meshes_for_resource_rebuild(
+        &mut self,
+        camera_position: glam::Vec3,
+    ) -> anyhow::Result<Vec<TexturedRenderSectionMesh>> {
+        self.mark_all_render_sections_dirty_for_resource_rebuild();
+        Ok(self
+            .sync_render_sections_once(camera_position, usize::MAX, None)?
+            .rebuilt_sections)
+    }
+
+    fn traversal_ready_render_section_keys(
+        &self,
+        camera_position: glam::Vec3,
+    ) -> BTreeSet<RenderSectionKey> {
+        self.runtime
+            .scene_core()
+            .traversal_ready_render_section_keys(camera_position)
+    }
+
+    fn sky_clear_color(&self) -> wgpu::Color {
+        mclone_render::sky::overworld_clear_color(self.runtime.scene_core().time_of_day())
+    }
+
+    fn render_compile_pending_job_count(&self) -> usize {
+        self.render_compiler.pending_job_count()
+    }
+
+    fn render_compile_max_pending_job_count(&self) -> usize {
+        self.render_compiler.max_pending_job_count()
+    }
+
+    fn render_compile_available_pending_job_slots(&self) -> usize {
+        self.render_compiler.available_pending_job_slots()
+    }
+
+    fn render_compile_queue_health(&self) -> RenderSectionCompileQueueHealth {
+        RenderSectionCompileQueueHealth::from_compiler(&self.render_compiler)
+    }
+
+    fn view_readiness_overlay(&self) -> Option<LoadingProgressOverlay> {
+        view_readiness_overlay_from_diagnostics(&self.diagnostics())
+    }
+
+    fn flush_persistence(&mut self) -> anyhow::Result<usize> {
+        // IndexedDB writes are already owned by the integrated-server worker;
+        // graceful shutdown is a separate typed browser operation.
+        Ok(0)
+    }
+
+    fn refresh_startup_diagnostics(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        loading_progress_overlay_from_diagnostics(&self.diagnostics())
+    }
+
+    fn startup_host_ready(
+        &self,
+        policy: StartupReadinessPolicy,
+        camera_position: glam::Vec3,
+    ) -> bool {
+        let view_ready = !self
+            .traversal_ready_render_section_keys(camera_position)
+            .is_empty();
+        match policy {
+            StartupReadinessPolicy::Playable => self.loaded_chunk_count() > 0 && view_ready,
+            StartupReadinessPolicy::Idle => {
+                let diagnostics = self.diagnostics();
+                view_ready
+                    && diagnostics.command_queue_depth == 0
+                    && diagnostics.update_queue_depth == 0
+                    && diagnostics.pending_jobs == 0
+                    && diagnostics.pending_publications == 0
+                    && self.render_compiler.pending_job_count() == 0
+            }
+        }
+    }
+
+    fn stats(&self) -> mclone_app_runtime::SingleViewRuntimeStats {
+        self.runtime.scene_core().stats(
+            self.host_mode(),
+            Some(&self.diagnostics()),
+            self.render_compiler.pending_job_count(),
+        )
     }
 }
 
@@ -5338,6 +5841,35 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
         atlas_sprite_count: assets.atlas_sprite_count,
         asset_pack_file_count,
     })
+}
+
+/// CPU-side browser asset preparation for the neutral scene-host seam.
+///
+/// The caller runs this in the existing asset/worker lifecycle before handing
+/// the result to `McloneSceneHost::with_scene_runtime`. GPU upload remains in
+/// the browser driver, and browser audio stays explicitly absent.
+pub fn prepare_web_scene_assets_from_pack(bytes: Vec<u8>) -> Result<PreparedSceneAssets, String> {
+    let source = PackedAssetSource::from_bytes(bytes)
+        .map_err(|error| format!("failed to parse packed scene assets: {error}"))?;
+    let terrain = load_textured_terrain_assets(&source)
+        .map_err(|error| format!("failed to prepare browser terrain assets: {error}"))?;
+    let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(&source)
+        .map_err(|error| format!("failed to prepare browser far-LOD assets: {error}"))?;
+    let actors = load_actor_texture_assets(&source)
+        .map_err(|error| format!("failed to prepare browser actor assets: {error}"))?;
+    let screen_effects = load_screen_effect_texture_assets(&source)
+        .map_err(|error| format!("failed to prepare browser screen-effect assets: {error}"))?;
+    Ok(PreparedSceneAssets::startup(
+        0,
+        TexturedMeshAssets {
+            catalog: terrain.catalog,
+            atlas: terrain.atlas.into(),
+            far_lod_materials,
+        },
+        actors,
+        screen_effects,
+        PreparedAudioAssets::silent(),
+    ))
 }
 
 fn started_web_session_coordinator(

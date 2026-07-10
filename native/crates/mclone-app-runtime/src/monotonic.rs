@@ -6,7 +6,7 @@
 //! exposing browser APIs to shared scene code.
 
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// An ordered point on a host-supplied monotonic timeline.
@@ -51,6 +51,45 @@ impl MonotonicInstant {
 /// Source for a host's monotonic timeline.
 pub trait MonotonicClock: Send + Sync {
     fn now(&self) -> MonotonicInstant;
+}
+
+/// Host-updated monotonic projection for externally supplied frame times.
+///
+/// Browser drivers feed `requestAnimationFrame` / `performance.now()` samples
+/// through [`Self::observe_millis`]. Repeated or older samples (including a
+/// stale callback after tab resume) can never move shared scene time backwards.
+#[derive(Clone, Debug, Default)]
+pub struct ProjectedMonotonicClock {
+    nanos: Arc<Mutex<u64>>,
+}
+
+impl ProjectedMonotonicClock {
+    pub fn observe_millis(&self, millis: f64) -> MonotonicInstant {
+        self.observe(MonotonicInstant::from_millis_f64(millis))
+    }
+
+    pub fn observe(&self, sample: MonotonicInstant) -> MonotonicInstant {
+        let mut nanos = self
+            .nanos
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *nanos = (*nanos).max(sample.as_nanos());
+        MonotonicInstant::from_nanos(*nanos)
+    }
+
+    pub fn handle(&self) -> MonotonicClockHandle {
+        MonotonicClockHandle::new(self.clone())
+    }
+}
+
+impl MonotonicClock for ProjectedMonotonicClock {
+    fn now(&self) -> MonotonicInstant {
+        let nanos = self
+            .nanos
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        MonotonicInstant::from_nanos(*nanos)
+    }
 }
 
 /// Cloneable host clock capability retained by shared orchestration.
@@ -192,5 +231,23 @@ mod tests {
         manual.advance(Duration::from_millis(5));
         assert!(deadline.is_reached());
         assert_eq!(deadline.remaining(), Duration::ZERO);
+    }
+
+    #[test]
+    fn projected_clock_rejects_negative_and_post_resume_regression() {
+        let projected = ProjectedMonotonicClock::default();
+        assert_eq!(projected.observe_millis(-5.0), MonotonicInstant::ZERO);
+        assert_eq!(
+            projected.observe_millis(12.5),
+            MonotonicInstant::from_nanos(12_500_000)
+        );
+        assert_eq!(
+            projected.observe_millis(4.0),
+            MonotonicInstant::from_nanos(12_500_000)
+        );
+        assert_eq!(
+            projected.handle().now(),
+            MonotonicInstant::from_nanos(12_500_000)
+        );
     }
 }

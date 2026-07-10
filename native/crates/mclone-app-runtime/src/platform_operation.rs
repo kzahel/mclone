@@ -7,7 +7,9 @@
 //! needed by the policy owner to restore a retryable state, and teardown
 //! invalidates every outstanding request without retaining platform objects.
 
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 
 /// Platform-owned execution behind the shared token/epoch policy.
 ///
@@ -16,6 +18,90 @@ use std::collections::{HashMap, HashSet};
 pub trait PlatformOperationExecutor<K, T, E>: std::fmt::Debug {
     fn submit(&mut self, operation: PlatformOperation<K>);
     fn try_recv_completion(&mut self) -> Option<PlatformOperationCompletion<T, E>>;
+}
+
+/// Cloneable platform-side endpoint for a deferred executor.
+///
+/// The shared service owns the executor half. A browser adapter retains this
+/// handle, takes typed operations when it is ready to start a promise/worker,
+/// and later submits typed completions. No `JsValue`, promise, worker, or
+/// socket enters the shared ledger.
+pub struct DeferredPlatformOperationHandle<K, T, E> {
+    submitted: Rc<RefCell<VecDeque<PlatformOperation<K>>>>,
+    completions: Rc<RefCell<VecDeque<PlatformOperationCompletion<T, E>>>>,
+}
+
+impl<K, T, E> Clone for DeferredPlatformOperationHandle<K, T, E> {
+    fn clone(&self) -> Self {
+        Self {
+            submitted: Rc::clone(&self.submitted),
+            completions: Rc::clone(&self.completions),
+        }
+    }
+}
+
+impl<K, T, E> std::fmt::Debug for DeferredPlatformOperationHandle<K, T, E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DeferredPlatformOperationHandle")
+            .field("submitted", &self.submitted.borrow().len())
+            .field("completions", &self.completions.borrow().len())
+            .finish()
+    }
+}
+
+impl<K, T, E> DeferredPlatformOperationHandle<K, T, E> {
+    pub fn take_submitted(&self) -> Option<PlatformOperation<K>> {
+        self.submitted.borrow_mut().pop_front()
+    }
+
+    pub fn submit_completion(&self, completion: PlatformOperationCompletion<T, E>) {
+        self.completions.borrow_mut().push_back(completion);
+    }
+
+    pub fn submitted_len(&self) -> usize {
+        self.submitted.borrow().len()
+    }
+
+    pub fn completion_len(&self) -> usize {
+        self.completions.borrow().len()
+    }
+}
+
+#[derive(Debug)]
+pub struct DeferredPlatformOperationExecutor<K, T, E> {
+    handle: DeferredPlatformOperationHandle<K, T, E>,
+}
+
+impl<K, T, E> PlatformOperationExecutor<K, T, E> for DeferredPlatformOperationExecutor<K, T, E>
+where
+    K: std::fmt::Debug,
+    T: std::fmt::Debug,
+    E: std::fmt::Debug,
+{
+    fn submit(&mut self, operation: PlatformOperation<K>) {
+        self.handle.submitted.borrow_mut().push_back(operation);
+    }
+
+    fn try_recv_completion(&mut self) -> Option<PlatformOperationCompletion<T, E>> {
+        self.handle.completions.borrow_mut().pop_front()
+    }
+}
+
+pub fn deferred_platform_operation_executor<K, T, E>() -> (
+    DeferredPlatformOperationExecutor<K, T, E>,
+    DeferredPlatformOperationHandle<K, T, E>,
+) {
+    let handle = DeferredPlatformOperationHandle {
+        submitted: Rc::new(RefCell::new(VecDeque::new())),
+        completions: Rc::new(RefCell::new(VecDeque::new())),
+    };
+    (
+        DeferredPlatformOperationExecutor {
+            handle: handle.clone(),
+        },
+        handle,
+    )
 }
 
 #[derive(Debug)]
@@ -498,5 +584,47 @@ mod tests {
                 .into_iter()
                 .all(|resolution| matches!(resolution, PlatformOperationResolution::Stale(_)))
         );
+    }
+
+    #[test]
+    fn deferred_handle_accepts_out_of_order_results_and_rejects_post_teardown_work() {
+        let (executor, handle) = deferred_platform_operation_executor();
+        let mut service = PlatformOperationService::new(Box::new(executor));
+        let first = service.issue(TestOperation::StartLocal, RestoreState("title"));
+        let second = service.issue(TestOperation::Reconnect, RestoreState("disconnected"));
+        assert_eq!(handle.submitted_len(), 2);
+        let submitted_first = handle.take_submitted().unwrap();
+        let submitted_second = handle.take_submitted().unwrap();
+        assert_eq!(submitted_first.token, first);
+        assert_eq!(submitted_second.token, second);
+
+        handle.submit_completion(ok(second, "reconnected"));
+        handle.submit_completion(ok(first, "started"));
+        let resolutions = service.poll();
+        assert!(matches!(
+            resolutions[0],
+            PlatformOperationResolution::Applied {
+                kind: TestOperation::Reconnect,
+                value: "reconnected",
+                ..
+            }
+        ));
+        assert!(matches!(
+            resolutions[1],
+            PlatformOperationResolution::Applied {
+                kind: TestOperation::StartLocal,
+                value: "started",
+                ..
+            }
+        ));
+
+        let late = service.issue(TestOperation::OpenCatalog, RestoreState("catalog"));
+        let _ = handle.take_submitted().unwrap();
+        assert_eq!(service.begin_epoch().len(), 1);
+        handle.submit_completion(err(late, "late"));
+        assert!(matches!(
+            service.poll().as_slice(),
+            [PlatformOperationResolution::Stale(_)]
+        ));
     }
 }

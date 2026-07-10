@@ -306,7 +306,7 @@ impl McloneSceneHost {
         camera.set_first_person_player_visible(self.scene.first_person_player_visible);
         camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
         if let Some(startup) = &mut self.local_startup {
-            startup.camera = camera.clone();
+            startup.replace_camera(camera.clone());
         }
         self.camera = camera;
     }

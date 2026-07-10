@@ -1,7 +1,7 @@
 {
   "asset_set": "mclone-game-1.17.1",
   "format_version": 1,
-  "generated_at": "2026-07-01T14:33:17.985678Z",
+  "generated_at": "2026-07-10T17:21:51.459982Z",
   "minecraft_version": "1.17.1",
   "pack": {
     "asset_set": "mclone-game-1.17.1",
@@ -34990,11 +34990,11 @@
     "algorithm": "sha256",
     "files": [
       {
-        "normalized_bytes": 22441,
+        "normalized_bytes": 22521,
         "path": "tools/minecraft_assets/asset_pack.py",
-        "sha256": "65f6fcdf39815f7b8819f873928c9740e5c6a2a99db3d2b76d00740792c65670"
+        "sha256": "5537f531980c55eaa7f308792ab6c5a85aa241a014243332aff45d8c0b3c0cfa"
       }
     ],
-    "sha256": "51021fc21836a9d930f84aa52876ce582dea5edb3f74e9d2e11c6cc45f939794"
+    "sha256": "812edb80cc2acb92a7ef02e030bb9b1d0bf0cda402e0887e221f776370c44df6"
   }
 }

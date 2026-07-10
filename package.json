@@ -71,6 +71,7 @@
     "native:web:deploy": "bash ./scripts/deploy-native-web.sh",
     "native:web:serve": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --serve --app-loop",
     "native:web:smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs",
+    "native:web:scene-adapters": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --skip-threading",
     "native:web:thread-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-threading",
     "native:web:remote-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --remote-websocket",
     "native:web:canvas-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas",

@@ -1736,6 +1736,7 @@ dependencies = [
  "js-sys",
  "mclone-app-runtime",
  "mclone-assets",
+ "mclone-audio",
  "mclone-client",
  "mclone-core",
  "mclone-input",

@@ -34,6 +34,7 @@ const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import
 const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
+const SCENE_ADAPTER_CONTRACT_EXPORT = "mclone_web_scene_adapter_contract_report";
 const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
 const ready = boot();
 globalThis.__mcloneNativeReady = ready;
@@ -223,13 +224,25 @@ async function loadRuntimeWasm() {
         exports: Object.keys(instance.exports),
       };
     }
+    const sceneAdapterContract = instance.exports[SCENE_ADAPTER_CONTRACT_EXPORT];
+    if (typeof sceneAdapterContract !== "function") {
+      return {
+        ok: false,
+        reason: `missing wasm export ${SCENE_ADAPTER_CONTRACT_EXPORT}`,
+        exports: Object.keys(instance.exports),
+      };
+    }
 
     const bits = Number(runtimeSmoke()) >>> 0;
     const report = decodeRuntimeReport(bits);
+    const sceneAdapter = decodeSceneAdapterContract(
+      Number(sceneAdapterContract()) >>> 0,
+    );
     return {
-      ok: report.ok,
+      ok: report.ok && sceneAdapter.ok,
       exportName: RUNTIME_SMOKE_EXPORT,
       report,
+      sceneAdapter,
     };
   } catch (error) {
     return {
@@ -942,6 +955,19 @@ function decodeRuntimeReport(bits) {
     commandCount: (bits >>> 8) & 0xff,
     updateCount: (bits >>> 16) & 0xff,
     loadedChunkCount: (bits >>> 24) & 0xff,
+  };
+}
+
+/** @param {number} bits */
+function decodeSceneAdapterContract(bits) {
+  return {
+    bits,
+    ok: (bits & 0x1f) === 0x1f,
+    monotonicClockClamped: (bits & 0x1) !== 0,
+    supersededCompletionRejected: (bits & 0x2) !== 0,
+    reconnectStateExplicit: (bits & 0x4) !== 0,
+    catalogCompletionTyped: (bits & 0x8) !== 0,
+    postTeardownCompletionRejected: (bits & 0x10) !== 0,
   };
 }
 

@@ -13,8 +13,9 @@ use crate::client_catalog_policy::{
     ClientCatalogController, ClientCatalogEffects, ClientCatalogRequest,
 };
 use crate::platform_operation::{
-    PlatformOperation, PlatformOperationCompletion, PlatformOperationExecutor,
-    PlatformOperationResolution, PlatformOperationService,
+    DeferredPlatformOperationHandle, PlatformOperation, PlatformOperationCompletion,
+    PlatformOperationExecutor, PlatformOperationResolution, PlatformOperationService,
+    deferred_platform_operation_executor,
 };
 #[cfg(test)]
 use crate::world_catalog::WorldCatalogCapabilities;
@@ -99,6 +100,11 @@ impl WorldCatalogOperationService {
         Self::new(Box::new(ImmediateWorldCatalogExecutor::new(catalog)))
     }
 
+    pub fn deferred() -> (Self, DeferredWorldCatalogOperationHandle) {
+        let (executor, handle) = deferred_platform_operation_executor();
+        (Self::new(Box::new(executor)), handle)
+    }
+
     pub fn submit(&mut self, request: ClientCatalogRequest, active_world: Option<LocalWorldId>) {
         self.operations.issue(
             WorldCatalogOperation {
@@ -146,6 +152,9 @@ impl WorldCatalogOperationService {
             .collect()
     }
 }
+
+pub type DeferredWorldCatalogOperationHandle =
+    DeferredPlatformOperationHandle<WorldCatalogOperation, WorldCatalogResponse, WorldCatalogError>;
 
 /// Run one `ClientCatalogRequest` against a native catalog backend and fold the
 /// result back through the shared `ClientCatalogController`.

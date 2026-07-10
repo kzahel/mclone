@@ -2,10 +2,11 @@
 
 Topic: web-scene-host-adoption
 
-Status: active 2026-07-10. Tactical 170 Slices 0-2 landed the executable
-browser baselines, portable scene prerequisites, and neutral native-consumed
-scene-session shell. Slice 3 is next after the recorded physical-Quest hold is
-closed. The implementation sequence is recorded in
+Status: active 2026-07-10. Tactical 170 Slices 0-3 landed the executable
+browser baselines, portable scene prerequisites, neutral scene-session shell,
+and browser service adapters. The direct scene and web WASM gates are green;
+Slice 4's isolated browser scene-host proof is next. The implementation
+sequence is recorded in
 [`170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md);
 production adoption has not started and the old web owner remains active.
 
@@ -54,8 +55,8 @@ orchestrator.
 The browser client is functional and already shares important lower-level
 contracts, but the top-level orchestration is still forked:
 
-- `native/apps/mclone-web-client/src/web_canvas.rs` is 6,454 lines after the
-  Slice 0 deferred-drop diagnostic was added.
+- `native/apps/mclone-web-client/src/web_canvas.rs` is 6,986 lines after the
+  Slice 3 browser runtime-service adapter was added.
   `WebChunkRenderSession` owns runtime/session state, camera/input assembly,
   settings-effect dispatch, catalog/session dispatch, render synchronization,
   GPU uploads, actors, UI, and the sky-to-present frame sequence.
@@ -77,21 +78,19 @@ contracts, but the top-level orchestration is still forked:
 - Client-experience, session, and catalog policy are shared, but web still
   applies their effects through app-local matches and asynchronous wrappers.
 
-The direct acceptance gate still fails before browser service assembly:
+The direct acceptance gate is green after browser service assembly:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml \
   -p mclone-scene --target wasm32-unknown-unknown
 ```
 
-The Slice 0 baseline was 98 compiler errors and Slice 1 reduced that to 87.
-After Slice 2 it reports five errors: four root diagnostics for the missing
-browser connection/compiler/drop assembly and prepared-scene asset services,
-plus one inference cascade. Concrete native catalog ownership and its
-synchronous executor are no longer error roots. The expected failure log is
-`/tmp/mclone-t170-slice2-scene-wasm.txt`. A green direct WASM gate will still
-prove compile portability only; the Slice 4 browser proof remains the runtime
-gate.
+The Slice 0 baseline was 98 compiler errors, Slice 1 reduced it to 87, and
+Slice 2 reduced it to five. Slice 3 removed the remaining browser
+connection/compiler/drop and prepared-asset roots. The final green log is
+`/tmp/mclone-t170-slice3-scene-wasm.txt`; its only warnings are two pre-existing
+`mclone-server` WASM warnings. This proves compile portability only. Slice 4's
+direct browser proof remains the runtime acceptance gate.
 
 ## Slice 0 Landed Evidence (2026-07-10)
 
@@ -188,18 +187,62 @@ browser host or cutover toggle.
   is 4,096 items versus Slice 0's measured 295-item peak; overflow destroys on
   the caller and increments visible inline-fallback accounting. Queue
   replacement and bound/fallback behavior are tested.
-- The direct scene WASM audit fell from 87 errors to five. Remaining roots are
-  browser service/prepared-asset implementations reserved for Slice 3, not
-  concrete native catalog or host policy ownership.
+- The direct scene WASM audit fell from 87 errors to five. Those remaining
+  roots named browser service/prepared-asset implementations reserved for
+  Slice 3, not concrete native catalog or host policy ownership.
 - Desktop offscreen and synthetic-stereo captures were byte-identical to the
   pre-slice canaries (`cdffd673...` and `18bbdadd...`) and were visually
   inspected. The rebuilt flat-Android AVD produced a visible frozen-daytime
-  terrain/HUD frame. Desktop XR and Quest APK checks passed. No physical Quest
-  was attached, so a fresh on-device Quest run remains an explicit hold before
-  Slice 3 rather than being inferred from an APK build.
+  terrain/HUD frame. Desktop XR and Quest APK checks passed. The later attached
+  Quest 3 validation closed the platform hold before Slice 3: the Oculus
+  runtime reached `FOCUSED`, submitted a frame, reached playable 9/9, drew 67
+  of 118 sections and both actors, emitted `MCLONE_ANDROID_XR_READY`, and had
+  no app-fatal marker.
 
 Production web still uses `WebChunkRenderSession`; Slice 2 added no alternate
 browser host or cutover toggle.
+
+## Slice 3 Landed Evidence (2026-07-10)
+
+- `McloneSceneHost::with_scene_runtime` accepts an already-started neutral
+  `SceneSessionRuntime`, `PreparedSceneAssets`, projected clock, typed catalog
+  service, and explicit optional capabilities. Native filesystem/thread
+  constructors remain native-only; browser-prepared assets cross the portable
+  seam without making scene code fetch or parse JavaScript objects.
+- `WebSceneRuntimeService` adapts the existing local worker or remote
+  WebSocket connection, resident `WebRenderSectionCompiler`, and bounded
+  deferred-drop queue to `SceneRuntimeService`. The compiler wake function and
+  doorbell stay private to the browser adapter. Budget-one sync,
+  dirty/revision acceptance, shared-result transport, normal-frame connection
+  ingress, and the 4,096-item drop bound are preserved.
+- `ProjectedMonotonicClock` clamps negative or regressing rAF observations.
+  `WebSceneSessionLifecycle` gives local start, remote connect/reconnect,
+  shutdown, supersession, retry, and terminal failure explicit epoch-safe
+  states. Deferred typed catalog operations accept out-of-order completions
+  while rejecting superseded and post-teardown work.
+- Browser teleport preview and audio remain explicitly unavailable. Far LOD,
+  cadence control, and worker-owned persistence also report their current
+  capabilities honestly; Slice 3 did not promote any web feature exception.
+- `pnpm native:web:scene-adapters` passed its five-bit contract report
+  (`31`): monotonic clamp, superseded-completion rejection, explicit reconnect,
+  typed catalog completion, and post-teardown rejection. Its resident compiler
+  used `shared-result-buffer` with no generated-view fallback or overflow, and
+  both rendered centers settled.
+- The unchanged production local, catalog, and remote smokes passed. Local
+  remained `localWorld`, remote remained `remote-websocket`, and compiler
+  transport remained resident shared-result-buffer. Production still uses
+  `WebChunkRenderSession`; no alternate production host or cutover toggle was
+  added.
+- Shared-runtime/web tests passed (213 and 9 tests respectively), as did the
+  workspace, direct scene/web WASM, browser build/typecheck, asset-lock, scene
+  purity, thin-adapter purity, desktop offscreen, synthetic stereo, desktop XR,
+  flat-Android AVD, Android XR APK, and attached Quest validations.
+- `/tmp/mclone-t170-slice3-adapters-page.png` and
+  `/tmp/mclone-t170-slice3-adapters-canvas.png` showed textured forest/ore
+  terrain, sky, crosshair, and hotbar. The useful local, catalog, and remote
+  page captures, native offscreen/stereo captures, and flat-Android capture
+  were also inspected. Black/partial browser canvas-only artifacts were
+  rejected rather than treated as visual evidence. No capture was committed.
 
 ## Locked Decisions
 
@@ -289,21 +332,21 @@ separately reviewable.
 
 ## Known Gaps And Decision Deadlines
 
-- **Compiler wake ownership:** implement and prove the browser compiler's
-  internal wake sink before the direct browser host proof. Do not expose JS
-  objects through the shared scene API.
-- **Remote reconnect:** define nonblocking reconnect state and stale-completion
-  behavior before the production cutover. The existing async reconnect path is
-  evidence, not yet the final shared-host contract.
+- **Compiler wake ownership:** resolved in Slice 3. The browser runtime-service
+  adapter owns the JavaScript wake function and doorbell privately; shared
+  scene code sees only the neutral compiler contract.
+- **Remote reconnect:** the Slice 3 lifecycle protocol now has nonblocking
+  reconnect, retry/terminal, supersession, and stale-completion states. Slice 4
+  must exercise that protocol around a real browser scene host.
 - **Hidden-tab behavior:** decide whether scene frames pause while the server
   worker continues, and how queued updates are budget-drained on resume. Lock
   this in the direct browser proof slice. The same decision must state which
   browser event, if any, maps to the host's lifecycle save trigger; web
   persistence currently flows continuously through the runner with no
   `pagehide`/`visibilitychange` hook.
-- **Deferred drops:** Slice 2 selected the bounded `DeferredDropService`
-  contract. Slice 3 must attach its browser frame-drain or worker backend and
-  preserve the 4,096-item capacity plus pending/fallback reporting.
+- **Deferred drops:** Slice 3 attached a bounded browser frame-drain backend
+  with the same 4,096-item capacity and pending/fallback reporting. Slice 4
+  must measure it under direct-host resume and teardown.
 - **WebGPU device/surface loss:** the cutover must at least preserve current
   recovery or produce a controlled restart/error state; it may not silently
   wedge the session.
@@ -319,12 +362,9 @@ separately reviewable.
   Slice 6 parity audit will not surface the native/web physics disparity. If
   a physics engine graduates from opt-in, give it an explicit profile or
   ledger entry before claiming web parity.
-- **Slice 2 native regression risk:** the neutral runtime-shell split rewrites
-  the session runtime all five native targets converged on in Tactical 168.
-  Tactical 170 Slice 2 carries explicit defenses: move-first commits, deletion
-  of superseded native entry points, executor-equivalence tests,
-  native-assembly purity gates, and a recorded platform-matrix hold point
-  before Slice 3.
+- **Slice 2 native regression risk:** the platform-matrix hold is closed.
+  Desktop/native captures stayed byte-identical, flat Android rendered, and an
+  attached Quest 3 reached a playable local world with no app-fatal marker.
 - **Asset-pack work:** Tactical 169 also touches web asset payload and compiler
   lifecycle. Portable prerequisite work may proceed independently, but the
   atomic cutover must consume Tactical 169's active asset-set/epoch contract
@@ -343,7 +383,7 @@ cargo check --manifest-path native/Cargo.toml \
   -p mclone-web-client --target wasm32-unknown-unknown
 ```
 
-The direct scene gate becomes mandatory once its blockers are removed:
+The direct scene gate is mandatory and green after Slice 3:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml \
@@ -389,9 +429,9 @@ Primary code:
 
 ## Recommended Next Work
 
-1. Close the Slice 2 platform hold with an attached Quest: install the freshly
-built Android XR APK, run the standard local-world validation, and inspect its
-capture/log markers. Then start Tactical 170 Slice 3 by implementing browser
-clock, connection, compiler, catalog-operation, deferred-drop, prepared-asset,
-and explicit absent teleport/audio adapters behind the neutral shell. Keep
-production web on `WebChunkRenderSession`.
+1. Implement Tactical 170 Slice 4 only: add an isolated smoke-only browser
+entry point that constructs a real `McloneSceneHost` from the landed services,
+then prove local worker startup, input/interaction, render admission and frame
+assembly, UI/HUD, resize, shutdown, hidden-tab resume bounds, and controlled
+WebGPU loss handling. Keep production web on `WebChunkRenderSession` and stop
+before the atomic Slice 5 cutover.

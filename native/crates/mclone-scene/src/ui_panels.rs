@@ -561,15 +561,17 @@ impl McloneSceneHost {
                         runtime.render_distance()
                     })
             },
-            |startup| startup.scene.render_distance,
+            |startup| startup.render_distance(self.scene.render_distance),
         );
         let block_palette = self.runtime.as_ref().map_or_else(
             || {
                 self.local_startup
                     .as_ref()
-                    .map_or_else(Default::default, |startup| {
+                    .as_ref()
+                    .and_then(|startup| startup.mesh_catalog())
+                    .map_or_else(Default::default, |catalog| {
                         debug_block_palette_overlay(
-                            &startup.pump.runtime().mesh_assets().catalog,
+                            catalog,
                             self.interaction.selected_hotbar_slot(),
                         )
                     })
@@ -744,7 +746,7 @@ impl McloneSceneHost {
     pub(crate) fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
         self.local_startup
             .as_ref()
-            .and_then(|startup| startup.pump.progress_overlay())
+            .and_then(SceneLocalStartup::progress_overlay)
     }
 
     pub(crate) fn active_remote_addr(&self) -> Option<String> {
