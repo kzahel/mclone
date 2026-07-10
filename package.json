@@ -144,6 +144,7 @@
     "native:scene-host:purity": "node ./scripts/run-native-bash.mjs ./scripts/check-scene-host-purity.sh",
     "native:xr:frame-driver:purity": "node ./scripts/run-native-bash.mjs ./scripts/check-xr-frame-driver-purity.sh",
     "deploy": "pnpm native:web:deploy",
+    "prepare": "bash ./scripts/install-git-hooks.sh",
     "assets:pack": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py",
     "assets:pack:check": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py --check-lock",
     "assets:pack:write-lock": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py --write-lock",
