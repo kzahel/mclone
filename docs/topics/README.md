@@ -56,10 +56,19 @@ series implements the same concern, normally reuse the document slug in its
   baselines, and Java-shaped render/scheduling follow-ups.
   The broader frame/terrain/host accounting model lives in
   [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
+- [`asset-pack-profiles.md`](asset-pack-profiles.md): shared UI asset-pack
+  selection, pack-time generated missing assets, runtime provenance, and the
+  standalone first-party boundary.
+- [`falling-tree-physics.md`](falling-tree-physics.md): Dynamic Falling Tree
+  and Sable reference investigation for future tree felling, moving voxel
+  assemblies, and impact effects.
 - [`vanilla/networking.md`](vanilla/networking.md): Minecraft Java 1.17.1
   vanilla networking reference — connection pipeline, login/join sequence,
   50 ms tick loop, chunk/entity sync cadences, movement validation and
   teleport acks, interpolation, and a constants quick-reference table.
+- [`vanilla/weather.md`](vanilla/weather.md): Minecraft Java 1.17.1 vanilla
+  weather reference notes, including rain, snow, thunder, lightning/fire,
+  randomness, biome-local precipitation, and non-vanilla atmosphere boundaries.
 
 ## Update Policy
 

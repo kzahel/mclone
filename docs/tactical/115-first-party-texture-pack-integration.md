@@ -1,6 +1,10 @@
 # 115 - First-Party Texture Pack Integration
 
-Status: active; Slice 2 first-party overlay pack landed.
+Status: active; Slice 2 first-party overlay pack landed. Runtime selection,
+standalone generated fallback construction, and the cross-platform Asset Packs
+UI continue in tactical
+[`169`](169-runtime-asset-pack-selection.md) and topic
+[`asset-pack-profiles`](../topics/asset-pack-profiles.md).
 
 ## Goal
 
