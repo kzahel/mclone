@@ -55,12 +55,13 @@ pub use player::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use teleport::{
-    NativeTeleportPreviewWorker, TeleportPreviewRequest, TeleportPreviewRequestId,
-    TeleportPreviewResult, TeleportPreviewWorkerError,
+    NativeTeleportPreviewWorker, TeleportPreviewWorkerError, native_teleport_preview_capability,
 };
 pub use teleport::{
     TeleportCollisionSnapshot, TeleportCollisionSnapshotBounds, TeleportCollisionWorld,
-    TeleportConfig, TeleportIntent, TeleportPreview, TeleportResolverDiagnostics,
+    TeleportConfig, TeleportIntent, TeleportPreview, TeleportPreviewCapability,
+    TeleportPreviewRequest, TeleportPreviewRequestId, TeleportPreviewResult,
+    TeleportPreviewService, TeleportPreviewServiceError, TeleportResolverDiagnostics,
     TeleportValidityReason, resolve_teleport_preview,
 };
 

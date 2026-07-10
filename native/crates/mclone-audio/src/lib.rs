@@ -3,15 +3,20 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel};
 
 use anyhow::{Context, Result, bail};
+#[cfg(not(target_arch = "wasm32"))]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(not(target_arch = "wasm32"))]
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use lewton::inside_ogg::OggStreamReader;
 use mclone_assets::{AssetPath, AssetSource};
 
+#[cfg(not(target_arch = "wasm32"))]
 const COMMAND_QUEUE_CAPACITY: usize = 128;
+#[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_MAX_VOICES: usize = 32;
 const LANDING_BIG_IMPACT_SPEED: f64 = 6.0;
 
@@ -52,11 +57,13 @@ pub fn landing_playback_for_impact(impact_speed: f64) -> (SoundKey, f32) {
     (sound, gain)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct AudioEngine {
     commands: SyncSender<AudioCommand>,
     _stream: cpal::Stream,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AudioEngine {
     pub fn new(assets: &impl AssetSource, settings: AudioSettings) -> Result<Self> {
         Self::from_prepared(PreparedAudioAssets::load(assets)?, settings)
@@ -132,6 +139,73 @@ impl AudioEngine {
     }
 }
 
+/// Optional audio output attached by a platform host. Shared scene code emits
+/// neutral sound commands and requests a replacement capability at an asset
+/// epoch boundary; output-device creation remains inside the implementation.
+pub trait AudioOutput: Send {
+    fn play(&self, sound: SoundKey, gain: f32);
+
+    fn replacement(&self, assets: PreparedAudioAssets) -> Result<Box<dyn AudioOutput>>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AudioOutput for AudioEngine {
+    fn play(&self, sound: SoundKey, gain: f32) {
+        AudioEngine::play(self, sound, gain);
+    }
+
+    fn replacement(&self, assets: PreparedAudioAssets) -> Result<Box<dyn AudioOutput>> {
+        Ok(Box::new(AudioEngine::from_prepared(
+            assets,
+            AudioSettings::default(),
+        )?))
+    }
+}
+
+/// Explicit audio availability at the scene-host boundary.
+pub enum AudioOutputCapability {
+    Unavailable,
+    Available(Box<dyn AudioOutput>),
+}
+
+impl AudioOutputCapability {
+    pub fn available(output: impl AudioOutput + 'static) -> Self {
+        Self::Available(Box::new(output))
+    }
+
+    pub const fn is_available(&self) -> bool {
+        matches!(self, Self::Available(_))
+    }
+
+    pub fn play(&self, sound: SoundKey, gain: f32) {
+        if let Self::Available(output) = self {
+            output.play(sound, gain);
+        }
+    }
+
+    pub fn replacement(&self, assets: PreparedAudioAssets) -> Result<Self> {
+        match self {
+            Self::Unavailable => Ok(Self::Unavailable),
+            Self::Available(output) => output.replacement(assets).map(Self::Available),
+        }
+    }
+}
+
+impl Default for AudioOutputCapability {
+    fn default() -> Self {
+        Self::Unavailable
+    }
+}
+
+impl std::fmt::Debug for AudioOutputCapability {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AudioOutputCapability")
+            .field("available", &self.is_available())
+            .finish()
+    }
+}
+
 #[derive(Clone)]
 pub struct PreparedAudioAssets {
     bank: SoundBank,
@@ -161,6 +235,7 @@ impl PreparedAudioAssets {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum AudioCommand {
     Play { sound: SoundKey, gain: f32 },
@@ -196,6 +271,7 @@ impl SampleData {
         self.data.len() / self.channels
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn value_at(&self, frame_position: f64, output_channel: usize, output_channels: usize) -> f32 {
         let frame = frame_position.floor();
         if frame < 0.0 {
@@ -214,6 +290,7 @@ impl SampleData {
         a + (b - a) * fraction
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn frame_channel_value(
         &self,
         frame: usize,
@@ -280,6 +357,7 @@ impl SoundBank {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn sample(&self, sound: SoundKey) -> Option<Arc<SampleData>> {
         self.samples.get(&sound).cloned()
     }
@@ -316,12 +394,14 @@ fn decode_ogg(bytes: &[u8]) -> Result<SampleData> {
     SampleData::new(channels, sample_rate, data)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct Voice {
     sample: Arc<SampleData>,
     frame_position: f64,
     gain: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Voice {
     fn new(sample: Arc<SampleData>, gain: f32) -> Self {
         Self {
@@ -340,6 +420,7 @@ impl Voice {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct Mixer {
     bank: SoundBank,
     commands: Receiver<AudioCommand>,
@@ -350,6 +431,7 @@ struct Mixer {
     voices: Vec<Voice>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Mixer {
     fn new(
         bank: SoundBank,
@@ -432,6 +514,7 @@ impl Mixer {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_output_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -446,6 +529,7 @@ fn build_output_stream(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_typed_output_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -464,7 +548,7 @@ where
     Ok(stream)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 
@@ -559,5 +643,21 @@ mod tests {
         assert_eq!(landing_playback_for_impact(1.0).0, LANDING_SMALL);
         assert_eq!(landing_playback_for_impact(10.0).0, LANDING_BIG);
         assert!(landing_playback_for_impact(10.0).1 <= 1.0);
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn absent_audio_output_stays_silent_across_asset_replacement() {
+        let output = AudioOutputCapability::Unavailable;
+        assert!(!output.is_available());
+        output.play(LANDING_SMALL, 1.0);
+        assert!(matches!(
+            output.replacement(PreparedAudioAssets::silent()).unwrap(),
+            AudioOutputCapability::Unavailable
+        ));
     }
 }

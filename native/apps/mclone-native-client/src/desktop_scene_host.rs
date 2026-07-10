@@ -74,6 +74,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
             device,
             queue,
             color_format,
+            mclone_app_runtime::monotonic::system_monotonic_clock(),
             host_scene,
             runtime,
             render_options,
@@ -87,6 +88,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
             device,
             queue,
             color_format,
+            mclone_app_runtime::monotonic::system_monotonic_clock(),
             host_scene,
             render_options,
             assets.mesh_assets.clone(),
@@ -97,6 +99,8 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
         )
     }
     .context("initialize desktop Mono scene host")?;
+
+    host.set_teleport_preview_capability(mclone_client::native_teleport_preview_capability());
 
     host.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
         let desktop_scene = desktop_scene_options_for_remote(&endpoint, &scene);

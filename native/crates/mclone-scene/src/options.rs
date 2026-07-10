@@ -77,10 +77,9 @@ impl Default for McloneSceneHostOptions {
             chunk_x: DEFAULT_XR_CHUNK_X,
             chunk_z: DEFAULT_XR_CHUNK_Z,
             render_distance: DEFAULT_XR_RENDER_DISTANCE,
-            render_compile_worker_count:
-                mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            render_compile_worker_count: mclone_app_runtime::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(
-                mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
+                mclone_app_runtime::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
             ),
             render_compile_worker_timing_enabled: true,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,

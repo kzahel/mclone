@@ -341,17 +341,10 @@ where
             None
         };
         let far_lod = FarTerrainLodRenderer::new(device, self.color_format);
-        let audio = if self.audio.is_some() {
-            Some(
-                AudioEngine::from_prepared(
-                    assets.audio.clone(),
-                    mclone_audio::AudioSettings::default(),
-                )
-                .context("initialize replacement audio resources")?,
-            )
-        } else {
-            None
-        };
+        let audio = self
+            .audio
+            .replacement(assets.audio.clone())
+            .context("prepare replacement audio capability")?;
 
         // Compiler construction is the final fallible step. Replacing the
         // instance drops old queued/results and resets resident compile state

@@ -2,10 +2,9 @@
 
 Topic: web-scene-host-adoption
 
-Status: active 2026-07-10. Tactical 170 Slice 0 landed the executable browser
-baselines, warning-mode source inventory, deferred-drop diagnostic, and typed
-platform-operation contract. Slice 1 is next. The implementation sequence is
-recorded in
+Status: active 2026-07-10. Tactical 170 Slices 0-1 landed the executable
+browser baselines and portable scene prerequisites. Slice 2 is next. The
+implementation sequence is recorded in
 [`170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md);
 production adoption has not started and the old web owner remains active.
 
@@ -77,34 +76,28 @@ contracts, but the top-level orchestration is still forked:
 - Client-experience, session, and catalog policy are shared, but web still
   applies their effects through app-local matches and asynchronous wrappers.
 
-The direct acceptance gate currently fails:
+The direct acceptance gate still fails before the runtime-shell split:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml \
   -p mclone-scene --target wasm32-unknown-unknown
 ```
 
-It reports 98 compiler errors, but most are cascades from these root boundary
-families:
+The Slice 0 baseline was 98 compiler errors across native runtime, neutral
+asset data, catalog, camera reconciliation, teleport, and bare `Instant`
+families. After Slice 1 it reports 87 errors. The six root diagnostics now name
+only:
 
-1. `native_session_runtime` is entirely excluded from WASM.
-2. `TexturedMeshAssets` and compile defaults live in native-only
-   `render_assets` even though the data itself is platform-neutral.
-3. `McloneSceneHost` directly owns `NativeWorldCatalog` and the synchronous
-   native catalog executor.
-4. camera reconciliation is native-gated and tied to native runtime methods.
-5. `NativeTeleportPreviewWorker` is a concrete OS-thread owner inside the host.
-6. startup deadlines, frame admission, locomotion attribution, and render
-   timing use bare `std::time::Instant` throughout the reachable scene path.
+1. the native session runtime and its startup-readiness export;
+2. prepared-scene asset replacement request/services; and
+3. `NativeWorldCatalog` plus the synchronous native catalog executor.
 
-Families 1-5 are the compile-error roots: the missing types erase the host
-runtime type and produce most of the remaining inference errors. Family 6 is
-different in kind: `std::time::Instant` compiles on `wasm32-unknown-unknown`
-and panics at runtime instead (the reachable scene path has 68
-`Instant::now()` call sites). A green direct WASM gate therefore proves
-compile portability only, not browser runnability; the Slice 4 browser proof
-is the runtime gate. Treat all of this as a short list of architectural
-boundaries, not 98 independent fixes.
+The other 81 errors are inference cascades after the missing native runtime
+type is erased. `TexturedMeshAssets`/compile defaults, camera reconciliation,
+teleport request/result/service types, and monotonic time no longer appear as
+WASM error roots. The reachable `mclone-scene` source has no
+`std::time::Instant` use. A green direct WASM gate will still prove compile
+portability only; the Slice 4 browser proof remains the runtime gate.
 
 ## Slice 0 Landed Evidence (2026-07-10)
 
@@ -140,6 +133,41 @@ boundaries, not 98 independent fixes.
   was added to the repository.
 
 No production owner, behavior, or feature-profile state moved in Slice 0.
+
+## Slice 1 Landed Evidence (2026-07-10)
+
+- `mclone_app_runtime::monotonic` now owns ordered `MonotonicInstant`, injected
+  `MonotonicClockHandle`, and self-evaluating `MonotonicDeadline` contracts.
+  Native assembly supplies the system-`Instant` adapter; shared scene startup,
+  admission deadlines, locomotion deltas, and render attribution use only the
+  neutral contract. Ordering, saturation, and deadline-expiry tests use a
+  manual clock.
+- `mclone_app_runtime::render_asset_data` is always compiled and owns
+  `SceneTexturedSections`, `TextureAtlasImage`, `TexturedMeshAssets`, and
+  source-backed CPU preparation. Filesystem discovery, native compile workers,
+  and device upload remain outside it. Compile defaults are consumed from the
+  target-neutral runtime root.
+- Camera reconciliation is always compiled over `EngineCameraRuntime`, the
+  narrow command/update/interest facts it needs. The native session runtime is
+  one adapter, and a target-neutral fake-runtime test proves the policy has no
+  native runtime dependency.
+- `McloneSceneHost` owns `TeleportPreviewCapability` rather than
+  `NativeTeleportPreviewWorker`. Native desktop, Android, desktop XR, and
+  Android XR attach the lazy native service factory; unavailable capability is
+  explicit and tested for the future browser assembly.
+- Scene audio is an `AudioOutputCapability`. Platform assembly constructs and
+  attaches `AudioEngine`; shared scene code emits neutral sound commands and
+  asks the capability for transactional asset replacement. CPAL/device/stream
+  construction is native-gated inside `mclone-audio`, whose prepared data and
+  absent-output contract compile for WASM.
+- Native desktop/offscreen, synthetic stereo, flat Android, desktop XR, and
+  Android XR build/smoke gates passed. The inspected `/tmp` captures showed
+  textured terrain and actors in desktop offscreen, distinct stereo forest
+  views with both menu composites, and a live flat-Android terrain frame. No
+  capture was committed.
+
+Production web still uses `WebChunkRenderSession`; Slice 1 added no alternate
+browser host or cutover toggle.
 
 ## Locked Decisions
 

@@ -7,10 +7,12 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-cpal.workspace = true
 lewton.workspace = true
 log.workspace = true
 mclone-assets.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cpal.workspace = true
 
 [lib]
 name = "mclone_audio"

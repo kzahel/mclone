@@ -425,7 +425,10 @@ impl AndroidGpuState {
                 None
             }
         };
-        host.set_audio_engine(audio);
+        host.set_audio_output(audio.map_or_else(
+            || mclone_audio::AudioOutputCapability::Unavailable,
+            mclone_audio::AudioOutputCapability::available,
+        ));
         host.set_mono_ui_scale(GuiScale::from_pixels(config.width, config.height));
 
         log::info!(
@@ -1023,6 +1026,7 @@ fn create_android_scene_host(
             device,
             queue,
             color_format,
+            mclone_app_runtime::monotonic::system_monotonic_clock(),
             scene.clone(),
             runtime,
             render_options,
@@ -1036,6 +1040,7 @@ fn create_android_scene_host(
             device,
             queue,
             color_format,
+            mclone_app_runtime::monotonic::system_monotonic_clock(),
             scene.clone(),
             render_options,
             mesh_assets,
@@ -1046,6 +1051,7 @@ fn create_android_scene_host(
         )
     }
     .context("initialize Android shared Mono scene host")?;
+    host.set_teleport_preview_capability(mclone_client::native_teleport_preview_capability());
     host.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
         android_remote_runtime(&endpoint, &scene, mesh_assets)
     });

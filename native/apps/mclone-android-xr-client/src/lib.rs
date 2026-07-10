@@ -2047,6 +2047,7 @@ mod android {
                 device,
                 queue,
                 XR_COLOR_FORMAT,
+                mclone_app_runtime::monotonic::system_monotonic_clock(),
                 scene_options.clone(),
                 runtime,
                 render_options,
@@ -2060,6 +2061,7 @@ mod android {
                 device,
                 queue,
                 XR_COLOR_FORMAT,
+                mclone_app_runtime::monotonic::system_monotonic_clock(),
                 scene_options,
                 render_options,
                 mesh_assets,
@@ -2076,7 +2078,12 @@ mod android {
                 None
             }
         };
-        terrain.set_audio_engine(audio);
+        terrain.set_audio_output(audio.map_or_else(
+            || mclone_audio::AudioOutputCapability::Unavailable,
+            mclone_audio::AudioOutputCapability::available,
+        ));
+        terrain
+            .set_teleport_preview_capability(mclone_client::native_teleport_preview_capability());
         terrain.set_frame_host_kind(FrameHostKind::AndroidXrOpenXr);
         terrain.set_session_runtime_factory(|endpoint, scene_options, mesh_assets| {
             android_xr_remote_scene_runtime(endpoint, scene_options, mesh_assets)

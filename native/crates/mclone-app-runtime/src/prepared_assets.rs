@@ -34,7 +34,7 @@ use mclone_render_session::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::render_assets::TexturedMeshAssets;
+use crate::render_asset_data::TexturedMeshAssets;
 
 pub const AUTHORED_FIRST_PARTY_PACK_ID: &str = "mclone-authored";
 pub const GENERATED_FALLBACK_PACK_ID: &str = "mclone-generated-fallback";

@@ -7,7 +7,7 @@ use crate::host_mode::{
     SingleViewHostOptions,
 };
 use crate::native_session_runtime::NativeSessionRuntime;
-use crate::render_assets::TexturedMeshAssets;
+use crate::render_asset_data::TexturedMeshAssets;
 use crate::session::RemoteSessionEndpoint;
 
 pub fn connect_native_remote_session_runtime(

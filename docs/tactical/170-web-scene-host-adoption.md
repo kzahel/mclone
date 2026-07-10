@@ -1,8 +1,7 @@
 # 170: Web Scene-Host Adoption
 
-Status: active 2026-07-10; Slice 0 (baseline, tripwires, and contract locks)
-landed. Slice 1 is next. Production web still uses
-`WebChunkRenderSession`; no host-adoption cutover code has landed.
+Status: active 2026-07-10; Slices 0-1 landed. Slice 2 is next. Production web
+still uses `WebChunkRenderSession`; no host-adoption cutover code has landed.
 
 Topic: [`web-scene-host-adoption`](../topics/web-scene-host-adoption.md)
 
@@ -411,7 +410,7 @@ cargo check --manifest-path native/Cargo.toml \
   -p mclone-scene --target wasm32-unknown-unknown
 ```
 
-## Slice 1: Portable Scene Prerequisites
+## Slice 1: Portable Scene Prerequisites — DONE (2026-07-10)
 
 Purpose: remove neutral data/utility code from native cfg islands before
 changing the runtime owner.
@@ -443,6 +442,87 @@ Exit criteria:
   than neutral data and timing; and
 - public names are platform-neutral rather than aliases with `Native` in the
   semantic contract.
+
+### Slice 1 Result
+
+The portable prerequisite boundary landed without moving the production web
+owner:
+
+- `mclone_app_runtime::monotonic` defines ordered/saturating
+  `MonotonicInstant`, injected `MonotonicClockHandle`, and
+  `MonotonicDeadline`. Native hosts inject the system-`Instant` adapter at
+  assembly. Scene startup, frame admission, locomotion deltas, and render
+  timing contain no direct `std::time::Instant` use.
+- `mclone_app_runtime::render_asset_data` is target-neutral and owns
+  `SceneTexturedSections`, `TextureAtlasImage`, `TexturedMeshAssets`, and the
+  source-backed CPU loader. Filesystem discovery and native render-compile
+  worker construction remain in `render_assets`; GPU upload remains in render
+  owners. Scene compile defaults use the always-available runtime constants.
+- `camera_reconcile` is always compiled and accepts the narrow
+  `EngineCameraRuntime` command/update/interest facts. Native runtime support
+  is an adapter implementation rather than the policy signature.
+- `TeleportPreviewCapability` owns an optional lazy service. Native platform
+  assembly attaches `native_teleport_preview_capability`; the scene no longer
+  imports or stores `NativeTeleportPreviewWorker`. Unavailable submit/poll is
+  explicit and tested.
+- `AudioOutputCapability` replaces the scene's concrete `AudioEngine` field.
+  Platforms still construct the native engine and attach it; scene asset-epoch
+  commits request replacement through the capability. CPAL/device/stream code
+  and dependency selection are native-gated inside `mclone-audio`.
+- Focused tests lock monotonic ordering/deadline expiry, reconciliation through
+  neutral facts, unavailable teleport, and unavailable audio. Native teleport
+  remains lazy and native audio remains platform-attached.
+
+The direct scene WASM prerequisite gate changed from 98 errors at Slice 0 to
+87 errors. It has six root diagnostics: native session runtime/startup,
+prepared-scene asset replacement services, and native world catalog/executor.
+The other 81 are runtime-type inference cascades. There are no remaining root
+diagnostics for time, render-asset data/defaults, camera reconciliation, or
+teleport types. The expected failure log is
+`/tmp/mclone-t170-slice1-scene-wasm.txt`.
+
+Validation passed:
+
+```text
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml --workspace
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-app-runtime -p mclone-client -p mclone-audio -p mclone-scene
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-app-runtime --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:scene-host:purity
+pnpm native:thin-adapters:purity
+pnpm native:web:scene-host-adoption
+pnpm native:web:build
+pnpm native:web:typecheck
+pnpm native:desktop-offscreen:smoke
+pnpm native:xr-emulation:smoke
+pnpm native:xr:check
+pnpm native:android:apk
+pnpm native:android-xr:apk
+MCLONE_ANDROID_ASSET_LOCK_CHECK=0 \
+  pnpm native:android:avd-smoke -- --skip-build \
+  --render-distance 2 --smoke-seconds 30
+```
+
+The AVD override skipped only the repository's stale asset-tooling lock check;
+it staged the existing valid 5.6 MB `extracted.zip` without rewriting the lock.
+The smoke passed with the rebuilt APK, a focused activity, a rendered-frame
+marker, and a pulled screenshot.
+
+The following fresh captures were visually inspected and not committed:
+
+- `/tmp/mclone-desktop-offscreen.png`: 2560x1600 textured spruce terrain,
+  64 resident sections / 11 drawn sections, cow and chicken actors;
+- `/tmp/mclone-xr-emulation.png`: 1280x640 side-by-side output, 268,570
+  differing eye pixels, 166 resident / 24 drawn sections, and both world-menu
+  composites; and
+- `/tmp/mclone-android-avd-chunk.png`: live flat-Android terrain at the close
+  leaf-canopy spawn, with a small sky opening and no surface corruption.
+
+No production `WebChunkRenderSession` or TypeScript owner changed.
 
 ## Slice 2: Neutral Runtime Shell And Service Container
 
@@ -774,14 +854,15 @@ the evidence and options, and revise this tactical before production cutover.
   owns the feature-profile/exception framework; this tactical preserves web
   reasons before any later promotion.
 - [`169-runtime-asset-pack-selection.md`](169-runtime-asset-pack-selection.md)
-  owns active asset-set preparation/replacement. Slices 0-4 here may proceed
-  while its implementation advances, but Slice 5 consumes its epoch seam and
-  must not race it with another web resource lifecycle.
+  owns the landed active asset-set preparation/replacement seam. Slices 0-4
+  preserve it; Slice 5 consumes its epoch contract and must not race it with
+  another web resource lifecycle.
 
 ## Recommended Next Step
 
-Implement Slice 1 only. Introduce the shared monotonic time contract, move
-neutral render-asset data out of native cfg islands, make camera reconciliation
-target-neutral, and replace concrete teleport/audio ownership with explicit
-optional capabilities. Keep production web on `WebChunkRenderSession`; do not
-begin the neutral runtime-shell split from Slice 2 yet.
+Implement Slice 2 only. Split the native session runtime into the neutral
+scene-session shell and native service assembly, replace concrete catalog
+ownership with typed platform operations, select the bounded deferred-drop
+service, and adapt every native host to the compact service container. Keep
+production web on `WebChunkRenderSession`; do not begin Slice 3 browser service
+adapters or the production cutover.

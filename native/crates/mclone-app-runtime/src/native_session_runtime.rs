@@ -40,9 +40,11 @@ use crate::host_mode::{
     prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
 };
 use crate::lod_coverage::{LodCoverageCoordinator, LodReplacementCounters, LodTileAvailability};
+use crate::monotonic::{MonotonicDeadline, system_monotonic_clock};
+use crate::render_asset_data::TexturedMeshAssets;
 use crate::render_assets::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-    NativeRenderSectionCompileDispatcher, TexturedMeshAssets, load_textured_mesh_assets,
+    NativeRenderSectionCompileDispatcher, load_textured_mesh_assets,
 };
 use crate::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -821,8 +823,8 @@ where
         camera_position: Vec3,
         timeout: Duration,
     ) -> Result<NativeSessionStartupCompletion<S>> {
-        let deadline = Instant::now() + timeout;
-        self.drive_until_ready(camera_position, deadline, None, timeout)?;
+        let deadline = system_monotonic_clock().deadline_after(timeout);
+        self.drive_until_ready(camera_position, &deadline, None, timeout)?;
         Ok(self.complete())
     }
 
@@ -851,8 +853,8 @@ where
         timeout: Duration,
         mut reconcile: impl FnMut(&mut NativeSceneRuntime<S>) -> Result<Vec3>,
     ) -> Result<NativeSessionStartupCompletion<S>> {
-        let deadline = Instant::now() + timeout;
-        self.drive_until_ready(initial_camera, deadline, None, timeout)?;
+        let deadline = system_monotonic_clock().deadline_after(timeout);
+        self.drive_until_ready(initial_camera, &deadline, None, timeout)?;
         for _ in 0..MAX_STARTUP_RECONCILE_PASSES {
             let interest_before = self.runtime.interest_center();
             let camera = reconcile(&mut self.runtime)?;
@@ -863,7 +865,7 @@ where
             // Interest moved during reconciliation: keep pumping at the new camera
             // until the render seed covers it (docs/tactical/167 Slice 4). Another
             // pass may surface a further correction, so loop until interest settles.
-            self.drive_until_ready(camera, deadline, Some(interest_after), timeout)?;
+            self.drive_until_ready(camera, &deadline, Some(interest_after), timeout)?;
         }
         Ok(self.complete())
     }
@@ -876,7 +878,7 @@ where
     fn drive_until_ready(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: &MonotonicDeadline,
         require_drawable_near: Option<ChunkPos>,
         timeout: Duration,
     ) -> Result<()> {
@@ -893,7 +895,7 @@ where
             if step.startup_ready && covered {
                 return Ok(());
             }
-            if Instant::now() >= deadline {
+            if deadline.is_reached() {
                 if require_drawable_near.is_some() && step.startup_ready {
                     log::warn!(
                         "startup reconciliation timed out after {:.3}s waiting for {} render-seed coverage near the final camera; completing with best-effort seed (render_seed_drawable_sections={})",
@@ -1523,7 +1525,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
     ) -> Result<RenderSectionCacheUpdate> {
         let render_compile_dispatcher = &mut self.render_compile_dispatcher;
         self.core
@@ -1538,7 +1540,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate> {
         let render_compile_dispatcher = &mut self.render_compile_dispatcher;
@@ -1554,7 +1556,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
         let render_compile_dispatcher = &mut self.render_compile_dispatcher;
@@ -1570,7 +1572,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     pub fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         max_compile_requests: usize,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
@@ -2127,7 +2129,7 @@ where
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
     ) -> Result<RenderSectionCacheUpdate> {
         match self {
             Self::Local(scene) => {
@@ -2142,7 +2144,7 @@ where
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate> {
         match self {
@@ -2164,7 +2166,7 @@ where
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
         match self {
@@ -2186,7 +2188,7 @@ where
     pub fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         max_compile_requests: usize,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
@@ -3073,7 +3075,7 @@ where
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
@@ -3087,7 +3089,7 @@ where
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
@@ -3102,7 +3104,7 @@ where
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
         self.core
@@ -3188,7 +3190,7 @@ where
     pub fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         max_compile_requests: usize,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
@@ -4131,7 +4133,13 @@ mod tests {
                 apply_pending_engine_camera_position_updates(runtime, &mut camera, context)?;
                 let mut camera = EngineCameraController::spawn_for_chunk(final_chunk);
                 let mut timing = EngineCameraCommitTiming::default();
-                commit_engine_camera_player_pose(runtime, &mut camera, context, Some(&mut timing))?;
+                commit_engine_camera_player_pose(
+                    runtime,
+                    &mut camera,
+                    context,
+                    &system_monotonic_clock(),
+                    Some(&mut timing),
+                )?;
                 assert!(timing.server_command_ms.is_finite());
                 assert!(timing.position_updates_ms.is_finite());
                 assert!(timing.interest_ms.is_finite());
@@ -4198,6 +4206,7 @@ mod tests {
                     runtime,
                     &mut camera,
                     EngineCameraCommitContext::send_only("test"),
+                    &system_monotonic_clock(),
                     None,
                 )?;
                 assert_eq!(camera.snapshot().chunk_pos, corrected_chunk);

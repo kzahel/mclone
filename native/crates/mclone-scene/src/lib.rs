@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
@@ -38,13 +38,16 @@ use mclone_app_runtime::frame_render::{
 use mclone_app_runtime::host_mode::{
     RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::monotonic::system_monotonic_clock;
+use mclone_app_runtime::monotonic::{MonotonicClockHandle, MonotonicDeadline, MonotonicInstant};
 use mclone_app_runtime::native_session_runtime::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedStartupPump,
     LocalIntegratedStartupStep, NativeSceneRuntime, NativeSessionRuntime,
     NativeSessionStartupCompletion, NativeSessionStartupPump,
 };
 use mclone_app_runtime::prepared_assets::{AssetPackSourceRegistry, PreparedSceneAssets};
-use mclone_app_runtime::render_assets::TexturedMeshAssets;
+use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -62,12 +65,12 @@ use mclone_app_runtime::{
     set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::{ActorFigureId, AssetSource};
-use mclone_audio::{AudioEngine, PreparedAudioAssets, landing_playback_for_impact};
+use mclone_audio::{AudioOutputCapability, PreparedAudioAssets, landing_playback_for_impact};
 use mclone_client::{
     BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
-    NativeTeleportPreviewWorker, TeleportConfig, TeleportIntent, TeleportPreview,
-    TeleportPreviewRequestId, TeleportPreviewResult, TeleportValidityReason,
-    sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
+    TeleportCollisionSnapshot, TeleportConfig, TeleportIntent, TeleportPreview,
+    TeleportPreviewCapability, TeleportPreviewRequestId, TeleportPreviewResult,
+    TeleportValidityReason, sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_diagnostics::{
@@ -293,6 +296,7 @@ where
     S: RemoteDedicatedServerSession,
 {
     scene: McloneSceneHostOptions,
+    clock: MonotonicClockHandle,
     color_format: wgpu::TextureFormat,
     mesh_assets: TexturedMeshAssets,
     active_assets: PreparedSceneAssets,
@@ -337,7 +341,7 @@ where
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
     underwater_effects: XrUnderwaterEffectStates,
-    last_underwater_update: Option<Instant>,
+    last_underwater_update: Option<MonotonicInstant>,
     head_comfort: XrHeadComfortState,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
@@ -345,7 +349,7 @@ where
     turn_policy: XrTurnPolicy,
     snap_turn_state: XrSnapTurnState,
     blink_teleport: XrBlinkTeleportState,
-    blink_teleport_worker: Option<NativeTeleportPreviewWorker>,
+    teleport_preview: TeleportPreviewCapability,
     mono_blink_debug: MonoBlinkDebugState,
     display_refresh_hz: Option<f32>,
     render_admission_policy: RenderAdmissionPolicy,
@@ -357,7 +361,7 @@ where
     render_section_accept_budget: Option<usize>,
     render_completed_result_accept_budget: Option<usize>,
     per_view_uniform_frame: u32,
-    last_locomotion_update: Option<Instant>,
+    last_locomotion_update: Option<MonotonicInstant>,
     menu_toggle_down: bool,
     game_ui_toggle_down: bool,
     menu_pointer_down: bool,
@@ -370,7 +374,7 @@ where
     last_ui_panel_stats: WorldGuiPanelRenderStats,
     last_ui_draw_cache_stats: UiDrawCacheStats,
     rendered_frames: u32,
-    audio: Option<AudioEngine>,
+    audio: AudioOutputCapability,
     seed_reroll: NewWorldSeedReroll,
 }
 
@@ -484,9 +488,9 @@ where
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
         let mut timing = XrTerrainFrameTiming::default();
-        let render_views_start = Instant::now();
+        let render_views_start = self.clock.now();
         let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
-        timing.render_views_ms = elapsed_ms(render_views_start.elapsed());
+        timing.render_views_ms = elapsed_ms(self.clock.elapsed_since(render_views_start));
         self.render_prepared_frame(
             device,
             queue,
@@ -523,9 +527,9 @@ where
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
         let mut timing = XrTerrainFrameTiming::default();
-        let render_views_start = Instant::now();
+        let render_views_start = self.clock.now();
         let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
-        timing.render_views_ms = elapsed_ms(render_views_start.elapsed());
+        timing.render_views_ms = elapsed_ms(self.clock.elapsed_since(render_views_start));
         self.render_prepared_frame_multiview(
             device,
             queue,
@@ -788,27 +792,27 @@ where
         runtime_mode: XrTerrainRuntimeUpdateMode,
     ) -> Result<XrTerrainFrameSummary> {
         let mut timing = XrTerrainFrameTiming::default();
-        let render_views_start = Instant::now();
+        let render_views_start = self.clock.now();
         let mut render_views = self.render_views(&views)?;
-        timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+        timing.render_views_ms += elapsed_ms(self.clock.elapsed_since(render_views_start));
         self.update_menu_panel_pose(render_views);
-        let menu_pointer_start = Instant::now();
+        let menu_pointer_start = self.clock.now();
         if self
             .apply_menu_pointer_input(device, queue)
             .context("apply XR menu pointer input")?
         {
-            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
-            let render_views_start = Instant::now();
+            timing.menu_pointer_ms += elapsed_ms(self.clock.elapsed_since(menu_pointer_start));
+            let render_views_start = self.clock.now();
             render_views = self.render_views(&views)?;
-            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+            timing.render_views_ms += elapsed_ms(self.clock.elapsed_since(render_views_start));
             self.update_menu_panel_pose(render_views);
         } else {
-            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
+            timing.menu_pointer_ms += elapsed_ms(self.clock.elapsed_since(menu_pointer_start));
         }
         if self.advance_local_startup(device, queue)? {
-            let render_views_start = Instant::now();
+            let render_views_start = self.clock.now();
             render_views = self.render_views(&views)?;
-            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+            timing.render_views_ms += elapsed_ms(self.clock.elapsed_since(render_views_start));
             self.update_menu_panel_pose(render_views);
         }
         self.render_prepared_frame(
@@ -831,27 +835,27 @@ where
         runtime_mode: XrTerrainRuntimeUpdateMode,
     ) -> Result<XrTerrainFrameSummary> {
         let mut timing = XrTerrainFrameTiming::default();
-        let render_views_start = Instant::now();
+        let render_views_start = self.clock.now();
         let mut render_views = self.render_views(&views)?;
-        timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+        timing.render_views_ms += elapsed_ms(self.clock.elapsed_since(render_views_start));
         self.update_menu_panel_pose(render_views);
-        let menu_pointer_start = Instant::now();
+        let menu_pointer_start = self.clock.now();
         if self
             .apply_menu_pointer_input(device, queue)
             .context("apply XR menu pointer input for multiview frame")?
         {
-            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
-            let render_views_start = Instant::now();
+            timing.menu_pointer_ms += elapsed_ms(self.clock.elapsed_since(menu_pointer_start));
+            let render_views_start = self.clock.now();
             render_views = self.render_views(&views)?;
-            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+            timing.render_views_ms += elapsed_ms(self.clock.elapsed_since(render_views_start));
             self.update_menu_panel_pose(render_views);
         } else {
-            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
+            timing.menu_pointer_ms += elapsed_ms(self.clock.elapsed_since(menu_pointer_start));
         }
         if self.advance_local_startup(device, queue)? {
-            let render_views_start = Instant::now();
+            let render_views_start = self.clock.now();
             render_views = self.render_views(&views)?;
-            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+            timing.render_views_ms += elapsed_ms(self.clock.elapsed_since(render_views_start));
             self.update_menu_panel_pose(render_views);
         }
         self.render_prepared_frame_multiview(
@@ -928,11 +932,12 @@ where
         let underwater_overlays = self.underwater_overlays(render_views);
         let actor_instances = self.current_actor_instances();
         let collect_split_timing = self.render_split_timing_enabled;
-        let records_start = collect_split_timing.then(Instant::now);
+        let records_start = collect_split_timing.then(|| self.clock.now());
         let (prepared_records, record_cache_prepare) =
             self.draw.prepare_render_records_with_stats();
         timing.record_cache_prepare = record_cache_prepare;
-        timing.shared_records_ms = records_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        timing.shared_records_ms =
+            records_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
         let (terrain_views, terrain_options, _) =
             self.terrain_render_views_and_options(render_views);
         let (prepared_stereo_draw, stereo_draw_timing) = if collect_split_timing {
@@ -950,7 +955,7 @@ where
         let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
         let right_view_slot = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
         let diagnostic_panel = xr_diagnostic_panel_from_render_views(render_views);
-        let left_eye_start = Instant::now();
+        let left_eye_start = self.clock.now();
         let left_eye = self.render_eye_target(
             device,
             queue,
@@ -968,13 +973,13 @@ where
             left_view_slot,
             !defer_eye_waits,
         )?;
-        timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
+        timing.left_eye_ms = elapsed_ms(self.clock.elapsed_since(left_eye_start));
         timing.left_eye_render = left_eye.timing;
         timing.left_eye_render.cull_ms += stereo_draw_timing.cull_ms;
         timing.left_eye_render.translucent_collect_ms += stereo_draw_timing.translucent_collect_ms;
         timing.left_eye_render.translucent_sort_ms += stereo_draw_timing.translucent_sort_ms;
         timing.left_eye_render.prepare_ms += stereo_draw_timing.prepare_ms;
-        let right_eye_start = Instant::now();
+        let right_eye_start = self.clock.now();
         let mut right_eye = self.render_eye_target(
             device,
             queue,
@@ -992,7 +997,7 @@ where
             right_view_slot,
             !defer_eye_waits,
         )?;
-        timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
+        timing.right_eye_ms = elapsed_ms(self.clock.elapsed_since(right_eye_start));
         timing.right_eye_render = right_eye.timing;
         timing.stereo_submit_ms =
             timing.left_eye_render.submit_ms + timing.right_eye_render.submit_ms;
@@ -1002,7 +1007,7 @@ where
                 && self.local_startup.is_none()
                 && self.runtime.is_some()
             {
-                let prefetch_start = Instant::now();
+                let prefetch_start = self.clock.now();
                 let mut prefetch_timing = XrTerrainFrameTiming::default();
                 let prefetch_deadline = self.render_compile_frame_deadline();
                 let upload = self
@@ -1014,7 +1019,8 @@ where
                     )
                     .context("prefetch XR runtime upload before deferred stereo wait")?;
                 self.prefetched_live_upload = Some(upload);
-                timing.overlap_runtime_prefetch_ms = elapsed_ms(prefetch_start.elapsed());
+                timing.overlap_runtime_prefetch_ms =
+                    elapsed_ms(self.clock.elapsed_since(prefetch_start));
                 timing.overlap_runtime_prefetch_poll_ms = prefetch_timing.runtime_poll_ms;
                 timing.overlap_runtime_prefetch_sync_ms = prefetch_timing.runtime_sync_ms;
                 timing.overlap_runtime_prefetch_gpu_upload_ms =
@@ -1026,10 +1032,10 @@ where
                 .submission
                 .take()
                 .context("deferred XR eye wait missing right-eye submission")?;
-            let poll_wait_start = Instant::now();
+            let poll_wait_start = self.clock.now();
             Self::wait_for_xr_submission(device, submission, "deferred XR terrain stereo render")
                 .context("wait for deferred XR terrain stereo render")?;
-            timing.stereo_poll_wait_ms = elapsed_ms(poll_wait_start.elapsed());
+            timing.stereo_poll_wait_ms = elapsed_ms(self.clock.elapsed_since(poll_wait_start));
         } else {
             timing.stereo_poll_wait_ms =
                 timing.left_eye_render.poll_wait_ms + timing.right_eye_render.poll_wait_ms;
@@ -1049,7 +1055,7 @@ where
         device: &wgpu::Device,
         center_position: Vec3,
         runtime_mode: XrTerrainRuntimeUpdateMode,
-        frame_deadline: Option<Instant>,
+        frame_deadline: Option<MonotonicDeadline>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
         if !matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live) {
@@ -1063,16 +1069,18 @@ where
         if let Some(upload) = self.prefetched_live_upload.take() {
             return Ok(upload);
         }
-        let runtime_upload_start = Instant::now();
+        let runtime_upload_start = self.clock.now();
         let upload =
             self.poll_runtime_and_upload(device, center_position, frame_deadline, timing)?;
-        timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
+        timing.runtime_upload_ms = elapsed_ms(self.clock.elapsed_since(runtime_upload_start));
         Ok(upload)
     }
 
-    fn render_compile_frame_deadline(&self) -> Option<Instant> {
-        self.render_admission_target_period_ms()
-            .map(|period_ms| Instant::now() + Duration::from_secs_f64(period_ms / 1_000.0))
+    fn render_compile_frame_deadline(&self) -> Option<MonotonicDeadline> {
+        self.render_admission_target_period_ms().map(|period_ms| {
+            self.clock
+                .deadline_after(Duration::from_secs_f64(period_ms / 1_000.0))
+        })
     }
 
     fn render_admission_target_period_ms(&self) -> Option<f64> {
@@ -1406,11 +1414,11 @@ where
         } else {
             Vec::new()
         };
-        let records_start = Instant::now();
+        let records_start = self.clock.now();
         let (prepared_records, record_cache_prepare) =
             self.draw.prepare_render_records_with_stats();
         if let Some(timing) = timing.as_deref_mut() {
-            timing.shared_records_ms = elapsed_ms(records_start.elapsed());
+            timing.shared_records_ms = elapsed_ms(self.clock.elapsed_since(records_start));
             timing.record_cache_prepare = record_cache_prepare;
         }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1423,7 +1431,7 @@ where
             self.sky_clear_color(),
         );
         if include_sky {
-            let sky_start = Instant::now();
+            let sky_start = self.clock.now();
             self.sky.render_multiview(
                 device,
                 queue,
@@ -1438,11 +1446,11 @@ where
                 self.sun_angle(),
             )?;
             if let Some(timing) = timing.as_deref_mut() {
-                timing.multiview_sky_ms = elapsed_ms(sky_start.elapsed());
+                timing.multiview_sky_ms = elapsed_ms(self.clock.elapsed_since(sky_start));
             }
             render_target = render_target.with_loaded_color();
         }
-        let terrain_start = Instant::now();
+        let terrain_start = self.clock.now();
         let prepared_stereo_draw =
             self.draw
                 .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options);
@@ -1466,10 +1474,10 @@ where
             )
             .context("render XR terrain multiview chunks")?;
         if let Some(timing) = timing.as_deref_mut() {
-            timing.multiview_terrain_ms = elapsed_ms(terrain_start.elapsed());
+            timing.multiview_terrain_ms = elapsed_ms(self.clock.elapsed_since(terrain_start));
         }
         let actor_stats = if include_actors {
-            let actor_start = Instant::now();
+            let actor_start = self.clock.now();
             let actor_stats = self
                 .actors
                 .render_multiview(
@@ -1484,10 +1492,10 @@ where
                 )
                 .context("render XR actor multiview pass")?;
             if let Some(timing) = timing.as_deref_mut() {
-                timing.multiview_actor_ms = elapsed_ms(actor_start.elapsed());
+                timing.multiview_actor_ms = elapsed_ms(self.clock.elapsed_since(actor_start));
             }
             if split_translucent_terrain {
-                let translucent_start = Instant::now();
+                let translucent_start = self.clock.now();
                 self.draw
                     .render_prepared_multiview_stereo_draw_phase_with_options(
                         &prepared_stereo_draw,
@@ -1501,7 +1509,8 @@ where
                     )
                     .context("render XR terrain multiview translucent chunks")?;
                 if let Some(timing) = timing.as_deref_mut() {
-                    timing.multiview_terrain_ms += elapsed_ms(translucent_start.elapsed());
+                    timing.multiview_terrain_ms +=
+                        elapsed_ms(self.clock.elapsed_since(translucent_start));
                 }
             }
             actor_stats
@@ -1511,7 +1520,7 @@ where
         let mut ui_panel_stats = WorldGuiPanelRenderStats::default();
         let mut ui_draw_cache_stats = UiDrawCacheStats::default();
         if include_overlays {
-            let screen_effect_start = Instant::now();
+            let screen_effect_start = self.clock.now();
             self.screen_effects
                 .render_underwater_multiview(
                     device,
@@ -1531,9 +1540,10 @@ where
                 )
                 .context("render XR head comfort fade multiview")?;
             if let Some(timing) = timing.as_deref_mut() {
-                timing.multiview_screen_effect_ms = elapsed_ms(screen_effect_start.elapsed());
+                timing.multiview_screen_effect_ms =
+                    elapsed_ms(self.clock.elapsed_since(screen_effect_start));
             }
-            let overlays_start = Instant::now();
+            let overlays_start = self.clock.now();
             let world_overlay_stats = self
                 .render_xr_world_overlays_multiview(
                     device,
@@ -1546,15 +1556,16 @@ where
             ui_panel_stats = world_overlay_stats.panel;
             ui_draw_cache_stats = world_overlay_stats.draw_cache;
             if let Some(timing) = timing.as_deref_mut() {
-                timing.multiview_world_overlays_ms = elapsed_ms(overlays_start.elapsed());
+                timing.multiview_world_overlays_ms =
+                    elapsed_ms(self.clock.elapsed_since(overlays_start));
             }
         }
-        let submit_start = Instant::now();
+        let submit_start = self.clock.now();
         let submission = queue.submit(Some(encoder.finish()));
         if let Some(timing) = timing.as_deref_mut() {
-            timing.multiview_submit_ms = elapsed_ms(submit_start.elapsed());
+            timing.multiview_submit_ms = elapsed_ms(self.clock.elapsed_since(submit_start));
         }
-        let poll_wait_start = Instant::now();
+        let poll_wait_start = self.clock.now();
         device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
             .map(|_| ())
@@ -1564,7 +1575,7 @@ where
             .map(|_| ())
             .context("wait for XR terrain multiview device idle")?;
         if let Some(timing) = timing.as_deref_mut() {
-            timing.multiview_poll_wait_ms = elapsed_ms(poll_wait_start.elapsed());
+            timing.multiview_poll_wait_ms = elapsed_ms(self.clock.elapsed_since(poll_wait_start));
         }
 
         self.render_stats.drawn_section_count = stats[0].drawn_section_count;
@@ -1759,13 +1770,14 @@ where
         skip_refresh: bool,
         timing: &mut XrTerrainFrameTiming,
     ) -> usize {
-        let ready_start = Instant::now();
+        let ready_start = self.clock.now();
         if skip_refresh {
-            timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
-            let ready_publish_start = Instant::now();
+            timing.runtime_ready_sections_ms = elapsed_ms(self.clock.elapsed_since(ready_start));
+            let ready_publish_start = self.clock.now();
             self.draw
                 .record_traversal_ready_sections_skipped(upload_backpressured);
-            timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
+            timing.runtime_ready_publish_ms =
+                elapsed_ms(self.clock.elapsed_since(ready_publish_start));
             return self.draw.traversal_ready_section_count();
         }
         let draw_section_generation = self.draw.traversal_ready_source_generation();
@@ -1780,8 +1792,8 @@ where
                 draw_section_generation,
             )
         };
-        timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
-        let ready_publish_start = Instant::now();
+        timing.runtime_ready_sections_ms = elapsed_ms(self.clock.elapsed_since(ready_start));
+        let ready_publish_start = self.clock.now();
         if refresh.refreshed {
             self.draw.set_traversal_ready_sections_with_context(
                 self.traversal_ready_sections.ready_sections(),
@@ -1791,7 +1803,7 @@ where
             self.draw
                 .record_traversal_ready_sections_skipped(upload_backpressured);
         }
-        timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
+        timing.runtime_ready_publish_ms = elapsed_ms(self.clock.elapsed_since(ready_publish_start));
         refresh.section_count
     }
 
@@ -1799,7 +1811,7 @@ where
         &mut self,
         device: &wgpu::Device,
         camera_position: Vec3,
-        frame_deadline: Option<Instant>,
+        frame_deadline: Option<MonotonicDeadline>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
         let (
@@ -1829,9 +1841,9 @@ where
                 ..XrTerrainUploadSummary::default()
             });
         };
-        let poll_start = Instant::now();
+        let poll_start = self.clock.now();
         let poll_changed = self.poll().context("poll XR terrain runtime")?;
-        timing.runtime_poll_ms = elapsed_ms(poll_start.elapsed());
+        timing.runtime_poll_ms = elapsed_ms(self.clock.elapsed_since(poll_start));
         let (poll_summary, has_runtime_render_work) = {
             let runtime = self
                 .runtime
@@ -1904,14 +1916,14 @@ where
             .section_uploads
             .should_drain_before_runtime_sync(upload_frame_policy);
         if drained_pending_uploads_before_sync {
-            let upload_start = Instant::now();
+            let upload_start = self.clock.now();
             let drained_report = self.apply_section_update_uploads(
                 device,
                 RenderSectionCacheUpdate::default(),
                 false,
                 timing,
             )?;
-            let upload_elapsed_ms = elapsed_ms(upload_start.elapsed());
+            let upload_elapsed_ms = elapsed_ms(self.clock.elapsed_since(upload_start));
             timing.runtime_gpu_upload_ms += upload_elapsed_ms;
             timing.runtime_gpu_upload_pre_sync_ms += upload_elapsed_ms;
             accumulate_upload_report(&mut upload_report, drained_report.upload);
@@ -1925,12 +1937,12 @@ where
             drained_pending_uploads_before_sync,
         );
         let should_sync_render_sections = upload_frame_decision.should_sync_render_sections;
-        let sync_start = Instant::now();
+        let sync_start = self.clock.now();
         let timed_section_update = if should_sync_render_sections {
             if let Some(grant) = render_admission_grant {
-                let admission_deadline = Instant::now() + grant.elapsed_budget;
+                let admission_deadline = self.clock.deadline_after(grant.elapsed_budget);
                 let deadline = frame_deadline
-                    .map(|frame_deadline| frame_deadline.min(admission_deadline))
+                    .map(|frame_deadline| frame_deadline.earlier(admission_deadline.clone()))
                     .unwrap_or(admission_deadline);
                 self.sync_render_sections_until_deadline_with_admission_budget_timed(
                     camera_position,
@@ -1950,7 +1962,7 @@ where
         };
         self.render_admission_policy
             .observe_sync(target_period_ms, &timed_section_update);
-        timing.runtime_sync_ms = elapsed_ms(sync_start.elapsed());
+        timing.runtime_sync_ms = elapsed_ms(self.clock.elapsed_since(sync_start));
         timing.runtime_result_accept_ms = timed_section_update.timing.completed_result_accept_ms;
         timing.runtime_dirty_seed_ms = timed_section_update.timing.dirty_seed_ms;
         timing.runtime_prepare_ms = timed_section_update.timing.prepare_ms;
@@ -2150,14 +2162,14 @@ where
         let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
         let resident_mesh_stats = section_update.resident_mesh_stats;
         if upload_frame_decision.should_apply_section_update_after_sync {
-            let upload_start = Instant::now();
+            let upload_start = self.clock.now();
             let section_update_report = self.apply_section_update_uploads(
                 device,
                 section_update,
                 upload_frame_decision.upload_backpressured,
                 timing,
             )?;
-            let upload_elapsed_ms = elapsed_ms(upload_start.elapsed());
+            let upload_elapsed_ms = elapsed_ms(self.clock.elapsed_since(upload_start));
             timing.runtime_gpu_upload_ms += upload_elapsed_ms;
             timing.runtime_gpu_upload_post_sync_ms += upload_elapsed_ms;
             accumulate_upload_report(&mut upload_report, section_update_report.upload);
@@ -2303,7 +2315,7 @@ where
                 section_update.removed_section_keys.len(),
                 release_compile_jobs,
             );
-            let apply_start = Instant::now();
+            let apply_start = self.clock.now();
             let report = self
                 .draw
                 .apply_section_updates_with_context_timed(
@@ -2313,7 +2325,7 @@ where
                     upload_backpressured,
                 )
                 .context("upload XR terrain render section updates");
-            timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
+            timing.runtime_upload_apply_ms += elapsed_ms(self.clock.elapsed_since(apply_start));
             return report.map(|(upload, upload_timing)| {
                 timing.absorb_upload_apply_timing(upload_timing);
                 XrTerrainUploadApplyReport {
@@ -2324,16 +2336,16 @@ where
             });
         }
 
-        let enqueue_start = Instant::now();
+        let enqueue_start = self.clock.now();
         let mut phase = self.section_uploads.enqueue_cache_update(section_update);
-        timing.runtime_upload_enqueue_ms += elapsed_ms(enqueue_start.elapsed());
-        let select_start = Instant::now();
+        timing.runtime_upload_enqueue_ms += elapsed_ms(self.clock.elapsed_since(enqueue_start));
+        let select_start = self.clock.now();
         let drain = self.section_uploads.drain_budgeted(
             self.render_section_upload_budget,
             self.render_section_accept_budget,
         );
         phase.absorb(drain.phase_report);
-        timing.runtime_upload_select_ms += elapsed_ms(select_start.elapsed());
+        timing.runtime_upload_select_ms += elapsed_ms(self.clock.elapsed_since(select_start));
         if drain.is_empty() {
             return Ok(XrTerrainUploadApplyReport {
                 upload: TexturedSectionUploadReport::default(),
@@ -2341,7 +2353,7 @@ where
                 release_compile_jobs: phase.released_compile_jobs,
             });
         }
-        let apply_start = Instant::now();
+        let apply_start = self.clock.now();
         let report = self
             .draw
             .apply_section_updates_with_context_timed(
@@ -2351,7 +2363,7 @@ where
                 upload_backpressured,
             )
             .context("accept budgeted XR terrain render section updates");
-        timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
+        timing.runtime_upload_apply_ms += elapsed_ms(self.clock.elapsed_since(apply_start));
         report.map(|(upload, upload_timing)| {
             timing.absorb_upload_apply_timing(upload_timing);
             let released_on_apply = self
@@ -2473,7 +2485,7 @@ where
     }
 
     fn underwater_effect_dt_seconds(&mut self) -> f32 {
-        let now = Instant::now();
+        let now = self.clock.now();
         let dt_seconds = self
             .last_underwater_update
             .replace(now)
@@ -2503,7 +2515,7 @@ where
         wait_after_submit: bool,
     ) -> Result<XrRenderedEye> {
         let collect_split_timing = self.render_split_timing_enabled;
-        let encode_start = collect_split_timing.then(Instant::now);
+        let encode_start = collect_split_timing.then(|| self.clock.now());
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(match label {
                 "left" => "mclone_xr_terrain_left_eye_encoder",
@@ -2544,7 +2556,7 @@ where
                 render_view.camera_position,
             )
         });
-        let full_frame_start = collect_split_timing.then(Instant::now);
+        let full_frame_start = collect_split_timing.then(|| self.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
             let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
             render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot(
@@ -2598,10 +2610,11 @@ where
             .map(|summary| (summary, Default::default()))
         }
         .with_context(|| format!("render XR terrain {label} eye"))?;
-        let full_frame_ms = full_frame_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let full_frame_ms =
+            full_frame_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
         let mut xr_fade_ms = 0.0;
         if let Some(overlay) = self.head_comfort.overlay() {
-            let fade_start = collect_split_timing.then(Instant::now);
+            let fade_start = collect_split_timing.then(|| self.clock.now());
             self.screen_effects.render_fade_in_slot(
                 device,
                 queue,
@@ -2610,9 +2623,10 @@ where
                 overlay,
                 view_slot,
             );
-            xr_fade_ms = fade_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+            xr_fade_ms =
+                fade_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
         }
-        let selection_start = collect_split_timing.then(Instant::now);
+        let selection_start = collect_split_timing.then(|| self.clock.now());
         self.selection_outline.render_in_slot(
             device,
             queue,
@@ -2623,7 +2637,8 @@ where
             selection_outline.as_ref(),
             view_slot,
         );
-        let xr_selection_ms = selection_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let xr_selection_ms =
+            selection_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
         let mut world_lines = engine_debug_world_lines(
             &self.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
@@ -2637,7 +2652,7 @@ where
         world_lines.extend(self.xr_blink_teleport_lines());
         let mut xr_world_lines_ms = 0.0;
         if !world_lines.is_empty() {
-            let world_lines_start = collect_split_timing.then(Instant::now);
+            let world_lines_start = collect_split_timing.then(|| self.clock.now());
             self.world_gui_renderer
                 .render_lines_in_slot(
                     device,
@@ -2649,12 +2664,13 @@ where
                     view_slot,
                 )
                 .with_context(|| format!("render XR world debug lines for {label} eye"))?;
-            xr_world_lines_ms = world_lines_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+            xr_world_lines_ms =
+                world_lines_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
         }
         let mut ui_panel_stats = WorldGuiPanelRenderStats::default();
         let mut ui_draw_cache_stats = panel_draw.draw_cache;
         let mut xr_world_panel_ms = 0.0;
-        let diagnostic_panel_start = collect_split_timing.then(Instant::now);
+        let diagnostic_panel_start = collect_split_timing.then(|| self.clock.now());
         self.refresh_debug_diagnostics_overlay();
         let (diagnostic_panel_stats, diagnostic_draw_cache) = self
             .diagnostic_panel
@@ -2671,10 +2687,10 @@ where
         ui_panel_stats.add(diagnostic_panel_stats);
         ui_draw_cache_stats.add(diagnostic_draw_cache);
         xr_world_panel_ms +=
-            diagnostic_panel_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+            diagnostic_panel_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
-                let world_panel_start = collect_split_timing.then(Instant::now);
+                let world_panel_start = collect_split_timing.then(|| self.clock.now());
                 let controller_ray_lines = self
                     .xr_menu_controller_ray_lines(panel)
                     .context("build XR menu controller ray visuals")?;
@@ -2754,18 +2770,21 @@ where
                     menu_panel_stats.add(overlay_stats);
                 }
                 ui_panel_stats.add(menu_panel_stats);
-                xr_world_panel_ms +=
-                    world_panel_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+                xr_world_panel_ms += world_panel_start
+                    .map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
             }
         }
-        let finish_start = collect_split_timing.then(Instant::now);
+        let finish_start = collect_split_timing.then(|| self.clock.now());
         let command_buffer = encoder.finish();
-        let encoder_finish_ms = finish_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        let encode_total_ms = encode_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        let submit_start = collect_split_timing.then(Instant::now);
+        let encoder_finish_ms =
+            finish_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
+        let encode_total_ms =
+            encode_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
+        let submit_start = collect_split_timing.then(|| self.clock.now());
         let submission = queue.submit(Some(command_buffer));
-        let submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        let poll_start = collect_split_timing.then(Instant::now);
+        let submit_ms =
+            submit_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start)));
+        let poll_start = collect_split_timing.then(|| self.clock.now());
         let (submission, poll_wait_ms) = if wait_after_submit {
             Self::wait_for_xr_submission(
                 device,
@@ -2774,7 +2793,7 @@ where
             )?;
             (
                 None,
-                poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed())),
+                poll_start.map_or(0.0, |start| elapsed_ms(self.clock.elapsed_since(start))),
             )
         } else {
             (Some(submission), 0.0)
@@ -2844,7 +2863,7 @@ where
     fn sync_render_sections_until_deadline_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
     ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
         let completed_result_accept_budget = self.render_completed_result_accept_budget;
         self.runtime
@@ -2860,7 +2879,7 @@ where
     fn sync_render_sections_until_deadline_with_admission_budget_timed(
         &mut self,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         max_compile_requests: usize,
     ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
         let completed_result_accept_budget = self.render_completed_result_accept_budget;
@@ -2893,6 +2912,7 @@ where
             &mut **runtime,
             &mut self.camera,
             XR_CAMERA_COMMIT_CONTEXT,
+            &self.clock,
             Some(&mut timing),
         )
         .context("sync XR terrain player pose")?;
@@ -2901,12 +2921,9 @@ where
 
     fn play_landing_events(&mut self) {
         let events = self.camera.take_landing_events();
-        let Some(audio) = &self.audio else {
-            return;
-        };
         for event in events {
             let (sound, gain) = landing_playback_for_impact(event.impact_speed);
-            audio.play(sound, gain);
+            self.audio.play(sound, gain);
         }
     }
 

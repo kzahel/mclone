@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-#[cfg(not(target_arch = "wasm32"))]
 use std::fmt;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Condvar, Mutex, mpsc};
@@ -254,10 +253,8 @@ impl TeleportPreview {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub type TeleportPreviewRequestId = u64;
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct TeleportPreviewRequest {
     pub id: TeleportPreviewRequestId,
@@ -266,11 +263,138 @@ pub struct TeleportPreviewRequest {
     pub collision: TeleportCollisionSnapshot,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct TeleportPreviewResult {
     pub id: TeleportPreviewRequestId,
     pub preview: TeleportPreview,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TeleportPreviewServiceError {
+    Unavailable,
+    Failed(String),
+}
+
+impl fmt::Display for TeleportPreviewServiceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unavailable => formatter.write_str("teleport preview capability is unavailable"),
+            Self::Failed(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for TeleportPreviewServiceError {}
+
+/// Target-neutral asynchronous preview service. Native hosts attach the OS
+/// worker adapter; browser hosts may attach a worker-backed compiler service or
+/// leave the capability explicitly unavailable.
+pub trait TeleportPreviewService: Send {
+    fn submit_snapshot(
+        &mut self,
+        intent: TeleportIntent,
+        config: TeleportConfig,
+        collision: TeleportCollisionSnapshot,
+    ) -> Result<TeleportPreviewRequestId, TeleportPreviewServiceError>;
+
+    fn try_recv_latest(
+        &mut self,
+    ) -> Result<Option<TeleportPreviewResult>, TeleportPreviewServiceError>;
+}
+
+type TeleportPreviewServiceFactory =
+    dyn Fn() -> Result<Box<dyn TeleportPreviewService>, TeleportPreviewServiceError> + Send + Sync;
+
+/// Optional host capability retained by shared scene orchestration.
+pub enum TeleportPreviewCapability {
+    Unavailable,
+    Available {
+        factory: Box<TeleportPreviewServiceFactory>,
+        service: Option<Box<dyn TeleportPreviewService>>,
+    },
+}
+
+impl TeleportPreviewCapability {
+    pub fn available(
+        factory: impl Fn() -> Result<Box<dyn TeleportPreviewService>, TeleportPreviewServiceError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self::Available {
+            factory: Box::new(factory),
+            service: None,
+        }
+    }
+
+    pub const fn is_available(&self) -> bool {
+        matches!(self, Self::Available { .. })
+    }
+
+    pub fn ensure_started(&mut self) -> Result<bool, TeleportPreviewServiceError> {
+        match self {
+            Self::Unavailable => Ok(false),
+            Self::Available { factory, service } => {
+                if service.is_none() {
+                    *service = Some(factory()?);
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn submit_snapshot(
+        &mut self,
+        intent: TeleportIntent,
+        config: TeleportConfig,
+        collision: TeleportCollisionSnapshot,
+    ) -> Result<Option<TeleportPreviewRequestId>, TeleportPreviewServiceError> {
+        if !self.ensure_started()? {
+            return Ok(None);
+        }
+        let Self::Available {
+            service: Some(service),
+            ..
+        } = self
+        else {
+            return Err(TeleportPreviewServiceError::Unavailable);
+        };
+        service.submit_snapshot(intent, config, collision).map(Some)
+    }
+
+    pub fn try_recv_latest(
+        &mut self,
+    ) -> Result<Option<TeleportPreviewResult>, TeleportPreviewServiceError> {
+        let Self::Available {
+            service: Some(service),
+            ..
+        } = self
+        else {
+            return Ok(None);
+        };
+        service.try_recv_latest()
+    }
+
+    pub fn reset_service(&mut self) {
+        if let Self::Available { service, .. } = self {
+            *service = None;
+        }
+    }
+}
+
+impl Default for TeleportPreviewCapability {
+    fn default() -> Self {
+        Self::Unavailable
+    }
+}
+
+impl fmt::Debug for TeleportPreviewCapability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TeleportPreviewCapability")
+            .field("available", &self.is_available())
+            .finish()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -370,6 +494,35 @@ impl NativeTeleportPreviewWorker {
             }
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TeleportPreviewService for NativeTeleportPreviewWorker {
+    fn submit_snapshot(
+        &mut self,
+        intent: TeleportIntent,
+        config: TeleportConfig,
+        collision: TeleportCollisionSnapshot,
+    ) -> Result<TeleportPreviewRequestId, TeleportPreviewServiceError> {
+        NativeTeleportPreviewWorker::submit_snapshot(self, intent, config, collision)
+            .map_err(|error| TeleportPreviewServiceError::Failed(error.to_string()))
+    }
+
+    fn try_recv_latest(
+        &mut self,
+    ) -> Result<Option<TeleportPreviewResult>, TeleportPreviewServiceError> {
+        NativeTeleportPreviewWorker::try_recv_latest(self)
+            .map_err(|error| TeleportPreviewServiceError::Failed(error.to_string()))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn native_teleport_preview_capability() -> TeleportPreviewCapability {
+    TeleportPreviewCapability::available(|| {
+        NativeTeleportPreviewWorker::new()
+            .map(|worker| Box::new(worker) as Box<dyn TeleportPreviewService>)
+            .map_err(|error| TeleportPreviewServiceError::Failed(error.to_string()))
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1324,6 +1477,22 @@ mod tests {
             Some(AIR_BLOCK_STATE_ID)
         );
         assert_eq!(snapshot.block_state_at(BlockPos::new(32, 1, 0)), None);
+    }
+
+    #[test]
+    fn unavailable_preview_capability_is_explicit_and_does_not_submit() {
+        let mut capability = TeleportPreviewCapability::Unavailable;
+        let (intent, config) = forward_intent(3.0);
+
+        assert!(!capability.is_available());
+        assert!(!capability.ensure_started().unwrap());
+        assert_eq!(
+            capability
+                .submit_snapshot(intent, config, TeleportCollisionSnapshot::empty())
+                .unwrap(),
+            None
+        );
+        assert_eq!(capability.try_recv_latest().unwrap(), None);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

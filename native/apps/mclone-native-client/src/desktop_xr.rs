@@ -772,6 +772,7 @@ fn create_mclone_terrain_state(
             device,
             queue,
             XR_COLOR_FORMAT,
+            mclone_app_runtime::monotonic::system_monotonic_clock(),
             scene,
             runtime,
             options.render_options,
@@ -785,6 +786,7 @@ fn create_mclone_terrain_state(
             device,
             queue,
             XR_COLOR_FORMAT,
+            mclone_app_runtime::monotonic::system_monotonic_clock(),
             scene,
             options.render_options,
             load_textured_mesh_assets_from_source(&asset_source)?,
@@ -795,7 +797,11 @@ fn create_mclone_terrain_state(
         )
     }
     .context("initialize shared mclone XR terrain scene")?;
-    state.set_audio_engine(audio);
+    state.set_audio_output(audio.map_or_else(
+        || mclone_audio::AudioOutputCapability::Unavailable,
+        mclone_audio::AudioOutputCapability::available,
+    ));
+    state.set_teleport_preview_capability(mclone_client::native_teleport_preview_capability());
     state.set_frame_host_kind(FrameHostKind::DesktopXrOpenXr);
     state.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
         let desktop_scene = desktop_scene_options_for_xr_remote(&endpoint, &scene);

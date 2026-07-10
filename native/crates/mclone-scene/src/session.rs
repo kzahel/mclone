@@ -56,6 +56,7 @@ impl RemoteDedicatedServerSession for SceneLocalOnlyRemoteSession {
 }
 
 impl McloneSceneHost<SceneLocalOnlyRemoteSession> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -73,6 +74,7 @@ impl McloneSceneHost<SceneLocalOnlyRemoteSession> {
             device,
             queue,
             color_format,
+            system_monotonic_clock(),
             scene,
             render_options,
             mesh_assets,
@@ -92,6 +94,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
+        clock: MonotonicClockHandle,
         scene: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
@@ -145,6 +148,7 @@ where
         session.begin_start(request.clone());
         let mut state = Self {
             scene: scene.clone(),
+            clock,
             color_format,
             mesh_assets,
             active_assets,
@@ -214,7 +218,7 @@ where
             turn_policy: XrTurnPolicy::default(),
             snap_turn_state: XrSnapTurnState::default(),
             blink_teleport: XrBlinkTeleportState::default(),
-            blink_teleport_worker: None,
+            teleport_preview: TeleportPreviewCapability::Unavailable,
             mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
             render_admission_policy: RenderAdmissionPolicy::new(
@@ -242,7 +246,7 @@ where
             last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
             rendered_frames: 0,
-            audio: None,
+            audio: AudioOutputCapability::Unavailable,
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
@@ -253,6 +257,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
+        clock: MonotonicClockHandle,
         scene: McloneSceneHostOptions,
         runtime: NativeSessionRuntime<S>,
         render_options: TexturedSectionRenderOptions,
@@ -270,6 +275,7 @@ where
             runtime,
             scene.movement_speed_multiplier,
             startup_view_pose,
+            &clock,
         )?;
         let active_session = started
             .runtime
@@ -298,6 +304,7 @@ where
             .context("upload XR GUI atlas")?;
         let mut state = Self {
             scene: scene.clone(),
+            clock,
             color_format,
             mesh_assets,
             active_assets,
@@ -360,7 +367,7 @@ where
             turn_policy: XrTurnPolicy::default(),
             snap_turn_state: XrSnapTurnState::default(),
             blink_teleport: XrBlinkTeleportState::default(),
-            blink_teleport_worker: None,
+            teleport_preview: TeleportPreviewCapability::Unavailable,
             mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
             render_admission_policy: RenderAdmissionPolicy::new(
@@ -388,7 +395,7 @@ where
             last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
             rendered_frames: 0,
-            audio: None,
+            audio: AudioOutputCapability::Unavailable,
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state
@@ -399,8 +406,12 @@ where
         Ok(state)
     }
 
-    pub fn set_audio_engine(&mut self, audio: Option<AudioEngine>) {
+    pub fn set_audio_output(&mut self, audio: AudioOutputCapability) {
         self.audio = audio;
+    }
+
+    pub fn set_teleport_preview_capability(&mut self, capability: TeleportPreviewCapability) {
+        self.teleport_preview = capability;
     }
 
     pub fn set_frame_pipeline_report(&mut self, report: Arc<FramePipelineReport>, revision: u64) {
@@ -700,12 +711,13 @@ where
         // pose moves chunk interest, the reconciled drive re-pumps at the new camera
         // so the drained seed covers the final camera rather than the spawn camera.
         let startup_camera = glam_vec3_from_vec3d(camera.snapshot().eye);
+        let clock = self.clock.clone();
         let (local_runtime, startup_sections) = pump
             .drive_to_ready_reconciled(
                 startup_camera,
                 DEFAULT_STARTUP_READINESS_TIMEOUT,
                 |runtime| {
-                    reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose)?;
+                    reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose, &clock)?;
                     Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
                 },
             )
@@ -908,6 +920,7 @@ where
             runtime,
             movement_speed_multiplier,
             None,
+            &self.clock,
         ) {
             Ok(started) => started,
             Err(error) => {
@@ -1454,6 +1467,7 @@ pub(crate) fn start_scene_runtime<S>(
     runtime: NativeSessionRuntime<S>,
     movement_speed_multiplier: f32,
     startup_view_pose: Option<XrStartupViewPose>,
+    clock: &MonotonicClockHandle,
 ) -> Result<StartedSceneRuntime<S>>
 where
     S: RemoteDedicatedServerSession,
@@ -1470,14 +1484,14 @@ where
     // correction or the XR startup view pose moves chunk interest (a far view pose
     // can move it several chunks), the pump re-pumps at the new camera so the seed
     // covers the final camera rather than the initial spawn camera.
-    let initial_poll_start = Instant::now();
+    let initial_poll_start = clock.now();
     let startup_camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
     let completion = NativeSessionStartupPump::from_runtime(runtime)
         .drive_to_ready_reconciled(
             startup_camera_position,
             DEFAULT_STARTUP_READINESS_TIMEOUT,
             |runtime| {
-                reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose)?;
+                reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose, clock)?;
                 Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
             },
         )
@@ -1533,7 +1547,7 @@ where
         render_stats.index_count,
         final_step.poll_count,
         final_step.poll_ms,
-        elapsed_ms(initial_poll_start.elapsed())
+        elapsed_ms(clock.elapsed_since(initial_poll_start))
     );
     Ok(StartedSceneRuntime {
         runtime,
@@ -1560,6 +1574,7 @@ fn reconcile_xr_startup_pose<S>(
     runtime: &mut NativeSceneRuntime<S>,
     camera: &mut EngineCameraController,
     startup_view_pose: Option<XrStartupViewPose>,
+    clock: &MonotonicClockHandle,
 ) -> Result<bool>
 where
     S: RemoteDedicatedServerSession,
@@ -1577,6 +1592,7 @@ where
         runtime,
         camera,
         XR_CAMERA_COMMIT_CONTEXT,
+        clock,
         None,
     )?;
     Ok(changed)

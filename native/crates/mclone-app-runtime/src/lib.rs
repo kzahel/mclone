@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 pub mod asset_pack_ui;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod camera_reconcile;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod catalog_executor;
@@ -17,12 +16,14 @@ pub mod frame_pipeline_presentation;
 pub mod frame_render;
 pub mod host_mode;
 pub mod lod_coverage;
+pub mod monotonic;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_remote_session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_session_runtime;
 pub mod platform_operation;
 pub mod prepared_assets;
+pub mod render_asset_data;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod render_assets;
 pub mod render_compile_capacity;
@@ -32,9 +33,8 @@ pub mod startup_args;
 pub mod startup_render_seed;
 pub mod world_catalog;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use crate::camera_reconcile::{
-    EngineCameraCommitContext, EngineCameraCommitTiming,
+    EngineCameraCommitContext, EngineCameraCommitTiming, EngineCameraRuntime,
     apply_pending_engine_camera_position_updates, commit_engine_camera_player_pose,
     sync_engine_camera_player_pose, update_interest_from_engine_camera,
 };
@@ -96,6 +96,8 @@ use mclone_ui::{
 };
 
 use crate::host_mode::SingleViewHostMode;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::monotonic::MonotonicDeadline;
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
@@ -1892,7 +1894,7 @@ impl SingleViewRuntime {
         &mut self,
         compiler: &mut C,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
@@ -1914,7 +1916,7 @@ impl SingleViewRuntime {
         &mut self,
         compiler: &mut C,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
         snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
@@ -1940,7 +1942,7 @@ impl SingleViewRuntime {
         &mut self,
         compiler: &mut C,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
         mut snapshots_for_submit: Snapshots,
     ) -> Result<TimedRenderSectionCacheUpdate>
@@ -1957,9 +1959,7 @@ impl SingleViewRuntime {
         loop {
             if submitted_request_count > 0 {
                 let average_admission = average_duration(admission_total, submitted_request_count);
-                if average_admission > Duration::ZERO
-                    && deadline.saturating_duration_since(Instant::now()) < average_admission
-                {
+                if average_admission > Duration::ZERO && deadline.remaining() < average_admission {
                     if compiler.has_pending_job_capacity()
                         && self.has_ready_pending_render_work(camera_position)
                     {
@@ -2016,7 +2016,7 @@ impl SingleViewRuntime {
                     timing: combined_timing,
                 });
             }
-            if submitted_request_count > 0 && Instant::now() >= deadline {
+            if submitted_request_count > 0 && deadline.is_reached() {
                 if self.has_ready_pending_render_work(camera_position) {
                     combined.deadline_skipped_compile_request_count += 1;
                 }
@@ -2036,7 +2036,7 @@ impl SingleViewRuntime {
         &mut self,
         compiler: &mut C,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate>
     where
@@ -2058,7 +2058,7 @@ impl SingleViewRuntime {
         &mut self,
         compiler: &mut C,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate>
     where
@@ -2080,7 +2080,7 @@ impl SingleViewRuntime {
         &mut self,
         compiler: &mut C,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         max_compile_requests: usize,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate>
@@ -2103,7 +2103,7 @@ impl SingleViewRuntime {
         &mut self,
         compiler: &mut C,
         camera_position: Vec3,
-        deadline: Instant,
+        deadline: MonotonicDeadline,
         max_compile_requests: Option<usize>,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate>
@@ -2119,9 +2119,7 @@ impl SingleViewRuntime {
         loop {
             if submitted_request_count > 0 {
                 let average_admission = average_duration(admission_total, submitted_request_count);
-                if average_admission > Duration::ZERO
-                    && deadline.saturating_duration_since(Instant::now()) < average_admission
-                {
+                if average_admission > Duration::ZERO && deadline.remaining() < average_admission {
                     if compiler.has_pending_job_capacity()
                         && self.has_ready_pending_render_work(camera_position)
                     {
@@ -2189,7 +2187,7 @@ impl SingleViewRuntime {
                     timing: combined_timing,
                 });
             }
-            if submitted_request_count > 0 && Instant::now() >= deadline {
+            if submitted_request_count > 0 && deadline.is_reached() {
                 if self.has_ready_pending_render_work(camera_position) {
                     combined.deadline_skipped_compile_request_count += 1;
                 }
@@ -3374,7 +3372,7 @@ mod tests {
             .sync_render_sections_until_deadline(
                 &mut compiler,
                 Vec3::new(8.0, 8.0, 8.0),
-                Instant::now(),
+                monotonic::system_monotonic_clock().deadline_after(Duration::ZERO),
                 |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
             .expect("deadline render sync should succeed");

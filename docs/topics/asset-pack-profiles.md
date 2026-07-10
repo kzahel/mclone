@@ -3,10 +3,9 @@
 Topic: asset-pack-profiles
 
 Status: active implementation. Tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-4 landed
-2026-07-10. Its required checkpoint recommends Tactical
-[`170`](../tactical/170-web-scene-host-adoption.md) Slice 0 next, before web or
-full Slice 5 adoption.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-4 and Tactical
+[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-1 landed
+2026-07-10. Tactical 170 Slice 2 is next, before web asset-service adoption.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -101,8 +100,14 @@ Minecraft pack is not sufficient.
 - `mclone-app-runtime::PreparedAssetSet` now groups one epoch/selection with
   the composed source chain, terrain catalog/atlas, far-LOD palette, actors,
   figures, decoded screen effect, audio policy, missing-resource registry,
-  exact resolution ledger, and aggregate coverage. It is CPU-side preparation
-  only; live scene replacement remains the next slice.
+  exact resolution ledger, and aggregate coverage. It remains the CPU-side
+  preparation layer consumed by the separate live scene replacement request.
+- Tactical 170 Slice 1 moved `TexturedMeshAssets`, its CPU atlas wrapper, and
+  source-backed CPU preparation into always-compiled
+  `mclone_app_runtime::render_asset_data`. Filesystem discovery, native compile
+  workers, GPU upload, and prepared replacement requests remain in their
+  existing native/platform owners. The Tactical 169 epoch and transactional
+  replacement contract is unchanged.
 - A real authored-plus-generated prepare resolved 11 unique paths from the
   authored pack and 135 from the generated pack, explicitly suppressed two
   sounds, and reported zero Minecraft-reference or unknown resolutions. All

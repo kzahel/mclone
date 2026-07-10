@@ -491,16 +491,10 @@ where
     }
 
     fn ensure_mono_blink_worker(&mut self) -> bool {
-        if self.blink_teleport_worker.is_some() {
-            return true;
-        }
-        match NativeTeleportPreviewWorker::new() {
-            Ok(worker) => {
-                self.blink_teleport_worker = Some(worker);
-                true
-            }
+        match self.teleport_preview.ensure_started() {
+            Ok(available) => available,
             Err(error) => {
-                log::warn!("failed to start Mono Blink preview worker: {error}");
+                log::warn!("failed to start Mono Blink preview service: {error}");
                 false
             }
         }
@@ -511,13 +505,16 @@ where
         if self.mono_blink_debug.last_submitted_intent == Some(intent) {
             return false;
         }
-        let (Some(runtime), Some(worker)) =
-            (self.runtime.as_ref(), self.blink_teleport_worker.as_mut())
-        else {
+        let Some(runtime) = self.runtime.as_ref() else {
             return false;
         };
-        match worker.submit_from_world(runtime.client(), intent, mono_blink_config()) {
-            Ok(request_id) => {
+        let config = mono_blink_config();
+        let collision = TeleportCollisionSnapshot::capture(runtime.client(), intent, config);
+        match self
+            .teleport_preview
+            .submit_snapshot(intent, config, collision)
+        {
+            Ok(Some(request_id)) => {
                 self.mono_blink_debug
                     .first_request_id
                     .get_or_insert(request_id);
@@ -525,24 +522,22 @@ where
                 self.mono_blink_debug.last_submitted_intent = Some(intent);
                 true
             }
+            Ok(None) => false,
             Err(error) => {
                 log::warn!("Mono Blink preview submit failed: {error}");
-                self.blink_teleport_worker = None;
+                self.teleport_preview.reset_service();
                 false
             }
         }
     }
 
     fn poll_mono_blink_worker(&mut self) -> bool {
-        let Some(worker) = self.blink_teleport_worker.as_mut() else {
-            return false;
-        };
-        match worker.try_recv_latest() {
+        match self.teleport_preview.try_recv_latest() {
             Ok(Some(result)) => self.accept_mono_blink_result(result),
             Ok(None) => false,
             Err(error) => {
-                log::warn!("Mono Blink preview worker failed: {error}");
-                self.blink_teleport_worker = None;
+                log::warn!("Mono Blink preview service failed: {error}");
+                self.teleport_preview.reset_service();
                 false
             }
         }
@@ -1030,7 +1025,7 @@ where
             self.ensure_mono_gui(device, queue)?;
         }
 
-        let render_start = Instant::now();
+        let render_start = self.clock.now();
         let far_lod_config = self.scene.far_lod;
         let far_lod_seed = self.scene.seed;
         let far_lod_center = self.camera.snapshot().chunk_pos;
@@ -1131,7 +1126,7 @@ where
                 )
                 .context("render Mono screen-space UI")?;
         }
-        timing.render_views_ms = elapsed_ms(render_start.elapsed());
+        timing.render_views_ms = elapsed_ms(self.clock.elapsed_since(render_start));
 
         self.render_stats = render_stats;
         self.rendered_frames = self.rendered_frames.wrapping_add(1);

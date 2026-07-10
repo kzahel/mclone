@@ -304,15 +304,10 @@ where
     }
 
     pub(crate) fn ensure_xr_blink_teleport_worker(&mut self) {
-        if self.blink_teleport_worker.is_some() {
-            return;
-        }
-        match NativeTeleportPreviewWorker::new() {
-            Ok(worker) => {
-                self.blink_teleport_worker = Some(worker);
-            }
+        match self.teleport_preview.ensure_started() {
+            Ok(_) => {}
             Err(error) => {
-                log::warn!("failed to start XR Blink teleport worker: {error}");
+                log::warn!("failed to start XR Blink teleport service: {error}");
             }
         }
     }
@@ -343,35 +338,35 @@ where
         let Some(runtime) = self.runtime.as_ref() else {
             return Ok(false);
         };
-        let Some(worker) = self.blink_teleport_worker.as_mut() else {
-            return Ok(false);
-        };
-        match worker.submit_from_world(runtime.client(), intent, xr_blink_teleport_config()) {
-            Ok(request_id) => {
+        let config = xr_blink_teleport_config();
+        let collision = TeleportCollisionSnapshot::capture(runtime.client(), intent, config);
+        match self
+            .teleport_preview
+            .submit_snapshot(intent, config, collision)
+        {
+            Ok(Some(request_id)) => {
                 self.blink_teleport
                     .first_request_id
                     .get_or_insert(request_id);
                 self.blink_teleport.last_submitted_intent = Some(intent);
                 Ok(true)
             }
+            Ok(None) => Ok(false),
             Err(error) => {
                 log::warn!("XR Blink teleport preview submit failed: {error}");
-                self.blink_teleport_worker = None;
+                self.teleport_preview.reset_service();
                 Ok(false)
             }
         }
     }
 
     pub(crate) fn poll_xr_blink_teleport_worker(&mut self) -> bool {
-        let Some(worker) = self.blink_teleport_worker.as_mut() else {
-            return false;
-        };
-        match worker.try_recv_latest() {
+        match self.teleport_preview.try_recv_latest() {
             Ok(Some(result)) => self.accept_xr_blink_teleport_result(result),
             Ok(None) => false,
             Err(error) => {
-                log::warn!("XR Blink teleport worker failed: {error}");
-                self.blink_teleport_worker = None;
+                log::warn!("XR Blink teleport service failed: {error}");
+                self.teleport_preview.reset_service();
                 false
             }
         }

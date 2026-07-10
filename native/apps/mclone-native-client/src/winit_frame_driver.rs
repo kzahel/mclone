@@ -156,7 +156,10 @@ impl WinitFrameDriver {
     }
 
     pub(crate) fn set_audio_engine(&mut self, audio: Option<AudioEngine>) {
-        self.host.set_audio_engine(audio);
+        self.host.set_audio_output(audio.map_or_else(
+            || mclone_audio::AudioOutputCapability::Unavailable,
+            mclone_audio::AudioOutputCapability::available,
+        ));
     }
 
     pub(crate) fn drive_until_idle(
