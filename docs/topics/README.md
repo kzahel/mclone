@@ -46,6 +46,10 @@ series implements the same concern, normally reuse the document slug in its
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
   keep new features from re-forking across the client lanes and offscreen
   validation hosts.
+- [`web-scene-host-adoption.md`](web-scene-host-adoption.md): planned browser
+  adoption of the shared `McloneSceneHost`, including current WASM blockers,
+  service and typed-async boundaries, worker/compiler reuse, cutover strategy,
+  decision deadlines, and validation expectations.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`performance.md`](performance.md): native performance priority queue,

@@ -1617,12 +1617,13 @@ old host/options names or desktop compatibility wrappers.
 | [`163-render-section-cpu-mesh-eviction.md`](163-render-section-cpu-mesh-eviction.md) | Resident CPU mesh eviction invariants must survive all migrations (no resident CPU payloads reintroduced). |
 | [`166-shared-resident-tile-substrate.md`](166-shared-resident-tile-substrate.md) | Orthogonal render-substrate direction; both tacticals touch upload admission — Slice 6 should not preempt 166's decision-family design, only relocate today's controller. |
 | [`151-remote-inbound-update-pipeline.md`](151-remote-inbound-update-pipeline.md) / [`154-client-ingress-adapter-cleanup.md`](154-client-ingress-adapter-cleanup.md) | Remote ingress is shared; the triplicated `RemoteServerSession` adapter dedup (Slice 7) must use the existing ingress contracts, not new request/response helpers. |
-| [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md) / [`062-shared-threading-topology.md`](062-shared-threading-topology.md) | Own the web worker/threading convergence that the deferred web-adoption tactical will build on; the seams in this doc (runner trait, step-based APIs) are prerequisites, not replacements. |
+| [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md) / [`062-shared-threading-topology.md`](062-shared-threading-topology.md) | Own the web worker/threading convergence that [`170-web-scene-host-adoption.md`](170-web-scene-host-adoption.md) will build on; the seams in this doc (runner trait, step-based APIs) are prerequisites, not replacements. |
 
 ## How to continue (for the implementing agent)
 
 Tactical 168 is complete through Slice 10. Preserve the executable native
 thin-adapter and headset-free stereo gates when adding scene-host behavior.
 Web retains the runner/session seams prepared in Slice 2, but adopting the
-shared host is a separate follow-up tactical rather than another Slice 168
-change.
+shared host is planned in
+[`170-web-scene-host-adoption.md`](170-web-scene-host-adoption.md) rather than
+as another Slice 168 change.

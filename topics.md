@@ -15,3 +15,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `client-prediction` — movement authority, server validation checks, and the
   preserved input-replay path
 - `vanilla-networking` — 1.17.1 vanilla network stack reference receipts
+- `web-scene-host-adoption` — tactical 170 browser adoption of the shared
+  scene host
