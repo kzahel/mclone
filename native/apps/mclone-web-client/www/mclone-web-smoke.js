@@ -36,6 +36,7 @@ const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", impo
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 const SCENE_ADAPTER_CONTRACT_EXPORT = "mclone_web_scene_adapter_contract_report";
 const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
+const SCENE_HOST_PROOF = new URL(globalThis.location.href).searchParams.get("sceneHostProof") === "1";
 const ready = boot();
 globalThis.__mcloneNativeReady = ready;
 
@@ -49,7 +50,9 @@ async function boot() {
   const wasm = await loadRuntimeWasm();
   const webGpu = await probeWebGpu();
   const canvas = webGpu.supported
-    ? await renderCanvas()
+    ? SCENE_HOST_PROOF
+      ? await renderSceneHostProof()
+      : await renderCanvas()
     : {
         ok: true,
         supported: false,
@@ -63,6 +66,275 @@ async function boot() {
     webGpu,
     canvas,
   };
+}
+
+async function renderSceneHostProof() {
+  const canvas = document.getElementById("mclone-canvas");
+  if (!(canvas instanceof HTMLCanvasElement)) {
+    return {
+      ok: false,
+      supported: true,
+      status: "canvas-missing",
+      reason: "missing canvas#mclone-canvas",
+    };
+  }
+
+  /** @type {RenderSectionWorkerCompiler | null} */
+  let compiler = null;
+  /** @type {any} */
+  let proof = null;
+  try {
+    const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
+    await module.default(BINDGEN_WASM_URL.href);
+    if (typeof module.mclone_web_create_scene_host_proof !== "function") {
+      return {
+        ok: false,
+        supported: true,
+        status: "export-missing",
+        reason: "missing mclone_web_create_scene_host_proof export",
+        exports: Object.keys(module),
+      };
+    }
+
+    const assetPack = await fetchAssetPack(ASSET_PACK_URL);
+    compiler = new RenderSectionWorkerCompiler(assetPack, {
+      workerUrl: RENDER_COMPILER_WORKER_URL,
+      bindgenJsUrl: BINDGEN_JS_URL,
+      bindgenWasmUrl: BINDGEN_WASM_URL,
+      workerName: "mclone-scene-host-proof-compiler",
+    });
+    const activeCompiler = compiler;
+    let compilerWakeCount = 0;
+    let compilerError = "";
+    /** @type {any} */
+    let lastCompilerReport = null;
+    let compilerChain = Promise.resolve();
+    /** @param {any} doorbell */
+    const compilerWake = (doorbell) => {
+      compilerWakeCount += 1;
+      compilerChain = compilerChain
+        .then(async () => {
+          const compiled = await activeCompiler.compileWithDoorbell(doorbell);
+          if (compiled?.report) lastCompilerReport = compiled.report;
+        })
+        .catch((error) => {
+          compilerError = stringifyError(error);
+        });
+    };
+
+    proof = await module.mclone_web_create_scene_host_proof(
+      canvas,
+      assetPack,
+      SERVER_WORKER_URL.href,
+      SERVER_JOB_WORKER_URL.href,
+      BINDGEN_JS_URL.href,
+      BINDGEN_WASM_URL.href,
+      compilerWake,
+    );
+    if (
+      typeof proof.renderFrame !== "function"
+      || typeof proof.setHidden !== "function"
+      || typeof proof.simulateSurfaceLoss !== "function"
+      || typeof proof.shutdown !== "function"
+    ) {
+      throw new Error("WebSceneHostProof is missing lifecycle/frame exports");
+    }
+
+    const heldCodes = new Set();
+    let domTranslationCount = 0;
+    /** @param {KeyboardEvent} event */
+    const onKeyDown = (event) => {
+      heldCodes.add(event.code);
+      domTranslationCount += 1;
+    };
+    /** @param {KeyboardEvent} event */
+    const onKeyUp = (event) => {
+      heldCodes.delete(event.code);
+      domTranslationCount += 1;
+    };
+    canvas.addEventListener("keydown", onKeyDown);
+    canvas.addEventListener("keyup", onKeyUp);
+    canvas.tabIndex = 0;
+
+    let busy = false;
+    let overlapRejectedCount = 0;
+    const step = async ({ domInput = false, lookX = 0, lookY = 0 } = {}) => {
+      if (busy) {
+        overlapRejectedCount += 1;
+        return null;
+      }
+      busy = true;
+      try {
+        const report = proof.renderFrame(
+          performance.now(),
+          heldCodes.has("KeyW"),
+          lookX,
+          lookY,
+          domInput,
+        );
+        await yieldToEventLoop();
+        if (compilerError) throw new Error(compilerError);
+        return report;
+      } finally {
+        busy = false;
+      }
+    };
+
+    const deadline = performance.now() + 60_000;
+    let report = null;
+    let stableFrames = 0;
+    while (performance.now() < deadline) {
+      report = await step();
+      if (
+        report?.playable
+        && Number(report.loadedChunkCount) > 0
+        && Number(report.pendingStreamWork) === 0
+        && Number(report.pendingCompileJobCount) === 0
+        && Number(report.serverPendingJobs) === 0
+        && Number(report.serverPendingPublications) === 0
+      ) {
+        stableFrames += 1;
+        if (stableFrames >= 3) break;
+      } else {
+        stableFrames = 0;
+      }
+    }
+    if (stableFrames < 3) {
+      throw new Error(`scene host proof did not reach idle:\n${JSON.stringify(report, null, 2)}`);
+    }
+
+    canvas.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW", bubbles: true }));
+    for (let frame = 0; frame < 5; frame += 1) {
+      report = await step({ domInput: true, lookX: frame === 0 ? 2 : 0 });
+    }
+    canvas.dispatchEvent(new KeyboardEvent("keyup", { code: "KeyW", bubbles: true }));
+    await step({ domInput: true });
+
+    const interaction = proof.exerciseBlockInteraction();
+    stableFrames = 0;
+    while (performance.now() < deadline) {
+      report = await step();
+      if (
+        Number(report?.pendingStreamWork) === 0
+        && Number(report?.pendingCompileJobCount) === 0
+      ) {
+        stableFrames += 1;
+        if (stableFrames >= 3) break;
+      } else {
+        stableFrames = 0;
+      }
+    }
+    const settings = proof.exerciseSettingsEffect();
+    proof.setPauseMenu(true);
+    const pauseFrame = await step();
+    proof.setPauseMenu(false);
+
+    proof.resize(960, 540);
+    await step();
+    proof.frameFirstActor();
+    for (let frame = 0; frame < 3; frame += 1) report = await step();
+
+    const hiddenStart = proof.setHidden(true);
+    const hiddenFrame = proof.renderFrame(performance.now() + 60_000, false, 0, 0, false);
+    await yieldToEventLoop();
+    const resumeStart = proof.setHidden(false);
+    let firstResumeFrame = null;
+    for (let frame = 0; frame < 8; frame += 1) {
+      const resumed = await step();
+      if (frame === 0) firstResumeFrame = resumed;
+      report = resumed;
+    }
+    await compilerChain;
+    if (compilerError) throw new Error(compilerError);
+    const visualReport = report;
+
+    const surfaceLoss = proof.simulateSurfaceLoss();
+    const lossFrame = await step();
+    const busyGuardReleasedAfterLoss = busy === false;
+    const shutdown = proof.shutdown();
+    canvas.removeEventListener("keydown", onKeyDown);
+    canvas.removeEventListener("keyup", onKeyUp);
+
+    const ok = Boolean(
+      visualReport?.owner === "McloneSceneHost"
+      && visualReport?.hostOwnedFrameAssembly
+      && visualReport?.playable
+      && Number(visualReport.drawnSectionCount) > 0
+      && Number(visualReport.drawnIndexCount) > 0
+      && Number(visualReport.actorCount) > 0
+      && Number(visualReport.drawnActorCount) > 0
+      && Number(visualReport.guiCommandCount) > 0
+      && visualReport.movementInputApplied
+      && Number(visualReport.domInputFrameCount) > 0
+      && domTranslationCount >= 2
+      && interaction?.interactionSent
+      && interaction?.interactionChanged
+      && settings?.settingsEffectApplied
+      && pauseFrame?.pauseUiRendered
+      && visualReport.resized
+      && Number(visualReport.width) === 960
+      && Number(visualReport.height) === 540
+      && hiddenStart?.state === "hidden"
+      && hiddenFrame?.state === "hidden"
+      && Number(hiddenFrame.hiddenFrameSkips) >= 1
+      && resumeStart?.state === "running"
+      && firstResumeFrame?.firstAfterResume
+      && Number(firstResumeFrame.deltaSeconds) === 0
+      && Number(visualReport.resumeCount) === 1
+      && Number(visualReport.backgroundSaveCount) === 1
+      && surfaceLoss?.state === "restart-required"
+      && lossFrame?.state === "restart-required"
+      && !lossFrame?.rendered
+      && busyGuardReleasedAfterLoss
+      && shutdown?.state === "shutdown"
+      && shutdown?.shutdownComplete
+      && compilerWakeCount > 0
+      && compiler?.pendingJobCount() === 0
+      && lastCompilerReport?.transportKind === "shared-result-buffer"
+      && lastCompilerReport?.generatedViewFallbackUsed === false
+      && lastCompilerReport?.sharedResultOverflow === false
+      && visualReport.audioCapabilityAbsent
+      && visualReport.teleportCapabilityAbsent
+    );
+    return {
+      ok,
+      supported: true,
+      status: ok ? "scene-host-proven" : "scene-host-proof-failed",
+      report: {
+        ...visualReport,
+        configured: true,
+        rendered: true,
+      },
+      domTranslationCount,
+      overlapRejectedCount,
+      compilerWakeCount,
+      compilerPendingJobCount: compiler?.pendingJobCount() ?? -1,
+      lastCompilerReport,
+      interaction,
+      settings,
+      pauseFrame,
+      hiddenStart,
+      hiddenFrame,
+      resumeStart,
+      firstResumeFrame,
+      surfaceLoss,
+      lossFrame,
+      busyGuardReleasedAfterLoss,
+      shutdown,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      supported: true,
+      status: "scene-host-proof-failed",
+      reason: stringifyError(error),
+    };
+  } finally {
+    try {
+      proof?.shutdown?.();
+    } catch {}
+    compiler?.terminate();
+  }
 }
 
 async function probeThreading() {

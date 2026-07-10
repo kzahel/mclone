@@ -55,7 +55,7 @@ use mclone_app_runtime::world_catalog::{
     validate_delete_inactive_world, validate_local_world_compatible, world_not_found,
 };
 use mclone_app_runtime::{
-    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimeUpdatePumpBudget,
+    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollTiming, RuntimeUpdatePumpBudget,
     TimedRenderSectionCacheUpdate, debug_block_palette_overlay, debug_hotbar_icons,
     loading_progress_overlay_from_diagnostics, set_player_appearance_command_for_ui_model,
     view_readiness_overlay_from_diagnostics,
@@ -2395,17 +2395,23 @@ impl WebSceneRuntimeService {
         }
     }
 
-    fn handoff_deferred_drops(&mut self) {
+    fn handoff_deferred_drops(&mut self) -> (usize, usize) {
+        let mut handed_off = 0_usize;
         while let Some((snapshot, item_count)) = self
             .runtime
             .scene_core_mut()
             .take_deferred_client_chunk_drop_snapshot()
         {
+            handed_off = handed_off.saturating_add(item_count);
             let _ = self.deferred_chunk_drops.enqueue(snapshot, item_count);
         }
         let _ = self
             .deferred_chunk_drops
             .drain(WEB_DEFERRED_DROP_DRAIN_ITEM_BUDGET);
+        (
+            handed_off,
+            self.deferred_chunk_drops.backlog().pending_items,
+        )
     }
 
     fn sync_render_sections_once(
@@ -2590,12 +2596,33 @@ impl SceneRuntimeService for WebSceneRuntimeService {
     }
 
     fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> anyhow::Result<bool> {
-        let report = self
+        let pump = self
             .runtime
-            .drain_pending_runner_updates_with_budget(budget)
+            .drain_pending_runner_updates_report(budget)
             .map_err(anyhow::Error::msg)?;
-        self.handoff_deferred_drops();
-        Ok(report.update_count > 0)
+        let (drop_items, drop_backlog) = self.handoff_deferred_drops();
+        let runner = self.diagnostics();
+        self.runtime.scene_core_mut().finish_poll_diagnostics(
+            RuntimePollTiming {
+                drain_updates_ms: pump.drain_updates_ms,
+                producer_read_ms: pump.producer_read_ms,
+                producer_decode_ms: pump.producer_decode_ms,
+                producer_response_sequence: pump.producer_response_sequence,
+                client_deferred_chunk_drop_items: drop_items,
+                client_deferred_chunk_drop_backlog_items: drop_backlog,
+                update_pump_stalled: pump.stalled,
+                update_pump_stall_count: pump.stall_count,
+                server_update_queue_depth: pump.remaining_queue_depth,
+                server_update_queue_bytes: pump.remaining_queue_bytes,
+                server_update_applied_bytes: pump.update_bytes,
+                server_update_oldest_applied_age_ms: pump.oldest_applied_update_age_ms,
+                diagnostics_refreshed: true,
+                ..RuntimePollTiming::default()
+            },
+            pump.apply_report,
+            Some(&runner),
+        );
+        Ok(pump.apply_report.changed)
     }
 
     fn poll_until_idle_with_timeout(
@@ -3669,7 +3696,9 @@ impl WebChunkRenderSession {
         set_bool(object, "coversWorld", self.ui.covers_world())?;
         set_string(object, "screen", ui_screen_label(self.ui.screen()))?;
         set_string(object, "uiScreen", ui_screen_label(self.ui.screen()))?;
-        if let Some(GameScreen::Options { parent }) = self.ui.screen() {
+        if let Some(GameScreen::Options { parent } | GameScreen::OptionsCategory { parent, .. }) =
+            self.ui.screen()
+        {
             set_string(object, "optionsParent", options_parent_label(parent))?;
             set_string(object, "uiOptionsParent", options_parent_label(parent))?;
         }
@@ -5538,7 +5567,9 @@ impl WebChunkRenderSession {
             ui_covers_world,
             ui_screen: ui_screen_label(self.ui.screen()),
             ui_options_parent: match self.ui.screen() {
-                Some(GameScreen::Options { parent }) => Some(options_parent_label(parent)),
+                Some(
+                    GameScreen::Options { parent } | GameScreen::OptionsCategory { parent, .. },
+                ) => Some(options_parent_label(parent)),
                 _ => None,
             },
             debug_overlay_visible: self.debug_overlay_visible,
@@ -6570,20 +6601,20 @@ fn engine_collision_mode(mode: GameCollisionMode) -> EngineCameraCollisionMode {
     }
 }
 
-struct WebCanvasContext {
-    canvas: HtmlCanvasElement,
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    format: wgpu::TextureFormat,
+pub(super) struct WebCanvasContext {
+    pub(super) canvas: HtmlCanvasElement,
+    pub(super) surface: wgpu::Surface<'static>,
+    pub(super) device: wgpu::Device,
+    pub(super) queue: wgpu::Queue,
+    pub(super) format: wgpu::TextureFormat,
     present_mode: wgpu::PresentMode,
     alpha_mode: wgpu::CompositeAlphaMode,
-    width: u32,
-    height: u32,
+    pub(super) width: u32,
+    pub(super) height: u32,
 }
 
 impl WebCanvasContext {
-    async fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
+    pub(super) async fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
         Self::new_with_color_profile(canvas, RenderColorProfile::default()).await
     }
 
@@ -6657,7 +6688,7 @@ impl WebCanvasContext {
         })
     }
 
-    fn resize(&mut self, width: u32, height: u32) -> bool {
+    pub(super) fn resize(&mut self, width: u32, height: u32) -> bool {
         let width = width.max(1);
         let height = height.max(1);
         self.canvas.set_width(width);

@@ -1745,6 +1745,7 @@ dependencies = [
  "mclone-protocol",
  "mclone-render",
  "mclone-render-session",
+ "mclone-scene",
  "mclone-server",
  "mclone-ui",
  "wasm-bindgen",

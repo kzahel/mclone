@@ -2,13 +2,14 @@
 
 Topic: web-scene-host-adoption
 
-Status: active 2026-07-10. Tactical 170 Slices 0-3 landed the executable
+Status: active 2026-07-10. Tactical 170 Slices 0-4 landed the executable
 browser baselines, portable scene prerequisites, neutral scene-session shell,
-and browser service adapters. The direct scene and web WASM gates are green;
-Slice 4's isolated browser scene-host proof is next. The implementation
-sequence is recorded in
+browser service adapters, and an isolated real-host browser proof. The direct
+scene/web WASM gates and direct browser proof are green; Slice 5's atomic
+production cutover is next. The implementation sequence is recorded in
 [`170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md);
-production adoption has not started and the old web owner remains active.
+production adoption has not started, the proof remains smoke-only, and the old
+web owner remains active.
 
 ## Scope
 
@@ -55,8 +56,8 @@ orchestrator.
 The browser client is functional and already shares important lower-level
 contracts, but the top-level orchestration is still forked:
 
-- `native/apps/mclone-web-client/src/web_canvas.rs` is 6,986 lines after the
-  Slice 3 browser runtime-service adapter was added.
+- `native/apps/mclone-web-client/src/web_canvas.rs` is 7,017 lines after the
+  Slice 4 proof exposed the runtime diagnostics needed by the shared host.
   `WebChunkRenderSession` owns runtime/session state, camera/input assembly,
   settings-effect dispatch, catalog/session dispatch, render synchronization,
   GPU uploads, actors, UI, and the sky-to-present frame sequence.
@@ -89,8 +90,8 @@ The Slice 0 baseline was 98 compiler errors, Slice 1 reduced it to 87, and
 Slice 2 reduced it to five. Slice 3 removed the remaining browser
 connection/compiler/drop and prepared-asset roots. The final green log is
 `/tmp/mclone-t170-slice3-scene-wasm.txt`; its only warnings are two pre-existing
-`mclone-server` WASM warnings. This proves compile portability only. Slice 4's
-direct browser proof remains the runtime acceptance gate.
+`mclone-server` WASM warnings. Compile portability alone is not runtime
+acceptance; Slice 4's direct browser proof now supplies that evidence.
 
 ## Slice 0 Landed Evidence (2026-07-10)
 
@@ -244,6 +245,54 @@ browser host or cutover toggle.
   were also inspected. Black/partial browser canvas-only artifacts were
   rejected rather than treated as visual evidence. No capture was committed.
 
+## Slice 4 Landed Evidence (2026-07-10)
+
+- A query-only `sceneHostProof=1` entry point constructs a real
+  `McloneSceneHost` over the landed browser runtime services and current packed
+  assets. It is smoke-only: production still constructs
+  `WebChunkRenderSession`, and no old/new production toggle was added.
+- The JavaScript rim retains rAF, DOM translation, compiler wake promises,
+  canvas/surface acquisition, resize, visibility events, presentation, and a
+  non-overlap busy guard. The host applies `FlatInputFrame`, owns scene sync
+  and render admission, and assembles the shared sky, terrain, actors/effects,
+  and UI/HUD frame.
+- `pnpm native:web:scene-host-proof` reached `scene-host-proven` with 473 host
+  frames/renders and a 10.365 ms maximum frame gap. It loaded 49 chunks and 218
+  sections, drew 17 sections/97,278 indices and both actors, emitted 94 GUI
+  commands, applied movement from six DOM/script input frames, changed a block,
+  applied a shared setting effect, rendered pause UI, and resized to 960x540.
+- The runner, worldgen, and light transports remained `shared-memory`. The
+  resident compiler woke 72 times through `shared-result-buffer`, loaded the
+  6,985-file asset pack once, and used neither generated-view fallback nor
+  shared-result overflow.
+- Hidden pages perform no host step or presentation. Visibility entry calls
+  `on_background`; current worker-owned continuous IndexedDB persistence makes
+  that lifecycle save a synchronous no-op. On resume the first delta is zero,
+  later deltas clamp to 50 ms, and each rAF performs at most one default-budget
+  host step rather than a catch-up loop. The eight-frame resume probe observed
+  at most four updates per frame and zero deferred-drop backlog.
+- Surface acquisition failure enters explicit `restart-required` state and
+  requires recreation of the proof owner. A simulated loss remained terminal
+  on the following frame, released the JavaScript busy guard, and still allowed
+  controlled shutdown. Browser audio and teleport preview remain explicitly
+  absent; no user-gesture audible probe exists.
+- The full browser matrix remained green. The 16 movement samples measured
+  5.9-17.9 ms total (9.4 ms average), 3.9-11.7 ms worker round trip (5.4 ms
+  average), 1.1-3.7 ms decode/finish/apply (1.5 ms average), and 7.3-8.8 ms
+  maximum frame gaps (8.3 ms average), consistent with Slice 0. IndexedDB again
+  retained block state `5` across reload with 81 chunk and one entity record.
+- `/tmp/mclone-native-web-scene-host-proof.png` and its canvas capture showed
+  clean textured spruce terrain, water, sky, HUD, a centered cow, and a chicken.
+  Local/app, mobile UI/options, catalog, block-edit, and remote page captures
+  were also inspected. Partial IndexedDB and sky-only movement endpoint images
+  were rejected as visual evidence. No capture was committed.
+- Workspace, focused tests (213 app-runtime, 92 scene, and 11 web-client), both
+  direct WASM checks, browser build/typecheck, asset lock, purity gates,
+  desktop offscreen, synthetic stereo, and desktop XR checks passed. The native
+  captures retained their Slice 3 hashes (`cdffd673...` and `18bbdadd...`) and
+  were visually inspected. No shared public host contract changed, so the
+  Slice 3 flat-Android and attached-Quest canaries remain the device evidence.
+
 ## Locked Decisions
 
 ### One policy host
@@ -335,24 +384,23 @@ separately reviewable.
 - **Compiler wake ownership:** resolved in Slice 3. The browser runtime-service
   adapter owns the JavaScript wake function and doorbell privately; shared
   scene code sees only the neutral compiler contract.
-- **Remote reconnect:** the Slice 3 lifecycle protocol now has nonblocking
-  reconnect, retry/terminal, supersession, and stale-completion states. Slice 4
-  must exercise that protocol around a real browser scene host.
-- **Hidden-tab behavior:** decide whether scene frames pause while the server
-  worker continues, and how queued updates are budget-drained on resume. Lock
-  this in the direct browser proof slice. The same decision must state which
-  browser event, if any, maps to the host's lifecycle save trigger; web
-  persistence currently flows continuously through the runner with no
-  `pagehide`/`visibilitychange` hook.
-- **Deferred drops:** Slice 3 attached a bounded browser frame-drain backend
-  with the same 4,096-item capacity and pending/fallback reporting. Slice 4
-  must measure it under direct-host resume and teardown.
-- **WebGPU device/surface loss:** the cutover must at least preserve current
-  recovery or produce a controlled restart/error state; it may not silently
-  wedge the session.
-- **Audio activation:** compilation is not evidence that browser playback can
-  start outside a user gesture. Keep audio optional until a real browser
-  listen/activation gate exists.
+- **Remote reconnect:** the Slice 3 lifecycle protocol has nonblocking
+  reconnect, retry/terminal, supersession, and stale-completion states. The
+  Slice 4 proof used the local worker; Slice 5 must preserve the already-green
+  production remote smoke while routing it through the shared host.
+- **Hidden-tab behavior:** resolved for cutover in Slice 4. Scene step and
+  presentation pause while workers may continue. Visibility entry calls the
+  host background hook; continuous worker-owned persistence means no immediate
+  browser write. Resume starts at zero delta, then clamps to 50 ms and performs
+  one budgeted host step per rAF.
+- **Deferred drops:** resolved for direct-host resume. The Slice 3 bounded
+  4,096-item browser backend reported zero resume backlog and no fallback in
+  the Slice 4 proof; production cutover must preserve those diagnostics.
+- **WebGPU device/surface loss:** resolved for first cutover as explicit
+  `restart-required` owner recreation. Loss is terminal for that owner and the
+  rAF busy guard is always released.
+- **Audio activation:** resolved for first cutover as an absent capability.
+  Promote it only after a real user-gesture activation and audible probe.
 - **Web feature exceptions:** far LOD, travel assist, frame-pipeline overlay,
   debug diagnostics, and server cadence retain their current reason-bearing
   state until individually validated.
@@ -429,9 +477,10 @@ Primary code:
 
 ## Recommended Next Work
 
-1. Implement Tactical 170 Slice 4 only: add an isolated smoke-only browser
-entry point that constructs a real `McloneSceneHost` from the landed services,
-then prove local worker startup, input/interaction, render admission and frame
-assembly, UI/HUD, resize, shutdown, hidden-tab resume bounds, and controlled
-WebGPU loss handling. Keep production web on `WebChunkRenderSession` and stop
-before the atomic Slice 5 cutover.
+1. Implement Tactical 170 Slice 5 only: atomically move local worker,
+IndexedDB local-world, and remote WebSocket production modes onto
+`McloneSceneHost`; consume Tactical 169's active asset-set/epoch contract;
+preserve the Slice 4 visibility, loss, and capability decisions; delete
+`WebChunkRenderSession`, duplicated policy, and the proof-only entry point;
+enable the end-state enforcement tripwires; then stop before Slice 6's parity
+audit.

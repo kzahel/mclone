@@ -45,6 +45,8 @@ const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
+const sceneHostProof = process.argv.includes("--scene-host-proof")
+  || process.env.MCLONE_NATIVE_WEB_SCENE_HOST_PROOF === "1";
 const appLoop = movementPerf
   || blockEditProbe
   || indexedDbReloadProbe
@@ -59,7 +61,9 @@ const mobileViewport = mobileAppLoop || movementPerf;
 const serveOnly = process.argv.includes("--serve")
   || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
-  ?? (movementPerf
+  ?? (sceneHostProof
+    ? "/tmp/mclone-native-web-scene-host-proof.png"
+    : movementPerf
     ? "/tmp/mclone-native-web-movement-perf.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
@@ -71,7 +75,9 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
-  ?? (movementPerf
+  ?? (sceneHostProof
+    ? "/tmp/mclone-native-web-scene-host-proof-canvas.png"
+    : movementPerf
     ? "/tmp/mclone-native-web-movement-perf-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
@@ -104,7 +110,8 @@ const blockEditProbeBreaks = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_BREAKS ?? "1", 10) || 1,
 );
-const requireChunk = process.argv.includes("--require-chunk")
+const requireChunk = sceneHostProof
+  || process.argv.includes("--require-chunk")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CHUNK === "1";
 const requireCanvas = requireChunk
   || process.argv.includes("--require-canvas")
@@ -561,7 +568,7 @@ async function run() {
 
     const smokeUrl = remoteServer
       ? `${baseUrl}/?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-      : baseUrl;
+      : sceneHostProof ? `${baseUrl}/?sceneHostProof=1` : baseUrl;
     await page.goto(smokeUrl, { waitUntil: "load" });
     await page.waitForFunction(
       () => typeof globalThis.__mcloneNativeReady !== "undefined",
@@ -589,6 +596,7 @@ async function run() {
       requireCanvas,
       requireChunk,
       requireThreading,
+      sceneHostProof,
       remoteWebSocket,
       remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
       canvasPixels,
@@ -2156,31 +2164,66 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
     { timeout: 10_000 },
   );
   const openedOptions = await readNativeUiState(page);
-
   await dispatchCanvasPointerEvent(page, "pointerdown", {
     pointerId: 62,
-    xFraction: 0.744,
-    yFraction: 0.601,
+    xFraction: 0.5,
+    yFraction: 0.435,
     buttons: 1,
   });
   await dispatchCanvasPointerEvent(page, "pointerup", {
     pointerId: 62,
-    xFraction: 0.744,
-    yFraction: 0.601,
+    xFraction: 0.5,
+    yFraction: 0.435,
     buttons: 0,
   });
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
-        && state.nativeUiScreen === "options"
-        && state.lastUiAction?.action === "setTouchLookSensitivity"
-        && Number(state.lookSensitivity) > 4.9
-        && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) > 4.9;
+        && state.nativeUiScreen === "optionsCategory"
+        && state.nativeUiOptionsParent === "pause"
+        && state.lastUiAction?.action === "openOptionsCategory";
     },
     undefined,
     { timeout: 10_000 },
   );
+  await canvas.screenshot({
+    path: mobileNativeOptionsCanvasScreenshotPath,
+    timeout: 60_000,
+  });
+
+  await dispatchCanvasPointerEvent(page, "pointerdown", {
+    pointerId: 63,
+    xFraction: 0.925,
+    yFraction: 0.538,
+    buttons: 1,
+  });
+  await dispatchCanvasPointerEvent(page, "pointerup", {
+    pointerId: 63,
+    xFraction: 0.925,
+    yFraction: 0.538,
+    buttons: 0,
+  });
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.uiActive === true
+          && state.nativeUiScreen === "optionsCategory"
+          && state.lastUiAction?.action === "setTouchLookSensitivity"
+          && Number(state.lookSensitivity) > 4.9
+          && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) > 4.9;
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      state: globalThis.__mcloneWebApp?.state ?? null,
+      stored: globalThis.localStorage?.getItem("mclone.web.lookSensitivity") ?? null,
+    }));
+    throw new Error(`mobile touch-look slider did not update: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state, null, 2)}`);
+  }
   const adjusted = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     return {
@@ -2195,6 +2238,18 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
     timeout: 60_000,
   });
   const optionsCanvasPixels = analyzePng(optionsCanvasPng);
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "options"
+        && state.nativeUiOptionsParent === "pause"
+        && state.lastUiAction?.action === "openOptions";
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
 
   return {
     ok: openedOptions.uiActive === true
@@ -2953,7 +3008,13 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     throw new Error(`WebGPU canvas render failed:\n${JSON.stringify(result.canvas, null, 2)}`);
   }
   if (result.canvas.report.width !== 640 || result.canvas.report.height !== 360) {
-    throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
+    if (!sceneHostProof || result.canvas.report.width !== 960 || result.canvas.report.height !== 540) {
+      throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
+    }
+  }
+  if (sceneHostProof) {
+    assertSceneHostProofResult(result.canvas, canvasPixels);
+    return;
   }
   if (requireChunk) {
     assertChunkRenderResult(
@@ -2968,6 +3029,43 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     );
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+/** @param {any} proof @param {any} canvasPixels */
+function assertSceneHostProofResult(proof, canvasPixels) {
+  const report = proof?.report;
+  if (
+    !proof?.ok
+    || proof.status !== "scene-host-proven"
+    || report?.owner !== "McloneSceneHost"
+    || !report.hostOwnedFrameAssembly
+    || !report.playable
+    || Number(report.drawnSectionCount) <= 0
+    || Number(report.drawnActorCount) <= 0
+    || Number(report.guiCommandCount) <= 0
+    || !report.movementInputApplied
+    || !proof.interaction?.interactionSent
+    || !proof.settings?.settingsEffectApplied
+    || !proof.pauseFrame?.pauseUiRendered
+    || proof.hiddenFrame?.state !== "hidden"
+    || !proof.firstResumeFrame?.firstAfterResume
+    || Number(proof.firstResumeFrame?.deltaSeconds) !== 0
+    || proof.lossFrame?.state !== "restart-required"
+    || !proof.busyGuardReleasedAfterLoss
+    || proof.shutdown?.state !== "shutdown"
+    || !proof.shutdown?.shutdownComplete
+    || proof.lastCompilerReport?.transportKind !== "shared-result-buffer"
+    || proof.lastCompilerReport?.generatedViewFallbackUsed !== false
+    || proof.lastCompilerReport?.sharedResultOverflow !== false
+  ) {
+    throw new Error(`direct browser scene-host proof failed:\n${JSON.stringify(proof, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`scene-host proof canvas did not contain world pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+  if (canvasPixels.skyLikePixelCount < 64) {
+    throw new Error(`scene-host proof canvas did not contain visible sky:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
@@ -3097,10 +3195,12 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
   if (!result?.ok || !result.ready) {
     throw new Error(`native web mobile app loop failed:\n${JSON.stringify(result, null, 2)}`);
   }
+  const expectedLoadedChunkCount = (result.radiusChunks * 2 + 1) ** 2;
   if (
-    result.radiusChunks !== 1
+    !Number.isInteger(result.radiusChunks)
+    || result.radiusChunks < 1
     || result.renderCount < 2
-    || result.loadedChunkCount !== 9
+    || result.loadedChunkCount !== expectedLoadedChunkCount
     || result.residentSectionCount <= 1
     || result.pendingCompileJobCount !== 0
   ) {

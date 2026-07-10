@@ -31,6 +31,10 @@ mod web_canvas;
 #[cfg(target_arch = "wasm32")]
 pub use web_canvas::{WebSceneRuntimeService, prepare_web_scene_assets_from_pack};
 #[cfg(target_arch = "wasm32")]
+mod web_scene_host_proof;
+#[cfg(target_arch = "wasm32")]
+pub use web_scene_host_proof::{WebSceneHostProof, mclone_web_create_scene_host_proof};
+#[cfg(target_arch = "wasm32")]
 mod web_compile_timing;
 #[cfg(target_arch = "wasm32")]
 mod web_remote_session;
@@ -234,13 +238,7 @@ impl WebRuntime {
         &mut self,
         budget: RuntimeUpdatePumpBudget,
     ) -> Result<WebRuntimeStepReport, String> {
-        let pump_report = pump_client_connection_updates_report(
-            &mut self.core,
-            &mut self.host,
-            budget,
-            ConnectionUpdateDrainMode::ReadyOnly,
-        )
-        .map_err(|error| error.to_string())?;
+        let pump_report = self.drain_pending_runner_updates_report(budget)?;
         Ok(WebRuntimeStepReport {
             command_count: 0,
             update_count: pump_report.apply_report.updates,
@@ -248,6 +246,19 @@ impl WebRuntime {
             protocol_codec_roundtrip: true,
             transport_drained: self.host.command_update_queues_drained(),
         })
+    }
+
+    pub(crate) fn drain_pending_runner_updates_report(
+        &mut self,
+        budget: RuntimeUpdatePumpBudget,
+    ) -> Result<mclone_app_runtime::RuntimeUpdatePumpReport, String> {
+        pump_client_connection_updates_report(
+            &mut self.core,
+            &mut self.host,
+            budget,
+            ConnectionUpdateDrainMode::ReadyOnly,
+        )
+        .map_err(|error| error.to_string())
     }
 
     fn chunk_view_command(

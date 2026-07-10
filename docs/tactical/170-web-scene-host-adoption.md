@@ -1,8 +1,8 @@
 # 170: Web Scene-Host Adoption
 
-Status: active 2026-07-10; Slices 0-3 landed. Slice 4's isolated direct-browser
-scene-host proof is next. Production web still uses `WebChunkRenderSession`;
-no host-adoption cutover code has landed.
+Status: active 2026-07-10; Slices 0-4 landed. Slice 5's atomic production
+cutover is next. Production web still uses `WebChunkRenderSession`; the real
+shared-host browser proof is smoke-only and no production cutover has landed.
 
 Topic: [`web-scene-host-adoption`](../topics/web-scene-host-adoption.md)
 
@@ -849,7 +849,7 @@ fingerprint; `pnpm assets:pack:check` then passed. No packed content changed.
 Production web still uses `WebChunkRenderSession`; Slice 3 added no production
 cutover path or long-lived old/new host toggle.
 
-## Slice 4: Direct Browser Scene-Host Proof
+## Slice 4: Direct Browser Scene-Host Proof — DONE (2026-07-10)
 
 Purpose: render and interact with a real shared host in a browser before the
 irreversible production cutover.
@@ -886,6 +886,85 @@ Exit criteria:
 - no material frame-gap or movement/perf regression is unexplained;
 - hidden-tab and device/surface-loss policies are recorded in the topic; and
 - the proof path is ready to be folded into production and then removed.
+
+### Slice 4 Result
+
+The query-only `sceneHostProof=1` browser entry point now owns a real
+`McloneSceneHost` built from `WebSceneRuntimeService`, browser platform
+services, and the current packed assets. Its JavaScript rim owns rAF, DOM and
+script input translation, compiler wake promises, resize/visibility events,
+surface acquisition/presentation, and the non-overlap busy guard. The host owns
+input application, runtime sync/admission, and shared frame assembly. The path
+is smoke-only; production remains entirely on `WebChunkRenderSession`.
+
+`pnpm native:web:scene-host-proof` reached `scene-host-proven` with 473 host
+frames/renders, a 10.365 ms maximum gap, 49 loaded chunks, 218 resident
+sections, 17 drawn sections, 97,278 drawn indices, both actors drawn, and 94
+GUI commands. Six DOM/script input frames moved the camera; block interaction
+sent and changed state; a shared setting effect applied; pause UI rendered;
+and resize reached 960x540. Runner, worldgen, and light transport remained
+`shared-memory`. The compiler woke 72 times through `shared-result-buffer`,
+loaded the 6,985-file pack once, and used no generated-view fallback or
+shared-result overflow.
+
+The browser frame policy is now executable and unit-locked. Hidden pages do
+not step or present; workers may continue. Visibility entry calls the host's
+background hook, which is a synchronous no-op because IndexedDB persistence is
+continuous and runner-owned. Resume starts at zero delta, clamps later deltas
+to 50 ms, and performs one default-budget host step per rAF with no catch-up
+loop. The eight-frame probe observed at most four updates per frame and zero
+deferred-drop backlog. Surface acquisition failure enters terminal
+`restart-required` state for that owner; the simulated loss stayed terminal on
+the next frame, released the JavaScript busy guard, and permitted controlled
+shutdown. Audio and teleport remain absent because no real user-gesture audible
+or teleport probe exists.
+
+The full browser smoke matrix passed: local, threaded, canvas, chunk, app,
+catalog, mobile, block-edit, IndexedDB reload, movement/perf, and remote
+WebSocket. The mobile harness was updated for the already-shared nested options
+categories and configured view radius; this corrected stale smoke assumptions,
+not production policy. IndexedDB preserved block state `5` across reload with
+81 chunk and one entity record. Sixteen movement samples measured 5.9-17.9 ms
+total (9.4 ms average), 3.9-11.7 ms worker round trip (5.4 ms average),
+1.1-3.7 ms decode/finish/apply (1.5 ms average), and 7.3-8.8 ms maximum frame
+gaps (8.3 ms average), consistent with Slice 0.
+
+Focused validation passed:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml --workspace
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-scene --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-web-client --target wasm32-unknown-unknown
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-app-runtime -p mclone-scene -p mclone-web-client
+pnpm native:web:build
+pnpm native:web:typecheck
+pnpm native:scene-host:purity
+pnpm native:thin-adapters:purity
+pnpm native:web:scene-host-adoption
+pnpm assets:pack:check
+pnpm native:desktop-offscreen:smoke
+pnpm native:xr-emulation:smoke
+pnpm native:xr:check
+```
+
+The focused test counts were 213 app-runtime, 92 scene, and 11 web-client.
+Direct scene/web WASM checks retained only the two pre-existing
+`mclone-server` warnings. `/tmp/mclone-native-web-scene-host-proof.png` and its
+canvas capture were visually inspected and showed clean textured spruce
+terrain, water, sky, HUD, cow, and chicken. Useful app, mobile UI/options,
+catalog, block-edit, and remote page captures were also inspected; partial
+IndexedDB and sky-only movement endpoint images were rejected as evidence. The
+desktop offscreen and synthetic-stereo captures retained the Slice 3 hashes
+`cdffd673...` and `18bbdadd...` and were visually inspected. No shared public
+host contract changed, so Slice 3's flat-Android and attached-Quest canaries
+remain the device evidence. No capture was committed.
+
+Production still uses `WebChunkRenderSession`; the proof must be folded into
+and deleted with Slice 5's atomic cutover, not retained as an alternate mode.
 
 ## Slice 5: Atomic Production Cutover And Deletion
 
@@ -1086,10 +1165,9 @@ the evidence and options, and revise this tactical before production cutover.
 
 ## Recommended Next Step
 
-Implement Slice 4 only. Add a smoke-only direct browser entry point that builds
-a real `McloneSceneHost` from the Slice 3 services and proves local-worker
-startup, scripted and DOM input, block interaction, render admission/frame
-assembly, actors/effects, UI/HUD, resize, bounded hidden-tab resume, controlled
-WebGPU loss handling, and teardown. Keep production web on
-`WebChunkRenderSession`; stop before Slice 5's atomic production cutover and
-deletion.
+Implement Slice 5 only. Atomically move local worker, IndexedDB local-world,
+and remote WebSocket production modes onto `McloneSceneHost`; consume Tactical
+169's active asset-set/epoch seam; preserve the Slice 4 visibility, loss, and
+capability decisions; delete `WebChunkRenderSession`, duplicated policy, and
+the proof-only entry point; and enable the end-state enforcement tripwires.
+Stop before Slice 6's parity and cleanup audit.
