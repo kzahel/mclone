@@ -4,7 +4,8 @@ use std::fmt;
 
 use mclone_assets::{
     AssetError, AssetPath, AssetSource, BlockModelLibrary, BlockStateAssetIndex,
-    BlockStateRegistry, ResourceLocation, TextureAtlasPlan, TextureMaterial,
+    BlockStateRegistry, FirstPartyVisualCatalog, ResourceLocation, TextureAtlasPlan,
+    TextureMaterial,
 };
 
 use crate::{TexturedColorMap, TexturedColorMaps, TexturedMeshCatalog, TexturedMeshError};
@@ -132,6 +133,31 @@ pub fn load_textured_terrain_assets(
         catalog = catalog.with_color_maps(color_maps);
     }
 
+    Ok(TexturedTerrainAssets {
+        catalog,
+        atlas,
+        atlas_sprite_count,
+    })
+}
+
+pub fn load_first_party_textured_terrain_assets(
+    source: &impl AssetSource,
+) -> Result<TexturedTerrainAssets, TexturedTerrainAssetError> {
+    let registry = BlockStateRegistry::terrain_mvp();
+    let visuals = FirstPartyVisualCatalog::load(source)?;
+    let materials = visuals
+        .definitions()
+        .filter_map(|visual| visual.material.clone())
+        .map(TextureMaterial::blocks)
+        .collect::<BTreeSet<_>>();
+    let atlas_plan = TextureAtlasPlan::build(source, materials)?;
+    let atlas_sprite_count = atlas_plan.len();
+    let atlas = stitch_texture_atlas(source, &atlas_plan)?;
+    let mut catalog =
+        TexturedMeshCatalog::from_first_party_visuals(&registry, &visuals, &atlas_plan)?;
+    if let Some(color_maps) = load_color_maps(source)? {
+        catalog = catalog.with_color_maps(color_maps);
+    }
     Ok(TexturedTerrainAssets {
         catalog,
         atlas,

@@ -33,7 +33,8 @@ pub use data::{
 pub use mclone_core::{CHUNK_WIDTH, SECTION_HEIGHT as RENDER_SECTION_HEIGHT};
 pub use terrain_assets::{
     TextureAtlasImage, TexturedTerrainAssetError, TexturedTerrainAssets,
-    collect_textured_terrain_materials, load_textured_terrain_assets,
+    collect_textured_terrain_materials, load_first_party_textured_terrain_assets,
+    load_textured_terrain_assets,
 };
 pub use visibility::{SectionFace, VisGraph, VisibilitySet};
 

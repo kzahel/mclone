@@ -1,8 +1,8 @@
 # 169: Runtime Asset Pack Selection
 
-Status: active implementation parent 2026-07-10; Slices 0-1 landed. Stop
-boundary honored after deterministic standalone pack construction; Slice 2 is
-next.
+Status: active implementation parent 2026-07-10; Slices 0-2 landed. Stop
+boundary honored after first-party visual catalog/prepared-set validation;
+Slice 3 is next.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
@@ -357,20 +357,64 @@ Visual inspection:
 
 ### Slice 2 - First-Party Visual Catalog and Prepared Set
 
-- [ ] Add the engine-native first-party visual definition/catalog adapter.
-- [ ] Compile authored and fallback visual entries into the same neutral
+- [x] Add the engine-native first-party visual definition/catalog adapter.
+- [x] Compile authored and fallback visual entries into the same neutral
   `TexturedMeshCatalog` used by the Minecraft JSON adapter.
-- [ ] Load terrain, LOD, actors, figures, effects, and audio policy into one
+- [x] Load terrain, LOD, actors, figures, effects, and audio policy into one
   epoch-tagged `PreparedAssetSet`.
-- [ ] Make missing solids/plants/fluids visibly distinct with conservative
+- [x] Make missing solids/plants/fluids visibly distinct with conservative
   fallback geometry.
-- [ ] Produce an exact resolution ledger and aggregate coverage report.
-- [ ] Prove `Mclone authored -> generated fallback` prepares with no loose or
+- [x] Produce an exact resolution ledger and aggregate coverage report.
+- [x] Prove `Mclone authored -> generated fallback` prepares with no loose or
   packed Minecraft source installed.
 
 Exit criteria: a headless/offscreen first-party-only capture is drawable and
 inspected; provenance reports zero Minecraft/unknown resolutions; every missing
 resource in the capture maps to a registry id.
+
+Landed evidence (2026-07-10):
+
+- `mclone-assets` validates `mclone-visuals-v1` against all 209 canonical
+  runtime block-state ids/keys, parses the generated missing-resource registry
+  and silent-audio policy, and provides a source view that records the named
+  first-source-wins result for each logical path.
+- `mclone-mesh` compiles those visual definitions into the same
+  `TexturedMeshCatalog` consumed by render-section meshing. Full cubes,
+  double-sided crossed plant planes, a low flat plane, and the existing basic
+  fluid renderer provide distinct conservative geometry; normal atlas/mip and
+  render-layer paths remain unchanged.
+- `mclone-app-runtime::PreparedAssetSet` owns one epoch and selection plus the
+  composed source chain, CPU terrain catalog/atlas, far-LOD palette, actor
+  atlas, three figures, decoded underwater effect, explicit audio policy,
+  missing-resource registry, exact provenance ledger, and aggregate coverage.
+  This slice does not upload or replace live scene resources.
+- The preparation diagnostic opened only `mclone-authored.pbp` followed by the
+  required `mclone-generated-fallback.pbp`. It prepared 209 states, 137 atlas
+  sprites, 3 figures, 107 far-LOD colors, and 139 missing registry entries.
+  The ledger contained 11 first-party and 135 generated resolved paths, 2
+  suppressed sounds, 1 absent optional colormap lookup, and zero
+  Minecraft-reference or unknown resolutions. Every resolved generated PNG
+  was required to have a registry entry.
+- The native offscreen client ran with `MCLONE_ASSET_MODE=pack-only`, the
+  authored archive as its sole overlay, and the generated archive as its sole
+  base. `/tmp/mclone-first-party-slice2.png` rendered at 960x540 with 64
+  sections, 11 drawn sections, 2 entities, and 2 drawn actors. Inspection
+  confirmed authored terrain remained legible while generated checker/code
+  textures and conservative silhouettes were conspicuous and drawable.
+
+Focused validation:
+
+```text
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-assets -p mclone-mesh -p mclone-app-runtime --lib
+  43 + 85 + 195 tests passed; 0 failures
+cargo run -p mclone-app-runtime --bin first_party_asset_prepare -- \
+  generated-assets/texture-lab/mclone-authored.pbp \
+  generated-assets/texture-lab/mclone-generated-fallback.pbp
+  prepared; minecraft_reference=0 unknown=0
+first-party-only native offscreen screenshot
+  passed and inspected at /tmp/mclone-first-party-slice2.png
+```
 
 ### Slice 3 - Transactional Native Scene Replacement
 

@@ -3,6 +3,7 @@
 mod atlas;
 mod block_registry;
 mod figure;
+mod first_party;
 mod inventory;
 mod model;
 mod pack;
@@ -27,6 +28,12 @@ pub use figure::{
     default_player_figure_id, default_player_figure_path, load_figure_asset,
     upright_bear_figure_id, upright_bear_figure_path,
 };
+pub use first_party::{
+    FIRST_PARTY_AUDIO_POLICY_PATH, FIRST_PARTY_MISSING_REGISTRY_PATH,
+    FIRST_PARTY_VISUAL_CATALOG_PATH, FIRST_PARTY_VISUAL_SCHEMA, FirstPartyAudioPolicy,
+    FirstPartyVisualCatalog, FirstPartyVisualDefinition, MissingAssetRegistry,
+    MissingAssetRegistryEntry,
+};
 pub use inventory::{
     AssetConsumerKind, AssetRequirementPolicy, CanonicalAssetRequirement,
     CanonicalFirstPartyAssetInventory, FirstPartyBlockVisual, FirstPartyVisualClass,
@@ -45,7 +52,10 @@ pub use profile::{
     AssetProvenanceReport, AssetProvenanceSummary, AssetResolutionOrigin, AssetResolutionOutcome,
 };
 pub use resource::{AssetPath, ResourceLocation};
-pub use source::{AssetSource, AssetSourceChain, MemoryAssetSource, NamedAssetResolution};
+pub use source::{
+    AssetSource, AssetSourceChain, MemoryAssetSource, NamedAssetResolution,
+    ProvenanceTrackingAssetSource,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::FilesystemAssetSource;

@@ -9,7 +9,8 @@ use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetSource, AssetSourceChain, FilesystemAssetSource, PackedAssetSource};
 use mclone_mesh::{
     TextureAtlasImage as MeshTextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionMesh,
-    VisibilityGraphBuildStats, load_textured_terrain_assets,
+    VisibilityGraphBuildStats, load_first_party_textured_terrain_assets,
+    load_textured_terrain_assets,
 };
 pub use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::load_actor_texture_assets as load_actor_texture_assets_from_source;
@@ -685,8 +686,14 @@ pub fn load_textured_mesh_assets() -> Result<TexturedMeshAssets> {
 pub fn load_textured_mesh_assets_from_source(
     source: &impl AssetSource,
 ) -> Result<TexturedMeshAssets> {
-    let assets =
-        load_textured_terrain_assets(source).context("failed to load textured terrain assets")?;
+    let first_party_catalog =
+        mclone_assets::AssetPath::new(mclone_assets::FIRST_PARTY_VISUAL_CATALOG_PATH);
+    let assets = if source.read(&first_party_catalog)?.is_some() {
+        load_first_party_textured_terrain_assets(source)
+            .context("failed to load first-party textured terrain assets")?
+    } else {
+        load_textured_terrain_assets(source).context("failed to load textured terrain assets")?
+    };
     let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(source)
         .context("failed to load Far LOD material metadata")?;
 

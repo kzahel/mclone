@@ -16,7 +16,38 @@ const VERTEX_SIZE: wgpu::BufferAddress =
 const MULTIVIEW_UNIFORM_FLOATS_PER_VIEW: usize = 8;
 const MULTIVIEW_UNIFORM_SIZE: wgpu::BufferAddress =
     (2 * MULTIVIEW_UNIFORM_FLOATS_PER_VIEW * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
-const UNDERWATER_TEXTURE_PATH: &str = "assets/minecraft/textures/misc/underwater.png";
+pub const UNDERWATER_TEXTURE_PATH: &str = "assets/minecraft/textures/misc/underwater.png";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScreenEffectTextureAssets {
+    pub underwater_width: u32,
+    pub underwater_height: u32,
+    pub underwater_rgba: Vec<u8>,
+}
+
+pub fn load_screen_effect_texture_assets(
+    assets: &impl AssetSource,
+) -> Result<ScreenEffectTextureAssets> {
+    let path = AssetPath::new(UNDERWATER_TEXTURE_PATH);
+    let bytes = assets
+        .read(&path)?
+        .ok_or_else(|| anyhow!("missing underwater screen effect texture {}", path.as_str()))?;
+    let image = image::load_from_memory(&bytes)
+        .with_context(|| format!("failed to decode {}", path.as_str()))?
+        .to_rgba8();
+    let (underwater_width, underwater_height) = image.dimensions();
+    if underwater_width == 0 || underwater_height == 0 {
+        bail!(
+            "underwater screen effect texture {} is empty",
+            path.as_str()
+        );
+    }
+    Ok(ScreenEffectTextureAssets {
+        underwater_width,
+        underwater_height,
+        underwater_rgba: image.into_raw(),
+    })
+}
 const WATER_VISION_MAX_TICKS: f32 = 600.0;
 const WATER_VISION_QUICK_TICKS: f32 = 100.0;
 const WATER_VISION_QUICK_PERCENT: f32 = 0.6;
@@ -706,21 +737,10 @@ fn create_underwater_texture_bind_group(
     layout: &wgpu::BindGroupLayout,
     assets: &impl AssetSource,
 ) -> Result<GpuScreenEffectTexture> {
-    let path = AssetPath::new(UNDERWATER_TEXTURE_PATH);
-    let bytes = assets
-        .read(&path)?
-        .ok_or_else(|| anyhow!("missing underwater screen effect texture {}", path.as_str()))?;
-    let image = image::load_from_memory(&bytes)
-        .with_context(|| format!("failed to decode {}", path.as_str()))?
-        .to_rgba8();
-    let (width, height) = image.dimensions();
-    if width == 0 || height == 0 {
-        bail!(
-            "underwater screen effect texture {} is empty",
-            path.as_str()
-        );
-    }
-    let rgba = image.into_raw();
+    let assets = load_screen_effect_texture_assets(assets)?;
+    let width = assets.underwater_width;
+    let height = assets.underwater_height;
+    let rgba = assets.underwater_rgba;
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mclone_underwater_screen_effect_texture"),
         size: wgpu::Extent3d {

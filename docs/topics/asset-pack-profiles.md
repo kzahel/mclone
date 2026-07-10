@@ -3,8 +3,8 @@
 Topic: asset-pack-profiles
 
 Status: active implementation. Tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-1 landed
-2026-07-10; Slice 2 first-party visual catalog/prepared set is next.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-2 landed
+2026-07-10; Slice 3 transactional native scene replacement is next.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -89,6 +89,27 @@ Minecraft pack is not sufficient.
   catalog under ignored
   `generated-assets/first-party-stage/first-party-packs/`. Platform installation
   and runtime selection remain later slices.
+- `mclone-assets` now validates the engine-native `mclone-visuals-v1` catalog
+  against all 209 canonical state ids/keys and parses the generated
+  missing-resource registry and explicit silent-audio policy.
+- `mclone-mesh` compiles first-party solid, crossed-plane, flat, and fluid
+  definitions into the same neutral `TexturedMeshCatalog` used by the
+  Minecraft JSON adapter. It builds the ordinary texture atlas directly from
+  `mclone:block/*` materials; no blockstate/model JSON is required.
+- `mclone-app-runtime::PreparedAssetSet` now groups one epoch/selection with
+  the composed source chain, terrain catalog/atlas, far-LOD palette, actors,
+  figures, decoded screen effect, audio policy, missing-resource registry,
+  exact resolution ledger, and aggregate coverage. It is CPU-side preparation
+  only; live scene replacement remains the next slice.
+- A real authored-plus-generated prepare resolved 11 unique paths from the
+  authored pack and 135 from the generated pack, explicitly suppressed two
+  sounds, and reported zero Minecraft-reference or unknown resolutions. All
+  resolved generated PNGs were checked against the 139-entry registry.
+- A 960x540 first-party-only native offscreen capture rendered 11 terrain
+  sections and two actors and was inspected at
+  `/tmp/mclone-first-party-slice2.png`. It used only the two standalone packed
+  sources; authored terrain and conspicuous checker/code fallbacks were both
+  visible.
 - `mclone-app-runtime::render_assets` discovers environment/platform paths and
   constructs one source chain at startup. `MCLONE_ASSET_OVERLAY_PACK` inserts
   one or more authored overlays before loose or packed Minecraft sources.
@@ -294,22 +315,21 @@ resolve when their logical pack is disabled.
   identifies them. The two new standalone first-party builders do emit them.
 - The compatibility overlay remains partial; use the authored + generated
   standalone outputs for new first-party work.
-- There is no first-party replacement/fallback visual catalog for missing
-  blockstate/model JSON.
 - Render compiler/catalog and GPU atlas replacement are startup-shaped.
 - Web's resident compiler worker and single-byte-pack bootstrap need a
   replacement epoch/reinitialization path.
-- First-party actor/effect/audio coverage and strict suppression are incomplete.
+- Prepared first-party actor/effect/audio inputs and strict suppression exist,
+  but live consumer replacement is not wired yet.
 - Asset selection persistence has no shared cross-platform preference adapter.
 
 ## Recommended Next Work
 
 Implement only tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 2 next. Add the
-engine-native first-party visual adapter and prepare the authored + generated
-stack into one CPU asset set with an exact resolution ledger. Prove the staged
-packs produce a drawable offscreen first-party-only capture with zero
-Minecraft/unknown resolutions before beginning transactional live replacement.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slice 3 next. Add the
+transactional native scene replacement path: prepare away from the frame path,
+introduce asset epochs for compiler results, keep the old selection drawable
+until the new visible set is ready, and commit all source-backed presentation
+consumers together without reconnecting or mutating world/session state.
 
 ## Slice 0 Evidence
 
@@ -361,6 +381,31 @@ the two canonical outputs reach staging. Archive inspection confirmed fixed
 timestamps, stored entries, declared fingerprints, no reference-root names,
 and no sentinel bytes. Enlarged generated stone (`E67C`) and cow (`BDE7`) PNGs
 were visually inspected for checker/border contrast and code legibility.
+
+## Slice 2 Evidence
+
+Focused validation on 2026-07-10:
+
+```text
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-assets -p mclone-mesh -p mclone-app-runtime --lib
+  43 + 85 + 195 tests passed; 0 failures
+cargo run -p mclone-app-runtime --bin first_party_asset_prepare -- \
+  generated-assets/texture-lab/mclone-authored.pbp \
+  generated-assets/texture-lab/mclone-generated-fallback.pbp
+  209 states; 137 atlas sprites; 3 figures; 107 LOD colors
+  first_party=11; generated=135; suppressed=2
+  minecraft_reference=0; unknown=0
+native first-party-only offscreen capture
+  960x540; 11 drawn sections; 2 drawn actors
+```
+
+The capture at `/tmp/mclone-first-party-slice2.png` was visually inspected.
+The generated short-code textures are conspicuous and legible at normal scene
+scale, authored terrain remains visible, and actor/plant silhouettes remain
+drawable. The prepared-set validator rejects any Minecraft/unknown resolved
+origin and any generated PNG resolution without a matching missing-resource
+registry id.
 
 ## Non-Goals
 

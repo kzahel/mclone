@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -5,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     AssetError, AssetPackCatalog, AssetPackId, AssetPackOrigin, AssetPackSelection, AssetPath,
-    AssetResolutionOrigin, AssetResult,
+    AssetProvenanceEntry, AssetProvenanceReport, AssetResolutionOrigin, AssetResolutionOutcome,
+    AssetResult,
 };
 
 pub trait AssetSource {
@@ -166,6 +168,83 @@ impl AssetSource for AssetSourceChain {
     }
 }
 
+/// Asset-source view that records one final resolution per logical path.
+///
+/// Preparation is deliberately single-threaded; interior mutability keeps the
+/// ordinary `AssetSource` consumer contract while retaining exact named-source
+/// provenance for every read.
+pub struct ProvenanceTrackingAssetSource<'a> {
+    chain: &'a AssetSourceChain,
+    entries: RefCell<BTreeMap<AssetPath, AssetProvenanceEntry>>,
+}
+
+impl<'a> ProvenanceTrackingAssetSource<'a> {
+    pub fn new(chain: &'a AssetSourceChain) -> Self {
+        Self {
+            chain,
+            entries: RefCell::new(BTreeMap::new()),
+        }
+    }
+
+    pub fn record_suppressed(&self, path: AssetPath, source: AssetResolutionOrigin) {
+        self.entries.borrow_mut().insert(
+            path.clone(),
+            AssetProvenanceEntry {
+                path,
+                source,
+                outcome: AssetResolutionOutcome::Suppressed,
+            },
+        );
+    }
+
+    pub fn resolved_origin(&self, path: &AssetPath) -> Option<AssetResolutionOrigin> {
+        self.entries
+            .borrow()
+            .get(path)
+            .filter(|entry| entry.outcome == AssetResolutionOutcome::Resolved)
+            .map(|entry| entry.source.clone())
+    }
+
+    pub fn report(&self, epoch: u64, selection: AssetPackSelection) -> AssetProvenanceReport {
+        let mut report = AssetProvenanceReport::new(epoch, selection);
+        for entry in self.entries.borrow().values() {
+            report.record(entry.clone());
+        }
+        report
+    }
+}
+
+impl AssetSource for ProvenanceTrackingAssetSource<'_> {
+    fn read(&self, path: &AssetPath) -> AssetResult<Option<Vec<u8>>> {
+        let resolution = self.chain.resolve(path)?;
+        let (bytes, source, outcome) = match resolution {
+            Some(resolution) => (
+                Some(resolution.bytes),
+                resolution.source,
+                AssetResolutionOutcome::Resolved,
+            ),
+            None => (
+                None,
+                AssetResolutionOrigin::anonymous(),
+                AssetResolutionOutcome::Missing,
+            ),
+        };
+        self.entries.borrow_mut().insert(
+            path.clone(),
+            AssetProvenanceEntry {
+                path: path.clone(),
+                source,
+                outcome,
+            },
+        );
+        Ok(bytes)
+    }
+
+    fn list(&self, prefix: &str, suffix: &str) -> AssetResult<Vec<AssetPath>> {
+        self.chain.list(prefix, suffix)
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub struct FilesystemAssetSource {
@@ -243,6 +322,7 @@ fn collect_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AssetPackDescriptor;
 
     #[cfg(not(target_arch = "wasm32"))]
     fn extracted_asset_root() -> std::path::PathBuf {
@@ -278,6 +358,64 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["assets/minecraft/blockstates/stone.json"]
         );
+    }
+
+    #[test]
+    fn provenance_tracking_retains_named_winner_and_missing_lookup() {
+        let authored_id = AssetPackId::new("authored");
+        let fallback_id = AssetPackId::new("fallback");
+        let authored = AssetPackDescriptor::new(
+            authored_id.clone(),
+            "Authored",
+            AssetPackOrigin::FirstParty,
+            10,
+        )
+        .unwrap();
+        let fallback = AssetPackDescriptor::new(
+            fallback_id.clone(),
+            "Fallback",
+            AssetPackOrigin::Generated,
+            30,
+        )
+        .unwrap()
+        .required();
+        let catalog = AssetPackCatalog::new([authored, fallback]).unwrap();
+        let selection = AssetPackSelection::new([authored_id.clone()]);
+        let mut authored_source = MemoryAssetSource::new();
+        let shared = AssetPath::new("assets/mclone/shared.png");
+        authored_source.insert(shared.clone(), b"authored".to_vec());
+        let mut fallback_source = MemoryAssetSource::new();
+        fallback_source.insert(shared.clone(), b"fallback".to_vec());
+        let chain = AssetSourceChain::from_selection(
+            &catalog,
+            &selection,
+            [
+                (
+                    authored_id,
+                    Box::new(authored_source) as Box<dyn AssetSource>,
+                ),
+                (
+                    fallback_id,
+                    Box::new(fallback_source) as Box<dyn AssetSource>,
+                ),
+            ],
+        )
+        .unwrap();
+        let tracker = ProvenanceTrackingAssetSource::new(&chain);
+
+        assert_eq!(tracker.read(&shared).unwrap().unwrap(), b"authored");
+        assert!(
+            tracker
+                .read(&AssetPath::new("assets/mclone/missing.png"))
+                .unwrap()
+                .is_none()
+        );
+        let report = tracker.report(9, selection);
+
+        assert_eq!(report.epoch, 9);
+        assert_eq!(report.summary().first_party, 1);
+        assert_eq!(report.summary().missing, 1);
+        assert_eq!(report.summary().unknown, 0);
     }
 
     #[test]

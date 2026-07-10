@@ -1,8 +1,11 @@
 use std::collections::BTreeSet;
 
+use serde::Deserialize;
+
 use crate::{AssetPath, BlockStateRecord, BlockStateRegistry, ResourceLocation};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum FirstPartyVisualClass {
     Empty,
     Solid,

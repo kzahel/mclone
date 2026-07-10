@@ -4,7 +4,8 @@ use std::fmt;
 
 use mclone_assets::{
     AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
-    BlockStateVariant, ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
+    BlockStateVariant, FirstPartyVisualCatalog, FirstPartyVisualClass, ModelFaceDirection,
+    ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
 use mclone_core::BlockStateId;
 
@@ -244,6 +245,68 @@ pub struct TexturedMeshCatalog {
 }
 
 impl TexturedMeshCatalog {
+    /// Compile engine-native first-party definitions into the same neutral
+    /// catalog consumed by terrain meshing and rendering.
+    pub fn from_first_party_visuals(
+        registry: &BlockStateRegistry,
+        visuals: &FirstPartyVisualCatalog,
+        atlas: &TextureAtlasPlan,
+    ) -> Result<Self, TexturedMeshError> {
+        let mut blocks = BTreeMap::new();
+        for record in registry.records() {
+            let visual = visuals
+                .get(record.id)
+                .ok_or_else(|| TexturedMeshError::MissingBlockStateAsset(record.block.clone()))?;
+            let sprite = visual
+                .material
+                .as_ref()
+                .map(|material| first_party_sprite(material, atlas))
+                .transpose()?;
+            let faces = match (visual.class, sprite) {
+                (FirstPartyVisualClass::Empty | FirstPartyVisualClass::Fluid, _) => Vec::new(),
+                (FirstPartyVisualClass::Solid, Some(sprite)) => {
+                    first_party_solid_faces(record.block.path(), sprite)
+                }
+                (FirstPartyVisualClass::CrossedPlane, Some(sprite)) => {
+                    first_party_crossed_faces(record.block.path(), sprite)
+                }
+                (FirstPartyVisualClass::Flat, Some(sprite)) => {
+                    first_party_flat_faces(record.block.path(), sprite)
+                }
+                (_, None) => Vec::new(),
+            };
+            let fluid = sprite
+                .map(|sprite| first_party_fluid_model(record, sprite))
+                .transpose()?
+                .flatten();
+            let full_cube_occluder = visual.class == FirstPartyVisualClass::Solid;
+            let facts = block_render_facts(record, full_cube_occluder);
+            blocks.insert(
+                record.id,
+                TexturedBlockModel {
+                    faces,
+                    fluid,
+                    render_layer: textured_terrain_render_layer(
+                        record.block.path(),
+                        facts.solid_render,
+                    ),
+                    occludes: facts.occludes,
+                    ambient_occlusion: visual.class == FirstPartyVisualClass::Solid,
+                    light_emission: facts.light_emission,
+                    light_block: facts.light_block,
+                    view_blocking: facts.view_blocking,
+                    solid_render: facts.solid_render,
+                    collision_shape_full_block: facts.collision_shape_full_block,
+                    shade_brightness: facts.shade_brightness,
+                },
+            );
+        }
+        Ok(Self {
+            blocks,
+            color_maps: None,
+        })
+    }
+
     pub fn from_assets(
         registry: &BlockStateRegistry,
         blockstates: &BlockStateAssetIndex,
@@ -350,6 +413,14 @@ impl TexturedMeshCatalog {
         self.blocks.get(&state_id)
     }
 
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
     pub fn gui_icon_uv(&self, state_id: BlockStateId) -> Option<AtlasSpriteUv> {
         let model = self.blocks.get(&state_id)?;
         if let Some(fluid) = model.fluid {
@@ -417,6 +488,136 @@ impl TexturedMeshCatalog {
             .as_ref()
             .map(|maps| maps.foliage.sample(temperature, downfall))
     }
+}
+
+fn first_party_sprite(
+    material: &ResourceLocation,
+    atlas: &TextureAtlasPlan,
+) -> Result<AtlasSpriteUv, TexturedMeshError> {
+    let material = TextureMaterial::blocks(material.clone());
+    let sprite = atlas
+        .sprite(&material)
+        .ok_or_else(|| TexturedMeshError::MissingSprite(material.clone()))?;
+    Ok(AtlasSpriteUv {
+        u0: sprite.u0,
+        v0: sprite.v0,
+        u1: sprite.u1,
+        v1: sprite.v1,
+    })
+}
+
+fn first_party_face(
+    direction: ModelFaceDirection,
+    cullface: Option<ModelFaceDirection>,
+    from: [f32; 3],
+    to: [f32; 3],
+    sprite: AtlasSpriteUv,
+    tint: TexturedBlockTint,
+) -> TexturedBlockFace {
+    TexturedBlockFace {
+        direction,
+        cullface,
+        from,
+        to,
+        uv: [0.0, 0.0, 16.0, 16.0],
+        uv_rotation: 0,
+        sprite,
+        tintindex: -1,
+        tint,
+        shade: true,
+    }
+}
+
+fn first_party_solid_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBlockFace> {
+    let tint = textured_block_tint(block, 0);
+    [
+        ModelFaceDirection::Down,
+        ModelFaceDirection::Up,
+        ModelFaceDirection::North,
+        ModelFaceDirection::South,
+        ModelFaceDirection::West,
+        ModelFaceDirection::East,
+    ]
+    .into_iter()
+    .map(|direction| {
+        first_party_face(
+            direction,
+            Some(direction),
+            [0.0, 0.0, 0.0],
+            [16.0, 16.0, 16.0],
+            sprite,
+            tint,
+        )
+    })
+    .collect()
+}
+
+fn first_party_crossed_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBlockFace> {
+    let tint = textured_block_tint(block, 0);
+    // The neutral face representation is axis-aligned. Two thin, double-sided
+    // center planes preserve a conservative crossed-plant silhouette.
+    [
+        (
+            ModelFaceDirection::North,
+            [0.0, 0.0, 7.9],
+            [16.0, 16.0, 8.1],
+        ),
+        (
+            ModelFaceDirection::South,
+            [0.0, 0.0, 7.9],
+            [16.0, 16.0, 8.1],
+        ),
+        (ModelFaceDirection::West, [7.9, 0.0, 0.0], [8.1, 16.0, 16.0]),
+        (ModelFaceDirection::East, [7.9, 0.0, 0.0], [8.1, 16.0, 16.0]),
+    ]
+    .into_iter()
+    .map(|(direction, from, to)| first_party_face(direction, None, from, to, sprite, tint))
+    .collect()
+}
+
+fn first_party_flat_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBlockFace> {
+    let tint = textured_block_tint(block, 0);
+    [ModelFaceDirection::Up, ModelFaceDirection::Down]
+        .into_iter()
+        .map(|direction| {
+            first_party_face(
+                direction,
+                None,
+                [0.0, 0.9, 0.0],
+                [16.0, 1.1, 16.0],
+                sprite,
+                tint,
+            )
+        })
+        .collect()
+}
+
+fn first_party_fluid_model(
+    record: &mclone_assets::BlockStateRecord,
+    sprite: AtlasSpriteUv,
+) -> Result<Option<TexturedFluidModel>, TexturedMeshError> {
+    let Some(kind) = textured_fluid_kind(record) else {
+        return Ok(None);
+    };
+    let level_text = record
+        .properties
+        .get("level")
+        .map(String::as_str)
+        .unwrap_or("0");
+    let level = level_text
+        .parse::<u8>()
+        .ok()
+        .filter(|level| *level <= 8)
+        .ok_or_else(|| TexturedMeshError::InvalidFluidLevel {
+            state: record.canonical_key(),
+            level: level_text.to_owned(),
+        })?;
+    Ok(Some(TexturedFluidModel {
+        kind,
+        level,
+        still: sprite,
+        flow: sprite,
+    }))
 }
 
 fn textured_block_tint(block_path: &str, tintindex: i32) -> TexturedBlockTint {
