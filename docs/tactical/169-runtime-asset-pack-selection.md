@@ -1,8 +1,8 @@
 # 169: Runtime Asset Pack Selection
 
-Status: active implementation parent 2026-07-10; Slices 0-4 landed. Stop
-boundary honored after the shared Asset Packs UI. The required next-work
-checkpoint recommends Tactical 170 Slice 0 before web/Slice 5 adoption.
+Status: active implementation parent 2026-07-11; Slices 0-4 landed. Tactical
+170 Slices 0-5 completed the shared-host browser prerequisite. Resume this
+tactical at Slice 5 platform discovery/adoption; do not skip to Slice 6.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
@@ -615,6 +615,14 @@ with Tactical 170:
   deterministic validation without inventing a separate product policy.
 - [ ] Update the platform parity capability/exception ledger if any host cannot
   yet apply a selection; do not silently omit the screen/action.
+
+Handoff status (2026-07-11): Tactical 170 Slice 5 atomically moved production
+local worker, IndexedDB local-world, and remote WebSocket modes onto one
+`McloneSceneHost` and deleted `WebChunkRenderSession` plus the proof-only path.
+The host retains the existing prepared epoch 0 across session replacements;
+no competing asset epoch or browser-local selection policy was added. The web
+checkbox above is still open: pack descriptor/byte staging and transactional
+resident-compiler reinitialization are the work to perform here.
 
 Exit criteria: the Asset Packs screen is accessible and truthful on every
 supported client lane; each lane either applies the selection or carries an

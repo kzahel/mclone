@@ -2,14 +2,13 @@
 
 Topic: web-scene-host-adoption
 
-Status: active 2026-07-10. Tactical 170 Slices 0-4 landed the executable
-browser baselines, portable scene prerequisites, neutral scene-session shell,
-browser service adapters, and an isolated real-host browser proof. The direct
-scene/web WASM gates and direct browser proof are green; Slice 5's atomic
-production cutover is next. The implementation sequence is recorded in
-[`170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md);
-production adoption has not started, the proof remains smoke-only, and the old
-web owner remains active.
+Status: active 2026-07-11. Tactical 170 Slices 0-5 landed the executable
+baselines, portable scene prerequisites, neutral scene-session shell, browser
+service adapters, direct-host proof, and atomic production cutover. Local
+worker, IndexedDB local-world, and remote WebSocket modes now use one
+`McloneSceneHost`; `WebChunkRenderSession` and the proof-only path are gone.
+Return to Tactical 169 Slice 5 for platform asset-pack adoption, then resume
+Tactical 170 Slice 6 for parity audit, durable documentation, and closeout.
 
 ## Scope
 
@@ -51,33 +50,31 @@ The browser may keep a small wasm-bindgen wrapper around the host, but that
 wrapper must be a platform driver rather than a second game/runtime/render
 orchestrator.
 
-## Current State (Verified 2026-07-10)
+## Current State (Verified 2026-07-11)
 
-The browser client is functional and already shares important lower-level
-contracts, but the top-level orchestration is still forked:
+The browser is now structurally converged on the same scene-policy owner as
+the native display clients:
 
-- `native/apps/mclone-web-client/src/web_canvas.rs` is 7,017 lines after the
-  Slice 4 proof exposed the runtime diagnostics needed by the shared host.
-  `WebChunkRenderSession` owns runtime/session state, camera/input assembly,
-  settings-effect dispatch, catalog/session dispatch, render synchronization,
-  GPU uploads, actors, UI, and the sky-to-present frame sequence.
-- `native/apps/mclone-web-client/www/mclone-web-app.ts` owns the rAF loop,
-  canvas/input event collection, promise serialization, render-compiler wake
-  relay, and public browser state. The rAF and browser-resource portions are
-  the correct future driver rim; the policy relay portions should shrink.
-- `WebIntegratedServerRunner` already implements the shared
-  `IntegratedServerRunner` contract and uses a Web Worker.
-- `WebRenderSectionCompiler` already implements the shared
-  `RenderSectionCompiler` contract over the resident shared-memory compiler
-  ring. It uses the same budget-one dirty/revision/acceptance loop as native.
-- Worldgen and light job workers, bounded shared-buffer pools, transport
-  metrics, and stress/fallback coverage are already landed through Tactical
-  062. Render-compiler streaming, resident snapshot deltas, and ABI locks are
-  landed through Tactical 067.
-- Local worker and remote WebSocket modes already drain normal-frame updates
-  through the shared `ClientConnection` contract.
-- Client-experience, session, and catalog policy are shared, but web still
-  applies their effects through app-local matches and asynchronous wrappers.
+- `native/apps/mclone-web-client/src/web_scene_host.rs` is the production
+  wasm-bindgen wrapper around one `McloneSceneHost`. It adapts browser runtime,
+  compiler, catalog, clock, drop, input, and WebGPU target facts without owning
+  a second session/render policy stack.
+- `native/apps/mclone-web-client/www/mclone-web-app.ts` owns `WebFrameDriver`:
+  rAF cadence, canvas/surface acquisition, DOM input collection, typed promise
+  execution, visibility/resize events, public browser state, and presentation.
+- Local worker, persistent IndexedDB local-world, and remote WebSocket session
+  startup and replacement all flow through the same host and neutral external
+  scene-session seam. Normal-frame updates still enter through
+  `ClientConnection`.
+- `WebIntegratedServerRunner`, worldgen/light workers, resident
+  `WebRenderSectionCompiler`, shared-memory rings, bounded pools, ABI locks,
+  transport metrics, and fallback probes retain their prior topology.
+- The active prepared asset set stays in the long-lived host across session
+  replacement. Current production still uses the one existing packed
+  6,985-file payload at epoch 0; logical pack discovery/selection and compiler
+  reinitialization remain Tactical 169 Slice 5 work.
+- Browser audio and teleport preview remain explicit absent capabilities. The
+  reason-bearing web feature profile is preserved for Slice 6 audit.
 
 The direct acceptance gate is green after browser service assembly:
 
@@ -91,7 +88,8 @@ Slice 2 reduced it to five. Slice 3 removed the remaining browser
 connection/compiler/drop and prepared-asset roots. The final green log is
 `/tmp/mclone-t170-slice3-scene-wasm.txt`; its only warnings are two pre-existing
 `mclone-server` WASM warnings. Compile portability alone is not runtime
-acceptance; Slice 4's direct browser proof now supplies that evidence.
+acceptance; the Slice 4 proof and Slice 5 production matrix supply that
+evidence.
 
 ## Slice 0 Landed Evidence (2026-07-10)
 
@@ -293,6 +291,40 @@ browser host or cutover toggle.
   were visually inspected. No shared public host contract changed, so the
   Slice 3 flat-Android and attached-Quest canaries remain the device evidence.
 
+## Slice 5 Landed Evidence (2026-07-11)
+
+- The production `WebSceneHost` wrapper owns one `McloneSceneHost`, while
+  `WebFrameDriver` owns only browser cadence, DOM/input translation, typed
+  promise execution, canvas/surface resources, and presentation. Local worker,
+  persistent IndexedDB world, and remote WebSocket replacement all use that
+  host.
+- `WebChunkRenderSession`, its duplicated policy/support surface, the direct
+  proof module, query flag, and proof-only package command are deleted. There
+  is no old/new runtime toggle.
+- The default adoption gate enforces zero competing Rust/TypeScript owner,
+  settings/session/transition/runtime-install policy, camera semantics, render
+  admission/frame assembly, async dispatch/restart, or compiler-wake relay
+  matches. Its current inventory is 5,299 Rust and 1,890 TypeScript lines.
+- The final full browser matrix passed. Local runner/job transports remained
+  shared-memory, remote remained WebSocket, and the compiler remained resident
+  on `shared-result-buffer` with one 6,985-file pack load and no generated-view
+  fallback or shared-result overflow. Deferred-drop backlog ended at zero.
+- IndexedDB retained placed block state `5` across reload with 121 chunk and
+  two entity-chunk records. Sixteen movement samples measured 6.6-17.7 ms
+  total (13.3 ms average), 6.5-17.7 ms worker round trip (13.3 ms average), and
+  6.9-9.3 ms maximum frame gaps (8.2 ms average).
+- Focused app-runtime and scene suites passed 213 and 92 tests plus the startup
+  contract. Direct scene/web WASM, browser typecheck, asset lock, source-shape,
+  scene-host purity, and thin-adapter purity gates passed.
+- Final desktop world/HUD, portrait touch, nested options, and catalog captures
+  were visually inspected. Native offscreen, synthetic stereo, and fresh flat
+  Android captures were also inspected. The Quest APK rebuilt; no headset was
+  visible after restarting `adb`, so the current slice does not claim a fresh
+  attached-device result. No capture was committed.
+- The long-lived host retains the current prepared asset epoch 0 across
+  session replacements. Browser pack discovery/selection and transactional
+  compiler reinitialization intentionally remain Tactical 169 Slice 5 work.
+
 ## Locked Decisions
 
 ### One policy host
@@ -385,20 +417,19 @@ separately reviewable.
   adapter owns the JavaScript wake function and doorbell privately; shared
   scene code sees only the neutral compiler contract.
 - **Remote reconnect:** the Slice 3 lifecycle protocol has nonblocking
-  reconnect, retry/terminal, supersession, and stale-completion states. The
-  Slice 4 proof used the local worker; Slice 5 must preserve the already-green
-  production remote smoke while routing it through the shared host.
+  reconnect, retry/terminal, supersession, and stale-completion states. Slice 5
+  preserved the remote smoke while routing it through the shared host.
 - **Hidden-tab behavior:** resolved for cutover in Slice 4. Scene step and
   presentation pause while workers may continue. Visibility entry calls the
   host background hook; continuous worker-owned persistence means no immediate
   browser write. Resume starts at zero delta, then clamps to 50 ms and performs
   one budgeted host step per rAF.
-- **Deferred drops:** resolved for direct-host resume. The Slice 3 bounded
-  4,096-item browser backend reported zero resume backlog and no fallback in
-  the Slice 4 proof; production cutover must preserve those diagnostics.
-- **WebGPU device/surface loss:** resolved for first cutover as explicit
-  `restart-required` owner recreation. Loss is terminal for that owner and the
-  rAF busy guard is always released.
+- **Deferred drops:** resolved for production resume. The bounded 4,096-item
+  browser backend reported zero final backlog and retained its diagnostics
+  through the cutover.
+- **WebGPU device/surface loss:** explicit `restart-required` owner recreation
+  is retained in production. Loss is terminal for that owner and the rAF busy
+  guard is always released.
 - **Audio activation:** resolved for first cutover as an absent capability.
   Promote it only after a real user-gesture activation and audible probe.
 - **Web feature exceptions:** far LOD, travel assist, frame-pipeline overlay,
@@ -413,10 +444,10 @@ separately reviewable.
 - **Slice 2 native regression risk:** the platform-matrix hold is closed.
   Desktop/native captures stayed byte-identical, flat Android rendered, and an
   attached Quest 3 reached a playable local world with no app-fatal marker.
-- **Asset-pack work:** Tactical 169 also touches web asset payload and compiler
-  lifecycle. Portable prerequisite work may proceed independently, but the
-  atomic cutover must consume Tactical 169's active asset-set/epoch contract
-  rather than invent a competing web resource owner.
+- **Asset-pack work:** the production host retains one prepared asset epoch and
+  does not add a competing resource owner. Tactical 169 Slice 5 must now add
+  browser pack discovery/byte staging and transactional resident-compiler
+  reinitialization through that landed shared-host boundary.
 
 ## Validation Contract
 
@@ -477,10 +508,12 @@ Primary code:
 
 ## Recommended Next Work
 
-1. Implement Tactical 170 Slice 5 only: atomically move local worker,
-IndexedDB local-world, and remote WebSocket production modes onto
-`McloneSceneHost`; consume Tactical 169's active asset-set/epoch contract;
-preserve the Slice 4 visibility, loss, and capability decisions; delete
-`WebChunkRenderSession`, duplicated policy, and the proof-only entry point;
-enable the end-state enforcement tripwires; then stop before Slice 6's parity
-audit.
+1. Return to Tactical 169 Slice 5 and adopt the shared logical asset-pack
+catalog/selection on the supported platform lanes. On web, fetch/stage pack
+descriptors and bytes and reinitialize the resident compiler transactionally
+through the landed `McloneSceneHost` asset epoch; do not add policy back to
+`WebFrameDriver`.
+2. After Tactical 169 records its platform evidence, resume Tactical 170 Slice
+6 for the browser feature-profile audit, obsolete-name/cfg cleanup, default
+purity coverage, architecture/platform/web documentation, and final
+cross-platform closeout.

@@ -1,8 +1,10 @@
 # 170: Web Scene-Host Adoption
 
-Status: active 2026-07-10; Slices 0-4 landed. Slice 5's atomic production
-cutover is next. Production web still uses `WebChunkRenderSession`; the real
-shared-host browser proof is smoke-only and no production cutover has landed.
+Status: active 2026-07-11; Slices 0-5 landed. Production local worker,
+IndexedDB local-world, and remote WebSocket modes now use one shared scene
+host; the old web orchestrator and proof-only entry point are deleted. Return
+to Tactical 169 Slice 5 for platform asset-pack adoption before this
+tactical's Slice 6 parity audit and closeout.
 
 Topic: [`web-scene-host-adoption`](../topics/web-scene-host-adoption.md)
 
@@ -966,7 +968,7 @@ remain the device evidence. No capture was committed.
 Production still uses `WebChunkRenderSession`; the proof must be folded into
 and deleted with Slice 5's atomic cutover, not retained as an alternate mode.
 
-## Slice 5: Atomic Production Cutover And Deletion
+## Slice 5: Atomic Production Cutover And Deletion — DONE (2026-07-11)
 
 Purpose: replace the production web orchestrator once, for every supported host
 mode, and remove the duplicated policy in the same landed slice.
@@ -1012,6 +1014,84 @@ Exit criteria:
 - web source-shape gates pass in enforcement mode;
 - all browser smoke and performance gates pass with reviewed metrics; and
 - native thin-adapter and scene-host purity gates remain green.
+
+### Slice 5 Result
+
+Production `mclone-web-app.ts` now constructs one `McloneSceneHost` through
+the production `WebSceneHost` wrapper. `WebFrameDriver` retains rAF cadence,
+DOM input collection, promise execution, visibility/resize events, WebGPU
+surface acquisition, and presentation. Local worker, persistent IndexedDB
+world, and remote WebSocket startup/replacement all install their neutral
+runtime service into the same host; session transition, camera/input,
+interaction, render admission, section synchronization, frame assembly,
+UI/HUD, settings effects, diagnostics, and accounting remain shared policy.
+
+The cutover was atomic. `WebChunkRenderSession`, its app-local render/session
+support surface, `web_scene_host_proof.rs`, the `sceneHostProof=1` flag, and
+the proof-only package command are gone. The Slice 4 behaviors now run through
+the production path rather than a retained alternate owner. Browser async
+work is serialized through the typed platform-operation boundary; rAF skips
+while a completion holds the WASM session borrow and resumes on the following
+animation frame, so a promise cannot overlap a host call.
+
+The active prepared asset set remains epoch 0 in the long-lived host across
+runtime replacements. The browser still fetches and parses the existing
+6,985-file packed payload once and initializes the resident compiler catalog
+once; this slice did not add selection or compiler-epoch policy. Logical pack
+discovery, byte staging, selection, and transactional compiler
+reinitialization remain Tactical 169 Slice 5 work.
+
+`pnpm native:web:scene-host-adoption` now runs in enforcement mode by default.
+Its 5,299-line Rust and 1,890-line TypeScript inventory reports zero competing
+Rust or TypeScript owner, settings/session/transition/runtime-install policy,
+camera semantics, render admission/frame assembly, async session/catalog
+dispatch or restart, and compiler-wake relay matches. Scene-host and native
+thin-adapter purity gates also pass.
+
+The complete browser matrix passed on the final source: basic, threaded,
+canvas, chunk, production app, catalog, mobile, block edit, IndexedDB reload,
+movement/performance, and remote WebSocket. Local transports remained
+shared-memory; remote remained WebSocket; the resident compiler remained on
+`shared-result-buffer`, with no generated-view fallback or shared-result
+overflow. IndexedDB retained placed block state `5` across reload and ended
+with 121 chunk plus two entity-chunk records. The 16 movement compile samples
+measured 6.6-17.7 ms total (13.3 ms average), 6.5-17.7 ms worker round trip
+(13.3 ms average), and 6.9-9.3 ms maximum frame gaps (8.2 ms average). The
+compiler pack was sent once and the deferred-drop backlog ended at zero.
+
+Focused validation passed:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-app-runtime -p mclone-scene
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-scene --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:typecheck
+pnpm native:web:scene-host-adoption
+pnpm native:scene-host:purity
+pnpm native:thin-adapters:purity
+pnpm assets:pack:check
+pnpm native:desktop-offscreen:smoke
+pnpm native:xr-emulation:smoke
+pnpm native:android:apk:avd
+pnpm native:android:avd-smoke -- --skip-build --render-distance 2 \
+  --day-time 6000 --freeze-time --smoke-seconds 30
+pnpm native:android-xr:apk
+```
+
+The focused suites passed 213 app-runtime, 92 scene, and one startup-contract
+test. Direct scene/web WASM checks retained only the two pre-existing
+`mclone-server` warnings. The final desktop browser world/HUD, portrait touch
+layout, nested options screen, and catalog deletion captures were inspected
+under `/tmp`; the desktop offscreen, synthetic-stereo, and fresh flat-Android
+captures were also inspected and showed intact terrain, actors or touch UI as
+applicable. No capture was committed. The Quest APK rebuilt, but the flaky
+USB-attached headset was not visible to `adb` after a server restart, so this
+slice does not claim a fresh attached-Quest run; the last attached Quest 3
+runtime canary remains the Slice 3 evidence.
 
 ## Slice 6: Parity Audit, Enforcement, And Closeout
 

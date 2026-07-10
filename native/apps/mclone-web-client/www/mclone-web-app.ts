@@ -27,17 +27,17 @@ import {
   setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
 import type { WebLocalWorldSummary } from "./mclone-web-world-catalog.js";
-import type { WebChunkRenderSession, WebCompileTiming } from "mclone-web-client-wasm";
+import type { WebSceneHost, WebCompileTiming } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
 // Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
 // in tsconfig.json and only ever appears in type positions. Casting the dynamic import to this type
-// is what makes the live wasm call sites (`session.advanceCameraFrame(...)` &c.) checkable against
+// is what makes the live wasm call sites (`session.renderFrame(...)` &c.) checkable against
 // the real export signatures — the "single biggest win" of 070 Stage 2.
 type WasmModule = typeof import("mclone-web-client-wasm");
 
 // A wasm-return object — camera/frame/report/target/interaction/doorbell. The generated `.d.ts`
-// types every `WebChunkRenderSession` method return as `any` (wasm-bindgen cannot describe the
+// types every `WebSceneHost` method return as `any` (wasm-bindgen cannot describe the
 // serde shape), so these are read coercion-guarded (`Number(...)`/`Boolean(...)`/`?.ok`). Naming
 // the boundary documents intent and keeps internal field reads consistent.
 type WasmReport = Record<string, any>;
@@ -224,6 +224,7 @@ const runtime: AppRuntime = {
     lightStatusJobFrameMetrics: null,
     debugOverlayVisible: false,
     sessionBusy: false,
+    worldCatalogCompletionCount: 0,
     lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
     touchControlsMode: "auto",
     touchLookSensitivityAvailable: false,
@@ -242,7 +243,7 @@ const runtime: AppRuntime = {
 globalThis.__mcloneWebApp = runtime;
 
 async function boot(): Promise<WasmReport> {
-  const app = new WebChunkApp();
+  const app = new WebFrameDriver();
   runtime.queueMouseDelta = (dx: number, dy: number) => app.queueMouseDelta(dx, dy);
   runtime.setInputKey = (name: string, down: boolean) => app.setInputKey(name, down);
   runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
@@ -290,10 +291,10 @@ async function boot(): Promise<WasmReport> {
   }
 }
 
-class WebChunkApp {
+class WebFrameDriver {
   canvas: HTMLCanvasElement;
   module: WasmModule | null;
-  session: WebChunkRenderSession | null;
+  session: WebSceneHost | null;
   compiler: RenderCompiler | null;
   assetPack: Uint8Array | null;
   keys: InputKeys;
@@ -375,8 +376,8 @@ class WebChunkApp {
     this.module = module;
     const requiredExports = [
       "mclone_web_startup_options_from_query",
-      "mclone_web_create_worker_chunk_render_session_with_startup",
-      "mclone_web_create_remote_chunk_render_session_with_startup",
+      "mclone_web_create_worker_scene_host_with_startup",
+      "mclone_web_create_remote_scene_host_with_startup",
       "mclone_web_catalog_validate_world_id",
       "mclone_web_catalog_prepare_world_list",
       "mclone_web_catalog_prepare_create_world",
@@ -404,33 +405,40 @@ class WebChunkApp {
     publishRuntimeState(runtime.state);
     const assetPack = await fetchAssetPack(ASSET_PACK_URL);
     this.assetPack = assetPack;
+    this.compiler = this.createRenderCompiler();
+    const compilerWake = (doorbell: WasmReport): void => {
+      void this.wakeRenderCompiler(doorbell);
+    };
     runtime.state.status = "initializing webgpu";
     publishRuntimeState(runtime.state);
     if (remoteWebSocketUrl) {
       runtime.state.status = "connecting remote websocket";
       publishRuntimeState(runtime.state);
-      this.session = await module.mclone_web_create_remote_chunk_render_session_with_startup(
+      this.session = await module.mclone_web_create_remote_scene_host_with_startup(
         this.canvas,
         assetPack,
         remoteWebSocketUrl,
         startup.chunkX,
         startup.chunkZ,
+        this.radiusChunks,
         startup.movementSpeedMultiplier,
         this.sectionOcclusionCulling,
         this.forceFullbright,
         startup.renderColorProfile,
+        compilerWake,
       );
     } else {
       const seed = parseSeedBigInt(startup.seedText);
       if (seed === null) {
         throw new Error(`invalid startup seed ${JSON.stringify(startup.seedText)}`);
       }
-      this.session = await module.mclone_web_create_worker_chunk_render_session_with_startup(
+      this.session = await module.mclone_web_create_worker_scene_host_with_startup(
         this.canvas,
         assetPack,
         seed,
         startup.chunkX,
         startup.chunkZ,
+        this.radiusChunks,
         startup.movementSpeedMultiplier,
         startup.lightStatusBatchSize,
         this.sectionOcclusionCulling,
@@ -443,12 +451,12 @@ class WebChunkApp {
         startup.worldStorage,
         startup.worldId,
         startup.clearWorldStorage,
+        compilerWake,
       );
     }
     for (const name of [
-      "advanceCameraFrame",
+      "renderFrame",
       "renderCompilerSharedSupported",
-      "syncCameraRenderFrame",
       "cameraFrameState",
       "resizeCanvas",
       "toggleMovementMode",
@@ -475,9 +483,10 @@ class WebChunkApp {
       "setTouchLookSensitivity",
       "setTouchControlsMode",
       "setTouchControlsOverlay",
+      "setHidden",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
-        throw new Error(`missing WebChunkRenderSession.${name} export`);
+        throw new Error(`missing WebSceneHost.${name} export`);
       }
     }
     if (!this.session.renderCompilerSharedSupported()) {
@@ -485,9 +494,16 @@ class WebChunkApp {
         "cross-origin isolation (SharedArrayBuffer/Atomics) is required for the streaming render loop",
       );
     }
-    this.compiler = this.createRenderCompiler();
     this.setNativeDebugOverlay(defaultDebugOverlayVisible());
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
+    document.addEventListener("visibilitychange", () => {
+      const hidden = document.visibilityState === "hidden";
+      const report = this.session?.setHidden(hidden);
+      if (!hidden) {
+        this.lastFrameTime = performance.now();
+      }
+      this.applyNativeUiReport(report);
+    });
     this.touchControls = new TouchControls(this, runtime.state);
     this.setNativeTouchControlsMode(this.touchControlsMode, false);
     this.flushNativeTouchControlsOverlay();
@@ -511,7 +527,7 @@ class WebChunkApp {
   start(): void {
     this.lastFrameTime = performance.now();
     const frame = (now: number) => {
-      if (!this.tickFrameBusy) {
+      if (!this.tickFrameBusy && !this.sessionBusy) {
         this.tickFrameBusy = true;
         runtime.state.tickFrameBusy = true;
         void this.tickFrame(now).finally(() => {
@@ -525,20 +541,16 @@ class WebChunkApp {
     this.animationFrame = requestAnimationFrame(frame);
   }
 
+
   async tickFrame(now: number): Promise<void> {
     if (!this.session) {
       return;
     }
-    const session = this.session;
     const frameGapMs = Number.isFinite(now - this.lastFrameTime)
       ? Math.max(0, now - this.lastFrameTime)
       : 0;
     this.recordFrameGap(frameGapMs);
-    const rawDt = frameGapMs / 1000;
     this.lastFrameTime = now;
-    const dtSeconds = Number.isFinite(rawDt)
-      ? Math.max(0, Math.min(rawDt, MAX_FRAME_DT_SECONDS))
-      : 0;
     const uiActive = runtime.state.uiActive === true;
     const mouseDeltaX = uiActive ? 0 : this.mouseDeltaX;
     const mouseDeltaY = uiActive ? 0 : this.mouseDeltaY;
@@ -546,190 +558,176 @@ class WebChunkApp {
     this.mouseDeltaY = 0;
     this.syncCanvasSize();
     const keys = uiActive ? (defaultInputKeys() as InputKeys) : this.currentInputKeys();
-    const keyboardTurn = (keys.turnLeft ? 1 : 0) - (keys.turnRight ? 1 : 0);
-    const movementImpulse = uiActive ? defaultMovementImpulse() : this.currentMovementImpulse();
-
+    const movement = uiActive ? defaultMovementImpulse() : this.currentMovementImpulse();
     runtime.state.frameCount += 1;
-    runtime.state.tickPhase = "advance";
-    const camera = await this.withSessionAsync(() => session.advanceCameraFrame(
-      dtSeconds,
+    runtime.state.tickPhase = "scene-host";
+    const frame = await this.renderHostFrame(now, {
       mouseDeltaX,
       mouseDeltaY,
-      keyboardTurn,
-      keys.forward,
-      keys.backward,
-      keys.left,
-      keys.right,
-      keys.jump,
-      keys.descend,
-      keys.shift,
-      keys.sprint,
-      movementImpulse.active,
-      movementImpulse.left,
-      movementImpulse.forward,
-    ));
-    runtime.state.tickPhase = "post-advance";
-    this.applyCameraState(camera);
-    this.applyTargetState(session.previewBlockTarget());
-
-    // 067 Stage 3: one frame of the shared streaming loop. syncCameraRenderFrame drains
-    // updates, runs the budget-1 sync over the resident-ring compiler, and renders the
-    // current cache; JS only relays the worker doorbell it returns. No coalescing queue,
-    // no busy flag, no begin/worker/finish transaction — the loop is dirty-driven.
-    runtime.state.tickPhase = "stream";
-    await this.streamFrameOnce();
-    runtime.state.tickPhase = "idle";
+      keyboardTurn: (keys.turnLeft ? 1 : 0) - (keys.turnRight ? 1 : 0),
+      forward: keys.forward,
+      backward: keys.backward,
+      left: keys.left,
+      right: keys.right,
+      jump: keys.jump,
+      descend: keys.descend,
+      sneak: keys.shift,
+      sprint: keys.sprint,
+      analogActive: movement.active,
+      analogLeft: movement.left,
+      analogForward: movement.forward,
+    });
+    this.handleSceneFrame(frame);
+    this.applyTargetState(this.session.previewBlockTarget());
   }
 
-  // 067 Stage 3: warm up the streaming loop to idle before the live rAF loop begins, in
-  // two phases, so the boot-time camera fall is reproducible despite per-compile frame
-  // timing:
-  //   1. stream the client-spawn view to idle (no camera motion);
-  //   2. apply the server-spawn snap with ~0 dt (so the camera's horizontal position
-  //      lands deterministically without falling) and pre-load the server-spawn chunks
-  //      to idle.
-  // The live rAF gravity fall then runs on fast, fully-streamed frames and settles the
-  // camera at the same sub-block position every run — matching the pre-streaming app,
-  // whose render-only frames were uniformly fast. Feeding variable streaming frame gaps
-  // into the boot fall otherwise wedged WALK movement against spawn terrain on ~half of
-  // runs.
   async warmUpStreamingToIdle(): Promise<void> {
-    // Called from `init()` only after `this.session` is assigned, so it is non-null here.
-    const session = this.session as WebChunkRenderSession;
-    const deadline = performance.now() + 30_000;
-    while (performance.now() < deadline) {
-      const idle = await this.streamFrameOnce({ awaitWorker: true });
-      if (idle && this.hasRendered && Number(runtime.state.residentSectionCount) > 0) {
-        break;
-      }
-      await nextAnimationFrame();
-    }
-    let last: { x: number, z: number } | null = null;
+    // The shared scene host intentionally admits one resident-ring compile at a time.
+    // A cold radius-four view can contain more than 200 visible sections, so leave
+    // enough room for slower browser/CI worker scheduling while retaining a hard boot
+    // failure bound.
+    const deadline = performance.now() + 60_000;
     let stableFrames = 0;
-    let iterations = 0;
     while (performance.now() < deadline) {
-      const camera = await this.withSessionAsync(() => session.advanceCameraFrame(
-        1e-4, 0, 0, 0, false, false, false, false, false, false, false, false, false, 0, 0,
-      ));
-      this.applyCameraState(camera);
       const idle = await this.streamFrameOnce({ awaitWorker: true });
-      iterations += 1;
-      const x = Number(camera.cameraX);
-      const z = Number(camera.cameraZ);
-      const settled = last !== null
-        && Math.abs(x - last.x) < 1e-4
-        && Math.abs(z - last.z) < 1e-4;
-      stableFrames = settled ? stableFrames + 1 : 0;
-      last = { x, z };
-      if (
-        idle
-        && this.hasRendered
-        && Number(runtime.state.residentSectionCount) > 0
-        && iterations >= 8
-        && stableFrames >= 6
-      ) {
+      stableFrames = idle && this.hasRendered && Number(runtime.state.residentSectionCount) > 0
+        ? stableFrames + 1
+        : 0;
+      if (stableFrames >= 6) {
         return;
       }
       await nextAnimationFrame();
     }
-    throw new Error("timed out warming up the streaming render loop");
+    throw new Error("timed out warming up the shared scene host");
   }
 
-  // 067 Stage 3 keystone: one frame of the shared streaming loop. Rust drains updates,
-  // runs the budget-1 sync over the resident-ring compiler, and renders the current
-  // cache, returning the frame report plus an optional worker `doorbell`. JS relays the
-  // doorbell (fire-and-forget in the live loop; awaited during warm-up so the pump
-  // converges); the next frame's poll applies the result. Returns whether the loop idled.
   async streamFrameOnce(options: { awaitWorker?: boolean } = {}): Promise<boolean> {
-    if (!this.session || !this.compiler) {
+    if (!this.session) {
       return true;
     }
-    const session = this.session;
-    const syncStart = performance.now();
-    let frame: WasmReport;
-    try {
-      frame = await this.withSessionAsync(() => session.syncCameraRenderFrame(this.radiusChunks));
-    } catch (error) {
-      runtime.state.ok = false;
-      runtime.state.status = stringifyError(error);
-      this.setNativeStatusOverlay(runtime.state.status, false, true);
-      console.error(error);
-      publishRuntimeState(runtime.state);
-      return true;
-    }
-    const syncMs = performance.now() - syncStart;
-    const workerPromise = this.handleStreamingFrame(frame, syncMs);
-    if (workerPromise && options.awaitWorker) {
-      await workerPromise.catch(() => {});
+    const frame = await this.renderHostFrame(performance.now(), {
+      mouseDeltaX: 0,
+      mouseDeltaY: 0,
+      keyboardTurn: 0,
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      jump: false,
+      descend: false,
+      sneak: false,
+      sprint: false,
+      analogActive: false,
+      analogLeft: 0,
+      analogForward: 0,
+    });
+    this.handleSceneFrame(frame);
+    if (options.awaitWorker && this.pendingTimings.size > 0) {
+      await Promise.allSettled(
+        [...this.pendingTimings.values()]
+          .map((pending) => pending.workerPromise)
+          .filter((promise): promise is Promise<any> => promise !== null),
+      );
     }
     return runtime.state.streamingSettled === true;
   }
 
-  handleStreamingFrame(frame: WasmReport, syncMs: number): Promise<any> | null {
+  async renderHostFrame(
+    now: number,
+    input: {
+      mouseDeltaX: number;
+      mouseDeltaY: number;
+      keyboardTurn: number;
+      forward: boolean;
+      backward: boolean;
+      left: boolean;
+      right: boolean;
+      jump: boolean;
+      descend: boolean;
+      sneak: boolean;
+      sprint: boolean;
+      analogActive: boolean;
+      analogLeft: number;
+      analogForward: number;
+    },
+  ): Promise<WasmReport> {
+    const session = this.session as WebSceneHost;
+    return session.renderFrame(
+      now,
+      input.mouseDeltaX,
+      input.mouseDeltaY,
+      input.keyboardTurn,
+      input.forward,
+      input.backward,
+      input.left,
+      input.right,
+      input.jump,
+      input.descend,
+      input.sneak,
+      input.sprint,
+      input.analogActive,
+      input.analogLeft,
+      input.analogForward,
+    );
+  }
+
+  handleSceneFrame(frame: WasmReport): void {
     if (!frame?.ok) {
       runtime.state.ok = false;
-      runtime.state.status = frame?.reason ?? "streaming render frame failed";
+      runtime.state.status = frame?.reason ?? "shared scene frame failed";
+      publishRuntimeState(runtime.state);
+      return;
+    }
+    if (frame.state === "restart-required") {
+      runtime.state.ok = false;
+      runtime.state.status = frame.restartReason ?? "WebGPU restart required";
       this.setNativeStatusOverlay(runtime.state.status, false, true);
       publishRuntimeState(runtime.state);
-      return null;
+      return;
     }
-    this.hasRendered = true;
+    this.hasRendered ||= Boolean(frame.rendered);
     this.applyReport(frame);
+    if (
+      Number(frame.acceptedCompileSectionCount) > 0
+      && runtime.state.lastCompileReport
+    ) {
+      runtime.state.lastCompileReport = {
+        ...runtime.state.lastCompileReport,
+        commandCount: Number(frame.commandCount) || 0,
+        acceptedCompileSectionCount: Number(frame.acceptedCompileSectionCount) || 0,
+        meshBuildCount: Number(frame.meshBuildCount) || 0,
+        pendingCompileJobCount: Number(frame.pendingCompileJobCount) || 0,
+      };
+    }
     const pendingJobs = Number(frame.pendingCompileJobCount) || 0;
-    runtime.state.pendingCompileJobCount = pendingJobs;
-    runtime.state.compileInFlight = pendingJobs > 0;
-    runtime.state.compileInFlightCount = this.pendingTimings.size;
-    runtime.state.compileFinalizingCount = this.finalizingCount;
-    // 067 Stage 3: "settled" must mean the server runner has finished generating +
-    // publishing the view AND the render loop has nothing left to compile. Render-idle
-    // alone is reached prematurely when a fast camera outruns chunk generation (no
-    // snapshots yet => no dirty work => idle, but the view is not actually loaded). Gate
-    // loadedCenter on the runner queues draining so movement waits for the moved-to
-    // chunks to stream + compile.
     const runnerSettled = Number(frame.runnerCommandQueueDepth) === 0
       && Number(frame.runnerUpdateQueueDepth) === 0
       && Number(frame.runnerPendingJobs) === 0
       && Number(frame.runnerPendingPublications) === 0;
-    const remoteVisibleSettled = runtime.state.clientHost === "remote-dedicated"
-      && !frame.doorbell
-      && Number(frame.residentSectionCount) > 0
-      && Number(frame.renderDirtyChunkCount) === 0
-      && Number(frame.renderInflightSectionCount) === 0;
-    const streamingSettled = (Boolean(frame.streamingIdle) || remoteVisibleSettled)
+    const streamingSettled = Boolean(frame.streamingIdle)
       && runnerSettled
       && pendingJobs === 0
-      && this.pendingTimings.size === 0
-      && this.finalizingCount === 0;
+      && this.pendingTimings.size === 0;
+    runtime.state.pendingCompileJobCount = pendingJobs;
+    runtime.state.compileInFlight = pendingJobs > 0;
+    runtime.state.compileInFlightCount = this.pendingTimings.size;
+    runtime.state.compileFinalizingCount = 0;
     runtime.state.streamingSettled = streamingSettled;
     if (streamingSettled) {
-      this.loadedCenter = { centerX: frame.centerX, centerZ: frame.centerZ };
-      runtime.state.loadedCenterX = frame.centerX;
-      runtime.state.loadedCenterZ = frame.centerZ;
-    }
-    if (Number(frame.appliedRequestId) > 0) {
-      this.finalizeCompileTiming(frame, syncMs);
-    }
-    let workerPromise: Promise<any> | null = null;
-    if (frame.doorbell) {
-      workerPromise = this.startAndPostCompileTiming(frame.doorbell, syncMs);
+      this.loadedCenter = { centerX: Number(frame.centerX), centerZ: Number(frame.centerZ) };
+      runtime.state.loadedCenterX = Number(frame.centerX);
+      runtime.state.loadedCenterZ = Number(frame.centerZ);
     }
     publishRuntimeState(runtime.state);
-    return workerPromise;
+    this.dispatchSceneSessionOperation(frame);
   }
 
-  // Begin a per-compile timing for the doorbell armed this frame and relay it to the
-  // worker. The worker writes the packed result into the resident ring (drained by the
-  // next frame's poll); the returned promise resolves with the worker metrics report.
-  startAndPostCompileTiming(doorbell: WasmReport, syncMs: number): Promise<any> {
-    // Reached only from `handleStreamingFrame` via `streamFrameOnce`, which already guards
-    // `this.compiler` and (via boot/init) `this.module` non-null.
+  wakeRenderCompiler(doorbell: WasmReport): Promise<any> {
     const compiler = this.compiler as RenderCompiler;
     const module = this.module as WasmModule;
-    const sequence = ++this.compileSequence;
-    // 070 Stage 3: the timing bag + its report coercions live in Rust now; `updateFromRequest`
-    // sets the target center off the doorbell, so the constructor starts it null.
+    const requestId = Number(doorbell.requestId);
     const timing = new module.WebCompileTiming(
-      sequence,
+      ++this.compileSequence,
       "stream",
       this.loadedCenter?.centerX ?? null,
       this.loadedCenter?.centerZ ?? null,
@@ -738,64 +736,63 @@ class WebChunkApp {
       performance.now(),
     );
     timing.updateFromRequest(doorbell);
-    timing.setBeginRequestMs(syncMs);
+    timing.setBeginRequestMs(0);
     const pending: PendingCompile = { timing, workerPromise: null, workerError: null };
-    const workerStart = performance.now();
-    const workerPromise = compiler.compileWithDoorbell(doorbell).then((compiled: any) => {
-      timing.setWorkerRoundTripMs(performance.now() - workerStart);
+    const started = performance.now();
+    const promise = compiler.compileWithDoorbell(doorbell).then((compiled: any) => {
+      timing.setWorkerRoundTripMs(performance.now() - started);
       if (compiled?.report) {
         timing.updateFromWorker(compiled.report);
       }
-      return compiled;
-    });
-    pending.workerPromise = workerPromise;
-    this.pendingTimings.set(Number(doorbell.requestId), pending);
-    runtime.state.compileInFlightCount = this.pendingTimings.size;
-    publishActiveCompileTiming(timing);
-    workerPromise.catch((error: unknown) => {
-      pending.workerError = stringifyError(error);
-      console.error(error);
-    });
-    return workerPromise;
-  }
-
-  // Finalize the timing for the compile applied this frame: await its worker metrics (so
-  // the record carries the transport/byte diagnostics), merge the Rust apply report, and
-  // publish it to runtime.state.compileTimings.
-  finalizeCompileTiming(frame: WasmReport, syncMs: number): void {
-    const requestId = Number(frame.appliedRequestId);
-    const pending = this.pendingTimings.get(requestId);
-    if (!pending) {
-      return;
-    }
-    this.pendingTimings.delete(requestId);
-    runtime.state.compileInFlightCount = this.pendingTimings.size;
-    this.finalizingCount += 1;
-    runtime.state.compileFinalizingCount = this.finalizingCount;
-    const { timing } = pending;
-    void (async () => {
-      try {
-        await pending.workerPromise;
-      } catch (_error) {
-        // worker error already recorded on `pending.workerError`
-      }
-      timing.updateFromReport(frame);
-      timing.setDecodeFinishApplyMs(syncMs);
-      const ok = Boolean(frame.appliedOk) && !pending.workerError;
+      timing.setDecodeFinishApplyMs(0);
       timing.finish(
-        ok ? "accepted" : "failed",
-        pending.workerError ?? null,
+        "accepted",
+        null,
         performance.now(),
         runtime.state.frameCount,
         runtime.state.renderCount,
         runtime.state.lastFrameGapMs,
       );
       recordCompileTiming(timing);
-      runtime.state.lastCompileReport = frame;
-      this.finalizingCount = Math.max(0, this.finalizingCount - 1);
-      runtime.state.compileFinalizingCount = this.finalizingCount;
+      const priorCompileReport = runtime.state.lastCompileReport;
+      runtime.state.lastCompileReport = compiled?.report
+        ? {
+            ...priorCompileReport,
+            ...compiled.report,
+            workerCompileUsed: true,
+            commandCount: Number(priorCompileReport?.commandCount) || 0,
+            acceptedCompileSectionCount:
+              Number(priorCompileReport?.acceptedCompileSectionCount) || 0,
+            meshBuildCount: Number(priorCompileReport?.meshBuildCount) || 0,
+            pendingCompileJobCount:
+              Number(priorCompileReport?.pendingCompileJobCount) || 0,
+          }
+        : null;
+      this.pendingTimings.delete(requestId);
+      runtime.state.compileInFlightCount = this.pendingTimings.size;
       publishRuntimeState(runtime.state);
-    })();
+      return compiled;
+    }).catch((error: unknown) => {
+      const message = stringifyError(error);
+      pending.workerError = message;
+      timing.finish(
+        "failed",
+        message,
+        performance.now(),
+        runtime.state.frameCount,
+        runtime.state.renderCount,
+        runtime.state.lastFrameGapMs,
+      );
+      recordCompileTiming(timing);
+      this.pendingTimings.delete(requestId);
+      runtime.state.compileInFlightCount = this.pendingTimings.size;
+      throw error;
+    });
+    pending.workerPromise = promise;
+    this.pendingTimings.set(requestId, pending);
+    runtime.state.compileInFlightCount = this.pendingTimings.size;
+    publishActiveCompileTiming(timing);
+    return promise;
   }
 
   applyCameraState(camera: WasmReport): void {
@@ -1227,50 +1224,41 @@ class WebChunkApp {
       this.requestPointerLock();
     }
     publishRuntimeState(runtime.state);
-    this.handleSessionStartAction(report, options);
-    this.handleWorldCatalogRequest(report, options);
+    this.dispatchSceneSessionOperation(report, options);
+    this.dispatchWorldCatalogOperation(report, options);
   }
 
-  handleSessionStartAction(
+  dispatchSceneSessionOperation(
     report: WasmReport,
     options: { fromPointer?: boolean, pointerType?: string } = {},
   ): void {
-    if (report.action === "createWorld") {
-      const seed = parseSeedBigInt(
-        report.worldSeedText
-          ?? report.sessionSeedText
-          ?? report.worldSeed
-          ?? report.sessionSeed,
-      );
-      if (seed !== null) {
-        void this.restartSessionFromUiAction(
-          "localWorld",
-          (session) => session.startLocalWorld(
-            seed,
-            SERVER_WORKER_URL.href,
-            SERVER_JOB_WORKER_URL.href,
-            BINDGEN_JS_URL.href,
-            BINDGEN_WASM_URL.href,
-          ),
-          options,
-        );
-      }
-    } else if (report.action === "joinRemote") {
+    if (report.sessionStartPending !== true) {
+      return;
+    }
+    const operationKind = String(report.sessionOperationKind ?? "");
+    if (operationKind === "remote") {
       const endpoint = String(report.remoteEndpoint ?? report.sessionRemoteEndpoint ?? "").trim();
       if (endpoint.length > 0) {
-        void this.restartSessionFromUiAction(
+        void this.completeSceneSessionStart(
           "remote",
           (session) => session.joinRemoteWebSocket(endpoint),
           options,
         );
       }
-    } else if (report.catalogSessionStart === true) {
-      const seed = parseSeedBigInt(report.catalogWorldSeedText ?? report.catalogWorldSeed);
+      return;
+    }
+    if (operationKind === "localWorld") {
+      const seed = parseSeedBigInt(
+        report.catalogWorldSeedText
+          ?? report.sessionSeedText
+          ?? report.catalogWorldSeed
+          ?? report.sessionSeed,
+      );
       const worldId = String(report.catalogWorldId ?? "").trim();
       const displayName = String(report.catalogWorldDisplayName ?? worldId).trim();
       const requestKind = String(report.catalogSessionRequest ?? "openLocalWorld");
-      if (seed !== null && worldId.length > 0 && displayName.length > 0) {
-        void this.restartSessionFromUiAction(
+      if (seed !== null && worldId.length > 0) {
+        void this.completeSceneSessionStart(
           "localWorld",
           (session) => session.startIndexedDbLocalWorld(
             seed,
@@ -1284,11 +1272,23 @@ class WebChunkApp {
           ),
           options,
         );
+      } else if (seed !== null) {
+        void this.completeSceneSessionStart(
+          "localWorld",
+          (session) => session.startLocalWorld(
+            seed,
+            SERVER_WORKER_URL.href,
+            SERVER_JOB_WORKER_URL.href,
+            BINDGEN_JS_URL.href,
+            BINDGEN_WASM_URL.href,
+          ),
+          options,
+        );
       }
     }
   }
 
-  handleWorldCatalogRequest(
+  dispatchWorldCatalogOperation(
     report: WasmReport,
     options: { fromPointer?: boolean, pointerType?: string } = {},
   ): void {
@@ -1313,12 +1313,14 @@ class WebChunkApp {
       db = await openWorldDb();
       const payload = await this.executeWorldCatalogRequest(db, operation, report);
       const completion = session.applyWorldCatalogResponse(requestId, operation, payload);
+      runtime.state.worldCatalogCompletionCount += 1;
       this.applyNativeUiReport(completion, options);
     } catch (error) {
       const message = stringifyError(error);
       console.error(error);
       try {
         const failure = session.applyWorldCatalogError(requestId, message);
+        runtime.state.worldCatalogCompletionCount += 1;
         this.applyNativeUiReport(failure, options);
       } catch (completionError) {
         runtime.state.ok = false;
@@ -1363,23 +1365,32 @@ class WebChunkApp {
     }
   }
 
-  async restartSessionFromUiAction(
+  async completeSceneSessionStart(
     requestedKind: "localWorld" | "remote",
-    start: (session: WebChunkRenderSession) => Promise<WasmReport>,
+    start: (session: WebSceneHost) => Promise<WasmReport>,
     options: { fromPointer?: boolean, pointerType?: string } = {},
   ): Promise<void> {
     if (!this.session) {
       return;
     }
+    // Reserve the wasm host synchronously. A catalog completion can race the
+    // rAF render lock; leaving the pending start on the Rust host lets the next
+    // frame retry instead of starving behind continuously scheduled frames.
+    if (this.sessionBusy) {
+      return;
+    }
+    this.sessionBusy = true;
+    runtime.state.sessionBusy = true;
     const session = this.session;
     this.clearGameplayInput();
     this.releasePointerLockForUi();
     let startReport: WasmReport | null = null;
     try {
-      await this.waitForSessionIdle();
-      this.sessionBusy = true;
-      runtime.state.sessionBusy = true;
       startReport = await start(session);
+      // wasm-bindgen keeps the exported async `&mut WebSceneHost` borrow until
+      // its promise reaction has fully unwound. Resume host calls on the next
+      // macrotask so replacement warm-up cannot recursively reborrow it.
+      await nextAnimationFrame();
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
@@ -1403,12 +1414,10 @@ class WebChunkApp {
 
     this.applySessionHostMode(startReport);
     this.resetStreamingStateForSessionRestart();
-    this.replaceRenderCompiler();
     try {
       this.syncCanvasSize();
       this.applyCameraState(this.session.cameraFrameState());
       this.applyTargetState(this.session.previewBlockTarget());
-      await this.warmUpStreamingToIdle();
       if (options.fromPointer && options.pointerType !== "touch") {
         this.requestPointerLock();
       }
@@ -1535,7 +1544,7 @@ class WebChunkApp {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     if (this.sessionBusy) {
-      throw new Error("timed out waiting for WebChunkRenderSession async operation");
+      throw new Error("timed out waiting for WebSceneHost async operation");
     }
   }
 

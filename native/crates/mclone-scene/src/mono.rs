@@ -296,6 +296,39 @@ impl McloneSceneHost {
         pitch_radians: f64,
         speed_blocks_per_second: f64,
     ) {
+        self.replace_mono_camera(
+            eye,
+            yaw_radians,
+            pitch_radians,
+            speed_blocks_per_second,
+            EngineCameraCollisionMode::NoClip,
+        );
+    }
+
+    pub fn set_mono_player_camera(
+        &mut self,
+        eye: Vec3d,
+        yaw_radians: f64,
+        pitch_radians: f64,
+        speed_blocks_per_second: f64,
+    ) {
+        self.replace_mono_camera(
+            eye,
+            yaw_radians,
+            pitch_radians,
+            speed_blocks_per_second,
+            EngineCameraCollisionMode::Normal,
+        );
+    }
+
+    fn replace_mono_camera(
+        &mut self,
+        eye: Vec3d,
+        yaw_radians: f64,
+        pitch_radians: f64,
+        speed_blocks_per_second: f64,
+        collision_mode: EngineCameraCollisionMode,
+    ) {
         let mut camera = EngineCameraController::from_eye_pose(
             eye,
             yaw_radians,
@@ -304,7 +337,7 @@ impl McloneSceneHost {
         );
         camera.set_movement_speed_multiplier(f64::from(self.scene.movement_speed_multiplier));
         camera.set_first_person_player_visible(self.scene.first_person_player_visible);
-        camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+        camera.set_collision_mode(collision_mode);
         if let Some(startup) = &mut self.local_startup {
             startup.replace_camera(camera.clone());
         }
@@ -591,6 +624,19 @@ impl McloneSceneHost {
         self.interaction.selected_hotbar_slot()
     }
 
+    pub fn selected_mono_hotbar_block_state(&self) -> Option<BlockStateId> {
+        self.interaction.hotbar_items()[usize::from(self.interaction.selected_hotbar_slot())]
+    }
+
+    pub fn mono_local_world_id_for_ui_id(
+        &self,
+        id: mclone_ui::WorldCatalogUiWorldId,
+    ) -> Option<&LocalWorldId> {
+        self.client_experience
+            .catalog()
+            .local_world_id_for_ui_id(id)
+    }
+
     pub fn step_mono_hotbar_slot(&mut self, step: i8) -> bool {
         if step == 0 {
             return false;
@@ -614,6 +660,14 @@ impl McloneSceneHost {
 
     pub fn mono_ui_screen(&self) -> Option<GameScreen> {
         self.ui.screen()
+    }
+
+    pub fn mono_ui_render_state(&self) -> GameUiRenderState {
+        self.current_mono_ui_render_state()
+    }
+
+    pub fn mono_status_overlay(&self) -> StatusOverlay {
+        self.session_projection().status_overlay
     }
 
     pub fn set_mono_ui_scale(&mut self, scale: GuiScale) {
@@ -725,6 +779,8 @@ impl McloneSceneHost {
         if !self.ui.is_active() {
             self.clear_menu_input_state();
         }
+        let render_state = self.current_mono_ui_render_state();
+        self.ui.commit_render_state(render_state);
         Ok(MonoUiActionOutcome {
             scene_replaced,
             session_start_requested: starts_session,
@@ -856,6 +912,18 @@ impl McloneSceneHost {
             .expect("runtime presence checked")
             .send_gameplay_command(command)?;
         Ok(MonoWorldActionStatus::Sent { target, changed })
+    }
+
+    pub fn mono_block_target(&self) -> Option<BlockInteractionTarget> {
+        self.current_mono_block_target()
+    }
+
+    pub fn mono_time_of_day(&self) -> f32 {
+        self.time_of_day()
+    }
+
+    pub fn mono_sun_angle(&self) -> f32 {
+        self.sun_angle()
     }
 
     fn current_mono_block_target(&self) -> Option<BlockInteractionTarget> {
@@ -1289,7 +1357,7 @@ impl McloneSceneHost {
         Some(hud)
     }
 
-    fn current_mono_ui_render_state(&self) -> GameUiRenderState {
+    pub(crate) fn current_mono_ui_render_state(&self) -> GameUiRenderState {
         let mut state = self.current_ui_render_state();
         let context = self.mono_ui_context.clone().unwrap_or_default();
         state.crosshair_visible = Some(self.crosshair_visible);

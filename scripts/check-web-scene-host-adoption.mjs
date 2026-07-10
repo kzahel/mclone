@@ -3,13 +3,18 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const enforce = process.argv.includes("--enforce");
+const enforce = !process.argv.includes("--baseline");
 const json = process.argv.includes("--json");
 
 const sources = {
   rust: {
-    path: "native/apps/mclone-web-client/src/web_canvas.rs",
-    text: readFileSync(resolve(repoRoot, "native/apps/mclone-web-client/src/web_canvas.rs"), "utf8"),
+    path: "native/apps/mclone-web-client/src/{web_canvas,web_scene_host}.rs",
+    text: ["web_canvas.rs", "web_scene_host.rs"]
+      .map((name) => readFileSync(
+        resolve(repoRoot, "native/apps/mclone-web-client/src", name),
+        "utf8",
+      ))
+      .join("\n"),
   },
   ts: {
     path: "native/apps/mclone-web-client/www/mclone-web-app.ts",
@@ -17,8 +22,8 @@ const sources = {
   },
 };
 
-// Warning-mode baselines deliberately describe the pre-cutover owner. Slice 5
-// will run this same inventory with --enforce after the old owner is deleted.
+// Baselines remain the historical pre-cutover inventory. Enforcement is the
+// default after Slice 5; --baseline exists only for archaeology.
 const patterns = [
   {
     id: "combined-rust-owner",
@@ -161,5 +166,5 @@ if (enforce) {
   if (drifted.length > 0) {
     console.warn("warning: pre-cutover source inventory drifted; review and update the tactical evidence");
   }
-  console.warn("warning: known app-local scene policy remains until Tactical 170 Slice 5");
+  console.warn("warning: baseline mode does not enforce the landed Slice 5 boundary");
 }

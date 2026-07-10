@@ -31,9 +31,12 @@ mod web_canvas;
 #[cfg(target_arch = "wasm32")]
 pub use web_canvas::{WebSceneRuntimeService, prepare_web_scene_assets_from_pack};
 #[cfg(target_arch = "wasm32")]
-mod web_scene_host_proof;
+mod web_scene_host;
 #[cfg(target_arch = "wasm32")]
-pub use web_scene_host_proof::{WebSceneHostProof, mclone_web_create_scene_host_proof};
+pub use web_scene_host::{
+    WebSceneHost, mclone_web_create_remote_scene_host_with_startup,
+    mclone_web_create_worker_scene_host_with_startup,
+};
 #[cfg(target_arch = "wasm32")]
 mod web_compile_timing;
 #[cfg(target_arch = "wasm32")]

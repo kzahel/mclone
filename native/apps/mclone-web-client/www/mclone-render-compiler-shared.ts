@@ -25,7 +25,7 @@ export interface RenderSectionWorkerCompilerOptions {
 }
 
 // The SAB "doorbell" handed from Rust main-wasm to JS when a compile is armed for a frame
-// (see `WebChunkRenderSession.syncCameraRenderFrame`). JS relays it to the worker and reads
+// (see `WebSceneHost.syncCameraRenderFrame`). JS relays it to the worker and reads
 // byte counts back for diagnostics; it never decodes the packed section bytes itself.
 export interface RenderCompileDoorbell {
   requestId?: number;

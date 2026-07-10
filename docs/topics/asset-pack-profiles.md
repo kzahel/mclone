@@ -2,10 +2,11 @@
 
 Topic: asset-pack-profiles
 
-Status: active implementation. Tactical
+Status: active implementation 2026-07-11. Tactical
 [`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-4 and Tactical
-[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-1 landed
-2026-07-10. Tactical 170 Slice 2 is next, before web asset-service adoption.
+[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-5 landed. The
+browser production cutover prerequisite is complete; Tactical 169 Slice 5
+platform discovery/adoption is next.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -353,29 +354,29 @@ resolve when their logical pack is disabled.
 - The compatibility overlay remains partial; use the authored + generated
   standalone outputs for new first-party work.
 - Web's resident compiler worker and single-byte-pack bootstrap need a
-  replacement epoch/reinitialization path.
+  replacement epoch/reinitialization path through the now-production shared
+  scene host.
 - Platform discovery/adoption is not wired to the shared catalog yet; the
   desktop offscreen source registry is a deterministic validation injection,
   not product discovery policy.
-- Web projects the shared screen/actions and reports an explicit Tactical 170
-  cutover requirement on Apply. Its active-set lifecycle must land through the
-  new shared scene host rather than `WebChunkRenderSession`.
+- Web now projects the shared screen/actions through the production
+  `McloneSceneHost` and retains prepared epoch 0 across session replacement.
+  Apply still reports its explicit unavailable reason until logical pack
+  discovery, byte staging, and compiler reinitialization land.
 - Asset selection persistence has no shared cross-platform preference adapter.
 
 ## Recommended Next Work
 
-Start tactical
-[`170`](../tactical/170-web-scene-host-adoption.md) Slice 0 next. Its current
-status is draft with no adoption code landed, and its baseline/tripwire locks
-must precede browser asset lifecycle work. Do not start the web portion of 169
-Slice 5 or add asset selection/compiler-epoch policy to
-`WebChunkRenderSession`, because Tactical 170 deletes that orchestrator.
+Resume Tactical 169 Slice 5 for platform discovery/adoption. Project native,
+Android/XR, offscreen, and web staging into the shared catalog and action path.
+For web, fetch pack descriptors/bytes and transactionally reinitialize the
+resident compiler under the `McloneSceneHost` prepared-set epoch; keep fetch,
+worker, and byte ownership in browser services and selection policy in shared
+code.
 
-After the shared browser host/cutover is ready, return to Tactical 169 Slice 5
-for platform discovery/adoption evidence, then Slice 6 persistence, audit, and
-closeout. Non-web discovery could proceed independently if it becomes the
-explicit immediate priority, but it is not the default recommendation at this
-checkpoint.
+After Slice 5 records truthful capability/evidence for every supported client,
+continue Tactical 169 Slice 6 persistence/audit/closeout, then return to
+Tactical 170 Slice 6 for the final browser parity and documentation audit.
 
 ## Slice 0 Evidence
 

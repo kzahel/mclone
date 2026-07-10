@@ -4,6 +4,7 @@ use crate::session::{ActiveSessionDescriptor, SessionStartRequest};
 use crate::world_catalog::{
     LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
     WorldCatalogError, WorldCatalogRequest, WorldCatalogRequestId, WorldCatalogResponse,
+    sort_local_world_summaries,
 };
 use mclone_ui::{
     GameUiAction, WORLD_CATALOG_UI_ROW_CAPACITY, WorldCatalogUiEntry, WorldCatalogUiState,
@@ -354,6 +355,7 @@ impl ClientCatalogController {
         } else {
             worlds.push(summary);
         }
+        sort_local_world_summaries(&mut worlds);
         self.set_world_catalog_worlds(worlds, WorldCatalogUiStatus::hidden());
     }
 
@@ -388,7 +390,7 @@ impl ClientCatalogController {
         self.entries.iter().find(|entry| entry.ui_id == ui_id)
     }
 
-    fn local_world_id_for_ui_id(&self, ui_id: WorldCatalogUiWorldId) -> Option<&LocalWorldId> {
+    pub fn local_world_id_for_ui_id(&self, ui_id: WorldCatalogUiWorldId) -> Option<&LocalWorldId> {
         self.catalog_entry_for_ui_id(ui_id)
             .map(|entry| &entry.summary.id)
     }

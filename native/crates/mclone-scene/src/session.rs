@@ -2,6 +2,7 @@ use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
+#[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::session::SessionStorageIntent;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -117,6 +118,20 @@ impl SceneLocalStartup {
 }
 
 pub(crate) type ScenePendingSessionStart = SessionStartPayload<McloneSceneHostOptions>;
+
+/// Platform-neutral pending session start handed to an asynchronous driver.
+///
+/// Native hosts normally consume this payload through their synchronous
+/// runtime factory. Browser hosts take it after shared UI/catalog policy has
+/// classified the request, construct the Worker or WebSocket runtime, and
+/// complete it back into the same scene host.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternalSceneSessionStart {
+    pub request: SessionStartRequest,
+    pub runtime_kind: SessionRuntimeKind,
+    pub scene: McloneSceneHostOptions,
+    pub descriptor: ActiveSessionDescriptor,
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, PartialEq)]
@@ -715,9 +730,148 @@ impl McloneSceneHost {
         &mut self,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
-        _request: SessionStartRequest,
+        request: SessionStartRequest,
     ) -> Result<bool> {
-        bail!("browser session starts must complete through the typed asynchronous service adapter")
+        self.request_external_session_start(request)?;
+        Ok(false)
+    }
+
+    /// Queue a session request for an asynchronous platform runtime builder.
+    /// Request classification remains shared; the driver receives only the
+    /// resolved runtime kind, scene options, and active descriptor.
+    pub fn request_external_session_start(&mut self, request: SessionStartRequest) -> Result<()> {
+        let plan = plan_session_start(
+            request,
+            |options| {
+                let mut scene = self.scene.clone();
+                scene.seed = options.seed;
+                scene.world_dir = None;
+                Ok::<_, anyhow::Error>(scene)
+            },
+            |id| {
+                let summary = self
+                    .client_experience
+                    .catalog()
+                    .world_summary(id)
+                    .cloned()
+                    .context("local world is not present in the catalog view")?;
+                let mut scene = self.scene.clone();
+                scene.seed = summary.seed;
+                scene.world_dir = None;
+                Ok((
+                    scene,
+                    ActiveSessionDescriptor::from_local_world_summary(&summary),
+                ))
+            },
+            |endpoint| {
+                let mut scene = self.scene.clone();
+                scene.world_dir = None;
+                let _ = endpoint;
+                Ok(scene)
+            },
+            || anyhow!("unsupported unknown scene session start"),
+        )?;
+        self.status_overlay = StatusOverlay::hidden();
+        self.session.request_start(plan.request, plan.payload);
+        Ok(())
+    }
+
+    /// Take the next shared-policy session request for asynchronous platform
+    /// construction. A taken request remains in the coordinator's Starting
+    /// state until completion or failure is submitted.
+    pub fn take_external_session_start(&mut self) -> Option<ExternalSceneSessionStart> {
+        let pending = self.session.take_pending_start()?;
+        Some(ExternalSceneSessionStart {
+            request: pending.request,
+            runtime_kind: pending.payload.runtime_kind,
+            scene: pending.payload.options,
+            descriptor: pending.payload.descriptor,
+        })
+    }
+
+    pub fn external_session_start_snapshot(&self) -> Option<ExternalSceneSessionStart> {
+        let pending = self.session.pending_start()?;
+        Some(ExternalSceneSessionStart {
+            request: pending.request.clone(),
+            runtime_kind: pending.payload.runtime_kind,
+            scene: pending.payload.options.clone(),
+            descriptor: pending.payload.descriptor.clone(),
+        })
+    }
+
+    /// Install an asynchronously constructed neutral runtime without moving
+    /// session, render, UI, or camera policy into the platform adapter.
+    pub fn complete_external_session_start(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pending: ExternalSceneSessionStart,
+        runtime: SceneSessionRuntime,
+    ) -> Result<()> {
+        let active = runtime
+            .active_session()
+            .cloned()
+            .context("external scene runtime has no active descriptor")?;
+        if active != pending.descriptor {
+            bail!(
+                "external scene runtime descriptor mismatch: expected {:?}, got {:?}",
+                pending.descriptor,
+                active
+            );
+        }
+        if runtime.mesh_assets().catalog.len() != self.mesh_assets.catalog.len() {
+            bail!(
+                "external scene runtime catalog mismatch: active={} replacement={}",
+                self.mesh_assets.catalog.len(),
+                runtime.mesh_assets().catalog.len()
+            );
+        }
+
+        let movement_speed_multiplier = self.camera.movement_speed_multiplier();
+        let mut camera = EngineCameraController::spawn_for_chunk(runtime.interest_center());
+        camera.set_movement_speed_multiplier(movement_speed_multiplier);
+        camera.set_first_person_player_visible(pending.scene.first_person_player_visible);
+        self.draw = TexturedSectionDrawResources::new(
+            device,
+            queue,
+            self.color_format,
+            &[],
+            self.mesh_assets.atlas.as_upload(),
+        )
+        .context("reset scene terrain for external session start")?;
+        self.scene = pending.scene;
+        self.runtime = Some(runtime);
+        self.camera = camera;
+        self.render_stats = RenderStreamStats::default();
+        self.clear_transient_world_state();
+        self.clear_menu_input_state();
+        self.session.complete_start(active.clone());
+        self.status_overlay = StatusOverlay::hidden();
+        self.apply_started_session_ui(&active);
+        self.sync_player_appearance()
+            .context("sync external session player appearance")?;
+        Ok(())
+    }
+
+    pub fn fail_external_session_start(
+        &mut self,
+        pending: ExternalSceneSessionStart,
+        error: impl Into<String>,
+    ) {
+        let message = error.into();
+        log::error!(
+            "failed to start external scene session {:?}: {}",
+            pending.request,
+            message
+        );
+        self.session.fail_start(SessionFailure::new(
+            pending.request.default_failure_message(),
+        ));
+        self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(
+            &pending.request,
+            false,
+        ));
+        self.status_overlay = StatusOverlay::new(message, false);
     }
 
     pub(crate) fn next_new_world_seed(&mut self) -> i64 {
@@ -734,6 +888,7 @@ impl McloneSceneHost {
         self.scene_for_storage_intent(SessionStorageIntent::remote_session(remote_addr))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn catalog_world_scene(
         &self,
         summary: &LocalWorldSummary,
@@ -742,6 +897,7 @@ impl McloneSceneHost {
         self.scene_for_storage_intent(SessionStorageIntent::catalog_world(summary, world_dir))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn scene_for_storage_intent(&self, intent: SessionStorageIntent) -> McloneSceneHostOptions {
         let mut scene = self.scene.clone();
         if let Some(seed) = intent.seed() {
@@ -858,9 +1014,7 @@ impl McloneSceneHost {
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
     ) -> Result<bool> {
-        bail!(
-            "browser pending sessions must complete through the typed asynchronous service adapter"
-        )
+        Ok(false)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1361,13 +1515,22 @@ impl McloneSceneHost {
     ) -> Result<bool> {
         let mut scene_replaced = false;
         for start in effects.session_starts {
-            let Some(world_root) = self.scene.world_root.clone() else {
-                let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
-                log::warn!("XR catalog session start failed: {error}");
-                continue;
+            #[cfg(not(target_arch = "wasm32"))]
+            let scene = {
+                let Some(world_root) = self.scene.world_root.clone() else {
+                    let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
+                    log::warn!("XR catalog session start failed: {error}");
+                    continue;
+                };
+                self.catalog_world_scene(&start.summary, world_root.join(start.summary.id.as_str()))
             };
-            let scene = self
-                .catalog_world_scene(&start.summary, world_root.join(start.summary.id.as_str()));
+            #[cfg(target_arch = "wasm32")]
+            let scene = {
+                let mut scene = self.scene.clone();
+                scene.seed = start.summary.seed;
+                scene.world_dir = None;
+                scene
+            };
             self.status_overlay = StatusOverlay::hidden();
             self.session.request_start(
                 start.request,
@@ -1406,6 +1569,52 @@ impl McloneSceneHost {
         let effects = operations.poll(self.client_experience.catalog_mut());
         self.services.catalog_operations = Some(operations);
         self.apply_xr_catalog_effects(effects, device, queue)
+    }
+
+    /// Fold deferred platform catalog completions back through the shared
+    /// controller. Browser drivers call this after submitting an IndexedDB
+    /// completion; any resulting session start remains queued for
+    /// `take_external_session_start`.
+    pub fn poll_external_catalog_operations(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        let Some(mut operations) = self.services.catalog_operations.take() else {
+            return Ok(false);
+        };
+        let effects = operations.poll(self.client_experience.catalog_mut());
+        self.services.catalog_operations = Some(operations);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.apply_xr_catalog_effects(effects, device, queue)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut scene_replaced = false;
+            for start in effects.session_starts {
+                let mut scene = self.scene.clone();
+                scene.seed = start.summary.seed;
+                scene.world_dir = None;
+                self.status_overlay = StatusOverlay::hidden();
+                self.session.request_start(
+                    start.request,
+                    ScenePendingSessionStart {
+                        runtime_kind: SessionRuntimeKind::Local,
+                        options: scene,
+                        descriptor: start.descriptor,
+                    },
+                );
+                self.ui.clear_input();
+                self.menu_pointer_down = false;
+            }
+            for request in effects.catalog_requests {
+                scene_replaced |= self.execute_xr_catalog_request(request, device, queue)?;
+            }
+            let render_state = self.current_mono_ui_render_state();
+            self.ui.commit_render_state(render_state);
+            Ok(scene_replaced)
+        }
     }
 
     pub(crate) fn apply_xr_session_effects(
@@ -1478,7 +1687,6 @@ impl McloneSceneHost {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
         match descriptor {
             ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {

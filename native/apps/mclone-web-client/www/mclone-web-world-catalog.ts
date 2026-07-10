@@ -17,6 +17,12 @@ type IndexedDbCatalogPolicy = Pick<
 >;
 
 let indexedDbCatalogPolicy: IndexedDbCatalogPolicy | null = null;
+let lastCatalogTimestamp = 0;
+
+function nextCatalogTimestamp(): number {
+  lastCatalogTimestamp = Math.max(Date.now(), lastCatalogTimestamp + 1);
+  return lastCatalogTimestamp;
+}
 
 export function setIndexedDbCatalogPolicy(policy: IndexedDbCatalogPolicy): void {
   indexedDbCatalogPolicy = policy;
@@ -85,7 +91,7 @@ export async function createIndexedDbCatalogWorld(
     .mclone_web_catalog_prepare_create_world(
       options,
       existingRecords,
-      Date.now(),
+      nextCatalogTimestamp(),
     ) as WebLocalWorldSummary;
 
   const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
@@ -105,7 +111,7 @@ export async function openIndexedDbCatalogWorld(
     .mclone_web_catalog_prepare_open_world(
       normalizedId,
       summary,
-      Date.now(),
+      nextCatalogTimestamp(),
     ) as WebLocalWorldSummary;
   await putIndexedDbCatalogSummary(db, opened);
   return opened;

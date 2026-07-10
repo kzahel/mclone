@@ -16,7 +16,6 @@ use mclone_app_runtime::client_experience::{
     ClientExperienceSettingsEffects, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
 };
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::client_session_policy::client_session_failed_start_ui_effects;
 use mclone_app_runtime::client_session_policy::{
     ClientSessionEffects, ClientSessionHostAction, ClientSessionStatusProjection,
@@ -55,14 +54,16 @@ use mclone_app_runtime::prepared_assets::{AssetPackSourceRegistry, PreparedScene
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::session::RemoteSessionEndpoint;
 use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, SessionRuntimeKind,
-    SessionStartPayload, SessionStartRequest,
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, SessionFailure,
+    SessionRuntimeKind, SessionStartPayload, SessionStartRequest, plan_session_start,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionFailure, plan_session_start};
+use mclone_app_runtime::world_catalog::LocalWorldSummary;
 use mclone_app_runtime::world_catalog::{
-    LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities, WorldCatalogError,
+    LocalWorldId, WorldCatalogCapabilities, WorldCatalogError,
 };
 use mclone_app_runtime::{
     EngineCameraCommitContext, EngineCameraCommitTiming, GameplayCommandTiming,

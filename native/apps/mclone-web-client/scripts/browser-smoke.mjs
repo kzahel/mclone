@@ -45,8 +45,6 @@ const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
-const sceneHostProof = process.argv.includes("--scene-host-proof")
-  || process.env.MCLONE_NATIVE_WEB_SCENE_HOST_PROOF === "1";
 const appLoop = movementPerf
   || blockEditProbe
   || indexedDbReloadProbe
@@ -61,9 +59,7 @@ const mobileViewport = mobileAppLoop || movementPerf;
 const serveOnly = process.argv.includes("--serve")
   || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
-  ?? (sceneHostProof
-    ? "/tmp/mclone-native-web-scene-host-proof.png"
-    : movementPerf
+  ?? (movementPerf
     ? "/tmp/mclone-native-web-movement-perf.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
@@ -75,9 +71,7 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
-  ?? (sceneHostProof
-    ? "/tmp/mclone-native-web-scene-host-proof-canvas.png"
-    : movementPerf
+  ?? (movementPerf
     ? "/tmp/mclone-native-web-movement-perf-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
@@ -110,8 +104,7 @@ const blockEditProbeBreaks = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_BREAKS ?? "1", 10) || 1,
 );
-const requireChunk = sceneHostProof
-  || process.argv.includes("--require-chunk")
+const requireChunk = process.argv.includes("--require-chunk")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CHUNK === "1";
 const requireCanvas = requireChunk
   || process.argv.includes("--require-canvas")
@@ -176,7 +169,10 @@ async function run() {
     page.on("pageerror", (error) => pageErrors.push(String(error)));
     page.on("console", (message) => {
       pageLogs.push(`${message.type()}: ${message.text()}`);
-      if (message.type() === "error") pageErrors.push(message.text());
+      if (message.type() === "error") {
+        pageErrors.push(message.text());
+        console.error(`browser console: ${message.text()}`);
+      }
     });
 
     if (appLoop) {
@@ -568,7 +564,7 @@ async function run() {
 
     const smokeUrl = remoteServer
       ? `${baseUrl}/?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-      : sceneHostProof ? `${baseUrl}/?sceneHostProof=1` : baseUrl;
+      : baseUrl;
     await page.goto(smokeUrl, { waitUntil: "load" });
     await page.waitForFunction(
       () => typeof globalThis.__mcloneNativeReady !== "undefined",
@@ -596,7 +592,6 @@ async function run() {
       requireCanvas,
       requireChunk,
       requireThreading,
-      sceneHostProof,
       remoteWebSocket,
       remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
       canvasPixels,
@@ -901,20 +896,25 @@ async function runBlockEditProbe(page, canvas) {
 async function runIndexedDbReloadProbe(page, canvas, baseUrl, worldId) {
   await canvas.evaluate((element) => element.focus());
   await canvas.click({ position: { x: 640, y: 360 } });
-  await page.waitForFunction(
-    () => {
-      const state = globalThis.__mcloneWebApp?.state;
-      return state?.ok === true
-        && state.ready === true
-        && state.streamingSettled === true
-        && state.currentTarget?.ok === true
-        && state.currentTarget.hit === true
-        && typeof globalThis.__mcloneWebApp?.blockStateAt === "function"
-        && state.pendingCompileJobCount === 0;
-    },
-    undefined,
-    { timeout: 60_000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && state.ready === true
+          && state.streamingSettled === true
+          && state.currentTarget?.ok === true
+          && state.currentTarget.hit === true
+          && typeof globalThis.__mcloneWebApp?.blockStateAt === "function"
+          && state.pendingCompileJobCount === 0;
+      },
+      undefined,
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(`indexeddb world did not become targetable: ${String(error)}\n${JSON.stringify(state, null, 2)}`);
+  }
   await installIndexedDbCountHelper(page);
 
   await page.keyboard.press("2");
@@ -993,9 +993,11 @@ async function runCatalogUiProbe(page, canvas) {
     firstWorldId,
     secondWorldId,
   ]);
-
   await openNativeWorldList(page, 2);
-  await clickWorldListRow(page, 1);
+  const openSelection = await clickWorldListRow(page, 1);
+  if (String(openSelection?.catalogWorldId ?? "") !== firstWorldId) {
+    await clickWorldListRow(page, 0);
+  }
   await clickWorldListFooterButton(page, 0);
   const openedFirstSession = await waitForSessionWorldId(page, { worldId: firstWorldId });
   const afterOpenFirst = await waitForBrowserCatalogWorldIds(page, [
@@ -1004,7 +1006,10 @@ async function runCatalogUiProbe(page, canvas) {
   ]);
 
   await openNativeWorldList(page, 2);
-  await clickWorldListRow(page, 1);
+  const deleteSelection = await clickWorldListRow(page, 1);
+  if (String(deleteSelection?.catalogWorldId ?? "") !== secondWorldId) {
+    await clickWorldListRow(page, 0);
+  }
   await clickWorldListFooterButton(page, 2);
   await waitForNativeUiScreen(page, "worldDeleteConfirm");
   await clickWorldDeleteConfirm(page);
@@ -1054,13 +1059,16 @@ async function runCatalogUiProbe(page, canvas) {
  * @param {number} expectedEntryCount
  */
 async function openNativeWorldList(page, expectedEntryCount) {
+  const completionCount = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.worldCatalogCompletionCount) || 0,
+  );
   await page.evaluate(() => globalThis.__mcloneWebApp.openNativeTitleUi?.());
   await waitForNativeUiScreen(page, "title");
   const geometry = await nativeUiGeometry(page);
   const point = nativeTitleSingleplayerPoint(geometry);
   const clickReport = await clickNativeUiPoint(page, point);
   await waitForNativeUiScreen(page, "worldList", { geometry, point, clickReport });
-  await waitForWorldCatalogEntryCount(page, expectedEntryCount);
+  await waitForWorldCatalogEntryCount(page, expectedEntryCount, completionCount + 1);
 }
 
 /**
@@ -1076,7 +1084,7 @@ async function clickWorldListFooterButton(page, index) {
  * @param {number} index
  */
 async function clickWorldListRow(page, index) {
-  await clickNativeUiPoint(page, worldListRowPoint(await nativeUiGeometry(page), index));
+  return clickNativeUiPoint(page, worldListRowPoint(await nativeUiGeometry(page), index));
 }
 
 /** @param {Page} page */
@@ -1268,16 +1276,17 @@ async function compactNativeUiState(page) {
  * @param {Page} page
  * @param {number} expectedEntryCount
  */
-async function waitForWorldCatalogEntryCount(page, expectedEntryCount) {
+async function waitForWorldCatalogEntryCount(page, expectedEntryCount, minimumCompletionCount = 0) {
   await page.waitForFunction(
-    (expectedEntryCount) => {
+    ({ expectedEntryCount, minimumCompletionCount }) => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.ok === true
         && state.worldCatalogPersistent === true
         && state.worldCatalogLoading === false
-        && Number(state.worldCatalogEntryCount) === expectedEntryCount;
+        && Number(state.worldCatalogEntryCount) === expectedEntryCount
+        && Number(state.worldCatalogCompletionCount) >= minimumCompletionCount;
     },
-    expectedEntryCount,
+    { expectedEntryCount, minimumCompletionCount },
     { timeout: 30_000 },
   );
 }
@@ -1287,24 +1296,29 @@ async function waitForWorldCatalogEntryCount(page, expectedEntryCount) {
  * @param {{ worldId?: string, notWorldId?: string | null }} options
  */
 async function waitForSessionWorldId(page, options) {
-  await page.waitForFunction(
-    ({ worldId, notWorldId }) => {
-      const state = globalThis.__mcloneWebApp?.state;
-      const sessionWorldId = String(state?.sessionWorldId ?? "");
-      return state?.ok === true
-        && state.ready === true
-        && state.sessionState === "active"
-        && state.sessionKind === "localWorld"
-        && state.clientHost === "worker-integrated"
-        && state.sessionBusy !== true
-        && state.status === "ready"
-        && sessionWorldId.length > 0
-        && (worldId === undefined || sessionWorldId === worldId)
-        && (notWorldId === undefined || sessionWorldId !== String(notWorldId ?? ""));
-    },
-    options,
-    { timeout: 90_000 },
-  );
+  try {
+    await page.waitForFunction(
+      ({ worldId, notWorldId }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const sessionWorldId = String(state?.sessionWorldId ?? "");
+        return state?.ok === true
+          && state.ready === true
+          && state.sessionState === "active"
+          && state.sessionKind === "localWorld"
+          && state.clientHost === "worker-integrated"
+          && state.sessionBusy !== true
+          && state.status === "ready"
+          && sessionWorldId.length > 0
+          && (worldId === undefined || sessionWorldId === worldId)
+          && (notWorldId === undefined || sessionWorldId !== String(notWorldId ?? ""));
+      },
+      options,
+      { timeout: 90_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(`timed out waiting for catalog session ${JSON.stringify(options)}: ${String(error)}\n${JSON.stringify(state, null, 2)}`);
+  }
   return page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     return {
@@ -3008,13 +3022,7 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     throw new Error(`WebGPU canvas render failed:\n${JSON.stringify(result.canvas, null, 2)}`);
   }
   if (result.canvas.report.width !== 640 || result.canvas.report.height !== 360) {
-    if (!sceneHostProof || result.canvas.report.width !== 960 || result.canvas.report.height !== 540) {
-      throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
-    }
-  }
-  if (sceneHostProof) {
-    assertSceneHostProofResult(result.canvas, canvasPixels);
-    return;
+    throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
   }
   if (requireChunk) {
     assertChunkRenderResult(
@@ -3029,43 +3037,6 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     );
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
-  }
-}
-
-/** @param {any} proof @param {any} canvasPixels */
-function assertSceneHostProofResult(proof, canvasPixels) {
-  const report = proof?.report;
-  if (
-    !proof?.ok
-    || proof.status !== "scene-host-proven"
-    || report?.owner !== "McloneSceneHost"
-    || !report.hostOwnedFrameAssembly
-    || !report.playable
-    || Number(report.drawnSectionCount) <= 0
-    || Number(report.drawnActorCount) <= 0
-    || Number(report.guiCommandCount) <= 0
-    || !report.movementInputApplied
-    || !proof.interaction?.interactionSent
-    || !proof.settings?.settingsEffectApplied
-    || !proof.pauseFrame?.pauseUiRendered
-    || proof.hiddenFrame?.state !== "hidden"
-    || !proof.firstResumeFrame?.firstAfterResume
-    || Number(proof.firstResumeFrame?.deltaSeconds) !== 0
-    || proof.lossFrame?.state !== "restart-required"
-    || !proof.busyGuardReleasedAfterLoss
-    || proof.shutdown?.state !== "shutdown"
-    || !proof.shutdown?.shutdownComplete
-    || proof.lastCompilerReport?.transportKind !== "shared-result-buffer"
-    || proof.lastCompilerReport?.generatedViewFallbackUsed !== false
-    || proof.lastCompilerReport?.sharedResultOverflow !== false
-  ) {
-    throw new Error(`direct browser scene-host proof failed:\n${JSON.stringify(proof, null, 2)}`);
-  }
-  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
-    throw new Error(`scene-host proof canvas did not contain world pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
-  }
-  if (canvasPixels.skyLikePixelCount < 64) {
-    throw new Error(`scene-host proof canvas did not contain visible sky:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 

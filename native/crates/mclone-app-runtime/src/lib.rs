@@ -1079,8 +1079,15 @@ pub struct SingleViewRuntimeStats {
     pub render_distance: u32,
     pub chunk_tracking_radius: u32,
     pub loaded_chunks: usize,
+    pub command_count: usize,
+    pub update_count: usize,
+    pub snapshot_update_count: usize,
+    pub section_block_update_count: usize,
+    pub unload_update_count: usize,
     pub pending_jobs: usize,
     pub pending_publications: usize,
+    pub pending_persistence_loads: usize,
+    pub pending_persistence_saves: usize,
     pub scheduler_pending_worldgen_publication_chunks: usize,
     pub scheduler_pending_light_publications: usize,
     pub pending_render_chunks: usize,
@@ -2614,9 +2621,18 @@ impl SingleViewRuntime {
             render_distance: self.render_distance,
             chunk_tracking_radius: self.chunk_tracking_radius,
             loaded_chunks: self.client().loaded_chunk_count(),
+            command_count: self.command_count(),
+            update_count: self.update_count(),
+            snapshot_update_count: self.snapshot_update_count(),
+            section_block_update_count: self.section_block_update_count(),
+            unload_update_count: self.unload_update_count(),
             pending_jobs: runner_diagnostics.map_or(0, |diagnostics| diagnostics.pending_jobs),
             pending_publications: runner_diagnostics
                 .map_or(0, |diagnostics| diagnostics.pending_publications),
+            pending_persistence_loads: runner_diagnostics
+                .map_or(0, |diagnostics| diagnostics.pending_persistence_loads),
+            pending_persistence_saves: runner_diagnostics
+                .map_or(0, |diagnostics| diagnostics.pending_persistence_saves),
             scheduler_pending_worldgen_publication_chunks: runner_diagnostics.map_or(
                 0,
                 |diagnostics| {
