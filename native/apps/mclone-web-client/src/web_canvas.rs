@@ -2616,6 +2616,7 @@ impl WebChunkRenderSession {
             },
             jump_pressed,
             sprint_pressed,
+            sneak_pressed: false,
             descend_pressed,
             interaction_visible: false,
             attack_pressed: false,

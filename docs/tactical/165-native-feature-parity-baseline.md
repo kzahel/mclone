@@ -1,13 +1,13 @@
 # 165: Native Feature-Parity Baseline And Exception Burn-Down
 
-Status: active 2026-07-09. Slice 1 (baseline mechanism + flat-Android far LOD)
+Status: native burn-down complete 2026-07-10. Slice 1 (baseline mechanism + flat-Android far LOD)
 landed in `da719dda`. Slice 2a (shared frame-pipeline accountant owner) landed
 2026-07-09; Slice 2c (XR/flat accountant convergence) landed through tactical
 168 Slice 5 and the frame-pacing/debug-data promotion landed through tactical
-168 Slice 7a on 2026-07-10; the remaining exceptions are open burn-down slices.
-Coordination update 2026-07-10: tactical 168 now owns the runtime/host plumbing
-that clears the remaining native rows; do not grow the soon-to-be-deleted
-Android or desktop loops to complete them independently.
+168 Slice 7a on 2026-07-10. Tactical 168 Slice 8 landed the shared-host Android
+adoption and cadence wiring on 2026-07-10; the native feature-exception ledger
+is now empty. Web reason-bearing divergences and shared settings preferences
+remain separate follow-ups.
 
 Workstream: native Rust shared client-experience policy in `mclone-app-runtime`,
 desktop flat, shared XR scene, flat Android, and Android XR. Web is the one
@@ -124,11 +124,7 @@ still rejects.
 
 | Platform | Feature | Current gap |
 |---|---|---|
-| Flat Android | `TravelAssist` | Effect handler is a silent no-op; needs camera travel-assist wiring. |
-| Flat Android | `FramePipelineOverlay` | **Not a renderer gap** — the overlay renderer (`render_frame_pipeline_overlay`) is already shared and drives desktop *and* XR. The gap is a missing *data source*: the frame-pipeline accountant lives in the desktop app crate (`DesktopFramePipelineAccounting`), so Android has no `FramePipelineReport` producer to attach and stubs the effect + hard-codes visibility `false`. |
-| Flat Android | `DebugDiagnostics` | The draw path (`render_debug_overlay_at`) and, as of tactical 168 Slice 7a, the `DebugPaneStats -> DebugOverlay` aggregator are shared. Android already owns the inputs but does not feed the shared aggregator until 168 Slice 8 replaces its loop. |
-| Flat Android | `ServerSimulationCadence` | Effect handler rejects; needs integrated-server cadence wiring. |
-| XR (desktop + Android) | `ServerSimulationCadence` | Not yet wired on the XR scene path. |
+| — | — | No native feature-axis exceptions remain. |
 
 ### Diagnostics producer ownership (root cause behind the two overlay rows)
 
@@ -158,27 +154,21 @@ Web keeps `FarLod`, `TravelAssist`, `FramePipelineOverlay`, `DebugDiagnostics`,
 and `ServerSimulationCadence` gated with explicit reasons; decided separately on
 threading/perf grounds (far LOD "measure on web first", Tactical 162).
 
-## Remaining Slices
+## Remaining Follow-Ups
 
-**Coordination with tactical 168 (2026-07-10):** the items below remain the
-capability acceptance requirements, but their implementation routing changed:
+**Completed through tactical 168 (2026-07-10):** native travel assist,
+frame-pipeline accounting/overlay, debug diagnostics, and local-integrated
+server cadence now route through the shared scene host. Flat Android adopted
+that host in Slice 8 and all five ledger rows were removed atomically with the
+profile flips. The parity enforcement tests pass with an empty ledger.
 
-- travel assist and server cadence land through the shared scene host during
-  168 Slices 7/8, not as Android-loop additions;
 - accountant convergence (2c) is 168 Slice 5;
-- frame-pacing POD/debug-aggregator promotion landed in 168 Slice 7a; Android
-  consumption remains part of Slice 8;
-- Android frame-pipeline wiring is inherited when the old Android loop is
-  deleted in 168 Slice 8. Do **not** execute the old "next — slice 2b" recipe by
-  adding timing brackets to that app-local loop; it would create code that Slice
-  8 immediately removes.
+- frame-pacing POD/debug-aggregator promotion is 168 Slice 7a;
+- native host consumption and ledger closeout are 168 Slice 8.
 
-Capability flips and ledger-row removal still happen atomically with the shared
-plumbing, as required by this tactical's enforcement tests.
+Historical execution record:
 
-1. **Flat-Android travel assist.** Wire `SetTravelAssistMode` into the Android
-   camera/movement path (desktop `flat_client_driver` is the reference); drop the
-   ledger entry and flip the capability.
+1. **[LANDED via 168 Slice 8] Flat-Android travel assist.**
 2. **Promote the frame-pipeline accountant to a shared owner, then wire flat
    Android.** This is primarily a shared-owner refactor, not an Android renderer.
    - **[LANDED 2026-07-09 — slice 2a]** Relocated `DesktopFramePipelineAccounting`
@@ -200,31 +190,19 @@ plumbing, as required by this tactical's enforcement tests.
      enqueue/dequeue age semantics, remote-lane availability, and its peer panel.
      A shared peer-window accumulator preserves the Quest/desktop perf max/sum
      semantics, and shared presentation preserves the parser-visible Quest labels.
-   - **[subsumed by tactical 168 Slice 8 — do not implement app-locally]** On flat Android, instantiate the shared accountant,
-     un-gate the profile, replace the `SetFramePipelineOverlayVisible(_)` no-op
-     with a real `bool` handler, feed the flag through `current_ui_render_state`,
-     and populate `hud.frame_pipeline`. The draw link already exists, but note:
-     the Android render loop currently instruments **no** per-stage timings, so
-     this slice must first add `Instant` brackets across its loop (frame-active
-     wall, runtime-poll, the `_timed` section-sync variant, upload-apply, render,
-     surface acquire/submit/present) and a target-frame-period source before the
-     accountant has anything to report. Then drop the ledger entry and capture a
-     tablet-AVD frame-pipeline overlay screenshot.
-3. **Promote the debug-stats aggregator, then wire flat Android.** Same pattern.
+   - **[LANDED via tactical 168 Slice 8]** Flat Android feeds Mono summaries,
+     surface timings, a fixed 60 Hz target, and budget decisions into the shared
+     accountant; the host owns the overlay state and draw path.
+3. **[LANDED via 168 Slice 8] Promote the debug-stats aggregator, then wire flat Android.** Same pattern.
    - **[LANDED 2026-07-10 — promotion via tactical 168 Slice 7a]** Move the three frame-pacing POD structs out of the winit-bound
      `frame_pacing.rs` into a shared `mclone-app-runtime` location (leave the
      `FramePacing` driver in the desktop app), then relocate the
      `DebugPaneStats -> DebugOverlay` aggregator beside them.
-   - On flat Android, feed the aggregator from its existing inputs, un-gate the
-     profile, replace the `SetDebugDiagnosticsVisible(_)` no-op with a real `bool`
-     handler, feed the flag through `current_ui_render_state`, and populate
-     `hud.debug`. Drop the ledger entry. (XR may later converge its own
-     `debug_diagnostics_overlay` stat assembly onto the shared aggregator, but
-     that is optional and not required to clear this Android row.)
-4. **Server simulation cadence on XR + flat Android.** Wire cadence into the
-   integrated-server option path for the XR scene runtime and the Android
-   renderer; drop both ledger entries. Cadence is only meaningful for
-   local-integrated sessions, so gate on host mode rather than platform.
+   - Flat Android now supplies the shared Mono context and the host assembles
+     the debug pane from runtime/render/frame/pacing facts.
+4. **[LANDED via 168 Slice 8] Server simulation cadence on XR + flat Android.**
+   The shared host applies cadence to local-integrated runtimes and retains it
+   in scene options; both ledger rows are gone.
 5. **Web far-LOD decision.** Separate from native parity: decide whether web's
    threading/runtime model can carry far LOD (Tactical 162) before removing its
    web reason.

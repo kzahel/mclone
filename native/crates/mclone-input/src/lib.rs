@@ -453,6 +453,46 @@ impl FlatInputFrame {
         }
     }
 
+    /// Merge another producer's frame into this one without exposing the
+    /// engine-camera representation to platform adapters.
+    pub fn merge_from(&mut self, source: Self) {
+        for (pressed, direction) in [
+            (source.forward, MovementDirection::Forward),
+            (source.backward, MovementDirection::Backward),
+            (source.left, MovementDirection::Left),
+            (source.right, MovementDirection::Right),
+        ] {
+            if pressed {
+                self.add_movement_direction(direction);
+            }
+        }
+        if let Some(movement) = source.analog_movement {
+            self.set_analog_movement_impulse(movement.left, movement.forward);
+        }
+        self.add_keyboard_turn_impulse(source.keyboard_turn);
+        self.add_look_delta(source.look_delta.x, source.look_delta.y);
+        for (pressed, action) in [
+            (source.jump, FlatInputAction::Jump),
+            (source.sprint, FlatInputAction::Sprint),
+            (source.sneak, FlatInputAction::Sneak),
+            (source.descend, FlatInputAction::Descend),
+            (source.attack, FlatInputAction::Attack),
+            (source.use_item, FlatInputAction::Use),
+            (source.open_menu, FlatInputAction::OpenMenu),
+            (source.open_block_palette, FlatInputAction::OpenBlockPalette),
+            (source.open_help, FlatInputAction::OpenHelp),
+            (source.toggle_camera_view, FlatInputAction::ToggleCameraView),
+        ] {
+            if pressed {
+                self.press_action(action);
+            }
+        }
+        if let Some(slot) = source.selected_hotbar_slot {
+            self.select_hotbar_slot(slot);
+        }
+        self.step_hotbar(source.hotbar_step);
+    }
+
     pub fn add_movement_direction(&mut self, direction: MovementDirection) {
         let (left, forward) = match direction {
             MovementDirection::Forward => {
@@ -909,6 +949,49 @@ pub enum KeyboardKey {
 }
 
 impl KeyboardKey {
+    /// Parse the stable physical-key names used by winit and the browser
+    /// `KeyboardEvent.code` API.
+    pub fn from_code_name(code: &str) -> Option<Self> {
+        match code {
+            "KeyW" => Some(Self::KeyW),
+            "KeyA" => Some(Self::KeyA),
+            "KeyS" => Some(Self::KeyS),
+            "KeyD" => Some(Self::KeyD),
+            "ArrowUp" => Some(Self::ArrowUp),
+            "ArrowDown" => Some(Self::ArrowDown),
+            "ArrowLeft" => Some(Self::ArrowLeft),
+            "ArrowRight" => Some(Self::ArrowRight),
+            "KeyE" => Some(Self::KeyE),
+            "KeyB" => Some(Self::KeyB),
+            "KeyL" => Some(Self::KeyL),
+            "KeyN" => Some(Self::KeyN),
+            "KeyO" => Some(Self::KeyO),
+            "KeyX" => Some(Self::KeyX),
+            "Backquote" => Some(Self::Backquote),
+            "Space" => Some(Self::Space),
+            "ShiftLeft" => Some(Self::ShiftLeft),
+            "ShiftRight" => Some(Self::ShiftRight),
+            "ControlLeft" => Some(Self::ControlLeft),
+            "ControlRight" => Some(Self::ControlRight),
+            "Escape" => Some(Self::Escape),
+            "F1" => Some(Self::F1),
+            "F5" => Some(Self::F5),
+            "F7" => Some(Self::F7),
+            "F8" => Some(Self::F8),
+            "F9" => Some(Self::F9),
+            "Digit1" => Some(Self::Digit1),
+            "Digit2" => Some(Self::Digit2),
+            "Digit3" => Some(Self::Digit3),
+            "Digit4" => Some(Self::Digit4),
+            "Digit5" => Some(Self::Digit5),
+            "Digit6" => Some(Self::Digit6),
+            "Digit7" => Some(Self::Digit7),
+            "Digit8" => Some(Self::Digit8),
+            "Digit9" => Some(Self::Digit9),
+            _ => None,
+        }
+    }
+
     pub const fn from_hotbar_slot(slot: u8) -> Option<Self> {
         match slot {
             0 => Some(Self::Digit1),
@@ -1297,6 +1380,7 @@ impl Default for TouchBindings {
             TouchBinding::new(TouchControl::LookDrag, InputBindingAction::Look),
             TouchBinding::new(TouchControl::JumpButton, InputBindingAction::Jump),
             TouchBinding::new(TouchControl::SprintButton, InputBindingAction::Sprint),
+            TouchBinding::new(TouchControl::SneakButton, InputBindingAction::Sneak),
             TouchBinding::new(TouchControl::DescendButton, InputBindingAction::Descend),
             TouchBinding::new(TouchControl::AttackButton, InputBindingAction::Attack),
             TouchBinding::new(TouchControl::UseButton, InputBindingAction::Use),
@@ -1309,6 +1393,14 @@ impl Default for TouchBindings {
             ));
         }
         Self { bindings }
+    }
+}
+
+impl TouchBindings {
+    pub fn action_for(&self, control: TouchControl) -> Option<InputBindingAction> {
+        self.bindings
+            .iter()
+            .find_map(|binding| (binding.control == control).then_some(binding.action))
     }
 }
 
@@ -1332,11 +1424,312 @@ pub enum TouchControl {
     LookDrag,
     JumpButton,
     SprintButton,
+    SneakButton,
     DescendButton,
     AttackButton,
     UseButton,
     HotbarSlot(u8),
     MenuButton,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TouchInputSettings {
+    pub look_sensitivity: f32,
+    pub movement_stick_radius: f32,
+}
+
+impl TouchInputSettings {
+    pub const DEFAULT_LOOK_SENSITIVITY: f32 = 2.4;
+    pub const MIN_LOOK_SENSITIVITY: f32 = 0.5;
+    pub const MAX_LOOK_SENSITIVITY: f32 = 5.0;
+    pub const DEFAULT_MOVEMENT_STICK_RADIUS: f32 = 50.0;
+
+    fn normalized(self) -> Self {
+        let look_sensitivity = if self.look_sensitivity.is_finite() {
+            self.look_sensitivity
+                .clamp(Self::MIN_LOOK_SENSITIVITY, Self::MAX_LOOK_SENSITIVITY)
+        } else {
+            Self::DEFAULT_LOOK_SENSITIVITY
+        };
+        let movement_stick_radius =
+            if self.movement_stick_radius.is_finite() && self.movement_stick_radius > 0.0 {
+                self.movement_stick_radius
+            } else {
+                Self::DEFAULT_MOVEMENT_STICK_RADIUS
+            };
+        Self {
+            look_sensitivity,
+            movement_stick_radius,
+        }
+    }
+}
+
+impl Default for TouchInputSettings {
+    fn default() -> Self {
+        Self {
+            look_sensitivity: Self::DEFAULT_LOOK_SENSITIVITY,
+            movement_stick_radius: Self::DEFAULT_MOVEMENT_STICK_RADIUS,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TouchLookDelta {
+    pub yaw_radians: f32,
+    pub pitch_radians: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TouchInputEvent {
+    pub handled: bool,
+    pub frame: Option<FlatInputFrame>,
+    pub look_delta: Option<TouchLookDelta>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TouchJoystickState {
+    pub base: Vec2,
+    pub thumb: Vec2,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TouchInputOverlayState {
+    pub menu_pressed: bool,
+    pub movement: Option<TouchJoystickState>,
+    pub jump_pressed: bool,
+    pub sprint_pressed: bool,
+    pub sneak_pressed: bool,
+    pub descend_pressed: bool,
+    pub attack_pressed: bool,
+    pub use_pressed: bool,
+    pub hotbar_pressed_slot: Option<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ActiveTouchContact {
+    id: u64,
+    control: TouchControl,
+    action: InputBindingAction,
+    base: Vec2,
+    position: Vec2,
+    active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TouchInputAdapter {
+    pub bindings: TouchBindings,
+    pub settings: TouchInputSettings,
+    viewport_size: Vec2,
+    contacts: Vec<ActiveTouchContact>,
+}
+
+impl Default for TouchInputAdapter {
+    fn default() -> Self {
+        Self {
+            bindings: TouchBindings::default(),
+            settings: TouchInputSettings::default(),
+            viewport_size: Vec2::ONE,
+            contacts: Vec::new(),
+        }
+    }
+}
+
+impl TouchInputAdapter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_settings(settings: TouchInputSettings) -> Self {
+        Self {
+            settings: settings.normalized(),
+            ..Self::default()
+        }
+    }
+
+    pub fn set_viewport_size(&mut self, size: Vec2) {
+        self.viewport_size = Vec2::new(finite_positive(size.x), finite_positive(size.y));
+    }
+
+    pub fn set_look_sensitivity(&mut self, look_sensitivity: f32) {
+        self.settings.look_sensitivity = TouchInputSettings {
+            look_sensitivity,
+            ..self.settings
+        }
+        .normalized()
+        .look_sensitivity;
+    }
+
+    pub fn begin_contact(
+        &mut self,
+        id: u64,
+        control: TouchControl,
+        position: Vec2,
+    ) -> TouchInputEvent {
+        let Some(action) = self.bindings.action_for(control) else {
+            return TouchInputEvent::default();
+        };
+        self.contacts.retain(|contact| contact.id != id);
+        let position = finite_vec2(position);
+        self.contacts.push(ActiveTouchContact {
+            id,
+            control,
+            action,
+            base: position,
+            position,
+            active: true,
+        });
+        let mut event = TouchInputEvent {
+            handled: true,
+            ..TouchInputEvent::default()
+        };
+        if is_one_shot_touch_action(action) {
+            let mut frame = FlatInputFrame::default();
+            frame.apply_binary_binding_action(action, true);
+            event.frame = Some(frame);
+        }
+        event
+    }
+
+    pub fn move_contact(&mut self, id: u64, position: Vec2, active: bool) -> TouchInputEvent {
+        let position = finite_vec2(position);
+        let viewport_min = self.viewport_size.min_element().max(1.0);
+        let sensitivity = self.settings.look_sensitivity;
+        let Some(contact) = self.contacts.iter_mut().find(|contact| contact.id == id) else {
+            return TouchInputEvent::default();
+        };
+        let delta = position - contact.position;
+        contact.position = position;
+        contact.active = active;
+        let look_delta = (contact.action == InputBindingAction::Look
+            && delta.length_squared() > 0.0)
+            .then_some(TouchLookDelta {
+                yaw_radians: -(delta.x / viewport_min) * sensitivity,
+                pitch_radians: -(delta.y / viewport_min) * sensitivity,
+            });
+        TouchInputEvent {
+            handled: true,
+            frame: None,
+            look_delta,
+        }
+    }
+
+    pub fn end_contact(&mut self, id: u64, cancelled: bool) -> TouchInputEvent {
+        let Some(index) = self.contacts.iter().position(|contact| contact.id == id) else {
+            return TouchInputEvent::default();
+        };
+        let contact = self.contacts.remove(index);
+        let frame = (!cancelled
+            && contact.active
+            && contact.action == InputBindingAction::OpenMenu)
+            .then(|| {
+                let mut frame = FlatInputFrame::default();
+                frame.apply_binary_binding_action(contact.action, true);
+                frame
+            });
+        TouchInputEvent {
+            handled: true,
+            frame,
+            look_delta: None,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.contacts.clear();
+    }
+
+    pub fn has_continuous_movement_input(&self) -> bool {
+        self.contacts
+            .iter()
+            .any(|contact| is_continuous_touch_action(contact.action))
+    }
+
+    pub fn held_frame(&self) -> Option<FlatInputFrame> {
+        let mut frame = FlatInputFrame::default();
+        let mut has_input = false;
+        for contact in &self.contacts {
+            match contact.action {
+                InputBindingAction::MoveAnalog => {
+                    let radius = self.settings.movement_stick_radius;
+                    let offset = (contact.position - contact.base).clamp_length_max(radius);
+                    frame.set_analog_movement_impulse(-offset.x / radius, -offset.y / radius);
+                    has_input = true;
+                }
+                action if is_continuous_touch_action(action) => {
+                    frame.apply_binary_binding_action(action, true);
+                    has_input = true;
+                }
+                _ => {}
+            }
+        }
+        has_input.then_some(frame)
+    }
+
+    pub fn overlay_state(&self) -> TouchInputOverlayState {
+        let mut overlay = TouchInputOverlayState::default();
+        for contact in &self.contacts {
+            match contact.control {
+                TouchControl::MovementStick => {
+                    let offset = (contact.position - contact.base)
+                        .clamp_length_max(self.settings.movement_stick_radius);
+                    overlay.movement = Some(TouchJoystickState {
+                        base: contact.base,
+                        thumb: contact.base + offset,
+                    });
+                }
+                TouchControl::JumpButton => overlay.jump_pressed = true,
+                TouchControl::SprintButton => overlay.sprint_pressed = true,
+                TouchControl::SneakButton => overlay.sneak_pressed = true,
+                TouchControl::DescendButton => overlay.descend_pressed = true,
+                TouchControl::AttackButton => overlay.attack_pressed = true,
+                TouchControl::UseButton => overlay.use_pressed = true,
+                TouchControl::HotbarSlot(slot) => overlay.hotbar_pressed_slot = Some(slot),
+                TouchControl::MenuButton => overlay.menu_pressed = contact.active,
+                TouchControl::LookDrag => {}
+            }
+        }
+        overlay
+    }
+}
+
+fn finite_positive(value: f32) -> f32 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        1.0
+    }
+}
+
+fn finite_vec2(value: Vec2) -> Vec2 {
+    Vec2::new(
+        if value.x.is_finite() { value.x } else { 0.0 },
+        if value.y.is_finite() { value.y } else { 0.0 },
+    )
+}
+
+fn is_continuous_touch_action(action: InputBindingAction) -> bool {
+    matches!(
+        action,
+        InputBindingAction::MoveAnalog
+            | InputBindingAction::Jump
+            | InputBindingAction::Sprint
+            | InputBindingAction::Sneak
+            | InputBindingAction::Descend
+    )
+}
+
+fn is_one_shot_touch_action(action: InputBindingAction) -> bool {
+    matches!(
+        action,
+        InputBindingAction::Attack
+            | InputBindingAction::Use
+            | InputBindingAction::SelectHotbarSlot(_)
+            | InputBindingAction::NextHotbarSlot
+            | InputBindingAction::PreviousHotbarSlot
+            | InputBindingAction::OpenBlockPalette
+            | InputBindingAction::OpenHelp
+            | InputBindingAction::ToggleCameraView
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -2235,6 +2628,112 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_code_names_are_shared_across_platform_adapters() {
+        assert_eq!(KeyboardKey::from_code_name("KeyW"), Some(KeyboardKey::KeyW));
+        assert_eq!(
+            KeyboardKey::from_code_name("ArrowLeft"),
+            Some(KeyboardKey::ArrowLeft)
+        );
+        assert_eq!(KeyboardKey::from_code_name("F5"), Some(KeyboardKey::F5));
+        assert_eq!(KeyboardKey::from_code_name("Unidentified"), None);
+    }
+
+    #[test]
+    fn flat_input_frames_merge_all_producer_intents() {
+        let mut target = FlatInputFrame::default();
+        target.add_movement_direction(MovementDirection::Forward);
+        let mut source = FlatInputFrame::default();
+        source.set_analog_movement_impulse(0.5, -0.25);
+        source.press_action(FlatInputAction::Sneak);
+        source.press_action(FlatInputAction::ToggleCameraView);
+        source.add_look_delta(2.0, -1.0);
+        source.step_hotbar(-1);
+
+        target.merge_from(source);
+
+        assert!(target.forward);
+        assert!(target.sneak);
+        assert!(target.toggle_camera_view);
+        assert_eq!(
+            target.analog_movement,
+            Some(MovementImpulse {
+                left: 0.5,
+                forward: -0.25
+            })
+        );
+        assert_eq!(target.look_delta, LookDelta { x: 2.0, y: -1.0 });
+        assert_eq!(target.hotbar_step, -1);
+    }
+
+    #[test]
+    fn touch_adapter_normalizes_look_and_clamps_movement_stick() {
+        let mut adapter = TouchInputAdapter::with_settings(TouchInputSettings {
+            look_sensitivity: f32::INFINITY,
+            movement_stick_radius: 50.0,
+        });
+        assert_eq!(
+            adapter.settings.look_sensitivity,
+            TouchInputSettings::DEFAULT_LOOK_SENSITIVITY
+        );
+        adapter.set_viewport_size(Vec2::new(400.0, 200.0));
+        adapter.begin_contact(1, TouchControl::LookDrag, Vec2::new(100.0, 100.0));
+        let look = adapter
+            .move_contact(1, Vec2::new(110.0, 95.0), true)
+            .look_delta
+            .expect("look drag should emit radians");
+        assert!((look.yaw_radians + 0.12).abs() < 1.0e-6);
+        assert!((look.pitch_radians - 0.06).abs() < 1.0e-6);
+
+        adapter.begin_contact(2, TouchControl::MovementStick, Vec2::new(20.0, 30.0));
+        adapter.move_contact(2, Vec2::new(120.0, 30.0), true);
+        let held = adapter.held_frame().expect("movement touch should be held");
+        assert_eq!(
+            held.analog_movement,
+            Some(MovementImpulse {
+                left: -1.0,
+                forward: 0.0
+            })
+        );
+        let joystick = adapter.overlay_state().movement.expect("joystick overlay");
+        assert_eq!(joystick.thumb, Vec2::new(70.0, 30.0));
+    }
+
+    #[test]
+    fn touch_adapter_preserves_multitouch_and_edge_actions() {
+        let mut adapter = TouchInputAdapter::new();
+        assert!(
+            adapter
+                .begin_contact(1, TouchControl::JumpButton, Vec2::ZERO)
+                .handled
+        );
+        adapter.begin_contact(2, TouchControl::SneakButton, Vec2::ZERO);
+        let attack = adapter
+            .begin_contact(3, TouchControl::AttackButton, Vec2::ZERO)
+            .frame
+            .expect("attack should emit on the press edge");
+        assert!(attack.attack);
+        let held = adapter
+            .held_frame()
+            .expect("held actions should produce a frame");
+        assert!(held.jump);
+        assert!(held.sneak);
+        assert!(adapter.overlay_state().attack_pressed);
+
+        adapter.begin_contact(4, TouchControl::MenuButton, Vec2::ZERO);
+        assert!(adapter.move_contact(4, Vec2::ONE, false).handled);
+        assert!(adapter.end_contact(4, false).frame.is_none());
+        adapter.begin_contact(5, TouchControl::MenuButton, Vec2::ZERO);
+        let menu = adapter
+            .end_contact(5, false)
+            .frame
+            .expect("active menu release should emit the action");
+        assert!(menu.open_menu);
+
+        adapter.clear();
+        assert!(adapter.held_frame().is_none());
+    }
+
+    #[test]
     fn gamepad_adapter_builds_shared_frames_from_sticks_and_held_buttons() {
         let mut adapter = GamepadInputAdapter::with_settings(GamepadInputSettings {
             movement_deadzone: 0.0,
@@ -2356,6 +2855,10 @@ mod tests {
         assert!(touch.bindings.contains(&TouchBinding::new(
             TouchControl::UseButton,
             InputBindingAction::Use
+        )));
+        assert!(touch.bindings.contains(&TouchBinding::new(
+            TouchControl::SneakButton,
+            InputBindingAction::Sneak
         )));
         assert!(touch.bindings.contains(&TouchBinding::new(
             TouchControl::HotbarSlot(8),

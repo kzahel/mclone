@@ -13,7 +13,9 @@ native remote-session adapter) landed 2026-07-10; Slice 7c (desktop live
 per-frame loop onto the shared Mono host) landed 2026-07-10; Slice 7d
 (offscreen, screenshot, timedemo, and perf harnesses onto the shared Mono
 host) landed 2026-07-10; Slice 7e (shared optional camera-reconcile timing and
-scene-local timed-fork deletion) landed 2026-07-10. (Slices 0–2 are
+scene-local timed-fork deletion) landed 2026-07-10; Slice 8 (flat Android onto
+the shared Mono host, shared touch semantics, and native capability-ledger
+closeout) landed 2026-07-10. (Slices 0–2 are
 independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
 Post-Slice-3
 review corrections landed
@@ -1209,7 +1211,7 @@ pnpm native:xr:desktop
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 ```
 
-### Slice 8: Flat Android rebuilt as thin glue (delete the loop)
+### Slice 8: Flat Android rebuilt as thin glue (delete the loop) — DONE (2026-07-10)
 
 Goal: `mclone-android-client/src/lib.rs` is deleted-and-replaced, not
 refactored. Target size: activity/surface/lifecycle glue + input adapter +
@@ -1301,6 +1303,42 @@ suspend/resume cycle on the AVD and verify the world persists (the host
 Exit criteria: new `lib.rs` is glue-only (target well under ~1,000 lines);
 all three AVD smokes pass with unchanged-or-better output; the 165 ledger
 rows for flat Android are gone.
+
+Result:
+
+- Replaced the 3,388-line app-local renderer/session/effects implementation
+  with a 139-line entry module plus Android startup and surface/input adapters.
+  `AndroidSurfaceDriver` owns winit/Android lifecycle, Vulkan surface targets,
+  raw input translation, and fixed-FIFO cadence facts; the shared Mono host now
+  owns runtime polling, camera reconciliation, section admission/upload,
+  rendering, UI/session/catalog policy, diagnostics, travel assist, and cadence.
+- Made `TouchBindings` real through `mclone-input::TouchInputAdapter`: bounded
+  resolution-independent look sensitivity, the existing 50-GUI-point movement
+  radius, multi-touch held/edge semantics, neutral overlay state, and a sneak
+  button in the formerly empty action slot. Physical-key code parsing and
+  `FlatInputFrame` merging are shared as well.
+- Flat Android uses `NativeRemoteServerSession` and the shared remote-runtime
+  constructor. Both Android apps now use the same legacy remote-address
+  sentinel/normalization helper from `mclone-android-platform`.
+- Android supplies `FrameHostKind::FlatAndroidWinit`, a fixed 60 Hz target, and
+  Mono frame reports to the shared adaptive admission/accounting path. The
+  native feature-exception ledger is empty: flat Android now exposes travel
+  assist, frame-pipeline overlay, debug diagnostics, and server cadence; XR
+  server cadence is also supported by the same host settings implementation.
+- Pre-change and post-change AVD world, touch-swipe, and New World session
+  captures were inspected. The post-change captures preserve terrain/HUD
+  output, show the new `SNK` control, respond to the camera swipe, and complete
+  shared session replacement. A separate options-driven capture shows a
+  populated frame-pipeline waterfall/queue report. A background/foreground
+  cycle destroys and rebuilds Vulkan, recreates the surface, and resumes
+  rendering successfully.
+- The full native workspace, desktop offscreen pixels, browser WASM build, both
+  Android APKs, and the attached Quest New World session smoke pass after the
+  shared code changes.
+- Tripwires are clean: the Android app contains no app-local experience-effect
+  match, render-section sync, session-request dispatch, `EngineCameraInput`
+  construction, or remote transport adapter. The existing shared-host
+  startup-ready log wording is now visible in Android logcat.
 
 ### Slice 9: XR-emulation lane on desktop (acceptance proof)
 
@@ -1492,9 +1530,8 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 8; Slices 0–7e are implemented. Replace flat Android's app-local
-frame loop with thin activity/surface/input glue over the shared Mono host,
-move touch semantics into `mclone-input`, and coordinate the inherited
-capability flips with tactical 165. Capture the three AVD baselines before the
-rewrite, keep Android XR unchanged, and do not reintroduce app-local polling,
-section upload, diagnostics, session policy, or render admission.
+Start with Slice 9; Slices 0–8 are implemented. Add the headset-free synthetic
+stereo acceptance lane without initializing OpenXR, then inspect the side-by-side
+capture before Slice 10 cleanup and neutral host renaming. Do not reintroduce
+app-local polling, section upload, diagnostics, session policy, or render
+admission while adding the emulation driver.

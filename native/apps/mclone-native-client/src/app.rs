@@ -1490,6 +1490,7 @@ impl ApplicationHandler for ChunkApp {
                     frame_timing: self.frame_timing,
                     render_scale: self.current_render_scale(),
                     hud_visible: true,
+                    ..MonoUiContext::default()
                 };
                 let render_start = Instant::now();
                 let mut scene_summary = None;
@@ -1601,37 +1602,13 @@ impl ApplicationHandler for ChunkApp {
 }
 
 fn desktop_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> {
-    match key_code {
-        KeyCode::KeyW => Some(KeyboardKey::KeyW),
-        KeyCode::KeyA => Some(KeyboardKey::KeyA),
-        KeyCode::KeyS => Some(KeyboardKey::KeyS),
-        KeyCode::KeyD => Some(KeyboardKey::KeyD),
-        KeyCode::ArrowUp => Some(KeyboardKey::ArrowUp),
-        KeyCode::ArrowDown => Some(KeyboardKey::ArrowDown),
-        KeyCode::ArrowLeft => Some(KeyboardKey::ArrowLeft),
-        KeyCode::ArrowRight => Some(KeyboardKey::ArrowRight),
-        KeyCode::KeyE => Some(KeyboardKey::KeyE),
-        KeyCode::KeyB => Some(KeyboardKey::KeyB),
-        KeyCode::KeyX => Some(KeyboardKey::KeyX),
-        KeyCode::Space => Some(KeyboardKey::Space),
-        KeyCode::ShiftLeft => Some(KeyboardKey::ShiftLeft),
-        KeyCode::ShiftRight => Some(KeyboardKey::ShiftRight),
-        KeyCode::ControlLeft => Some(KeyboardKey::ControlLeft),
-        KeyCode::ControlRight => Some(KeyboardKey::ControlRight),
-        KeyCode::Escape => Some(KeyboardKey::Escape),
-        KeyCode::F1 => Some(KeyboardKey::F1),
-        KeyCode::F5 => Some(KeyboardKey::F5),
-        KeyCode::Digit1 => Some(KeyboardKey::Digit1),
-        KeyCode::Digit2 => Some(KeyboardKey::Digit2),
-        KeyCode::Digit3 => Some(KeyboardKey::Digit3),
-        KeyCode::Digit4 => Some(KeyboardKey::Digit4),
-        KeyCode::Digit5 => Some(KeyboardKey::Digit5),
-        KeyCode::Digit6 => Some(KeyboardKey::Digit6),
-        KeyCode::Digit7 => Some(KeyboardKey::Digit7),
-        KeyCode::Digit8 => Some(KeyboardKey::Digit8),
-        KeyCode::Digit9 => Some(KeyboardKey::Digit9),
-        _ => None,
+    if matches!(
+        key_code,
+        KeyCode::KeyN | KeyCode::KeyO | KeyCode::KeyL | KeyCode::F8 | KeyCode::F9
+    ) {
+        return None;
     }
+    KeyboardKey::from_code_name(&format!("{key_code:?}"))
 }
 
 fn desktop_pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {

@@ -65,6 +65,12 @@ features from re-forking.
 > world pixels scaled while composing host-owned UI at native output resolution.
 > XR camera commits now use optional timing from the same shared reconcile path
 > as flat clients; the scene-local timed policy fork is gone.
+> Refreshed again after tactical 168 Slice 8 replaced flat Android's app-local
+> loop with the shared Mono scene host. Touch input now uses the shared
+> `TouchInputAdapter` (including sneak), all three AVD lanes and a lifecycle
+> rebuild pass, Android inherits shared interaction/HUD/hotbar/screen effects,
+> diagnostics, travel assist, and cadence, and the native feature-exception
+> ledger is empty.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -132,16 +138,16 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | World render (textured terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Day/night + sky | ✅ | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
-| Player movement + collision | ✅ | ◐ (perf/scripted paths; no real host loop) | ✅ | ◐ (shared touch move, device pending) | ✅ | ✅ |
-| Block interaction (break/place) | ✅ | ◐ (scripted `FlatInputFrame`, no real host loop) | ✗ | ✗ | ✗ | ✅ |
-| Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
-| Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
+| Player movement + collision | ✅ | ◐ (perf/scripted paths; no real host loop) | ✅ | ✅ (shared touch + AVD swipe) | ✅ | ✅ |
+| Block interaction (break/place) | ✅ | ◐ (scripted `FlatInputFrame`, no real host loop) | ✗ | ◐ (shared path + touch controls; action smoke pending) | ✗ | ✅ |
+| Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ✅ |
+| Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
 | Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Underwater camera FX / screen effects | ✅ | ✅ | ✅ (multiview path + user device validation) | ✗ (wiring pending) | ✅ (multiview path + user device validation) | ✗ (inline render fork) |
-| HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ◐ (debug/UI screenshots; no real HUD host) | ✗ | ✗ | ✗ | ✅ |
-| Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✗ | ✅ |
+| Underwater camera FX / screen effects | ✅ | ✅ | ✅ (multiview path + user device validation) | ✅ (shared Mono path) | ✅ (multiview path + user device validation) | ✗ (inline render fork) |
+| HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ◐ (debug/UI screenshots; no real HUD host) | ✗ | ✅ | ✗ | ✅ |
+| Hotbar (debug palette) | ✅ | ✗ | ✗ | ✅ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ◐ (screenshot scenarios; no real input host) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
-| Connect / world-select UI | ✗ | ✗ | ◐ (world catalog UI wired; connect-screen smoke pending) | ✗ | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (world catalog UI wired; connect-screen text/smoke pending) |
+| Connect / world-select UI | ✗ | ✗ | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (persistent world catalog + New World smoke; connect text/smoke pending) | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (world catalog UI wired; connect-screen text/smoke pending) |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ◐ TCP screenshot/settle, no long-lived offscreen host | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ | ◐ (IndexedDB catalog + chunk/entity records; player/world metadata pending) |
 | Basic audio (landing sound foundation) | ◐ (code; listen validation pending) | — (not targeted for no-window validation yet) | ◐ (code; listen validation pending) | ◐ (code; device audio pending) | ◐ (code; device audio pending) | ✗ |
@@ -167,17 +173,18 @@ Reading the matrix:
   world-panel/pointer path wired through `mclone-xr-scene`. User headset
   validation says the menu works mostly fine; automated menu/replacement smoke,
   comfort tuning, and actual spawned actor scenarios remain pending.
-- **flat-Android** is still the thinnest full-client lane: it has terrain,
-  lighting, shared local/remote host wiring, shared menu/touch in code, and a
-  shared touch player camera/movement path, but still lacks interaction,
-  actors, HUD/hotbar, underwater FX wiring, and an in-app connect flow.
+- **flat-Android** now runs the same Mono scene host as desktop/offscreen. Its
+  AVD-validated touch movement, HUD/hotbar, menus, local world replacement,
+  screen effects, interaction command path, diagnostics, travel assist, and
+  cadence are shared. Remaining evidence gaps are spawned actor/remote-player
+  scenarios, an actual break/place action smoke, and connect-screen text/input.
 - **underwater camera effects** are not desktop-only by architecture. The shared
   renderer/app-runtime path exists, desktop native and current
   offscreen/headless screenshots compute and pass the camera-water overlay/fog,
   and `mclone-xr-scene` now computes per-view/midpoint underwater overlays and
   renders the effect through the stereo/multiview path for desktop XR and
   Android XR. User device validation says the XR treatment works pretty well.
-  Flat Android and web still need app-lane wiring.
+  Flat Android now consumes the Mono path; web still needs app-lane wiring.
 - **basic audio** exists through `mclone-audio` on native desktop, desktop XR,
   flat Android, and Android XR. It is still a foundation slice: landing sounds
   only, no web audio yet, no automated audible validation, and no step/break/
@@ -200,19 +207,19 @@ use (and should) · — n/a.
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-offscreen:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
-| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
-| `app-runtime::client_session_policy` (display-neutral session UI action policy) | ✅ (desktop flat/offscreen and desktop XR via `mclone-xr-scene` execute shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✅ (flat Android executes shared seed/join/start/quit effects and failed-start UI restoration; Android activity/session replacement remains host-local) | ✅ (XR scene executes shared seed/join/start/quit effects, status/startup projection, failed-start UI restoration, and quit-title transitions; Android activity/session adapters remain host-local) | `cargo test -p mclone-app-runtime client_session_policy`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-xr-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; tactical 141 Slice 4d; tactical 143 Slice 4a; tactical 143 Slice 6; tactical 143 Slice 7 |
-| `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (flat Android executes the shared controller with transient create-only capabilities; persistent list/open/delete project unsupported state until Android storage is scoped) | ✅ (XR scene executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-xr-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
-| `app-runtime::client_experience` (catalog/session/settings facade) | ✅ (desktop/offscreen adapter and desktop XR scene execute facade effects; host window/runtime/pointer-lock/OpenXR work remains adapter-local) | ✅ (web adapter executes facade effects; IndexedDB promises, worker startup, and JS result writing remain adapter-local) | ✅ (flat Android executes facade catalog/session/settings/capability effects; Android activity, touch, runtime replacement, and storage roots remain adapter-local) | ✅ (XR scene executes facade catalog/session/settings/capability effects; Android activity/session adapters and app-private storage roots remain host-local) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-native-client catalog_`; `cargo test -p mclone-xr-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android-xr:session-smoke`; tactical 143 Slice 2; tactical 143 Slice 4; tactical 143 Slice 6; tactical 143 Slice 7 |
+| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (shared Mono host initial local/remote and New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
+| `app-runtime::client_session_policy` (display-neutral session UI action policy) | ✅ (desktop flat/offscreen and desktop XR via `mclone-xr-scene` execute shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✅ (shared Mono host executes seed/join/start/quit effects and failed-start UI restoration; Android activity/surface remains local) | ✅ (XR scene executes shared seed/join/start/quit effects, status/startup projection, failed-start UI restoration, and quit-title transitions; Android activity/session adapters remain host-local) | `cargo test -p mclone-app-runtime client_session_policy`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-xr-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; tactical 141 Slice 4d; tactical 143 Slice 4a; tactical 143 Slice 6; tactical 143 Slice 7 |
+| `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (shared Mono host executes native catalog effects against the Android app-private world root; AVD New World flow covered) | ✅ (XR scene executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-xr-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
+| `app-runtime::client_experience` (catalog/session/settings facade) | ✅ (desktop/offscreen adapter and desktop XR scene execute facade effects; host window/runtime/pointer-lock/OpenXR work remains adapter-local) | ✅ (web adapter executes facade effects; IndexedDB promises, worker startup, and JS result writing remain adapter-local) | ✅ (shared Mono host executes facade effects; Android activity, raw touch translation, surface, and storage roots remain adapter-local) | ✅ (XR scene executes facade catalog/session/settings/capability effects; Android activity/session adapters and app-private storage roots remain host-local) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-native-client catalog_`; `cargo test -p mclone-xr-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android-xr:session-smoke`; tactical 143 Slice 2; tactical 143 Slice 4; tactical 143 Slice 6; tactical 143 Slice 7 |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
-The reuse story in one line: **desktop flat, offscreen/screenshot/perf, desktop
-XR, and Android XR now share `mclone-scene`; flat Android is the next native
-host migration, web still carries the important runtime/render fork, and
-offscreen still lacks an exposed long-lived source/sink mode.**
+The reuse story in one line: **desktop flat, offscreen/screenshot/perf, flat
+Android, desktop XR, and Android XR now share `mclone-scene`; web still carries
+the important runtime/render fork, and offscreen still lacks an exposed
+long-lived source/sink mode.**
 Concretely:
 
 - The native flat single-view scene driver is shared:
@@ -253,12 +260,11 @@ Concretely:
   connect-screen smoke still pending. The playable browser app can join a
   dedicated WebSocket server through `?remoteWsUrl=...`, covered by
   `native:web:remote-smoke` (see blockers #1 and #2).
-- flat Android has a TCP remote-dedicated path through
-  `debug.mclone.remote_addr`, constructs local/remote startup through
-  `NativeSingleViewSessionRuntime<S>`, and now replaces the current native scene
-  from shared New World / Join Remote menu actions while retaining Android
-  activity, touch, surface, and TCP ownership in the app crate. New World
-  replacement is covered by `pnpm native:android:avd-session-smoke`.
+- Flat Android drives the shared Mono host and shared native remote-session
+  adapter. Its app crate retains only Android activity/lifecycle, Vulkan
+  surface targets, raw touch/pointer/key translation, startup properties, and
+  fixed presentation cadence. New World replacement is covered by
+  `pnpm native:android:avd-session-smoke`.
 - Desktop XR and Android XR route New World / Join Remote / Quit To Title menu
   actions through `mclone-xr-scene`'s `GameSessionCoordinator` and
   `app-runtime::client_experience` facade. Each app host still owns its runtime
@@ -419,12 +425,13 @@ these first:
    headset validation says it works mostly fine. Flat Android consumes
    `mclone-ui` in code for pause/options touch input and uses the shared touch
    player movement path. Remaining work is automated XR menu coverage, comfort
-   tuning, broader flat-Android HUD/gameplay interaction controls, and the
-   connect/world-select `EditBox` surface. (tactical 089, tactical 090)
+   tuning, a flat-Android interaction action smoke, and the connect/world-select
+   `EditBox` surface. (tactical 089, tactical 090)
 5. **Finish the shared input-intent layer.** Unify raw input → intent across
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
-   for flat Android HUD/hotbar/block-interaction controls. (tactical 076 follow-up)
+   for XR interaction and cross-platform menu/pointer parity. Flat Android now
+   has shared touch movement/action/hotbar intents. (tactical 076 follow-up)
 6. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through

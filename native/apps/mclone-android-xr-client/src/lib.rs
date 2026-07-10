@@ -1,8 +1,5 @@
 #![deny(unsafe_code)]
 
-#[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
-const ANDROID_REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
-
 // Android XR-owned startup flags are OpenXR session/perf harness controls.
 // Shared scene/session policy flags must stay in `StartupArgState`.
 #[cfg(test)]
@@ -44,16 +41,6 @@ const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--xr-underwater-mode",
 ];
 
-#[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
-fn normalize_android_legacy_remote_addr(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() || value == ANDROID_REMOTE_ADDR_NONE_SENTINEL {
-        None
-    } else {
-        Some(value.to_owned())
-    }
-}
-
 #[cfg(target_os = "android")]
 mod graphics_vulkan;
 
@@ -71,7 +58,7 @@ mod android {
     use anyhow::{Context, Result, bail};
     use mclone_android_platform::{
         ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, android_app_data_asset_root,
-        android_app_data_world_root,
+        android_app_data_world_root, normalize_android_legacy_remote_addr,
     };
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
@@ -1071,7 +1058,7 @@ mod android {
 
     fn android_remote_addr() -> Option<String> {
         android_property(REMOTE_ADDR_PROPERTY)
-            .and_then(|value| super::normalize_android_legacy_remote_addr(&value))
+            .and_then(|value| normalize_android_legacy_remote_addr(&value))
     }
 
     #[allow(unsafe_code)]
@@ -7044,10 +7031,7 @@ pub fn host_placeholder() {}
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{
-        ANDROID_REMOTE_ADDR_NONE_SENTINEL, ANDROID_XR_LOCAL_ARG_FLAGS,
-        normalize_android_legacy_remote_addr,
-    };
+    use super::ANDROID_XR_LOCAL_ARG_FLAGS;
 
     fn collect_source_flags(source: &str) -> BTreeSet<String> {
         let mut flags = BTreeSet::new();
@@ -7094,36 +7078,6 @@ mod tests {
         assert!(
             unclassified.is_empty(),
             "classify Android XR startup flags as shared startup or XR-local: {unclassified:?}"
-        );
-    }
-
-    #[test]
-    fn android_legacy_remote_addr_ignores_empty_values() {
-        assert_eq!(normalize_android_legacy_remote_addr(""), None);
-        assert_eq!(normalize_android_legacy_remote_addr("   \t"), None);
-    }
-
-    #[test]
-    fn android_legacy_remote_addr_ignores_none_sentinel() {
-        assert_eq!(
-            normalize_android_legacy_remote_addr(ANDROID_REMOTE_ADDR_NONE_SENTINEL),
-            None
-        );
-    }
-
-    #[test]
-    fn android_legacy_remote_addr_preserves_real_address() {
-        assert_eq!(
-            normalize_android_legacy_remote_addr(" 192.168.1.10:25565 "),
-            Some("192.168.1.10:25565".to_owned())
-        );
-    }
-
-    #[test]
-    fn android_legacy_remote_addr_preserves_sentinel_near_misses() {
-        assert_eq!(
-            normalize_android_legacy_remote_addr("__mclone_none__:25565"),
-            Some("__mclone_none__:25565".to_owned())
         );
     }
 }

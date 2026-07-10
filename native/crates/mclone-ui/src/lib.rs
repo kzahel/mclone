@@ -2230,6 +2230,7 @@ pub struct TouchOverlay {
     pub movement: TouchJoystickOverlay,
     pub jump_pressed: bool,
     pub sprint_pressed: bool,
+    pub sneak_pressed: bool,
     pub descend_pressed: bool,
     pub interaction_visible: bool,
     pub attack_pressed: bool,
@@ -2747,6 +2748,7 @@ pub fn render_touch_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &T
     let buttons = touch_action_button_rects(scale);
     render_touch_action_button(draw, &font, buttons.jump, "UP", overlay.jump_pressed);
     render_touch_action_button(draw, &font, buttons.sprint, ">>", overlay.sprint_pressed);
+    render_touch_action_button(draw, &font, buttons.sneak, "SNK", overlay.sneak_pressed);
     render_touch_action_button(draw, &font, buttons.descend, "DN", overlay.descend_pressed);
     if overlay.interaction_visible {
         render_touch_action_button(draw, &font, buttons.attack, "ATK", overlay.attack_pressed);
@@ -2977,6 +2979,7 @@ fn movement_speed_label(state: GameUiRenderState) -> String {
 pub struct TouchActionButtonRects {
     pub jump: Rect,
     pub sprint: Rect,
+    pub sneak: Rect,
     pub descend: Rect,
     pub attack: Rect,
     pub use_item: Rect,
@@ -3008,6 +3011,7 @@ pub fn touch_action_button_rects(scale: GuiScale) -> TouchActionButtonRects {
     TouchActionButtonRects {
         jump: Rect::new(x1, y0, size, size),
         sprint: Rect::new(x0, y1, size, size),
+        sneak: Rect::new(x0, y0, size, size),
         descend: Rect::new(x1, y1, size, size),
         attack: Rect::new(x1, y_attack, size, size),
         use_item: Rect::new(x0, y_attack, size, size),

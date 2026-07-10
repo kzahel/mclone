@@ -4,7 +4,21 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 
 use crate::host_mode::{
     RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
+    SingleViewHostOptions,
 };
+use crate::native_session_runtime::NativeSessionRuntime;
+use crate::render_assets::TexturedMeshAssets;
+use crate::session::RemoteSessionEndpoint;
+
+pub fn connect_native_remote_session_runtime(
+    endpoint: RemoteSessionEndpoint,
+    options: SingleViewHostOptions,
+    mesh_assets: TexturedMeshAssets,
+    host_label: &'static str,
+) -> Result<NativeSessionRuntime<NativeRemoteServerSession>> {
+    let session = NativeRemoteServerSession::connect(endpoint.address.as_str(), host_label)?;
+    NativeSessionRuntime::remote_dedicated_with_mesh_assets(endpoint, options, session, mesh_assets)
+}
 
 /// Native TCP-backed remote session shared by desktop and XR hosts.
 ///

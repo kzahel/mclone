@@ -74,7 +74,7 @@ use mclone_diagnostics::{
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, InputPromptKind, ResolvedFlatInput,
-    TouchControlsMode, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
+    TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -121,10 +121,10 @@ use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, GameCollisionMode,
     GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence,
-    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState,
-    GameXrTurnMode, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect,
-    StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
-    render_loading_progress_overlay, render_status_overlay,
+    GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
+    GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
+    Point, Rect, StatusOverlay, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
+    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod comfort;

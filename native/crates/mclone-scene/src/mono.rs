@@ -50,6 +50,9 @@ pub struct MonoUiContext {
     pub frame_timing: FrameTimingStats,
     pub render_scale: f32,
     pub hud_visible: bool,
+    pub touch_overlay: TouchOverlay,
+    pub touch_controls_mode: Option<TouchControlsMode>,
+    pub touch_settings: Option<GameTouchSettings>,
 }
 
 impl Default for MonoUiContext {
@@ -68,6 +71,9 @@ impl Default for MonoUiContext {
             frame_timing: FrameTimingStats::default(),
             render_scale: 1.0,
             hud_visible: true,
+            touch_overlay: TouchOverlay::hidden(),
+            touch_controls_mode: None,
+            touch_settings: None,
         }
     }
 }
@@ -137,10 +143,24 @@ where
     /// Select the conventional flat-client capability/UI profile. This is a
     /// topology choice on the shared host, not a platform-owned gameplay path.
     pub fn configure_mono_ui(&mut self, ui: GameUiHost, context: MonoUiContext) {
+        self.configure_mono_ui_with_profile(
+            ui,
+            context,
+            desktop_native_client_experience_profile(),
+        );
+    }
+
+    /// Configure flat UI using a platform capability profile while retaining
+    /// the shared Mono gameplay/session/render implementation.
+    pub fn configure_mono_ui_with_profile(
+        &mut self,
+        ui: GameUiHost,
+        context: MonoUiContext,
+        profile: ClientExperienceProfile,
+    ) {
         self.ui = ui;
         self.mono_ui_context = Some(context);
-        self.client_experience =
-            ClientExperienceController::new(desktop_native_client_experience_profile());
+        self.client_experience = ClientExperienceController::new(profile);
         self.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
     }
 
@@ -288,6 +308,9 @@ where
         camera.set_movement_speed_multiplier(f64::from(self.scene.movement_speed_multiplier));
         camera.set_first_person_player_visible(self.scene.first_person_player_visible);
         camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+        if let Some(startup) = &mut self.local_startup {
+            startup.camera = camera.clone();
+        }
         self.camera = camera;
     }
 
@@ -375,6 +398,17 @@ where
         }
         self.camera
             .turn_mouse_delta(f64::from(frame.look_delta.x), f64::from(frame.look_delta.y));
+        true
+    }
+
+    pub fn apply_mono_touch_look(&mut self, delta: TouchLookDelta) -> bool {
+        if delta.yaw_radians == 0.0 && delta.pitch_radians == 0.0 {
+            return false;
+        }
+        self.camera.turn_mouse_delta(
+            -f64::from(delta.yaw_radians) / ENGINE_CAMERA_MOUSE_SENSITIVITY,
+            -f64::from(delta.pitch_radians) / ENGINE_CAMERA_MOUSE_SENSITIVITY,
+        );
         true
     }
 
@@ -558,6 +592,10 @@ where
 
     pub fn select_mono_hotbar_slot(&mut self, slot: u8) -> bool {
         self.interaction.select_hotbar_slot(slot)
+    }
+
+    pub fn selected_mono_hotbar_slot(&self) -> u8 {
+        self.interaction.selected_hotbar_slot()
     }
 
     pub fn step_mono_hotbar_slot(&mut self, step: i8) -> bool {
@@ -1220,6 +1258,7 @@ where
             ),
         );
         hud.status = self.session_projection().status_overlay;
+        hud.touch = context.touch_overlay;
         hud.frame_pipeline = self
             .diagnostic_panel
             .frame_metrics_visible()
@@ -1269,6 +1308,8 @@ where
             }
         };
         state.fps_cap = context.frame_pacing.fps_cap;
+        state.touch_controls_mode = context.touch_controls_mode;
+        state.touch_settings = context.touch_settings;
         state.server_cadence = self.runtime.as_ref().and_then(|runtime| {
             runtime
                 .simulation_cadence()

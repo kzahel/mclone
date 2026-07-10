@@ -405,8 +405,7 @@ pub fn desktop_native_client_experience_profile() -> ClientExperienceProfile {
 
 /// XR profile (desktop XR and Android XR): full native baseline minus
 /// surface/input capabilities that XR owns differently (world-space reticle,
-/// compositor-owned pacing, controller turn), plus one tracked feature-axis
-/// exception for cadence.
+/// compositor-owned pacing, controller turn).
 pub fn xr_native_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = native_client_experience_baseline();
     settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -414,17 +413,11 @@ pub fn xr_native_client_experience_profile() -> ClientExperienceProfile {
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    // Feature-axis exception (tracked): cadence control is not yet wired on XR.
-    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
-        "Server simulation cadence is not yet wired on XR",
-    );
     ClientExperienceProfile::new(settings)
 }
 
-/// Android flat profile: full native baseline minus touch-device/surface input,
-/// plus tracked feature-axis exceptions. Those exceptions are genuine Android
-/// runtime plumbing gaps (not hardware limits) to burn down toward the native
-/// baseline one feature per slice — see [`NATIVE_FEATURE_PARITY_EXCEPTIONS`].
+/// Android flat profile: full native baseline minus surface capabilities that
+/// remain fixed by the Android presenter.
 pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = native_client_experience_baseline();
     settings.turn_mode =
@@ -437,20 +430,6 @@ pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfil
     );
     settings.fps_cap =
         ClientExperienceCapabilityStatus::Unsupported("FPS cap is fixed on flat Android");
-    // Far LOD is wired on flat Android (shared far-LOD render path); it stays on
-    // the native baseline. Do not gate it here.
-    settings.travel_assist = ClientExperienceCapabilityStatus::Unsupported(
-        "Travel assist is unavailable on flat Android",
-    );
-    settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
-        "Frame pipeline overlay is unavailable on flat Android",
-    );
-    settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
-        "Debug diagnostics panel is unavailable on flat Android",
-    );
-    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
-        "Server simulation cadence is unavailable on flat Android",
-    );
     ClientExperienceProfile::new(settings)
 }
 
@@ -492,28 +471,7 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
 pub const NATIVE_FEATURE_PARITY_EXCEPTIONS: &[(
     NativePlatform,
     ClientExperienceFeatureCapability,
-)] = &[
-    (
-        NativePlatform::AndroidFlat,
-        ClientExperienceFeatureCapability::TravelAssist,
-    ),
-    (
-        NativePlatform::AndroidFlat,
-        ClientExperienceFeatureCapability::FramePipelineOverlay,
-    ),
-    (
-        NativePlatform::AndroidFlat,
-        ClientExperienceFeatureCapability::DebugDiagnostics,
-    ),
-    (
-        NativePlatform::AndroidFlat,
-        ClientExperienceFeatureCapability::ServerSimulationCadence,
-    ),
-    (
-        NativePlatform::Xr,
-        ClientExperienceFeatureCapability::ServerSimulationCadence,
-    ),
-];
+)] = &[];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClientExperienceCapabilityStatus {

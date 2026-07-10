@@ -7,6 +7,16 @@ use android_activity::AndroidApp;
 
 pub const ANDROID_ASSET_ROOT_ENV: &str = "MCLONE_ANDROID_ASSET_ROOT";
 pub const ANDROID_WORLD_ROOT_DIR_NAME: &str = "worlds";
+pub const ANDROID_REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
+
+pub fn normalize_android_legacy_remote_addr(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value == ANDROID_REMOTE_ADDR_NONE_SENTINEL {
+        None
+    } else {
+        Some(value.to_owned())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AndroidAppDataPathPreference {
@@ -153,5 +163,26 @@ mod tests {
     #[test]
     fn world_root_is_absent_without_app_data_path() {
         assert_eq!(android_world_root_from_app_data_paths(None, None), None);
+    }
+
+    #[test]
+    fn legacy_remote_addr_ignores_empty_and_none_sentinel() {
+        assert_eq!(normalize_android_legacy_remote_addr("   \t"), None);
+        assert_eq!(
+            normalize_android_legacy_remote_addr(ANDROID_REMOTE_ADDR_NONE_SENTINEL),
+            None
+        );
+    }
+
+    #[test]
+    fn legacy_remote_addr_preserves_real_addresses_and_near_misses() {
+        assert_eq!(
+            normalize_android_legacy_remote_addr(" 192.168.1.10:25565 "),
+            Some("192.168.1.10:25565".to_owned())
+        );
+        assert_eq!(
+            normalize_android_legacy_remote_addr("__mclone_none__:25565"),
+            Some("__mclone_none__:25565".to_owned())
+        );
     }
 }
