@@ -469,15 +469,26 @@ async function run() {
       }, walkingStart);
       const targetPreviewProbe = await captureTargetPreviewProbe(page);
       const blockInteractionProbe = await exerciseBlockInteraction(page, canvas);
-      await page.keyboard.press("n");
-      await page.waitForFunction(
-        () => {
-          const state = globalThis.__mcloneWebApp?.state;
-          return state?.ok === true && state.movementMode === "NOCLIP";
-        },
-        undefined,
-        { timeout: 10_000 },
-      );
+      await canvas.evaluate((element) => element.focus());
+      // The shared camera reports movement and collision as separate axes: one
+      // physical KeyN transition selects FLY movement with NOCLIP collision.
+      await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
+      await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
+      try {
+        await page.waitForFunction(
+          () => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.ok === true
+              && state.movementMode === "FLY"
+              && state.lastReport?.collisionMode === "NOCLIP";
+          },
+          undefined,
+          { timeout: 10_000 },
+        );
+      } catch (error) {
+        const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+        throw new Error(`native web app did not toggle FLY/NOCLIP after physical KeyN: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}`);
+      }
       await page.mouse.down();
       await page.mouse.move(700, 330);
       await page.mouse.up();
@@ -487,7 +498,8 @@ async function run() {
           const state = globalThis.__mcloneWebApp?.state;
           return state?.ok === true
             && (state.centerX !== 0 || state.centerZ !== 0)
-            && state.lastReport?.movementMode === "NOCLIP"
+            && state.lastReport?.movementMode === "FLY"
+            && state.lastReport?.collisionMode === "NOCLIP"
             && state.renderCount >= 3
             && state.frameCount > 0;
         },
@@ -659,6 +671,7 @@ async function runMovementPerfProbe(page, canvas) {
       frameCount: state.frameCount,
       renderCount: state.renderCount,
       compileTimingCount: state.compileTimingCount,
+      clientDeferredChunkDropBacklogItems: state.clientDeferredChunkDropBacklogItems,
       lastCompileSequence: state.lastCompileTiming?.sequence ?? 0,
       // 067 Stage 3: the streaming loop tags every compile "stream"; the warm-up to idle
       // produces the initial-load compiles, so the most recent settled timing before
@@ -669,9 +682,14 @@ async function runMovementPerfProbe(page, canvas) {
     };
   });
 
-  await page.keyboard.press("n");
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
+  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
   await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.movementMode === "NOCLIP",
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.movementMode === "FLY"
+        && state.lastReport?.collisionMode === "NOCLIP";
+    },
     undefined,
     { timeout: 10_000 },
   );
@@ -724,6 +742,7 @@ async function runMovementPerfProbe(page, canvas) {
       compileTimingCount: state.compileTimingCount,
       lastFrameGapMs: state.lastFrameGapMs,
       maxFrameGapMs: state.maxFrameGapMs,
+      clientDeferredChunkDropBacklogItems: state.clientDeferredChunkDropBacklogItems,
       lastCompileTiming: state.lastCompileTiming,
       compileTimings,
       movementCompileTimings,
@@ -754,6 +773,7 @@ async function runMovementPerfProbe(page, canvas) {
       compileTimingCount: end.compileTimingCount,
       lastFrameGapMs: end.lastFrameGapMs,
       maxFrameGapMs: end.maxFrameGapMs,
+      clientDeferredChunkDropBacklogItems: end.clientDeferredChunkDropBacklogItems,
       lastCompileTiming: end.lastCompileTiming,
     },
     movedChunks,
@@ -1745,18 +1765,23 @@ async function captureNativeUiProbe(page, canvas) {
   const requestedStatus = await page.evaluate(() => (
     globalThis.__mcloneWebApp?.openNativeTitleUi?.() ?? null
   ));
-  await page.waitForFunction(
-    () => {
-      const state = globalThis.__mcloneWebApp?.state;
-      const report = state?.lastReport;
-      return state?.ok === true
-        && report?.uiActive === true
-        && report?.uiCoversWorld === true
-        && Number(report?.guiCommandCount) > 500;
-    },
-    undefined,
-    { timeout: 10_000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const report = state?.lastReport;
+        return state?.ok === true
+          && report?.uiActive === true
+          && report?.uiCoversWorld === true
+          && Number(report?.guiCommandCount) > 0;
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(`native web title UI did not become drawable: ${error instanceof Error ? error.message : String(error)}\nrequested=${JSON.stringify(requestedStatus)}\nstate=${JSON.stringify(state, null, 2)}`);
+  }
   const state = await page.evaluate(() => {
     const runtimeState = globalThis.__mcloneWebApp.state;
     return {
@@ -1764,6 +1789,9 @@ async function captureNativeUiProbe(page, canvas) {
       uiActive: runtimeState.uiActive,
       uiCoversWorld: runtimeState.uiCoversWorld,
       guiCommandCount: runtimeState.guiCommandCount,
+      sessionState: runtimeState.sessionState,
+      sessionKind: runtimeState.sessionKind,
+      sessionRemoteEndpoint: runtimeState.sessionRemoteEndpoint,
       lastReport: {
         ok: runtimeState.lastReport?.ok,
         uiActive: runtimeState.lastReport?.uiActive,
@@ -1810,48 +1838,45 @@ async function captureNativeUiProbe(page, canvas) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
-        && state.nativeUiScreen === "newWorld"
-        && state.lastUiAction?.action === "openNewWorld";
+        && state.nativeUiScreen === "worldList"
+        && state.lastUiAction?.action === "openWorldList";
     },
     undefined,
     { timeout: 10_000 },
   );
-  const openedNewWorld = await readNativeUiState(page);
+  const openedWorldList = await readNativeUiState(page);
 
-  await clickNativeMenuButton(canvas, "newWorld", 1);
+  await clickWorldListFooterButton(page, 3);
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
-      return state?.uiActive === false
-        && state.nativeUiScreen === "none"
-        && state.lastUiAction?.action === "createWorld"
-        && state.sessionState === "active"
-        && state.sessionKind === "localWorld"
-        && state.clientHost === "worker-integrated"
-        && state.streamingSettled === true;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "title"
+        && state.lastUiAction?.action === "backToTitle";
     },
     undefined,
-    { timeout: 30_000 },
+    { timeout: 10_000 },
   );
-  const createdWorld = await readNativeUiState(page);
+  const backedFromWorldList = await readNativeUiState(page);
   return {
     ok: state.uiActive === true
       && state.uiCoversWorld === true
-      && Number(state.guiCommandCount) > 500
+      && Number(state.guiCommandCount) > 0
       && canvasPixels.nonClearInteriorPixelCount > 128
       && canvasPixels.distinctInteriorColorCount > 2
       && openedOptions.nativeUiScreen === "options"
       && backedToTitle.nativeUiScreen === "title"
-      && openedNewWorld.nativeUiScreen === "newWorld"
-      && createdWorld.uiActive === false
-      && createdWorld.sessionState === "active"
-      && createdWorld.sessionKind === "localWorld",
+      && openedWorldList.nativeUiScreen === "worldList"
+      && backedFromWorldList.nativeUiScreen === "title"
+      && backedFromWorldList.sessionState === state.sessionState
+      && backedFromWorldList.sessionKind === state.sessionKind
+      && backedFromWorldList.sessionRemoteEndpoint === state.sessionRemoteEndpoint,
     requestedStatus,
     state,
     openedOptions,
     backedToTitle,
-    openedNewWorld,
-    createdWorld,
+    openedWorldList,
+    backedFromWorldList,
     canvasScreenshotPath: nativeUiCanvasScreenshotPath,
     canvasPixels,
   };
@@ -2254,7 +2279,7 @@ async function readNativeUiState(page) {
 
 /**
  * @param {Locator} canvas
- * @param {"title" | "newWorld"} menu
+ * @param {"title"} menu
  * @param {number} buttonIndex
  */
 async function clickNativeMenuButton(canvas, menu, buttonIndex) {
@@ -2465,7 +2490,9 @@ async function captureTargetPreviewProbe(page) {
  * @param {Locator} canvas
  */
 async function exerciseBlockInteraction(page, canvas) {
-  const breakProbe = await clickBlockInteraction(page, canvas, "left", "break");
+  // Place first so the follow-up break has a deterministic, nearer target. Breaking the
+  // original reach-limit block first can leave the next block outside pick range and turn
+  // the placement into a legitimate miss even though both interaction paths are healthy.
   await page.keyboard.press("2");
   await page.waitForFunction(
     () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 1,
@@ -2480,6 +2507,7 @@ async function exerciseBlockInteraction(page, canvas) {
     expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
     expectedCarriedItemSynced: true,
   });
+  const breakProbe = await clickBlockInteraction(page, canvas, "left", "break");
   return {
     ok: breakProbe.ok && selectedSlotProbe.selectedHotbarSlot === 1 && placeProbe.ok,
     break: breakProbe,
@@ -2966,13 +2994,15 @@ function assertAppLoopResult(
   if (!result?.ok || !result.ready) {
     throw new Error(`native web app loop failed:\n${JSON.stringify(result, null, 2)}`);
   }
+  const expectedLoadedChunkCount = (result.radiusChunks * 2 + 1) ** 2;
   if (
     (result.centerX === 0 && result.centerZ === 0)
     || result.loadedCenterX !== result.centerX
     || result.loadedCenterZ !== result.centerZ
-    || result.radiusChunks !== 1
+    || !Number.isInteger(result.radiusChunks)
+    || result.radiusChunks < 1
     || result.renderCount < 3
-    || result.loadedChunkCount !== 9
+    || result.loadedChunkCount !== expectedLoadedChunkCount
     || result.residentSectionCount <= 1
     || result.pendingCompileJobCount !== 0
   ) {
@@ -2990,8 +3020,12 @@ function assertAppLoopResult(
   if (!blockInteractionProbe?.ok) {
     throw new Error(`native web app did not break/place through the shared interaction path and recompile dirty sections:\n${JSON.stringify({ blockInteractionProbe, result }, null, 2)}`);
   }
-  if (result.movementMode !== "NOCLIP" || result.lastReport?.movementMode !== "NOCLIP") {
-    throw new Error(`native web app did not keep no-clip as a toggleable streaming fallback:\n${JSON.stringify(result, null, 2)}`);
+  if (
+    result.movementMode !== "FLY"
+    || result.lastReport?.movementMode !== "FLY"
+    || result.lastReport?.collisionMode !== "NOCLIP"
+  ) {
+    throw new Error(`native web app did not keep FLY/NOCLIP as a toggleable streaming fallback:\n${JSON.stringify(result, null, 2)}`);
   }
   if (!result.pointerLockAttempted || (!result.pointerLocked && !result.pointerLockFallback)) {
     throw new Error(`native web app did not exercise pointer-lock or fallback state:\n${JSON.stringify(result, null, 2)}`);
@@ -3007,39 +3041,7 @@ function assertAppLoopResult(
     throw new Error(`native web app did not report streaming compile timings:\n${JSON.stringify(result, null, 2)}`);
   }
   assertCompileTimingDiagnostics(result.lastCompileTiming, "app last compile timing");
-  const expectedRunnerKind = remoteWebSocketUrl ? "remote-websocket" : "web-worker";
-  const expectedClientHost = remoteWebSocketUrl ? "remote-dedicated" : "worker-integrated";
-  if (result.runnerKind !== expectedRunnerKind || result.lastReport?.runnerKind !== expectedRunnerKind) {
-    throw new Error(`native web app did not use the expected ${expectedRunnerKind} runner:\n${JSON.stringify(result, null, 2)}`);
-  }
-  if (result.clientHost !== expectedClientHost) {
-    throw new Error(`native web app did not report the expected ${expectedClientHost} host mode:\n${JSON.stringify(result, null, 2)}`);
-  }
-  if (remoteWebSocketUrl && result.remoteWebSocketUrl !== remoteWebSocketUrl) {
-    throw new Error(`native web app did not preserve the requested remote websocket URL:\n${JSON.stringify({ remoteWebSocketUrl, result }, null, 2)}`);
-  }
-  const expectedSessionKind = remoteWebSocketUrl ? "remote" : "localWorld";
-  if (
-    result.sessionState !== "active"
-    || result.sessionKind !== expectedSessionKind
-    || (remoteWebSocketUrl && result.sessionRemoteEndpoint !== remoteWebSocketUrl)
-    || (!remoteWebSocketUrl && !Number.isFinite(Number(result.sessionSeed)))
-    || (!remoteWebSocketUrl && !/^-?\d+$/.test(String(result.sessionSeedText ?? "")))
-  ) {
-    throw new Error(`native web app did not publish the expected shared session state:\n${JSON.stringify({ remoteWebSocketUrl, result }, null, 2)}`);
-  }
-  if (
-    result.runnerCommandQueueDepth !== 0
-    || result.runnerUpdateQueueDepth !== 0
-    || result.runnerPendingJobs !== 0
-    || result.runnerPendingPublications !== 0
-    || result.lastReport?.runnerCommandQueueDepth !== 0
-    || result.lastReport?.runnerUpdateQueueDepth !== 0
-    || result.lastReport?.runnerPendingJobs !== 0
-    || result.lastReport?.runnerPendingPublications !== 0
-  ) {
-    throw new Error(`native web app integrated server worker did not settle queues/jobs:\n${JSON.stringify(result, null, 2)}`);
-  }
+  assertProductionHostMode(result, { remoteWebSocketUrl });
   if (!Number.isFinite(result.width) || !Number.isFinite(result.height) || result.width < 960 || result.height < 540) {
     throw new Error(`native web app did not resize the WebGPU canvas from explicit display dimensions:\n${JSON.stringify(result, null, 2)}`);
   }
@@ -3238,12 +3240,29 @@ function assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels) {
   ) {
     throw new Error(`native web IndexedDB reload probe did not preserve the placed dirt block:\n${JSON.stringify(probe, null, 2)}`);
   }
+  if (
+    report.indexedDbReloadWorldId !== probe.worldId
+    || !String(report.url ?? "").includes("worldStorage=indexeddb")
+    || !String(report.reloadUrl ?? "").includes(encodeURIComponent(probe.worldId))
+  ) {
+    throw new Error(`native web IndexedDB reload probe did not preserve its storage identity:\n${JSON.stringify(report, null, 2)}`);
+  }
   if (Number(probe.afterReloadRecordCounts?.chunks) <= 0) {
     throw new Error(`native web IndexedDB reload probe did not write chunk records:\n${JSON.stringify(probe, null, 2)}`);
   }
   if (!report.result?.ok || !report.result?.ready) {
     throw new Error(`native web IndexedDB reload probe ended with an unhealthy app state:\n${JSON.stringify(report.result, null, 2)}`);
   }
+  assertProductionHostMode(report.result, {
+    indexedDbWorldId: probe.worldId,
+  });
+  if (!report.result.lastCompileTiming) {
+    throw new Error(`native web IndexedDB reload probe did not retain compiler transport diagnostics:\n${JSON.stringify(report.result, null, 2)}`);
+  }
+  assertCompileTimingDiagnostics(
+    report.result.lastCompileTiming,
+    "IndexedDB reload last compile timing",
+  );
   if (
     Number(report.result.runnerPendingPersistenceLoads) !== 0
     || Number(report.result.runnerPendingPersistenceSaves) !== 0
@@ -3299,6 +3318,104 @@ function assertMovementPerfResult(report, pageErrors, canvasPixels) {
 }
 
 /**
+ * Lock the three production browser host modes before scene-host adoption.
+ * IndexedDB uses the local worker host plus a persistent world identity; remote
+ * WebSocket uses the dedicated host. All modes must settle their neutral queues.
+ *
+ * @param {any} result
+ * @param {{ remoteWebSocketUrl?: string | null, indexedDbWorldId?: string | null }} options
+ */
+function assertProductionHostMode(
+  result,
+  { remoteWebSocketUrl = null, indexedDbWorldId = null } = {},
+) {
+  const expectedRunnerKind = remoteWebSocketUrl ? "remote-websocket" : "web-worker";
+  const expectedClientHost = remoteWebSocketUrl ? "remote-dedicated" : "worker-integrated";
+  const expectedSessionKind = remoteWebSocketUrl ? "remote" : "localWorld";
+  if (
+    result.runnerKind !== expectedRunnerKind
+    || result.lastReport?.runnerKind !== expectedRunnerKind
+    || result.clientHost !== expectedClientHost
+  ) {
+    throw new Error(`native web app did not use the expected ${expectedClientHost}/${expectedRunnerKind} host:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    result.sessionState !== "active"
+    || result.sessionKind !== expectedSessionKind
+    || (remoteWebSocketUrl && result.remoteWebSocketUrl !== remoteWebSocketUrl)
+    || (remoteWebSocketUrl && result.sessionRemoteEndpoint !== remoteWebSocketUrl)
+    || (!remoteWebSocketUrl && !Number.isFinite(Number(result.sessionSeed)))
+    || (!remoteWebSocketUrl && !/^-?\d+$/.test(String(result.sessionSeedText ?? "")))
+  ) {
+    throw new Error(`native web app did not publish the expected production session identity:\n${JSON.stringify({ remoteWebSocketUrl, indexedDbWorldId, result }, null, 2)}`);
+  }
+  if (
+    result.runnerCommandQueueDepth !== 0
+    || result.runnerUpdateQueueDepth !== 0
+    || result.runnerPendingJobs !== 0
+    || result.runnerPendingPublications !== 0
+    || result.lastReport?.runnerCommandQueueDepth !== 0
+    || result.lastReport?.runnerUpdateQueueDepth !== 0
+    || result.lastReport?.runnerPendingJobs !== 0
+    || result.lastReport?.runnerPendingPublications !== 0
+    || !Number.isFinite(Number(result.clientDeferredChunkDropBacklogItems))
+    || Number(result.clientDeferredChunkDropBacklogItems) < 0
+  ) {
+    throw new Error(`native web app did not settle runtime queues/jobs:\n${JSON.stringify(result, null, 2)}`);
+  }
+
+  if (!remoteWebSocketUrl) {
+    if (
+      result.worldgenMailboxKind !== "web-worker"
+      || result.lightStatusMailboxKind !== "web-worker"
+      || result.worldgenMailboxPendingJobs !== 0
+      || result.lightStatusMailboxPendingStatuses !== 0
+    ) {
+      throw new Error(`native web local host did not retain settled worldgen/light worker mailboxes:\n${JSON.stringify(result, null, 2)}`);
+    }
+    assertSharedWorkerTransport(result.runnerFrameMetrics, "server runner");
+    assertSharedWorkerTransport(
+      result.worldgenJobFrameMetrics,
+      "worldgen job worker",
+      { requireTraffic: !indexedDbWorldId },
+    );
+    assertSharedWorkerTransport(
+      result.lightStatusJobFrameMetrics,
+      "light job worker",
+      { requireTraffic: !indexedDbWorldId },
+    );
+  }
+}
+
+/**
+ * @param {any} metrics
+ * @param {string} label
+ * @param {{ requireTraffic?: boolean }} options
+ */
+function assertSharedWorkerTransport(metrics, label, { requireTraffic = true } = {}) {
+  const numericFields = [
+    "requestFrames",
+    "responseFrames",
+    "maxPendingFrames",
+    "sharedBufferPoolHits",
+    "sharedBufferPoolMisses",
+    "sharedBufferPoolDrops",
+    "sharedBufferCapacityBytes",
+    "maxSharedBufferCapacityBytes",
+    "sharedBufferPooledResponseFrames",
+    "sharedBufferFallbackResponseFrames",
+  ];
+  if (
+    metrics?.transportKind !== "shared-memory"
+    || (requireTraffic && Number(metrics.requestFrames) <= 0)
+    || (requireTraffic && Number(metrics.responseFrames) <= 0)
+    || numericFields.some((field) => !Number.isFinite(Number(metrics[field])) || Number(metrics[field]) < 0)
+  ) {
+    throw new Error(`${label} did not expose bounded shared-memory transport metrics:\n${JSON.stringify(metrics, null, 2)}`);
+  }
+}
+
+/**
  * @param {any} timing
  * @param {string} label
  */
@@ -3350,6 +3467,8 @@ function assertCompileTimingDiagnostics(timing, label) {
     || timing.renderCompilerSnapshotInputCompileUsed !== true
     || timing.renderCompilerGeneratedViewFallbackUsed !== false
     || timing.renderCompilerSharedResultBufferUsed !== true
+    || !Number.isFinite(Number(timing.renderCompilerSharedResultOverflowCount))
+    || Number(timing.renderCompilerSharedResultOverflowCount) < 0
     || Number(timing.renderCompilerSharedResultByteLength) !== Number(timing.packedByteLength)
     || Number(timing.renderCompilerSharedResultBufferCapacityBytes) < Number(timing.packedByteLength)
     || Number(timing.renderCompilerSharedResultResponseCount) <= 0

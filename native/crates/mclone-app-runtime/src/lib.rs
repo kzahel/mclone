@@ -21,6 +21,7 @@ pub mod lod_coverage;
 pub mod native_remote_session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_session_runtime;
+pub mod platform_operation;
 pub mod prepared_assets;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod render_assets;

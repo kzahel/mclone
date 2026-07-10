@@ -1,7 +1,8 @@
 # 170: Web Scene-Host Adoption
 
-Status: draft implementation plan 2026-07-10; Slice 0 is next. Production web
-still uses `WebChunkRenderSession`; no adoption code has landed.
+Status: active 2026-07-10; Slice 0 (baseline, tripwires, and contract locks)
+landed. Slice 1 is next. Production web still uses
+`WebChunkRenderSession`; no host-adoption cutover code has landed.
 
 Topic: [`web-scene-host-adoption`](../topics/web-scene-host-adoption.md)
 
@@ -60,7 +61,8 @@ This tactical is complete when:
 
 Verified on 2026-07-10:
 
-- `native/apps/mclone-web-client/src/web_canvas.rs` is 6,431 lines.
+- `native/apps/mclone-web-client/src/web_canvas.rs` is 6,454 lines after the
+  Slice 0 deferred-drop diagnostic was added.
   `WebChunkRenderSession` combines WebGPU resources with runtime/session state,
   camera/input construction, settings effects, session dispatch, catalog work,
   render synchronization/uploads, actors, UI, and full-frame ordering.
@@ -78,7 +80,7 @@ Verified on 2026-07-10:
 - shared client-experience/session/catalog reducers exist, but web consumes
   some of their outputs through its own matches.
 
-The direct portability gate currently reports 95 errors:
+The direct portability gate currently reports 98 errors:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml \
@@ -258,7 +260,7 @@ The production cutover may use several local commits while being developed,
 but the landed slice must not leave one host mode or a runtime flag on the old
 orchestrator.
 
-## Slice 0: Baseline, Tripwires, And Contract Locks
+## Slice 0: Baseline, Tripwires, And Contract Locks — DONE (2026-07-10)
 
 Purpose: make the current behavior and forbidden end state executable before
 moving ownership.
@@ -291,6 +293,123 @@ Exit criteria:
 - async state-machine edge cases are test-locked independently of JS promises;
 - performance thresholds use current evidence rather than invented values; and
 - no production behavior or user-facing feature profile changes.
+
+### Slice 0 Result
+
+The slice landed without moving production ownership. The web app still uses
+`WebChunkRenderSession`, and the feature profile is unchanged.
+
+Owner inventory:
+
+| Current owner/block | Current responsibility | Destination locked by this slice |
+|---|---|---|
+| `WebChunkRenderSession` constructors, runtime install, and shutdown | local worker, IndexedDB local-world, remote WebSocket startup/replacement, and teardown | `McloneSceneHost` session policy plus neutral runtime/platform-operation services |
+| `apply_client_session_*` and `install_started_runtime_with_descriptor` | session transition, failure restoration, UI projection, and runtime replacement | `McloneSceneHost`; browser promises only execute typed operations |
+| catalog response/error writers and `WebChunkApp.completeWorldCatalogRequest` | catalog intent, IndexedDB promise execution, and follow-up session start | shared host/catalog policy plus browser platform-operation executor |
+| `apply_client_experience_settings_effects` | settings policy and camera/render/UI mutation | `McloneSceneHost` |
+| app-local `EngineCameraInput`, pose sync, and interaction methods | camera semantics, movement, target selection, break/place, and hotbar synchronization | `McloneSceneHost`; DOM events remain in `WebFrameDriver` |
+| `sync_render_sections_with_budget`, compiler doorbells, and result acceptance | dirty/revision planning, budget-one admission, compiler wake relay, and accepted/stale accounting | host render policy plus injected browser render-compiler service with a private wake sink |
+| `render_chunk_report_with_cache_update` | upload decisions and sky, terrain, actors, translucent terrain, HUD/UI, submit, and present ordering | host frame assembly/admission; `WebFrameDriver` retains canvas target acquisition and final presentation |
+| app-local actor interpolation, HUD/UI assembly, and diagnostics projection | actor/effect/UI policy and public browser report assembly | `McloneSceneHost`; driver may publish already-decided neutral diagnostics |
+| `WebChunkApp.tickFrame` and rAF busy guard | cadence plus duplicated camera/render stepping | thin `WebFrameDriver` cadence, input collection, shared monotonic-time projection, and one host step |
+| `WebChunkApp` input, resize, fetch, Worker, IndexedDB, and WebSocket objects | browser resource and event ownership | retained in `WebFrameDriver` and concrete browser services |
+| `handleSessionStartAction`, `restartSessionFromUiAction`, and `handleWorldCatalogRequest` | promise serialization around app-local policy matches | typed platform-operation executor; no policy match remains in the driver |
+| `startAndPostCompileTiming` | compiler wake relay and worker metric merge | browser render-compiler backend; host consumes neutral queue/timing facts |
+
+`scripts/check-web-scene-host-adoption.mjs`, exposed as
+`pnpm native:web:scene-host-adoption`, makes this inventory executable. Its
+warning-mode baseline currently reports:
+
+- 6,454 Rust lines and 1,881 TypeScript lines;
+- one combined Rust owner and one combined TypeScript owner;
+- settings `2`, session `2`, transition `5`, runtime-install `3`, camera `1`,
+  render-admission `1`, and frame-assembly `3` source-pattern hits; and
+- async session `2`, catalog `2`, restart `4`, and compiler-wake `2` hits.
+
+The command succeeds with a warning before cutover and supports `--enforce` for
+Slice 5, when every forbidden owner must be gone.
+
+`mclone_app_runtime::platform_operation` now provides the portable operation
+identity/lifetime lock before browser promises use it. Four focused tests prove
+host-lifetime request-ID uniqueness, out-of-order identity matching,
+duplicate/unknown observability, epoch/stale rejection, exact retry-state
+restoration on failure, and teardown invalidation/cancellation. It stores only
+typed neutral kind/restoration data; browser objects remain outside the ledger.
+
+Browser baseline evidence, captured on 2026-07-10 with Chrome/WebGPU and debug
+WASM:
+
+- `pnpm native:web:app-smoke` passed as `worker-integrated` / `web-worker` /
+  `localWorld`, loaded the expected 49 chunks at radius 3, rendered terrain,
+  actors, HUD, and current title/options/world-list UI, and ended with command,
+  update, job, and publication queues at zero.
+- `pnpm native:web:indexeddb-smoke` is the new named production-mode gate. It
+  persisted dirt block state `5` across reload, retained 81 chunk plus one
+  entity-chunk record, used the worker-integrated host, and ended with runner
+  and persistence queues at zero.
+- `pnpm native:web:remote-smoke` passed as `remote-dedicated` /
+  `remote-websocket` / `remote`, preserved the remote session through the
+  shared UI probe, rendered the same world/UI surface, and ended with all
+  neutral queues at zero.
+- All three modes used the resident `shared-result-buffer` compiler with no
+  generated-view fallback or shared-result overflow. Local runner, worldgen,
+  and light transports reported `shared-memory`; the remote runner reported
+  `websocket` and correctly reported no local job-worker transport.
+- `pnpm native:web:movement-perf` crossed three chunks with 68 advancing
+  frames/renders. Fourteen movement compile samples measured total
+  `6.7..19.0 ms` (average `10.0 ms`), worker round-trip `3.9..11.2 ms`
+  (average `5.6 ms`), apply `1.0..3.6 ms` (average `1.5 ms`), and compile-local
+  max frame gaps `6.7..10.0 ms` (average `8.3 ms`). These are observations, not
+  acceptance thresholds.
+- An extended 16-chunk movement run advanced 241 frames/renders, observed seven
+  unload updates, a `10.33 ms` maximum app frame gap, and zero final deferred
+  drop items. Other settled endpoints retained 70 deferred-drop items for the
+  local app and 295 for remote WebSocket, while IndexedDB reload retained zero.
+  The current web path performs no explicit drain, so there is no honest drain
+  cost to time yet; the path-dependent nonzero backlog is the Slice 2 input for
+  selecting a bounded, observable browser service.
+
+The following `/tmp` captures were visually inspected and not committed:
+
+- `/tmp/mclone-web-scene-host-slice0-local-world.png`
+- `/tmp/mclone-web-scene-host-slice0-local-ui.png`
+- `/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png`
+- `/tmp/mclone-web-scene-host-slice0-remote-world.png`
+- `/tmp/mclone-web-scene-host-slice0-remote-ui.png`
+- `/tmp/mclone-web-scene-host-slice0-movement-rd16-canvas.png`
+
+The local/remote captures showed textured mountain terrain, sky, actors,
+crosshair/hotbar, and debug HUD; the title UI was centered and legible; the
+IndexedDB capture showed the persisted dirt edit; and the extended movement
+capture was intentionally sky-dominant after flight while retaining the mobile
+menu, crosshair, hotbar, and touch layout without corruption.
+
+Validation passed:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+cargo check --manifest-path native/Cargo.toml --workspace
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-app-runtime --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:typecheck
+pnpm native:web:scene-host-adoption
+pnpm native:web:app-smoke
+pnpm native:web:indexeddb-smoke
+pnpm native:web:remote-smoke
+pnpm native:web:movement-perf
+```
+
+The expected pre-Slice-3 direct gate still fails with 98 errors rooted in the
+documented native runtime/assets/catalog/camera/teleport boundary families:
+
+```bash
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-scene --target wasm32-unknown-unknown
+```
 
 ## Slice 1: Portable Scene Prerequisites
 
@@ -659,10 +778,10 @@ the evidence and options, and revise this tactical before production cutover.
   while its implementation advances, but Slice 5 consumes its epoch seam and
   must not race it with another web resource lifecycle.
 
-## Recommended Start
+## Recommended Next Step
 
-Begin with Slice 0. The first implementation commit should add executable
-baseline/tripwire coverage and the explicit old-owner-to-new-owner inventory;
-it should not yet move production web behavior. Slices 1-3 can then remove the
-WASM blockers in reviewable shared-first commits while Tactical 169 stabilizes
-the asset epoch needed by the eventual atomic cutover.
+Implement Slice 1 only. Introduce the shared monotonic time contract, move
+neutral render-asset data out of native cfg islands, make camera reconciliation
+target-neutral, and replace concrete teleport/audio ownership with explicit
+optional capabilities. Keep production web on `WebChunkRenderSession`; do not
+begin the neutral runtime-shell split from Slice 2 yet.

@@ -389,6 +389,10 @@ impl WebRuntime {
         self.core.unload_update_count()
     }
 
+    pub fn deferred_client_chunk_drop_item_count(&self) -> usize {
+        self.core.deferred_client_chunk_drop_item_count()
+    }
+
     pub const fn protocol_codec_roundtrip(&self) -> bool {
         self.core.protocol_codec_roundtrip()
     }

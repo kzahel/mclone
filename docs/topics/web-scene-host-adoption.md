@@ -2,10 +2,12 @@
 
 Topic: web-scene-host-adoption
 
-Status: planned 2026-07-10. The target shape and implementation sequence are
+Status: active 2026-07-10. Tactical 170 Slice 0 landed the executable browser
+baselines, warning-mode source inventory, deferred-drop diagnostic, and typed
+platform-operation contract. Slice 1 is next. The implementation sequence is
 recorded in
 [`170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md);
-implementation has not started.
+production adoption has not started and the old web owner remains active.
 
 ## Scope
 
@@ -52,7 +54,8 @@ orchestrator.
 The browser client is functional and already shares important lower-level
 contracts, but the top-level orchestration is still forked:
 
-- `native/apps/mclone-web-client/src/web_canvas.rs` is 6,431 lines.
+- `native/apps/mclone-web-client/src/web_canvas.rs` is 6,454 lines after the
+  Slice 0 deferred-drop diagnostic was added.
   `WebChunkRenderSession` owns runtime/session state, camera/input assembly,
   settings-effect dispatch, catalog/session dispatch, render synchronization,
   GPU uploads, actors, UI, and the sky-to-present frame sequence.
@@ -81,7 +84,7 @@ cargo check --manifest-path native/Cargo.toml \
   -p mclone-scene --target wasm32-unknown-unknown
 ```
 
-It reports 95 compiler errors, but most are cascades from these root boundary
+It reports 98 compiler errors, but most are cascades from these root boundary
 families:
 
 1. `native_session_runtime` is entirely excluded from WASM.
@@ -101,7 +104,42 @@ and panics at runtime instead (the reachable scene path has 68
 `Instant::now()` call sites). A green direct WASM gate therefore proves
 compile portability only, not browser runnability; the Slice 4 browser proof
 is the runtime gate. Treat all of this as a short list of architectural
-boundaries, not 95 independent fixes.
+boundaries, not 98 independent fixes.
+
+## Slice 0 Landed Evidence (2026-07-10)
+
+- `mclone_app_runtime::platform_operation` locks request identity, unique IDs,
+  epoch/stale rejection, duplicate/unknown observability, exact failure
+  restoration, and teardown invalidation in four focused portable tests.
+- `pnpm native:web:scene-host-adoption` inventories the current combined Rust
+  and TypeScript owners in warning mode and has an enforcement mode reserved
+  for the atomic deletion slice. The baseline is 6,454 Rust lines, 1,881
+  TypeScript lines, and the exact policy-pattern counts recorded in Tactical
+  170.
+- Named executable pre-cutover gates now cover local worker
+  (`native:web:app-smoke`), IndexedDB local world
+  (`native:web:indexeddb-smoke`), and remote WebSocket
+  (`native:web:remote-smoke`). All passed with the expected host/session
+  identity, settled queues, resident compiler transport, rendered world, and
+  shared UI flow.
+- The IndexedDB gate persisted block state `5` across reload with 81 chunk and
+  one entity-chunk record. Local worker transports remained shared-memory;
+  remote runner transport remained WebSocket; compiler generated-view fallback
+  and shared-result overflow were both zero.
+- The three-chunk movement baseline advanced 68 frames/renders. Compile samples
+  measured `6.7..19.0 ms` total, `3.9..11.2 ms` worker, `1.0..3.6 ms` apply,
+  and `6.7..10.0 ms` compile-local max frame gaps. These values are evidence,
+  not hard-coded budgets.
+- Deferred-drop backlog is now observable. Settled endpoints measured 70 items
+  for local worker, 295 for remote WebSocket, and zero after IndexedDB reload;
+  an extended 16-chunk/7-unload run also ended at zero. Because current web has
+  no explicit drain, Slice 2 must select a bounded observable backend from this
+  path-dependent evidence rather than assume zero work.
+- Current local/remote world and title UI, the IndexedDB persisted edit, and the
+  extended movement/mobile layout were visually inspected in `/tmp`; no image
+  was added to the repository.
+
+No production owner, behavior, or feature-profile state moved in Slice 0.
 
 ## Locked Decisions
 
@@ -203,8 +241,10 @@ separately reviewable.
   browser event, if any, maps to the host's lifecycle save trigger; web
   persistence currently flows continuously through the runner with no
   `pagehide`/`visibilitychange` hook.
-- **Deferred drops:** measure the current browser cost before choosing a
-  frame-budgeted main-thread executor or another Worker lane.
+- **Deferred drops:** Slice 0 observed path-dependent settled backlogs of 0,
+  70, and 295 items and confirmed that current web has no explicit drain.
+  Slice 2 must choose a bounded frame-budgeted executor or Worker lane and
+  retain backlog reporting.
 - **WebGPU device/surface loss:** the cutover must at least preserve current
   recovery or produce a controlled restart/error state; it may not silently
   wedge the session.
@@ -289,7 +329,7 @@ Primary code:
 
 ## Recommended Next Work
 
-Start Tactical 170 Slice 0: capture executable browser baselines, add a source
-inventory/tripwire for the app-local orchestration that must disappear, and
-lock the typed clock/runtime/async-operation contracts in focused tests before
-moving ownership.
+Start Tactical 170 Slice 1: introduce the shared monotonic time contract, move
+neutral render-asset data out of native cfg islands, make camera reconciliation
+target-neutral, and replace concrete teleport/audio ownership with explicit
+optional capabilities. Keep production web on `WebChunkRenderSession`.

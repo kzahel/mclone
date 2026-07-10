@@ -214,6 +214,7 @@ const runtime: AppRuntime = {
     runnerUpdateQueueDepth: 0,
     runnerPendingJobs: 0,
     runnerPendingPublications: 0,
+    clientDeferredChunkDropBacklogItems: 0,
     worldgenMailboxKind: "unknown",
     lightStatusMailboxKind: "unknown",
     worldgenMailboxPendingJobs: 0,
@@ -841,6 +842,9 @@ class WebChunkApp {
     runtime.state.runnerPendingPublications = report.runnerPendingPublications;
     runtime.state.runnerPendingPersistenceLoads = report.runnerPendingPersistenceLoads;
     runtime.state.runnerPendingPersistenceSaves = report.runnerPendingPersistenceSaves;
+    runtime.state.clientDeferredChunkDropBacklogItems = Number(
+      report.clientDeferredChunkDropBacklogItems,
+    ) || 0;
     runtime.state.worldgenMailboxKind = report.worldgenMailboxKind;
     runtime.state.lightStatusMailboxKind = report.lightStatusMailboxKind;
     runtime.state.worldgenMailboxPendingJobs = report.worldgenMailboxPendingJobs;
