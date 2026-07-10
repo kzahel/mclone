@@ -231,7 +231,7 @@ pub(crate) fn horizontal_forward_from_player_yaw_degrees(yaw_degrees: f64) -> Ve
     Vec3d::new(forward.x, 0.0, forward.z)
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {

@@ -1781,6 +1781,13 @@ fn is_one_shot_touch_action(action: InputBindingAction) -> bool {
     )
 }
 
+/// Reserved shared gamepad contract (reviewed 2026-07-10 for tactical 168
+/// Slice 10). It is intentionally retained because preferences, prompt
+/// projection, remappable bindings, dead-zone policy, and HUD presentation
+/// already share this vocabulary. No live platform adapter currently supplies
+/// gamepad events or advertises the capability; adoption requires a real
+/// desktop/browser/Android event source and device validation, not synthetic
+/// enablement in one client lane.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GamepadBindings {

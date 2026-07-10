@@ -1,16 +1,17 @@
 use super::*;
 
+use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 use mclone_app_runtime::session::SessionStorageIntent;
 
-pub(crate) type XrSessionRuntimeFactory<S> = Box<
+pub(crate) type SceneSessionRuntimeFactory<S> = Box<
     dyn FnMut(
         RemoteSessionEndpoint,
-        XrSceneOptions,
+        McloneSceneHostOptions,
         TexturedMeshAssets,
     ) -> Result<NativeSessionRuntime<S>>,
 >;
 
-pub(crate) struct StartedXrTerrainRuntime<S>
+pub(crate) struct StartedSceneRuntime<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -20,27 +21,27 @@ where
     render_stats: RenderStreamStats,
 }
 
-pub(crate) struct XrLocalStartup {
+pub(crate) struct SceneLocalStartup {
     pub(super) request: SessionStartRequest,
     pub(super) descriptor: Option<ActiveSessionDescriptor>,
-    pub(super) scene: XrSceneOptions,
+    pub(super) scene: McloneSceneHostOptions,
     pub(super) pump: LocalIntegratedStartupPump,
     pub(super) camera: EngineCameraController,
     pub(super) startup_view_pose: Option<XrStartupViewPose>,
 }
 
-pub(crate) type XrPendingSessionStart = SessionStartPayload<XrSceneOptions>;
+pub(crate) type ScenePendingSessionStart = SessionStartPayload<McloneSceneHostOptions>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum XrSessionStartOutcome {
+pub(crate) enum SceneSessionStartOutcome {
     LocalStartupQueued,
     Started(ActiveSessionDescriptor),
 }
 
 #[derive(Debug)]
-pub enum XrLocalOnlyRemoteSession {}
+pub enum SceneLocalOnlyRemoteSession {}
 
-impl RemoteDedicatedServerSession for XrLocalOnlyRemoteSession {
+impl RemoteDedicatedServerSession for SceneLocalOnlyRemoteSession {
     fn send_command_only(&mut self, _command: mclone_protocol::ClientCommand) -> Result<()> {
         match *self {}
     }
@@ -54,12 +55,12 @@ impl RemoteDedicatedServerSession for XrLocalOnlyRemoteSession {
     }
 }
 
-impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
+impl McloneSceneHost<SceneLocalOnlyRemoteSession> {
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        scene: XrSceneOptions,
+        scene: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
         actor_atlas: ActorTextureImage,
@@ -83,7 +84,7 @@ impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
     }
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -91,7 +92,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        scene: XrSceneOptions,
+        scene: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
         actor_atlas: ActorTextureImage,
@@ -135,7 +136,7 @@ where
             color_format,
             mesh_assets,
             runtime: None,
-            local_startup: Some(XrLocalStartup {
+            local_startup: Some(SceneLocalStartup {
                 request: request.clone(),
                 descriptor,
                 scene: scene.clone(),
@@ -235,7 +236,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        scene: XrSceneOptions,
+        scene: McloneSceneHostOptions,
         runtime: NativeSessionRuntime<S>,
         render_options: TexturedSectionRenderOptions,
         actor_atlas: ActorTextureImage,
@@ -245,7 +246,7 @@ where
     ) -> Result<Self> {
         let scene = scene.validated()?;
         let world_catalog = scene.world_root.clone().map(NativeWorldCatalog::new);
-        let started = start_xr_terrain_runtime(
+        let started = start_scene_runtime(
             device,
             queue,
             color_format,
@@ -391,7 +392,7 @@ where
     where
         F: FnMut(
                 RemoteSessionEndpoint,
-                XrSceneOptions,
+                McloneSceneHostOptions,
                 TexturedMeshAssets,
             ) -> Result<NativeSessionRuntime<S>>
             + 'static,
@@ -413,11 +414,11 @@ where
         self.seed_reroll.next_seed()
     }
 
-    pub(crate) fn local_world_options(&self, seed: i64) -> XrSceneOptions {
+    pub(crate) fn local_world_options(&self, seed: i64) -> McloneSceneHostOptions {
         self.scene_for_storage_intent(SessionStorageIntent::transient_local_world(seed))
     }
 
-    pub(crate) fn remote_session_options(&self, remote_addr: String) -> XrSceneOptions {
+    pub(crate) fn remote_session_options(&self, remote_addr: String) -> McloneSceneHostOptions {
         self.scene_for_storage_intent(SessionStorageIntent::remote_session(remote_addr))
     }
 
@@ -425,11 +426,11 @@ where
         &self,
         summary: &LocalWorldSummary,
         world_dir: PathBuf,
-    ) -> XrSceneOptions {
+    ) -> McloneSceneHostOptions {
         self.scene_for_storage_intent(SessionStorageIntent::catalog_world(summary, world_dir))
     }
 
-    fn scene_for_storage_intent(&self, intent: SessionStorageIntent) -> XrSceneOptions {
+    fn scene_for_storage_intent(&self, intent: SessionStorageIntent) -> McloneSceneHostOptions {
         let mut scene = self.scene.clone();
         if let Some(seed) = intent.seed() {
             scene.seed = seed;
@@ -497,8 +498,8 @@ where
         };
         let request = pending.request.clone();
         match self.start_pending_session_payload(device, queue, pending) {
-            Ok(XrSessionStartOutcome::LocalStartupQueued) => Ok(false),
-            Ok(XrSessionStartOutcome::Started(descriptor)) => {
+            Ok(SceneSessionStartOutcome::LocalStartupQueued) => Ok(false),
+            Ok(SceneSessionStartOutcome::Started(descriptor)) => {
                 self.session.complete_start(descriptor.clone());
                 self.status_overlay = StatusOverlay::hidden();
                 self.apply_started_session_ui(&descriptor);
@@ -522,8 +523,8 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        pending: mclone_app_runtime::session::PendingSessionStart<XrPendingSessionStart>,
-    ) -> Result<XrSessionStartOutcome> {
+        pending: mclone_app_runtime::session::PendingSessionStart<ScenePendingSessionStart>,
+    ) -> Result<SceneSessionStartOutcome> {
         let request = pending.request;
         let SessionStartPayload {
             runtime_kind,
@@ -533,12 +534,12 @@ where
         match runtime_kind {
             SessionRuntimeKind::Local => {
                 self.begin_local_session_start(request, Some(descriptor), scene)?;
-                Ok(XrSessionStartOutcome::LocalStartupQueued)
+                Ok(SceneSessionStartOutcome::LocalStartupQueued)
             }
             SessionRuntimeKind::Remote => {
                 let descriptor =
                     self.start_replacement_session(device, queue, request, descriptor, scene)?;
-                Ok(XrSessionStartOutcome::Started(descriptor))
+                Ok(SceneSessionStartOutcome::Started(descriptor))
             }
         }
     }
@@ -547,7 +548,7 @@ where
         &mut self,
         request: SessionStartRequest,
         descriptor: Option<ActiveSessionDescriptor>,
-        scene: XrSceneOptions,
+        scene: McloneSceneHostOptions,
     ) -> Result<()> {
         let scene = scene.validated()?;
         let mesh_assets = self.mesh_assets.clone();
@@ -559,7 +560,7 @@ where
         let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
         camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
         camera.set_first_person_player_visible(scene.first_person_player_visible);
-        self.local_startup = Some(XrLocalStartup {
+        self.local_startup = Some(SceneLocalStartup {
             request: request.clone(),
             descriptor,
             scene: scene.clone(),
@@ -645,10 +646,10 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        startup: XrLocalStartup,
+        startup: SceneLocalStartup,
         step: LocalIntegratedStartupStep,
     ) -> Result<()> {
-        let XrLocalStartup {
+        let SceneLocalStartup {
             request,
             descriptor,
             scene,
@@ -666,10 +667,14 @@ where
         // so the drained seed covers the final camera rather than the spawn camera.
         let startup_camera = glam_vec3_from_vec3d(camera.snapshot().eye);
         let (local_runtime, startup_sections) = pump
-            .drive_to_ready_reconciled(startup_camera, XR_STARTUP_READINESS_TIMEOUT, |runtime| {
-                reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose)?;
-                Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
-            })
+            .drive_to_ready_reconciled(
+                startup_camera,
+                DEFAULT_STARTUP_READINESS_TIMEOUT,
+                |runtime| {
+                    reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose)?;
+                    Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
+                },
+            )
             .context("reconcile XR local startup pose")?;
         let runtime = NativeSessionRuntime::<S>::from_active_runtime_with_descriptor(
             descriptor.clone(),
@@ -772,7 +777,7 @@ where
         }
     }
 
-    pub(crate) fn fail_local_startup(&mut self, startup: XrLocalStartup, error: anyhow::Error) {
+    pub(crate) fn fail_local_startup(&mut self, startup: SceneLocalStartup, error: anyhow::Error) {
         log::error!(
             "failed to start XR local world {:?}: {error:#}",
             startup.request
@@ -842,7 +847,7 @@ where
         queue: &wgpu::Queue,
         request: SessionStartRequest,
         descriptor: ActiveSessionDescriptor,
-        scene: XrSceneOptions,
+        scene: McloneSceneHostOptions,
     ) -> Result<ActiveSessionDescriptor> {
         let ActiveSessionDescriptor::Remote { endpoint } = &descriptor else {
             bail!("XR replacement runtime requires a remote descriptor: {descriptor:?}");
@@ -862,7 +867,7 @@ where
             }
         };
         let movement_speed_multiplier = scene.movement_speed_multiplier;
-        let started = match start_xr_terrain_runtime(
+        let started = match start_scene_runtime(
             device,
             queue,
             self.color_format,
@@ -999,7 +1004,7 @@ where
             self.status_overlay = StatusOverlay::hidden();
             self.session.request_start(
                 start.request,
-                XrPendingSessionStart {
+                ScenePendingSessionStart {
                     runtime_kind: SessionRuntimeKind::Local,
                     options: scene,
                     descriptor: start.descriptor,
@@ -1168,7 +1173,7 @@ struct XrSessionHostEffects<'a, 'device, S>
 where
     S: RemoteDedicatedServerSession,
 {
-    scene: &'a mut XrMcloneTerrainState<S>,
+    scene: &'a mut McloneSceneHost<S>,
     device: &'device wgpu::Device,
     queue: &'device wgpu::Queue,
 }
@@ -1207,7 +1212,7 @@ where
     }
 }
 
-impl<S> ClientExperienceSettingsHost for XrMcloneTerrainState<S>
+impl<S> ClientExperienceSettingsHost for McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -1301,7 +1306,7 @@ where
     }
 
     fn sync_player_appearance(&mut self) -> Result<()> {
-        if let Err(error) = XrMcloneTerrainState::sync_player_appearance(self) {
+        if let Err(error) = McloneSceneHost::sync_player_appearance(self) {
             log::warn!("failed to sync XR player appearance: {error:#}");
         }
         Ok(())
@@ -1407,14 +1412,14 @@ where
     }
 }
 
-pub(crate) fn start_xr_terrain_runtime<S>(
+pub(crate) fn start_scene_runtime<S>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
     runtime: NativeSessionRuntime<S>,
     movement_speed_multiplier: f32,
     startup_view_pose: Option<XrStartupViewPose>,
-) -> Result<StartedXrTerrainRuntime<S>>
+) -> Result<StartedSceneRuntime<S>>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -1435,7 +1440,7 @@ where
     let completion = NativeSessionStartupPump::from_runtime(runtime)
         .drive_to_ready_reconciled(
             startup_camera_position,
-            XR_STARTUP_READINESS_TIMEOUT,
+            DEFAULT_STARTUP_READINESS_TIMEOUT,
             |runtime| {
                 reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose)?;
                 Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
@@ -1495,7 +1500,7 @@ where
         final_step.poll_ms,
         elapsed_ms(initial_poll_start.elapsed())
     );
-    Ok(StartedXrTerrainRuntime {
+    Ok(StartedSceneRuntime {
         runtime,
         camera,
         draw,
@@ -1508,9 +1513,6 @@ where
 /// request optional shared instrumentation for XR camera-commit profiling.
 pub(crate) const XR_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
     EngineCameraCommitContext::send_only("XR terrain");
-
-/// Deadline for the XR startup drive, matching the shared default startup timeout.
-const XR_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Apply the XR startup physical pose against the pump-owned runtime during
 /// reconciliation (docs/tactical/167 Slice 4): accept any pending server position
@@ -1578,7 +1580,9 @@ pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
     xr_native_client_experience_profile()
 }
 
-pub fn local_integrated_scene_options(scene: &XrSceneOptions) -> LocalIntegratedSceneOptions {
+pub fn local_integrated_scene_options(
+    scene: &McloneSceneHostOptions,
+) -> LocalIntegratedSceneOptions {
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
     let mut options =
@@ -1606,7 +1610,7 @@ pub fn local_integrated_scene_options(scene: &XrSceneOptions) -> LocalIntegrated
         .with_integrated_world_session_storage(storage)
 }
 
-pub fn single_view_host_options(scene: &XrSceneOptions) -> SingleViewHostOptions {
+pub fn single_view_host_options(scene: &McloneSceneHostOptions) -> SingleViewHostOptions {
     SingleViewHostOptions::new(scene.center(), scene.render_distance)
         .with_render_compile_worker_count(scene.render_compile_worker_count)
         .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)

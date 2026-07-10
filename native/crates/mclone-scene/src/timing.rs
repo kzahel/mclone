@@ -412,7 +412,7 @@ impl XrTerrainFrameTiming {
     }
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {

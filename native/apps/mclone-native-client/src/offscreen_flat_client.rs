@@ -449,7 +449,7 @@ fn configure_screenshot_scene(
 }
 
 fn clear_scripted_interaction_target(
-    host: &crate::desktop_scene_host::DesktopMonoSceneHost,
+    host: &crate::desktop_scene_host::DesktopSceneHost,
     base_x: i32,
     base_z: i32,
 ) -> Option<ScriptedInteractionTarget> {

@@ -19,7 +19,7 @@ use mclone_scene::{
 use mclone_ui::{GameUiAction, GameUiHost, GuiKey, GuiScale, Point, UiDebugSnapshot};
 
 use crate::cli::{SceneOptions, WindowStartIntent};
-use crate::desktop_scene_host::{DesktopMonoSceneHost, create_desktop_mono_scene_host};
+use crate::desktop_scene_host::{DesktopSceneHost, create_desktop_scene_host};
 use crate::scene_runtime::WindowSceneAssets;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -76,7 +76,7 @@ impl HostEffects for WinitHostEffects {
 }
 
 pub(crate) struct WinitFrameDriver {
-    host: DesktopMonoSceneHost,
+    host: DesktopSceneHost,
     depth: ChunkDepthTarget,
     target_size: [u32; 2],
     adaptive_render_admission_budget: bool,
@@ -105,7 +105,7 @@ impl WinitFrameDriver {
         if start_intent == WindowStartIntent::Menu {
             initial_scene.remote_addr = None;
         }
-        let mut host = create_desktop_mono_scene_host(
+        let mut host = create_desktop_scene_host(
             device,
             queue,
             render_config.color_format,
@@ -374,11 +374,11 @@ impl WinitFrameDriver {
         self.host.set_frame_pipeline_report(report, revision);
     }
 
-    pub(crate) fn host(&self) -> &DesktopMonoSceneHost {
+    pub(crate) fn host(&self) -> &DesktopSceneHost {
         &self.host
     }
 
-    pub(crate) fn host_mut(&mut self) -> &mut DesktopMonoSceneHost {
+    pub(crate) fn host_mut(&mut self) -> &mut DesktopSceneHost {
         &mut self.host
     }
 

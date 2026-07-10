@@ -93,8 +93,8 @@ mod android {
     };
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_scene::{
-        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFrameLocomotionAutomation,
-        XrFramePipelineHostTiming, XrMcloneTerrainState, XrSceneFrameTarget, XrSceneOptions,
+        MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions, XrDebugUiScreen,
+        XrFrameLocomotionAutomation, XrFramePipelineHostTiming, XrSceneFrameTarget,
         XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
         record_xr_frame_pipeline, record_xr_frame_pipeline_with_peer_threads,
         single_view_host_options, xr_frame_pipeline_accounting_config,
@@ -120,7 +120,7 @@ mod android {
         graphics_vulkan::OpenXrStereoState,
     >;
     type AndroidXrSceneRuntime = NativeSessionRuntime<NativeRemoteServerSession>;
-    type AndroidXrTerrainState = XrMcloneTerrainState<NativeRemoteServerSession>;
+    type AndroidXrTerrainState = McloneSceneHost<NativeRemoteServerSession>;
 
     const LOG_TAG: &str = "mclone_android_xr";
     const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
@@ -287,7 +287,7 @@ mod android {
 
     #[derive(Clone, Debug, PartialEq)]
     struct AndroidXrStartupOptions {
-        scene: XrSceneOptions,
+        scene: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         remote_addr: Option<String>,
         default_world_root_enabled: bool,
@@ -324,7 +324,7 @@ mod android {
     impl Default for AndroidXrStartupOptions {
         fn default() -> Self {
             Self {
-                scene: XrSceneOptions::default(),
+                scene: McloneSceneHostOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
                 remote_addr: None,
                 default_world_root_enabled: true,
@@ -954,14 +954,14 @@ mod android {
     }
 
     fn android_xr_startup_scene_defaults() -> StartupSceneOptions {
-        XrSceneOptions::default().to_startup_scene()
+        McloneSceneHostOptions::default().to_startup_scene()
     }
 
     fn android_xr_scene_options_from_startup(
         scene: StartupSceneOptions,
         storage: &StartupWorldStorageProjection,
-    ) -> XrSceneOptions {
-        XrSceneOptions::from_startup_scene(
+    ) -> McloneSceneHostOptions {
+        McloneSceneHostOptions::from_startup_scene(
             scene,
             storage.world_root.clone(),
             storage.world_dir.clone(),
@@ -1426,7 +1426,7 @@ mod android {
     fn run_android_openxr_mclone(
         app: &AndroidApp,
         runtime_assets: AndroidXrRuntimeAssets,
-        scene_options: XrSceneOptions,
+        scene_options: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         startup_view_pose: Option<XrStartupViewPose>,
         remote_addr: Option<String>,
@@ -2021,7 +2021,7 @@ mod android {
         queue: &wgpu::Queue,
         runtime_assets: AndroidXrRuntimeAssets,
         startup_view_pose: Option<XrStartupViewPose>,
-        scene_options: XrSceneOptions,
+        scene_options: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         remote_addr: Option<String>,
     ) -> Result<AndroidXrTerrainState> {
@@ -2043,7 +2043,7 @@ mod android {
                     "failed to initialize Android XR remote dedicated runtime from {remote_addr}"
                 )
             })?;
-            XrMcloneTerrainState::with_runtime(
+            McloneSceneHost::with_runtime(
                 device,
                 queue,
                 XR_COLOR_FORMAT,
@@ -2056,7 +2056,7 @@ mod android {
                 startup_view_pose,
             )?
         } else {
-            XrMcloneTerrainState::start_local_async(
+            McloneSceneHost::start_local_async(
                 device,
                 queue,
                 XR_COLOR_FORMAT,
@@ -2086,7 +2086,7 @@ mod android {
 
     fn android_xr_remote_scene_runtime(
         endpoint: RemoteSessionEndpoint,
-        scene_options: XrSceneOptions,
+        scene_options: McloneSceneHostOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<AndroidXrSceneRuntime> {
         let session = NativeRemoteServerSession::connect(endpoint.address.as_str(), "Android XR")?;

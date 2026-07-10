@@ -16,7 +16,9 @@ host) landed 2026-07-10; Slice 7e (shared optional camera-reconcile timing and
 scene-local timed-fork deletion) landed 2026-07-10; Slice 8 (flat Android onto
 the shared Mono host, shared touch semantics, and native capability-ledger
 closeout) landed 2026-07-10; Slice 9 (headset-free synthetic stereo capture
-and keyboard-fed XR semantics) landed 2026-07-10. (Slices 0–2 are
+and keyboard-fed XR semantics) landed 2026-07-10; Slice 10 (cleanup,
+enforcement, neutral public names, and durable docs) completed 2026-07-10.
+Tactical complete. (Slices 0–2 are
 independent per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.)
 Post-Slice-3
 review corrections landed
@@ -35,8 +37,8 @@ and the structural completion of [`165`](165-native-feature-parity-baseline.md)
 
 ## Principle: delete, don't port
 
-The most mature orchestrator in the tree is the XR scene state
-(`mclone-scene::XrMcloneTerrainState`). Both XR apps are already thin over
+The most mature orchestrator in the tree began as the XR scene state (now
+`mclone-scene::McloneSceneHost`). Both XR apps are already thin over
 it, which is why desktop XR and Quest cannot diverge on gameplay semantics.
 The flat family has no equivalent: `FlatClientDriver` lives inside the desktop
 app crate, and flat Android re-implements the whole loop by hand, worse.
@@ -1495,6 +1497,45 @@ Final acceptance checklist (run everything on this machine):
 - 165's non-web exception ledger is empty or every remaining row has a
   recorded reason unrelated to this tactical.
 
+Slice 10 implementation (2026-07-10): the desktop compatibility
+`WindowSceneRuntime`/`WindowSceneStartupPump` facade and its duplicate test
+suite are deleted; headless/perf/rebuild harnesses now use
+`NativeSceneRuntime` and the shared host directly. The public native core is
+`McloneSceneHost<S>` with `McloneSceneHostOptions`; no compatibility aliases or
+old XR-prefixed public names remain. Related desktop construction names are
+neutral as well.
+
+`DEFAULT_STARTUP_READINESS_TIMEOUT` is public and single-homed in
+`mclone-app-runtime`; scene, desktop, and remote visual-smoke consumers import
+it. `SESSION_IDLE_POLL_INTERVAL` remains single-homed in `mclone-xr-host`.
+`pnpm native:thin-adapters:purity` now rejects native app-local settings or
+session dispatch, render-section sync/upload policy, engine-camera literals,
+and low-level OpenXR sequencing, then composes the existing scene-host and
+OpenXR-driver purity gates.
+
+The shared gamepad API is intentionally retained as a dated contract, not
+synthetically enabled. No platform adapter currently provides real gamepad
+events or advertises the capability; adoption requires a real desktop,
+browser, or Android event source and device validation. `AGENTS.md` was audited
+and already states the completed host/driver ownership boundary, so no guidance
+edit was needed.
+
+Slice 10 validation (2026-07-10): workspace tests, workspace check, direct
+`wasm32-unknown-unknown` check, browser build, formatting, diff check, thin
+adapter/scene-host/OpenXR-driver purity gates, and the native remote two-client
+smoke pass. The inspected desktop offscreen capture renders 64 sections (11
+drawn), and the inspected 1280x640 XR-emulation capture renders 166 sections
+(24 drawn), two eye UI composites, and 268,570 differing eye pixels.
+
+Real-lane coverage also passes: macOS WiVRn/Quest desktop OpenXR submitted 120
+frames and rendered 125 sections (7 drawn); the arm64+x86_64 flat Android APK
+build and all three `jstorrent-tablet` AVD gates pass, with touch and replacement
+screenshots inspected; the Quest session-replacement smoke passes; and the
+terrain multiview proof renders six sections (two drawn per eye) with 2,357,731
+differing pixels. The native non-web feature-exception ledger is empty, the two
+canonical timing constants each have one definition, and source scans find no
+old host/options names or desktop compatibility wrappers.
+
 ## Cross-slice guardrails
 
 1. **Delete, don't port.** When migrating a surface onto the host, the old
@@ -1580,7 +1621,8 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 10; Slices 0–9 are implemented. Preserve the inspected
-headset-free stereo gate while doing cleanup, enforcement, durable docs, and
-neutral host renaming. Do not fold deferred web adoption or unrelated feature
-work into the closeout slice.
+Tactical 168 is complete through Slice 10. Preserve the executable native
+thin-adapter and headset-free stereo gates when adding scene-host behavior.
+Web retains the runner/session seams prepared in Slice 2, but adopting the
+shared host is a separate follow-up tactical rather than another Slice 168
+change.

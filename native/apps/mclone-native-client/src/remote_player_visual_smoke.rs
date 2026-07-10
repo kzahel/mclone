@@ -8,6 +8,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
+use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_net::{
     NativeClientSession, NativeTransportError, complete_server_handshake,
@@ -29,7 +30,6 @@ use crate::offscreen_flat_client::run_offscreen_flat_client_screenshot;
 const REMOTE_SETTLE_MS: u64 = 250;
 const REMOTE_ACTOR_MOVE_STEP_MS: u64 = 50;
 const REMOTE_ACTOR_MOVE_STEP_BLOCKS: f64 = 0.08;
-const SMOKE_READY_TIMEOUT: Duration = Duration::from_secs(120);
 const SERVER_JOB_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -439,7 +439,7 @@ impl RemoteActorClient {
         });
 
         let _ready = ready_rx
-            .recv_timeout(SMOKE_READY_TIMEOUT)
+            .recv_timeout(DEFAULT_STARTUP_READINESS_TIMEOUT)
             .context("timed out waiting for loopback remote actor client")?
             .map_err(|message| anyhow!(message))?;
 

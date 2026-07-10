@@ -41,7 +41,7 @@ impl XrDebugUiScreen {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct XrSceneOptions {
+pub struct McloneSceneHostOptions {
     pub seed: i64,
     pub chunk_x: i32,
     pub chunk_z: i32,
@@ -70,7 +70,7 @@ pub struct XrSceneOptions {
     pub world_dir: Option<PathBuf>,
 }
 
-impl Default for XrSceneOptions {
+impl Default for McloneSceneHostOptions {
     fn default() -> Self {
         Self {
             seed: DEFAULT_XR_SEED,
@@ -108,7 +108,7 @@ impl Default for XrSceneOptions {
     }
 }
 
-impl XrSceneOptions {
+impl McloneSceneHostOptions {
     pub fn from_startup_scene(
         scene: mclone_app_runtime::startup_args::StartupSceneOptions,
         world_root: Option<PathBuf>,
@@ -221,7 +221,7 @@ impl XrViewAlignmentMode {
     }
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn xr_scene_startup_projection_round_trips_shared_fields() {
-        let mut scene = XrSceneOptions::default();
+        let mut scene = McloneSceneHostOptions::default();
         scene.seed = 98_765;
         scene.chunk_x = -4;
         scene.chunk_z = 7;
@@ -308,7 +308,7 @@ mod tests {
         scene.freeze_time = true;
         scene.adaptive_chunk_publication_budget = false;
         let startup = scene.to_startup_scene();
-        let projected = XrSceneOptions::from_startup_scene(
+        let projected = McloneSceneHostOptions::from_startup_scene(
             startup,
             Some(PathBuf::from("/tmp/worlds")),
             Some(PathBuf::from("/tmp/worlds/demo")),

@@ -145,7 +145,7 @@ pub(crate) fn xr_head_comfort_fade_overlays(
     [overlay, overlay]
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {

@@ -54,7 +54,7 @@ features from re-forking.
 > catalog list/create/open/delete through the shared controller, using native
 > and app-private storage adapters respectively. Refreshed again after closeout
 > review found the XR underwater/screen-effect cells were stale: desktop XR and
-> Android XR both use the shared `mclone-xr-scene` multiview underwater path,
+> Android XR both use the shared `mclone-scene` multiview underwater path,
 > and user device validation says it works pretty well; flat Android and
 > web/WASM still need app-lane wiring.
 > Refreshed on 2026-07-10 after tactical 168 Slices 7c–7e moved both the live
@@ -71,6 +71,14 @@ features from re-forking.
 > rebuild pass, Android inherits shared interaction/HUD/hotbar/screen effects,
 > diagnostics, travel assist, and cadence, and the native feature-exception
 > ledger is empty.
+> Refreshed again after tactical 168 Slices 9–10 added a headset-free synthetic
+> stereo capture through the same scene host, removed the last desktop
+> compatibility runtime/startup wrappers, neutralized the public host/options
+> names, consolidated startup and XR idle-poll constants, and added executable
+> native thin-adapter and host-purity tripwires. The native non-web exception
+> ledger remains empty. Gamepad input is retained as a dated shared contract;
+> no native adapter advertises it until a real platform event source and device
+> validation land.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -170,7 +178,7 @@ Reading the matrix:
   menu works mostly fine; automated menu/replacement smoke, comfort tuning, and
   spawned actor scenarios remain open.
 - **Android-XR** now has the same shared actor render path and pause-menu
-  world-panel/pointer path wired through `mclone-xr-scene`. User headset
+  world-panel/pointer path wired through `mclone-scene`. User headset
   validation says the menu works mostly fine; automated menu/replacement smoke,
   comfort tuning, and actual spawned actor scenarios remain pending.
 - **flat-Android** now runs the same Mono scene host as desktop/offscreen. Its
@@ -181,7 +189,7 @@ Reading the matrix:
 - **underwater camera effects** are not desktop-only by architecture. The shared
   renderer/app-runtime path exists, desktop native and current
   offscreen/headless screenshots compute and pass the camera-water overlay/fog,
-  and `mclone-xr-scene` now computes per-view/midpoint underwater overlays and
+  and `mclone-scene` now computes per-view/midpoint underwater overlays and
   renders the effect through the stereo/multiview path for desktop XR and
   Android XR. User device validation says the XR treatment works pretty well.
   Flat Android now consumes the Mono path; web still needs app-lane wiring.
@@ -203,18 +211,19 @@ use (and should) · — n/a.
 | `mclone-client::ClientRuntime` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-client` |
 | `mclone-render` (view/target draw) | ✅ | ⚑ (inline render path) | ✅ | ✅ | `native:desktop-offscreen:smoke` |
 | `mclone-render-session` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-render-session` |
-| `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
-| `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-offscreen:smoke`; `native:web:smoke` |
-| `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
-| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
-| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (shared Mono host initial local/remote and New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
-| `app-runtime::client_session_policy` (display-neutral session UI action policy) | ✅ (desktop flat/offscreen and desktop XR via `mclone-xr-scene` execute shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✅ (shared Mono host executes seed/join/start/quit effects and failed-start UI restoration; Android activity/surface remains local) | ✅ (XR scene executes shared seed/join/start/quit effects, status/startup projection, failed-start UI restoration, and quit-title transitions; Android activity/session adapters remain host-local) | `cargo test -p mclone-app-runtime client_session_policy`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-xr-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; tactical 141 Slice 4d; tactical 143 Slice 4a; tactical 143 Slice 6; tactical 143 Slice 7 |
-| `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (shared Mono host executes native catalog effects against the Android app-private world root; AVD New World flow covered) | ✅ (XR scene executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-xr-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
-| `app-runtime::client_experience` (catalog/session/settings facade) | ✅ (desktop/offscreen adapter and desktop XR scene execute facade effects; host window/runtime/pointer-lock/OpenXR work remains adapter-local) | ✅ (web adapter executes facade effects; IndexedDB promises, worker startup, and JS result writing remain adapter-local) | ✅ (shared Mono host executes facade effects; Android activity, raw touch translation, surface, and storage roots remain adapter-local) | ✅ (XR scene executes facade catalog/session/settings/capability effects; Android activity/session adapters and app-private storage roots remain host-local) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-native-client catalog_`; `cargo test -p mclone-xr-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android-xr:session-smoke`; tactical 143 Slice 2; tactical 143 Slice 4; tactical 143 Slice 6; tactical 143 Slice 7 |
+| `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via scene host) | `cargo test -p mclone-app-runtime` |
+| `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via scene host) | `native:desktop-offscreen:smoke`; `native:web:smoke` |
+| `app-runtime::local_single_view` (native scene runtime) | ✅ (composed by the scene host) | — (wasm-gated) | ✅ (composed by the scene host) | ✅ (composed by the scene host) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene` |
+| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via scene host) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
+| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via scene host, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (shared Mono host initial local/remote and New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
+| `app-runtime::client_session_policy` (display-neutral session UI action policy) | ✅ (desktop flat/offscreen and desktop XR via `mclone-scene` execute shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✅ (shared Mono host executes seed/join/start/quit effects and failed-start UI restoration; Android activity/surface remains local) | ✅ (scene host executes shared seed/join/start/quit effects, status/startup projection, failed-start UI restoration, and quit-title transitions; Android activity/session adapters remain host-local) | `cargo test -p mclone-app-runtime client_session_policy`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; tactical 141 Slice 4d; tactical 143 Slice 4a; tactical 143 Slice 6; tactical 143 Slice 7 |
+| `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (shared Mono host executes native catalog effects against the Android app-private world root; AVD New World flow covered) | ✅ (scene host executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
+| `app-runtime::client_experience` (catalog/session/settings facade) | ✅ (desktop/offscreen adapter and desktop XR scene execute facade effects; host window/runtime/pointer-lock/OpenXR work remains adapter-local) | ✅ (web adapter executes facade effects; IndexedDB promises, worker startup, and JS result writing remain adapter-local) | ✅ (shared Mono host executes facade effects; Android activity, raw touch translation, surface, and storage roots remain adapter-local) | ✅ (scene host executes facade catalog/session/settings/capability effects; Android activity/session adapters and app-private storage roots remain host-local) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-native-client catalog_`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android-xr:session-smoke`; tactical 143 Slice 2; tactical 143 Slice 4; tactical 143 Slice 6; tactical 143 Slice 7 |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
-| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
-| `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
+| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-scene`; `native:android:avd-session-smoke` |
+| `mclone-scene` | ✅ | — | ✅ | ✅ | `native:desktop-offscreen:smoke`; `native:xr-emulation:smoke`; `native:xr:*`; `native:android:*` |
+| `mclone-xr-{host,graphics}` | ✅ (desktop XR) | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, offscreen/screenshot/perf, flat
 Android, desktop XR, and Android XR now share `mclone-scene`; web still carries
@@ -222,12 +231,11 @@ the important runtime/render fork, and offscreen still lacks an exposed
 long-lived source/sink mode.**
 Concretely:
 
-- The native flat single-view scene driver is shared:
-  `WindowSceneRuntime` and flat Android both compose
-  `NativeSingleViewSceneRuntime<S>`, while concrete TCP/property/config remains
-  in the app crates. This landed in
-  [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md).
-- `OffscreenDriver` and `WinitFrameDriver` now drive the same Mono scene host.
+- `McloneSceneHost<S>` with `McloneSceneHostOptions` is the native shared owner;
+  concrete TCP/property/config remains in app crates. `WinitFrameDriver`,
+  `OffscreenDriver`, and `AndroidSurfaceDriver` adapt cadence and targets.
+- `OffscreenDriver` and `WinitFrameDriver` drive the same scene host. Mono is
+  the normal flat topology; the headset-free gate feeds synthetic Stereo views.
   Screenshot/script input, dual-view, timedemo, startup-streaming,
   frame-budget, and movement-frame therefore share runtime polling, section
   admission/upload, frame-input assembly, actors, `GameUi`, and full-frame
@@ -241,7 +249,7 @@ Concretely:
   interest policy in `app-runtime::camera_reconcile`. Optional neutral timing
   keeps XR's existing locomotion attribution without a scene-local policy fork.
 - The XR scene-driver fork is closed:
-  `XrMcloneTerrainState<S>` composes `NativeSingleViewSessionRuntime<S>` around
+  `McloneSceneHost<S>` composes `NativeSingleViewSessionRuntime<S>` around
   the shared native scene runtime, desktop XR passes the desktop TCP
   `RemoteServerSession`, Android XR can pass its Android-owned TCP session
   adapter, and app-local `XrMcloneWorldState` is gone. The scene-driver
@@ -266,7 +274,7 @@ Concretely:
   fixed presentation cadence. New World replacement is covered by
   `pnpm native:android:avd-session-smoke`.
 - Desktop XR and Android XR route New World / Join Remote / Quit To Title menu
-  actions through `mclone-xr-scene`'s `GameSessionCoordinator` and
+  actions through `mclone-scene`'s `GameSessionCoordinator` and
   `app-runtime::client_experience` facade. Each app host still owns its runtime
   factory: desktop maps back to `SceneOptions` and TCP `RemoteServerSession`,
   while Android XR maps launch-scoped options to `AndroidXrRemoteServerSession`.
@@ -280,7 +288,7 @@ Concretely:
 - Android XR uses launch-scoped
   `mclone.startup.argv --remote-addr HOST:PORT`, can have the validator start a
   local dedicated server, and reports the local/remote session descriptor
-  through the shared XR scene wrapper. Android XR reached
+  through the shared scene host. Android XR reached
   `MCLONE_ANDROID_XR_READY` against a dedicated server over direct LAN and
   through `--adb-reverse`.
 - `mclone-audio` is a real shared native/XR/Android foundation now, not a
@@ -309,7 +317,7 @@ are built, exactly as transport/storage were:
   shared menu-surface bring-up; CLI, Android launch argv/properties, and web
   query params remain acceptable connect surfaces for now.
 - **Stereo / world-space UI — partial.** Desktop XR and Android XR now share a
-  `mclone-ui` pause/options panel through `mclone-xr-scene`, toggled by left-hand
+  `mclone-ui` pause/options panel through `mclone-scene`, toggled by left-hand
   select, rendered by `mclone-render::gui::WorldGuiRenderer`, and driven by
   controller-ray trigger clicks. User headset validation says the current menu
   works mostly fine; the XR target still needs automated smoke coverage and
@@ -368,7 +376,7 @@ for d in \
   native/apps/mclone-android-xr-client/src \
   native/crates/mclone-app-runtime/src \
   native/crates/mclone-render-session/src \
-  native/crates/mclone-xr-scene/src
+  native/crates/mclone-scene/src
 do
   printf '%7s %s\n' \
     "$(find "$d" -maxdepth 1 -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.js' \) -print0 2>/dev/null | xargs -0 wc -l 2>/dev/null | tail -1 | awk '{print $1}')" \
@@ -376,7 +384,7 @@ do
 done
 
 rg -n "poll_until_idle|sync_all_render_sections|std::thread::sleep|block_on" \
-  native/apps native/crates/mclone-app-runtime native/crates/mclone-xr-scene
+  native/apps native/crates/mclone-app-runtime native/crates/mclone-scene
 ```
 
 Do not turn the counts into a hard budget. Use them to find cleanup candidates:

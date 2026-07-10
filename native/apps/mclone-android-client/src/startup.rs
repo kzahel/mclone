@@ -17,7 +17,7 @@ use mclone_app_runtime::startup_args::{
 use mclone_core::Vec3d;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render_session::ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER;
-use mclone_scene::{XrMcloneTerrainState, XrSceneOptions};
+use mclone_scene::{McloneSceneHost, McloneSceneHostOptions};
 use winit::platform::android::activity::AndroidApp;
 
 const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
@@ -33,7 +33,7 @@ unsafe extern "C" {
 
 #[derive(Clone, Debug)]
 pub(crate) struct AndroidStartupOptions {
-    pub(crate) scene: XrSceneOptions,
+    pub(crate) scene: McloneSceneHostOptions,
     pub(crate) remote_addr: Option<String>,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) camera: StartupCameraOptions,
@@ -148,7 +148,7 @@ fn parse_android_startup_options(
     let storage = parsed.storage.project(None);
     let default_world_root_enabled = storage.default_world_root_enabled;
     let remote_addr = parsed.scene.remote_addr.clone();
-    let scene = XrSceneOptions::from_startup_scene(
+    let scene = McloneSceneHostOptions::from_startup_scene(
         parsed.scene,
         storage.world_root.clone(),
         storage.world_dir.clone(),
@@ -186,9 +186,7 @@ fn android_startup_scene_defaults() -> StartupSceneOptions {
 }
 
 pub(crate) fn apply_startup_camera_options(
-    host: &mut XrMcloneTerrainState<
-        impl mclone_app_runtime::host_mode::RemoteDedicatedServerSession,
-    >,
+    host: &mut McloneSceneHost<impl mclone_app_runtime::host_mode::RemoteDedicatedServerSession>,
     options: StartupCameraOptions,
 ) {
     if options.eye.is_none() && options.target.is_none() {

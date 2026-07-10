@@ -48,7 +48,8 @@ The Rust workspace owns live engine implementation:
 - `mclone-ui`: shared Rust/WebGPU UI model.
 - `mclone-xr-host`: shared OpenXR host/session/frame/action/view helpers.
 - `mclone-xr-graphics`: shared Vulkan OpenXR/`wgpu` graphics bridge.
-- `mclone-xr-scene`: shared XR terrain runtime, startup-pose alignment, and locomotion mapping.
+- `mclone-scene`: shared native scene host for mono, stereo, and multiview
+  runtime/render/UI orchestration.
 
 Applications:
 

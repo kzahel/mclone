@@ -11,8 +11,8 @@ contract health.
 
 ## Current Status
 
-Mclone currently has five supported client/platform validation lanes, plus an
-emerging offscreen flat-client host for no-window validation:
+Mclone currently has five supported client/platform validation lanes, plus
+offscreen flat and headset-free stereo validation hosts:
 
 | Target | Status | Validation shape |
 |---|---|---|
@@ -27,6 +27,7 @@ Additional host lane:
 | Host | Status | Notes |
 |---|---|---|
 | Offscreen flat client | active cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current public validation uses the full-frame `--screenshot` offscreen host path with shared `--startup-wait none\|playable\|idle\|frames:N` readiness policy; screenshots default to `idle`, while desktop defaults to `playable`. Older narrow `--headless-ui` / `--headless-chunk` native-client modes are retired. Long-lived host lifetime remains tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
+| Headset-free XR emulation | active acceptance lane | The default desktop binary feeds fixed-IPD synthetic Stereo views and optional keyboard-translated controller input through `OffscreenDriver` and the same `McloneSceneHost` used by OpenXR. `pnpm native:xr-emulation:smoke` writes a side-by-side capture to `/tmp/mclone-xr-emulation.png`; it does not initialize or depend on OpenXR. This is a render/input/host seam gate, not an OpenXR runtime substitute. |
 | Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The retired TypeScript/browser engine is gone from the live tree. Use Git
@@ -132,7 +133,8 @@ Shared app/runtime boundary crates currently include:
   by desktop Vulkan XR and Android XR
 - `mclone-scene`: shared mono/stereo/multiview terrain/actor scene, startup
   view-pose alignment, controller-to-engine locomotion, and XR frame render
-  topology selection
+  topology selection. Its public native core is `McloneSceneHost<S>` configured
+  by `McloneSceneHostOptions`.
 
 Core shared crates must not depend on:
 
@@ -155,7 +157,7 @@ not a bug, but
 new desktop-local gameplay, renderer policy, runtime startup policy, UI state,
 session lifecycle policy, persistence behavior, or input semantics are bugs
 unless they are temporary forks tracked in the platform parity matrix.
-The live desktop redraw path is already thin: its `WinitFrameDriver` owns the
+The live desktop redraw path is thin: its `WinitFrameDriver` owns the
 surface/depth/presentation rim and delegates session, input application,
 runtime/render orchestration, and screen-space UI assembly to `mclone-scene`.
 The native desktop and offscreen lanes no longer have an app-local flat
@@ -163,6 +165,16 @@ orchestrator. `WinitFrameDriver` and `OffscreenDriver` both delegate session,
 input application, runtime/render orchestration, and UI assembly to
 `mclone-scene`. Flat Android's `AndroidSurfaceDriver` delegates the same policy
 to the Mono host and retains only Android lifecycle/surface/raw-input work.
+`OffscreenDriver` selects Mono or synthetic Stereo target ownership for
+screenshot, perf, and headset-free XR-emulation lanes. OpenXR cadence and
+session sequencing stay in `mclone-xr-host::OpenXrFrameDriver`.
+
+The native app adapters are source-scanned by
+`pnpm native:thin-adapters:purity`. The gate rejects app-local settings/session
+dispatch, render-section synchronization/upload policy, engine-camera literals,
+and low-level OpenXR frame sequencing, then runs the scene-host and XR-driver
+dependency/ownership purity checks. Browser host adoption remains explicitly
+deferred and is not included in this native-only gate.
 
 `mclone-render` may depend on `wgpu` and own GPU resources, but host-facing
 entry points should continue to accept explicit render target and view data.
@@ -171,18 +183,19 @@ This is already true through `RenderFrameContext`, `RenderFrameTarget`,
 
 ## Host Shapes
 
-Single-view hosts:
+Mono and synthetic-stereo hosts:
 
 ```text
 platform input/lifecycle
   -> platform adapter
   -> shared client/runtime/render-session state
-  -> explicit single render view + render target
+  -> explicit Mono(view) or Stereo([view; 2]) targets
   -> mclone-render
 ```
 
-This includes desktop flat, offscreen flat, flat Android, and the web canvas
-path. The app shells are not identical: desktop owns native threads and
+This includes desktop flat, offscreen flat, headset-free XR emulation, flat
+Android, and the web canvas path. The app shells are not identical: desktop
+owns native threads and
 keyboard/mouse, offscreen owns synthetic/network/model input and frame sinks,
 Android owns `NativeActivity` lifecycle and touch, and web owns browser workers
 and canvas APIs. The convergence point is shared runtime/render state and
@@ -211,6 +224,11 @@ result to the shared `mclone-scene` render-admission policy. Static Quest upload
 limits remain optional clamps on that shared adaptive grant, not a separate
 platform controller.
 
+`mclone-input::GamepadInputAdapter` and `GamepadBindings` are retained as a
+shared contract as of 2026-07-10. No current native adapter advertises gamepad
+capability or synthesizes support; adoption requires a real desktop, browser,
+or Android event source plus device validation.
+
 ## Validation Policy
 
 Every supported platform lane has an executable gate. Use `/tmp` for screenshots
@@ -226,6 +244,7 @@ Recommended default gates:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml
+pnpm native:thin-adapters:purity
 pnpm native:desktop-offscreen:smoke
 pnpm native:web:build
 ```
@@ -240,6 +259,9 @@ Platform-specific gates:
 # Desktop flat
 pnpm native:movement:smoke
 pnpm native:timedemo:smoke
+
+# Headset-free synthetic stereo
+pnpm native:xr-emulation:smoke
 
 # Desktop OpenXR, headset/runtime required
 pnpm native:xr:check
@@ -260,6 +282,7 @@ pnpm native:android:avd-session-smoke -- --skip-build
 pnpm native:android-xr:apk
 pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
+pnpm native:android-xr:terrain-multiview-proof
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate --debug --skip-build --adb-reverse --start-server --view-pose 0,120,-96,180
 pnpm native:android-xr:validate --debug --skip-build --start-server --server-listen 0.0.0.0:25565 --remote-addr HOST:25565 --view-pose 0,120,-96,180
 

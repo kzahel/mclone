@@ -136,7 +136,7 @@ pub enum MonoUiPresentation {
     ScreenSpaceHud,
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -238,7 +238,7 @@ where
         self.session.state()
     }
 
-    pub fn scene_options(&self) -> &XrSceneOptions {
+    pub fn scene_options(&self) -> &McloneSceneHostOptions {
         &self.scene
     }
 

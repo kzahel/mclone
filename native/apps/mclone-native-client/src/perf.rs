@@ -11,6 +11,8 @@ use mclone_app_runtime::frame_pipeline_accounting::{
     FramePipelineQueueDepths, FramePipelineReportExtras, render_section_sync_stage_spans,
 };
 use mclone_app_runtime::frame_pipeline_presentation::frame_pipeline_report_json_field_lines;
+use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
+use mclone_app_runtime::native_session_runtime::NativeSceneRuntime;
 use mclone_app_runtime::{RenderSectionSyncTiming, RuntimeUpdatePumpBudget};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
@@ -42,8 +44,9 @@ use crate::render_compile_capacity::{
     render_compile_capacity_report,
 };
 use crate::scene_runtime::{
-    WindowSceneAssets, WindowSceneRuntime, chunk_tracking_radius_for_render_distance,
-    poll_window_runtime_until_idle, poll_window_runtime_until_idle_with_timeout, square_count,
+    WindowSceneAssets, chunk_tracking_radius_for_render_distance, native_window_scene_runtime,
+    native_window_scene_runtime_with_mesh_assets, poll_window_runtime_until_idle,
+    poll_window_runtime_until_idle_with_timeout, square_count,
 };
 use crate::{MAX_RENDER_DISTANCE, json_escape, print_benchmark_metadata};
 
@@ -3115,7 +3118,7 @@ pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<M
         bail!("--movement-perf currently requires the local integrated server path");
     }
     let total_start = Instant::now();
-    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
+    let mut runtime = native_window_scene_runtime(&options.scene)?;
     let mut steps = Vec::with_capacity(options.steps);
 
     for index in 0..options.steps {
@@ -3242,7 +3245,8 @@ pub(crate) fn run_loading_settle_perf(
 
         let runtime_start = Instant::now();
         let runtime_create_start = Instant::now();
-        let mut runtime = WindowSceneRuntime::with_assets(&scene, &assets)?;
+        let mut runtime =
+            native_window_scene_runtime_with_mesh_assets(&scene, assets.mesh_assets.clone())?;
         let runtime_create_ms = elapsed_ms(runtime_create_start.elapsed());
         let (runtime_poll_count, runtime_poll_ms) =
             poll_window_runtime_until_loading_target_settled(
@@ -3323,7 +3327,7 @@ pub(crate) fn run_loading_settle_perf(
 }
 
 fn poll_window_runtime_until_loading_target_settled(
-    runtime: &mut WindowSceneRuntime,
+    runtime: &mut NativeSceneRuntime<NativeRemoteServerSession>,
     expected_target_chunks: usize,
     timeout: Duration,
 ) -> Result<(usize, f64)> {
@@ -3378,8 +3382,9 @@ fn prewarm_startup_streaming_world(
 ) -> Result<StartupStreamingPrewarmReport> {
     let total_start = Instant::now();
     let runtime_create_start = Instant::now();
-    let mut runtime = WindowSceneRuntime::with_assets(scene, assets)
-        .context("failed to create persisted startup-streaming prewarm runtime")?;
+    let mut runtime =
+        native_window_scene_runtime_with_mesh_assets(scene, assets.mesh_assets.clone())
+            .context("failed to create persisted startup-streaming prewarm runtime")?;
     let runtime_create_ms = elapsed_ms(runtime_create_start.elapsed());
     let (runtime_poll_count, runtime_poll_ms) =
         poll_window_runtime_until_idle_with_timeout(&mut runtime, LOADING_SETTLE_IDLE_TIMEOUT)
@@ -3713,7 +3718,7 @@ struct StartupStreamingState {
 fn fill_startup_streaming_report_from_scene(
     report: &mut StartupStreamingFrameReport,
     summary: &mclone_scene::MonoSceneFrameSummary,
-    host: &crate::desktop_scene_host::DesktopMonoSceneHost,
+    host: &crate::desktop_scene_host::DesktopSceneHost,
     camera_position: Vec3,
 ) {
     report.poll_ms = summary.timing.runtime_poll_ms;
@@ -4096,7 +4101,7 @@ pub(crate) fn run_frame_budget_probe(
 fn fill_frame_budget_report_from_scene(
     report: &mut FrameBudgetProbeFrameReport,
     summary: &mclone_scene::MonoSceneFrameSummary,
-    host: &crate::desktop_scene_host::DesktopMonoSceneHost,
+    host: &crate::desktop_scene_host::DesktopSceneHost,
 ) {
     report.runtime_changed = summary.upload.poll_changed;
     report.poll_ms = summary.timing.runtime_poll_ms;

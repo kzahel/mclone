@@ -6,8 +6,9 @@ landed in `da719dda`. Slice 2a (shared frame-pipeline accountant owner) landed
 168 Slice 5 and the frame-pacing/debug-data promotion landed through tactical
 168 Slice 7a on 2026-07-10. Tactical 168 Slice 8 landed the shared-host Android
 adoption and cadence wiring on 2026-07-10; the native feature-exception ledger
-is now empty. Web reason-bearing divergences and shared settings preferences
-remain separate follow-ups.
+is now empty. Tactical 168 Slice 10 added the native thin-adapter source gate,
+so app-local orchestration cannot silently recreate a wiring fork behind that
+empty ledger. Web reason-bearing divergences remain a separate follow-up.
 
 Workstream: native Rust shared client-experience policy in `mclone-app-runtime`,
 desktop flat, shared XR scene, flat Android, and Android XR. Web is the one
@@ -164,7 +165,12 @@ profile flips. The parity enforcement tests pass with an empty ledger.
 
 - accountant convergence (2c) is 168 Slice 5;
 - frame-pacing POD/debug-aggregator promotion is 168 Slice 7a;
-- native host consumption and ledger closeout are 168 Slice 8.
+- native host consumption and ledger closeout are 168 Slice 8;
+- adapter-orchestration enforcement and neutral host names are 168 Slice 10.
+
+The retained `GamepadInputAdapter`/`GamepadBindings` API is not a native parity
+exception: no native profile advertises gamepad capability. It is a dated
+shared contract awaiting a real platform event source and device validation.
 
 Historical execution record:
 

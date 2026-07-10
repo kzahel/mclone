@@ -823,6 +823,14 @@ No other slice-safety wrappers survived earlier slices (Slice 1 already deleted
 the desktop `WindowSceneStartupPump::into_runtime` /
 `compile_all_render_section_meshes` pass-throughs and `cached_runtime_sections`).
 
+Tactical 168 Slice 10 follow-up (2026-07-10): the remaining desktop
+`WindowSceneRuntime`/`WindowSceneStartupPump` compatibility facade and its
+duplicate test suite are now deleted completely; desktop headless/perf/rebuild
+harnesses use `NativeSceneRuntime` and `McloneSceneHost` directly. The live
+`LocalIntegratedStartupPump` convenience described above remains because it is
+a real thin specialization of the shared pump. The 120-second default is now
+single-homed as public `mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT`.
+
 Docs — `docs/platforms.md` needed no change: no startup smoke command or log line
 changed this slice (the rename is internal; the Quest smoke line remains
 `XR local world playable ... sections=N` and the desktop counters are unchanged).

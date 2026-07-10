@@ -551,7 +551,7 @@ pub(crate) fn xr_game_ui_panel_height_blocks() -> f32 {
     XR_GAME_UI_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {

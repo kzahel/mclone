@@ -8,6 +8,8 @@ use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
 };
+use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
+use mclone_app_runtime::native_session_runtime::NativeSceneRuntime;
 use mclone_client::ActorInterpolationState;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
@@ -20,7 +22,7 @@ use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameUiHost, GuiDrawList, GuiScale};
 
-use crate::actor_assets::load_actor_texture_assets;
+use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessActorReviewSheetOptions, HeadlessActorWalkReviewOptions, HeadlessDualViewOptions,
@@ -28,7 +30,9 @@ use crate::cli::{
 };
 use crate::offscreen_scene_host::OffscreenDriver;
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, poll_window_runtime_until_idle};
+use crate::scene_runtime::{
+    WindowSceneAssets, native_window_scene_runtime_with_mesh_assets, poll_window_runtime_until_idle,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HeadlessScreenshotReport {
@@ -131,7 +135,11 @@ struct RendererRebuildSmokePreservedState {
 }
 
 impl RendererRebuildSmokePreservedState {
-    fn capture(runtime: &WindowSceneRuntime, camera: ChunkCamera, ui: &GameUiHost) -> Self {
+    fn capture(
+        runtime: &NativeSceneRuntime<NativeRemoteServerSession>,
+        camera: ChunkCamera,
+        ui: &GameUiHost,
+    ) -> Self {
         let runtime = runtime.stats();
         let scale = ui.scale();
         Self {
@@ -151,7 +159,8 @@ impl RendererRebuildSmokePreservedState {
 }
 
 struct RendererRebuildSmokeState {
-    runtime: WindowSceneRuntime,
+    runtime: NativeSceneRuntime<NativeRemoteServerSession>,
+    actor_textures: ActorTextureAssets,
     resources: FlatRenderResources,
     asset_source: mclone_assets::AssetSourceChain,
     sections: Vec<mclone_mesh::TexturedRenderSectionMesh>,
@@ -899,7 +908,9 @@ pub(crate) fn run_renderer_rebuild_smoke(
     let before_path = options.directory.join("before.png");
     let after_path = options.directory.join("after.png");
 
-    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
+    let assets = WindowSceneAssets::load()?;
+    let mut runtime =
+        native_window_scene_runtime_with_mesh_assets(&options.scene, assets.mesh_assets.clone())?;
     poll_window_runtime_until_idle(&mut runtime)?;
     if let Some(day_time) = options.scene.day_time_override {
         runtime.force_day_time(day_time);
@@ -956,8 +967,8 @@ pub(crate) fn run_renderer_rebuild_smoke(
                 size,
                 render_config,
                 runtime.mesh_assets().atlas.as_upload(),
-                runtime.actor_textures.atlas.as_upload(),
-                Some(&runtime.actor_textures.figures),
+                assets.actor_textures.atlas.as_upload(),
+                Some(&assets.actor_textures.figures),
                 &asset_source,
             )?;
             resources
@@ -982,6 +993,7 @@ pub(crate) fn run_renderer_rebuild_smoke(
 
             Ok(RendererRebuildSmokeState {
                 runtime,
+                actor_textures: assets.actor_textures,
                 resources,
                 asset_source,
                 sections,
@@ -1090,8 +1102,8 @@ fn rebuild_renderer_rebuild_smoke_resources(
         frame.target.size,
         render_config,
         state.runtime.mesh_assets().atlas.as_upload(),
-        state.runtime.actor_textures.atlas.as_upload(),
-        Some(&state.runtime.actor_textures.figures),
+        state.actor_textures.atlas.as_upload(),
+        Some(&state.actor_textures.figures),
         &state.asset_source,
     )?;
     let upload_report = resources

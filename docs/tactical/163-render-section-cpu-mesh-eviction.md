@@ -249,6 +249,14 @@ explicit; an enforcement test
 its owner references it. `resident_mesh_owned_bytes` stays 0; the transient seed
 bytes exist only for the startup window and drop to zero at completion.
 
+Tactical 168 Slice 10 closeout (2026-07-10): the remaining desktop
+`WindowSceneRuntime`/`WindowSceneStartupPump` compatibility facade and its
+duplicate tests are deleted. Renderer-rebuild, headless, and perf harnesses now
+drive `NativeSceneRuntime` and `McloneSceneHost` directly, while the canonical
+startup timeout is imported from `mclone-app-runtime`. This does not restore a
+resident CPU mesh path; the resource-rebuild-only dirty-all invariant and its
+tripwire remain unchanged.
+
 ### Slice 2: Make Draw Resources Creatable Empty
 
 Add an explicit empty terrain draw-resource initialization path:

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use mclone_app_runtime::RuntimePollDiagnostics;
+use mclone_app_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, RuntimePollDiagnostics};
 use mclone_assets::AssetSource;
 use mclone_input::{
     FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
@@ -1129,7 +1129,7 @@ impl ApplicationHandler for ChunkApp {
             && let Err(error) = scene_driver.drive_until_idle(
                 &surface.device,
                 &surface.queue,
-                std::time::Duration::from_secs(120),
+                DEFAULT_STARTUP_READINESS_TIMEOUT,
             )
         {
             log::error!("failed to complete idle desktop startup: {error:#}");

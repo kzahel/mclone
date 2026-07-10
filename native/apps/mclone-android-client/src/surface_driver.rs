@@ -31,8 +31,8 @@ use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_scene::{
-    HostEffects, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
-    XrMcloneTerrainState, XrSceneOptions, record_mono_frame_pipeline,
+    HostEffects, McloneSceneHost, McloneSceneHostOptions, MonoSceneFrameSummary, MonoUiContext,
+    MonoUiPresentation, MonoWorldActionStatus, record_mono_frame_pipeline,
     xr_frame_pipeline_accounting_config,
 };
 use mclone_ui::{
@@ -1008,7 +1008,7 @@ fn create_android_scene_host(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
-    scene: &XrSceneOptions,
+    scene: &McloneSceneHostOptions,
     remote_addr: Option<&str>,
     render_options: TexturedSectionRenderOptions,
     mesh_assets: TexturedMeshAssets,
@@ -1019,7 +1019,7 @@ fn create_android_scene_host(
     let mut host: AndroidSceneHost = if let Some(remote_addr) = remote_addr {
         let endpoint = RemoteSessionEndpoint::new(remote_addr);
         let runtime = android_remote_runtime(&endpoint, scene, mesh_assets)?;
-        XrMcloneTerrainState::with_runtime(
+        McloneSceneHost::with_runtime(
             device,
             queue,
             color_format,
@@ -1032,7 +1032,7 @@ fn create_android_scene_host(
             None,
         )
     } else {
-        XrMcloneTerrainState::start_local_async(
+        McloneSceneHost::start_local_async(
             device,
             queue,
             color_format,
@@ -1054,7 +1054,7 @@ fn create_android_scene_host(
 
 fn android_remote_runtime(
     endpoint: &RemoteSessionEndpoint,
-    scene: &XrSceneOptions,
+    scene: &McloneSceneHostOptions,
     mesh_assets: TexturedMeshAssets,
 ) -> Result<NativeSessionRuntime<NativeRemoteServerSession>> {
     connect_native_remote_session_runtime(

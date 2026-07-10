@@ -288,7 +288,7 @@ pub fn xr_headset_world_yaw_from_views(views: &[XrView], transform: XrStageToWor
         .ok_or_else(|| anyhow!("OpenXR returned an invalid headset locomotion yaw"))
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {

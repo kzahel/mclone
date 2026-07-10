@@ -13,8 +13,8 @@ use anyhow::{Result, bail};
 use glam::Vec3;
 #[cfg(not(target_os = "android"))]
 use mclone_scene::{
-    XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrMcloneTerrainState,
-    XrSceneFrameTarget, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+    McloneSceneHost, McloneSceneHostOptions, XrDebugUiScreen as SceneXrDebugUiScreen,
+    XrFramePipelineHostTiming, XrSceneFrameTarget, XrStartupViewPose, XrTerrainEyeTarget,
     XrTerrainFrameSummary, XrUnderwaterDetectionMode, record_xr_frame_pipeline,
     xr_frame_pipeline_accounting_config,
 };
@@ -74,7 +74,7 @@ type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
 >;
 
 #[cfg(not(target_os = "android"))]
-type DesktopXrMcloneTerrainState = XrMcloneTerrainState<NativeRemoteServerSession>;
+type DesktopXrSceneHost = McloneSceneHost<NativeRemoteServerSession>;
 
 #[cfg(target_os = "android")]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
@@ -431,7 +431,7 @@ struct DesktopXrFrameLoop<'a> {
     stage: &'a xr::Space,
     left_eye: &'a mut platform_graphics::OpenXrEyeState,
     right_eye: &'a mut platform_graphics::OpenXrEyeState,
-    mclone: &'a mut Option<DesktopXrMcloneTerrainState>,
+    mclone: &'a mut Option<DesktopXrSceneHost>,
     controller_actions: &'a OpenXrControllerActions,
     controller_summary: XrControllerInputSummary,
     frame_pipeline_accountant: FramePipelineAccountant,
@@ -742,7 +742,7 @@ fn create_mclone_terrain_state(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     options: XrMcloneSmokeOptions,
-) -> Result<DesktopXrMcloneTerrainState> {
+) -> Result<DesktopXrSceneHost> {
     let asset_source = load_asset_source().context("load mclone XR asset source")?;
     let actor_assets = load_actor_texture_assets_from_asset_source(&asset_source)
         .context("load mclone actor texture assets")?;
@@ -768,7 +768,7 @@ fn create_mclone_terrain_state(
             request,
             native_window_scene_runtime(&options.scene)?,
         )?;
-        XrMcloneTerrainState::with_runtime(
+        McloneSceneHost::with_runtime(
             device,
             queue,
             XR_COLOR_FORMAT,
@@ -781,7 +781,7 @@ fn create_mclone_terrain_state(
             startup_view_pose,
         )
     } else {
-        XrMcloneTerrainState::start_local_async(
+        McloneSceneHost::start_local_async(
             device,
             queue,
             XR_COLOR_FORMAT,
@@ -823,8 +823,8 @@ fn xr_scene_options_from_desktop_scene(
     scene: &SceneOptions,
     underwater_mode: crate::cli::XrUnderwaterMode,
     debug_ui_screen: Option<CliXrDebugUiScreen>,
-) -> Result<XrSceneOptions> {
-    let mut options = XrSceneOptions::from_startup_scene(
+) -> Result<McloneSceneHostOptions> {
+    let mut options = McloneSceneHostOptions::from_startup_scene(
         scene.to_startup_scene(),
         scene.world_root.clone(),
         scene.world_dir.clone(),
@@ -856,7 +856,7 @@ fn xr_underwater_mode_from_desktop(
 #[cfg(not(target_os = "android"))]
 fn desktop_scene_options_for_xr_remote(
     endpoint: &RemoteSessionEndpoint,
-    scene: &XrSceneOptions,
+    scene: &McloneSceneHostOptions,
 ) -> SceneOptions {
     SceneOptions {
         seed: scene.seed,
@@ -881,7 +881,7 @@ fn desktop_scene_options_for_xr_remote(
 }
 
 #[cfg(not(target_os = "android"))]
-fn print_mclone_summary(mclone: &DesktopXrMcloneTerrainState) {
+fn print_mclone_summary(mclone: &DesktopXrSceneHost) {
     let summary = mclone.frame_summary();
     println!(
         "mclone XR frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} local_startup_active={}",
@@ -910,7 +910,7 @@ fn render_desktop_xr_frame(
     stage: &xr::Space,
     left_eye: &mut platform_graphics::OpenXrEyeState,
     right_eye: &mut platform_graphics::OpenXrEyeState,
-    mclone: &mut DesktopXrMcloneTerrainState,
+    mclone: &mut DesktopXrSceneHost,
     controllers: &[XrControllerSnapshot],
 ) -> Result<XrTerrainFrameSummary> {
     let stereo_views =

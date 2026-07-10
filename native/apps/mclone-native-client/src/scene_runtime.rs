@@ -1,58 +1,21 @@
-use std::collections::BTreeSet;
 use std::time::Duration;
-use std::time::Instant;
 
-use anyhow::{Context, Result, bail};
-use glam::Vec3;
-use mclone_app_runtime::far_lod::{FarTerrainLodConfig, StartupLodPrewarmConfig};
-use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
+use anyhow::{Context, Result};
+use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
+use mclone_app_runtime::far_lod::StartupLodPrewarmConfig;
+use mclone_app_runtime::host_mode::SingleViewHostOptions;
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 use mclone_app_runtime::native_session_runtime::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneRuntime,
-    NativeSessionStartupPump, NativeSessionStartupStep, StartupReadinessPolicy,
-    build_local_integrated_client_runtime,
 };
-use mclone_app_runtime::session::RemoteSessionEndpoint;
-use mclone_app_runtime::{
-    EngineCameraCommitContext, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
-    SingleViewRuntimeStats, TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
-};
-#[cfg(test)]
-use mclone_app_runtime::{camera_position_inside_water_block, snapshot_block_state_at_world};
 pub(crate) use mclone_app_runtime::{chunk_tracking_radius_for_render_distance, square_count};
-#[cfg(test)]
-use mclone_client::ClientHost;
-use mclone_client::ClientRuntime;
-#[cfg(test)]
-use mclone_core::AIR_BLOCK_STATE_ID;
 use mclone_core::ChunkPos;
-use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, TexturedRenderSectionMetadata};
-#[cfg(test)]
-use mclone_protocol::ServerUpdate;
-use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
-use mclone_render::far_lod::FarTerrainLodMesh;
-use mclone_server::SimulationCadenceConfig;
-#[cfg(test)]
-use mclone_server::{IntegratedServer, ServerRunnerKind};
-use mclone_ui::LoadingProgressOverlay;
 
 use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use crate::cli::SceneOptions;
-use crate::render_cache::{SceneTexturedSections, TexturedMeshAssets, load_textured_mesh_assets};
-use mclone_render_session::{
-    EngineCameraController, RenderSectionCacheUpdate, build_client_textured_sections,
-};
-#[cfg(test)]
-use mclone_render_session::{RenderSectionSession, render_section_neighbor_readiness};
+use crate::render_cache::{TexturedMeshAssets, load_textured_mesh_assets};
 
-pub(crate) type WindowRuntimeStats = SingleViewRuntimeStats;
-pub(crate) type NativeWindowSceneRuntime = NativeSceneRuntime<NativeRemoteServerSession>;
-
-/// Shared camera/interest reconciliation lane for the desktop flat client
-/// (docs/tactical/167 Slice 4): send-only pose sync, `"desktop"` log lane.
-#[allow(dead_code)]
-const DESKTOP_CAMERA_COMMIT_CONTEXT: EngineCameraCommitContext =
-    EngineCameraCommitContext::send_only("desktop");
+pub(crate) type WindowRuntimeStats = mclone_app_runtime::SingleViewRuntimeStats;
 
 #[derive(Clone, Debug)]
 pub(crate) struct WindowSceneAssets {
@@ -71,45 +34,6 @@ impl WindowSceneAssets {
 
 fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
     u32::try_from(scene.render_distance).context("render distance must be non-negative")
-}
-
-#[allow(dead_code)]
-pub(crate) fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSections> {
-    let client = build_scene_client_runtime(scene)?;
-    let mesh_assets = load_textured_mesh_assets()?;
-    let build = build_client_textured_sections(&client, &mesh_assets.catalog)?;
-    if build.sections.is_empty() {
-        bail!(
-            "generated chunk area seed={} center=({}, {}) render_distance={} produced no textured render sections",
-            scene.seed,
-            scene.chunk_x,
-            scene.chunk_z,
-            scene.render_distance
-        );
-    }
-    Ok(SceneTexturedSections {
-        sections: build.sections,
-        visibility_graph_stats: build.visibility_graph,
-        atlas: mesh_assets.atlas,
-    })
-}
-
-#[allow(dead_code)]
-fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
-    let render_distance = scene_render_distance(scene)?;
-    let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
-    let Some(remote_addr) = &scene.remote_addr else {
-        return build_local_integrated_client_runtime(local_integrated_scene_options(scene)?);
-    };
-
-    let mut session = NativeRemoteServerSession::connect(remote_addr.as_str(), "desktop")?;
-    build_remote_dedicated_client_runtime(
-        SingleViewHostOptions::new(center, render_distance)
-            .with_render_compile_worker_count(scene.render_compile_worker_count)
-            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
-            .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled),
-        &mut session,
-    )
 }
 
 pub(crate) fn local_integrated_scene_options(
@@ -142,25 +66,25 @@ pub(crate) fn local_integrated_scene_options(
 #[cfg_attr(not(feature = "xr"), allow(dead_code))]
 pub(crate) fn native_window_scene_runtime(
     scene: &SceneOptions,
-) -> Result<NativeWindowSceneRuntime> {
+) -> Result<NativeSceneRuntime<NativeRemoteServerSession>> {
     native_window_scene_runtime_with_mesh_assets(scene, load_textured_mesh_assets()?)
 }
 
 pub(crate) fn native_window_scene_runtime_with_mesh_assets(
     scene: &SceneOptions,
     mesh_assets: TexturedMeshAssets,
-) -> Result<NativeWindowSceneRuntime> {
+) -> Result<NativeSceneRuntime<NativeRemoteServerSession>> {
     let render_distance = scene_render_distance(scene)?;
     let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
     let Some(remote_addr) = &scene.remote_addr else {
-        return NativeWindowSceneRuntime::local_with_mesh_assets(
+        return NativeSceneRuntime::local_with_mesh_assets(
             local_integrated_scene_options(scene)?,
             mesh_assets,
         );
     };
 
     let session = NativeRemoteServerSession::connect(remote_addr.as_str(), "desktop")?;
-    NativeWindowSceneRuntime::remote_dedicated_with_mesh_assets(
+    NativeSceneRuntime::remote_dedicated_with_mesh_assets(
         SingleViewHostOptions::new(center, render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
             .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
@@ -173,549 +97,15 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
     })
 }
 
-#[derive(Debug)]
-pub(crate) struct WindowSceneRuntime {
-    scene: NativeWindowSceneRuntime,
-    pub(crate) actor_textures: ActorTextureAssets,
-}
-
-/// Desktop startup pump wrapper over the host-neutral
-/// [`NativeSessionStartupPump`] (docs/tactical/167 Slice 3). It drives both local
-/// integrated and remote dedicated startup through one shared contract and hands
-/// the platform a transient render-section seed for a one-shot draw upload; no
-/// startup path recompiles the resident cache.
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct WindowSceneStartupPump {
-    pump: NativeSessionStartupPump<NativeRemoteServerSession>,
-    actor_textures: ActorTextureAssets,
-}
-
-#[allow(dead_code)]
-impl WindowSceneStartupPump {
-    /// Build a startup pump for either host mode from the scene: remote when the
-    /// scene names a remote address, otherwise local integrated. Local worlds
-    /// anchor interest to the seed's spawn center for the non-blocking
-    /// loading-screen path.
-    pub(crate) fn from_scene(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
-        if scene.remote_addr.is_some() {
-            Self::new_remote(scene, assets)
-        } else {
-            Self::new_local(scene, assets)
-        }
-    }
-
-    /// Build a startup pump for either host mode, keeping local interest at the
-    /// scene center rather than overriding it to the seed's spawn center. Used by
-    /// the blocking startup lane (desktop remote join, offscreen idle screenshots,
-    /// and tests), matching the pre-tactical `make_runtime` behavior.
-    pub(crate) fn from_scene_at_scene_center(
-        scene: &SceneOptions,
-        assets: &WindowSceneAssets,
-    ) -> Result<Self> {
-        if scene.remote_addr.is_some() {
-            Self::new_remote(scene, assets)
-        } else {
-            Self::with_local_options(local_integrated_scene_options(scene)?, assets)
-        }
-    }
-
-    /// Interest center of the pump's runtime, used to derive the fixed startup
-    /// camera for the blocking startup drive.
-    pub(crate) fn interest_center(&self) -> ChunkPos {
-        self.pump.runtime().interest_center()
-    }
-
-    /// Fixed startup camera position for the blocking drive: the interest-center
-    /// chunk column at the spectator spawn height, so camera-targeted section
-    /// compilation reaches a drawable view regardless of the pre-start camera.
-    pub(crate) fn startup_camera_position(&self) -> Vec3 {
-        let center = self.interest_center();
-        // Match the spectator spawn height in `SpectatorCamera::spawn_for_scene`.
-        const STARTUP_CAMERA_HEIGHT: f32 = 88.0;
-        Vec3::new(
-            mclone_core::chunk_middle_block_coord(center.x) as f32,
-            STARTUP_CAMERA_HEIGHT,
-            mclone_core::chunk_middle_block_coord(center.z) as f32,
-        )
-    }
-
-    pub(crate) fn new_local(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
-        Self::with_local_options(
-            local_integrated_scene_options(scene)?.with_initial_spawn_center(),
-            assets,
-        )
-    }
-
-    pub(crate) fn with_local_options(
-        options: LocalIntegratedSceneOptions,
-        assets: &WindowSceneAssets,
-    ) -> Result<Self> {
-        Ok(Self {
-            pump: NativeSessionStartupPump::local_with_mesh_assets(
-                options,
-                assets.mesh_assets.clone(),
-            )
-            .context("failed to create local world startup pump")?,
-            actor_textures: assets.actor_textures.clone(),
-        })
-    }
-
-    pub(crate) fn new_remote(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
-        let render_distance = scene_render_distance(scene)?;
-        let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
-        let remote_addr = scene
-            .remote_addr
-            .as_deref()
-            .context("remote startup pump requires a remote address")?;
-        let session = NativeRemoteServerSession::connect(remote_addr, "desktop")?;
-        let pump = NativeSessionStartupPump::remote_dedicated_with_mesh_assets(
-            RemoteSessionEndpoint::new(remote_addr.to_owned()),
-            SingleViewHostOptions::new(center, render_distance)
-                .with_render_compile_worker_count(scene.render_compile_worker_count)
-                .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
-                .with_render_compile_worker_timing_enabled(
-                    scene.render_compile_worker_timing_enabled,
-                ),
-            session,
-            assets.mesh_assets.clone(),
-        )
-        .with_context(|| {
-            format!("failed to initialize desktop remote dedicated startup pump from {remote_addr}")
-        })?;
-        Ok(Self {
-            pump,
-            actor_textures: assets.actor_textures.clone(),
-        })
-    }
-
-    /// Select the startup readiness policy (`Playable` default; `Idle` for
-    /// screenshot/diagnostics waits).
-    pub(crate) fn with_readiness(mut self, readiness: StartupReadinessPolicy) -> Self {
-        self.pump = self.pump.with_readiness(readiness);
-        self
-    }
-
-    pub(crate) fn step(&mut self, camera_position: Vec3) -> Result<NativeSessionStartupStep> {
-        self.pump.step(camera_position)
-    }
-
-    pub(crate) fn progress_overlay(&self) -> Option<LoadingProgressOverlay> {
-        self.pump.progress_overlay()
-    }
-
-    /// Consume the pump into the runtime plus the transient startup render seed
-    /// batch for a one-shot draw upload (docs/tactical/167), instead of
-    /// recompiling every resident section after startup.
-    pub(crate) fn complete(
-        self,
-    ) -> (
-        WindowSceneRuntime,
-        Vec<TexturedRenderSectionMesh>,
-        NativeSessionStartupStep,
-    ) {
-        let Self {
-            pump,
-            actor_textures,
-        } = self;
-        let completion = pump.complete();
-        (
-            WindowSceneRuntime::from_scene_runtime(
-                completion.runtime.into_runtime(),
-                actor_textures,
-            ),
-            completion.startup_sections,
-            completion.final_step,
-        )
-    }
-
-    /// Drive the pump synchronously to startup readiness, then hand back the
-    /// runtime, transient render seed, and final step (docs/tactical/167 Slice 3
-    /// blocking startup lane). Replaces the former `poll_until_idle` +
-    /// `sync_all_render_sections` desktop remote/idle path.
-    pub(crate) fn drive_to_ready_with_timeout(
-        self,
-        camera_position: Vec3,
-        timeout: Duration,
-    ) -> Result<(
-        WindowSceneRuntime,
-        Vec<TexturedRenderSectionMesh>,
-        NativeSessionStartupStep,
-    )> {
-        let Self {
-            pump,
-            actor_textures,
-        } = self;
-        let completion = pump.drive_to_ready_with_timeout(camera_position, timeout)?;
-        Ok((
-            WindowSceneRuntime::from_scene_runtime(
-                completion.runtime.into_runtime(),
-                actor_textures,
-            ),
-            completion.startup_sections,
-            completion.final_step,
-        ))
-    }
-}
-
-#[allow(dead_code)]
-impl WindowSceneRuntime {
-    pub(crate) fn new(scene: &SceneOptions) -> Result<Self> {
-        Self::with_assets(scene, &WindowSceneAssets::load()?)
-    }
-
-    pub(crate) fn with_assets(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
-        Ok(Self {
-            scene: native_window_scene_runtime_with_mesh_assets(scene, assets.mesh_assets.clone())?,
-            actor_textures: assets.actor_textures.clone(),
-        })
-    }
-
-    fn from_scene_runtime(
-        scene: NativeWindowSceneRuntime,
-        actor_textures: ActorTextureAssets,
-    ) -> Self {
-        Self {
-            scene,
-            actor_textures,
-        }
-    }
-
-    pub(crate) fn client(&self) -> &ClientRuntime {
-        self.scene.client()
-    }
-
-    pub(crate) fn mesh_assets(&self) -> &TexturedMeshAssets {
-        self.scene.mesh_assets()
-    }
-
-    pub(crate) fn clear_far_lod(&mut self) {
-        self.scene.clear_far_lod();
-    }
-
-    pub(crate) fn prepare_far_lod_mesh(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        center: ChunkPos,
-        camera_position: Vec3,
-    ) -> Option<&FarTerrainLodMesh> {
-        self.scene
-            .prepare_far_lod_mesh(config, seed, center, camera_position)
-    }
-
-    #[cfg(test)]
-    fn render_session(&self) -> &RenderSectionSession {
-        self.scene.core().render_session()
-    }
-
-    #[cfg(test)]
-    fn render_session_mut(&mut self) -> &mut RenderSectionSession {
-        self.scene.core_mut().render_session_mut()
-    }
-
-    pub(crate) fn render_distance(&self) -> u32 {
-        self.scene.render_distance()
-    }
-
-    pub(crate) fn render_compile_pending_job_count(&self) -> usize {
-        self.scene.render_compile_pending_job_count()
-    }
-
-    pub(crate) fn render_compile_max_pending_job_count(&self) -> usize {
-        self.scene.render_compile_max_pending_job_count()
-    }
-
-    pub(crate) fn render_compile_available_pending_job_slots(&self) -> usize {
-        self.scene.render_compile_available_pending_job_slots()
-    }
-
-    pub(crate) fn simulation_cadence(&self) -> Option<SimulationCadenceConfig> {
-        self.scene.simulation_cadence()
-    }
-
-    pub(crate) fn set_simulation_cadence(
-        &mut self,
-        cadence: SimulationCadenceConfig,
-    ) -> Result<bool> {
-        self.scene.set_simulation_cadence(cadence)
-    }
-
-    pub(crate) fn chunk_tracking_radius(&self) -> u32 {
-        self.scene.chunk_tracking_radius()
-    }
-
-    pub(crate) fn interest_center(&self) -> ChunkPos {
-        self.scene.interest_center()
-    }
-
-    pub(crate) fn set_interest_center(&mut self, center: ChunkPos) -> Result<bool> {
-        self.scene.set_interest_center(center)
-    }
-
-    pub(crate) fn set_render_distance(&mut self, render_distance: u32) -> Result<bool> {
-        self.scene.set_render_distance(render_distance)
-    }
-
-    pub(crate) fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
-        self.scene.send_gameplay_command(command)
-    }
-
-    pub(crate) fn drain_player_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
-        self.scene.drain_player_position_updates()
-    }
-
-    pub(crate) fn commit_engine_camera_player_pose(
-        &mut self,
-        camera: &mut EngineCameraController,
-    ) -> Result<bool> {
-        mclone_app_runtime::commit_engine_camera_player_pose(
-            &mut self.scene,
-            camera,
-            DESKTOP_CAMERA_COMMIT_CONTEXT,
-            None,
-        )
-    }
-
-    pub(crate) fn sync_engine_camera_player_pose(
-        &mut self,
-        camera: &mut EngineCameraController,
-    ) -> Result<bool> {
-        mclone_app_runtime::sync_engine_camera_player_pose(
-            &mut self.scene,
-            camera,
-            DESKTOP_CAMERA_COMMIT_CONTEXT,
-        )
-    }
-
-    pub(crate) fn apply_pending_engine_camera_position_updates(
-        &mut self,
-        camera: &mut EngineCameraController,
-    ) -> Result<bool> {
-        mclone_app_runtime::apply_pending_engine_camera_position_updates(
-            &mut self.scene,
-            camera,
-            DESKTOP_CAMERA_COMMIT_CONTEXT,
-        )
-    }
-
-    pub(crate) fn poll(&mut self) -> Result<bool> {
-        self.scene.poll()
-    }
-
-    pub(crate) fn poll_with_update_budget(
-        &mut self,
-        budget: RuntimeUpdatePumpBudget,
-    ) -> Result<bool> {
-        self.scene.poll_with_update_budget(budget)
-    }
-
-    #[cfg(test)]
-    fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> bool {
-        self.scene.core_mut().apply_server_updates(updates)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn sync_render_sections(
-        &mut self,
-        camera_position: Vec3,
-    ) -> Result<RenderSectionCacheUpdate> {
-        self.scene.sync_render_sections(camera_position)
-    }
-
-    pub(crate) fn sync_render_sections_with_completed_result_acceptance_timed(
-        &mut self,
-        camera_position: Vec3,
-        completed_result_accept_budget: Option<usize>,
-    ) -> Result<TimedRenderSectionCacheUpdate> {
-        self.scene
-            .sync_render_sections_with_completed_result_acceptance_timed(
-                camera_position,
-                completed_result_accept_budget,
-            )
-    }
-
-    pub(crate) fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
-        &mut self,
-        camera_position: Vec3,
-        deadline: Instant,
-        completed_result_accept_budget: Option<usize>,
-    ) -> Result<TimedRenderSectionCacheUpdate> {
-        self.scene
-            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
-                camera_position,
-                deadline,
-                completed_result_accept_budget,
-            )
-    }
-
-    pub(crate) fn sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
-        &mut self,
-        camera_position: Vec3,
-        deadline: Instant,
-        max_compile_requests: usize,
-        completed_result_accept_budget: Option<usize>,
-    ) -> Result<TimedRenderSectionCacheUpdate> {
-        self.scene
-            .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
-                camera_position,
-                deadline,
-                max_compile_requests,
-                completed_result_accept_budget,
-            )
-    }
-
-    pub(crate) fn sync_all_render_sections(
-        &mut self,
-        camera_position: Vec3,
-    ) -> Result<RenderSectionCacheUpdate> {
-        self.scene.sync_all_render_sections(camera_position)
-    }
-
-    pub(crate) fn release_render_compile_jobs(&mut self, count: usize) -> usize {
-        self.scene.release_render_compile_jobs(count)
-    }
-
-    pub(crate) fn resident_section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
-        self.scene.resident_section_metadata()
-    }
-
-    pub(crate) fn cached_section_count(&self) -> usize {
-        self.scene.cached_section_count()
-    }
-
-    pub(crate) fn mark_all_render_sections_dirty_for_resource_rebuild(&mut self) -> usize {
-        self.scene
-            .mark_all_render_sections_dirty_for_resource_rebuild()
-    }
-
-    /// Sky clear color for the current day-time, driving the day/night gradient.
-    pub(crate) fn sky_clear_color(&self) -> wgpu::Color {
-        self.scene.sky_clear_color()
-    }
-
-    /// Celestial phase in `[0, 1)` for the current day-time (noon = 0).
-    pub(crate) fn time_of_day(&self) -> f32 {
-        self.scene.time_of_day()
-    }
-
-    /// Celestial rig rotation in radians for the current day-time.
-    pub(crate) fn sun_angle(&self) -> f32 {
-        self.scene.sun_angle()
-    }
-
-    /// Force the client day/night clock to a specific `dayTime`. Debug-only hook
-    /// for captures; the next server tick will overwrite it with authoritative
-    /// time.
-    pub(crate) fn force_day_time(&mut self, day_time: u64) {
-        self.scene.force_day_time(day_time);
-    }
-
-    pub(crate) fn traversal_ready_render_section_keys(
-        &self,
-        camera_position: Vec3,
-    ) -> BTreeSet<RenderSectionKey> {
-        self.scene
-            .traversal_ready_render_section_keys(camera_position)
-    }
-
-    pub(crate) fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.scene.has_pending_render_work(camera_position)
-    }
-
-    pub(crate) fn target_render_work_stats(&self, camera_position: Vec3) -> TargetRenderWorkStats {
-        self.scene.target_render_work_stats(camera_position)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pending_render_chunk_count(&self) -> usize {
-        self.scene.pending_render_chunk_count()
-    }
-
-    pub(crate) fn last_poll_diagnostics(&self) -> RuntimePollDiagnostics {
-        self.scene.last_poll_diagnostics()
-    }
-
-    pub(crate) fn view_readiness_overlay(&self) -> Option<LoadingProgressOverlay> {
-        self.scene.view_readiness_overlay()
-    }
-
-    pub(crate) fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
-        let Some(state_id) = self.block_state_at_position(position) else {
-            return false;
-        };
-        self.mesh_assets().catalog.occludes(state_id)
-    }
-
-    pub(crate) fn camera_inside_water(&self, position: Vec3) -> bool {
-        self.scene.camera_inside_water(position)
-    }
-
-    pub(crate) fn highest_non_air_block_y_at_world(
-        &self,
-        world_x: i32,
-        world_z: i32,
-    ) -> Option<i32> {
-        self.scene
-            .highest_non_air_block_y_at_world(world_x, world_z)
-    }
-
-    fn block_state_at_position(&self, position: Vec3) -> Option<mclone_core::BlockStateId> {
-        self.scene.block_state_at_position(position)
-    }
-
-    pub(crate) fn stats(&self) -> WindowRuntimeStats {
-        self.scene.stats()
-    }
-}
-
-#[cfg(test)]
-fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
-    let deadline = Instant::now() + Duration::from_secs(120);
-    let mut updates = Vec::new();
-
-    loop {
-        updates.extend(
-            server
-                .try_poll()
-                .context("failed to poll integrated server worldgen jobs")?,
-        );
-        if server.pending_job_count() == 0 {
-            return Ok(updates);
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for integrated server worldgen jobs");
-        }
-        if server.pending_publication_count() == 0 {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-}
-
 pub(crate) fn poll_window_runtime_until_idle(
-    runtime: &mut WindowSceneRuntime,
+    runtime: &mut NativeSceneRuntime<NativeRemoteServerSession>,
 ) -> Result<(usize, f64)> {
-    runtime.scene.poll_until_idle()
+    runtime.poll_until_idle_with_timeout(DEFAULT_STARTUP_READINESS_TIMEOUT)
 }
 
 pub(crate) fn poll_window_runtime_until_idle_with_timeout(
-    runtime: &mut WindowSceneRuntime,
+    runtime: &mut NativeSceneRuntime<NativeRemoteServerSession>,
     timeout: Duration,
 ) -> Result<(usize, f64)> {
-    runtime.scene.poll_until_idle_with_timeout(timeout)
+    runtime.poll_until_idle_with_timeout(timeout)
 }
-
-impl SceneOptions {
-    #[cfg(test)]
-    fn chunk_positions(&self) -> impl Iterator<Item = (i32, i32)> {
-        let min_x = self.chunk_x - self.render_distance;
-        let max_x = self.chunk_x + self.render_distance;
-        let min_z = self.chunk_z - self.render_distance;
-        let max_z = self.chunk_z + self.render_distance;
-        (min_x..=max_x)
-            .flat_map(move |chunk_x| (min_z..=max_z).map(move |chunk_z| (chunk_x, chunk_z)))
-    }
-}
-
-#[cfg(test)]
-mod tests;

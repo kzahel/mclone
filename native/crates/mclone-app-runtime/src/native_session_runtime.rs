@@ -59,7 +59,7 @@ const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_LOCAL_INTEGRATED_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default deadline for the shared synchronous startup drive
 /// (docs/tactical/167 Slice 3), matching the former `poll_until_idle` timeout.
-const DEFAULT_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
+pub const DEFAULT_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
 /// Bound on startup camera/interest reconciliation re-pump passes
 /// (docs/tactical/167 Slice 4). One correction/view-pose settles in a single
 /// pass; the bound only guards a pathological correction cascade.

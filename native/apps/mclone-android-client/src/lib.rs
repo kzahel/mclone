@@ -14,7 +14,7 @@ mod android {
         ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, android_app_data_asset_root,
     };
     use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
-    use mclone_scene::XrMcloneTerrainState;
+    use mclone_scene::McloneSceneHost;
     use winit::event_loop::{ControlFlow, EventLoop};
     use winit::platform::android::EventLoopBuilderExtAndroid;
     use winit::platform::android::activity::AndroidApp;
@@ -22,7 +22,7 @@ mod android {
     use crate::startup::prepare_android_startup;
     use crate::surface_driver::AndroidSurfaceDriver;
 
-    pub(crate) type AndroidSceneHost = XrMcloneTerrainState<NativeRemoteServerSession>;
+    pub(crate) type AndroidSceneHost = McloneSceneHost<NativeRemoteServerSession>;
 
     const LOG_TAG: &str = "mclone_android";
 

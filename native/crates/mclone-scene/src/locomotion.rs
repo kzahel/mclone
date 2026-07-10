@@ -504,7 +504,7 @@ pub struct XrFrameLocomotionOutcome {
     pub frozen_render: bool,
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {

@@ -284,17 +284,17 @@ struct XrWorldOverlayStats {
     draw_cache: UiDrawCacheStats,
 }
 
-pub struct XrMcloneTerrainState<S = XrLocalOnlyRemoteSession>
+pub struct McloneSceneHost<S = SceneLocalOnlyRemoteSession>
 where
     S: RemoteDedicatedServerSession,
 {
-    scene: XrSceneOptions,
+    scene: McloneSceneHostOptions,
     color_format: wgpu::TextureFormat,
     mesh_assets: TexturedMeshAssets,
     runtime: Option<NativeSessionRuntime<S>>,
-    local_startup: Option<XrLocalStartup>,
-    session: GameSessionCoordinator<XrPendingSessionStart>,
-    session_runtime_factory: Option<XrSessionRuntimeFactory<S>>,
+    local_startup: Option<SceneLocalStartup>,
+    session: GameSessionCoordinator<ScenePendingSessionStart>,
+    session_runtime_factory: Option<SceneSessionRuntimeFactory<S>>,
     client_experience: ClientExperienceController,
     world_catalog: Option<NativeWorldCatalog>,
     camera: EngineCameraController,
@@ -365,7 +365,7 @@ where
     seed_reroll: NewWorldSeedReroll,
 }
 
-impl<S> XrMcloneTerrainState<S>
+impl<S> McloneSceneHost<S>
 where
     S: RemoteDedicatedServerSession,
 {
@@ -2973,7 +2973,7 @@ mod tests {
 
     #[test]
     fn default_scene_options_match_desktop_xr_smoke_defaults() {
-        let options = XrSceneOptions::default();
+        let options = McloneSceneHostOptions::default();
         assert_eq!(options.seed, 12_345);
         assert_eq!(options.center(), ChunkPos::new(0, 0));
         assert_eq!(options.render_distance, 5);

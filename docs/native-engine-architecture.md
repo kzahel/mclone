@@ -94,26 +94,29 @@ Platform app crates own:
 
 ## Host Shapes
 
-Native clients are converging on one `mclone-scene` host with thin cadence and
-surface drivers (tactical 168). Single-view hosts use the mono topology:
+Native clients share one `mclone-scene::McloneSceneHost<S>`, configured with
+`McloneSceneHostOptions`, behind thin cadence and surface drivers (tactical
+168). Flat hosts use Mono; the headset-free gate uses synthetic Stereo:
 
 ```text
 platform input/lifecycle
   -> platform adapter
   -> mclone-scene shared session/runtime/UI orchestration
-  -> explicit single render view + render target
+  -> explicit Mono(view) or Stereo([view; 2]) targets
   -> mclone-render
 ```
 
-This covers desktop flat, offscreen flat, and flat Android. Web canvas retains
-its separate WASM host/render path until the deferred web-adoption work.
+This covers desktop flat, offscreen flat, headset-free XR emulation, and flat
+Android. Web canvas retains its separate WASM host/render path until the
+deferred web-adoption work.
 The live desktop flat path now reaches this boundary through the app-local
 `WinitFrameDriver`: winit owns redraw cadence, surface acquisition,
 keyboard/mouse translation, mouse lock, and final presentation, while
 `mclone-scene` owns session startup/replacement, runtime polling, camera/input
 application, render admission/sync/upload, traversal, actors, world overlays,
-HUD/menu/status assembly, and frame-accounting feedback. Offscreen/perf still
-drive the same Mono host through `OffscreenDriver`. Flat Android reaches it
+HUD/menu/status assembly, and frame-accounting feedback. Offscreen/perf drive
+the same host through `OffscreenDriver`, which owns Mono or synthetic Stereo
+targets but no scene policy. Flat Android reaches it
 through `AndroidSurfaceDriver`: the app retains `NativeActivity` lifecycle,
 Vulkan surface targets, raw input translation, startup properties, and fixed
 FIFO cadence facts; the host owns the same session/runtime/render/UI policy as
@@ -137,7 +140,8 @@ OpenXR runtime/actions/swapchains
 ```
 
 Desktop XR and Android XR should diverge only at runtime discovery, Android loader/activity glue, packaging, headset wake/restore, and other true platform concerns.
-The shared driver owns OpenXR poll/wait/begin/skip/end ordering and timing facts;
+The shared `mclone-xr-host::OpenXrFrameDriver` owns OpenXR
+poll/wait/begin/skip/end ordering and timing facts;
 platform handlers own event pumping, target acquisition/render callbacks, and
 presentation of outcomes.
 
@@ -147,6 +151,11 @@ Neutral tracked-controller snapshots and hand identity belong to
 contracts; `mclone-scene` does not depend on OpenXR or winit. Window surface
 support in `mclone-render` is feature-gated and enabled by the desktop app,
 not by shared scene consumers.
+
+The executable `pnpm native:thin-adapters:purity` source gate protects this
+boundary across the three native app crates and composes the scene-host and
+OpenXR-frame-driver purity checks. `AGENTS.md` carries the same shared-first
+ownership rule; no Tactical 168 guidance depends on app-local orchestration.
 
 ## Core Rules
 

@@ -1,25 +1,26 @@
-//! Desktop-native construction and option projection for the shared Mono
-//! scene host. Surface drivers stay responsible only for targets and cadence.
+//! Desktop-native construction and option projection for the shared scene
+//! host. Surface drivers select topology and remain responsible for targets
+//! and cadence.
 
 use anyhow::{Context, Result};
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_render::chunk::TexturedSectionRenderOptions;
-use mclone_scene::{XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose};
+use mclone_scene::{McloneSceneHost, McloneSceneHostOptions, XrStartupViewPose};
 
 use crate::cli::SceneOptions;
 use crate::scene_runtime::{WindowSceneAssets, native_window_scene_runtime_with_mesh_assets};
 
-pub(crate) type DesktopMonoSceneHost = XrMcloneTerrainState<NativeRemoteServerSession>;
+pub(crate) type DesktopSceneHost = McloneSceneHost<NativeRemoteServerSession>;
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct DesktopMonoSceneHostOverrides {
+pub(crate) struct DesktopSceneHostOverrides {
     pub(crate) freeze_scheduled_fluid_ticks: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn create_desktop_mono_scene_host(
+pub(crate) fn create_desktop_scene_host(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
@@ -28,8 +29,8 @@ pub(crate) fn create_desktop_mono_scene_host(
     assets: &WindowSceneAssets,
     asset_source: &impl mclone_assets::AssetSource,
     startup_view_pose: Option<XrStartupViewPose>,
-) -> Result<DesktopMonoSceneHost> {
-    create_desktop_mono_scene_host_with_overrides(
+) -> Result<DesktopSceneHost> {
+    create_desktop_scene_host_with_overrides(
         device,
         queue,
         color_format,
@@ -38,12 +39,12 @@ pub(crate) fn create_desktop_mono_scene_host(
         assets,
         asset_source,
         startup_view_pose,
-        DesktopMonoSceneHostOverrides::default(),
+        DesktopSceneHostOverrides::default(),
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn create_desktop_mono_scene_host_with_overrides(
+pub(crate) fn create_desktop_scene_host_with_overrides(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
@@ -52,9 +53,9 @@ pub(crate) fn create_desktop_mono_scene_host_with_overrides(
     assets: &WindowSceneAssets,
     asset_source: &impl mclone_assets::AssetSource,
     startup_view_pose: Option<XrStartupViewPose>,
-    overrides: DesktopMonoSceneHostOverrides,
-) -> Result<DesktopMonoSceneHost> {
-    let mut host_scene = mono_scene_options_from_desktop(scene)?;
+    overrides: DesktopSceneHostOverrides,
+) -> Result<DesktopSceneHost> {
+    let mut host_scene = scene_host_options_from_desktop(scene)?;
     host_scene.freeze_scheduled_fluid_ticks = overrides.freeze_scheduled_fluid_ticks;
     let mut host = if scene.remote_addr.is_some() {
         let endpoint = RemoteSessionEndpoint::new(
@@ -69,7 +70,7 @@ pub(crate) fn create_desktop_mono_scene_host_with_overrides(
             },
             native_window_scene_runtime_with_mesh_assets(scene, assets.mesh_assets.clone())?,
         )?;
-        XrMcloneTerrainState::with_runtime(
+        McloneSceneHost::with_runtime(
             device,
             queue,
             color_format,
@@ -82,7 +83,7 @@ pub(crate) fn create_desktop_mono_scene_host_with_overrides(
             startup_view_pose,
         )
     } else {
-        XrMcloneTerrainState::start_local_async(
+        McloneSceneHost::start_local_async(
             device,
             queue,
             color_format,
@@ -108,8 +109,10 @@ pub(crate) fn create_desktop_mono_scene_host_with_overrides(
     Ok(host)
 }
 
-pub(crate) fn mono_scene_options_from_desktop(scene: &SceneOptions) -> Result<XrSceneOptions> {
-    XrSceneOptions {
+pub(crate) fn scene_host_options_from_desktop(
+    scene: &SceneOptions,
+) -> Result<McloneSceneHostOptions> {
+    McloneSceneHostOptions {
         seed: scene.seed,
         chunk_x: scene.chunk_x,
         chunk_z: scene.chunk_z,
@@ -143,7 +146,7 @@ pub(crate) fn mono_scene_options_from_desktop(scene: &SceneOptions) -> Result<Xr
 
 fn desktop_scene_options_for_remote(
     endpoint: &RemoteSessionEndpoint,
-    scene: &XrSceneOptions,
+    scene: &McloneSceneHostOptions,
 ) -> SceneOptions {
     SceneOptions {
         seed: scene.seed,
@@ -212,7 +215,7 @@ mod tests {
     #[test]
     fn desktop_scene_options_survive_mono_host_conversion() {
         let scene = customized_scene();
-        let mono = mono_scene_options_from_desktop(&scene).expect("valid Mono scene");
+        let mono = scene_host_options_from_desktop(&scene).expect("valid Mono scene");
 
         assert_eq!(mono.seed, scene.seed);
         assert_eq!(mono.chunk_x, scene.chunk_x);
@@ -263,7 +266,7 @@ mod tests {
     #[test]
     fn remote_runtime_scene_preserves_shared_host_options() {
         let scene = customized_scene();
-        let mono = mono_scene_options_from_desktop(&scene).expect("valid Mono scene");
+        let mono = scene_host_options_from_desktop(&scene).expect("valid Mono scene");
         let endpoint = RemoteSessionEndpoint::new("127.0.0.1:25565");
         let remote = desktop_scene_options_for_remote(&endpoint, &mono);
 

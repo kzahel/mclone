@@ -25,8 +25,7 @@ use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point};
 use crate::camera::SpectatorCamera;
 use crate::cli::{SceneOptions, StartupWaitPolicy};
 use crate::desktop_scene_host::{
-    DesktopMonoSceneHost, DesktopMonoSceneHostOverrides,
-    create_desktop_mono_scene_host_with_overrides,
+    DesktopSceneHost, DesktopSceneHostOverrides, create_desktop_scene_host_with_overrides,
 };
 use crate::scene_runtime::WindowSceneAssets;
 
@@ -130,7 +129,7 @@ impl HostEffects for OffscreenHostEffects {
 /// on `mclone-scene`; this type owns only target sizing, deterministic cadence,
 /// readiness loops, and frame-accounting feedback.
 pub(crate) struct OffscreenDriver {
-    host: DesktopMonoSceneHost,
+    host: DesktopSceneHost,
     depth: ChunkDepthTarget,
     right_depth: Option<ChunkDepthTarget>,
     color_format: wgpu::TextureFormat,
@@ -186,7 +185,7 @@ impl OffscreenDriver {
             position: camera.position.to_array(),
             yaw_degrees: camera.yaw.to_degrees(),
         });
-        let mut host = create_desktop_mono_scene_host_with_overrides(
+        let mut host = create_desktop_scene_host_with_overrides(
             device,
             queue,
             color_format,
@@ -195,7 +194,7 @@ impl OffscreenDriver {
             assets,
             asset_source,
             startup_view_pose,
-            DesktopMonoSceneHostOverrides {
+            DesktopSceneHostOverrides {
                 freeze_scheduled_fluid_ticks: options.freeze_scheduled_fluid_ticks,
             },
         )?;
@@ -265,11 +264,11 @@ impl OffscreenDriver {
         )
     }
 
-    pub(crate) fn host(&self) -> &DesktopMonoSceneHost {
+    pub(crate) fn host(&self) -> &DesktopSceneHost {
         &self.host
     }
 
-    pub(crate) fn host_mut(&mut self) -> &mut DesktopMonoSceneHost {
+    pub(crate) fn host_mut(&mut self) -> &mut DesktopSceneHost {
         &mut self.host
     }
 
@@ -728,7 +727,7 @@ impl OffscreenDriver {
     }
 }
 
-fn set_host_camera(host: &mut DesktopMonoSceneHost, camera: &SpectatorCamera) {
+fn set_host_camera(host: &mut DesktopSceneHost, camera: &SpectatorCamera) {
     host.set_mono_capture_camera(
         mclone_core::Vec3d::new(
             f64::from(camera.position.x),
