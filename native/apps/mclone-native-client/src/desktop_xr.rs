@@ -13,9 +13,10 @@ use anyhow::{Result, bail};
 use glam::Vec3;
 #[cfg(not(target_os = "android"))]
 use mclone_scene::{
-    XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrFramePipelineReporter,
-    XrMcloneTerrainState, XrSceneFrameTarget, XrSceneOptions, XrStartupViewPose,
-    XrTerrainEyeTarget, XrTerrainFrameSummary, XrUnderwaterDetectionMode,
+    XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrMcloneTerrainState,
+    XrSceneFrameTarget, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+    XrTerrainFrameSummary, XrUnderwaterDetectionMode, record_xr_frame_pipeline,
+    xr_frame_pipeline_accounting_config,
 };
 #[cfg(not(target_os = "android"))]
 use mclone_xr_host::{
@@ -37,8 +38,6 @@ use crate::scene_runtime::{
     native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
 };
 #[cfg(not(target_os = "android"))]
-use mclone_app_runtime::elapsed_ms;
-#[cfg(not(target_os = "android"))]
 use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::render_assets::{
@@ -46,6 +45,8 @@ use mclone_app_runtime::render_assets::{
 };
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
+#[cfg(not(target_os = "android"))]
+use mclone_app_runtime::{elapsed_ms, frame_pipeline_accounting::FramePipelineAccountant};
 #[cfg(not(target_os = "android"))]
 use mclone_audio::{AudioEngine, AudioSettings};
 
@@ -410,7 +411,7 @@ struct DesktopXrFrameLoop<'a> {
     mclone: &'a mut Option<DesktopXrMcloneTerrainState>,
     controller_actions: &'a OpenXrControllerActions,
     controller_summary: XrControllerInputSummary,
-    frame_pipeline_reporter: XrFramePipelineReporter,
+    frame_pipeline_accountant: FramePipelineAccountant,
     companion: &'a mut Option<CompanionWindow>,
     companion_running_announced: bool,
     window_requested_exit: bool,
@@ -504,21 +505,20 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
                     (output.summary, output.controller_poll_ms)
                 });
             let budget_decision_panel = mclone.latest_budget_decision_panel();
-            let (frame_pipeline_report, frame_pipeline_revision) = self
-                .frame_pipeline_reporter
-                .record_frame_with_budget_decision_panel(
-                    XrFramePipelineHostTiming {
-                        frame_wall_ms: elapsed_ms(outcome.timing.frame_wall),
-                        wait_frame_ms: elapsed_ms(
-                            outcome.timing.wait_frame + outcome.timing.begin_frame,
-                        ),
-                        controller_poll_ms,
-                        rendered: rendered_summary.is_some(),
-                        thread_cpu_ms: None,
-                    },
-                    rendered_summary,
-                    budget_decision_panel,
-                );
+            let (frame_pipeline_report, frame_pipeline_revision) = record_xr_frame_pipeline(
+                &mut self.frame_pipeline_accountant,
+                XrFramePipelineHostTiming {
+                    frame_wall_ms: elapsed_ms(outcome.timing.frame_wall),
+                    wait_frame_ms: elapsed_ms(
+                        outcome.timing.wait_frame + outcome.timing.begin_frame,
+                    ),
+                    controller_poll_ms,
+                    rendered: rendered_summary.is_some(),
+                    thread_cpu_ms: None,
+                },
+                rendered_summary,
+                budget_decision_panel,
+            );
             mclone.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
         }
         Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
@@ -641,7 +641,9 @@ fn run_smoke_frames(
         mclone: &mut mclone,
         controller_actions: &controller_actions,
         controller_summary: XrControllerInputSummary::default(),
-        frame_pipeline_reporter: XrFramePipelineReporter::new(None),
+        frame_pipeline_accountant: FramePipelineAccountant::new(
+            xr_frame_pipeline_accounting_config(None),
+        ),
         companion: &mut companion,
         companion_running_announced: false,
         window_requested_exit: false,

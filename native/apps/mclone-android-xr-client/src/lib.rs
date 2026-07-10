@@ -92,14 +92,15 @@ mod android {
         StartupWorldStorageProjection, format_optional_startup_path, parse_bool_arg,
         parse_string_arg,
     };
+    use mclone_app_runtime::{
+        frame_pipeline_accounting::{FramePipelineAccountant, FramePipelinePeerThreadAccumulator},
+        frame_pipeline_presentation::frame_pipeline_report_lines,
+    };
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_diagnostics::{
-        BudgetDecisionFamily, BudgetDecisionPanelReport, BudgetDecisionReason, CriticalPathLabel,
-        DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator, FrameHostKind,
-        FrameObservation, FramePipelineReport, FrameSummaryReport, PeerThreadActivityReport,
-        PeerThreadId, PeerThreadPanelReport, PercentileMethod, QueueAgeReport, QueueAgeTracker,
-        QueueId, QueuePanelReport, StageId, StageSpan, WorkWindow, percentile_sorted_ms,
+        BudgetDecisionPanelReport, FrameAccumulator, FramePipelineReport, FrameSummaryReport,
+        PercentileMethod, QueuePanelReport, percentile_sorted_ms,
     };
     use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
     use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -110,10 +111,11 @@ mod android {
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_scene::{
         MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFrameLocomotionAutomation,
-        XrFramePipelineHostTiming, XrFramePipelineReporter, XrMcloneTerrainState,
-        XrSceneFrameTarget, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
-        XrTerrainMultiviewTarget, XrUnderwaterDetectionMode, local_integrated_scene_options,
-        single_view_host_options,
+        XrFramePipelineHostTiming, XrMcloneTerrainState, XrSceneFrameTarget, XrSceneOptions,
+        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        local_integrated_scene_options, record_xr_frame_pipeline,
+        record_xr_frame_pipeline_with_peer_threads, single_view_host_options,
+        xr_frame_pipeline_accounting_config, xr_frame_pipeline_peer_threads,
     };
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE, XrControllerSnapshot,
@@ -3386,8 +3388,9 @@ mod android {
     ) -> Result<()> {
         let render_path = frame_targets.render_path();
         let xr_eye_size = frame_targets.eye_size();
-        let frame_pipeline_reporter =
-            XrFramePipelineReporter::new(display_refresh.current_rate.map(f64::from));
+        let frame_pipeline_accountant = FramePipelineAccountant::new(
+            xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),
+        );
         let perf_probe = AndroidXrPerfProbe::new(
             perf_seconds,
             perf_flight,
@@ -3453,7 +3456,7 @@ mod android {
             session_smoke,
             fixed_render_view_pose,
             render_path,
-            frame_pipeline_reporter,
+            frame_pipeline_accountant,
             perf_probe,
             performance_metrics_wait_for_perf_window,
             performance_metrics_probe,
@@ -3590,7 +3593,7 @@ mod android {
         session_smoke: Option<AndroidXrSessionSmoke>,
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_path: AndroidXrRenderPath,
-        frame_pipeline_reporter: XrFramePipelineReporter,
+        frame_pipeline_accountant: FramePipelineAccountant,
         perf_probe: AndroidXrPerfProbe,
         performance_metrics_wait_for_perf_window: bool,
         performance_metrics_probe: Option<perf_metrics::XrPerformanceMetricsProbe>,
@@ -3833,22 +3836,21 @@ mod android {
                 BudgetDecisionPanelReport::empty()
             };
             if cfg!(feature = "perf-diagnostics") || frame_pipeline_overlay_open {
-                let (frame_pipeline_report, frame_pipeline_revision) = self
-                    .frame_pipeline_reporter
-                    .record_frame_with_budget_decision_panel(
-                        XrFramePipelineHostTiming {
-                            frame_wall_ms: self.frame_timing.frame_wall_ms,
-                            wait_frame_ms: self.frame_timing.wait_frame_ms,
-                            controller_poll_ms: self.frame_timing.controller_poll_ms,
-                            rendered: rendered_frame.is_some(),
-                            thread_cpu_ms: self
-                                .frame_timing
-                                .thread_cpu_valid
-                                .then_some(self.frame_timing.thread_cpu_ms),
-                        },
-                        rendered_frame.map(|rendered| rendered.summary),
-                        budget_decision_panel.clone(),
-                    );
+                let (frame_pipeline_report, frame_pipeline_revision) = record_xr_frame_pipeline(
+                    &mut self.frame_pipeline_accountant,
+                    XrFramePipelineHostTiming {
+                        frame_wall_ms: self.frame_timing.frame_wall_ms,
+                        wait_frame_ms: self.frame_timing.wait_frame_ms,
+                        controller_poll_ms: self.frame_timing.controller_poll_ms,
+                        rendered: rendered_frame.is_some(),
+                        thread_cpu_ms: self
+                            .frame_timing
+                            .thread_cpu_valid
+                            .then_some(self.frame_timing.thread_cpu_ms),
+                    },
+                    rendered_frame.map(|rendered| rendered.summary),
+                    budget_decision_panel.clone(),
+                );
                 self.terrain
                     .set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
             }
@@ -4311,7 +4313,8 @@ mod android {
                 detail: self.detail,
                 frame_accounting: self
                     .frame_accounting_enabled
-                    .then(|| android_xr_frame_accounting_accumulator(self.target_hz)),
+                    .then(|| android_xr_frame_pipeline_accountant(self.target_hz)),
+                peer_thread_accounting: FramePipelinePeerThreadAccumulator::default(),
                 sample_frames: 0,
                 max_wait_begin_ms: 0.0,
                 max_wait_frame_ms: 0.0,
@@ -4451,7 +4454,8 @@ mod android {
         started: Instant,
         start_stats: XrFrameStats,
         detail: AndroidXrPerfDetail,
-        frame_accounting: Option<FrameAccumulator>,
+        frame_accounting: Option<FramePipelineAccountant>,
+        peer_thread_accounting: FramePipelinePeerThreadAccumulator,
         sample_frames: u64,
         max_wait_begin_ms: f64,
         max_wait_frame_ms: f64,
@@ -4504,15 +4508,23 @@ mod android {
             rendered: Option<AndroidXrRenderedFrame>,
             budget_decision_panel: BudgetDecisionPanelReport,
         ) {
-            self.latest_budget_decision_panel = budget_decision_panel;
+            self.latest_budget_decision_panel = budget_decision_panel.clone();
             self.sample_frames = self.sample_frames.saturating_add(1);
             let sample_frame = self.sample_frames;
+            if let Some(rendered) = rendered.as_ref() {
+                self.peer_thread_accounting
+                    .observe(xr_frame_pipeline_peer_threads(rendered.summary.upload));
+            }
             if let Some(frame_accounting) = self.frame_accounting.as_mut() {
-                frame_accounting.record_frame(android_xr_frame_observation(
-                    sample_frame,
-                    timing,
-                    rendered.is_some(),
-                ));
+                record_xr_frame_pipeline_with_peer_threads(
+                    frame_accounting,
+                    android_xr_frame_pipeline_host_timing(timing, rendered.is_some()),
+                    rendered.as_ref().map(|rendered| rendered.summary),
+                    budget_decision_panel.clone(),
+                    rendered
+                        .is_some()
+                        .then(|| self.peer_thread_accounting.report()),
+                );
             }
             if self.detail.is_full() {
                 self.frame_details.push(AndroidXrWorstFrameSnapshot {
@@ -4551,30 +4563,40 @@ mod android {
             }
         }
 
-        fn frame_accounting_report(&self) -> FrameSummaryReport {
+        fn frame_pipeline_report(&self) -> FramePipelineReport {
             if let Some(frame_accounting) = self.frame_accounting.as_ref() {
-                return frame_accounting.summary_report();
+                return frame_accounting
+                    .latest_report()
+                    .map(|(report, _)| (*report).clone())
+                    .unwrap_or_else(empty_android_xr_frame_pipeline_report);
             }
-            let mut frame_accounting = android_xr_frame_accounting_accumulator(self.target_hz);
+            let mut frame_accounting = android_xr_frame_pipeline_accountant(self.target_hz);
+            let mut peer_thread_accounting = FramePipelinePeerThreadAccumulator::default();
             for detail in &self.frame_details {
-                frame_accounting.record_frame(android_xr_frame_observation(
-                    detail.sample_frame,
-                    detail.timing,
-                    detail.summary.is_some(),
-                ));
+                if let Some(summary) = detail.summary {
+                    peer_thread_accounting.observe(xr_frame_pipeline_peer_threads(summary.upload));
+                }
+                record_xr_frame_pipeline_with_peer_threads(
+                    &mut frame_accounting,
+                    android_xr_frame_pipeline_host_timing(detail.timing, detail.summary.is_some()),
+                    detail.summary,
+                    self.latest_budget_decision_panel.clone(),
+                    detail
+                        .summary
+                        .is_some()
+                        .then(|| peer_thread_accounting.report()),
+                );
             }
-            frame_accounting.summary_report()
+            frame_accounting
+                .latest_report()
+                .map(|(report, _)| (*report).clone())
+                .unwrap_or_else(empty_android_xr_frame_pipeline_report)
         }
 
         fn log_summary(&mut self, frame_stats: XrFrameStats) {
-            let frame_accounting = self.frame_accounting_report();
-            let frame_pipeline_report = self.detail.is_full().then(|| {
-                let queue_panel = android_xr_queue_panel(&self.frame_details);
-                let peer_thread_panel = android_xr_peer_thread_panel(&self.frame_details);
-                FramePipelineReport::new(frame_accounting.clone(), queue_panel)
-                    .with_peer_thread_panel(peer_thread_panel)
-                    .with_budget_decision_panel(self.latest_budget_decision_panel.clone())
-            });
+            let full_frame_pipeline_report = self.frame_pipeline_report();
+            let frame_accounting = full_frame_pipeline_report.frame_summary.clone();
+            let frame_pipeline_report = self.detail.is_full().then_some(full_frame_pipeline_report);
             let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = frame_accounting.frames;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
@@ -5562,398 +5584,36 @@ mod android {
         }
     }
 
-    fn android_xr_frame_accounting_accumulator(target_hz: f64) -> FrameAccumulator {
-        FrameAccumulator::new(
-            FrameAccountingConfig::from_target_hz(target_hz)
-                .with_percentile_method(PercentileMethod::NearestRank)
+    fn android_xr_frame_pipeline_accountant(target_hz: f64) -> FramePipelineAccountant {
+        FramePipelineAccountant::new(
+            xr_frame_pipeline_accounting_config(Some(target_hz))
                 .with_worst_frame_capacity(ANDROID_XR_PERF_WORST_FRAME_COUNT),
         )
     }
 
-    fn android_xr_frame_observation(
-        sample_frame: u64,
+    fn android_xr_frame_pipeline_host_timing(
         timing: AndroidXrFrameTiming,
         rendered: bool,
-    ) -> FrameObservation {
-        let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
-        let thread_cpu_ms = timing.thread_cpu_valid.then_some(timing.thread_cpu_ms);
-        let mut observation = FrameObservation::new(sample_frame, timing.frame_wall_ms)
-            .with_wait_ms(timing.wait_frame_ms)
-            .with_app_work_ms(app_work_ms)
-            .with_thread_cpu_ms(thread_cpu_ms)
-            .with_rendered(rendered)
-            .with_stage_span(StageSpan::new(
-                StageId::GpuExecutionPresentationWait,
-                timing.wait_frame_ms,
-            ))
-            .with_stage_span(StageSpan::new(
-                StageId::InputPoseEvents,
-                timing.controller_poll_ms,
-            ));
-        for span in android_xr_render_stage_spans(timing.render) {
-            observation = observation.with_stage_span(span);
-        }
-        observation
-    }
-
-    fn android_xr_render_stage_spans(timing: AndroidXrRenderFrameTiming) -> Vec<StageSpan> {
-        let dirty_ready_scan_ms =
-            timing.terrain_runtime_dirty_seed_ms + timing.terrain_runtime_prepare_ms;
-        let request_build_ms = timing.terrain_runtime_submit_snapshot_ms
-            + timing.terrain_runtime_submit_request_build_ms;
-        let worker_submit_ms = timing.terrain_runtime_submit_compiler_ms;
-        let prepared_record_ms = timing.terrain_runtime_submit_mark_inflight_ms
-            + timing.terrain_runtime_submit_apply_ready_plan_ms
-            + timing.terrain_runtime_submit_ready_update_ms;
-        let attributed_sync_ms = timing.terrain_runtime_result_accept_ms
-            + dirty_ready_scan_ms
-            + request_build_ms
-            + worker_submit_ms
-            + prepared_record_ms;
-        let sync_unattributed_ms = timing
-            .terrain_runtime_sync_unattributed_ms
-            .max((timing.terrain_runtime_sync_ms - attributed_sync_ms).max(0.0));
-        let multiview_draw_ms = timing.terrain_multiview_sky_ms
-            + timing.terrain_multiview_terrain_ms
-            + timing.terrain_multiview_actor_ms
-            + timing.terrain_multiview_screen_effect_ms
-            + timing.terrain_multiview_world_overlays_ms
-            + timing.terrain_multiview_submit_ms;
-        let draw_encode_ms = timing.terrain_render_views_ms.max(multiview_draw_ms);
-        vec![
-            StageSpan::new(StageId::HostSessionCommands, timing.terrain_runtime_poll_ms),
-            StageSpan::new(
-                StageId::CompletedResultAcceptance,
-                timing.terrain_runtime_result_accept_ms,
-            ),
-            StageSpan::new(StageId::RenderAdmissionDirtyReadyScan, dirty_ready_scan_ms),
-            StageSpan::new(StageId::RenderAdmissionRequestBuild, request_build_ms),
-            StageSpan::new(StageId::RenderAdmissionWorkerSubmit, worker_submit_ms),
-            StageSpan::new(
-                StageId::RenderAdmissionPreparedRecordMaintenance,
-                prepared_record_ms,
-            ),
-            StageSpan::new(StageId::RenderSectionAdmission, sync_unattributed_ms),
-            StageSpan::new(StageId::UploadApply, timing.terrain_runtime_gpu_upload_ms),
-            StageSpan::new(
-                StageId::PreparedDrawRecords,
-                timing.terrain_shared_records_ms,
-            ),
-            StageSpan::new(StageId::DrawEncode, draw_encode_ms),
-        ]
-    }
-
-    fn android_xr_queue_panel(details: &[AndroidXrWorstFrameSnapshot]) -> QueuePanelReport {
-        let mut inbound_updates = QueueAgeTracker::new(QueueId::InboundUpdates);
-        let mut completed_results = QueueAgeTracker::new(QueueId::CompletedRenderResults);
-        let mut upload_work = QueueAgeTracker::new(QueueId::UploadWork);
-        let mut host_publication = QueueAgeTracker::new(QueueId::HostPublication);
-        let mut host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
-        let mut host_publication_worldgen = QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
-        let mut host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
-        let mut render_compile_jobs = QueueAgeTracker::new(QueueId::RenderCompileJobs);
-        let mut now_ms = 0.0;
-
-        for detail in details {
-            now_ms += detail.timing.frame_wall_ms;
-            let Some(summary) = detail.summary else {
-                continue;
-            };
-            let upload = summary.upload;
-            inbound_updates.reconcile_depth(usize_to_u64(upload.server_update_queue_depth), now_ms);
-
-            let completed = usize_to_u64(upload.completed_compile_section_count);
-            if completed > 0 {
-                completed_results.enqueue(completed, now_ms);
-                completed_results.dequeue(completed, now_ms);
-            }
-            completed_results.reconcile_depth(
-                usize_to_u64(upload.queued_completed_compile_result_count),
-                now_ms,
-            );
-
-            upload_work.reconcile_depth(
-                usize_to_u64(upload.queued_upload_lifecycle_item_count),
-                now_ms,
-            );
-
-            if !upload.host_mode.server_owned_lanes_are_remote() {
-                let runner_depth = upload.server_pending_publications;
-                let worldgen_depth = upload.poll_scheduler_pending_worldgen_publication_chunks;
-                let light_depth = upload.poll_scheduler_pending_light_publications;
-                let publication_depth = runner_depth
-                    .saturating_add(worldgen_depth)
-                    .saturating_add(light_depth);
-                host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
-                host_publication_runner.reconcile_depth(usize_to_u64(runner_depth), now_ms);
-                host_publication_worldgen.reconcile_depth(usize_to_u64(worldgen_depth), now_ms);
-                host_publication_light.reconcile_depth(usize_to_u64(light_depth), now_ms);
-            }
-            render_compile_jobs
-                .reconcile_depth(usize_to_u64(upload.pending_compile_jobs_after), now_ms);
-        }
-
-        let latest_host_mode = details
-            .iter()
-            .rev()
-            .find_map(|detail| detail.summary.map(|summary| summary.upload.host_mode))
-            .unwrap_or_default();
-        let host_publication = if latest_host_mode.server_owned_lanes_are_remote() {
-            remote_host_queue_report(QueueId::HostPublication)
-        } else {
-            host_publication.report(now_ms)
-        };
-        let host_publication_runner = if latest_host_mode.server_owned_lanes_are_remote() {
-            remote_host_queue_report(QueueId::HostPublicationRunner)
-        } else {
-            host_publication_runner.report(now_ms)
-        };
-        let host_publication_worldgen = if latest_host_mode.server_owned_lanes_are_remote() {
-            remote_host_queue_report(QueueId::HostPublicationWorldgen)
-        } else {
-            host_publication_worldgen.report(now_ms)
-        };
-        let host_publication_light = if latest_host_mode.server_owned_lanes_are_remote() {
-            remote_host_queue_report(QueueId::HostPublicationLight)
-        } else {
-            host_publication_light.report(now_ms)
-        };
-
-        QueuePanelReport::new(vec![
-            inbound_updates.report(now_ms),
-            completed_results.report(now_ms),
-            upload_work.report(now_ms),
-            host_publication,
-            host_publication_runner,
-            host_publication_worldgen,
-            host_publication_light,
-            render_compile_jobs.report(now_ms),
-        ])
-    }
-
-    fn android_xr_peer_thread_panel(
-        details: &[AndroidXrWorstFrameSnapshot],
-    ) -> PeerThreadPanelReport {
-        let latest_upload = details
-            .iter()
-            .rev()
-            .find_map(|detail| detail.summary.map(|summary| summary.upload))
-            .unwrap_or_default();
-        let server_busy_ms = details
-            .iter()
-            .filter_map(|detail| detail.summary)
-            .map(|summary| summary.upload.poll_server_reported_total_ms)
-            .sum::<f64>();
-        let max_server_pending_jobs = details
-            .iter()
-            .filter_map(|detail| detail.summary)
-            .map(|summary| summary.upload.server_pending_jobs)
-            .max()
-            .unwrap_or(0);
-        let max_worldgen_pending_jobs = details
-            .iter()
-            .filter_map(|detail| detail.summary)
-            .map(|summary| summary.upload.poll_scheduler_worldgen_mailbox_pending_jobs)
-            .max()
-            .unwrap_or(0);
-        let max_light_pending_jobs = details
-            .iter()
-            .filter_map(|detail| detail.summary)
-            .map(|summary| summary.upload.poll_scheduler_light_mailbox_pending_statuses)
-            .max()
-            .unwrap_or(0);
-        let max_render_compile_pending_jobs = details
-            .iter()
-            .filter_map(|detail| detail.summary)
-            .map(|summary| summary.upload.pending_compile_jobs_after)
-            .max()
-            .unwrap_or(0);
-        let submitted_compile_sections = details
-            .iter()
-            .filter_map(|detail| detail.summary)
-            .map(|summary| summary.upload.submitted_compile_section_count)
-            .sum::<usize>();
-        let completed_compile_sections = details
-            .iter()
-            .filter_map(|detail| detail.summary)
-            .map(|summary| summary.upload.completed_compile_section_count)
-            .sum::<usize>();
-        let server_lanes_remote = latest_upload.host_mode.server_owned_lanes_are_remote();
-
-        PeerThreadPanelReport::new(vec![
-            server_runner_peer_report(server_lanes_remote, max_server_pending_jobs, server_busy_ms),
-            worker_metrics_peer_report(
-                PeerThreadId::Worldgen,
-                server_lanes_remote,
-                usize_to_u64(latest_upload.worldgen_job_frame_metrics.request_frames),
-                usize_to_u64(latest_upload.worldgen_job_frame_metrics.response_frames),
-                usize_to_u64(latest_upload.worldgen_job_frame_metrics.request_bytes),
-                usize_to_u64(latest_upload.worldgen_job_frame_metrics.response_bytes),
-                usize_to_u64(latest_upload.worldgen_job_frame_metrics.max_pending_frames),
-                latest_upload.worldgen_job_frame_metrics.last_request_us,
-                latest_upload.worldgen_job_frame_metrics.total_request_us,
-                latest_upload.worldgen_job_frame_metrics.max_request_us,
-                max_worldgen_pending_jobs,
-            ),
-            worker_metrics_peer_report(
-                PeerThreadId::LightStatus,
-                server_lanes_remote,
-                usize_to_u64(latest_upload.light_status_job_frame_metrics.request_frames),
-                usize_to_u64(latest_upload.light_status_job_frame_metrics.response_frames),
-                usize_to_u64(latest_upload.light_status_job_frame_metrics.request_bytes),
-                usize_to_u64(latest_upload.light_status_job_frame_metrics.response_bytes),
-                usize_to_u64(
-                    latest_upload
-                        .light_status_job_frame_metrics
-                        .max_pending_frames,
-                ),
-                latest_upload.light_status_job_frame_metrics.last_request_us,
-                latest_upload
-                    .light_status_job_frame_metrics
-                    .total_request_us,
-                latest_upload.light_status_job_frame_metrics.max_request_us,
-                max_light_pending_jobs,
-            ),
-            PeerThreadActivityReport::new(PeerThreadId::RenderCompileWorkers)
-                .with_pending_jobs(usize_to_u64(max_render_compile_pending_jobs))
-                .with_frames(
-                    usize_to_u64(submitted_compile_sections),
-                    usize_to_u64(completed_compile_sections),
-                )
-                .with_request_timing_ms(
-                    None,
-                    latest_upload.dispatcher_total_compile_worker_busy_ms,
-                    latest_upload.dispatcher_max_compile_worker_task_ms,
-                )
-                .with_busy_idle_ms(
-                    Some(latest_upload.dispatcher_total_compile_worker_busy_ms),
-                    None,
-                ),
-        ])
-    }
-
-    fn worker_metrics_peer_report(
-        lane: PeerThreadId,
-        server_lanes_remote: bool,
-        request_frames: u64,
-        response_frames: u64,
-        request_bytes: u64,
-        response_bytes: u64,
-        max_pending_frames: u64,
-        last_request_us: u128,
-        total_request_us: u128,
-        max_request_us: u128,
-        pending_jobs: usize,
-    ) -> PeerThreadActivityReport {
-        let report = PeerThreadActivityReport::new(lane)
-            .with_pending_jobs(usize_to_u64(pending_jobs))
-            .with_frames(request_frames, response_frames)
-            .with_bytes(request_bytes, response_bytes)
-            .with_max_pending_frames(max_pending_frames)
-            .with_request_timing_ms(
-                (last_request_us > 0).then_some(micros_to_ms(last_request_us)),
-                micros_to_ms(total_request_us),
-                micros_to_ms(max_request_us),
-            )
-            .with_busy_idle_ms(Some(micros_to_ms(total_request_us)), None);
-        if server_lanes_remote {
-            report.with_availability(DiagnosticLaneAvailability::RemoteHost)
-        } else {
-            report
+    ) -> XrFramePipelineHostTiming {
+        XrFramePipelineHostTiming {
+            frame_wall_ms: timing.frame_wall_ms,
+            wait_frame_ms: timing.wait_frame_ms,
+            controller_poll_ms: timing.controller_poll_ms,
+            rendered,
+            thread_cpu_ms: timing.thread_cpu_valid.then_some(timing.thread_cpu_ms),
         }
     }
 
-    fn remote_host_queue_report(queue: QueueId) -> QueueAgeReport {
-        QueueAgeReport::snapshot(queue, 0, 0, 0, None, 0.0, 0)
-            .with_availability(DiagnosticLaneAvailability::RemoteHost)
-    }
-
-    fn server_runner_peer_report(
-        server_lanes_remote: bool,
-        pending_jobs: usize,
-        busy_ms: f64,
-    ) -> PeerThreadActivityReport {
-        let report = PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
-            .with_pending_jobs(usize_to_u64(pending_jobs))
-            .with_busy_idle_ms(Some(busy_ms), None);
-        if server_lanes_remote {
-            report.with_availability(DiagnosticLaneAvailability::RemoteHost)
-        } else {
-            report
-        }
+    fn empty_android_xr_frame_pipeline_report() -> FramePipelineReport {
+        FramePipelineReport::new(
+            FrameAccumulator::new(xr_frame_pipeline_accounting_config(None)).summary_report(),
+            QueuePanelReport::new(Vec::new()),
+        )
     }
 
     fn log_android_xr_frame_pipeline_report(report: &FramePipelineReport) {
-        log::info!(
-            "MCLONE_ANDROID_XR_PERF_FRAME_PIPELINE schema_version={} frames={} queues={} peers={} stages={} budget_decisions={}",
-            report.schema_version,
-            report.frame_summary.frames,
-            report.queue_panel.queues.len(),
-            report.peer_thread_panel.peers.len(),
-            report.stage_spans.len(),
-            report.budget_decision_panel.decisions.len()
-        );
-        for queue in &report.queue_panel.queues {
-            log::info!(
-                "MCLONE_ANDROID_XR_PERF_QUEUE queue={} enqueued={} dequeued={} depth={} oldest_age_ms={} max_oldest_age_ms={:.3} conservation_violations={} availability={}",
-                queue_id_label(&queue.queue),
-                queue.enqueued_total,
-                queue.dequeued_total,
-                queue.depth,
-                format_optional_f64(queue.oldest_age_ms),
-                queue.max_oldest_age_ms,
-                queue.conservation_violations,
-                queue.availability.label()
-            );
-        }
-        for peer in &report.peer_thread_panel.peers {
-            log::info!(
-                "MCLONE_ANDROID_XR_PERF_PEER lane={} active={} pending_jobs={} request_frames={} response_frames={} request_bytes={} response_bytes={} max_pending_frames={} busy_ms={} idle_ms={} last_request_ms={} total_request_ms={:.3} max_request_ms={:.3} conservation_violations={} availability={}",
-                peer_thread_id_label(&peer.lane),
-                peer.active,
-                peer.pending_jobs,
-                peer.request_frames,
-                peer.response_frames,
-                peer.request_bytes,
-                peer.response_bytes,
-                peer.max_pending_frames,
-                format_optional_f64(peer.busy_ms),
-                format_optional_f64(peer.idle_ms),
-                format_optional_f64(peer.last_request_ms),
-                peer.total_request_ms,
-                peer.max_request_ms,
-                peer.conservation_violations,
-                peer.availability.label()
-            );
-        }
-        for span in &report.stage_spans {
-            log::info!(
-                "MCLONE_ANDROID_XR_PERF_STAGE stage={} label={} elapsed_ms={:.3} thread_cpu_ms={}",
-                stage_id_label(span.stage),
-                critical_path_label(span.label),
-                span.elapsed_ms,
-                format_optional_f64(span.thread_cpu_ms)
-            );
-        }
-        for decision in &report.budget_decision_panel.decisions {
-            log::info!(
-                "MCLONE_ANDROID_XR_PERF_BUDGET_DECISION family={} host={} window={} stage={} reason={} grant_ms={:.3} min_units={} max_units={} max_pending_units={} target_period_ms={:.3} queue_depth={} oldest_queue_age_ms={} per_unit_cost_ms={} previous_max_units={} clean_windows={}",
-                budget_decision_family_label(decision.family),
-                frame_host_kind_label(decision.address.host_kind),
-                work_window_label(decision.address.work_window),
-                stage_id_label(decision.address.stage),
-                budget_decision_reason_label(decision.trace.reason),
-                decision.grant.elapsed_ms,
-                decision.grant.min_units,
-                decision.grant.max_units,
-                format_optional_u32(decision.grant.max_pending_units),
-                decision.trace.input_snapshot.target_period_ms,
-                decision.trace.input_snapshot.queue_depth,
-                format_optional_f64(decision.trace.input_snapshot.oldest_queue_age_ms),
-                format_optional_f64(decision.trace.input_snapshot.per_unit_cost_ms),
-                decision.trace.previous_max_units,
-                decision.trace.consecutive_clean_windows
-            );
+        for line in frame_pipeline_report_lines("MCLONE_ANDROID_XR_PERF", report) {
+            log::info!("{line}");
         }
     }
 
@@ -5978,138 +5638,6 @@ mod android {
         value
             .map(|value| value.to_string())
             .unwrap_or_else(|| "unbounded".to_owned())
-    }
-
-    fn format_optional_f64(value: Option<f64>) -> String {
-        value
-            .map(|value| format!("{value:.3}"))
-            .unwrap_or_else(|| "none".to_owned())
-    }
-
-    fn format_optional_u32(value: Option<u32>) -> String {
-        value
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_owned())
-    }
-
-    fn usize_to_u64(value: usize) -> u64 {
-        value.try_into().unwrap_or(u64::MAX)
-    }
-
-    fn micros_to_ms(value: u128) -> f64 {
-        value as f64 / 1000.0
-    }
-
-    fn critical_path_label(label: CriticalPathLabel) -> &'static str {
-        match label {
-            CriticalPathLabel::CurrentFrameCritical => "current-frame-critical",
-            CriticalPathLabel::NextFrameSlack => "next-frame-slack",
-            CriticalPathLabel::ParallelCpuPeer => "parallel-cpu-peer",
-            CriticalPathLabel::RemoteHostWork => "remote-host-work",
-            CriticalPathLabel::QueuedBackpressured => "queued-backpressured",
-        }
-    }
-
-    fn budget_decision_family_label(family: BudgetDecisionFamily) -> &'static str {
-        match family {
-            BudgetDecisionFamily::FeaturePublication => "feature-publication",
-            BudgetDecisionFamily::LightPublication => "light-publication",
-            BudgetDecisionFamily::FeatureJobAdmission => "feature-job-admission",
-            BudgetDecisionFamily::RenderAdmission => "render-admission",
-            BudgetDecisionFamily::CompletedResultAcceptance => "completed-result-acceptance",
-            BudgetDecisionFamily::SectionUpload => "section-upload",
-            BudgetDecisionFamily::RenderCompileWorkers => "render-compile-workers",
-        }
-    }
-
-    fn budget_decision_reason_label(reason: BudgetDecisionReason) -> &'static str {
-        match reason {
-            BudgetDecisionReason::ColdStartFloor => "cold-start-floor",
-            BudgetDecisionReason::MissingInputFloor => "missing-input-floor",
-            BudgetDecisionReason::TargetPeriodChangedFloor => "target-period-changed-floor",
-            BudgetDecisionReason::CutFrameMiss => "cut-frame-miss",
-            BudgetDecisionReason::CutNegativeHeadroom => "cut-negative-headroom",
-            BudgetDecisionReason::CutQueueAge => "cut-queue-age",
-            BudgetDecisionReason::RaiseSustainedHeadroom => "raise-sustained-headroom",
-            BudgetDecisionReason::HoldHysteresis => "hold-hysteresis",
-            BudgetDecisionReason::HoldAtCap => "hold-at-cap",
-        }
-    }
-
-    fn frame_host_kind_label(host: FrameHostKind) -> &'static str {
-        match host {
-            FrameHostKind::DesktopFlatWinit => "desktop-flat-winit",
-            FrameHostKind::FlatAndroidWinit => "flat-android-winit",
-            FrameHostKind::WebRafWorkers => "web-raf-workers",
-            FrameHostKind::AndroidXrOpenXr => "android-xr-open-xr",
-            FrameHostKind::DesktopXrOpenXr => "desktop-xr-open-xr",
-            FrameHostKind::HeadlessOffscreenPerf => "headless-offscreen-perf",
-            FrameHostKind::IntegratedServerRunner => "integrated-server-runner",
-            FrameHostKind::DedicatedServerCommandLoop => "dedicated-server-command-loop",
-        }
-    }
-
-    fn work_window_label(window: WorkWindow) -> &'static str {
-        match window {
-            WorkWindow::BeforeRender => "before-render",
-            WorkWindow::PostSubmitOverlapSlack => "post-submit-overlap-slack",
-            WorkWindow::GameplayTick => "gameplay-tick",
-            WorkWindow::TickSlack => "tick-slack",
-            WorkWindow::WorkerPoll => "worker-poll",
-            WorkWindow::OffscreenStep => "offscreen-step",
-            WorkWindow::CommandTick => "command-tick",
-        }
-    }
-
-    fn stage_id_label(stage: StageId) -> &'static str {
-        match stage {
-            StageId::InputPoseEvents => "input-pose-events",
-            StageId::HostSessionCommands => "host-session-commands",
-            StageId::TerrainGeneration => "terrain-generation",
-            StageId::LightComputeStatus => "light-compute-status",
-            StageId::SchedulerPublication => "scheduler-publication",
-            StageId::TransportDecode => "transport-decode",
-            StageId::ClientUpdateApply => "client-update-apply",
-            StageId::RenderSectionAdmission => "render-section-admission",
-            StageId::RenderAdmissionDirtyReadyScan => "render-admission-dirty-ready-scan",
-            StageId::RenderAdmissionRequestBuild => "render-admission-request-build",
-            StageId::RenderAdmissionWorkerSubmit => "render-admission-worker-submit",
-            StageId::RenderAdmissionPreparedRecordMaintenance => {
-                "render-admission-prepared-record-maintenance"
-            }
-            StageId::CpuMeshCompile => "cpu-mesh-compile",
-            StageId::CompletedResultAcceptance => "completed-result-acceptance",
-            StageId::GpuUpload => "gpu-upload",
-            StageId::UploadApply => "upload-apply",
-            StageId::PreparedDrawRecords => "prepared-draw-records",
-            StageId::DrawEncode => "draw-encode",
-            StageId::GpuExecutionPresentationWait => "gpu-execution-presentation-wait",
-            StageId::UiDebug => "ui-debug",
-        }
-    }
-
-    fn queue_id_label(queue: &QueueId) -> &str {
-        match queue {
-            QueueId::InboundUpdates => "inbound-updates",
-            QueueId::CompletedRenderResults => "completed-render-results",
-            QueueId::UploadWork => "upload-work",
-            QueueId::HostPublication => "host-publication",
-            QueueId::HostPublicationRunner => "host-publication-runner",
-            QueueId::HostPublicationWorldgen => "host-publication-worldgen",
-            QueueId::HostPublicationLight => "host-publication-light",
-            QueueId::RenderCompileJobs => "render-compile-jobs",
-            QueueId::Custom(label) => label.as_str(),
-        }
-    }
-
-    fn peer_thread_id_label(peer: &PeerThreadId) -> &str {
-        match peer {
-            PeerThreadId::ServerRunner => "server-runner",
-            PeerThreadId::Worldgen => "worldgen",
-            PeerThreadId::LightStatus => "light-status",
-            PeerThreadId::RenderCompileWorkers => "render-compile-workers",
-            PeerThreadId::Custom(label) => label.as_str(),
-        }
     }
 
     fn format_supported_hz(rates: &[f32]) -> String {

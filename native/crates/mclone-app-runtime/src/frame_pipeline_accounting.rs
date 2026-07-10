@@ -1,29 +1,152 @@
 //! Shared frame-pipeline accountant.
 //!
-//! Turns a single-view render loop's per-frame stage/surface timing and runtime
-//! stats into a [`FramePipelineReport`] for the shared frame-pipeline overlay. It
-//! is surface-neutral: its inputs ([`SingleViewRuntimeStats`], [`RenderStreamStats`],
-//! [`RenderSectionSyncTiming`]) are all shared runtime types, so flat desktop, flat
-//! Android, and any other single-view native surface feed the same accountant. Each
-//! surface still measures its own stage timings — that feeding is legitimately
-//! per-loop; only the accounting structure is shared.
+//! Turns neutral per-frame observations, queue depths, and peer-thread snapshots
+//! into a [`FramePipelineReport`] for overlays and perf output. Flat clients keep
+//! their incremental convenience API, while XR and offscreen/perf consumers feed
+//! the same accountant through [`FramePipelineAccountant::record_prebuilt`].
 
 use std::sync::Arc;
 
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, DiagnosticLaneAvailability, FrameAccountingConfig, FrameAccumulator,
-    FrameObservation, FramePipelineReport, QueueAgeReport, QueueAgeTracker, QueueId,
-    QueuePanelReport, StageId, StageSpan,
+    FrameObservation, FramePipelineReport, PeerThreadActivityReport, PeerThreadId,
+    PeerThreadPanelReport, QueueAgeReport, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
+    StageSpan,
 };
+use mclone_server::WorkerFrameMetrics;
 
 use crate::frame_render::RenderStreamStats;
 use crate::{RenderSectionSyncTiming, SingleViewRuntimeStats};
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FramePipelineQueueDepths {
+    pub observed: bool,
+    pub server_owned_lanes_remote: bool,
+    pub inbound_updates: usize,
+    pub host_publication_runner: usize,
+    pub host_publication_worldgen: usize,
+    pub host_publication_light: usize,
+    pub render_compile_jobs: usize,
+    pub completed_results: usize,
+    pub completed_results_processed: usize,
+    pub upload_work: usize,
+    pub upload_work_processed: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FramePipelinePeerThreadInput {
+    pub server_owned_lanes_remote: bool,
+    pub server_pending_jobs: usize,
+    pub server_busy_ms: f64,
+    pub worldgen_metrics: WorkerFrameMetrics,
+    pub worldgen_pending_jobs: usize,
+    pub light_metrics: WorkerFrameMetrics,
+    pub light_pending_jobs: usize,
+    pub render_compile_pending_jobs: usize,
+    pub render_compile_submitted: usize,
+    pub render_compile_completed: usize,
+    pub render_compile_busy_ms: f64,
+    pub render_compile_max_task_ms: f64,
+    pub render_compile_idle_ms: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FramePipelinePeerThreadAccumulator {
+    aggregate: FramePipelinePeerThreadInput,
+}
+
+impl FramePipelinePeerThreadAccumulator {
+    pub fn observe(&mut self, input: FramePipelinePeerThreadInput) {
+        self.aggregate.server_owned_lanes_remote = input.server_owned_lanes_remote;
+        self.aggregate.server_pending_jobs = self
+            .aggregate
+            .server_pending_jobs
+            .max(input.server_pending_jobs);
+        self.aggregate.server_busy_ms += sanitize_ms(input.server_busy_ms);
+        self.aggregate.worldgen_metrics = input.worldgen_metrics;
+        self.aggregate.worldgen_pending_jobs = self
+            .aggregate
+            .worldgen_pending_jobs
+            .max(input.worldgen_pending_jobs);
+        self.aggregate.light_metrics = input.light_metrics;
+        self.aggregate.light_pending_jobs = self
+            .aggregate
+            .light_pending_jobs
+            .max(input.light_pending_jobs);
+        self.aggregate.render_compile_pending_jobs = self
+            .aggregate
+            .render_compile_pending_jobs
+            .max(input.render_compile_pending_jobs);
+        self.aggregate.render_compile_submitted = self
+            .aggregate
+            .render_compile_submitted
+            .saturating_add(input.render_compile_submitted);
+        self.aggregate.render_compile_completed = self
+            .aggregate
+            .render_compile_completed
+            .saturating_add(input.render_compile_completed);
+        self.aggregate.render_compile_busy_ms = self
+            .aggregate
+            .render_compile_busy_ms
+            .max(sanitize_ms(input.render_compile_busy_ms));
+        self.aggregate.render_compile_max_task_ms = self
+            .aggregate
+            .render_compile_max_task_ms
+            .max(sanitize_ms(input.render_compile_max_task_ms));
+        self.aggregate.render_compile_idle_ms = input.render_compile_idle_ms;
+    }
+
+    pub fn report(self) -> FramePipelinePeerThreadInput {
+        self.aggregate
+    }
+
+    pub fn with_render_compile_idle_ms(mut self, idle_ms: Option<f64>) -> Self {
+        self.aggregate.render_compile_idle_ms = idle_ms;
+        self
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FramePipelineReportExtras {
+    pub peer_threads: Option<FramePipelinePeerThreadInput>,
+    pub budget_decision_panel: BudgetDecisionPanelReport,
+}
+
+impl FramePipelineReportExtras {
+    pub fn with_peer_threads(mut self, peer_threads: FramePipelinePeerThreadInput) -> Self {
+        self.peer_threads = Some(peer_threads);
+        self
+    }
+
+    pub fn with_budget_decision_panel(
+        mut self,
+        budget_decision_panel: BudgetDecisionPanelReport,
+    ) -> Self {
+        self.budget_decision_panel = budget_decision_panel;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FramePipelineStageTiming {
+    pub host_session_commands_ms: f64,
+    pub completed_result_acceptance_ms: f64,
+    pub render_admission_dirty_ready_scan_ms: f64,
+    pub render_admission_request_build_ms: f64,
+    pub render_admission_worker_submit_ms: f64,
+    pub render_admission_prepared_record_maintenance_ms: f64,
+    pub render_section_admission_ms: f64,
+    pub upload_apply_ms: f64,
+    pub prepared_draw_records_ms: f64,
+    pub draw_encode_ms: f64,
+}
+
 #[derive(Clone, Debug)]
 pub struct FramePipelineAccountant {
-    target_period_ms: Option<f64>,
+    config: FrameAccountingConfig,
     accumulator: FrameAccumulator,
     pending: Option<FrameObservation>,
+    pending_clock_advance_ms: f64,
     queue_trackers: FramePipelineQueueTrackers,
     now_ms: f64,
     latest_report: Option<Arc<FramePipelineReport>>,
@@ -32,26 +155,44 @@ pub struct FramePipelineAccountant {
 
 impl Default for FramePipelineAccountant {
     fn default() -> Self {
+        Self::new(frame_accounting_config(None))
+    }
+}
+
+impl FramePipelineAccountant {
+    pub fn new(config: FrameAccountingConfig) -> Self {
         Self {
-            target_period_ms: None,
-            accumulator: FrameAccumulator::new(frame_accounting_config(None)),
+            config,
+            accumulator: FrameAccumulator::new(config),
             pending: None,
+            pending_clock_advance_ms: 0.0,
             queue_trackers: FramePipelineQueueTrackers::new(),
             now_ms: 0.0,
             latest_report: None,
             revision: 0,
         }
     }
-}
 
-impl FramePipelineAccountant {
+    pub fn set_config(&mut self, config: FrameAccountingConfig) {
+        if self.config == config {
+            return;
+        }
+        self.config = config;
+        self.accumulator = FrameAccumulator::new(config);
+        self.pending = None;
+        self.pending_clock_advance_ms = 0.0;
+        self.queue_trackers = FramePipelineQueueTrackers::new();
+        self.now_ms = 0.0;
+        self.latest_report = None;
+    }
+
     /// Opens a new frame. `frame_period_ms` is the real inter-frame interval and
     /// only advances the queue-age clock; the observation's wall is not the period
     /// but the frame's own active span, stamped in `finish_frame` so that it covers
     /// exactly the stage spans recorded for this frame (see conservation invariant).
     pub fn begin_frame(&mut self, frame_period_ms: f64, target_period_ms: Option<f64>) {
         self.refresh_target(target_period_ms);
-        self.now_ms += sanitize_ms(frame_period_ms);
+        self.pending_clock_advance_ms = sanitize_ms(frame_period_ms);
         let frame_index = self.accumulator.len() as u64 + 1;
         self.pending = Some(FrameObservation::new(frame_index, 0.0));
     }
@@ -102,20 +243,46 @@ impl FramePipelineAccountant {
             present_wait_ms,
         ));
 
-        let queue_panel =
-            self.queue_trackers
-                .report(runtime_stats.as_ref(), render_stats, self.now_ms);
         let Some(mut observation) = self.pending.take() else {
             return;
         };
         let frame_active_ms = sanitize_ms(frame_active_ms);
         observation.frame_wall_ms = frame_active_ms;
         observation.app_work_ms = Some(frame_active_ms);
-        self.accumulator.record_frame(observation);
-        let report = FramePipelineReport::new(self.accumulator.summary_report(), queue_panel)
-            .with_budget_decision_panel(budget_decision_panel);
-        self.revision = self.revision.saturating_add(1);
-        self.latest_report = Some(Arc::new(report));
+        let queues = frame_pipeline_queue_depths(runtime_stats.as_ref(), render_stats);
+        let clock_advance_ms = self.pending_clock_advance_ms;
+        self.pending_clock_advance_ms = 0.0;
+        self.record_prebuilt_with_clock_advance(
+            observation,
+            queues,
+            FramePipelineReportExtras::default().with_budget_decision_panel(budget_decision_panel),
+            clock_advance_ms,
+        );
+    }
+
+    /// Records a complete observation from XR, offscreen, or another driver
+    /// that already owns its timing brackets.
+    pub fn record_prebuilt(
+        &mut self,
+        observation: FrameObservation,
+        queues: FramePipelineQueueDepths,
+        extras: FramePipelineReportExtras,
+    ) -> (Arc<FramePipelineReport>, u64) {
+        let clock_advance_ms = observation.frame_wall_ms;
+        self.record_prebuilt_with_clock_advance(observation, queues, extras, clock_advance_ms)
+    }
+
+    /// Records a complete observation whose queue clock is an absolute sample
+    /// timestamp, as used by historical/offscreen report reconstruction.
+    pub fn record_prebuilt_at(
+        &mut self,
+        observation: FrameObservation,
+        queues: FramePipelineQueueDepths,
+        extras: FramePipelineReportExtras,
+        observed_at_ms: f64,
+    ) -> (Arc<FramePipelineReport>, u64) {
+        self.now_ms = sanitize_ms(observed_at_ms).max(self.now_ms);
+        self.record_prebuilt_at_current_clock(observation, queues, extras)
     }
 
     pub fn latest_report(&self) -> Option<(Arc<FramePipelineReport>, u64)> {
@@ -124,14 +291,20 @@ impl FramePipelineAccountant {
             .map(|report| (report.clone(), self.revision))
     }
 
+    pub fn next_frame_index(&self) -> u64 {
+        self.accumulator.len() as u64 + 1
+    }
+
     fn refresh_target(&mut self, target_period_ms: Option<f64>) {
         let target_period_ms = target_period_ms.and_then(finite_positive);
-        if same_target(self.target_period_ms, target_period_ms) {
+        if same_target(self.config.target_period_ms, target_period_ms) {
             return;
         }
-        self.target_period_ms = target_period_ms;
-        self.accumulator = FrameAccumulator::new(frame_accounting_config(target_period_ms));
+        let config = frame_accounting_config(target_period_ms);
+        self.config = config;
+        self.accumulator = FrameAccumulator::new(config);
         self.pending = None;
+        self.pending_clock_advance_ms = 0.0;
         self.latest_report = None;
     }
 
@@ -141,6 +314,38 @@ impl FramePipelineAccountant {
         {
             observation.stage_spans.push(span);
         }
+    }
+
+    fn record_prebuilt_with_clock_advance(
+        &mut self,
+        observation: FrameObservation,
+        queues: FramePipelineQueueDepths,
+        extras: FramePipelineReportExtras,
+        clock_advance_ms: f64,
+    ) -> (Arc<FramePipelineReport>, u64) {
+        self.now_ms += sanitize_ms(clock_advance_ms);
+        self.record_prebuilt_at_current_clock(observation, queues, extras)
+    }
+
+    fn record_prebuilt_at_current_clock(
+        &mut self,
+        observation: FrameObservation,
+        queues: FramePipelineQueueDepths,
+        extras: FramePipelineReportExtras,
+    ) -> (Arc<FramePipelineReport>, u64) {
+        self.accumulator.record_frame(observation);
+        let queue_panel = self.queue_trackers.report(queues, self.now_ms);
+        let peer_thread_panel = extras.peer_threads.map_or_else(
+            PeerThreadPanelReport::empty,
+            frame_pipeline_peer_thread_panel,
+        );
+        let report = FramePipelineReport::new(self.accumulator.summary_report(), queue_panel)
+            .with_peer_thread_panel(peer_thread_panel)
+            .with_budget_decision_panel(extras.budget_decision_panel);
+        self.revision = self.revision.saturating_add(1);
+        let report = Arc::new(report);
+        self.latest_report = Some(report.clone());
+        (report, self.revision)
     }
 }
 
@@ -170,55 +375,57 @@ impl FramePipelineQueueTrackers {
         }
     }
 
-    fn report(
-        &mut self,
-        runtime: Option<&SingleViewRuntimeStats>,
-        render: RenderStreamStats,
-        now_ms: f64,
-    ) -> QueuePanelReport {
-        self.inbound_updates.reconcile_depth(
-            usize_to_u64(runtime.map_or(0, |stats| stats.server_update_queue_depth)),
-            now_ms,
-        );
-        let host_publication_remote =
-            runtime.is_some_and(|stats| stats.host_mode.server_owned_lanes_are_remote());
-        if host_publication_remote {
-            self.host_publication = QueueAgeTracker::new(QueueId::HostPublication);
-            self.host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
-            self.host_publication_worldgen = QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
-            self.host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
-        } else {
-            let runner_depth = runtime.map_or(0, |stats| stats.pending_publications);
-            let worldgen_depth = runtime.map_or(0, |stats| {
-                stats.scheduler_pending_worldgen_publication_chunks
-            });
-            let light_depth = runtime.map_or(0, |stats| stats.scheduler_pending_light_publications);
-            let publication_depth = runner_depth
-                .saturating_add(worldgen_depth)
-                .saturating_add(light_depth);
-            self.host_publication
-                .reconcile_depth(usize_to_u64(publication_depth), now_ms);
-            self.host_publication_runner
-                .reconcile_depth(usize_to_u64(runner_depth), now_ms);
-            self.host_publication_worldgen
-                .reconcile_depth(usize_to_u64(worldgen_depth), now_ms);
-            self.host_publication_light
-                .reconcile_depth(usize_to_u64(light_depth), now_ms);
+    fn report(&mut self, queues: FramePipelineQueueDepths, now_ms: f64) -> QueuePanelReport {
+        let host_publication_remote = queues.server_owned_lanes_remote;
+        if queues.observed {
+            self.inbound_updates
+                .reconcile_depth(usize_to_u64(queues.inbound_updates), now_ms);
+            if host_publication_remote {
+                self.host_publication = QueueAgeTracker::new(QueueId::HostPublication);
+                self.host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
+                self.host_publication_worldgen =
+                    QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
+                self.host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
+            } else {
+                let runner_depth = queues.host_publication_runner;
+                let worldgen_depth = queues.host_publication_worldgen;
+                let light_depth = queues.host_publication_light;
+                let publication_depth = runner_depth
+                    .saturating_add(worldgen_depth)
+                    .saturating_add(light_depth);
+                self.host_publication
+                    .reconcile_depth(usize_to_u64(publication_depth), now_ms);
+                self.host_publication_runner
+                    .reconcile_depth(usize_to_u64(runner_depth), now_ms);
+                self.host_publication_worldgen
+                    .reconcile_depth(usize_to_u64(worldgen_depth), now_ms);
+                self.host_publication_light
+                    .reconcile_depth(usize_to_u64(light_depth), now_ms);
+            }
+            self.render_compile_jobs
+                .reconcile_depth(usize_to_u64(queues.render_compile_jobs), now_ms);
+            let completed_results_processed = usize_to_u64(queues.completed_results_processed);
+            if completed_results_processed > 0 {
+                self.completed_results
+                    .enqueue(completed_results_processed, now_ms);
+                self.completed_results
+                    .dequeue(completed_results_processed, now_ms);
+            }
+            self.completed_results
+                .reconcile_depth(usize_to_u64(queues.completed_results), now_ms);
+            let upload_work_processed = usize_to_u64(queues.upload_work_processed);
+            if upload_work_processed > 0 {
+                self.upload_work.enqueue(upload_work_processed, now_ms);
+                self.upload_work.dequeue(upload_work_processed, now_ms);
+            }
+            self.upload_work
+                .reconcile_depth(usize_to_u64(queues.upload_work), now_ms);
         }
-        self.render_compile_jobs.reconcile_depth(
-            usize_to_u64(runtime.map_or(render.last_pending_compile_jobs, |stats| {
-                stats.pending_render_compile_jobs
-            })),
-            now_ms,
-        );
-        self.completed_results.reconcile_depth(
-            usize_to_u64(render.last_completed_compile_section_count),
-            now_ms,
-        );
-        self.upload_work
-            .reconcile_depth(usize_to_u64(render.last_deferred_section_count), now_ms);
 
         QueuePanelReport::new(vec![
+            self.inbound_updates.report(now_ms),
+            self.completed_results.report(now_ms),
+            self.upload_work.report(now_ms),
             if host_publication_remote {
                 remote_host_queue_report(QueueId::HostPublication)
             } else {
@@ -239,11 +446,35 @@ impl FramePipelineQueueTrackers {
             } else {
                 self.host_publication_light.report(now_ms)
             },
-            self.inbound_updates.report(now_ms),
             self.render_compile_jobs.report(now_ms),
-            self.completed_results.report(now_ms),
-            self.upload_work.report(now_ms),
         ])
+    }
+}
+
+pub fn frame_pipeline_queue_depths(
+    runtime: Option<&SingleViewRuntimeStats>,
+    render: RenderStreamStats,
+) -> FramePipelineQueueDepths {
+    FramePipelineQueueDepths {
+        observed: true,
+        server_owned_lanes_remote: runtime
+            .is_some_and(|stats| stats.host_mode.server_owned_lanes_are_remote()),
+        inbound_updates: runtime.map_or(0, |stats| stats.server_update_queue_depth),
+        host_publication_runner: runtime.map_or(0, |stats| stats.pending_publications),
+        host_publication_worldgen: runtime.map_or(0, |stats| {
+            stats.scheduler_pending_worldgen_publication_chunks
+        }),
+        host_publication_light: runtime
+            .map_or(0, |stats| stats.scheduler_pending_light_publications),
+        render_compile_jobs: runtime.map_or(render.last_pending_compile_jobs, |stats| {
+            stats.pending_render_compile_jobs
+        }),
+        // Preserve the flat accountant's sampled-depth semantics. XR and perf
+        // inputs use the processed/depth pair below to retain their event ages.
+        completed_results: render.last_completed_compile_section_count,
+        completed_results_processed: 0,
+        upload_work: render.last_deferred_section_count,
+        upload_work_processed: 0,
     }
 }
 
@@ -252,7 +483,7 @@ fn remote_host_queue_report(queue: QueueId) -> QueueAgeReport {
         .with_availability(DiagnosticLaneAvailability::RemoteHost)
 }
 
-fn render_section_sync_stage_spans(
+pub fn render_section_sync_stage_spans(
     timing: RenderSectionSyncTiming,
     total_sync_ms: f64,
 ) -> Vec<StageSpan> {
@@ -268,20 +499,154 @@ fn render_section_sync_stage_spans(
         + worker_submit_ms
         + prepared_record_ms;
     let unattributed_ms = (total_sync_ms - attributed_ms).max(0.0);
-    vec![
-        StageSpan::new(
+    frame_pipeline_stage_spans(FramePipelineStageTiming {
+        completed_result_acceptance_ms: timing.completed_result_accept_ms,
+        render_admission_dirty_ready_scan_ms: dirty_ready_scan_ms,
+        render_admission_request_build_ms: request_build_ms,
+        render_admission_worker_submit_ms: worker_submit_ms,
+        render_admission_prepared_record_maintenance_ms: prepared_record_ms,
+        render_section_admission_ms: unattributed_ms,
+        ..FramePipelineStageTiming::default()
+    })
+    .into_iter()
+    .filter(|span| {
+        matches!(
+            span.stage,
+            StageId::CompletedResultAcceptance
+                | StageId::RenderAdmissionDirtyReadyScan
+                | StageId::RenderAdmissionRequestBuild
+                | StageId::RenderAdmissionWorkerSubmit
+                | StageId::RenderAdmissionPreparedRecordMaintenance
+                | StageId::RenderSectionAdmission
+        )
+    })
+    .collect()
+}
+
+pub fn frame_pipeline_stage_spans(timing: FramePipelineStageTiming) -> Vec<StageSpan> {
+    [
+        (
+            StageId::HostSessionCommands,
+            timing.host_session_commands_ms,
+        ),
+        (
             StageId::CompletedResultAcceptance,
-            timing.completed_result_accept_ms,
+            timing.completed_result_acceptance_ms,
         ),
-        StageSpan::new(StageId::RenderAdmissionDirtyReadyScan, dirty_ready_scan_ms),
-        StageSpan::new(StageId::RenderAdmissionRequestBuild, request_build_ms),
-        StageSpan::new(StageId::RenderAdmissionWorkerSubmit, worker_submit_ms),
-        StageSpan::new(
+        (
+            StageId::RenderAdmissionDirtyReadyScan,
+            timing.render_admission_dirty_ready_scan_ms,
+        ),
+        (
+            StageId::RenderAdmissionRequestBuild,
+            timing.render_admission_request_build_ms,
+        ),
+        (
+            StageId::RenderAdmissionWorkerSubmit,
+            timing.render_admission_worker_submit_ms,
+        ),
+        (
             StageId::RenderAdmissionPreparedRecordMaintenance,
-            prepared_record_ms,
+            timing.render_admission_prepared_record_maintenance_ms,
         ),
-        StageSpan::new(StageId::RenderSectionAdmission, unattributed_ms),
+        (
+            StageId::RenderSectionAdmission,
+            timing.render_section_admission_ms,
+        ),
+        (StageId::UploadApply, timing.upload_apply_ms),
+        (
+            StageId::PreparedDrawRecords,
+            timing.prepared_draw_records_ms,
+        ),
+        (StageId::DrawEncode, timing.draw_encode_ms),
     ]
+    .into_iter()
+    .map(|(stage, elapsed_ms)| StageSpan::new(stage, elapsed_ms))
+    .collect()
+}
+
+pub fn frame_pipeline_peer_thread_panel(
+    input: FramePipelinePeerThreadInput,
+) -> PeerThreadPanelReport {
+    PeerThreadPanelReport::new(vec![
+        server_runner_peer_report(
+            input.server_owned_lanes_remote,
+            input.server_pending_jobs,
+            input.server_busy_ms,
+        ),
+        worker_metrics_peer_report(
+            PeerThreadId::Worldgen,
+            input.server_owned_lanes_remote,
+            input.worldgen_metrics,
+            input.worldgen_pending_jobs,
+        ),
+        worker_metrics_peer_report(
+            PeerThreadId::LightStatus,
+            input.server_owned_lanes_remote,
+            input.light_metrics,
+            input.light_pending_jobs,
+        ),
+        PeerThreadActivityReport::new(PeerThreadId::RenderCompileWorkers)
+            .with_pending_jobs(usize_to_u64(input.render_compile_pending_jobs))
+            .with_frames(
+                usize_to_u64(input.render_compile_submitted),
+                usize_to_u64(input.render_compile_completed),
+            )
+            .with_request_timing_ms(
+                None,
+                input.render_compile_busy_ms,
+                input.render_compile_max_task_ms,
+            )
+            .with_busy_idle_ms(
+                Some(input.render_compile_busy_ms),
+                input.render_compile_idle_ms,
+            ),
+    ])
+}
+
+fn server_runner_peer_report(
+    server_lanes_remote: bool,
+    pending_jobs: usize,
+    busy_ms: f64,
+) -> PeerThreadActivityReport {
+    let report = PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
+        .with_pending_jobs(usize_to_u64(pending_jobs))
+        .with_busy_idle_ms(Some(busy_ms), None);
+    if server_lanes_remote {
+        report.with_availability(DiagnosticLaneAvailability::RemoteHost)
+    } else {
+        report
+    }
+}
+
+fn worker_metrics_peer_report(
+    lane: PeerThreadId,
+    server_lanes_remote: bool,
+    metrics: WorkerFrameMetrics,
+    pending_jobs: usize,
+) -> PeerThreadActivityReport {
+    let report = PeerThreadActivityReport::new(lane)
+        .with_pending_jobs(usize_to_u64(pending_jobs))
+        .with_frames(
+            usize_to_u64(metrics.request_frames),
+            usize_to_u64(metrics.response_frames),
+        )
+        .with_bytes(
+            usize_to_u64(metrics.request_bytes),
+            usize_to_u64(metrics.response_bytes),
+        )
+        .with_max_pending_frames(usize_to_u64(metrics.max_pending_frames))
+        .with_request_timing_ms(
+            (metrics.last_request_us > 0).then_some(micros_to_ms(metrics.last_request_us)),
+            micros_to_ms(metrics.total_request_us),
+            micros_to_ms(metrics.max_request_us),
+        )
+        .with_busy_idle_ms(Some(micros_to_ms(metrics.total_request_us)), None);
+    if server_lanes_remote {
+        report.with_availability(DiagnosticLaneAvailability::RemoteHost)
+    } else {
+        report
+    }
 }
 
 fn frame_accounting_config(target_period_ms: Option<f64>) -> FrameAccountingConfig {
@@ -309,6 +674,10 @@ fn same_target(left: Option<f64>, right: Option<f64>) -> bool {
 
 fn usize_to_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn micros_to_ms(value: u128) -> f64 {
+    value as f64 / 1000.0
 }
 
 #[cfg(test)]
@@ -392,6 +761,45 @@ mod tests {
             DiagnosticLaneAvailability::Local
         );
         assert_eq!(inbound_updates.depth, 2);
+    }
+
+    #[test]
+    fn peer_thread_accumulator_preserves_window_max_and_sum_semantics() {
+        let mut peers = FramePipelinePeerThreadAccumulator::default();
+        peers.observe(FramePipelinePeerThreadInput {
+            server_pending_jobs: 2,
+            server_busy_ms: 1.5,
+            render_compile_pending_jobs: 3,
+            render_compile_submitted: 2,
+            render_compile_completed: 1,
+            render_compile_busy_ms: 4.0,
+            ..FramePipelinePeerThreadInput::default()
+        });
+        peers.observe(FramePipelinePeerThreadInput {
+            server_pending_jobs: 1,
+            server_busy_ms: 2.5,
+            render_compile_pending_jobs: 5,
+            render_compile_submitted: 4,
+            render_compile_completed: 3,
+            render_compile_busy_ms: 6.0,
+            ..FramePipelinePeerThreadInput::default()
+        });
+
+        let report = peers.report();
+        assert_eq!(report.server_pending_jobs, 2);
+        assert_eq!(report.server_busy_ms, 4.0);
+        assert_eq!(report.render_compile_pending_jobs, 5);
+        assert_eq!(report.render_compile_submitted, 6);
+        assert_eq!(report.render_compile_completed, 4);
+        assert_eq!(report.render_compile_busy_ms, 6.0);
+    }
+
+    #[test]
+    fn sync_stage_adapter_keeps_the_six_stage_report_shape() {
+        let spans = render_section_sync_stage_spans(RenderSectionSyncTiming::default(), 0.0);
+        assert_eq!(spans.len(), 6);
+        assert_eq!(spans[0].stage, StageId::CompletedResultAcceptance);
+        assert_eq!(spans[5].stage, StageId::RenderSectionAdmission);
     }
 
     fn runtime_stats(host_mode: crate::host_mode::SingleViewHostMode) -> SingleViewRuntimeStats {

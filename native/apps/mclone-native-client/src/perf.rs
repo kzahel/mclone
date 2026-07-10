@@ -6,6 +6,11 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::frame_pipeline_accounting::{
+    FramePipelineAccountant, FramePipelinePeerThreadAccumulator, FramePipelinePeerThreadInput,
+    FramePipelineQueueDepths, FramePipelineReportExtras, render_section_sync_stage_spans,
+};
+use mclone_app_runtime::frame_pipeline_presentation::frame_pipeline_report_json_field_lines;
 use mclone_app_runtime::frame_render::{
     FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
@@ -14,8 +19,7 @@ use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, FrameAccountingConfig, FrameAccumulator, FrameObservation,
-    FramePipelineReport, FrameSummaryReport, PeerThreadActivityReport, PeerThreadId,
-    PeerThreadPanelReport, PercentileMethod, QueueAgeTracker, QueueId, QueuePanelReport, StageId,
+    FramePipelineReport, FrameSummaryReport, PercentileMethod, QueuePanelReport, StageId,
     StageSpan,
 };
 use mclone_frame_budget::RenderCompileMeshFootprint;
@@ -1198,13 +1202,12 @@ impl FrameBudgetProbeReport {
         println!("    \"max_frame_ms\": {:.3}", self.headless.max_frame_ms);
         println!("  }},");
         let pipeline_frame_accounting = self.frame_accounting.as_ref().unwrap_or(&frame_accounting);
-        print_frame_accounting_json_field(
-            pipeline_frame_accounting,
+        let frame_pipeline_report = FramePipelineReport::new(
+            pipeline_frame_accounting.clone(),
             QueuePanelReport::new(Vec::new()),
-            PeerThreadPanelReport::empty(),
-            BudgetDecisionPanelReport::empty(),
-            true,
-        );
+        )
+        .with_budget_decision_panel(BudgetDecisionPanelReport::empty());
+        print_frame_accounting_json_field(&frame_pipeline_report, true);
         println!("  \"frame_reports\": [");
         for (index, frame) in self.frames.iter().enumerate() {
             let timing = self.headless.frames.get(index).copied().unwrap_or_default();
@@ -1622,11 +1625,14 @@ impl StartupStreamingPerfReport {
 
     pub(crate) fn print_json(&self) {
         let target_frame_ms = self.target_frame_ms();
-        let frame_accounting = startup_streaming_frame_accounting_report(
+        let frame_pipeline_report = startup_streaming_frame_pipeline_report(
             &self.frames,
             &self.headless.frames,
             target_frame_ms,
+            self.streaming_wall_ms,
+            self.budget_decision_panel.clone(),
         );
+        let frame_accounting = &frame_pipeline_report.frame_summary;
         let over_budget = frame_accounting.over_budget.single_period_frames();
         let over_double = frame_accounting.over_budget.double_period_frames();
         let over_quad = frame_accounting.over_budget.quad_period_frames();
@@ -2202,13 +2208,7 @@ impl StartupStreamingPerfReport {
             "  \"update_pump_stalled_frames\": {},",
             update_pump_stalled_frames
         );
-        print_frame_accounting_json_field(
-            &frame_accounting,
-            startup_streaming_queue_panel(&self.frames),
-            startup_streaming_peer_panel(&self.frames, self.streaming_wall_ms),
-            self.budget_decision_panel.clone(),
-            true,
-        );
+        print_frame_accounting_json_field(&frame_pipeline_report, true);
         let sampled_frames = self
             .frames
             .iter()
@@ -3034,60 +3034,17 @@ fn frame_accounting_observed_frames(summary: Option<&FrameSummaryReport>) -> u64
     summary.map_or(0, |summary| summary.frames)
 }
 
-fn print_frame_accounting_json_field(
-    summary: &FrameSummaryReport,
-    queue_panel: QueuePanelReport,
-    peer_thread_panel: PeerThreadPanelReport,
-    budget_decision_panel: BudgetDecisionPanelReport,
-    trailing_comma: bool,
-) {
-    let report = FramePipelineReport::new(summary.clone(), queue_panel)
-        .with_peer_thread_panel(peer_thread_panel)
-        .with_budget_decision_panel(budget_decision_panel);
-    let json = serde_json::to_string_pretty(&report).expect("frame accounting report serializes");
-    let lines = json.lines().collect::<Vec<_>>();
-    let suffix = if trailing_comma { "," } else { "" };
-    for (index, line) in lines.iter().enumerate() {
-        if index == 0 {
-            println!("  \"frame_pipeline_accounting\": {line}");
-        } else if index + 1 == lines.len() {
-            println!("  {line}{suffix}");
-        } else {
-            println!("  {line}");
-        }
+fn print_frame_accounting_json_field(report: &FramePipelineReport, trailing_comma: bool) {
+    for line in frame_pipeline_report_json_field_lines(
+        "frame_pipeline_accounting",
+        report,
+        "  ",
+        trailing_comma,
+    )
+    .expect("frame accounting report serializes")
+    {
+        println!("{line}");
     }
-}
-
-fn render_section_sync_stage_spans(
-    timing: RenderSectionSyncTiming,
-    total_sync_ms: f64,
-) -> Vec<StageSpan> {
-    let dirty_ready_scan_ms = timing.dirty_seed_ms + timing.prepare_ms;
-    let request_build_ms = timing.submit_snapshot_ms + timing.submit_request_build_ms;
-    let worker_submit_ms = timing.submit_compiler_ms;
-    let prepared_record_ms = timing.submit_mark_inflight_ms
-        + timing.submit_apply_ready_plan_ms
-        + timing.submit_ready_update_ms;
-    let attributed_ms = timing.completed_result_accept_ms
-        + dirty_ready_scan_ms
-        + request_build_ms
-        + worker_submit_ms
-        + prepared_record_ms;
-    let unattributed_ms = (total_sync_ms - attributed_ms).max(0.0);
-    vec![
-        StageSpan::new(
-            StageId::CompletedResultAcceptance,
-            timing.completed_result_accept_ms,
-        ),
-        StageSpan::new(StageId::RenderAdmissionDirtyReadyScan, dirty_ready_scan_ms),
-        StageSpan::new(StageId::RenderAdmissionRequestBuild, request_build_ms),
-        StageSpan::new(StageId::RenderAdmissionWorkerSubmit, worker_submit_ms),
-        StageSpan::new(
-            StageId::RenderAdmissionPreparedRecordMaintenance,
-            prepared_record_ms,
-        ),
-        StageSpan::new(StageId::RenderSectionAdmission, unattributed_ms),
-    ]
 }
 
 fn render_section_in_target(
@@ -3112,12 +3069,15 @@ fn count_target_section_keys(
         .count()
 }
 
-fn startup_streaming_frame_accounting_report(
+fn startup_streaming_frame_pipeline_report(
     frames: &[StartupStreamingFrameReport],
     headless_frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
     target_frame_ms: f64,
-) -> FrameSummaryReport {
-    let mut accumulator = FrameAccumulator::new(
+    wall_ms: f64,
+    budget_decision_panel: BudgetDecisionPanelReport,
+) -> FramePipelineReport {
+    let peer_threads = startup_streaming_peer_threads(frames, wall_ms);
+    let mut accountant = FramePipelineAccountant::new(
         FrameAccountingConfig::from_target_period_ms(target_frame_ms)
             .with_percentile_method(PercentileMethod::InclusiveCeil),
     );
@@ -3134,177 +3094,78 @@ fn startup_streaming_frame_accounting_report(
         observation = observation
             .with_stage_span(StageSpan::new(StageId::UploadApply, frame.upload_ms))
             .with_stage_span(StageSpan::new(StageId::DrawEncode, frame.render_ms));
-        accumulator.record_frame(observation);
+        accountant.record_prebuilt_at(
+            observation,
+            startup_streaming_queue_depths(*frame),
+            FramePipelineReportExtras::default()
+                .with_peer_threads(peer_threads)
+                .with_budget_decision_panel(budget_decision_panel.clone()),
+            frame.elapsed_ms,
+        );
     }
-    accumulator.summary_report()
+    accountant
+        .latest_report()
+        .map(|(report, _)| (*report).clone())
+        .expect("startup streaming report has at least one frame")
 }
 
-fn startup_streaming_queue_panel(frames: &[StartupStreamingFrameReport]) -> QueuePanelReport {
-    let mut inbound_updates = QueueAgeTracker::new(QueueId::InboundUpdates);
-    let mut completed_results = QueueAgeTracker::new(QueueId::CompletedRenderResults);
-    let mut upload_work = QueueAgeTracker::new(QueueId::UploadWork);
-    let mut host_publication = QueueAgeTracker::new(QueueId::HostPublication);
-    let mut host_publication_runner = QueueAgeTracker::new(QueueId::HostPublicationRunner);
-    let mut host_publication_worldgen = QueueAgeTracker::new(QueueId::HostPublicationWorldgen);
-    let mut host_publication_light = QueueAgeTracker::new(QueueId::HostPublicationLight);
-    let mut render_compile_jobs = QueueAgeTracker::new(QueueId::RenderCompileJobs);
-
-    for frame in frames {
-        let now_ms = frame.elapsed_ms;
-        inbound_updates.reconcile_depth(usize_to_u64(frame.server_update_queue_depth), now_ms);
-
-        let completed = usize_to_u64(frame.completed_compile_sections);
-        if completed > 0 {
-            completed_results.enqueue(completed, now_ms);
-            completed_results.dequeue(completed, now_ms);
-        }
-        completed_results
-            .reconcile_depth(usize_to_u64(frame.queued_completed_compile_results), now_ms);
-
-        let uploaded = usize_to_u64(frame.uploaded_sections + frame.upload_removed_sections);
-        if uploaded > 0 {
-            upload_work.enqueue(uploaded, now_ms);
-            upload_work.dequeue(uploaded, now_ms);
-        }
-
-        let runner_publication_depth = frame.pending_publications;
-        let worldgen_publication_depth = frame.scheduler_pending_worldgen_publication_chunks;
-        let light_publication_depth = frame.scheduler_pending_light_publications;
-        let publication_depth = runner_publication_depth
-            .saturating_add(worldgen_publication_depth)
-            .saturating_add(light_publication_depth);
-        host_publication.reconcile_depth(usize_to_u64(publication_depth), now_ms);
-        host_publication_runner.reconcile_depth(usize_to_u64(runner_publication_depth), now_ms);
-        host_publication_worldgen.reconcile_depth(usize_to_u64(worldgen_publication_depth), now_ms);
-        host_publication_light.reconcile_depth(usize_to_u64(light_publication_depth), now_ms);
-        render_compile_jobs
-            .reconcile_depth(usize_to_u64(frame.pending_render_compile_jobs), now_ms);
+fn startup_streaming_queue_depths(frame: StartupStreamingFrameReport) -> FramePipelineQueueDepths {
+    FramePipelineQueueDepths {
+        observed: true,
+        server_owned_lanes_remote: false,
+        inbound_updates: frame.server_update_queue_depth,
+        host_publication_runner: frame.pending_publications,
+        host_publication_worldgen: frame.scheduler_pending_worldgen_publication_chunks,
+        host_publication_light: frame.scheduler_pending_light_publications,
+        render_compile_jobs: frame.pending_render_compile_jobs,
+        completed_results: frame.queued_completed_compile_results,
+        completed_results_processed: frame.completed_compile_sections,
+        upload_work: 0,
+        upload_work_processed: frame
+            .uploaded_sections
+            .saturating_add(frame.upload_removed_sections),
     }
-
-    let report_at_ms = frames.last().map_or(0.0, |frame| frame.elapsed_ms);
-    QueuePanelReport::new(vec![
-        inbound_updates.report(report_at_ms),
-        completed_results.report(report_at_ms),
-        upload_work.report(report_at_ms),
-        host_publication.report(report_at_ms),
-        host_publication_runner.report(report_at_ms),
-        host_publication_worldgen.report(report_at_ms),
-        host_publication_light.report(report_at_ms),
-        render_compile_jobs.report(report_at_ms),
-    ])
 }
 
-fn startup_streaming_peer_panel(
+fn startup_streaming_peer_threads(
     frames: &[StartupStreamingFrameReport],
     wall_ms: f64,
-) -> PeerThreadPanelReport {
-    let final_frame = frames.last().copied().unwrap_or_default();
-    let server_busy_ms = frames
-        .iter()
-        .map(|frame| frame.poll_server_reported_total_ms)
-        .sum::<f64>();
-    let max_server_pending_jobs = frames
-        .iter()
-        .map(|frame| frame.pending_jobs)
-        .max()
-        .unwrap_or(0);
-    let max_worldgen_pending_jobs = frames
-        .iter()
-        .map(|frame| frame.scheduler_worldgen_mailbox_pending_jobs)
-        .max()
-        .unwrap_or(0);
-    let max_light_pending_jobs = frames
-        .iter()
-        .map(|frame| frame.scheduler_light_mailbox_pending_statuses)
-        .max()
-        .unwrap_or(0);
-    let max_render_compile_pending_jobs = frames
-        .iter()
-        .map(|frame| frame.pending_render_compile_jobs)
-        .max()
-        .unwrap_or(0);
-    let submitted_compile_sections = frames
-        .iter()
-        .map(|frame| frame.submitted_compile_sections)
-        .sum::<usize>();
-    let completed_compile_sections = frames
-        .iter()
-        .map(|frame| frame.completed_compile_sections)
-        .sum::<usize>();
-    let render_compile_busy_ms = frames
-        .iter()
-        .map(|frame| {
-            frame
+) -> FramePipelinePeerThreadInput {
+    let mut peers = FramePipelinePeerThreadAccumulator::default();
+    for frame in frames {
+        peers.observe(FramePipelinePeerThreadInput {
+            server_owned_lanes_remote: false,
+            server_pending_jobs: frame.pending_jobs,
+            server_busy_ms: frame.poll_server_reported_total_ms,
+            worldgen_metrics: frame.worldgen_job_frame_metrics,
+            worldgen_pending_jobs: frame.scheduler_worldgen_mailbox_pending_jobs,
+            light_metrics: frame.light_status_job_frame_metrics,
+            light_pending_jobs: frame.scheduler_light_mailbox_pending_statuses,
+            render_compile_pending_jobs: frame.pending_render_compile_jobs,
+            render_compile_submitted: frame.submitted_compile_sections,
+            render_compile_completed: frame.completed_compile_sections,
+            render_compile_busy_ms: frame
                 .section_sync_timing
-                .dispatcher_total_compile_worker_busy_ms
-        })
-        .fold(0.0, f64::max);
-    let render_compile_max_task_ms = frames
-        .iter()
-        .map(|frame| {
-            frame
+                .dispatcher_total_compile_worker_busy_ms,
+            render_compile_max_task_ms: frame
                 .section_sync_timing
-                .dispatcher_max_compile_worker_task_ms
-        })
-        .fold(0.0, f64::max);
+                .dispatcher_max_compile_worker_task_ms,
+            render_compile_idle_ms: None,
+        });
+    }
     let render_compile_worker_count = frames
         .iter()
         .map(|frame| frame.section_sync_timing.dispatcher_compile_worker_count)
         .max()
         .unwrap_or(0);
-    let render_compile_idle_ms =
-        worker_idle_ms(wall_ms, render_compile_worker_count, render_compile_busy_ms);
-
-    PeerThreadPanelReport::new(vec![
-        PeerThreadActivityReport::new(PeerThreadId::ServerRunner)
-            .with_pending_jobs(usize_to_u64(max_server_pending_jobs))
-            .with_busy_idle_ms(Some(server_busy_ms), None),
-        worker_metrics_peer_report(
-            PeerThreadId::Worldgen,
-            final_frame.worldgen_job_frame_metrics,
-            max_worldgen_pending_jobs,
-        ),
-        worker_metrics_peer_report(
-            PeerThreadId::LightStatus,
-            final_frame.light_status_job_frame_metrics,
-            max_light_pending_jobs,
-        ),
-        PeerThreadActivityReport::new(PeerThreadId::RenderCompileWorkers)
-            .with_pending_jobs(usize_to_u64(max_render_compile_pending_jobs))
-            .with_frames(
-                usize_to_u64(submitted_compile_sections),
-                usize_to_u64(completed_compile_sections),
-            )
-            .with_request_timing_ms(None, render_compile_busy_ms, render_compile_max_task_ms)
-            .with_busy_idle_ms(Some(render_compile_busy_ms), render_compile_idle_ms),
-    ])
-}
-
-fn worker_metrics_peer_report(
-    lane: PeerThreadId,
-    metrics: WorkerFrameMetrics,
-    pending_jobs: usize,
-) -> PeerThreadActivityReport {
-    PeerThreadActivityReport::new(lane)
-        .with_pending_jobs(usize_to_u64(pending_jobs))
-        .with_frames(
-            usize_to_u64(metrics.request_frames),
-            usize_to_u64(metrics.response_frames),
-        )
-        .with_bytes(
-            usize_to_u64(metrics.request_bytes),
-            usize_to_u64(metrics.response_bytes),
-        )
-        .with_max_pending_frames(usize_to_u64(metrics.max_pending_frames))
-        .with_request_timing_ms(
-            (metrics.last_request_us > 0).then_some(micros_to_ms(metrics.last_request_us)),
-            micros_to_ms(metrics.total_request_us),
-            micros_to_ms(metrics.max_request_us),
-        )
-        .with_busy_idle_ms(
-            Some(micros_to_ms(metrics.total_request_us)),
-            worker_idle_ms(0.0, 0, micros_to_ms(metrics.total_request_us)),
-        )
+    let render_compile_busy_ms = peers.report().render_compile_busy_ms;
+    peers
+        .with_render_compile_idle_ms(worker_idle_ms(
+            wall_ms,
+            render_compile_worker_count,
+            render_compile_busy_ms,
+        ))
+        .report()
 }
 
 fn worker_idle_ms(wall_ms: f64, worker_count: usize, busy_ms: f64) -> Option<f64> {
@@ -3313,10 +3174,6 @@ fn worker_idle_ms(wall_ms: f64, worker_count: usize, busy_ms: f64) -> Option<f64
     }
     let capacity_ms = wall_ms * worker_count as f64;
     (capacity_ms >= busy_ms).then_some((capacity_ms - busy_ms).max(0.0))
-}
-
-fn usize_to_u64(value: usize) -> u64 {
-    value.try_into().unwrap_or(u64::MAX)
 }
 
 fn micros_to_ms(value: u128) -> f64 {

@@ -134,7 +134,12 @@ pub use tracking::*;
 pub use ui_panels::*;
 
 use diagnostic_panel::XrDiagnosticPanel;
-pub use frame_pipeline_reporter::{XrFramePipelineHostTiming, XrFramePipelineReporter};
+pub use frame_pipeline_reporter::{
+    XrFramePipelineHostTiming, record_xr_frame_pipeline,
+    record_xr_frame_pipeline_with_peer_threads, xr_frame_pipeline_accounting_config,
+    xr_frame_pipeline_observation, xr_frame_pipeline_peer_threads, xr_frame_pipeline_queue_depths,
+    xr_frame_pipeline_stage_spans,
+};
 
 pub const DEFAULT_XR_SEED: i64 = 12_345;
 pub const DEFAULT_XR_CHUNK_X: i32 = 0;

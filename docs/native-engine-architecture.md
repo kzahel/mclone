@@ -67,6 +67,9 @@ Shared engine crates own:
 - render-section meshing, dirty/cache policy, and compile scheduling
 - renderer resources and frame drawing from explicit view/target facts
 - the shared native scene/session/UI/orchestration host (`mclone-scene`)
+- client frame-pipeline accounting, neutral queue/peer builders, and shared
+  report presentation (`mclone-app-runtime`, over the leaf
+  `mclone-diagnostics` schema/math)
 - shared Rust/WebGPU UI model and draw list
 
 Platform app crates own:

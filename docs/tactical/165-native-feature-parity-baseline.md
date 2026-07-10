@@ -2,10 +2,11 @@
 
 Status: active 2026-07-09. Slice 1 (baseline mechanism + flat-Android far LOD)
 landed in `da719dda`. Slice 2a (shared frame-pipeline accountant owner) landed
-2026-07-09; the remaining exceptions are open burn-down slices. Coordination
-update 2026-07-10: tactical 168 now owns the runtime/host plumbing that clears
-the remaining native rows; do not grow the soon-to-be-deleted Android or desktop
-loops to complete them independently.
+2026-07-09; Slice 2c (XR/flat accountant convergence) landed through tactical
+168 Slice 5 on 2026-07-10; the remaining exceptions are open burn-down slices.
+Coordination update 2026-07-10: tactical 168 now owns the runtime/host plumbing
+that clears the remaining native rows; do not grow the soon-to-be-deleted
+Android or desktop loops to complete them independently.
 
 Workstream: native Rust shared client-experience policy in `mclone-app-runtime`,
 desktop flat, shared XR scene, flat Android, and Android XR. Web is the one
@@ -189,20 +190,15 @@ plumbing, as required by this tactical's enforcement tests.
      Desktop `flat_client_driver` repoints to the shared type; the desktop-local
      module and its tests are deleted. Validated: `mclone-app-runtime` tests
      (incl. the two moved accountant tests) pass; desktop and wasm builds clean.
-   - **[deferred — slice 2c]** Collapse `XrFramePipelineReporter` onto the shared
-     accountant. Reading it in full showed it is **not** a mechanical duplicate:
-     it uses a single-shot `record_frame` feed (vs the desktop push API), a
-     `NearestRank` percentile config, `completed_results` enqueue/dequeue queue-age
-     semantics (vs plain `reconcile_depth`), an XR-only peer-thread panel, and
-     XR-local `XrTerrain*` input types. Collapsing it changes XR-pixel-visible
-     output and, per the XR render-path guardrail, needs desktop-XR + Android-XR
-     capture validation — so it is its own slice, not a rider on the relocation.
-     Recommended shape: generalize the shared accountant to accept a
-     `FrameAccountingConfig` directly plus a `record_prebuilt(observation,
-     queue_panel, extras)` entry point (extras = optional peer-thread + budget
-     panels), and factor a neutral queue-depth input struct so both surfaces feed
-     one queue-tracker set; preserve XR's percentile and age semantics exactly and
-     re-run the XR captures.
+   - **[LANDED 2026-07-10 — slice 2c via tactical 168 Slice 5]** Removed
+     `XrFramePipelineReporter`; desktop flat, desktop XR, Android XR, and desktop
+     perf reconstruction now use the single shared `FramePipelineAccountant`.
+     The accountant accepts `FrameAccountingConfig`, neutral queue-depth and
+     peer-thread inputs, `record_prebuilt` / absolute-clock reconstruction, and
+     optional peer/budget extras. XR keeps `NearestRank`, completed-result
+     enqueue/dequeue age semantics, remote-lane availability, and its peer panel.
+     A shared peer-window accumulator preserves the Quest/desktop perf max/sum
+     semantics, and shared presentation preserves the parser-visible Quest labels.
    - **[subsumed by tactical 168 Slice 8 — do not implement app-locally]** On flat Android, instantiate the shared accountant,
      un-gate the profile, replace the `SetFramePipelineOverlayVisible(_)` no-op
      with a real `bool` handler, feed the flag through `current_ui_render_state`,

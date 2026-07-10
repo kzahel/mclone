@@ -118,7 +118,9 @@ Shared app/runtime boundary crates currently include:
 
 - `mclone-app-runtime`: shared single-view runtime helpers used by desktop,
   flat Android, current headless captures, future offscreen flat client, and XR
-  terrain runtime construction
+  terrain runtime construction; it also owns the single client-side
+  `FramePipelineAccountant`, neutral queue/peer report builders, and shared
+  text/JSON presentation consumed by flat, XR, and perf hosts
 - `mclone-render-session`: shared render-section dirty state, compile request,
   cache update, neighbor-readiness, and camera-controller contracts used by
   desktop and web, and consumed by XR scene code

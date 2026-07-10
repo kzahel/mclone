@@ -262,25 +262,20 @@ too high in the dependency graph to serve `mclone-server`, which is why this
 noun gets a dedicated crate while the client-experience core stayed an
 `mclone-app-runtime` module family.
 
-As of July 2026 this machinery exists as three disconnected app-local copies:
+Current split (Tactical 168 Slice 5, July 2026): `mclone-diagnostics` owns the
+leaf accounting math and serde schema. `mclone-app-runtime` owns the one
+client-side `FramePipelineAccountant`, neutral queue/peer inputs and trackers,
+and shared text/JSON presentation. Desktop flat, desktop XR, Android XR, and
+desktop perf reconstruction feed that accountant; `mclone-scene` only maps its
+scene timing/upload facts into neutral inputs. Server producers keep their own
+timing facts and adopt the shared vocabulary without depending upward on the
+client accountant.
 
-- Quest/Android XR: `AndroidXrActivePerfProbe`
-  (`native/apps/mclone-android-xr-client/src/lib.rs`) is the most mature —
-  `app_work_*` as frame wall minus `xrWaitFrame`, headroom percentiles,
-  over-period/2x/4x tiers, worst-frame capture, and the
-  `CLOCK_THREAD_CPUTIME_ID` busy-vs-blocked split (`thread_cpu_time_ms`).
-- Desktop flat runtime: `FrameTimingStats`
-  (`native/apps/mclone-native-client/src/frame_pacing.rs`) — budget,
-  over-budget tiers, worst frame; no percentiles.
-- Desktop benchmarks: a third percentile/over-budget implementation in
-  `native/apps/mclone-native-client/src/perf.rs`
-  (`frame_budget_percentile_ms`).
-
-These collapse into one implementation. The closest existing shared stats
-types (`RenderStreamStats` and `FullFrameRenderTiming` in
-`mclone-app-runtime/src/frame_render.rs`, and the report structs in
-`mclone-server/src/timing.rs`) keep their producers and adopt the shared
-stage vocabulary and report schema rather than moving wholesale.
+The Quest `AndroidXrActivePerfProbe` still owns its raw OpenXR/eye/locomotion
+detail dump, and desktop `FrameTimingStats` still owns frame-pacing driver PODs.
+Neither is a second `FramePipelineReport` accountant or formatter; their
+remaining ownership is tracked by tacticals 165/168 rather than pushing
+platform-only data into the shared leaf schema.
 
 ### Sans-I/O Accounting Core
 
