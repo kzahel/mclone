@@ -76,11 +76,8 @@ mod android {
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::host_mode::{
         RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
-        SingleViewHostOptions,
     };
-    use mclone_app_runtime::native_session_runtime::{
-        IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSessionRuntime,
-    };
+    use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
     use mclone_app_runtime::render_assets::{
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
@@ -112,13 +109,15 @@ mod android {
     };
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_scene::{
-        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFramePipelineHostTiming,
-        XrFramePipelineReporter, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
-        XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFrameLocomotionAutomation,
+        XrFramePipelineHostTiming, XrFramePipelineReporter, XrMcloneTerrainState,
+        XrSceneFrameTarget, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+        XrTerrainMultiviewTarget, XrUnderwaterDetectionMode, local_integrated_scene_options,
+        single_view_host_options,
     };
     use mclone_xr_host::{
-        OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
-        XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
+        OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE, XrControllerSnapshot,
+        XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use openxr as xr;
 
@@ -147,7 +146,6 @@ mod android {
     const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
     const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
     const XR_SAMPLE_COUNT: u32 = 1;
-    const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
     const ANDROID_XR_SESSION_SMOKE_SEED: i64 = 246_813_579;
     const ANDROID_XR_PERF_FALLBACK_TARGET_HZ: f64 = 72.0;
     const ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND: f64 = 4.3;
@@ -971,51 +969,18 @@ mod android {
     }
 
     fn android_xr_startup_scene_defaults() -> StartupSceneOptions {
-        let scene = XrSceneOptions::default();
-        StartupSceneOptions {
-            seed: scene.seed,
-            chunk_x: scene.chunk_x,
-            chunk_z: scene.chunk_z,
-            render_distance: scene.render_distance,
-            render_compile_worker_count: scene.render_compile_worker_count,
-            render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-            render_compile_capacity_request: Default::default(),
-            movement_speed_multiplier: scene.movement_speed_multiplier,
-            remote_addr: None,
-            day_time_override: scene.day_time_override,
-            freeze_time: scene.freeze_time,
-            debug_passive_showcase: scene.debug_passive_showcase,
-            lighting_enabled: scene.lighting_enabled,
-            light_status_batch_size: scene.light_status_batch_size,
-            far_lod: scene.far_lod,
-        }
+        XrSceneOptions::default().to_startup_scene()
     }
 
     fn android_xr_scene_options_from_startup(
         scene: StartupSceneOptions,
         storage: &StartupWorldStorageProjection,
     ) -> XrSceneOptions {
-        XrSceneOptions {
-            seed: scene.seed,
-            chunk_x: scene.chunk_x,
-            chunk_z: scene.chunk_z,
-            render_distance: scene.render_distance,
-            render_compile_worker_count: scene.render_compile_worker_count,
-            render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-            movement_speed_multiplier: scene.movement_speed_multiplier,
-            day_time_override: scene.day_time_override,
-            freeze_time: scene.freeze_time,
-            debug_passive_showcase: scene.debug_passive_showcase,
-            lighting_enabled: scene.lighting_enabled,
-            light_status_batch_size: scene.light_status_batch_size,
-            adaptive_chunk_publication_budget: true,
-            far_lod: scene.far_lod,
-            underwater_detection_mode: XrUnderwaterDetectionMode::default(),
-            debug_ui_screen: None,
-            skip_actors: false,
-            world_root: storage.world_root.clone(),
-            world_dir: storage.world_dir.clone(),
-        }
+        XrSceneOptions::from_startup_scene(
+            scene,
+            storage.world_root.clone(),
+            storage.world_dir.clone(),
+        )
     }
 
     fn validate_perf_motion_speed(flag: &str, speed_blocks_per_second: f64) -> Result<f64> {
@@ -2084,7 +2049,7 @@ mod android {
             let session = AndroidXrRemoteServerSession::connect(remote_addr.as_str())?;
             let runtime = AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
                 RemoteSessionEndpoint::new(remote_addr.clone()),
-                android_xr_host_options(&scene_options),
+                single_view_host_options(&scene_options),
                 session,
                 mesh_assets,
             )
@@ -2143,14 +2108,14 @@ mod android {
                 let mut scene_options = scene_options;
                 scene_options.seed = options.seed;
                 AndroidXrSceneRuntime::local_with_mesh_assets(
-                    android_xr_local_options(&scene_options),
+                    local_integrated_scene_options(&scene_options),
                     mesh_assets,
                 )
                 .context("failed to initialize Android XR replacement local runtime")
             }
             SessionStartRequest::OpenLocalWorld { .. } => {
                 AndroidXrSceneRuntime::local_with_mesh_assets(
-                    android_xr_local_options(&scene_options),
+                    local_integrated_scene_options(&scene_options),
                     mesh_assets,
                 )
                 .context("failed to initialize Android XR replacement persistent local runtime")
@@ -2159,7 +2124,7 @@ mod android {
                 let session = AndroidXrRemoteServerSession::connect(endpoint.address.as_str())?;
                 AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
                     endpoint.clone(),
-                    android_xr_host_options(&scene_options),
+                    single_view_host_options(&scene_options),
                     session,
                     mesh_assets,
                 )
@@ -2172,27 +2137,6 @@ mod android {
             }
             SessionStartRequest::Unknown => bail!("unsupported Android XR replacement session"),
         }
-    }
-
-    fn android_xr_local_options(scene: &XrSceneOptions) -> LocalIntegratedSceneOptions {
-        let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
-            .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
-        LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
-            .with_initial_spawn_center()
-            .with_day_time(scene.day_time_override)
-            .with_freeze_time(scene.freeze_time)
-            .with_debug_passive_showcase(scene.debug_passive_showcase)
-            .with_lighting_enabled(scene.lighting_enabled)
-            .with_light_status_batch_size(scene.light_status_batch_size)
-            .with_render_compile_worker_count(scene.render_compile_worker_count)
-            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
-            .with_integrated_world_session_storage(storage)
-    }
-
-    fn android_xr_host_options(scene: &XrSceneOptions) -> SingleViewHostOptions {
-        SingleViewHostOptions::new(scene.center(), scene.render_distance)
-            .with_render_compile_worker_count(scene.render_compile_worker_count)
-            .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
     }
 
     fn request_display_refresh_rate(
@@ -2374,114 +2318,124 @@ mod android {
         environment_blend_mode: xr::EnvironmentBlendMode,
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
     ) -> Result<()> {
-        let mut event_storage = xr::EventDataBuffer::new();
-        let mut session_running = false;
-        let mut frame_stats = XrFrameStats::default();
+        let policy = mclone_xr_host::OpenXrFrameLoopPolicy {
+            view_type: VIEW_TYPE,
+            environment_blend_mode,
+            frame_limit: None,
+            session_ready_timeout: None,
+            submitted_frame_progress_timeout: None,
+            runtime_exit_is_error: false,
+            idle_poll_interval: mclone_xr_host::SESSION_IDLE_POLL_INTERVAL,
+        };
+        let mut handler = MultiviewProofLoop {
+            app,
+            device: &graphics.device,
+            queue: &graphics.queue,
+            stage,
+            stereo_target,
+        };
+        let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
+            &graphics.session,
+            &mut graphics.frame_wait,
+            &mut graphics.frame_stream,
+            policy,
+        );
+        let outcome = driver.run(&mut handler)?;
+        if outcome.exit == mclone_xr_host::OpenXrRunExit::Runtime {
+            log::info!(
+                "OpenXR multiview proof requested exit: submitted={} runtime_frames={} skipped={}",
+                outcome.stats.submitted_frames,
+                outcome.stats.runtime_frames,
+                outcome.stats.skipped_frames
+            );
+        }
+        Ok(())
+    }
 
-        loop {
-            if !poll_android_events(app, Some(Duration::from_millis(0)))? {
-                log::info!("Android activity destroyed; exiting OpenXR multiview proof loop");
-                return Ok(());
-            }
+    struct MultiviewProofLoop<'a> {
+        app: &'a AndroidApp,
+        device: &'a wgpu::Device,
+        queue: &'a wgpu::Queue,
+        stage: &'a xr::Space,
+        stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
+    }
 
-            match mclone_xr_host::poll_openxr_events(
-                &graphics.session,
-                &mut event_storage,
-                &mut session_running,
-                VIEW_TYPE,
-                log_openxr_host_event,
-            )
-            .context("poll OpenXR events")?
-            {
-                OpenXrPollStatus::Exit => {
-                    log::info!(
-                        "OpenXR multiview proof requested exit: submitted={} runtime_frames={} skipped={}",
-                        frame_stats.submitted_frames,
-                        frame_stats.runtime_frames,
-                        frame_stats.skipped_frames
-                    );
-                    return Ok(());
-                }
-                OpenXrPollStatus::Idle if !session_running => {
-                    if !poll_android_events(app, Some(SESSION_IDLE_POLL_INTERVAL))? {
-                        log::info!(
-                            "Android activity destroyed while waiting for OpenXR READY in multiview proof"
-                        );
-                        return Ok(());
-                    }
-                    continue;
-                }
-                OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
-            }
+    impl mclone_xr_host::OpenXrFrameLoopHandler<graphics_vulkan::AppGraphics>
+        for MultiviewProofLoop<'_>
+    {
+        type RenderOutput = MultiviewProofFrame;
 
-            let frame_state = mclone_xr_host::wait_begin_frame(
-                &mut graphics.frame_wait,
-                &mut graphics.frame_stream,
-                &mut frame_stats,
-            )?;
-            if frame_state.should_render {
-                match render_multiview_proof_frame(
-                    graphics,
-                    stage,
-                    environment_blend_mode,
-                    frame_state.predicted_display_time,
-                    stereo_target,
-                ) {
-                    Ok(proof) => {
-                        frame_stats.record_submitted_frame();
-                        log::info!(
-                            "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} multiview={} private_left_red={} private_right_green={} swapchain_left_red={} swapchain_right_green={} expected_disparity_px={:.1} tolerance_px={:.1} left_actual=({:.1},{:.1}) left_expected=({:.1},{:.1}) left_error_px={:.1} left_pixels={} right_actual=({:.1},{:.1}) right_expected=({:.1},{:.1}) right_error_px={:.1} right_pixels={}",
-                            frame_stats.submitted_frames,
-                            frame_stats.runtime_frames,
-                            frame_stats.skipped_frames,
-                            stereo_target.width,
-                            stereo_target.height,
-                            stereo_target.array_size(),
-                            graphics
-                                .device
-                                .features()
-                                .contains(wgpu::Features::MULTIVIEW),
-                            proof.private_multiview.left_red_pixels,
-                            proof.private_multiview.right_green_pixels,
-                            proof.swapchain_multiview.left_red_pixels,
-                            proof.swapchain_multiview.right_green_pixels,
-                            proof.projection.expected_disparity_px,
-                            proof.projection.tolerance_px,
-                            proof.projection.left.actual_px[0],
-                            proof.projection.left.actual_px[1],
-                            proof.projection.left.expected_px[0],
-                            proof.projection.left.expected_px[1],
-                            proof.projection.left.error_px,
-                            proof.projection.left.pixel_count,
-                            proof.projection.right.actual_px[0],
-                            proof.projection.right.actual_px[1],
-                            proof.projection.right.expected_px[0],
-                            proof.projection.right.expected_px[1],
-                            proof.projection.right.error_px,
-                            proof.projection.right.pixel_count
-                        );
-                        return Ok(());
-                    }
-                    Err(error) => {
-                        let _ = mclone_xr_host::end_frame_with_layers(
-                            &mut graphics.frame_stream,
-                            frame_state.predicted_display_time,
-                            environment_blend_mode,
-                            &[],
-                        );
-                        return Err(error);
-                    }
-                }
+        fn pump_platform_events(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            if poll_android_events(self.app, Some(timeout))? {
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
             } else {
-                if let Err(error) = mclone_xr_host::end_skipped_frame(
-                    &mut graphics.frame_stream,
-                    frame_state.predicted_display_time,
-                    environment_blend_mode,
-                    &mut frame_stats,
-                ) {
-                    return Err(error);
+                if timeout.is_zero() {
+                    log::info!("Android activity destroyed; exiting OpenXR multiview proof loop");
+                } else {
+                    log::info!(
+                        "Android activity destroyed while waiting for OpenXR READY in multiview proof"
+                    );
                 }
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete)
             }
+        }
+
+        fn on_openxr_event(&mut self, event: OpenXrHostEvent) {
+            log::info!("{event}");
+        }
+
+        fn render_frame(
+            &mut self,
+            frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
+        ) -> Result<Self::RenderOutput> {
+            render_multiview_proof_frame(
+                self.device,
+                self.queue,
+                frame,
+                self.stage,
+                self.stereo_target,
+            )
+        }
+
+        fn after_frame(
+            &mut self,
+            outcome: mclone_xr_host::OpenXrFrameOutcome<Self::RenderOutput>,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            let Some(proof) = outcome.render_output else {
+                return Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue);
+            };
+            log::info!(
+                "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} multiview={} private_left_red={} private_right_green={} swapchain_left_red={} swapchain_right_green={} expected_disparity_px={:.1} tolerance_px={:.1} left_actual=({:.1},{:.1}) left_expected=({:.1},{:.1}) left_error_px={:.1} left_pixels={} right_actual=({:.1},{:.1}) right_expected=({:.1},{:.1}) right_error_px={:.1} right_pixels={}",
+                outcome.stats.submitted_frames,
+                outcome.stats.runtime_frames,
+                outcome.stats.skipped_frames,
+                self.stereo_target.width,
+                self.stereo_target.height,
+                self.stereo_target.array_size(),
+                self.device.features().contains(wgpu::Features::MULTIVIEW),
+                proof.private_multiview.left_red_pixels,
+                proof.private_multiview.right_green_pixels,
+                proof.swapchain_multiview.left_red_pixels,
+                proof.swapchain_multiview.right_green_pixels,
+                proof.projection.expected_disparity_px,
+                proof.projection.tolerance_px,
+                proof.projection.left.actual_px[0],
+                proof.projection.left.actual_px[1],
+                proof.projection.left.expected_px[0],
+                proof.projection.left.expected_px[1],
+                proof.projection.left.error_px,
+                proof.projection.left.pixel_count,
+                proof.projection.right.actual_px[0],
+                proof.projection.right.actual_px[1],
+                proof.projection.right.expected_px[0],
+                proof.projection.right.expected_px[1],
+                proof.projection.right.error_px,
+                proof.projection.right.pixel_count
+            );
+            Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete)
         }
     }
 
@@ -2675,142 +2629,178 @@ mod android {
         include_sky: bool,
         include_actors: bool,
     ) -> Result<()> {
-        let mut event_storage = xr::EventDataBuffer::new();
-        let mut session_running = false;
-        let mut frame_stats = XrFrameStats::default();
         let targets = TerrainPerfTargets::new(&graphics.device, eye_width, eye_height);
-        let perf_start = Instant::now();
+        let policy = mclone_xr_host::OpenXrFrameLoopPolicy {
+            view_type: VIEW_TYPE,
+            environment_blend_mode,
+            frame_limit: None,
+            session_ready_timeout: None,
+            submitted_frame_progress_timeout: None,
+            runtime_exit_is_error: false,
+            idle_poll_interval: mclone_xr_host::SESSION_IDLE_POLL_INTERVAL,
+        };
+        let mut handler = TerrainMultiviewPerfLoop {
+            app,
+            device: &graphics.device,
+            queue: &graphics.queue,
+            stage,
+            targets: &targets,
+            terrain,
+            include_sky,
+            include_actors,
+            started_at: Instant::now(),
+            stats: XrFrameStats::default(),
+            eye_size: [eye_width, eye_height],
+        };
+        let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
+            &graphics.session,
+            &mut graphics.frame_wait,
+            &mut graphics.frame_stream,
+            policy,
+        );
+        let outcome = driver.run(&mut handler)?;
+        if outcome.exit == mclone_xr_host::OpenXrRunExit::Runtime {
+            log::info!(
+                "OpenXR terrain multiview perf requested exit: submitted={} runtime_frames={} skipped={}",
+                outcome.stats.submitted_frames,
+                outcome.stats.runtime_frames,
+                outcome.stats.skipped_frames
+            );
+        }
+        Ok(())
+    }
 
-        loop {
-            if perf_start.elapsed() > Duration::from_secs(60) {
+    struct TerrainMultiviewPerfLoop<'a> {
+        app: &'a AndroidApp,
+        device: &'a wgpu::Device,
+        queue: &'a wgpu::Queue,
+        stage: &'a xr::Space,
+        targets: &'a TerrainPerfTargets,
+        terrain: &'a mut AndroidXrTerrainState,
+        include_sky: bool,
+        include_actors: bool,
+        started_at: Instant,
+        stats: XrFrameStats,
+        eye_size: [u32; 2],
+    }
+
+    impl mclone_xr_host::OpenXrFrameLoopHandler<graphics_vulkan::AppGraphics>
+        for TerrainMultiviewPerfLoop<'_>
+    {
+        type RenderOutput = Option<TerrainMultiviewPerfSummary>;
+
+        fn pump_platform_events(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            if self.started_at.elapsed() > Duration::from_secs(60) {
                 bail!(
                     "terrain multiview perf timed out: submitted={} runtime_frames={} skipped={} sections={}",
-                    frame_stats.submitted_frames,
-                    frame_stats.runtime_frames,
-                    frame_stats.skipped_frames,
-                    terrain.frame_summary().section_count
+                    self.stats.submitted_frames,
+                    self.stats.runtime_frames,
+                    self.stats.skipped_frames,
+                    self.terrain.frame_summary().section_count
                 );
             }
-            if !poll_android_events(app, Some(Duration::from_millis(0)))? {
-                log::info!(
-                    "Android activity destroyed; exiting OpenXR terrain multiview perf loop"
-                );
-                return Ok(());
-            }
-
-            match mclone_xr_host::poll_openxr_events(
-                &graphics.session,
-                &mut event_storage,
-                &mut session_running,
-                VIEW_TYPE,
-                log_openxr_host_event,
-            )
-            .context("poll OpenXR events")?
-            {
-                OpenXrPollStatus::Exit => {
+            if poll_android_events(self.app, Some(timeout))? {
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
+            } else {
+                if timeout.is_zero() {
                     log::info!(
-                        "OpenXR terrain multiview perf requested exit: submitted={} runtime_frames={} skipped={}",
-                        frame_stats.submitted_frames,
-                        frame_stats.runtime_frames,
-                        frame_stats.skipped_frames
+                        "Android activity destroyed; exiting OpenXR terrain multiview perf loop"
                     );
-                    return Ok(());
+                } else {
+                    log::info!(
+                        "Android activity destroyed while waiting for OpenXR READY in terrain multiview perf"
+                    );
                 }
-                OpenXrPollStatus::Idle if !session_running => {
-                    if !poll_android_events(app, Some(SESSION_IDLE_POLL_INTERVAL))? {
-                        log::info!(
-                            "Android activity destroyed while waiting for OpenXR READY in terrain multiview perf"
-                        );
-                        return Ok(());
-                    }
-                    continue;
-                }
-                OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete)
             }
+        }
 
-            let frame_state = mclone_xr_host::wait_begin_frame(
-                &mut graphics.frame_wait,
-                &mut graphics.frame_stream,
-                &mut frame_stats,
+        fn on_openxr_event(&mut self, event: OpenXrHostEvent) {
+            log::info!("{event}");
+        }
+
+        fn before_frame(&mut self, stats: XrFrameStats) -> Result<()> {
+            self.stats = stats;
+            Ok(())
+        }
+
+        fn render_frame(
+            &mut self,
+            frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
+        ) -> Result<Self::RenderOutput> {
+            let summary = render_terrain_multiview_perf_frame(
+                self.device,
+                self.queue,
+                frame.session(),
+                self.stage,
+                frame.predicted_display_time(),
+                self.targets,
+                self.terrain,
+                self.include_sky,
+                self.include_actors,
             )?;
-            if frame_state.should_render {
-                let frame_result = render_terrain_multiview_perf_frame(
-                    graphics,
-                    stage,
-                    frame_state.predicted_display_time,
-                    &targets,
-                    terrain,
-                    include_sky,
-                    include_actors,
-                );
-                let end_result = mclone_xr_host::end_frame_with_layers(
-                    &mut graphics.frame_stream,
-                    frame_state.predicted_display_time,
-                    environment_blend_mode,
-                    &[],
-                );
-                let maybe_summary = match frame_result {
-                    Ok(summary) => summary,
-                    Err(error) => {
-                        let _ = end_result;
-                        return Err(error);
-                    }
-                };
-                end_result.context("end terrain multiview perf OpenXR frame")?;
-                frame_stats.record_submitted_frame();
-                if let Some(summary) = maybe_summary {
-                    let stereo = summary.stereo_stats();
-                    let multiview = summary.multiview_stats();
-                    let delta_ms = stereo.avg_ms - multiview.avg_ms;
-                    let marker = if include_actors {
-                        "MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY"
-                    } else if include_sky {
-                        "MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF_SUMMARY"
-                    } else {
-                        "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY"
-                    };
-                    log::info!(
-                        "{} samples={} warmup={} eye={}x{} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} actors={} drawn_actors={} stereo_avg_ms={:.3} stereo_min_ms={:.3} stereo_p50_ms={:.3} stereo_p95_ms={:.3} stereo_max_ms={:.3} multiview_avg_ms={:.3} multiview_min_ms={:.3} multiview_p50_ms={:.3} multiview_p95_ms={:.3} multiview_max_ms={:.3} delta_avg_ms={:.3} speedup={:.3}",
-                        marker,
-                        TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES,
-                        TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES,
-                        eye_width,
-                        eye_height,
-                        summary.terrain.section_count,
-                        summary.terrain.left.drawn_section_count,
-                        summary.terrain.right.drawn_section_count,
-                        summary.terrain.left.drawn_index_count,
-                        summary.terrain.right.drawn_index_count,
-                        summary.terrain.actor_count,
-                        summary.terrain.drawn_actor_count,
-                        stereo.avg_ms,
-                        stereo.min_ms,
-                        stereo.p50_ms,
-                        stereo.p95_ms,
-                        stereo.max_ms,
-                        multiview.avg_ms,
-                        multiview.min_ms,
-                        multiview.p50_ms,
-                        multiview.p95_ms,
-                        multiview.max_ms,
-                        delta_ms,
-                        summary.speedup()
-                    );
-                    return Ok(());
-                }
-            } else if let Err(error) = mclone_xr_host::end_skipped_frame(
-                &mut graphics.frame_stream,
-                frame_state.predicted_display_time,
-                environment_blend_mode,
-                &mut frame_stats,
-            ) {
-                return Err(error);
-            }
+            frame
+                .submit_empty()
+                .context("end terrain multiview perf OpenXR frame")?;
+            Ok(summary)
+        }
+
+        fn after_frame(
+            &mut self,
+            outcome: mclone_xr_host::OpenXrFrameOutcome<Self::RenderOutput>,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            self.stats = outcome.stats;
+            let Some(Some(summary)) = outcome.render_output else {
+                return Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue);
+            };
+            let stereo = summary.stereo_stats();
+            let multiview = summary.multiview_stats();
+            let delta_ms = stereo.avg_ms - multiview.avg_ms;
+            let marker = if self.include_actors {
+                "MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY"
+            } else if self.include_sky {
+                "MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF_SUMMARY"
+            } else {
+                "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY"
+            };
+            log::info!(
+                "{} samples={} warmup={} eye={}x{} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} actors={} drawn_actors={} stereo_avg_ms={:.3} stereo_min_ms={:.3} stereo_p50_ms={:.3} stereo_p95_ms={:.3} stereo_max_ms={:.3} multiview_avg_ms={:.3} multiview_min_ms={:.3} multiview_p50_ms={:.3} multiview_p95_ms={:.3} multiview_max_ms={:.3} delta_avg_ms={:.3} speedup={:.3}",
+                marker,
+                TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES,
+                TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES,
+                self.eye_size[0],
+                self.eye_size[1],
+                summary.terrain.section_count,
+                summary.terrain.left.drawn_section_count,
+                summary.terrain.right.drawn_section_count,
+                summary.terrain.left.drawn_index_count,
+                summary.terrain.right.drawn_index_count,
+                summary.terrain.actor_count,
+                summary.terrain.drawn_actor_count,
+                stereo.avg_ms,
+                stereo.min_ms,
+                stereo.p50_ms,
+                stereo.p95_ms,
+                stereo.max_ms,
+                multiview.avg_ms,
+                multiview.min_ms,
+                multiview.p50_ms,
+                multiview.p95_ms,
+                multiview.max_ms,
+                delta_ms,
+                summary.speedup()
+            );
+            Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete)
         }
     }
 
     fn render_terrain_multiview_perf_frame(
-        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        session: &xr::Session<graphics_vulkan::AppGraphics>,
         stage: &xr::Space,
         predicted_display_time: xr::Time,
         targets: &TerrainPerfTargets,
@@ -2819,11 +2809,11 @@ mod android {
         include_actors: bool,
     ) -> Result<Option<TerrainMultiviewPerfSummary>> {
         let stereo_views =
-            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+            mclone_xr_host::locate_stereo_views(session, stage, predicted_display_time)?;
         let startup_summary = terrain
             .render_terrain_multiview_frame(
-                &graphics.device,
-                &graphics.queue,
+                device,
+                queue,
                 [
                     mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                     mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2844,8 +2834,8 @@ mod android {
         for _ in 0..TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES {
             if include_sky {
                 let _ = terrain.render_sky_terrain_stereo_frame_frozen(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2855,8 +2845,8 @@ mod android {
                 )?;
             } else if include_actors {
                 let _ = terrain.render_sky_terrain_actors_stereo_frame_frozen(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2866,8 +2856,8 @@ mod android {
                 )?;
             } else {
                 let _ = terrain.render_terrain_stereo_frame_frozen(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2878,8 +2868,8 @@ mod android {
             }
             if include_sky {
                 let _ = terrain.render_sky_terrain_multiview_frame_frozen(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2888,8 +2878,8 @@ mod android {
                 )?;
             } else if include_actors {
                 let _ = terrain.render_sky_terrain_actors_multiview_frame_frozen(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2898,8 +2888,8 @@ mod android {
                 )?;
             } else {
                 let _ = terrain.render_terrain_multiview_frame_frozen(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2915,8 +2905,8 @@ mod android {
         for index in 0..TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES {
             if index % 2 == 0 {
                 stereo_ms.push(measure_terrain_stereo_frame(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2927,8 +2917,8 @@ mod android {
                     include_actors,
                 )?);
                 let (elapsed_ms, summary) = measure_terrain_multiview_frame(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2942,8 +2932,8 @@ mod android {
                 latest_summary = summary;
             } else {
                 let (elapsed_ms, summary) = measure_terrain_multiview_frame(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -2956,8 +2946,8 @@ mod android {
                 multiview_ms.push(elapsed_ms);
                 latest_summary = summary;
                 stereo_ms.push(measure_terrain_stereo_frame(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -3058,129 +3048,158 @@ mod android {
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
         terrain: &mut AndroidXrTerrainState,
     ) -> Result<()> {
-        let mut event_storage = xr::EventDataBuffer::new();
-        let mut session_running = false;
-        let mut frame_stats = XrFrameStats::default();
         let mut depth = ChunkMultiviewDepthTarget::new(
             &graphics.device,
             stereo_target.width,
             stereo_target.height,
         );
-        let proof_start = Instant::now();
+        let policy = mclone_xr_host::OpenXrFrameLoopPolicy {
+            view_type: VIEW_TYPE,
+            environment_blend_mode,
+            frame_limit: None,
+            session_ready_timeout: None,
+            submitted_frame_progress_timeout: None,
+            runtime_exit_is_error: false,
+            idle_poll_interval: mclone_xr_host::SESSION_IDLE_POLL_INTERVAL,
+        };
+        let mut handler = TerrainMultiviewProofLoop {
+            app,
+            device: &graphics.device,
+            queue: &graphics.queue,
+            stage,
+            stereo_target,
+            depth: &mut depth,
+            terrain,
+            started_at: Instant::now(),
+            stats: XrFrameStats::default(),
+        };
+        let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
+            &graphics.session,
+            &mut graphics.frame_wait,
+            &mut graphics.frame_stream,
+            policy,
+        );
+        let outcome = driver.run(&mut handler)?;
+        if outcome.exit == mclone_xr_host::OpenXrRunExit::Runtime {
+            log::info!(
+                "OpenXR terrain multiview proof requested exit: submitted={} runtime_frames={} skipped={}",
+                outcome.stats.submitted_frames,
+                outcome.stats.runtime_frames,
+                outcome.stats.skipped_frames
+            );
+        }
+        Ok(())
+    }
 
-        loop {
-            if proof_start.elapsed() > Duration::from_secs(45) {
+    struct TerrainMultiviewProofLoop<'a> {
+        app: &'a AndroidApp,
+        device: &'a wgpu::Device,
+        queue: &'a wgpu::Queue,
+        stage: &'a xr::Space,
+        stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
+        depth: &'a mut ChunkMultiviewDepthTarget,
+        terrain: &'a mut AndroidXrTerrainState,
+        started_at: Instant,
+        stats: XrFrameStats,
+    }
+
+    impl mclone_xr_host::OpenXrFrameLoopHandler<graphics_vulkan::AppGraphics>
+        for TerrainMultiviewProofLoop<'_>
+    {
+        type RenderOutput = TerrainMultiviewProofFrame;
+
+        fn pump_platform_events(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            if self.started_at.elapsed() > Duration::from_secs(45) {
                 bail!(
                     "terrain multiview proof timed out: submitted={} runtime_frames={} skipped={} sections={}",
-                    frame_stats.submitted_frames,
-                    frame_stats.runtime_frames,
-                    frame_stats.skipped_frames,
-                    terrain.frame_summary().section_count
+                    self.stats.submitted_frames,
+                    self.stats.runtime_frames,
+                    self.stats.skipped_frames,
+                    self.terrain.frame_summary().section_count
                 );
             }
-            if !poll_android_events(app, Some(Duration::from_millis(0)))? {
-                log::info!(
-                    "Android activity destroyed; exiting OpenXR terrain multiview proof loop"
-                );
-                return Ok(());
-            }
-
-            match mclone_xr_host::poll_openxr_events(
-                &graphics.session,
-                &mut event_storage,
-                &mut session_running,
-                VIEW_TYPE,
-                log_openxr_host_event,
-            )
-            .context("poll OpenXR events")?
-            {
-                OpenXrPollStatus::Exit => {
+            if poll_android_events(self.app, Some(timeout))? {
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
+            } else {
+                if timeout.is_zero() {
                     log::info!(
-                        "OpenXR terrain multiview proof requested exit: submitted={} runtime_frames={} skipped={}",
-                        frame_stats.submitted_frames,
-                        frame_stats.runtime_frames,
-                        frame_stats.skipped_frames
+                        "Android activity destroyed; exiting OpenXR terrain multiview proof loop"
                     );
-                    return Ok(());
+                } else {
+                    log::info!(
+                        "Android activity destroyed while waiting for OpenXR READY in terrain multiview proof"
+                    );
                 }
-                OpenXrPollStatus::Idle if !session_running => {
-                    if !poll_android_events(app, Some(SESSION_IDLE_POLL_INTERVAL))? {
-                        log::info!(
-                            "Android activity destroyed while waiting for OpenXR READY in terrain multiview proof"
-                        );
-                        return Ok(());
-                    }
-                    continue;
-                }
-                OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete)
             }
+        }
 
-            let frame_state = mclone_xr_host::wait_begin_frame(
-                &mut graphics.frame_wait,
-                &mut graphics.frame_stream,
-                &mut frame_stats,
-            )?;
-            if frame_state.should_render {
-                match render_terrain_multiview_proof_frame(
-                    graphics,
-                    stage,
-                    environment_blend_mode,
-                    frame_state.predicted_display_time,
-                    stereo_target,
-                    &mut depth,
-                    terrain,
-                ) {
-                    Ok(proof) => {
-                        frame_stats.record_submitted_frame();
-                        if let Some(difference) = proof.difference {
-                            log::info!(
-                                "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} different_pixels={} minimum_different_pixels={}",
-                                frame_stats.submitted_frames,
-                                frame_stats.runtime_frames,
-                                frame_stats.skipped_frames,
-                                stereo_target.width,
-                                stereo_target.height,
-                                stereo_target.array_size(),
-                                proof.summary.section_count,
-                                proof.summary.left.drawn_section_count,
-                                proof.summary.right.drawn_section_count,
-                                proof.summary.left.drawn_index_count,
-                                proof.summary.right.drawn_index_count,
-                                difference.different_pixels,
-                                difference.minimum_expected_different_pixels
-                            );
-                            return Ok(());
-                        }
-                        if frame_stats.submitted_frames % 60 == 0 {
-                            log::info!(
-                                "OpenXR terrain multiview proof waiting for drawable terrain: submitted={} sections={} left_indices={} right_indices={} pending_chunks={} pending_jobs={}",
-                                frame_stats.submitted_frames,
-                                proof.summary.section_count,
-                                proof.summary.left.drawn_index_count,
-                                proof.summary.right.drawn_index_count,
-                                proof.summary.upload.pending_render_chunks_after,
-                                proof.summary.upload.pending_compile_jobs_after
-                            );
-                        }
-                    }
-                    Err(error) => {
-                        let _ = mclone_xr_host::end_frame_with_layers(
-                            &mut graphics.frame_stream,
-                            frame_state.predicted_display_time,
-                            environment_blend_mode,
-                            &[],
-                        );
-                        return Err(error);
-                    }
-                }
-            } else if let Err(error) = mclone_xr_host::end_skipped_frame(
-                &mut graphics.frame_stream,
-                frame_state.predicted_display_time,
-                environment_blend_mode,
-                &mut frame_stats,
-            ) {
-                return Err(error);
+        fn on_openxr_event(&mut self, event: OpenXrHostEvent) {
+            log::info!("{event}");
+        }
+
+        fn before_frame(&mut self, stats: XrFrameStats) -> Result<()> {
+            self.stats = stats;
+            Ok(())
+        }
+
+        fn render_frame(
+            &mut self,
+            frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
+        ) -> Result<Self::RenderOutput> {
+            render_terrain_multiview_proof_frame(
+                self.device,
+                self.queue,
+                frame,
+                self.stage,
+                self.stereo_target,
+                self.depth,
+                self.terrain,
+            )
+        }
+
+        fn after_frame(
+            &mut self,
+            outcome: mclone_xr_host::OpenXrFrameOutcome<Self::RenderOutput>,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            self.stats = outcome.stats;
+            let Some(proof) = outcome.render_output else {
+                return Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue);
+            };
+            if let Some(difference) = proof.difference {
+                log::info!(
+                    "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} different_pixels={} minimum_different_pixels={}",
+                    outcome.stats.submitted_frames,
+                    outcome.stats.runtime_frames,
+                    outcome.stats.skipped_frames,
+                    self.stereo_target.width,
+                    self.stereo_target.height,
+                    self.stereo_target.array_size(),
+                    proof.summary.section_count,
+                    proof.summary.left.drawn_section_count,
+                    proof.summary.right.drawn_section_count,
+                    proof.summary.left.drawn_index_count,
+                    proof.summary.right.drawn_index_count,
+                    difference.different_pixels,
+                    difference.minimum_expected_different_pixels
+                );
+                return Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete);
             }
+            if outcome.stats.submitted_frames % 60 == 0 {
+                log::info!(
+                    "OpenXR terrain multiview proof waiting for drawable terrain: submitted={} sections={} left_indices={} right_indices={} pending_chunks={} pending_jobs={}",
+                    outcome.stats.submitted_frames,
+                    proof.summary.section_count,
+                    proof.summary.left.drawn_index_count,
+                    proof.summary.right.drawn_index_count,
+                    proof.summary.upload.pending_render_chunks_after,
+                    proof.summary.upload.pending_compile_jobs_after
+                );
+            }
+            Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
         }
     }
 
@@ -3196,27 +3215,30 @@ mod android {
     }
 
     fn render_multiview_proof_frame(
-        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
         stage: &xr::Space,
-        environment_blend_mode: xr::EnvironmentBlendMode,
-        predicted_display_time: xr::Time,
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
     ) -> Result<MultiviewProofFrame> {
-        let stereo_views =
-            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let stereo_views = mclone_xr_host::locate_stereo_views(
+            frame.session(),
+            stage,
+            frame.predicted_display_time(),
+        )?;
         let target_width = stereo_target.width;
         let target_height = stereo_target.height;
         let private_multiview = mclone_xr_host::render_private_multiview_readback_proof(
-            &graphics.device,
-            &graphics.queue,
+            device,
+            queue,
             XR_COLOR_FORMAT,
             64,
             64,
         )
         .context("validate private OpenXR multiview readback proof")?;
         let projection = mclone_xr_host::render_stereo_projection_readback_proof(
-            &graphics.device,
-            &graphics.queue,
+            device,
+            queue,
             XR_COLOR_FORMAT,
             target_width,
             target_height,
@@ -3226,15 +3248,15 @@ mod android {
         let target =
             acquire_stereo_target(stereo_target).context("acquire multiview proof target")?;
         mclone_xr_host::render_multiview_layer_proof(
-            &graphics.device,
-            &graphics.queue,
+            device,
+            queue,
             target.color_array_view(),
             XR_COLOR_FORMAT,
         )
         .context("render OpenXR multiview proof")?;
         let swapchain_multiview = mclone_xr_host::read_multiview_layer_color_proof(
-            &graphics.device,
-            &graphics.queue,
+            device,
+            queue,
             target.color_texture()?,
             target_width,
             target_height,
@@ -3242,14 +3264,7 @@ mod android {
         )
         .context("validate OpenXR swapchain multiview readback proof")?;
         target.release()?;
-        mclone_xr_host::end_multiview_projection_frame(
-            &mut graphics.frame_stream,
-            predicted_display_time,
-            environment_blend_mode,
-            stage,
-            stereo_views,
-            stereo_target,
-        )?;
+        frame.submit_multiview_projection(stage, stereo_views, stereo_target)?;
         Ok(MultiviewProofFrame {
             projection,
             private_multiview,
@@ -3258,28 +3273,31 @@ mod android {
     }
 
     fn render_terrain_multiview_proof_frame(
-        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
         stage: &xr::Space,
-        environment_blend_mode: xr::EnvironmentBlendMode,
-        predicted_display_time: xr::Time,
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
         depth: &mut ChunkMultiviewDepthTarget,
         terrain: &mut AndroidXrTerrainState,
     ) -> Result<TerrainMultiviewProofFrame> {
-        let stereo_views =
-            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let stereo_views = mclone_xr_host::locate_stereo_views(
+            frame.session(),
+            stage,
+            frame.predicted_display_time(),
+        )?;
         let target_width = stereo_target.width;
         let target_height = stereo_target.height;
         if depth.width != target_width || depth.height != target_height {
-            *depth = ChunkMultiviewDepthTarget::new(&graphics.device, target_width, target_height);
+            *depth = ChunkMultiviewDepthTarget::new(device, target_width, target_height);
         }
         let target = acquire_stereo_target(stereo_target)
             .context("acquire terrain multiview proof target")?;
         let render_result: Result<TerrainMultiviewProofFrame> = (|| {
             let summary = terrain
                 .render_terrain_multiview_frame(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -3293,8 +3311,8 @@ mod android {
                 .context("render OpenXR terrain multiview proof")?;
             terrain
                 .render_overlay_multiview_smoke_frame_frozen(
-                    &graphics.device,
-                    &graphics.queue,
+                    device,
+                    queue,
                     [
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
                         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
@@ -3310,8 +3328,8 @@ mod android {
                 if summary.left.drawn_index_count > 0 && summary.right.drawn_index_count > 0 {
                     Some(
                         mclone_xr_host::read_multiview_layer_difference_proof(
-                            &graphics.device,
-                            &graphics.queue,
+                            device,
+                            queue,
                             target.color_texture()?,
                             target_width,
                             target_height,
@@ -3329,14 +3347,7 @@ mod android {
         })();
         target.release()?;
         let proof = render_result?;
-        mclone_xr_host::end_multiview_projection_frame(
-            &mut graphics.frame_stream,
-            predicted_display_time,
-            environment_blend_mode,
-            stage,
-            stereo_views,
-            stereo_target,
-        )?;
+        frame.submit_multiview_projection(stage, stereo_views, stereo_target)?;
         Ok(proof)
     }
 
@@ -3345,7 +3356,7 @@ mod android {
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
         stage: &xr::Space,
         environment_blend_mode: xr::EnvironmentBlendMode,
-        mut frame_targets: AndroidXrFrameTargets<'_>,
+        frame_targets: AndroidXrFrameTargets<'_>,
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
@@ -3373,14 +3384,11 @@ mod android {
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
     ) -> Result<()> {
-        let mut event_storage = xr::EventDataBuffer::new();
-        let mut session_running = false;
-        let mut frame_stats = XrFrameStats::default();
         let render_path = frame_targets.render_path();
         let xr_eye_size = frame_targets.eye_size();
-        let mut frame_pipeline_reporter =
+        let frame_pipeline_reporter =
             XrFramePipelineReporter::new(display_refresh.current_rate.map(f64::from));
-        let mut perf_probe = AndroidXrPerfProbe::new(
+        let perf_probe = AndroidXrPerfProbe::new(
             perf_seconds,
             perf_flight,
             perf_settled_orbit,
@@ -3405,7 +3413,7 @@ mod android {
             xr_eye_size,
         );
         let performance_metrics_wait_for_perf_window = perf_seconds.is_some();
-        let mut performance_metrics_probe = if perf_metrics {
+        let performance_metrics_probe = if perf_metrics {
             let mode = if perf_metrics_periodic {
                 perf_metrics::XrPerformanceMetricsMode::Periodic
             } else {
@@ -3425,308 +3433,56 @@ mod android {
         } else {
             None
         };
-        let mut logged_first_frame = false;
-        let mut logged_ready = false;
-        let mut logged_controller_activity = false;
-        let mut session_smoke_pending_start = false;
-        let mut session_smoke_started = false;
-        let mut session_smoke_ready = false;
-
-        loop {
-            let lifecycle = poll_android_lifecycle(app, Some(Duration::from_millis(0)))?;
-            if lifecycle.paused {
-                flush_terrain_on_android_pause(terrain);
-            }
-            if !lifecycle.keep_running {
-                log::info!("Android activity destroyed; exiting OpenXR loop");
-                return Ok(());
-            }
-
-            match mclone_xr_host::poll_openxr_events(
-                &graphics.session,
-                &mut event_storage,
-                &mut session_running,
-                VIEW_TYPE,
-                log_openxr_host_event,
-            )
-            .context("poll OpenXR events")?
-            {
-                OpenXrPollStatus::Exit => {
-                    log::info!(
-                        "OpenXR session requested exit: submitted={} runtime_frames={} skipped={}",
-                        frame_stats.submitted_frames,
-                        frame_stats.runtime_frames,
-                        frame_stats.skipped_frames
-                    );
-                    return Ok(());
-                }
-                OpenXrPollStatus::Idle if !session_running => {
-                    let lifecycle = poll_android_lifecycle(app, Some(SESSION_IDLE_POLL_INTERVAL))?;
-                    if lifecycle.paused {
-                        flush_terrain_on_android_pause(terrain);
-                    }
-                    if !lifecycle.keep_running {
-                        log::info!("Android activity destroyed while waiting for OpenXR READY");
-                        return Ok(());
-                    }
-                    continue;
-                }
-                OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
-            }
-
-            let frame_wall_start = Instant::now();
-            let mut frame_timing = AndroidXrFrameTiming::default();
-            if matches!(session_smoke, Some(AndroidXrSessionSmoke::NewWorld))
-                && session_smoke_pending_start
-                && !session_smoke_started
-            {
-                log::info!(
-                    "MCLONE_ANDROID_XR_REPLACEMENT_STARTED new-world seed={}",
-                    ANDROID_XR_SESSION_SMOKE_SEED
-                );
-                terrain
-                    .start_session_for_request(
-                        &graphics.device,
-                        &graphics.queue,
-                        SessionStartRequest::new_seed_local_world(ANDROID_XR_SESSION_SMOKE_SEED),
-                    )
-                    .context("run Android XR new-world session smoke replacement")?;
-                session_smoke_started = true;
-                session_smoke_pending_start = false;
-            }
-
-            let wait_frame_start = Instant::now();
-            let frame_state = graphics.frame_wait.wait().context("wait OpenXR frame")?;
-            frame_timing.wait_frame_ms = elapsed_ms(wait_frame_start);
-            let thread_cpu_start_ms = mclone_diagnostics::clock::thread_cpu_time_ms();
-            let begin_frame_start = Instant::now();
-            graphics
-                .frame_stream
-                .begin()
-                .context("begin OpenXR frame")?;
-            frame_timing.begin_frame_ms = elapsed_ms(begin_frame_start);
-            frame_timing.wait_begin_ms = frame_timing.wait_frame_ms + frame_timing.begin_frame_ms;
-            frame_stats.record_runtime_frame();
-
-            let mut rendered_frame = None;
-            let mut perf_started_after_ready = false;
-            let frame_result = if frame_state.should_render {
-                let controller_poll_start = Instant::now();
-                let render_result = match controller_actions.poll(
-                    &graphics.session,
-                    stage,
-                    frame_state.predicted_display_time,
-                ) {
-                    Ok(controllers) => {
-                        frame_timing.controller_poll_ms = elapsed_ms(controller_poll_start);
-                        if !logged_controller_activity && !controllers.is_empty() {
-                            logged_controller_activity = true;
-                            log::info!(
-                                "MCLONE_ANDROID_XR_CONTROLLERS_ACTIVE count={}",
-                                controllers.len()
-                            );
-                        }
-                        let render_start = Instant::now();
-                        let result = match &mut frame_targets {
-                            AndroidXrFrameTargets::PerEye {
-                                left_eye,
-                                right_eye,
-                                ..
-                            } => render_mclone_frame(
-                                graphics,
-                                stage,
-                                environment_blend_mode,
-                                frame_state.predicted_display_time,
-                                left_eye,
-                                right_eye,
-                                terrain,
-                                &controllers,
-                                perf_probe.automation(),
-                                fixed_render_view_pose,
-                            ),
-                            AndroidXrFrameTargets::Multiview {
-                                stereo_target,
-                                depth,
-                            } => render_mclone_multiview_frame(
-                                graphics,
-                                stage,
-                                environment_blend_mode,
-                                frame_state.predicted_display_time,
-                                stereo_target,
-                                depth,
-                                terrain,
-                                &controllers,
-                                perf_probe.automation(),
-                                fixed_render_view_pose,
-                            ),
-                        };
-                        frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
-                        result
-                    }
-                    Err(error) => {
-                        frame_timing.controller_poll_ms = elapsed_ms(controller_poll_start);
-                        Err(error)
-                    }
-                };
-                match render_result {
-                    Ok(rendered) => {
-                        frame_stats.record_submitted_frame();
-                        frame_timing.render = rendered.timing;
-                        rendered_frame = Some(rendered);
-                        let summary = rendered.summary;
-                        if !logged_first_frame {
-                            logged_first_frame = true;
-                            log::info!(
-                                "Android XR terrain first-frame summary: render_path={} frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} local_startup_active={}",
-                                render_path.label(),
-                                summary.rendered_frames,
-                                summary.section_count,
-                                summary.drawn_section_count,
-                                summary.index_count,
-                                summary.drawn_index_count,
-                                summary.actor_count,
-                                summary.drawn_actor_count,
-                                summary.local_startup_active
-                            );
-                        }
-                        if !logged_ready && !summary.local_startup_active {
-                            logged_ready = true;
-                            log::info!(
-                                "Android XR terrain ready summary: render_path={} frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
-                                render_path.label(),
-                                summary.rendered_frames,
-                                summary.section_count,
-                                summary.drawn_section_count,
-                                summary.index_count,
-                                summary.drawn_index_count,
-                                summary.actor_count,
-                                summary.drawn_actor_count
-                            );
-                            log::info!("MCLONE_ANDROID_XR_READY");
-                            if render_path == AndroidXrRenderPath::Multiview {
-                                log::info!(
-                                    "MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW_READY frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
-                                    summary.rendered_frames,
-                                    summary.section_count,
-                                    summary.drawn_section_count,
-                                    summary.index_count,
-                                    summary.drawn_index_count,
-                                    summary.actor_count,
-                                    summary.drawn_actor_count
-                                );
-                            }
-                            if session_smoke.is_some() {
-                                session_smoke_pending_start = true;
-                            }
-                        } else if session_smoke_started
-                            && !session_smoke_ready
-                            && !summary.local_startup_active
-                            && summary.rendered_frames > 0
-                        {
-                            session_smoke_ready = true;
-                            log::info!(
-                                "MCLONE_ANDROID_XR_REPLACEMENT_READY new-world seed={} frames={} sections={} drawn_sections={} indices={} drawn_indices={}",
-                                ANDROID_XR_SESSION_SMOKE_SEED,
-                                summary.rendered_frames,
-                                summary.section_count,
-                                summary.drawn_section_count,
-                                summary.index_count,
-                                summary.drawn_index_count
-                            );
-                        }
-                        perf_started_after_ready = logged_ready
-                            && perf_probe.maybe_start_after_rendered_frame(frame_stats, rendered);
-                        Ok(())
-                    }
-                    Err(error) => Err(error),
-                }
-            } else {
-                mclone_xr_host::end_skipped_frame(
-                    &mut graphics.frame_stream,
-                    frame_state.predicted_display_time,
-                    environment_blend_mode,
-                    &mut frame_stats,
-                )
-            };
-
-            if let Err(error) = frame_result {
-                let _ = mclone_xr_host::end_frame_with_layers(
-                    &mut graphics.frame_stream,
-                    frame_state.predicted_display_time,
-                    environment_blend_mode,
-                    &[],
-                );
-                return Err(error);
-            }
-            if perf_started_after_ready {
-                if let Some(probe) = performance_metrics_probe.as_mut() {
-                    probe.start_perf_window();
-                }
-            }
-            frame_timing.frame_wall_ms = elapsed_ms(frame_wall_start);
-            if let (Some(start_ms), Some(end_ms)) = (
-                thread_cpu_start_ms,
-                mclone_diagnostics::clock::thread_cpu_time_ms(),
-            ) {
-                frame_timing.thread_cpu_ms = (end_ms - start_ms).max(0.0);
-                frame_timing.thread_cpu_valid = true;
-            }
-            // Feed the perf overlay whenever it is open (or perf diagnostics are
-            // compiled in / recording). The frame-pipeline report only assembles
-            // already-measured host and runtime timings, so running it while the
-            // overlay is visible is cheap and keeps the panel populated without
-            // requiring the `perf-diagnostics` build feature.
-            let frame_pipeline_overlay_open = terrain.frame_metrics_visible();
-            let budget_decision_panel = if cfg!(feature = "perf-diagnostics")
-                || perf_probe.is_recording()
-                || frame_pipeline_overlay_open
-            {
-                terrain.latest_budget_decision_panel()
-            } else {
-                BudgetDecisionPanelReport::empty()
-            };
-            if cfg!(feature = "perf-diagnostics") || frame_pipeline_overlay_open {
-                let (frame_pipeline_report, frame_pipeline_revision) = frame_pipeline_reporter
-                    .record_frame_with_budget_decision_panel(
-                        XrFramePipelineHostTiming {
-                            frame_wall_ms: frame_timing.frame_wall_ms,
-                            wait_frame_ms: frame_timing.wait_frame_ms,
-                            controller_poll_ms: frame_timing.controller_poll_ms,
-                            rendered: rendered_frame.is_some(),
-                            thread_cpu_ms: frame_timing
-                                .thread_cpu_valid
-                                .then_some(frame_timing.thread_cpu_ms),
-                        },
-                        rendered_frame.map(|rendered| rendered.summary),
-                        budget_decision_panel.clone(),
-                    );
-                terrain.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
-            }
-            if !perf_started_after_ready && perf_probe.is_recording() {
-                perf_probe.record_frame(
-                    frame_timing,
-                    frame_stats,
-                    rendered_frame,
-                    budget_decision_panel,
-                );
-            }
-            if rendered_frame.is_some() {
-                if let Some(probe) = performance_metrics_probe.as_mut() {
-                    if !performance_metrics_wait_for_perf_window || probe.perf_window_started() {
-                        probe.tick();
-                    }
-                }
-            }
-
-            if frame_stats.submitted_frames == 1 {
-                log::info!(
-                    "OpenXR mclone terrain frame submitted: submitted={} runtime_frames={} skipped={}",
-                    frame_stats.submitted_frames,
-                    frame_stats.runtime_frames,
-                    frame_stats.skipped_frames
-                );
-            }
+        let policy = mclone_xr_host::OpenXrFrameLoopPolicy {
+            view_type: VIEW_TYPE,
+            environment_blend_mode,
+            frame_limit: None,
+            session_ready_timeout: None,
+            submitted_frame_progress_timeout: None,
+            runtime_exit_is_error: false,
+            idle_poll_interval: mclone_xr_host::SESSION_IDLE_POLL_INTERVAL,
+        };
+        let mut handler = AndroidXrMainFrameLoop {
+            app,
+            device: &graphics.device,
+            queue: &graphics.queue,
+            stage,
+            frame_targets,
+            terrain,
+            controller_actions,
+            session_smoke,
+            fixed_render_view_pose,
+            render_path,
+            frame_pipeline_reporter,
+            perf_probe,
+            performance_metrics_wait_for_perf_window,
+            performance_metrics_probe,
+            logged_first_frame: false,
+            logged_ready: false,
+            logged_controller_activity: false,
+            session_smoke_pending_start: false,
+            session_smoke_started: false,
+            session_smoke_ready: false,
+            frame_timing: AndroidXrFrameTiming::default(),
+            thread_cpu_start_ms: None,
+            stats_before_frame: XrFrameStats::default(),
+        };
+        let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
+            &graphics.session,
+            &mut graphics.frame_wait,
+            &mut graphics.frame_stream,
+            policy,
+        );
+        let outcome = driver.run(&mut handler)?;
+        if outcome.exit == mclone_xr_host::OpenXrRunExit::Runtime {
+            log::info!(
+                "OpenXR session requested exit: submitted={} runtime_frames={} skipped={}",
+                outcome.stats.submitted_frames,
+                outcome.stats.runtime_frames,
+                outcome.stats.skipped_frames
+            );
         }
+        Ok(())
     }
 
     #[derive(Clone, Copy, Debug, Default)]
@@ -3817,22 +3573,311 @@ mod android {
         }
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    enum AndroidXrPerfAutomation {
-        Flight {
-            speed_blocks_per_second: f64,
-        },
-        Orbit {
-            speed_blocks_per_second: f64,
-            elapsed_seconds: f64,
-        },
-        Stationary {
-            frozen_render: bool,
-        },
-        ChunkViewChurn {
-            center_x: i32,
-            center_z: i32,
-        },
+    #[derive(Clone, Copy, Debug)]
+    struct AndroidXrMainFrameOutput {
+        rendered: AndroidXrRenderedFrame,
+        perf_started_after_ready: bool,
+    }
+
+    struct AndroidXrMainFrameLoop<'a> {
+        app: &'a AndroidApp,
+        device: &'a wgpu::Device,
+        queue: &'a wgpu::Queue,
+        stage: &'a xr::Space,
+        frame_targets: AndroidXrFrameTargets<'a>,
+        terrain: &'a mut AndroidXrTerrainState,
+        controller_actions: &'a OpenXrControllerActions,
+        session_smoke: Option<AndroidXrSessionSmoke>,
+        fixed_render_view_pose: Option<XrStartupViewPose>,
+        render_path: AndroidXrRenderPath,
+        frame_pipeline_reporter: XrFramePipelineReporter,
+        perf_probe: AndroidXrPerfProbe,
+        performance_metrics_wait_for_perf_window: bool,
+        performance_metrics_probe: Option<perf_metrics::XrPerformanceMetricsProbe>,
+        logged_first_frame: bool,
+        logged_ready: bool,
+        logged_controller_activity: bool,
+        session_smoke_pending_start: bool,
+        session_smoke_started: bool,
+        session_smoke_ready: bool,
+        frame_timing: AndroidXrFrameTiming,
+        thread_cpu_start_ms: Option<f64>,
+        stats_before_frame: XrFrameStats,
+    }
+
+    impl mclone_xr_host::OpenXrFrameLoopHandler<graphics_vulkan::AppGraphics>
+        for AndroidXrMainFrameLoop<'_>
+    {
+        type RenderOutput = AndroidXrMainFrameOutput;
+
+        fn pump_platform_events(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            let lifecycle = poll_android_lifecycle(self.app, Some(timeout))?;
+            if lifecycle.paused {
+                flush_terrain_on_android_pause(self.terrain);
+            }
+            if lifecycle.keep_running {
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
+            } else {
+                if timeout.is_zero() {
+                    log::info!("Android activity destroyed; exiting OpenXR loop");
+                } else {
+                    log::info!("Android activity destroyed while waiting for OpenXR READY");
+                }
+                Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete)
+            }
+        }
+
+        fn on_openxr_event(&mut self, event: OpenXrHostEvent) {
+            match event {
+                OpenXrHostEvent::EventsLost(_) => log::warn!("{event}"),
+                _ => log::info!("{event}"),
+            }
+        }
+
+        fn before_frame(&mut self, stats: XrFrameStats) -> Result<()> {
+            self.stats_before_frame = stats;
+            self.frame_timing = AndroidXrFrameTiming::default();
+            if matches!(self.session_smoke, Some(AndroidXrSessionSmoke::NewWorld))
+                && self.session_smoke_pending_start
+                && !self.session_smoke_started
+            {
+                log::info!(
+                    "MCLONE_ANDROID_XR_REPLACEMENT_STARTED new-world seed={}",
+                    ANDROID_XR_SESSION_SMOKE_SEED
+                );
+                self.terrain
+                    .start_session_for_request(
+                        self.device,
+                        self.queue,
+                        SessionStartRequest::new_seed_local_world(ANDROID_XR_SESSION_SMOKE_SEED),
+                    )
+                    .context("run Android XR new-world session smoke replacement")?;
+                self.session_smoke_started = true;
+                self.session_smoke_pending_start = false;
+            }
+            Ok(())
+        }
+
+        fn after_wait_frame(&mut self) -> Result<()> {
+            self.thread_cpu_start_ms = mclone_diagnostics::clock::thread_cpu_time_ms();
+            Ok(())
+        }
+
+        fn render_frame(
+            &mut self,
+            frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
+        ) -> Result<Self::RenderOutput> {
+            let controller_poll_start = Instant::now();
+            let controllers = self.controller_actions.poll(
+                frame.session(),
+                self.stage,
+                frame.predicted_display_time(),
+            );
+            self.frame_timing.controller_poll_ms = elapsed_ms(controller_poll_start);
+            let controllers = controllers?;
+            if !self.logged_controller_activity && !controllers.is_empty() {
+                self.logged_controller_activity = true;
+                log::info!(
+                    "MCLONE_ANDROID_XR_CONTROLLERS_ACTIVE count={}",
+                    controllers.len()
+                );
+            }
+
+            let render_start = Instant::now();
+            let rendered = match &mut self.frame_targets {
+                AndroidXrFrameTargets::PerEye {
+                    left_eye,
+                    right_eye,
+                    ..
+                } => render_android_xr_per_eye_frame(
+                    self.device,
+                    self.queue,
+                    frame,
+                    self.stage,
+                    left_eye,
+                    right_eye,
+                    self.terrain,
+                    &controllers,
+                    self.perf_probe.automation(),
+                    self.fixed_render_view_pose,
+                ),
+                AndroidXrFrameTargets::Multiview {
+                    stereo_target,
+                    depth,
+                } => render_android_xr_multiview_frame(
+                    self.device,
+                    self.queue,
+                    frame,
+                    self.stage,
+                    stereo_target,
+                    depth,
+                    self.terrain,
+                    &controllers,
+                    self.perf_probe.automation(),
+                    self.fixed_render_view_pose,
+                ),
+            };
+            self.frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
+            let rendered = rendered?;
+            self.frame_timing.render = rendered.timing;
+            let summary = rendered.summary;
+            if !self.logged_first_frame {
+                self.logged_first_frame = true;
+                log::info!(
+                    "Android XR terrain first-frame summary: render_path={} frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} local_startup_active={}",
+                    self.render_path.label(),
+                    summary.rendered_frames,
+                    summary.section_count,
+                    summary.drawn_section_count,
+                    summary.index_count,
+                    summary.drawn_index_count,
+                    summary.actor_count,
+                    summary.drawn_actor_count,
+                    summary.local_startup_active
+                );
+            }
+            if !self.logged_ready && !summary.local_startup_active {
+                self.logged_ready = true;
+                log::info!(
+                    "Android XR terrain ready summary: render_path={} frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                    self.render_path.label(),
+                    summary.rendered_frames,
+                    summary.section_count,
+                    summary.drawn_section_count,
+                    summary.index_count,
+                    summary.drawn_index_count,
+                    summary.actor_count,
+                    summary.drawn_actor_count
+                );
+                log::info!("MCLONE_ANDROID_XR_READY");
+                if self.render_path == AndroidXrRenderPath::Multiview {
+                    log::info!(
+                        "MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW_READY frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                        summary.rendered_frames,
+                        summary.section_count,
+                        summary.drawn_section_count,
+                        summary.index_count,
+                        summary.drawn_index_count,
+                        summary.actor_count,
+                        summary.drawn_actor_count
+                    );
+                }
+                if self.session_smoke.is_some() {
+                    self.session_smoke_pending_start = true;
+                }
+            } else if self.session_smoke_started
+                && !self.session_smoke_ready
+                && !summary.local_startup_active
+                && summary.rendered_frames > 0
+            {
+                self.session_smoke_ready = true;
+                log::info!(
+                    "MCLONE_ANDROID_XR_REPLACEMENT_READY new-world seed={} frames={} sections={} drawn_sections={} indices={} drawn_indices={}",
+                    ANDROID_XR_SESSION_SMOKE_SEED,
+                    summary.rendered_frames,
+                    summary.section_count,
+                    summary.drawn_section_count,
+                    summary.index_count,
+                    summary.drawn_index_count
+                );
+            }
+            let mut submitted_stats = self.stats_before_frame;
+            submitted_stats.record_submitted_frame();
+            let perf_started_after_ready = self.logged_ready
+                && self
+                    .perf_probe
+                    .maybe_start_after_rendered_frame(submitted_stats, rendered);
+            Ok(AndroidXrMainFrameOutput {
+                rendered,
+                perf_started_after_ready,
+            })
+        }
+
+        fn after_frame(
+            &mut self,
+            outcome: mclone_xr_host::OpenXrFrameOutcome<Self::RenderOutput>,
+        ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+            self.frame_timing.wait_frame_ms = outcome.timing.wait_frame.as_secs_f64() * 1000.0;
+            self.frame_timing.begin_frame_ms = outcome.timing.begin_frame.as_secs_f64() * 1000.0;
+            self.frame_timing.wait_begin_ms =
+                self.frame_timing.wait_frame_ms + self.frame_timing.begin_frame_ms;
+            self.frame_timing.frame_wall_ms = outcome.timing.frame_wall.as_secs_f64() * 1000.0;
+            if let (Some(start_ms), Some(end_ms)) = (
+                self.thread_cpu_start_ms.take(),
+                mclone_diagnostics::clock::thread_cpu_time_ms(),
+            ) {
+                self.frame_timing.thread_cpu_ms = (end_ms - start_ms).max(0.0);
+                self.frame_timing.thread_cpu_valid = true;
+            }
+
+            let rendered_frame = outcome.render_output.map(|output| output.rendered);
+            let perf_started_after_ready = outcome
+                .render_output
+                .is_some_and(|output| output.perf_started_after_ready);
+            if perf_started_after_ready {
+                if let Some(probe) = self.performance_metrics_probe.as_mut() {
+                    probe.start_perf_window();
+                }
+            }
+
+            let frame_pipeline_overlay_open = self.terrain.frame_metrics_visible();
+            let budget_decision_panel = if cfg!(feature = "perf-diagnostics")
+                || self.perf_probe.is_recording()
+                || frame_pipeline_overlay_open
+            {
+                self.terrain.latest_budget_decision_panel()
+            } else {
+                BudgetDecisionPanelReport::empty()
+            };
+            if cfg!(feature = "perf-diagnostics") || frame_pipeline_overlay_open {
+                let (frame_pipeline_report, frame_pipeline_revision) = self
+                    .frame_pipeline_reporter
+                    .record_frame_with_budget_decision_panel(
+                        XrFramePipelineHostTiming {
+                            frame_wall_ms: self.frame_timing.frame_wall_ms,
+                            wait_frame_ms: self.frame_timing.wait_frame_ms,
+                            controller_poll_ms: self.frame_timing.controller_poll_ms,
+                            rendered: rendered_frame.is_some(),
+                            thread_cpu_ms: self
+                                .frame_timing
+                                .thread_cpu_valid
+                                .then_some(self.frame_timing.thread_cpu_ms),
+                        },
+                        rendered_frame.map(|rendered| rendered.summary),
+                        budget_decision_panel.clone(),
+                    );
+                self.terrain
+                    .set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
+            }
+            if !perf_started_after_ready && self.perf_probe.is_recording() {
+                self.perf_probe.record_frame(
+                    self.frame_timing,
+                    outcome.stats,
+                    rendered_frame,
+                    budget_decision_panel,
+                );
+            }
+            if rendered_frame.is_some() {
+                if let Some(probe) = self.performance_metrics_probe.as_mut() {
+                    if !self.performance_metrics_wait_for_perf_window || probe.perf_window_started()
+                    {
+                        probe.tick();
+                    }
+                }
+            }
+            if outcome.stats.submitted_frames == 1 {
+                log::info!(
+                    "OpenXR mclone terrain frame submitted: submitted={} runtime_frames={} skipped={}",
+                    outcome.stats.submitted_frames,
+                    outcome.stats.runtime_frames,
+                    outcome.stats.skipped_frames
+                );
+            }
+            Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
+        }
     }
 
     #[derive(Clone, Copy, Debug, Default)]
@@ -4111,13 +4156,13 @@ mod android {
             }
         }
 
-        fn automation(&self) -> Option<AndroidXrPerfAutomation> {
+        fn automation(&self) -> Option<XrFrameLocomotionAutomation> {
             let needs_settle = self.settled_stationary
                 || self.settled_orbit.is_some()
                 || self.chunk_view_churn.is_some();
             if needs_settle && self.requested_seconds.is_some() && !self.completed {
                 if let (Some(active), Some(orbit)) = (self.active.as_ref(), self.settled_orbit) {
-                    return Some(AndroidXrPerfAutomation::Orbit {
+                    return Some(XrFrameLocomotionAutomation::Orbit {
                         speed_blocks_per_second: orbit.speed_blocks_per_second,
                         elapsed_seconds: active.started.elapsed().as_secs_f64(),
                     });
@@ -4125,16 +4170,21 @@ mod android {
                 if let (Some(active), Some(churn)) = (self.active.as_ref(), self.chunk_view_churn) {
                     let [center_x, center_z] =
                         self.chunk_view_churn_center(churn, active.started.elapsed());
-                    return Some(AndroidXrPerfAutomation::ChunkViewChurn { center_x, center_z });
+                    return Some(XrFrameLocomotionAutomation::ChunkViewChurn {
+                        center_x,
+                        center_z,
+                    });
                 }
-                return Some(AndroidXrPerfAutomation::Stationary {
+                return Some(XrFrameLocomotionAutomation::Stationary {
                     frozen_render: self.frozen_render && self.active.is_some(),
                 });
             }
             if self.active.is_some() {
-                return self.flight.map(|flight| AndroidXrPerfAutomation::Flight {
-                    speed_blocks_per_second: flight.speed_blocks_per_second,
-                });
+                return self
+                    .flight
+                    .map(|flight| XrFrameLocomotionAutomation::Flight {
+                        speed_blocks_per_second: flight.speed_blocks_per_second,
+                    });
             } else {
                 None
             }
@@ -7048,78 +7098,40 @@ mod android {
         timing.locomotion_gameplay_interaction_ms = locomotion.gameplay_interaction_ms;
     }
 
-    fn log_openxr_host_event(event: OpenXrHostEvent) {
-        match event {
-            OpenXrHostEvent::SessionStateChanged(state) => {
-                log::info!("OpenXR session state: {state:?}");
-            }
-            OpenXrHostEvent::InstanceLossPending => {
-                log::info!("OpenXR instance loss pending");
-            }
-            OpenXrHostEvent::EventsLost(count) => {
-                log::warn!("OpenXR events lost: {count}");
-            }
-        }
-    }
-
-    fn render_mclone_frame(
-        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+    fn render_android_xr_per_eye_frame(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
         stage: &xr::Space,
-        environment_blend_mode: xr::EnvironmentBlendMode,
-        predicted_display_time: xr::Time,
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
         terrain: &mut AndroidXrTerrainState,
         controllers: &[XrControllerSnapshot],
-        automation: Option<AndroidXrPerfAutomation>,
+        automation: Option<XrFrameLocomotionAutomation>,
         fixed_render_view_pose: Option<XrStartupViewPose>,
     ) -> Result<AndroidXrRenderedFrame> {
         let mut timing = AndroidXrRenderFrameTiming::default();
         let locate_views_start = Instant::now();
-        let stereo_views =
-            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let stereo_views = mclone_xr_host::locate_stereo_views(
+            frame.session(),
+            stage,
+            frame.predicted_display_time(),
+        )?;
         timing.locate_views_ms = elapsed_ms(locate_views_start);
+        let scene_views = [
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
+        ];
+        let eye_fovs = [
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.left.fov),
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.right.fov),
+        ];
         let locomotion_start = Instant::now();
-        let mut frozen_render = false;
-        let locomotion_timing = match automation {
-            Some(AndroidXrPerfAutomation::Flight {
-                speed_blocks_per_second,
-            }) => terrain
-                .apply_automated_flight_input(
-                    [
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
-                    ],
-                    speed_blocks_per_second,
-                )
-                .context("apply Android XR automated flight locomotion")?,
-            Some(AndroidXrPerfAutomation::Orbit {
-                speed_blocks_per_second,
-                elapsed_seconds,
-            }) => terrain
-                .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
-                .context("apply Android XR automated orbit locomotion")?,
-            Some(AndroidXrPerfAutomation::Stationary {
-                frozen_render: freeze_runtime,
-            }) => {
-                frozen_render = freeze_runtime;
-                terrain.apply_automated_stationary_input()
-            }
-            Some(AndroidXrPerfAutomation::ChunkViewChurn { center_x, center_z }) => terrain
-                .apply_automated_chunk_view_churn(center_x, center_z)
-                .context("apply Android XR automated chunk-view churn")?,
-            None => terrain
-                .apply_locomotion_input(
-                    controllers,
-                    [
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
-                    ],
-                )
-                .context("apply Android XR controller locomotion")?,
-        };
+        let locomotion = terrain
+            .apply_frame_locomotion(controllers, scene_views, automation)
+            .context("apply Android XR frame locomotion")?;
         timing.locomotion_ms = elapsed_ms(locomotion_start);
-        copy_locomotion_timing(&mut timing, locomotion_timing);
+        copy_locomotion_timing(&mut timing, locomotion.timing);
 
         let acquire_left_start = Instant::now();
         let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
@@ -7147,33 +7159,18 @@ mod android {
             depth: &right_target.eye().depth,
             size: [right_target.eye().width, right_target.eye().height],
         };
-        let frame_summary = if frozen_render {
-            let fixed_render_view_pose = fixed_render_view_pose.with_context(
-                || "Android XR frozen render probe requires a fixed startup view pose",
-            )?;
-            terrain.render_frame_frozen_runtime_at_view_pose(
-                &graphics.device,
-                &graphics.queue,
-                fixed_render_view_pose,
-                [
-                    mclone_xr_host::xr_fov_from_openxr(stereo_views.left.fov),
-                    mclone_xr_host::xr_fov_from_openxr(stereo_views.right.fov),
-                ],
-                left_terrain_target,
-                right_terrain_target,
-            )
-        } else {
-            terrain.render_frame(
-                &graphics.device,
-                &graphics.queue,
-                [
-                    mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
-                    mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
-                ],
-                left_terrain_target,
-                right_terrain_target,
-            )
-        };
+        let frame_summary = terrain.render_xr_scene_frame(
+            device,
+            queue,
+            scene_views,
+            eye_fovs,
+            locomotion.frozen_render,
+            fixed_render_view_pose,
+            XrSceneFrameTarget::PerEye {
+                left: left_terrain_target,
+                right: right_terrain_target,
+            },
+        );
         timing.terrain_render_frame_ms = elapsed_ms(terrain_render_start);
         let release_start = Instant::now();
         let left_release_result = left_target.release();
@@ -7185,15 +7182,7 @@ mod android {
         right_release_result?;
 
         let end_frame_start = Instant::now();
-        mclone_xr_host::end_stereo_projection_frame(
-            &mut graphics.frame_stream,
-            predicted_display_time,
-            environment_blend_mode,
-            stage,
-            stereo_views,
-            left_eye,
-            right_eye,
-        )?;
+        frame.submit_stereo_projection(stage, stereo_views, left_eye, right_eye)?;
         timing.end_frame_ms = elapsed_ms(end_frame_start);
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,
@@ -7202,69 +7191,45 @@ mod android {
         })
     }
 
-    fn render_mclone_multiview_frame(
-        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+    fn render_android_xr_multiview_frame(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
         stage: &xr::Space,
-        environment_blend_mode: xr::EnvironmentBlendMode,
-        predicted_display_time: xr::Time,
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
         depth: &mut ChunkMultiviewDepthTarget,
         terrain: &mut AndroidXrTerrainState,
         controllers: &[XrControllerSnapshot],
-        automation: Option<AndroidXrPerfAutomation>,
+        automation: Option<XrFrameLocomotionAutomation>,
         fixed_render_view_pose: Option<XrStartupViewPose>,
     ) -> Result<AndroidXrRenderedFrame> {
         let mut timing = AndroidXrRenderFrameTiming::default();
         let locate_views_start = Instant::now();
-        let stereo_views =
-            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let stereo_views = mclone_xr_host::locate_stereo_views(
+            frame.session(),
+            stage,
+            frame.predicted_display_time(),
+        )?;
         timing.locate_views_ms = elapsed_ms(locate_views_start);
+        let scene_views = [
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
+        ];
+        let eye_fovs = [
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.left.fov),
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.right.fov),
+        ];
         let locomotion_start = Instant::now();
-        let mut frozen_render = false;
-        let locomotion_timing = match automation {
-            Some(AndroidXrPerfAutomation::Flight {
-                speed_blocks_per_second,
-            }) => terrain
-                .apply_automated_flight_input(
-                    [
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
-                    ],
-                    speed_blocks_per_second,
-                )
-                .context("apply Android XR automated flight locomotion")?,
-            Some(AndroidXrPerfAutomation::Orbit {
-                speed_blocks_per_second,
-                elapsed_seconds,
-            }) => terrain
-                .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
-                .context("apply Android XR automated orbit locomotion")?,
-            Some(AndroidXrPerfAutomation::Stationary {
-                frozen_render: freeze_runtime,
-            }) => {
-                frozen_render = freeze_runtime;
-                terrain.apply_automated_stationary_input()
-            }
-            Some(AndroidXrPerfAutomation::ChunkViewChurn { center_x, center_z }) => terrain
-                .apply_automated_chunk_view_churn(center_x, center_z)
-                .context("apply Android XR automated chunk-view churn")?,
-            None => terrain
-                .apply_locomotion_input(
-                    controllers,
-                    [
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
-                        mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
-                    ],
-                )
-                .context("apply Android XR controller locomotion")?,
-        };
+        let locomotion = terrain
+            .apply_frame_locomotion(controllers, scene_views, automation)
+            .context("apply Android XR frame locomotion")?;
         timing.locomotion_ms = elapsed_ms(locomotion_start);
-        copy_locomotion_timing(&mut timing, locomotion_timing);
+        copy_locomotion_timing(&mut timing, locomotion.timing);
 
         let target_width = stereo_target.width;
         let target_height = stereo_target.height;
         if depth.width != target_width || depth.height != target_height {
-            *depth = ChunkMultiviewDepthTarget::new(&graphics.device, target_width, target_height);
+            *depth = ChunkMultiviewDepthTarget::new(device, target_width, target_height);
         }
         let acquire_start = Instant::now();
         let target = acquire_stereo_target(stereo_target)
@@ -7276,31 +7241,15 @@ mod android {
             depth,
             size: [target_width, target_height],
         };
-        let frame_summary = if frozen_render {
-            let fixed_render_view_pose = fixed_render_view_pose.with_context(
-                || "Android XR multiview frozen render probe requires a fixed startup view pose",
-            )?;
-            terrain.render_frame_multiview_frozen_runtime_at_view_pose(
-                &graphics.device,
-                &graphics.queue,
-                fixed_render_view_pose,
-                [
-                    mclone_xr_host::xr_fov_from_openxr(stereo_views.left.fov),
-                    mclone_xr_host::xr_fov_from_openxr(stereo_views.right.fov),
-                ],
-                terrain_target,
-            )
-        } else {
-            terrain.render_frame_multiview(
-                &graphics.device,
-                &graphics.queue,
-                [
-                    mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
-                    mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
-                ],
-                terrain_target,
-            )
-        };
+        let frame_summary = terrain.render_xr_scene_frame(
+            device,
+            queue,
+            scene_views,
+            eye_fovs,
+            locomotion.frozen_render,
+            fixed_render_view_pose,
+            XrSceneFrameTarget::Multiview(terrain_target),
+        );
         timing.terrain_render_frame_ms = elapsed_ms(terrain_render_start);
         let release_start = Instant::now();
         let release_result = target.release();
@@ -7310,14 +7259,7 @@ mod android {
         release_result?;
 
         let end_frame_start = Instant::now();
-        mclone_xr_host::end_multiview_projection_frame(
-            &mut graphics.frame_stream,
-            predicted_display_time,
-            environment_blend_mode,
-            stage,
-            stereo_views,
-            stereo_target,
-        )?;
+        frame.submit_multiview_projection(stage, stereo_views, stereo_target)?;
         timing.end_frame_ms = elapsed_ms(end_frame_start);
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,

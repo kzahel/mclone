@@ -103,13 +103,16 @@ Stereo XR hosts use the same scene host with OpenXR confined to the rim:
 ```text
 OpenXR runtime/actions/swapchains
   -> platform XR adapter
-  -> mclone-xr-host / mclone-xr-graphics frame and swapchain glue
+  -> mclone-xr-host OpenXrFrameDriver / mclone-xr-graphics swapchain glue
   -> mclone-scene shared session/runtime/UI orchestration
   -> explicit per-eye render views + targets
   -> mclone-render
 ```
 
 Desktop XR and Android XR should diverge only at runtime discovery, Android loader/activity glue, packaging, headset wake/restore, and other true platform concerns.
+The shared driver owns OpenXR poll/wait/begin/skip/end ordering and timing facts;
+platform handlers own event pumping, target acquisition/render callbacks, and
+presentation of outcomes.
 
 Neutral tracked-controller snapshots and hand identity belong to
 `mclone-input`. Neutral view pose/FOV/projection contracts belong to

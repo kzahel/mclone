@@ -14,13 +14,13 @@ use glam::Vec3;
 #[cfg(not(target_os = "android"))]
 use mclone_scene::{
     XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrFramePipelineReporter,
-    XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
-    XrTerrainFrameSummary, XrUnderwaterDetectionMode,
+    XrMcloneTerrainState, XrSceneFrameTarget, XrSceneOptions, XrStartupViewPose,
+    XrTerrainEyeTarget, XrTerrainFrameSummary, XrUnderwaterDetectionMode,
 };
 #[cfg(not(target_os = "android"))]
 use mclone_xr_host::{
-    OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
-    XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
+    OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE, XrControllerSnapshot,
+    XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
@@ -99,8 +99,6 @@ const XR_SAMPLE_COUNT: u32 = 1;
 const SESSION_READY_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(not(target_os = "android"))]
 const SUBMITTED_FRAME_PROGRESS_TIMEOUT: Duration = Duration::from_secs(15);
-#[cfg(not(target_os = "android"))]
-const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[cfg(not(target_os = "android"))]
 #[derive(Debug)]
 struct OpenXrRuntimeManifest {
@@ -291,21 +289,6 @@ fn create_graphics_session_probe(
 }
 
 #[cfg(not(target_os = "android"))]
-fn log_openxr_host_event(event: OpenXrHostEvent) {
-    match event {
-        OpenXrHostEvent::SessionStateChanged(state) => {
-            println!("OpenXR session state: {state:?}");
-        }
-        OpenXrHostEvent::InstanceLossPending => {
-            println!("OpenXR instance loss pending");
-        }
-        OpenXrHostEvent::EventsLost(count) => {
-            println!("OpenXR events lost: {count}");
-        }
-    }
-}
-
-#[cfg(not(target_os = "android"))]
 #[derive(Default)]
 struct XrControllerInputSummary {
     frames_polled: u32,
@@ -412,6 +395,137 @@ fn format_direction(direction: Option<Vec3>) -> String {
 }
 
 #[cfg(not(target_os = "android"))]
+struct DesktopXrFrameOutput {
+    summary: Option<XrTerrainFrameSummary>,
+    controller_poll_ms: f64,
+}
+
+#[cfg(not(target_os = "android"))]
+struct DesktopXrFrameLoop<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    stage: &'a xr::Space,
+    left_eye: &'a mut platform_graphics::OpenXrEyeState,
+    right_eye: &'a mut platform_graphics::OpenXrEyeState,
+    mclone: &'a mut Option<DesktopXrMcloneTerrainState>,
+    controller_actions: &'a OpenXrControllerActions,
+    controller_summary: XrControllerInputSummary,
+    frame_pipeline_reporter: XrFramePipelineReporter,
+    companion: &'a mut Option<CompanionWindow>,
+    companion_running_announced: bool,
+    window_requested_exit: bool,
+}
+
+#[cfg(not(target_os = "android"))]
+impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
+    for DesktopXrFrameLoop<'_>
+{
+    type RenderOutput = DesktopXrFrameOutput;
+
+    fn pump_platform_events(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+        if let Some(companion) = self.companion.as_mut() {
+            if companion.pump() {
+                println!("desktop XR companion window close requested");
+                companion.set_status("Desktop XR — shutting down…");
+                self.window_requested_exit = true;
+                return Ok(mclone_xr_host::OpenXrFrameLoopControl::Complete);
+            }
+        }
+        if !timeout.is_zero() {
+            thread::sleep(timeout);
+        }
+        Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
+    }
+
+    fn on_openxr_event(&mut self, event: OpenXrHostEvent) {
+        println!("{event}");
+        if matches!(
+            event,
+            OpenXrHostEvent::SessionStateChanged(xr::SessionState::READY)
+        ) && !self.companion_running_announced
+        {
+            if let Some(companion) = self.companion.as_mut() {
+                companion.set_status("Desktop XR — running · close this window to quit");
+            }
+            self.companion_running_announced = true;
+        }
+    }
+
+    fn render_frame(
+        &mut self,
+        frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, platform_graphics::AppGraphics>,
+    ) -> Result<Self::RenderOutput> {
+        let controller_poll_start = Instant::now();
+        let controllers = self.controller_actions.poll(
+            frame.session(),
+            self.stage,
+            frame.predicted_display_time(),
+        )?;
+        let controller_poll_ms = elapsed_ms(controller_poll_start.elapsed());
+        self.controller_summary.record(&controllers);
+        let summary = if let Some(mclone) = self.mclone.as_mut() {
+            Some(render_desktop_xr_frame(
+                self.device,
+                self.queue,
+                frame,
+                self.stage,
+                self.left_eye,
+                self.right_eye,
+                mclone,
+                &controllers,
+            )?)
+        } else {
+            render_clear_frame(
+                self.device,
+                self.queue,
+                frame,
+                self.stage,
+                self.left_eye,
+                self.right_eye,
+            )?;
+            None
+        };
+        Ok(DesktopXrFrameOutput {
+            summary,
+            controller_poll_ms,
+        })
+    }
+
+    fn after_frame(
+        &mut self,
+        outcome: mclone_xr_host::OpenXrFrameOutcome<Self::RenderOutput>,
+    ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
+        if let Some(mclone) = self.mclone.as_mut() {
+            let (rendered_summary, controller_poll_ms) =
+                outcome.render_output.map_or((None, 0.0), |output| {
+                    (output.summary, output.controller_poll_ms)
+                });
+            let budget_decision_panel = mclone.latest_budget_decision_panel();
+            let (frame_pipeline_report, frame_pipeline_revision) = self
+                .frame_pipeline_reporter
+                .record_frame_with_budget_decision_panel(
+                    XrFramePipelineHostTiming {
+                        frame_wall_ms: elapsed_ms(outcome.timing.frame_wall),
+                        wait_frame_ms: elapsed_ms(
+                            outcome.timing.wait_frame + outcome.timing.begin_frame,
+                        ),
+                        controller_poll_ms,
+                        rendered: rendered_summary.is_some(),
+                        thread_cpu_ms: None,
+                    },
+                    rendered_summary,
+                    budget_decision_panel,
+                );
+            mclone.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
+        }
+        Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
+    }
+}
+
+#[cfg(not(target_os = "android"))]
 fn run_smoke_frames(
     mut graphics: platform_graphics::GraphicsSession,
     stage: xr::Space,
@@ -500,7 +614,6 @@ fn run_smoke_frames(
     } else {
         None
     };
-    let mut companion_running_announced = false;
     let controller_actions = OpenXrControllerActions::create_with_binding_logger(
         graphics.session.instance(),
         &graphics.session,
@@ -510,193 +623,57 @@ fn run_smoke_frames(
     println!(
         "OpenXR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
     );
-    let mut controller_summary = XrControllerInputSummary::default();
-
-    let mut event_storage = xr::EventDataBuffer::new();
-    let mut session_running = false;
-    let session_ready_deadline = frame_limit.map(|_| Instant::now() + SESSION_READY_TIMEOUT);
-    let mut submitted_frame_progress_deadline =
-        frame_limit.map(|_| Instant::now() + SUBMITTED_FRAME_PROGRESS_TIMEOUT);
-    let mut frame_stats = XrFrameStats::default();
-    let mut frame_pipeline_reporter = XrFramePipelineReporter::new(None);
-    let mut runtime_requested_exit = false;
-    let mut window_requested_exit = false;
-
-    while frame_limit
-        .map(|frames| frame_stats.submitted_frames < u64::from(frames))
-        .unwrap_or(true)
-    {
-        // Drain the companion window first so a title-bar close quits even while
-        // still waiting for the headset session to reach READY (the idle branch
-        // below `continue`s). Window-close is a normal end for the persistent
-        // run, exactly like the headset-menu EXITING path.
-        if let Some(companion) = companion.as_mut() {
-            if companion.pump() {
-                println!("desktop XR companion window close requested");
-                companion.set_status("Desktop XR — shutting down…");
-                window_requested_exit = true;
-                break;
-            }
-        }
-
-        match mclone_xr_host::poll_openxr_events(
-            &graphics.session,
-            &mut event_storage,
-            &mut session_running,
-            VIEW_TYPE,
-            log_openxr_host_event,
-        )
-        .context("poll OpenXR events")?
-        {
-            OpenXrPollStatus::Exit if frame_limit.is_some() => {
-                bail!("OpenXR session requested exit before smoke completed")
-            }
-            OpenXrPollStatus::Exit => {
-                runtime_requested_exit = true;
-                break;
-            }
-            OpenXrPollStatus::Idle if !session_running => {
-                if session_ready_deadline
-                    .map(|deadline| Instant::now() >= deadline)
-                    .unwrap_or(false)
-                {
-                    bail!("timed out waiting for OpenXR session READY state");
-                }
-                thread::sleep(SESSION_IDLE_POLL_INTERVAL);
-                continue;
-            }
-            OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
-        }
-
-        if let Some(companion) = companion.as_mut() {
-            if session_running && !companion_running_announced {
-                companion.set_status("Desktop XR — running · close this window to quit");
-                companion_running_announced = true;
-            }
-        }
-
-        let frame_wall_start = Instant::now();
-        let submitted_frames_before = frame_stats.submitted_frames;
-        let wait_begin_start = Instant::now();
-        let frame_state = mclone_xr_host::wait_begin_frame(
-            &mut graphics.frame_wait,
-            &mut graphics.frame_stream,
-            &mut frame_stats,
-        )?;
-        let wait_begin_ms = elapsed_ms(wait_begin_start.elapsed());
-
-        let mut controller_poll_ms = 0.0;
-        let mut rendered_summary = None;
-        let frame_result = if frame_state.should_render {
-            let controller_poll_start = Instant::now();
-            let result = match controller_actions.poll(
-                &graphics.session,
-                &stage,
-                frame_state.predicted_display_time,
-            ) {
-                Ok(controllers) => {
-                    controller_poll_ms = elapsed_ms(controller_poll_start.elapsed());
-                    controller_summary.record(&controllers);
-                    if let Some(mclone) = &mut mclone {
-                        render_mclone_frame(
-                            &mut graphics,
-                            &stage,
-                            environment_blend_mode,
-                            frame_state.predicted_display_time,
-                            &mut left_eye,
-                            &mut right_eye,
-                            mclone,
-                            &controllers,
-                        )
-                        .map(|summary| {
-                            rendered_summary = Some(summary);
-                        })
-                    } else {
-                        render_clear_frame(
-                            &mut graphics,
-                            &stage,
-                            environment_blend_mode,
-                            frame_state.predicted_display_time,
-                            &mut left_eye,
-                            &mut right_eye,
-                        )
-                    }
-                }
-                Err(err) => {
-                    controller_poll_ms = elapsed_ms(controller_poll_start.elapsed());
-                    Err(err)
-                }
-            };
-            result.map(|()| {
-                frame_stats.record_submitted_frame();
-            })
-        } else {
-            mclone_xr_host::end_skipped_frame(
-                &mut graphics.frame_stream,
-                frame_state.predicted_display_time,
-                environment_blend_mode,
-                &mut frame_stats,
-            )
-        };
-
-        if let Err(err) = frame_result {
-            let _ = mclone_xr_host::end_frame_with_layers(
-                &mut graphics.frame_stream,
-                frame_state.predicted_display_time,
-                environment_blend_mode,
-                &[],
-            );
-            return Err(err);
-        }
-
-        if let Some(mclone) = &mut mclone {
-            let budget_decision_panel = mclone.latest_budget_decision_panel();
-            let (frame_pipeline_report, frame_pipeline_revision) = frame_pipeline_reporter
-                .record_frame_with_budget_decision_panel(
-                    XrFramePipelineHostTiming {
-                        frame_wall_ms: elapsed_ms(frame_wall_start.elapsed()),
-                        wait_frame_ms: wait_begin_ms,
-                        controller_poll_ms,
-                        rendered: rendered_summary.is_some(),
-                        thread_cpu_ms: None,
-                    },
-                    rendered_summary,
-                    budget_decision_panel,
-                );
-            mclone.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
-        }
-
-        if let Some(deadline) = submitted_frame_progress_deadline.as_mut() {
-            if frame_stats.submitted_frames > submitted_frames_before {
-                *deadline = Instant::now() + SUBMITTED_FRAME_PROGRESS_TIMEOUT;
-            } else if Instant::now() >= *deadline {
-                bail!(
-                    "timed out waiting for OpenXR submitted-frame progress: submitted={} runtime_frames={} skipped={}",
-                    frame_stats.submitted_frames,
-                    frame_stats.runtime_frames,
-                    frame_stats.skipped_frames
-                );
-            }
-        }
-    }
+    let policy = mclone_xr_host::OpenXrFrameLoopPolicy {
+        view_type: VIEW_TYPE,
+        environment_blend_mode,
+        frame_limit: frame_limit.map(u64::from),
+        session_ready_timeout: frame_limit.map(|_| SESSION_READY_TIMEOUT),
+        submitted_frame_progress_timeout: frame_limit.map(|_| SUBMITTED_FRAME_PROGRESS_TIMEOUT),
+        runtime_exit_is_error: frame_limit.is_some(),
+        idle_poll_interval: mclone_xr_host::SESSION_IDLE_POLL_INTERVAL,
+    };
+    let mut handler = DesktopXrFrameLoop {
+        device: &graphics.device,
+        queue: &graphics.queue,
+        stage: &stage,
+        left_eye: &mut left_eye,
+        right_eye: &mut right_eye,
+        mclone: &mut mclone,
+        controller_actions: &controller_actions,
+        controller_summary: XrControllerInputSummary::default(),
+        frame_pipeline_reporter: XrFramePipelineReporter::new(None),
+        companion: &mut companion,
+        companion_running_announced: false,
+        window_requested_exit: false,
+    };
+    let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
+        &graphics.session,
+        &mut graphics.frame_wait,
+        &mut graphics.frame_stream,
+        policy,
+    );
+    let outcome = driver.run(&mut handler)?;
 
     println!(
         "OpenXR frames submitted: submitted={} runtime_frames={} skipped={}",
-        frame_stats.submitted_frames, frame_stats.runtime_frames, frame_stats.skipped_frames
+        outcome.stats.submitted_frames, outcome.stats.runtime_frames, outcome.stats.skipped_frames
     );
-    controller_summary.print_summary();
-    if let Some(mclone) = &mclone {
+    handler.controller_summary.print_summary();
+    if let Some(mclone) = handler.mclone.as_ref() {
         print_mclone_summary(mclone);
     }
     // Headset-menu EXITING already left the runtime stopped; a window close or a
     // completed frame budget still needs an explicit app-driven EXITING handshake.
-    if !runtime_requested_exit {
-        if window_requested_exit {
+    if outcome.exit != mclone_xr_host::OpenXrRunExit::Runtime {
+        if handler.window_requested_exit {
             println!("desktop XR shutting down: companion window closed");
         }
-        shutdown_openxr_session(&mut graphics, &mut event_storage, &mut session_running)
+        driver
+            .request_exit_and_drain(Duration::from_secs(2), |event| println!("{event}"))
             .context("shut down OpenXR session after desktop XR run")?;
     }
+    drop(driver);
+    drop(handler);
     // Real desktop XR runs and the bounded smokes both exit the process right
     // after this returns, so a graceful shutdown followed by process teardown is
     // the defined quit path. We still `mem::forget` the XR object graph rather
@@ -716,61 +693,6 @@ fn run_smoke_frames(
     }
     drop(companion);
     println!("desktop OpenXR {run_label} complete: frames={frame_limit_label}");
-    Ok(())
-}
-
-#[cfg(not(target_os = "android"))]
-fn shutdown_openxr_session(
-    graphics: &mut platform_graphics::GraphicsSession,
-    event_storage: &mut xr::EventDataBuffer,
-    session_running: &mut bool,
-) -> Result<()> {
-    if !*session_running {
-        return Ok(());
-    }
-
-    match graphics.session.request_exit() {
-        Ok(()) => {}
-        Err(xr::sys::Result::ERROR_SESSION_NOT_RUNNING) => {
-            *session_running = false;
-            return Ok(());
-        }
-        Err(err) => {
-            println!("OpenXR session exit request failed: {err:?}");
-        }
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while *session_running && Instant::now() < deadline {
-        match mclone_xr_host::poll_openxr_events(
-            &graphics.session,
-            event_storage,
-            session_running,
-            VIEW_TYPE,
-            log_openxr_host_event,
-        )
-        .context("poll OpenXR events during shutdown")?
-        {
-            OpenXrPollStatus::Exit => break,
-            OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
-        }
-        thread::sleep(SESSION_IDLE_POLL_INTERVAL);
-    }
-
-    if *session_running {
-        match graphics.session.end() {
-            Ok(_) => {
-                *session_running = false;
-            }
-            Err(xr::sys::Result::ERROR_SESSION_NOT_RUNNING) => {
-                *session_running = false;
-            }
-            Err(err) => {
-                println!("OpenXR session end during shutdown failed: {err:?}");
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -857,29 +779,15 @@ fn xr_scene_options_from_desktop_scene(
     underwater_mode: crate::cli::XrUnderwaterMode,
     debug_ui_screen: Option<CliXrDebugUiScreen>,
 ) -> Result<XrSceneOptions> {
-    XrSceneOptions {
-        seed: scene.seed,
-        chunk_x: scene.chunk_x,
-        chunk_z: scene.chunk_z,
-        render_distance: u32::try_from(scene.render_distance)
-            .context("desktop XR render distance must fit u32")?,
-        render_compile_worker_count: scene.render_compile_worker_count,
-        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-        movement_speed_multiplier: scene.movement_speed_multiplier,
-        day_time_override: scene.day_time_override,
-        freeze_time: scene.freeze_time,
-        debug_passive_showcase: scene.debug_passive_showcase,
-        lighting_enabled: scene.lighting_enabled,
-        light_status_batch_size: scene.light_status_batch_size,
-        adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
-        far_lod: scene.far_lod,
-        underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
-        debug_ui_screen: debug_ui_screen.map(xr_debug_ui_screen_from_desktop),
-        skip_actors: false,
-        world_root: scene.world_root.clone(),
-        world_dir: scene.world_dir.clone(),
-    }
-    .validated()
+    let mut options = XrSceneOptions::from_startup_scene(
+        scene.to_startup_scene(),
+        scene.world_root.clone(),
+        scene.world_dir.clone(),
+    );
+    options.adaptive_chunk_publication_budget = scene.adaptive_chunk_publication_budget;
+    options.underwater_detection_mode = xr_underwater_mode_from_desktop(underwater_mode);
+    options.debug_ui_screen = debug_ui_screen.map(xr_debug_ui_screen_from_desktop);
+    options.validated()
 }
 
 #[cfg(not(target_os = "android"))]
@@ -969,24 +877,24 @@ fn print_mclone_summary(mclone: &DesktopXrMcloneTerrainState) {
 }
 
 #[cfg(not(target_os = "android"))]
-fn render_mclone_frame(
-    graphics: &mut platform_graphics::GraphicsSession,
+fn render_desktop_xr_frame(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, platform_graphics::AppGraphics>,
     stage: &xr::Space,
-    environment_blend_mode: xr::EnvironmentBlendMode,
-    predicted_display_time: xr::Time,
     left_eye: &mut platform_graphics::OpenXrEyeState,
     right_eye: &mut platform_graphics::OpenXrEyeState,
     mclone: &mut DesktopXrMcloneTerrainState,
     controllers: &[XrControllerSnapshot],
 ) -> Result<XrTerrainFrameSummary> {
     let stereo_views =
-        mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)
+        mclone_xr_host::locate_stereo_views(frame.session(), stage, frame.predicted_display_time())
             .context("locate OpenXR stereo views for mclone frame")?;
     let scene_views = [
         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
     ];
-    mclone.apply_locomotion_input(controllers, scene_views)?;
+    mclone.apply_frame_locomotion(controllers, scene_views, None)?;
 
     let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
     let right_target = match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image")
@@ -998,19 +906,24 @@ fn render_mclone_frame(
         }
     };
 
-    let render_result = mclone.render_frame(
-        &graphics.device,
-        &graphics.queue,
+    let render_result = mclone.render_xr_scene_frame(
+        device,
+        queue,
         scene_views,
-        XrTerrainEyeTarget {
-            color_view: left_target.color_view(),
-            depth: &left_target.eye().depth,
-            size: [left_target.eye().width, left_target.eye().height],
-        },
-        XrTerrainEyeTarget {
-            color_view: right_target.color_view(),
-            depth: &right_target.eye().depth,
-            size: [right_target.eye().width, right_target.eye().height],
+        [scene_views[0].fov, scene_views[1].fov],
+        false,
+        None,
+        XrSceneFrameTarget::PerEye {
+            left: XrTerrainEyeTarget {
+                color_view: left_target.color_view(),
+                depth: &left_target.eye().depth,
+                size: [left_target.eye().width, left_target.eye().height],
+            },
+            right: XrTerrainEyeTarget {
+                color_view: right_target.color_view(),
+                depth: &right_target.eye().depth,
+                size: [right_target.eye().width, right_target.eye().height],
+            },
         },
     );
     let left_release_result = left_target.release();
@@ -1019,29 +932,24 @@ fn render_mclone_frame(
     left_release_result?;
     right_release_result?;
 
-    mclone_xr_host::end_stereo_projection_frame(
-        &mut graphics.frame_stream,
-        predicted_display_time,
-        environment_blend_mode,
-        stage,
-        stereo_views,
-        left_eye,
-        right_eye,
-    )?;
+    frame.submit_stereo_projection(stage, stereo_views, left_eye, right_eye)?;
     Ok(frame_summary)
 }
 
 #[cfg(not(target_os = "android"))]
 fn render_clear_frame(
-    graphics: &mut platform_graphics::GraphicsSession,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, platform_graphics::AppGraphics>,
     stage: &xr::Space,
-    environment_blend_mode: xr::EnvironmentBlendMode,
-    predicted_display_time: xr::Time,
     left_eye: &mut platform_graphics::OpenXrEyeState,
     right_eye: &mut platform_graphics::OpenXrEyeState,
 ) -> Result<()> {
-    let stereo_views =
-        mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+    let stereo_views = mclone_xr_host::locate_stereo_views(
+        frame.session(),
+        stage,
+        frame.predicted_display_time(),
+    )?;
 
     let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
     let right_target = match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image")
@@ -1053,27 +961,14 @@ fn render_clear_frame(
         }
     };
 
-    let clear_result = clear_stereo_targets(
-        &graphics.device,
-        &graphics.queue,
-        &left_target,
-        &right_target,
-    );
+    let clear_result = clear_stereo_targets(device, queue, &left_target, &right_target);
     let left_release_result = left_target.release();
     let right_release_result = right_target.release();
     clear_result?;
     left_release_result?;
     right_release_result?;
 
-    mclone_xr_host::end_stereo_projection_frame(
-        &mut graphics.frame_stream,
-        predicted_display_time,
-        environment_blend_mode,
-        stage,
-        stereo_views,
-        left_eye,
-        right_eye,
-    )
+    frame.submit_stereo_projection(stage, stereo_views, left_eye, right_eye)
 }
 
 #[cfg(not(target_os = "android"))]

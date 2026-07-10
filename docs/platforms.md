@@ -123,11 +123,14 @@ Shared app/runtime boundary crates currently include:
   cache update, neighbor-readiness, and camera-controller contracts used by
   desktop and web, and consumed by XR scene code
 - `mclone-xr-host`: shared OpenXR event/session/frame/action/view helpers used
-  by desktop XR and Android XR
+  by desktop XR and Android XR. `OpenXrFrameDriver` exclusively owns
+  poll/wait/begin/render-or-skip/end sequencing; app handlers supply only their
+  platform event pump, concrete render targets, and observation hooks.
 - `mclone-xr-graphics`: shared unsafe Vulkan/OpenXR/`wgpu` graphics bridge used
   by desktop Vulkan XR and Android XR
-- `mclone-xr-scene`: shared XR terrain/actor scene, startup view-pose
-  alignment, and controller-to-engine locomotion mapper
+- `mclone-scene`: shared mono/stereo/multiview terrain/actor scene, startup
+  view-pose alignment, controller-to-engine locomotion, and XR frame render
+  topology selection
 
 Core shared crates must not depend on:
 
@@ -283,7 +286,7 @@ for d in \
   native/apps/mclone-android-xr-client/src \
   native/crates/mclone-app-runtime/src \
   native/crates/mclone-render-session/src \
-  native/crates/mclone-xr-scene/src
+  native/crates/mclone-scene/src
 do
   printf '%7s %s\n' \
     "$(find "$d" -maxdepth 1 -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.js' \) -print0 2>/dev/null | xargs -0 wc -l 2>/dev/null | tail -1 | awk '{print $1}')" \
@@ -291,7 +294,7 @@ do
 done
 
 rg -n "poll_until_idle|sync_all_render_sections|std::thread::sleep|block_on" \
-  native/apps native/crates/mclone-app-runtime native/crates/mclone-xr-scene
+  native/apps native/crates/mclone-app-runtime native/crates/mclone-scene
 ```
 
 Use the output as a prompt, not a hard budget. Escalate to shared-contract
@@ -340,7 +343,7 @@ manual checks:
    applicable. Web still has an async `WebRuntimeHost`; Android XR remote works
    over LAN after host firewall allow and through the first-class
    `--adb-reverse` validator path.
-6. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
+6. **Keep XR scene convergence complete as features grow.** `mclone-scene`
    now owns shared terrain/actor rendering, startup pose, locomotion, and
    local/remote-capable host shape. Keep future UI, comfort, and interaction
    work behind that shared scene boundary instead of reintroducing app-local XR

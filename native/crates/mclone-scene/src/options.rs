@@ -95,6 +95,54 @@ impl Default for XrSceneOptions {
 }
 
 impl XrSceneOptions {
+    pub fn from_startup_scene(
+        scene: mclone_app_runtime::startup_args::StartupSceneOptions,
+        world_root: Option<PathBuf>,
+        world_dir: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            seed: scene.seed,
+            chunk_x: scene.chunk_x,
+            chunk_z: scene.chunk_z,
+            render_distance: scene.render_distance,
+            render_compile_worker_count: scene.render_compile_worker_count,
+            render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
+            movement_speed_multiplier: scene.movement_speed_multiplier,
+            day_time_override: scene.day_time_override,
+            freeze_time: scene.freeze_time,
+            debug_passive_showcase: scene.debug_passive_showcase,
+            lighting_enabled: scene.lighting_enabled,
+            light_status_batch_size: scene.light_status_batch_size,
+            adaptive_chunk_publication_budget: true,
+            far_lod: scene.far_lod,
+            underwater_detection_mode: XrUnderwaterDetectionMode::default(),
+            debug_ui_screen: None,
+            skip_actors: false,
+            world_root,
+            world_dir,
+        }
+    }
+
+    pub fn to_startup_scene(&self) -> mclone_app_runtime::startup_args::StartupSceneOptions {
+        mclone_app_runtime::startup_args::StartupSceneOptions {
+            seed: self.seed,
+            chunk_x: self.chunk_x,
+            chunk_z: self.chunk_z,
+            render_distance: self.render_distance,
+            render_compile_worker_count: self.render_compile_worker_count,
+            render_compile_max_pending_jobs: self.render_compile_max_pending_jobs,
+            render_compile_capacity_request: Default::default(),
+            movement_speed_multiplier: self.movement_speed_multiplier,
+            remote_addr: None,
+            day_time_override: self.day_time_override,
+            freeze_time: self.freeze_time,
+            debug_passive_showcase: self.debug_passive_showcase,
+            lighting_enabled: self.lighting_enabled,
+            light_status_batch_size: self.light_status_batch_size,
+            far_lod: self.far_lod,
+        }
+    }
+
     pub fn center(&self) -> ChunkPos {
         ChunkPos::new(self.chunk_x, self.chunk_z)
     }
@@ -218,5 +266,37 @@ where
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
         self.camera.snapshot()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xr_scene_startup_projection_round_trips_shared_fields() {
+        let mut scene = XrSceneOptions::default();
+        scene.seed = 98_765;
+        scene.chunk_x = -4;
+        scene.chunk_z = 7;
+        scene.render_distance = 3;
+        scene.freeze_time = true;
+        scene.adaptive_chunk_publication_budget = false;
+        let startup = scene.to_startup_scene();
+        let projected = XrSceneOptions::from_startup_scene(
+            startup,
+            Some(PathBuf::from("/tmp/worlds")),
+            Some(PathBuf::from("/tmp/worlds/demo")),
+        );
+
+        assert_eq!(projected.seed, scene.seed);
+        assert_eq!(projected.chunk_x, scene.chunk_x);
+        assert_eq!(projected.chunk_z, scene.chunk_z);
+        assert_eq!(projected.render_distance, scene.render_distance);
+        assert_eq!(projected.freeze_time, scene.freeze_time);
+        assert_eq!(projected.world_root, Some(PathBuf::from("/tmp/worlds")));
+        assert_eq!(projected.world_dir, Some(PathBuf::from("/tmp/worlds/demo")));
+        // Platform policy is deliberately layered after the shared projection.
+        assert!(projected.adaptive_chunk_publication_budget);
     }
 }

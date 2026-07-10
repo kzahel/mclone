@@ -142,6 +142,7 @@
     "native:android-xr:perf:frozen:sweep": "pnpm native:android-xr:perf:frozen:rd1 && node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --perf-seconds 20 --perf-frozen-render --wait-seconds 180 --perf-summary /tmp/mclone-quest-openxr-perf-frozen-rd5.txt --log /tmp/mclone-quest-openxr-perf-frozen-rd5-logcat.txt --view-pose 0,80,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 5 --day-time 6000 --freeze-time && node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --perf-seconds 20 --perf-frozen-render --wait-seconds 240 --perf-summary /tmp/mclone-quest-openxr-perf-frozen-rd10.txt --log /tmp/mclone-quest-openxr-perf-frozen-rd10-logcat.txt --view-pose 0,80,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 10 --day-time 6000 --freeze-time",
     "native:policy:wasm-check": "cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime --lib --target wasm32-unknown-unknown",
     "native:scene-host:purity": "node ./scripts/run-native-bash.mjs ./scripts/check-scene-host-purity.sh",
+    "native:xr:frame-driver:purity": "node ./scripts/run-native-bash.mjs ./scripts/check-xr-frame-driver-purity.sh",
     "deploy": "pnpm native:web:deploy",
     "assets:pack": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py",
     "assets:pack:check": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py --check-lock",

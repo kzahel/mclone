@@ -31,7 +31,9 @@ use mclone_app_runtime::frame_render::{
     render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot,
     render_view_with_underwater_effect,
 };
-use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostMode};
+use mclone_app_runtime::host_mode::{
+    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
+};
 use mclone_app_runtime::native_session_runtime::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedStartupPump,
     LocalIntegratedStartupStep, NativeSceneRuntime, NativeSessionRuntime,
@@ -213,6 +215,15 @@ pub struct XrTerrainMultiviewTarget<'a> {
     pub size: [u32; 2],
 }
 
+#[derive(Clone, Copy)]
+pub enum XrSceneFrameTarget<'a> {
+    PerEye {
+        left: XrTerrainEyeTarget<'a>,
+        right: XrTerrainEyeTarget<'a>,
+    },
+    Multiview(XrTerrainMultiviewTarget<'a>),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct XrTerrainMultiviewFrameSummary {
     pub rendered_frames: u32,
@@ -366,6 +377,45 @@ where
             right_target,
             XrTerrainRuntimeUpdateMode::Live,
         )
+    }
+
+    pub fn render_xr_scene_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        tracked_views: [XrView; 2],
+        eye_fovs: [XrFov; 2],
+        frozen_render: bool,
+        fixed_render_view_pose: Option<XrStartupViewPose>,
+        target: XrSceneFrameTarget<'_>,
+    ) -> Result<XrTerrainFrameSummary> {
+        match (target, frozen_render) {
+            (XrSceneFrameTarget::PerEye { left, right }, false) => {
+                self.render_frame(device, queue, tracked_views, left, right)
+            }
+            (XrSceneFrameTarget::Multiview(target), false) => {
+                self.render_frame_multiview(device, queue, tracked_views, target)
+            }
+            (XrSceneFrameTarget::PerEye { left, right }, true) => self
+                .render_frame_frozen_runtime_at_view_pose(
+                    device,
+                    queue,
+                    fixed_render_view_pose
+                        .context("frozen XR scene frame requires a fixed render view pose")?,
+                    eye_fovs,
+                    left,
+                    right,
+                ),
+            (XrSceneFrameTarget::Multiview(target), true) => self
+                .render_frame_multiview_frozen_runtime_at_view_pose(
+                    device,
+                    queue,
+                    fixed_render_view_pose
+                        .context("frozen XR scene frame requires a fixed render view pose")?,
+                    eye_fovs,
+                    target,
+                ),
+        }
     }
 
     pub fn render_frame_frozen_runtime(

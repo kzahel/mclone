@@ -492,7 +492,7 @@ impl Default for SceneOptions {
 }
 
 impl SceneOptions {
-    fn to_startup_scene(&self) -> StartupSceneOptions {
+    pub(crate) fn to_startup_scene(&self) -> StartupSceneOptions {
         StartupSceneOptions {
             seed: self.seed,
             chunk_x: self.chunk_x,

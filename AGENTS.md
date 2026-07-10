@@ -104,6 +104,10 @@ window/activity/OpenXR session and surface/swapchain targets, platform roots,
 and presentation. Neutral tracked-controller data belongs in `mclone-input`;
 neutral view/FOV/projection contracts belong in `mclone-render-session`.
 Do not add OpenXR or winit dependencies to `mclone-scene`.
+OpenXR poll/wait/begin/render-or-skip/end sequencing belongs exclusively to
+`mclone-xr-host::OpenXrFrameDriver`; XR app handlers may supply platform event
+pumps, concrete targets/render callbacks, and observation hooks, but must not
+call the low-level frame primitives directly.
 
 ## XR render-path guardrail
 

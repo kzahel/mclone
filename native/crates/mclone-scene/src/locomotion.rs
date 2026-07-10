@@ -480,10 +480,69 @@ pub(crate) fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
     normalized * adjusted
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum XrFrameLocomotionAutomation {
+    Flight {
+        speed_blocks_per_second: f64,
+    },
+    Orbit {
+        speed_blocks_per_second: f64,
+        elapsed_seconds: f64,
+    },
+    Stationary {
+        frozen_render: bool,
+    },
+    ChunkViewChurn {
+        center_x: i32,
+        center_z: i32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct XrFrameLocomotionOutcome {
+    pub timing: XrLocomotionTiming,
+    pub frozen_render: bool,
+}
+
 impl<S> XrMcloneTerrainState<S>
 where
     S: RemoteDedicatedServerSession,
 {
+    pub fn apply_frame_locomotion(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+        views: [XrView; 2],
+        automation: Option<XrFrameLocomotionAutomation>,
+    ) -> Result<XrFrameLocomotionOutcome> {
+        let (timing, frozen_render) = match automation {
+            Some(XrFrameLocomotionAutomation::Flight {
+                speed_blocks_per_second,
+            }) => (
+                self.apply_automated_flight_input(views, speed_blocks_per_second)?,
+                false,
+            ),
+            Some(XrFrameLocomotionAutomation::Orbit {
+                speed_blocks_per_second,
+                elapsed_seconds,
+            }) => (
+                self.apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)?,
+                false,
+            ),
+            Some(XrFrameLocomotionAutomation::Stationary { frozen_render }) => {
+                (self.apply_automated_stationary_input(), frozen_render)
+            }
+            Some(XrFrameLocomotionAutomation::ChunkViewChurn { center_x, center_z }) => (
+                self.apply_automated_chunk_view_churn(center_x, center_z)?,
+                false,
+            ),
+            None => (self.apply_locomotion_input(controllers, views)?, false),
+        };
+        Ok(XrFrameLocomotionOutcome {
+            timing,
+            frozen_render,
+        })
+    }
+
     pub fn apply_locomotion_input(
         &mut self,
         controllers: &[XrControllerSnapshot],

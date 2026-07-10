@@ -1,6 +1,7 @@
 #![deny(unsafe_code)]
 
 mod actions;
+mod frame_driver;
 
 use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3};
@@ -10,6 +11,7 @@ use std::num::NonZeroU32;
 use std::sync::mpsc;
 
 pub use actions::OpenXrControllerActions;
+pub use frame_driver::*;
 pub use mclone_input::{XrControllerSnapshot, XrHand};
 pub use mclone_render_session::{
     XrFov, XrRenderView, XrView, XrViewPose, render_view_from_world_pose, xr_fov_aspect,
@@ -329,7 +331,7 @@ fn eye_config(view: xr::ViewConfigurationView) -> XrEyeConfig {
     }
 }
 
-pub fn poll_openxr_events<G, F>(
+fn poll_openxr_events<G, F>(
     session: &xr::Session<G>,
     event_storage: &mut xr::EventDataBuffer,
     session_running: &mut bool,
@@ -391,21 +393,7 @@ where
         .context("create OpenXR STAGE reference space")
 }
 
-pub fn wait_begin_frame<G>(
-    frame_wait: &mut xr::FrameWaiter,
-    frame_stream: &mut xr::FrameStream<G>,
-    frame_stats: &mut XrFrameStats,
-) -> Result<xr::FrameState>
-where
-    G: xr::Graphics,
-{
-    let frame_state = frame_wait.wait().context("wait OpenXR frame")?;
-    frame_stream.begin().context("begin OpenXR frame")?;
-    frame_stats.record_runtime_frame();
-    Ok(frame_state)
-}
-
-pub fn end_skipped_frame<G>(
+fn end_skipped_frame<G>(
     frame_stream: &mut xr::FrameStream<G>,
     predicted_display_time: xr::Time,
     environment_blend_mode: xr::EnvironmentBlendMode,
@@ -420,7 +408,7 @@ where
         .context("end skipped OpenXR frame")
 }
 
-pub fn end_frame_with_layers<G>(
+fn end_frame_with_layers<G>(
     frame_stream: &mut xr::FrameStream<G>,
     predicted_display_time: xr::Time,
     environment_blend_mode: xr::EnvironmentBlendMode,
@@ -510,7 +498,7 @@ where
     })
 }
 
-pub fn end_stereo_projection_frame<G, L, R>(
+fn end_stereo_projection_frame<G, L, R>(
     frame_stream: &mut xr::FrameStream<G>,
     predicted_display_time: xr::Time,
     environment_blend_mode: xr::EnvironmentBlendMode,
@@ -563,7 +551,7 @@ where
     )
 }
 
-pub fn end_multiview_projection_frame<G, S>(
+fn end_multiview_projection_frame<G, S>(
     frame_stream: &mut xr::FrameStream<G>,
     predicted_display_time: xr::Time,
     environment_blend_mode: xr::EnvironmentBlendMode,

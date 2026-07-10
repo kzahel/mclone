@@ -4,9 +4,8 @@ Status: approved direction 2026-07-09; Slice 0 (bug-grade parity pre-fixes)
 landed 2026-07-09; Slice 2 (web-shaped runner-generic seam) landed 2026-07-09;
 Slice 1 (OpenXR-free scene crate + `mclone-xr-scene` -> `mclone-scene` rename)
 landed 2026-07-09; Slice 3 (mono view topology + screen-space HUD strategy +
-offscreen driver) landed 2026-07-09. The Slice 4 frame-driver work has not
-started; its dependency-direction prerequisite is complete. Slice 4 requires
-Slice 1 (done). (Slices 0–2 are independent per the sequencing guardrail, so
+offscreen driver) landed 2026-07-09; Slice 4 (shared OpenXR frame driver)
+landed 2026-07-10. (Slices 0–2 are independent per the sequencing guardrail, so
 Slice 2 landed ahead of Slice 1.) Post-Slice-3 review corrections landed
 2026-07-10: truthful offscreen-settle failure, an exercised mono-HUD capture
 lane, a shared lifecycle `on_background()` policy, durable-flush regression
@@ -312,8 +311,8 @@ or pull a prerequisite earlier when a native slice naturally touches it:
 ## Implementation slices
 
 Every slice must independently satisfy the **cross-slice guardrails** at the
-bottom of this doc. Slices 0–3 are complete except for Slice 0's explicitly
-open manual device acceptance; Slice 4 is the next implementation slice.
+bottom of this doc. Slices 0–4 are complete except for Slice 0's explicitly
+open manual device acceptance; Slice 5 is the next implementation slice.
 
 ### Slice 0: Bug-grade parity pre-fixes — IMPLEMENTED; MANUAL DEVICE ACCEPTANCE OPEN
 
@@ -649,12 +648,37 @@ Validation: standard battery, plus:
 > (`native/crates/mclone-scene/`); older references to `mclone-xr-scene` in
 > the evidence section describe the pre-rename audit.
 
-### Slice 4: Shared OpenXR frame driver
+### Slice 4: Shared OpenXR frame driver — DONE (2026-07-10)
 
 Goal: write the poll -> waitFrame -> locate -> render-or-skip -> end -> report
 loop **once**, in `mclone-xr-host` (or a new thin `mclone-xr-runtime` crate if
 dependency direction demands it). The transitive host-dependency cleanup that
 was originally part of this slice landed early after the Slice 3 review.
+
+Landed shape:
+
+- `mclone-xr-host::OpenXrFrameDriver` owns the only live poll -> wait -> begin
+  -> render/skip -> end sequence. Its policy carries frame limits, READY and
+  submitted-progress deadlines, runtime-exit behavior, blend/view facts, and the
+  single 25 ms idle interval.
+- App-local handler implementations provide only platform event/lifecycle pumps,
+  render callbacks, and observation hooks. Structured per-frame outcomes retain
+  session state, predicted display time, should-render/disposition, separate
+  wait/begin/frame-wall timings, cumulative stats, and the render result. The
+  Android handler still starts thread-CPU accounting precisely after wait and
+  before begin.
+- `OpenXrRenderFrame` is the submission capability: callbacks may submit empty,
+  stereo, or multiview projection frames exactly once. The driver closes an
+  unsubmitted error frame safely. All low-level poll/end helpers are private to
+  `mclone-xr-host`.
+- Desktop, Android main, minimal multiview proof, terrain multiview proof, and
+  terrain multiview perf now use the driver. `pnpm
+  native:xr:frame-driver:purity` permanently rejects direct poll/wait/begin/end
+  calls in either app crate.
+- `mclone-scene::render_xr_scene_frame` owns the per-eye/multiview and
+  live/frozen render selection. Shared locomotion owns the automation dispatch;
+  shared scene options own startup projection plus local/remote runtime option
+  projection. The duplicate event formatter and app-local mapping helpers died.
 
 Read first: `native/crates/mclone-xr-host/src/lib.rs` (the frame primitives:
 `poll_openxr_events`, `wait_begin_frame`, `end_skipped_frame`,
@@ -728,11 +752,13 @@ validation scripts grep for specific log markers (e.g.
 `MCLONE_ANDROID_XR_REPLACEMENT_READY` in `android-xr/validate-quest-openxr.sh`)
 — those exact strings must survive the migration.
 
-Tripwires: app crates contain no `wait_begin_frame`, direct `frame_wait.wait()` /
+Tripwires (all pass): app crates contain no `wait_begin_frame`, direct `frame_wait.wait()` /
 `frame_stream.begin()`, `poll_openxr_events`, or `end_*frame` calls (make the
 low-level primitives crate-private to the driver if feasible rather than relying
-only on grep); Quest smoke ready-summary lines
-(`sections=`/`drawn_sections=`/`drawn_indices=`) match pre-slice baselines;
+only on grep); Quest smoke preserves the ready/replacement markers, render path,
+seed, and nonzero terrain/actor output. Exact readiness-frame section counts are
+not a stable gate: repeated pre-edit runs varied with asynchronous compile
+scheduling, so the multiview GPU readback proofs carry the pixel/output invariant;
 the `cargo tree` openxr check on `mclone-scene` is clean.
 
 Validation: standard battery + `pnpm native:xr:desktop` +
@@ -741,7 +767,17 @@ Validation: standard battery + `pnpm native:xr:desktop` +
 `pnpm native:android-xr:terrain-multiview-proof` (the harness loops must still
 pass after migrating onto the driver).
 
-Exit criteria: five loops replaced by one driver; both XR apps' loop code is
+Validation (2026-07-10): full workspace tests, workspace/native and app-runtime
+and web-client WASM checks, both scripted Android APK builds, both purity scripts,
+and the offscreen pixel canary pass. Desktop WiVRn before/after runs both submit
+120 frames with 121 runtime / 1 skipped frame and preserve 125 sections, 79
+drawn sections, 598,740 indices, and 291,768 drawn indices. Quest session-smoke
+preserves READY and replacement markers with drawn terrain; production
+full-frame multiview, minimal multiview proof, terrain multiview proof, and the
+terrain multiview perf harness all pass. The final terrain proof reports two
+drawn sections/eye, 15,924 indices/eye, and 2,355,106 differing eye pixels.
+
+Exit criteria (met): five loops replaced by one driver; both XR apps' loop code is
 render-callback + platform pump only; `mclone-scene` has no openxr edge,
 direct or transitive; device logs match baselines.
 
@@ -1252,11 +1288,10 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 4; Slices 0–3 are already implemented. First capture the
-desktop XR and Quest session-smoke baselines described in Slice 4, then read the
-five live loop bodies and the low-level primitives in `mclone-xr-host`. Preserve
-the Android main loop's direct wait/begin timing and all smoke/perf callbacks in
-the driver's structured outcome/hooks. Migrate one bounded harness first,
-validate its pixels/log markers, and only then move the main loops. Do not mark
-Slice 0's worn-headset Pause -> force-stop -> relaunch acceptance complete until
-that manual cycle has actually retained a world edit.
+Start with Slice 5; Slices 0–4 are implemented. Read the shared
+`XrFramePipelineReporter`, the flat-side `FramePipelineAccountant`, and the
+remaining Android/desktop presentation builders named in Slice 5. Preserve the
+new frame driver's timing facts as inputs; do not move formatting or diagnostics
+policy back into its loop handler. Do not mark Slice 0's worn-headset Pause ->
+force-stop -> relaunch acceptance complete until that manual cycle has actually
+retained a world edit.

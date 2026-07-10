@@ -1564,9 +1564,7 @@ pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
     xr_native_client_experience_profile()
 }
 
-pub(crate) fn local_integrated_scene_options(
-    scene: &XrSceneOptions,
-) -> LocalIntegratedSceneOptions {
+pub fn local_integrated_scene_options(scene: &XrSceneOptions) -> LocalIntegratedSceneOptions {
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
     LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
@@ -1579,6 +1577,12 @@ pub(crate) fn local_integrated_scene_options(
         .with_render_compile_worker_count(scene.render_compile_worker_count)
         .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
         .with_integrated_world_session_storage(storage)
+}
+
+pub fn single_view_host_options(scene: &XrSceneOptions) -> SingleViewHostOptions {
+    SingleViewHostOptions::new(scene.center(), scene.render_distance)
+        .with_render_compile_worker_count(scene.render_compile_worker_count)
+        .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
 }
 
 pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {
