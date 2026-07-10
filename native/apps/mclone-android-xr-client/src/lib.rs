@@ -74,9 +74,7 @@ mod android {
         android_app_data_world_root,
     };
     use mclone_app_runtime::frame_render::scaled_frame_size;
-    use mclone_app_runtime::host_mode::{
-        RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
-    };
+    use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
     use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
     use mclone_app_runtime::render_assets::{
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
@@ -102,8 +100,6 @@ mod android {
         BudgetDecisionPanelReport, FrameAccumulator, FrameHostKind, FramePipelineReport,
         FrameSummaryReport, PercentileMethod, QueuePanelReport, percentile_sorted_ms,
     };
-    use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
-    use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::{
         ChunkDepthTarget, ChunkMultiviewDepthTarget, TexturedSectionRecordCacheStats,
         TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions,
@@ -113,9 +109,9 @@ mod android {
         MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrFrameLocomotionAutomation,
         XrFramePipelineHostTiming, XrMcloneTerrainState, XrSceneFrameTarget, XrSceneOptions,
         XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
-        local_integrated_scene_options, record_xr_frame_pipeline,
-        record_xr_frame_pipeline_with_peer_threads, single_view_host_options,
-        xr_frame_pipeline_accounting_config, xr_frame_pipeline_peer_threads,
+        record_xr_frame_pipeline, record_xr_frame_pipeline_with_peer_threads,
+        single_view_host_options, xr_frame_pipeline_accounting_config,
+        xr_frame_pipeline_peer_threads,
     };
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE, XrControllerSnapshot,
@@ -136,8 +132,8 @@ mod android {
         graphics_vulkan::AppGraphics,
         graphics_vulkan::OpenXrStereoState,
     >;
-    type AndroidXrSceneRuntime = NativeSessionRuntime<AndroidXrRemoteServerSession>;
-    type AndroidXrTerrainState = XrMcloneTerrainState<AndroidXrRemoteServerSession>;
+    type AndroidXrSceneRuntime = NativeSessionRuntime<NativeRemoteServerSession>;
+    type AndroidXrTerrainState = XrMcloneTerrainState<NativeRemoteServerSession>;
 
     const LOG_TAG: &str = "mclone_android_xr";
     const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
@@ -2048,7 +2044,7 @@ mod android {
             asset_source,
         } = runtime_assets;
         let mut terrain = if let Some(remote_addr) = remote_addr {
-            let session = AndroidXrRemoteServerSession::connect(remote_addr.as_str())?;
+            let session = NativeRemoteServerSession::connect(remote_addr.as_str(), "Android XR")?;
             let runtime = AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
                 RemoteSessionEndpoint::new(remote_addr.clone()),
                 single_view_host_options(&scene_options),
@@ -2095,51 +2091,30 @@ mod android {
         };
         terrain.set_audio_engine(audio);
         terrain.set_frame_host_kind(FrameHostKind::AndroidXrOpenXr);
-        terrain.set_session_runtime_factory(|request, scene_options, mesh_assets| {
-            android_xr_scene_runtime_for_request(request, scene_options, mesh_assets)
+        terrain.set_session_runtime_factory(|endpoint, scene_options, mesh_assets| {
+            android_xr_remote_scene_runtime(endpoint, scene_options, mesh_assets)
         });
         Ok(terrain)
     }
 
-    fn android_xr_scene_runtime_for_request(
-        request: SessionStartRequest,
+    fn android_xr_remote_scene_runtime(
+        endpoint: RemoteSessionEndpoint,
         scene_options: XrSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<AndroidXrSceneRuntime> {
-        match request {
-            SessionStartRequest::CreateLocalWorld { options } => {
-                let mut scene_options = scene_options;
-                scene_options.seed = options.seed;
-                AndroidXrSceneRuntime::local_with_mesh_assets(
-                    local_integrated_scene_options(&scene_options),
-                    mesh_assets,
-                )
-                .context("failed to initialize Android XR replacement local runtime")
-            }
-            SessionStartRequest::OpenLocalWorld { .. } => {
-                AndroidXrSceneRuntime::local_with_mesh_assets(
-                    local_integrated_scene_options(&scene_options),
-                    mesh_assets,
-                )
-                .context("failed to initialize Android XR replacement persistent local runtime")
-            }
-            SessionStartRequest::JoinRemote { endpoint } => {
-                let session = AndroidXrRemoteServerSession::connect(endpoint.address.as_str())?;
-                AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
-                    endpoint.clone(),
-                    single_view_host_options(&scene_options),
-                    session,
-                    mesh_assets,
-                )
-                .with_context(|| {
-                    format!(
-                        "failed to initialize Android XR replacement remote runtime from {}",
-                        endpoint.address
-                    )
-                })
-            }
-            SessionStartRequest::Unknown => bail!("unsupported Android XR replacement session"),
-        }
+        let session = NativeRemoteServerSession::connect(endpoint.address.as_str(), "Android XR")?;
+        AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
+            endpoint.clone(),
+            single_view_host_options(&scene_options),
+            session,
+            mesh_assets,
+        )
+        .with_context(|| {
+            format!(
+                "failed to initialize Android XR replacement remote runtime from {}",
+                endpoint.address
+            )
+        })
     }
 
     fn request_display_refresh_rate(
@@ -2211,106 +2186,6 @@ mod android {
             log::warn!(
                 "OpenXR Android thread settings failed for renderer main thread tid={thread_id}: {result:?}"
             );
-        }
-    }
-
-    #[derive(Debug)]
-    struct AndroidXrRemoteServerSession {
-        addr: String,
-        session: NativeClientIoSession,
-    }
-
-    impl AndroidXrRemoteServerSession {
-        fn connect(addr: impl Into<String>) -> Result<Self> {
-            let addr = addr.into();
-            let session = NativeClientIoSession::connect(addr.as_str())
-                .with_context(|| format!("failed to connect to Android XR remote server {addr}"))?;
-            Ok(Self { addr, session })
-        }
-    }
-
-    impl RemoteDedicatedServerSession for AndroidXrRemoteServerSession {
-        fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
-            self.session.send_command_only(command).with_context(|| {
-                format!(
-                    "failed to send command to Android XR remote server {}",
-                    self.addr
-                )
-            })
-        }
-
-        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
-            self.session.drain_command_updates().with_context(|| {
-                format!(
-                    "failed to drain updates from Android XR remote server {}",
-                    self.addr
-                )
-            })
-        }
-
-        fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
-            self.session.try_drain_command_updates().with_context(|| {
-                format!(
-                    "failed to poll updates from Android XR remote server {}",
-                    self.addr
-                )
-            })
-        }
-
-        fn drain_command_update_batch(&mut self) -> Result<RemoteCommandUpdateBatch> {
-            self.session
-                .drain_update_batch()
-                .map(remote_batch_from_native)
-                .with_context(|| {
-                    format!(
-                        "failed to drain updates from Android XR remote server {}",
-                        self.addr
-                    )
-                })
-        }
-
-        fn try_drain_command_update_batch(&mut self) -> Result<Option<RemoteCommandUpdateBatch>> {
-            self.session
-                .try_drain_update_batch()
-                .map(|batch| batch.map(remote_batch_from_native))
-                .with_context(|| {
-                    format!(
-                        "failed to poll updates from Android XR remote server {}",
-                        self.addr
-                    )
-                })
-        }
-
-        fn reconnect(&mut self) -> Result<()> {
-            self.session =
-                NativeClientIoSession::connect(self.addr.as_str()).with_context(|| {
-                    format!(
-                        "failed to reconnect to Android XR remote server {}",
-                        self.addr
-                    )
-                })?;
-            Ok(())
-        }
-    }
-
-    fn remote_batch_from_native(batch: NativeServerUpdateBatch) -> RemoteCommandUpdateBatch {
-        let queued_age = batch.queued_age();
-        RemoteCommandUpdateBatch {
-            response_sequence: Some(batch.response_sequence),
-            producer_read_ms: batch.producer_read_ms,
-            producer_decode_ms: batch.producer_decode_ms,
-            updates: batch
-                .updates
-                .into_iter()
-                .map(|update| RemoteCommandUpdate {
-                    update: update.update,
-                    encoded_len: Some(update.encoded_len),
-                    queued_age,
-                    response_sequence: Some(update.response_sequence),
-                    producer_read_ms: update.producer_read_ms,
-                    producer_decode_ms: update.producer_decode_ms,
-                })
-                .collect(),
         }
     }
 

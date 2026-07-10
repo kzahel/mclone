@@ -30,9 +30,9 @@ use mclone_app_runtime::native_session_runtime::{
 };
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
-    RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
-    SessionStorageIntent, StartedGameSession,
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
+    SessionFailure, SessionRuntimeKind, SessionStartPlan, SessionStartRequest,
+    SessionStorageIntent, plan_session_start,
 };
 use mclone_app_runtime::set_player_appearance_command_for_ui_model;
 use mclone_app_runtime::world_catalog::{
@@ -151,8 +151,8 @@ impl FlatClientCameraView {
 pub(crate) struct FlatClientDriver {
     pub(crate) scene: SceneOptions,
     pub(crate) runtime: Option<WindowSceneRuntime>,
-    pub(crate) startup: Option<FlatClientPendingStartup>,
-    pub(crate) session: GameSessionCoordinator<FlatClientPendingSessionStart>,
+    pub(crate) startup: Option<FlatClientLocalStartup>,
+    pub(crate) session: GameSessionCoordinator<()>,
     pub(crate) ui: GameUiHost,
     pub(crate) spectator: SpectatorCamera,
     pub(crate) camera: EngineCameraController,
@@ -180,17 +180,16 @@ pub(crate) struct FlatClientDriver {
     seed_reroll: NewWorldSeedReroll,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct FlatClientPendingSessionStart {
-    pub(crate) scene: SceneOptions,
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FlatClientSessionStartPlan {
+    pub(crate) session: SessionStartPlan<SceneOptions>,
     pub(crate) arm_mouse_lock: bool,
     pub(crate) show_title_on_failure: bool,
-    pub(crate) descriptor: Option<ActiveSessionDescriptor>,
     pub(crate) transition: ClientSessionTransitionEffects,
 }
 
 #[derive(Debug)]
-pub(crate) struct FlatClientPendingStartup {
+pub(crate) struct FlatClientLocalStartup {
     request: SessionStartRequest,
     descriptor: ActiveSessionDescriptor,
     arm_mouse_lock: bool,
@@ -336,7 +335,7 @@ pub(crate) enum FlatClientHostAction {
 pub(crate) struct FlatClientUiActionResult {
     pub(crate) host_action: Option<FlatClientHostAction>,
     pub(crate) mouse_lock_requested: Option<bool>,
-    pub(crate) session_start_queued: bool,
+    pub(crate) session_start: Option<FlatClientSessionStartPlan>,
     pub(crate) preserve_pointer_state: bool,
     pub(crate) clear_gameplay_input: bool,
 }
@@ -761,6 +760,7 @@ impl FlatClientDriver {
         self.ui.set_new_world_seed(seed);
     }
 
+    #[cfg(test)]
     pub(crate) fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
         self.ui.set_join_remote_addr(addr);
     }
@@ -957,100 +957,111 @@ impl FlatClientDriver {
             .and_then(|startup| startup.pump.progress_overlay())
     }
 
-    pub(crate) fn request_current_scene_start(
-        &mut self,
+    pub(crate) fn current_scene_start_plan(
+        &self,
         arm_mouse_lock: bool,
         show_title_on_failure: bool,
-    ) {
+    ) -> Result<FlatClientSessionStartPlan> {
         let scene = self.scene.clone();
         let request = session_start_request_for_scene(&scene);
-        let transition = client_session_start_transition(self.session.state());
-        self.session.request_start(
+        let plan = plan_session_start(
             request,
-            FlatClientPendingSessionStart {
-                scene,
-                arm_mouse_lock,
-                show_title_on_failure,
-                descriptor: None,
-                transition,
-            },
-        );
+            |_| Ok::<_, anyhow::Error>(scene.clone()),
+            |_| anyhow::bail!("current desktop scene cannot be an unresolved catalog world"),
+            |_| Ok::<_, anyhow::Error>(scene.clone()),
+            || anyhow::anyhow!("unsupported current desktop session start"),
+        )?;
+        Ok(FlatClientSessionStartPlan {
+            session: plan,
+            arm_mouse_lock,
+            show_title_on_failure,
+            transition: client_session_start_transition(self.session.state()),
+        })
     }
 
-    pub(crate) fn request_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
-        let scene = self.local_world_scene(seed);
-        let request = SessionStartRequest::new_seed_local_world(seed);
-        let transition = client_session_start_transition(self.session.state());
-        self.session.request_start(
-            request,
-            FlatClientPendingSessionStart {
-                scene,
-                arm_mouse_lock,
-                show_title_on_failure: false,
-                descriptor: None,
-                transition,
-            },
-        );
-        self.clear_ui_input();
-    }
-
-    fn request_catalog_world_start(
-        &mut self,
+    fn session_start_plan_for_request(
+        &self,
         request: SessionStartRequest,
-        descriptor: ActiveSessionDescriptor,
-        scene: SceneOptions,
         arm_mouse_lock: bool,
-    ) {
-        let transition = client_session_start_transition(self.session.state());
-        self.session.request_start(
+        show_title_on_failure: bool,
+    ) -> Result<FlatClientSessionStartPlan> {
+        let catalog = self.world_catalog.clone();
+        let plan = plan_session_start(
             request,
-            FlatClientPendingSessionStart {
-                scene,
-                arm_mouse_lock,
-                show_title_on_failure: false,
-                descriptor: Some(descriptor),
-                transition,
+            |options| {
+                if let Some(id) = options.requested_id.as_ref() {
+                    let catalog = catalog.as_ref().context("Persistent worlds unavailable")?;
+                    let opened = catalog.open_world(id)?;
+                    return Ok(self.catalog_world_scene(
+                        &opened.summary,
+                        catalog.world_dir(&opened.summary.id),
+                    ));
+                }
+                Ok(self.local_world_scene(options.seed))
             },
-        );
-        self.clear_ui_input();
+            |id| {
+                let catalog = catalog.as_ref().context("Persistent worlds unavailable")?;
+                let opened = catalog.open_world(id)?;
+                Ok((
+                    self.catalog_world_scene(
+                        &opened.summary,
+                        catalog.world_dir(&opened.summary.id),
+                    ),
+                    ActiveSessionDescriptor::from_local_world_summary(&opened.summary),
+                ))
+            },
+            |endpoint| Ok(self.remote_session_scene(endpoint.address.clone())),
+            || anyhow::anyhow!("unsupported unknown desktop session start"),
+        )?;
+        Ok(FlatClientSessionStartPlan {
+            session: plan,
+            arm_mouse_lock,
+            show_title_on_failure,
+            transition: client_session_start_transition(self.session.state()),
+        })
+    }
+
+    fn attach_session_start_plan(
+        &mut self,
+        plan: Result<FlatClientSessionStartPlan>,
+        result: &mut FlatClientUiActionResult,
+    ) {
+        match plan {
+            Ok(plan) => {
+                self.session.begin_start(plan.session.request.clone());
+                result.session_start = Some(plan);
+                self.clear_ui_input();
+                request_flat_mouse_lock(result, false);
+            }
+            Err(err) => {
+                log::error!("failed to plan desktop session start: {err:#}");
+                self.status_overlay =
+                    StatusOverlay::new(format!("Failed to start session: {err}"), false);
+            }
+        }
     }
 
     fn apply_world_catalog_effects(
         &mut self,
         effects: ClientCatalogEffects,
         arm_mouse_lock: bool,
-    ) -> bool {
-        let mut session_start_queued = false;
+        result: &mut FlatClientUiActionResult,
+    ) {
         for start in effects.session_starts {
-            session_start_queued = true;
-            let Some(catalog) = self.world_catalog.clone() else {
-                log::warn!(
-                    "shared catalog controller returned a session start without a native catalog"
-                );
-                continue;
-            };
-            self.request_catalog_world_start(
-                start.request,
-                start.descriptor,
-                self.catalog_world_scene(&start.summary, catalog.world_dir(&start.summary.id)),
-                arm_mouse_lock,
-            );
+            let plan = self.session_start_plan_for_request(start.request, arm_mouse_lock, false);
+            self.attach_session_start_plan(plan, result);
         }
         for request in effects.catalog_requests {
-            session_start_queued |= self.execute_world_catalog_request(request, arm_mouse_lock);
+            self.execute_world_catalog_request(request, arm_mouse_lock, result);
         }
-        session_start_queued
     }
 
     fn execute_world_catalog_request(
         &mut self,
         request: ClientCatalogRequest,
         arm_mouse_lock: bool,
-    ) -> bool {
-        // Clone the catalog before borrowing the controller mutably: the catalog
-        // lives on `self.world_catalog` and the controller on
-        // `self.client_experience`, so the shared executor needs an owned catalog
-        // handle (cheap: a `PathBuf`) alongside the mutable controller borrow.
+        result: &mut FlatClientUiActionResult,
+    ) {
         let catalog = self.world_catalog.clone();
         let active = self.active_local_world_id().cloned();
         let effects = execute_world_catalog_request(
@@ -1059,7 +1070,7 @@ impl FlatClientDriver {
             active.as_ref(),
             request,
         );
-        self.apply_world_catalog_effects(effects, arm_mouse_lock)
+        self.apply_world_catalog_effects(effects, arm_mouse_lock, result);
     }
 
     fn client_experience_settings_state(&self) -> ClientExperienceSettingsState {
@@ -1090,10 +1101,7 @@ impl FlatClientDriver {
         arm_mouse_lock: bool,
         result: &mut FlatClientUiActionResult,
     ) -> bool {
-        if self.apply_world_catalog_effects(effects.catalog, arm_mouse_lock) {
-            result.session_start_queued = true;
-            request_flat_mouse_lock(result, false);
-        }
+        self.apply_world_catalog_effects(effects.catalog, arm_mouse_lock, result);
         self.apply_client_session_effects(effects.session, arm_mouse_lock, result);
         let settings_ok = {
             let mut host = FlatClientHostEffects { result };
@@ -1148,23 +1156,8 @@ impl FlatClientDriver {
             self.clear_inactive_session_status();
         }
         if let Some(request) = effects.session_start {
-            match request {
-                SessionStartRequest::CreateLocalWorld { options } => {
-                    self.request_local_world_start(options.seed, arm_mouse_lock);
-                    result.session_start_queued = true;
-                    request_flat_mouse_lock(result, false);
-                }
-                SessionStartRequest::JoinRemote { endpoint } => {
-                    self.request_remote_session_start(endpoint.address, arm_mouse_lock);
-                    result.session_start_queued = true;
-                    request_flat_mouse_lock(result, false);
-                }
-                SessionStartRequest::OpenLocalWorld { .. } | SessionStartRequest::Unknown => {
-                    log::warn!(
-                        "shared flat session policy emitted unsupported desktop start: {request:?}"
-                    );
-                }
-            }
+            let plan = self.session_start_plan_for_request(request, arm_mouse_lock, false);
+            self.attach_session_start_plan(plan, result);
         }
         if let Some(host_action) = effects.host_action {
             let mut host = FlatClientHostEffects { result };
@@ -1196,29 +1189,6 @@ impl FlatClientDriver {
         self.apply_client_session_ui_effects(effects.ui);
     }
 
-    pub(crate) fn request_remote_session_start(
-        &mut self,
-        remote_addr: String,
-        arm_mouse_lock: bool,
-    ) {
-        self.set_join_remote_addr(remote_addr.clone());
-        let request = SessionStartRequest::JoinRemote {
-            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-        };
-        let transition = client_session_start_transition(self.session.state());
-        self.session.request_start(
-            request,
-            FlatClientPendingSessionStart {
-                scene: self.remote_session_scene(remote_addr),
-                arm_mouse_lock,
-                show_title_on_failure: false,
-                descriptor: None,
-                transition,
-            },
-        );
-        self.clear_ui_input();
-    }
-
     pub(crate) fn clear_inactive_session_status(&mut self) {
         if client_session_should_clear_inactive_status(self.session.state()) {
             self.session.clear();
@@ -1226,59 +1196,59 @@ impl FlatClientDriver {
         self.status_overlay = StatusOverlay::hidden();
     }
 
-    pub(crate) fn finish_pending_session_start(
+    pub(crate) fn start_session_plan(
         &mut self,
+        plan: FlatClientSessionStartPlan,
         device: Option<&wgpu::Device>,
         mut make_startup_pump: impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
     ) -> FlatClientSessionUpdate {
-        let Some(pending) = self.session.take_pending_start() else {
-            return FlatClientSessionUpdate::default();
-        };
-        if matches!(
-            &pending.request,
-            SessionStartRequest::CreateLocalWorld { .. }
-                | SessionStartRequest::OpenLocalWorld { .. }
-        ) {
-            let request = pending.request.clone();
-            let show_title_on_failure = pending.payload.show_title_on_failure;
-            if let Err(err) =
-                self.begin_pending_local_world_start(pending, device, &mut make_startup_pump)
-            {
-                self.fail_session_start(request, show_title_on_failure, err);
-                return FlatClientSessionUpdate {
-                    mouse_lock_requested: Some(false),
-                };
-            }
-            return FlatClientSessionUpdate {
-                mouse_lock_requested: Some(false),
-            };
-        }
+        let FlatClientSessionStartPlan {
+            session: SessionStartPlan { request, payload },
+            arm_mouse_lock,
+            show_title_on_failure,
+            transition: _,
+        } = plan;
+        self.session.begin_start(request.clone());
 
-        let request = pending.request.clone();
-        let arm_mouse_lock = pending.payload.arm_mouse_lock;
-        let show_title_on_failure = pending.payload.show_title_on_failure;
-        let result = self.start_pending_session(pending, device, &mut make_startup_pump);
-        self.session.apply_start_result(&result);
-        match result {
-            Ok(started) => {
-                self.apply_started_session_ui(started.descriptor());
-                FlatClientSessionUpdate {
-                    mouse_lock_requested: Some(arm_mouse_lock),
+        match payload.runtime_kind {
+            SessionRuntimeKind::Local => {
+                if let Err(err) = self.begin_local_world_start(
+                    request.clone(),
+                    payload.descriptor,
+                    payload.options,
+                    arm_mouse_lock,
+                    show_title_on_failure,
+                    device,
+                    &mut make_startup_pump,
+                ) {
+                    self.fail_session_start(request, show_title_on_failure, err);
                 }
-            }
-            Err(_) => {
-                self.apply_failed_session_ui(&request, show_title_on_failure);
                 FlatClientSessionUpdate {
                     mouse_lock_requested: Some(false),
                 }
             }
+            SessionRuntimeKind::Remote => {
+                match self.start_remote_session_from_scene(
+                    payload.options,
+                    device,
+                    &mut make_startup_pump,
+                ) {
+                    Ok(()) => {
+                        self.session.complete_start(payload.descriptor.clone());
+                        self.apply_started_session_ui(&payload.descriptor);
+                        FlatClientSessionUpdate {
+                            mouse_lock_requested: Some(arm_mouse_lock),
+                        }
+                    }
+                    Err(err) => {
+                        self.fail_session_start(request, show_title_on_failure, err);
+                        FlatClientSessionUpdate {
+                            mouse_lock_requested: Some(false),
+                        }
+                    }
+                }
+            }
         }
-    }
-
-    pub(crate) fn pending_session_start_needs_teardown(&self) -> bool {
-        self.session
-            .pending_start()
-            .is_some_and(|pending| pending.payload.transition.teardown_world)
     }
 
     pub(crate) fn advance_local_world_startup(
@@ -1339,7 +1309,7 @@ impl FlatClientDriver {
         let mut result = FlatClientUiActionResult {
             host_action: None,
             mouse_lock_requested: None,
-            session_start_queued: false,
+            session_start: None,
             preserve_pointer_state: matches!(
                 action,
                 GameUiAction::SetRenderDistance(_)
@@ -1438,42 +1408,18 @@ impl FlatClientDriver {
         scene
     }
 
-    fn start_pending_session(
+    fn start_remote_session_from_scene(
         &mut self,
-        pending: PendingSessionStart<FlatClientPendingSessionStart>,
-        device: Option<&wgpu::Device>,
-        make_startup_pump: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
-    ) -> SessionStartResult<()> {
-        self.start_session_from_scene(
-            pending.request,
-            pending.payload.scene,
-            device,
-            make_startup_pump,
-        )
-    }
-
-    fn start_session_from_scene(
-        &mut self,
-        request: SessionStartRequest,
         scene: SceneOptions,
         device: Option<&wgpu::Device>,
         make_startup_pump: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
-    ) -> SessionStartResult<()> {
-        let Some(descriptor) = request.active_descriptor() else {
-            return Err(SessionFailure::new("Unsupported session start"));
-        };
-        match self.start_world_from_scene(
+    ) -> anyhow::Result<()> {
+        self.start_world_from_scene(
             scene,
             device,
             StartupReadinessPolicy::Playable,
             make_startup_pump,
-        ) {
-            Ok(()) => Ok(StartedGameSession::new(descriptor, ())),
-            Err(err) => {
-                log::error!("failed to start session {request:?}: {err:#}");
-                Err(SessionFailure::new(request.default_failure_message()))
-            }
-        }
+        )
     }
 
     /// Blocking startup for local and remote host modes (docs/tactical/167 Slice
@@ -1543,27 +1489,23 @@ impl FlatClientDriver {
         Ok(())
     }
 
-    fn begin_pending_local_world_start(
+    fn begin_local_world_start(
         &mut self,
-        pending: PendingSessionStart<FlatClientPendingSessionStart>,
+        request: SessionStartRequest,
+        descriptor: ActiveSessionDescriptor,
+        scene: SceneOptions,
+        arm_mouse_lock: bool,
+        show_title_on_failure: bool,
         device: Option<&wgpu::Device>,
         make_startup_pump: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
     ) -> anyhow::Result<()> {
-        if pending.payload.scene.remote_addr.is_some() {
+        if scene.remote_addr.is_some() {
             anyhow::bail!("local startup pump received a remote scene");
         }
-        let Some(descriptor) = pending
-            .payload
-            .descriptor
-            .clone()
-            .or_else(|| pending.request.active_descriptor())
-        else {
-            anyhow::bail!("unsupported local session start");
-        };
 
         self.startup = None;
         self.runtime = None;
-        self.scene = pending.payload.scene;
+        self.scene = scene;
         self.reset_world_state();
         if let Some(device) = device {
             self.clear_draw_sections(device)?;
@@ -1580,11 +1522,11 @@ impl FlatClientDriver {
             self.scene.chunk_z,
             self.scene.render_distance
         );
-        self.startup = Some(FlatClientPendingStartup {
-            request: pending.request,
+        self.startup = Some(FlatClientLocalStartup {
+            request,
             descriptor,
-            arm_mouse_lock: pending.payload.arm_mouse_lock,
-            show_title_on_failure: pending.payload.show_title_on_failure,
+            arm_mouse_lock,
+            show_title_on_failure,
             pump,
         });
         Ok(())
@@ -1592,7 +1534,7 @@ impl FlatClientDriver {
 
     fn complete_local_world_startup(
         &mut self,
-        startup: FlatClientPendingStartup,
+        startup: FlatClientLocalStartup,
         step: NativeSessionStartupStep,
         device: Option<&wgpu::Device>,
     ) -> anyhow::Result<FlatClientSessionUpdate> {
@@ -3024,7 +2966,7 @@ mod tests {
     }
 
     #[test]
-    fn ui_action_routing_queues_local_world_start_in_driver() {
+    fn ui_action_routing_plans_local_world_start_in_driver() {
         let scene = SceneOptions::default();
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
 
@@ -3036,7 +2978,7 @@ mod tests {
         let start_result =
             driver.apply_ui_action(GameUiAction::CreateWorld(seed), ui_action_context());
         assert_eq!(start_result.host_action, None);
-        assert!(start_result.session_start_queued);
+        assert!(start_result.session_start.is_some());
         assert_eq!(start_result.mouse_lock_requested, Some(false));
         assert_eq!(
             driver.session.state(),
@@ -3044,14 +2986,14 @@ mod tests {
                 request: SessionStartRequest::new_seed_local_world(seed)
             }
         );
-        let pending = driver.session.take_pending_start().unwrap();
+        let pending = start_result.session_start.expect("local session plan");
         assert_eq!(
-            pending.request,
+            pending.session.request,
             SessionStartRequest::new_seed_local_world(seed)
         );
-        assert_eq!(pending.payload.scene.seed, seed);
-        assert_eq!(pending.payload.scene.remote_addr, None);
-        assert!(pending.payload.arm_mouse_lock);
+        assert_eq!(pending.session.payload.options.seed, seed);
+        assert_eq!(pending.session.payload.options.remote_addr, None);
+        assert!(pending.arm_mouse_lock);
         assert_eq!(driver.ui_screen(), Some(GameScreen::NewWorld));
     }
 
@@ -3067,7 +3009,7 @@ mod tests {
 
         let join_result = driver.apply_ui_action(GameUiAction::JoinRemote, ui_action_context());
         assert_eq!(join_result.host_action, None);
-        assert!(join_result.session_start_queued);
+        assert!(join_result.session_start.is_some());
         assert_eq!(join_result.mouse_lock_requested, Some(false));
         assert_eq!(
             driver.session.state(),
@@ -3077,23 +3019,23 @@ mod tests {
                 }
             }
         );
-        let pending = driver.session.take_pending_start().unwrap();
+        let pending = join_result.session_start.expect("remote session plan");
         assert_eq!(
-            pending.request,
+            pending.session.request,
             SessionStartRequest::JoinRemote {
                 endpoint: RemoteSessionEndpoint::new("10.0.0.9:25565")
             }
         );
         assert_eq!(
-            pending.payload.scene.remote_addr,
+            pending.session.payload.options.remote_addr,
             Some("10.0.0.9:25565".to_owned())
         );
-        assert!(pending.payload.arm_mouse_lock);
+        assert!(pending.arm_mouse_lock);
         assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
     }
 
     #[test]
-    fn catalog_create_world_action_creates_world_and_queues_local_start() {
+    fn catalog_create_world_action_creates_world_and_plans_local_start() {
         let root = unique_temp_world_root("catalog-create");
         let scene = scene_with_world_root(root.clone());
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
@@ -3102,37 +3044,37 @@ mod tests {
 
         let result = driver.apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
 
-        assert!(result.session_start_queued);
+        assert!(result.session_start.is_some());
         assert_eq!(result.mouse_lock_requested, Some(false));
         assert_eq!(driver_catalog_state(&driver).entry_count(), 1);
         let worlds = NativeWorldCatalog::new(root.clone()).list_worlds().unwrap();
         assert_eq!(worlds.len(), 1);
         let summary = worlds[0].clone();
-        let pending = driver.session.take_pending_start().unwrap();
+        let pending = result.session_start.expect("catalog create session plan");
         assert_eq!(
-            pending.request,
+            pending.session.request,
             SessionStartRequest::create_local_world(
                 LocalWorldCreateOptions::new("New World", 4242)
                     .unwrap()
                     .with_requested_id(summary.id.clone())
             )
         );
-        assert_eq!(pending.payload.scene.seed, 4242);
-        assert_eq!(pending.payload.scene.remote_addr, None);
+        assert_eq!(pending.session.payload.options.seed, 4242);
+        assert_eq!(pending.session.payload.options.remote_addr, None);
         assert_eq!(
-            pending.payload.scene.world_dir,
+            pending.session.payload.options.world_dir,
             Some(root.join(summary.id.as_str()))
         );
         assert_eq!(
-            pending.payload.descriptor,
-            Some(ActiveSessionDescriptor::from_local_world_summary(&summary))
+            pending.session.payload.descriptor,
+            ActiveSessionDescriptor::from_local_world_summary(&summary)
         );
         assert!(root.join(summary.id.as_str()).join("world.json").is_file());
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn catalog_open_world_action_resolves_row_and_queues_open_start() {
+    fn catalog_open_world_action_resolves_row_and_plans_open_start() {
         let root = unique_temp_world_root("catalog-open");
         let catalog = NativeWorldCatalog::new(root.clone());
         let summary = catalog
@@ -3144,7 +3086,7 @@ mod tests {
 
         let result = driver.apply_ui_action(GameUiAction::OpenWorld(ui_id), ui_action_context());
 
-        assert!(result.session_start_queued);
+        assert!(result.session_start.is_some());
         assert_eq!(result.mouse_lock_requested, Some(false));
         let opened_summary = catalog
             .list_worlds()
@@ -3152,21 +3094,19 @@ mod tests {
             .into_iter()
             .find(|entry| entry.id == summary.id)
             .unwrap();
-        let pending = driver.session.take_pending_start().unwrap();
+        let pending = result.session_start.expect("catalog open session plan");
         assert_eq!(
-            pending.request,
+            pending.session.request,
             SessionStartRequest::open_local_world(summary.id.clone())
         );
-        assert_eq!(pending.payload.scene.seed, 99);
+        assert_eq!(pending.session.payload.options.seed, 99);
         assert_eq!(
-            pending.payload.scene.world_dir,
+            pending.session.payload.options.world_dir,
             Some(root.join(summary.id.as_str()))
         );
         assert_eq!(
-            pending.payload.descriptor,
-            Some(ActiveSessionDescriptor::from_local_world_summary(
-                &opened_summary
-            ))
+            pending.session.payload.descriptor,
+            ActiveSessionDescriptor::from_local_world_summary(&opened_summary)
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3184,7 +3124,7 @@ mod tests {
 
         let result = driver.apply_ui_action(GameUiAction::DeleteWorld(ui_id), ui_action_context());
 
-        assert!(!result.session_start_queued);
+        assert!(result.session_start.is_none());
         assert_eq!(driver.ui_screen(), Some(GameScreen::WorldList));
         assert!(!catalog.world_dir(&summary.id).exists());
         let state = driver_catalog_state(&driver);
@@ -3211,7 +3151,7 @@ mod tests {
         let state = driver
             .current_ui_render_state(FramePacingUiState::default(), BlockPaletteOverlay::hidden());
 
-        assert!(!result.session_start_queued);
+        assert!(result.session_start.is_none());
         assert!(catalog.world_dir(&summary.id).exists());
         assert_eq!(state.world_catalog.active, Some(ui_id));
         assert!(state.world_catalog.status.visible);

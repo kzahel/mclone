@@ -28,9 +28,9 @@ use crate::cli::{
     HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions, StartupWaitPolicy,
 };
 use crate::flat_client_driver::{
-    FlatClientDebugFrame, FlatClientDriver, FlatClientUiActionContext, FlatClientUiFrame,
-    FlatClientUiPointerClickReport, FlatClientUiRenderOptions, FlatClientWorldActionStatus,
-    game_collision_mode, game_movement_mode,
+    FlatClientDebugFrame, FlatClientDriver, FlatClientSessionStartPlan, FlatClientUiActionContext,
+    FlatClientUiFrame, FlatClientUiPointerClickReport, FlatClientUiRenderOptions,
+    FlatClientWorldActionStatus, game_collision_mode, game_movement_mode,
 };
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState};
 use crate::render_cache::load_asset_source;
@@ -126,6 +126,7 @@ pub(crate) struct OffscreenFlatClientHost {
     target_size: [u32; 2],
     clock: OffscreenFlatClientFrameClock,
     last_summary: Option<FullFrameRenderSummary>,
+    deferred_session_start: Option<FlatClientSessionStartPlan>,
 }
 
 impl OffscreenFlatClientHost {
@@ -159,6 +160,7 @@ impl OffscreenFlatClientHost {
             target_size,
             clock: OffscreenFlatClientFrameClock::default(),
             last_summary: None,
+            deferred_session_start: None,
         })
     }
 
@@ -203,14 +205,9 @@ impl OffscreenFlatClientHost {
     ) -> Result<()> {
         self.anchor_local_playable_startup_camera(&scene);
         self.driver.scene = scene;
-        self.driver.request_current_scene_start(false, false);
+        let plan = self.driver.current_scene_start_plan(false, false)?;
 
-        let assets = &self.assets;
-        let session_update = self
-            .driver
-            .finish_pending_session_start(Some(device), |scene| {
-                WindowSceneStartupPump::from_scene(scene, assets)
-            });
+        let session_update = self.start_session_plan(device, plan)?;
         if session_update.mouse_lock_requested.is_some() {
             self.driver.clear_camera_input();
         }
@@ -255,14 +252,9 @@ impl OffscreenFlatClientHost {
     fn start_scene_playable(&mut self, device: &wgpu::Device, scene: SceneOptions) -> Result<()> {
         self.anchor_local_playable_startup_camera(&scene);
         self.driver.scene = scene;
-        self.driver.request_current_scene_start(false, false);
+        let plan = self.driver.current_scene_start_plan(false, false)?;
 
-        let assets = &self.assets;
-        let session_update = self
-            .driver
-            .finish_pending_session_start(Some(device), |scene| {
-                WindowSceneStartupPump::from_scene(scene, assets)
-            });
+        let session_update = self.start_session_plan(device, plan)?;
         if session_update.mouse_lock_requested.is_some() {
             self.driver.clear_camera_input();
         }
@@ -321,14 +313,13 @@ impl OffscreenFlatClientHost {
             self.target_size[1],
         ));
 
-        let assets = &self.assets;
-        let session_update = self
-            .driver
-            .finish_pending_session_start(Some(frame.device), |scene| {
-                WindowSceneStartupPump::from_scene(scene, assets)
-            });
+        let session_update = if let Some(plan) = self.deferred_session_start.take() {
+            Some(self.start_session_plan(frame.device, plan)?)
+        } else {
+            None
+        };
         let startup_update = self.driver.advance_local_world_startup(Some(frame.device));
-        if session_update.mouse_lock_requested.is_some()
+        if session_update.is_some_and(|update| update.mouse_lock_requested.is_some())
             || startup_update.mouse_lock_requested.is_some()
         {
             self.driver.clear_camera_input();
@@ -488,14 +479,34 @@ impl OffscreenFlatClientHost {
             ),
         );
         self.driver.commit_ui_render_state(state);
-        self.driver.apply_ui_pointer_click(
+        let mut report = self.driver.apply_ui_pointer_click(
             point,
             FlatClientUiActionContext {
                 session_starting: self.driver.session.is_starting(),
                 from_pointer_click: true,
                 fallback_remote_addr: fallback_remote_addr.as_deref(),
             },
-        )
+        );
+        if let Some(result) = report.action_result.as_mut()
+            && let Some(plan) = result.session_start.take()
+        {
+            self.deferred_session_start = Some(plan);
+        }
+        report
+    }
+
+    fn start_session_plan(
+        &mut self,
+        device: &wgpu::Device,
+        plan: FlatClientSessionStartPlan,
+    ) -> Result<crate::flat_client_driver::FlatClientSessionUpdate> {
+        if plan.transition.teardown_world {
+            self.driver.teardown_world(Some(device))?;
+        }
+        let assets = &self.assets;
+        Ok(self.driver.start_session_plan(plan, Some(device), |scene| {
+            WindowSceneStartupPump::from_scene(scene, assets)
+        }))
     }
 
     pub(crate) fn run_script(&mut self, script: &OffscreenScript) -> Result<OffscreenScriptReport> {

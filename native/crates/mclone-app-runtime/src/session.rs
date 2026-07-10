@@ -234,6 +234,66 @@ impl SessionStartRequest {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionRuntimeKind {
+    Local,
+    Remote,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionStartPayload<O> {
+    pub runtime_kind: SessionRuntimeKind,
+    pub options: O,
+    pub descriptor: ActiveSessionDescriptor,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionStartPlan<O> {
+    pub request: SessionStartRequest,
+    pub payload: SessionStartPayload<O>,
+}
+
+/// Resolve every session request variant into host-specific scene/runtime
+/// options through one exhaustive shared dispatch.
+///
+/// Hosts supply only the construction details for transient local, catalog
+/// local, and remote options. This keeps request classification and descriptor
+/// selection out of platform/app loops.
+pub fn plan_session_start<O, E>(
+    request: SessionStartRequest,
+    create_local: impl FnOnce(&LocalWorldCreateOptions) -> Result<O, E>,
+    open_local: impl FnOnce(&LocalWorldId) -> Result<(O, ActiveSessionDescriptor), E>,
+    join_remote: impl FnOnce(&RemoteSessionEndpoint) -> Result<O, E>,
+    unknown_error: impl FnOnce() -> E,
+) -> Result<SessionStartPlan<O>, E> {
+    let payload = match &request {
+        SessionStartRequest::CreateLocalWorld { options } => SessionStartPayload {
+            runtime_kind: SessionRuntimeKind::Local,
+            options: create_local(options)?,
+            descriptor: request
+                .active_descriptor()
+                .expect("create-local request always has an active descriptor"),
+        },
+        SessionStartRequest::OpenLocalWorld { id } => {
+            let (options, descriptor) = open_local(id)?;
+            SessionStartPayload {
+                runtime_kind: SessionRuntimeKind::Local,
+                options,
+                descriptor,
+            }
+        }
+        SessionStartRequest::JoinRemote { endpoint } => SessionStartPayload {
+            runtime_kind: SessionRuntimeKind::Remote,
+            options: join_remote(endpoint)?,
+            descriptor: request
+                .active_descriptor()
+                .expect("join-remote request always has an active descriptor"),
+        },
+        SessionStartRequest::Unknown => return Err(unknown_error()),
+    };
+    Ok(SessionStartPlan { request, payload })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionStorageIntent {
     seed: Option<i64>,
@@ -586,6 +646,69 @@ mod tests {
             }
         );
         assert_eq!(descriptor.start_request(), request);
+    }
+
+    #[test]
+    fn shared_session_plan_classifies_all_supported_request_kinds() {
+        let create = plan_session_start(
+            SessionStartRequest::new_seed_local_world(12),
+            |options| Ok::<_, &'static str>(format!("local:{}", options.seed)),
+            |_| Err("unexpected open"),
+            |_| Err("unexpected remote"),
+            || "unknown",
+        )
+        .unwrap();
+        assert_eq!(create.payload.runtime_kind, SessionRuntimeKind::Local);
+        assert_eq!(create.payload.options, "local:12");
+        assert_eq!(
+            create.payload.descriptor,
+            ActiveSessionDescriptor::new_seed_local_world(12)
+        );
+
+        let id = LocalWorldId::new("planned-world").unwrap();
+        let summary = LocalWorldSummary::new(id.clone(), "Planned World", 34, 1).unwrap();
+        let expected_descriptor = ActiveSessionDescriptor::from_local_world_summary(&summary);
+        let open = plan_session_start(
+            SessionStartRequest::open_local_world(id.clone()),
+            |_| Err("unexpected create"),
+            |opened_id| {
+                assert_eq!(opened_id, &id);
+                Ok::<_, &'static str>(("catalog".to_owned(), expected_descriptor.clone()))
+            },
+            |_| Err("unexpected remote"),
+            || "unknown",
+        )
+        .unwrap();
+        assert_eq!(open.payload.runtime_kind, SessionRuntimeKind::Local);
+        assert_eq!(open.payload.options, "catalog");
+        assert_eq!(open.payload.descriptor, expected_descriptor);
+
+        let endpoint = RemoteSessionEndpoint::new("127.0.0.1:25565");
+        let remote = plan_session_start(
+            SessionStartRequest::JoinRemote {
+                endpoint: endpoint.clone(),
+            },
+            |_| Err("unexpected create"),
+            |_| Err("unexpected open"),
+            |joined| Ok::<_, &'static str>(format!("remote:{}", joined.address)),
+            || "unknown",
+        )
+        .unwrap();
+        assert_eq!(remote.payload.runtime_kind, SessionRuntimeKind::Remote);
+        assert_eq!(remote.payload.options, "remote:127.0.0.1:25565");
+        assert_eq!(
+            remote.payload.descriptor,
+            ActiveSessionDescriptor::Remote { endpoint }
+        );
+
+        let unknown = plan_session_start(
+            SessionStartRequest::Unknown,
+            |_| Ok::<_, &'static str>(String::new()),
+            |_| unreachable!(),
+            |_| unreachable!(),
+            || "unknown session",
+        );
+        assert_eq!(unknown.unwrap_err(), "unknown session");
     }
 
     #[test]

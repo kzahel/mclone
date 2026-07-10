@@ -4,7 +4,7 @@ use mclone_app_runtime::session::SessionStorageIntent;
 
 pub(crate) type XrSessionRuntimeFactory<S> = Box<
     dyn FnMut(
-        SessionStartRequest,
+        RemoteSessionEndpoint,
         XrSceneOptions,
         TexturedMeshAssets,
     ) -> Result<NativeSessionRuntime<S>>,
@@ -29,11 +29,7 @@ pub(crate) struct XrLocalStartup {
     pub(super) startup_view_pose: Option<XrStartupViewPose>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct XrPendingSessionStart {
-    scene: XrSceneOptions,
-    descriptor: Option<ActiveSessionDescriptor>,
-}
+pub(crate) type XrPendingSessionStart = SessionStartPayload<XrSceneOptions>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum XrSessionStartOutcome {
@@ -384,7 +380,7 @@ where
     pub fn set_session_runtime_factory<F>(&mut self, factory: F)
     where
         F: FnMut(
-                SessionStartRequest,
+                RemoteSessionEndpoint,
                 XrSceneOptions,
                 TexturedMeshAssets,
             ) -> Result<NativeSessionRuntime<S>>
@@ -456,43 +452,29 @@ where
     }
 
     pub(crate) fn request_session_start(&mut self, request: SessionStartRequest) -> Result<()> {
-        let payload = self.pending_session_payload_for_request(&request)?;
-        self.status_overlay = StatusOverlay::hidden();
-        self.session.request_start(request, payload);
-        Ok(())
-    }
-
-    pub(crate) fn pending_session_payload_for_request(
-        &self,
-        request: &SessionStartRequest,
-    ) -> Result<XrPendingSessionStart> {
-        match request {
-            SessionStartRequest::CreateLocalWorld { options } => Ok(XrPendingSessionStart {
-                scene: self.local_world_options(options.seed),
-                descriptor: request.active_descriptor(),
-            }),
-            SessionStartRequest::OpenLocalWorld { id } => {
+        let plan = plan_session_start(
+            request,
+            |options| Ok(self.local_world_options(options.seed)),
+            |id| {
                 let catalog = self
                     .world_catalog
                     .as_ref()
                     .context("Persistent worlds unavailable")?;
                 let opened = catalog.open_world(id)?;
-                Ok(XrPendingSessionStart {
-                    scene: self.catalog_world_scene(
+                Ok((
+                    self.catalog_world_scene(
                         &opened.summary,
                         catalog.world_dir(&opened.summary.id),
                     ),
-                    descriptor: Some(ActiveSessionDescriptor::from_local_world_summary(
-                        &opened.summary,
-                    )),
-                })
-            }
-            SessionStartRequest::JoinRemote { endpoint } => Ok(XrPendingSessionStart {
-                scene: self.remote_session_options(endpoint.address.clone()),
-                descriptor: request.active_descriptor(),
-            }),
-            SessionStartRequest::Unknown => bail!("unsupported unknown XR session start"),
-        }
+                    ActiveSessionDescriptor::from_local_world_summary(&opened.summary),
+                ))
+            },
+            |endpoint| Ok(self.remote_session_options(endpoint.address.clone())),
+            || anyhow!("unsupported unknown XR session start"),
+        )?;
+        self.status_overlay = StatusOverlay::hidden();
+        self.session.request_start(plan.request, plan.payload);
+        Ok(())
     }
 
     pub(crate) fn start_pending_session(
@@ -533,22 +515,21 @@ where
         pending: mclone_app_runtime::session::PendingSessionStart<XrPendingSessionStart>,
     ) -> Result<XrSessionStartOutcome> {
         let request = pending.request;
-        let scene = pending.payload.scene;
-        let descriptor = pending
-            .payload
-            .descriptor
-            .or_else(|| request.active_descriptor());
-        match request {
-            request @ (SessionStartRequest::CreateLocalWorld { .. }
-            | SessionStartRequest::OpenLocalWorld { .. }) => {
-                self.begin_local_session_start(request, descriptor, scene)?;
+        let SessionStartPayload {
+            runtime_kind,
+            options: scene,
+            descriptor,
+        } = pending.payload;
+        match runtime_kind {
+            SessionRuntimeKind::Local => {
+                self.begin_local_session_start(request, Some(descriptor), scene)?;
                 Ok(XrSessionStartOutcome::LocalStartupQueued)
             }
-            request @ SessionStartRequest::JoinRemote { .. } => {
-                let descriptor = self.start_replacement_session(device, queue, request, scene)?;
+            SessionRuntimeKind::Remote => {
+                let descriptor =
+                    self.start_replacement_session(device, queue, request, descriptor, scene)?;
                 Ok(XrSessionStartOutcome::Started(descriptor))
             }
-            SessionStartRequest::Unknown => bail!("unsupported unknown XR session start"),
         }
     }
 
@@ -848,11 +829,12 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         request: SessionStartRequest,
+        descriptor: ActiveSessionDescriptor,
         scene: XrSceneOptions,
     ) -> Result<ActiveSessionDescriptor> {
-        let descriptor = request.active_descriptor().with_context(|| {
-            format!("XR session start request did not describe an active session: {request:?}")
-        })?;
+        let ActiveSessionDescriptor::Remote { endpoint } = &descriptor else {
+            bail!("XR replacement runtime requires a remote descriptor: {descriptor:?}");
+        };
         let mesh_assets = self.mesh_assets.clone();
         let Some(factory) = self.session_runtime_factory.as_mut() else {
             let error = anyhow!("XR session runtime factory is not installed");
@@ -860,7 +842,7 @@ where
             return Err(error);
         };
         let scene = scene.validated()?;
-        let runtime = match factory(request.clone(), scene.clone(), mesh_assets) {
+        let runtime = match factory(endpoint.clone(), scene.clone(), mesh_assets) {
             Ok(runtime) => runtime,
             Err(error) => {
                 log::error!("failed to start XR session {request:?}: {error:#}");
@@ -1004,8 +986,9 @@ where
             self.session.request_start(
                 start.request,
                 XrPendingSessionStart {
-                    scene,
-                    descriptor: Some(start.descriptor),
+                    runtime_kind: SessionRuntimeKind::Local,
+                    options: scene,
+                    descriptor: start.descriptor,
                 },
             );
             self.ui.clear_input();

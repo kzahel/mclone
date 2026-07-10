@@ -41,8 +41,9 @@ use mclone_app_runtime::native_session_runtime::{
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, SessionFailure,
-    SessionStartRequest,
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
+    SessionFailure, SessionRuntimeKind, SessionStartPayload, SessionStartRequest,
+    plan_session_start,
 };
 use mclone_app_runtime::world_catalog::{
     LocalWorldId, LocalWorldSummary, NativeWorldCatalog, WorldCatalog, WorldCatalogError,

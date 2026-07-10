@@ -3,7 +3,9 @@ use crate::DEFAULT_SEED;
 use crate::flat_client_driver::{
     effective_render_options_for_camera, engine_camera_input_from_flat_frame,
 };
-use mclone_app_runtime::session::{GameSessionState, RemoteSessionEndpoint, SessionStartRequest};
+use mclone_app_runtime::session::{
+    ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
+};
 use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkSnapshot, Direction, block_to_section_coord,
@@ -63,19 +65,17 @@ fn unique_temp_world_root(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("mclone-{name}-{}-{nanos}", std::process::id()))
 }
 
-fn start_queued_session_immediately(app: &mut ChunkApp) {
-    let pending = app
-        .driver
-        .session
-        .take_pending_start()
-        .expect("session start should be queued");
-    let descriptor = pending
-        .payload
-        .descriptor
-        .clone()
-        .or_else(|| pending.request.active_descriptor())
-        .expect("queued local session should have an active descriptor");
-    app.start_world_from_scene(pending.payload.scene).unwrap();
+fn start_planned_session_immediately(
+    app: &mut ChunkApp,
+    mut result: crate::flat_client_driver::FlatClientUiActionResult,
+) {
+    let plan = result
+        .session_start
+        .take()
+        .expect("session start should be planned");
+    let descriptor = plan.session.payload.descriptor;
+    app.start_world_from_scene(plan.session.payload.options)
+        .unwrap();
     app.driver.session.complete_start(descriptor.clone());
     app.driver.apply_started_session_ui(&descriptor);
 }

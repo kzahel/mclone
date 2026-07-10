@@ -30,13 +30,13 @@ use crate::cli::{
     SceneOptions, XrClearSmokeOptions, XrDebugUiScreen as CliXrDebugUiScreen, XrMcloneSmokeOptions,
 };
 #[cfg(not(target_os = "android"))]
-use crate::remote_session::RemoteServerSession;
-#[cfg(not(target_os = "android"))]
 use crate::render_cache::load_asset_source;
 #[cfg(not(target_os = "android"))]
 use crate::scene_runtime::{
     native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
 };
+#[cfg(not(target_os = "android"))]
+use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::native_session_runtime::NativeSessionRuntime;
 #[cfg(not(target_os = "android"))]
@@ -74,7 +74,7 @@ type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
 >;
 
 #[cfg(not(target_os = "android"))]
-type DesktopXrMcloneTerrainState = XrMcloneTerrainState<RemoteServerSession>;
+type DesktopXrMcloneTerrainState = XrMcloneTerrainState<NativeRemoteServerSession>;
 
 #[cfg(target_os = "android")]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
@@ -797,10 +797,13 @@ fn create_mclone_terrain_state(
     .context("initialize shared mclone XR terrain scene")?;
     state.set_audio_engine(audio);
     state.set_frame_host_kind(FrameHostKind::DesktopXrOpenXr);
-    state.set_session_runtime_factory(|request, scene, mesh_assets| {
-        let desktop_scene = desktop_scene_options_for_xr_request(&request, &scene);
+    state.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
+        let desktop_scene = desktop_scene_options_for_xr_remote(&endpoint, &scene);
         let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
-        NativeSessionRuntime::from_active_runtime(request, runtime)
+        NativeSessionRuntime::from_active_runtime(
+            SessionStartRequest::JoinRemote { endpoint },
+            runtime,
+        )
     });
     Ok(state)
 }
@@ -851,31 +854,12 @@ fn xr_underwater_mode_from_desktop(
 }
 
 #[cfg(not(target_os = "android"))]
-fn desktop_scene_options_for_xr_request(
-    request: &SessionStartRequest,
+fn desktop_scene_options_for_xr_remote(
+    endpoint: &RemoteSessionEndpoint,
     scene: &XrSceneOptions,
 ) -> SceneOptions {
-    let mut seed = scene.seed;
-    let mut remote_addr = None;
-    let mut world_dir = scene.world_dir.clone();
-    match request {
-        SessionStartRequest::CreateLocalWorld { options } => {
-            seed = options.seed;
-            if options.requested_id.is_none() {
-                world_dir = None;
-            }
-        }
-        SessionStartRequest::OpenLocalWorld { .. } => {
-            remote_addr = None;
-        }
-        SessionStartRequest::JoinRemote { endpoint } => {
-            remote_addr = Some(endpoint.address.clone());
-            world_dir = None;
-        }
-        SessionStartRequest::Unknown => {}
-    }
     SceneOptions {
-        seed,
+        seed: scene.seed,
         chunk_x: scene.chunk_x,
         chunk_z: scene.chunk_z,
         render_distance: scene.render_distance as i32,
@@ -883,7 +867,7 @@ fn desktop_scene_options_for_xr_request(
         render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
         movement_speed_multiplier: scene.movement_speed_multiplier,
         simulation_cadence: Default::default(),
-        remote_addr,
+        remote_addr: Some(endpoint.address.clone()),
         day_time_override: scene.day_time_override,
         freeze_time: scene.freeze_time,
         first_person_player_visible: false,
@@ -891,7 +875,7 @@ fn desktop_scene_options_for_xr_request(
         light_status_batch_size: scene.light_status_batch_size,
         far_lod: scene.far_lod,
         world_root: scene.world_root.clone(),
-        world_dir,
+        world_dir: None,
         ..SceneOptions::default()
     }
 }

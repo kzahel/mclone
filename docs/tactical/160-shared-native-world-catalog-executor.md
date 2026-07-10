@@ -173,10 +173,13 @@ self.apply_<platform>_catalog_effects(effects, /* platform ctx */)
   `android_world_root(app)` helper (copy of the XR one). Web has none.
 - **Scene-option construction** — desktop `SceneOptions`, XR `XrSceneOptions`,
   Android its own type. The executor never builds scenes; it emits
-  `ClientCatalogSessionStart` effects the app turns into its scene.
-- **Session-start application** — desktop queues a `FlatClientPendingSessionStart`
-  with `arm_mouse_lock`; XR rebuilds the GPU scene inline with `&Device/&Queue`
-  (`session.rs:1012`). Already modeled as an effect; stays per-app.
+  `ClientCatalogSessionStart` effects. Tactical 168 Slice 7b later centralized
+  create/open/join classification in `plan_session_start`; hosts provide only
+  their scene-option constructors.
+- **Session-start application** — tactical 168 Slice 7b removed desktop's
+  `FlatClientPendingSessionStart` queue. Desktop and XR now consume the shared
+  typed plan; GPU/device application remains host-specific until the remaining
+  unified-scene slices land.
 
 ## Contract For Implementing Agents
 

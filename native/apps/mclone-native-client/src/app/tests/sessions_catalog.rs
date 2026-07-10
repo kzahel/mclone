@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn queue_local_world_start_sets_loading_status_without_closing_menu() {
+fn local_world_start_plan_sets_loading_status_without_closing_menu() {
     let scene = SceneOptions {
         remote_addr: Some("127.0.0.1:25565".to_owned()),
         ..SceneOptions::default()
@@ -16,7 +16,9 @@ fn queue_local_world_start_sets_loading_status_without_closing_menu() {
     );
     app.driver.set_ui_screen(Some(GameScreen::NewWorld));
 
-    app.driver.request_local_world_start(44, true);
+    let result = app
+        .driver
+        .apply_ui_action(GameUiAction::CreateWorld(44), ui_action_context());
 
     assert_eq!(
         app.driver.session.state(),
@@ -27,21 +29,21 @@ fn queue_local_world_start_sets_loading_status_without_closing_menu() {
     let status = app.driver.session.status().unwrap();
     assert!(status.ok);
     assert_eq!(status.message, "Creating world...");
-    let pending = app.driver.session.take_pending_start().unwrap();
+    let pending = result.session_start.expect("local session plan");
     assert_eq!(
-        pending.request,
+        pending.session.request,
         SessionStartRequest::new_seed_local_world(44)
     );
-    assert_eq!(pending.payload.scene.seed, 44);
-    assert_eq!(pending.payload.scene.remote_addr, None);
-    assert!(pending.payload.arm_mouse_lock);
-    assert!(!pending.payload.show_title_on_failure);
+    assert_eq!(pending.session.payload.options.seed, 44);
+    assert_eq!(pending.session.payload.options.remote_addr, None);
+    assert!(pending.arm_mouse_lock);
+    assert!(!pending.show_title_on_failure);
     assert_eq!(app.driver.ui_screen(), Some(GameScreen::NewWorld));
     assert!(!app.mouse_lock_requested);
 }
 
 #[test]
-fn queue_remote_session_start_sets_connecting_status_without_closing_menu() {
+fn remote_session_start_plan_sets_connecting_status_without_closing_menu() {
     let scene = SceneOptions::default();
     let assets = WindowSceneAssets::load().unwrap();
     let mut app = ChunkApp::new(
@@ -53,8 +55,10 @@ fn queue_remote_session_start_sets_connecting_status_without_closing_menu() {
     );
     app.driver.set_ui_screen(Some(GameScreen::JoinRemote));
 
-    app.driver
-        .request_remote_session_start("10.0.0.5:25565".to_owned(), true);
+    app.driver.set_join_remote_addr("10.0.0.5:25565");
+    let result = app
+        .driver
+        .apply_ui_action(GameUiAction::JoinRemote, ui_action_context());
 
     assert_eq!(
         app.driver.session.state(),
@@ -67,27 +71,27 @@ fn queue_remote_session_start_sets_connecting_status_without_closing_menu() {
     let status = app.driver.session.status().unwrap();
     assert!(status.ok);
     assert_eq!(status.message, "Connecting...");
-    let pending = app.driver.session.take_pending_start().unwrap();
+    let pending = result.session_start.expect("remote session plan");
     assert_eq!(
-        pending.request,
+        pending.session.request,
         SessionStartRequest::JoinRemote {
             endpoint: RemoteSessionEndpoint::new("10.0.0.5:25565")
         }
     );
     assert_eq!(
-        pending.payload.scene.remote_addr,
+        pending.session.payload.options.remote_addr,
         Some("10.0.0.5:25565".to_owned())
     );
-    assert_eq!(pending.payload.scene.seed, DEFAULT_SEED);
-    assert!(pending.payload.arm_mouse_lock);
-    assert!(!pending.payload.show_title_on_failure);
+    assert_eq!(pending.session.payload.options.seed, DEFAULT_SEED);
+    assert!(pending.arm_mouse_lock);
+    assert!(!pending.show_title_on_failure);
     assert_eq!(app.driver.ui_screen(), Some(GameScreen::JoinRemote));
     assert_eq!(app.driver.join_remote_addr(), "10.0.0.5:25565");
     assert!(!app.mouse_lock_requested);
 }
 
 #[test]
-fn pending_local_world_start_creates_startup_pump_without_blocking_until_active() {
+fn planned_local_world_start_creates_startup_pump_without_blocking_until_active() {
     let scene = SceneOptions {
         render_distance: 0,
         ..SceneOptions::default()
@@ -100,9 +104,10 @@ fn pending_local_world_start_creates_startup_pump_without_blocking_until_active(
         WindowStartIntent::Menu,
         StartupWaitPolicy::DESKTOP_DEFAULT,
     );
-    app.driver.request_local_world_start(77, true);
-
-    app.finish_pending_session_start();
+    let mut result = app
+        .driver
+        .apply_ui_action(GameUiAction::CreateWorld(77), ui_action_context());
+    app.start_session_plan(result.session_start.take().unwrap());
 
     assert!(app.driver.startup.is_some());
     assert!(app.driver.runtime.is_none());
@@ -113,6 +118,43 @@ fn pending_local_world_start_creates_startup_pump_without_blocking_until_active(
         }
     );
     assert!(!app.mouse_lock_requested);
+}
+
+#[test]
+fn mid_session_replacement_tears_down_active_runtime_and_starts_shared_plan() {
+    let scene = SceneOptions {
+        seed: 11,
+        render_distance: 0,
+        ..SceneOptions::default()
+    };
+    let assets = WindowSceneAssets::load().unwrap();
+    let mut app = ChunkApp::new(
+        scene.clone(),
+        assets,
+        TexturedSectionRenderOptions::default(),
+        WindowStartIntent::Menu,
+        StartupWaitPolicy::DESKTOP_DEFAULT,
+    );
+    app.start_world_from_scene(scene).unwrap();
+    app.driver
+        .session
+        .complete_start(ActiveSessionDescriptor::new_seed_local_world(11));
+
+    let mut result = app
+        .driver
+        .apply_ui_action(GameUiAction::CreateWorld(22), ui_action_context());
+    let plan = result.session_start.take().expect("replacement plan");
+    assert!(plan.transition.teardown_world);
+    app.start_session_plan(plan);
+
+    assert!(app.driver.runtime.is_none());
+    assert!(app.driver.startup.is_some());
+    assert_eq!(
+        app.driver.session.state(),
+        &GameSessionState::Starting {
+            request: SessionStartRequest::new_seed_local_world(22)
+        }
+    );
 }
 
 #[test]
@@ -176,8 +218,8 @@ fn catalog_world_create_edit_quit_reopen_preserves_block_edit() {
     let create = app
         .driver
         .apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
-    assert!(create.session_start_queued);
-    start_queued_session_immediately(&mut app);
+    assert!(create.session_start.is_some());
+    start_planned_session_immediately(&mut app, create);
 
     let created_id = match app.driver.session.state() {
         GameSessionState::Active { session } => session
@@ -246,8 +288,8 @@ fn catalog_world_create_edit_quit_reopen_preserves_block_edit() {
     let open = app
         .driver
         .apply_ui_action(GameUiAction::OpenWorld(row.id), ui_action_context());
-    assert!(open.session_start_queued);
-    start_queued_session_immediately(&mut app);
+    assert!(open.session_start.is_some());
+    start_planned_session_immediately(&mut app, open);
 
     match app.driver.session.state() {
         GameSessionState::Active { session } => {
@@ -291,8 +333,8 @@ fn catalog_world_delete_after_quit_removes_entry_and_blocks_reopen() {
     let create = app
         .driver
         .apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
-    assert!(create.session_start_queued);
-    start_queued_session_immediately(&mut app);
+    assert!(create.session_start.is_some());
+    start_planned_session_immediately(&mut app, create);
 
     let created_id = match app.driver.session.state() {
         GameSessionState::Active { session } => session
@@ -332,7 +374,7 @@ fn catalog_world_delete_after_quit_removes_entry_and_blocks_reopen() {
     let delete = app
         .driver
         .apply_ui_action(GameUiAction::DeleteWorld(row_id), ui_action_context());
-    assert!(!delete.session_start_queued);
+    assert!(delete.session_start.is_none());
     assert!(!world_dir.exists());
 
     let state = app.driver.current_ui_render_state(
@@ -353,7 +395,7 @@ fn catalog_world_delete_after_quit_removes_entry_and_blocks_reopen() {
     let reopen = app
         .driver
         .apply_ui_action(GameUiAction::OpenWorld(row_id), ui_action_context());
-    assert!(!reopen.session_start_queued);
+    assert!(reopen.session_start.is_none());
     assert!(app.driver.session.take_pending_start().is_none());
     assert!(app.driver.runtime.is_none());
     let state = app.driver.current_ui_render_state(
@@ -398,8 +440,8 @@ fn catalog_world_delete_active_world_is_rejected_without_teardown() {
     let create = app
         .driver
         .apply_ui_action(GameUiAction::CreateCatalogWorld, ui_action_context());
-    assert!(create.session_start_queued);
-    start_queued_session_immediately(&mut app);
+    assert!(create.session_start.is_some());
+    start_planned_session_immediately(&mut app, create);
 
     let created_id = match app.driver.session.state() {
         GameSessionState::Active { session } => session
@@ -433,7 +475,7 @@ fn catalog_world_delete_active_world_is_rejected_without_teardown() {
     let delete = app
         .driver
         .apply_ui_action(GameUiAction::DeleteWorld(active_row), ui_action_context());
-    assert!(!delete.session_start_queued);
+    assert!(delete.session_start.is_none());
     assert!(app.driver.session.take_pending_start().is_none());
     assert!(app.driver.runtime.is_some());
     assert!(world_dir.join("world.json").is_file());

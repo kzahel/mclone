@@ -67,6 +67,10 @@ Shared engine crates own:
 - render-section meshing, dirty/cache policy, and compile scheduling
 - renderer resources and frame drawing from explicit view/target facts
 - the shared native scene/session/UI/orchestration host (`mclone-scene`)
+- one shared create/open/join session-start planner (`mclone-app-runtime`),
+  producing typed local/remote runtime plans and active-session descriptors
+- one label-parameterized native TCP remote-session adapter
+  (`mclone-app-runtime`); platform factories still choose endpoint and label
 - client frame-pipeline accounting, neutral queue/peer builders, and shared
   report presentation (`mclone-app-runtime`, over the leaf
   `mclone-diagnostics` schema/math)

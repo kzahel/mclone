@@ -45,8 +45,8 @@ path.
   local and remote adapter implementations plus the normal runtime call sites.
   That is acceptable after 151, but future edits should not reintroduce a
   host-specific pump.
-- Desktop, Android, and Android XR remote wrappers hold
-  `NativeClientIoSession`. They still expose methods named
+- Historical note: desktop, Android, and Android XR remote wrappers held
+  `NativeClientIoSession`. They exposed methods named
   `drain_command_updates` / `try_drain_command_updates` because the shared
   `RemoteServerSession` trait predates the 151 naming cleanup.
 - `mclone-net::NativeClientSession` remains a low-level compatibility/test
@@ -271,6 +271,15 @@ the tactical records why the platform-local wrappers are intentionally left
 alone.
 
 Decision: no action; leave the native remote wrappers platform-local for now.
+
+**Superseded 2026-07-10 by tactical 168 Slice 7b:** the later unified-scene
+work made the shared ownership payoff concrete. Desktop flat, desktop XR, and
+Android XR now consume the label-parameterized
+`mclone_app_runtime::native_remote_session::NativeRemoteServerSession`; the
+desktop and Android-XR copies below are deleted. Flat Android intentionally
+keeps its copy only until tactical 168 Slice 8 deletes that app-local loop.
+The comparison and reasoning below remain the historical decision record for
+why tactical 154 did not broaden scope at the time.
 
 Comparison:
 

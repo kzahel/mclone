@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::far_lod::{FarTerrainLodConfig, StartupLodPrewarmConfig};
 use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
+use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 use mclone_app_runtime::native_session_runtime::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneRuntime,
     NativeSessionStartupPump, NativeSessionStartupStep, StartupReadinessPolicy,
@@ -37,7 +38,6 @@ use mclone_ui::LoadingProgressOverlay;
 
 use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use crate::cli::SceneOptions;
-use crate::remote_session::RemoteServerSession;
 use crate::render_cache::{SceneTexturedSections, TexturedMeshAssets, load_textured_mesh_assets};
 use mclone_render_session::{
     EngineCameraController, RenderSectionCacheUpdate, build_client_textured_sections,
@@ -46,7 +46,7 @@ use mclone_render_session::{
 use mclone_render_session::{RenderSectionSession, render_section_neighbor_readiness};
 
 pub(crate) type WindowRuntimeStats = SingleViewRuntimeStats;
-pub(crate) type NativeWindowSceneRuntime = NativeSceneRuntime<RemoteServerSession>;
+pub(crate) type NativeWindowSceneRuntime = NativeSceneRuntime<NativeRemoteServerSession>;
 
 /// Shared camera/interest reconciliation lane for the desktop flat client
 /// (docs/tactical/167 Slice 4): send-only pose sync, `"desktop"` log lane.
@@ -99,7 +99,7 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
         return build_local_integrated_client_runtime(local_integrated_scene_options(scene)?);
     };
 
-    let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
+    let mut session = NativeRemoteServerSession::connect(remote_addr.as_str(), "desktop")?;
     build_remote_dedicated_client_runtime(
         SingleViewHostOptions::new(center, render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
@@ -156,7 +156,7 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
         );
     };
 
-    let session = RemoteServerSession::connect(remote_addr.as_str())?;
+    let session = NativeRemoteServerSession::connect(remote_addr.as_str(), "desktop")?;
     NativeWindowSceneRuntime::remote_dedicated_with_mesh_assets(
         SingleViewHostOptions::new(center, render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
@@ -183,7 +183,7 @@ pub(crate) struct WindowSceneRuntime {
 /// startup path recompiles the resident cache.
 #[derive(Debug)]
 pub(crate) struct WindowSceneStartupPump {
-    pump: NativeSessionStartupPump<RemoteServerSession>,
+    pump: NativeSessionStartupPump<NativeRemoteServerSession>,
     actor_textures: ActorTextureAssets,
 }
 
@@ -263,7 +263,7 @@ impl WindowSceneStartupPump {
             .remote_addr
             .as_deref()
             .context("remote startup pump requires a remote address")?;
-        let session = RemoteServerSession::connect(remote_addr)?;
+        let session = NativeRemoteServerSession::connect(remote_addr, "desktop")?;
         let pump = NativeSessionStartupPump::remote_dedicated_with_mesh_assets(
             RemoteSessionEndpoint::new(remote_addr.to_owned()),
             SingleViewHostOptions::new(center, render_distance)

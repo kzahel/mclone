@@ -8,8 +8,10 @@ offscreen driver) landed 2026-07-09; Slice 4 (shared OpenXR frame driver)
 landed 2026-07-10; Slice 5 (shared diagnostics accounting and presentation)
 landed 2026-07-10; Slice 6 (shared adaptive render admission) landed
 2026-07-10; Slice 7a (shared effects/`HostEffects` and frame-pacing/debug POD
-promotion) landed 2026-07-10. (Slices 0–2 are independent per the sequencing guardrail, so
-Slice 2 landed ahead of Slice 1.) Post-Slice-3 review corrections landed
+promotion) landed 2026-07-10; Slice 7b (shared session-start planning and
+native remote-session adapter) landed 2026-07-10. (Slices 0–2 are independent
+per the sequencing guardrail, so Slice 2 landed ahead of Slice 1.) Post-Slice-3
+review corrections landed
 2026-07-10: truthful offscreen-settle failure, an exercised mono-HUD capture
 lane, a shared lifecycle `on_background()` policy, durable-flush regression
 coverage, the WASM-built runner connection adapter, and early completion of
@@ -1030,7 +1032,7 @@ Recommended sub-slice order:
   aggregator in Slice 8. XR pacing/mouse/touch hooks remain harmless adapters
   behind the existing visible capability policy rather than changing XR
   behavior in 7a.
-- **7b — Session start/replacement.** Desktop routes world create/open/join
+- **7b — Session start/replacement. [LANDED 2026-07-10]** Desktop routes world create/open/join
   and mid-session replacement through the host's session-runtime factory;
   delete the pending-start state machine (`app.rs:928-948`,
   `flat_client_driver.rs:1467-1781`) and desktop's `SessionStartRequest`
@@ -1038,6 +1040,30 @@ Recommended sub-slice order:
   label-parameterized shared type in `mclone-net` or `mclone-app-runtime`;
   desktop and both XR apps consume it (the flat-Android copy dies in
   Slice 8).
+
+  Landed shape: `plan_session_start` is the one exhaustive create/open/join/
+  unknown classifier and produces a typed local/remote runtime plan plus the
+  active-session descriptor. Both the scene host and desktop consume it. The
+  desktop coordinator no longer stores a second platform payload: UI/catalog
+  actions hand the plan directly to the `NativeSessionStartupPump` factory,
+  the app-side after-frame finisher and `FlatClientPendingSessionStart` are
+  gone, and local loading remains honestly step-driven through the existing
+  startup pump. Active-session replacement is covered by a regression that
+  verifies teardown followed by the new plan's local startup.
+
+  `mclone_app_runtime::native_remote_session::NativeRemoteServerSession` now
+  owns the native TCP/reconnect/update-batch adapter with a diagnostic host
+  label. Desktop flat, desktop XR, and Android XR use it; the two former
+  app-local adapters and their conversion copy are deleted. Flat Android's
+  copy remains explicitly for Slice 8.
+
+  Follow-ups intentionally retained: desktop still holds
+  `GameSessionCoordinator<()>` and `FlatClientLocalStartup` while 7c moves
+  session state and frame ownership wholesale onto `mclone-scene`; these are
+  state/progress compatibility, not a second queued request dispatcher. The
+  offscreen harness keeps one deferred typed plan only because scripted UI
+  clicks occur before a render-frame device is available; Slice 7d deletes
+  that harness staging slot. Web transport remains unchanged.
 - **7c — Per-frame loop.** `WinitFrameDriver`: redraw-driven, builds the mono
   view from the engine camera, acquires the window surface texture, calls the
   host's Mono frame; poll/sync/upload/traversal-ready/frame-input assembly
@@ -1368,8 +1394,8 @@ Final acceptance checklist (run everything on this machine):
 
 ## How to continue (for the implementing agent)
 
-Start with Slice 7b; Slices 0–7a are implemented. Read the shared session
-startup/runtime factory, desktop pending-start machine, and remote adapters
-named in Slice 7b. Keep `RenderAdmissionPolicy` on the scene host while moving desktop flat
+Start with Slice 7c; Slices 0–7b are implemented. Read the desktop redraw/frame
+assembly and the scene host's Mono topology named in Slice 7c. Keep
+`RenderAdmissionPolicy` on the scene host while moving desktop flat
 onto that host in the ordered 7a–7e sequence; do not move diagnostics or budget
 policy back into a platform loop handler.

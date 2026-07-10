@@ -20,7 +20,6 @@ mclone-audio.workspace = true
 mclone-android-platform.workspace = true
 mclone-app-runtime.workspace = true
 mclone-diagnostics.workspace = true
-mclone-net.workspace = true
 mclone-protocol.workspace = true
 mclone-render.workspace = true
 mclone-render-session.workspace = true

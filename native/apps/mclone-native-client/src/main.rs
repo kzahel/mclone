@@ -16,7 +16,6 @@ mod offscreen_flat_client;
 mod offscreen_scene_host;
 mod perf;
 mod remote_player_visual_smoke;
-mod remote_session;
 mod render_cache;
 mod render_compile_capacity;
 mod scene_runtime;

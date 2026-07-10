@@ -554,15 +554,17 @@ Shared-pump additions in `mclone-app-runtime`
 Per-consumer migration:
 
 - **Desktop flat** (`flat_client_driver.rs`, `scene_runtime.rs`): `WindowSceneStartupPump`
-  now wraps `NativeSessionStartupPump<RemoteServerSession>` and builds local
+  now wraps `NativeSessionStartupPump<NativeRemoteServerSession>` and builds local
   *or* remote pumps (`from_scene` keeps the loading-screen spawn-center anchor;
   `from_scene_at_scene_center` matches the pre-tactical blocking `make_runtime`
   scene center for tests / offscreen idle / remote join). `start_world_from_scene`
   replaced its `poll_window_runtime_until_idle` + `upload_all_runtime_sections`
   path with a shared blocking drive at the runtime interest center + a
   `upload_startup_seed_sections` seed upload, and takes a `StartupReadinessPolicy`
-  (`Playable` for real starts, `Idle` for screenshots). `finish_pending_session_start`
-  dropped its `make_runtime` arg and drives both branches from one pump maker.
+  (`Playable` for real starts, `Idle` for screenshots). At this tactical's
+  landing, `finish_pending_session_start` drove both branches from one pump
+  maker; tactical 168 Slice 7b later deleted that extra desktop pending queue
+  and hands a shared typed session plan directly to the pump factory.
   The startup step is now the host-neutral `NativeSessionStartupStep`
   (`startup_ready`, `local_progress`). `upload_all_runtime_sections` /
   `sync_all_runtime_sections` stay only for the surface/resource-rebuild path.

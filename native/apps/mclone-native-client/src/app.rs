@@ -32,8 +32,9 @@ use crate::MAX_RENDER_DISTANCE;
 use crate::cli::{SceneOptions, StartupWaitPolicy, WindowFrameReportOptions, WindowStartIntent};
 use crate::flat_client_driver::{
     DesktopBlinkDebugCommitStatus, FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver,
-    FlatClientHostAction, FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
-    FlatClientWorldActionStatus, game_collision_mode, game_movement_mode,
+    FlatClientHostAction, FlatClientSessionStartPlan, FlatClientUiActionContext, FlatClientUiFrame,
+    FlatClientUiRenderOptions, FlatClientWorldActionStatus, game_collision_mode,
+    game_movement_mode,
 };
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -925,8 +926,8 @@ impl ChunkApp {
         }
     }
 
-    fn finish_pending_session_start(&mut self) {
-        if self.driver.pending_session_start_needs_teardown() {
+    fn start_session_plan(&mut self, plan: FlatClientSessionStartPlan) {
+        if plan.transition.teardown_world {
             if let Err(err) = self.teardown_world() {
                 log::error!(
                     "failed to tear down world before starting replacement session: {err:#}"
@@ -936,7 +937,7 @@ impl ChunkApp {
         }
         let device = self.surface.as_ref().map(|surface| &surface.device);
         let assets = &self.assets;
-        let update = self.driver.finish_pending_session_start(device, |scene| {
+        let update = self.driver.start_session_plan(plan, device, |scene| {
             WindowSceneStartupPump::from_scene(scene, assets)
         });
         self.apply_session_update(update);
@@ -956,7 +957,7 @@ impl ChunkApp {
     ) {
         let fallback_remote_addr = self.driver.scene.remote_addr.clone();
         let session_starting = self.driver.session.is_starting();
-        let result = self.driver.apply_ui_action(
+        let mut result = self.driver.apply_ui_action(
             action,
             FlatClientUiActionContext {
                 session_starting,
@@ -1006,7 +1007,7 @@ impl ChunkApp {
             }
         }
 
-        if result.session_start_queued {
+        if result.session_start.is_some() {
             self.mouse_lock_requested = false;
         }
         if let Some(mouse_lock_requested) = result.mouse_lock_requested {
@@ -1017,6 +1018,9 @@ impl ChunkApp {
         }
         if !result.preserve_pointer_state {
             self.last_cursor = None;
+        }
+        if let Some(plan) = result.session_start.take() {
+            self.start_session_plan(plan);
         }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
@@ -1417,7 +1421,14 @@ impl ApplicationHandler for ChunkApp {
                 | StartupWaitPolicy::Progress
                 | StartupWaitPolicy::Playable
                 | StartupWaitPolicy::Frames(_) => {
-                    self.driver.request_current_scene_start(false, true);
+                    match self.driver.current_scene_start_plan(false, true) {
+                        Ok(plan) => self.start_session_plan(plan),
+                        Err(err) => {
+                            log::error!("failed to plan desktop startup: {err:#}");
+                            event_loop.exit();
+                            return;
+                        }
+                    }
                 }
             }
         }
@@ -1821,7 +1832,6 @@ impl ApplicationHandler for ChunkApp {
                             self.record_window_frame_report_sample(report.status);
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
-                                self.finish_pending_session_start();
                                 if frame_report_ready {
                                     if let Err(err) = self.write_window_frame_report() {
                                         log::error!("failed to write window frame report: {err:#}");
