@@ -817,6 +817,15 @@ selection, distinct stereo views, and live Android terrain/HUD/touch controls.
 No capture is committed. The Quest APK rebuilt, but `adb` reported no attached
 device, so this slice does not claim a fresh headset run.
 
+Post-closeout Quest evidence (2026-07-11): once the USB device reappeared, the
+first launch found that ADB's shell-owned external pack directory was readable
+but not writable by the release app. Android XR now stages its embedded
+first-party packs under internal app data and retains external app data only as
+a discovery root for the ADB-installed reference archive. The rebuilt APK
+passed the attached Quest 3 canary, discovered all three logical packs, reached
+a playable 9/9 target, and rendered 134 sections (37 drawn) with two actors on
+Oculus OpenXR/Adreno 740 without an app-fatal marker.
+
 The standalone claim is intentionally bounded to the authored/generated pack
 inputs and their resolution graph. Current native and web clients still
 load/fetch the local reference payload to construct epoch 0 before a persisted

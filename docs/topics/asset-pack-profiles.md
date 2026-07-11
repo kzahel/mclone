@@ -4,9 +4,9 @@ Topic: asset-pack-profiles
 
 Status: implementation complete 2026-07-11. Tactical
 [`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-6 and Tactical
-[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-5 landed. Selection,
+[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-6 landed. Selection,
 transactional replacement, platform adoption, persistence, strict provenance,
-and reload measurement are executable. Tactical 170 Slice 6 is next.
+reload measurement, and attached Quest asset discovery are executable.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -99,8 +99,12 @@ Minecraft pack is not sufficient.
 - Flat Android and Quest APK builds generate and embed both first-party packs.
   Android startup atomically stages them into the app-owned discovery root.
   The flat AVD logged both packs as staged/discovered and rendered a playable
-  scene; the Quest release APK contained both packs, but no headset was attached
-  for a fresh runtime run.
+  scene. On Quest, the writable internal app-data root owns embedded-pack
+  staging while external app data remains a read-only discovery source for the
+  ADB-installed reference archive. The attached Quest 3 canary discovered the
+  6,985-file reference pack plus both internal first-party packs, reached a
+  playable 9/9 target, and rendered 134 sections (37 drawn) and two actors on
+  Oculus OpenXR/Adreno 740 without an app-fatal marker.
 - Production web fetches all three pack payloads, projects their catalog into
   the shared host, and transactionally replaces both shared scene resources and
   the resident compiler at one asset epoch. The browser Apply probe completed

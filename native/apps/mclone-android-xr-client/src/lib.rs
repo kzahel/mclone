@@ -218,7 +218,7 @@ mod android {
         }
 
         let Some(path) =
-            android_app_data_asset_root(app, AndroidAppDataPathPreference::ExternalFirst)
+            android_app_data_asset_root(app, AndroidAppDataPathPreference::InternalFirst)
         else {
             log::warn!(
                 "Android XR could not resolve an app data path for {ANDROID_ASSET_ROOT_ENV}"
@@ -233,6 +233,24 @@ mod android {
             "Android XR {ANDROID_ASSET_ROOT_ENV} configured from app data path: {}",
             path.display()
         );
+
+        // Validation pushes the local Minecraft reference archive through adb,
+        // which makes its external directory shell-owned on Quest. Keep the
+        // writable app-internal root as the primary staging/persistence root,
+        // while retaining the external app-data root as a read-only discovery
+        // source for that developer-installed archive.
+        if std::env::var_os("MCLONE_ASSET_ROOT").is_none()
+            && let Some(external) = app.external_data_path()
+            && external != path
+        {
+            unsafe {
+                std::env::set_var("MCLONE_ASSET_ROOT", &external);
+            }
+            log::info!(
+                "Android XR MCLONE_ASSET_ROOT configured as external discovery root: {}",
+                external.display()
+            );
+        }
         Some(path)
     }
 

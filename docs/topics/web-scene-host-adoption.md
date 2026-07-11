@@ -532,8 +532,13 @@ zero result overflow, zero final deferred-drop backlog, and remote WebSocket
 transport were preserved. Reviewed `/tmp` captures covered desktop and mobile
 world/HUD, actor/selection/debug effects, catalog UI, native offscreen,
 synthetic stereo, and flat Android. No capture was committed. USB Quest was not
-visible after an `adb` restart, so the closeout does not claim a fresh headset
-run; Slice 3 remains the latest attached Quest 3 runtime canary.
+initially visible after an `adb` restart. Once it reappeared, the canary exposed
+and fixed shell-owned external asset-directory writes: embedded first-party
+packs now stage internally while the ADB-installed reference archive remains an
+external discovery source. The rebuilt release APK passed on Quest 3 with
+Oculus OpenXR/Adreno 740, discovered all three packs, reached a playable 9/9
+target, and rendered 134 sections (37 drawn) plus two actors without an
+app-fatal marker.
 
 ## Recommended Next Work
 

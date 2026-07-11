@@ -1167,11 +1167,18 @@ stereo rendered 42 sections (eight drawn, two eye UI composites, 249,679
 differing eye pixels), desktop XR checked, flat Android built for arm64+x86_64
 and passed its fresh AVD smoke, and the Quest APK rebuilt. Browser desktop,
 portrait, block-edit/debug/actor, catalog, desktop offscreen, stereo, and flat
-Android captures under `/tmp` were visually inspected and not committed. A
-fresh attached-Quest run is not claimed: after the AVD stopped, `adb` still
-listed no USB device even after a server restart. The last attached Quest 3
-runtime canary remains Slice 3 evidence; this closeout changed no OpenXR frame,
-view, target, or presentation contract.
+Android captures under `/tmp` were visually inspected and not committed.
+
+The Quest reappeared after a later `adb` restart and exposed a real canary
+failure: ADB had created the external `assets/packs` directory as the shell
+user, so the app could read the staged reference archive but could not write
+its two embedded first-party packs there. Android XR now stages embedded packs
+under its writable internal app-data root and registers external app data as a
+read-only discovery root. The rebuilt release APK then passed the attached
+Quest 3 launch canary on Oculus OpenXR/Adreno 740, discovered the external
+6,985-file reference pack plus both internal first-party packs, reached a
+playable 9/9 target, and rendered 134 sections (37 drawn) with two drawn actors.
+No app-fatal marker remained.
 
 ## Validation Matrix
 
