@@ -364,6 +364,13 @@ impl OffscreenFlatClientHost {
         self.driver.far_lod_settle_snapshot()
     }
 
+    pub(crate) fn render_view(
+        &self,
+        size: [u32; 2],
+    ) -> Result<mclone_render::chunk::ChunkRenderView> {
+        self.driver.host().mono_render_view(size)
+    }
+
     pub(crate) fn pending_stream_work(&self) -> usize {
         self.driver.host().pending_stream_work(self.camera.position)
     }

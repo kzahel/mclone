@@ -266,7 +266,7 @@ inventory; it is the default source-shape gate for every display client.
 flat-client smoke. It runs the real offscreen host path and writes its screenshot
 under `/tmp`.
 
-Far-LOD changes must additionally run the checked-in two-waypoint settle gate:
+Far-LOD changes must additionally run the checked-in four-waypoint settle gate:
 
 ```bash
 pnpm native:lod-settle:smoke
@@ -275,7 +275,9 @@ pnpm native:lod-settle:smoke
 It writes per-waypoint PNGs and `lod-settle-report.json` under
 `/tmp/mclone-lod-settle-smoke`, requires zero pending lifecycle work and exact
 set coherence, and pins the known high-view D1/D2 result until Tactical 172
-Slice 2 fixes it.
+Slice 2 fixes it. Its schema-2 top-down assertions also pin 165 sky-clear
+pixels inside the projected coverage footprint and require the high→spawn→high
+revisit capture to be pixel-identical.
 
 Platform-specific gates:
 

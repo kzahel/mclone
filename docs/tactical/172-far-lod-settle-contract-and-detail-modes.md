@@ -4,8 +4,9 @@ Status: active 2026-07-11. Slice 0 (documentation consolidation), Slice 1A
 (pull-only exact-set accessors plus the per-chunk ledger), and Slice 1B (first
 executable offscreen settle probe with the pinned fly-up repro) are complete.
 Slice 1C1 (validated JSON waypoint scripts and the permanent smoke lane) is
-also complete. Slice 1C2 (coverage pixels, revisit determinism, and the full
-movement/toggle/range matrix) is next. This tactical owns the far-LOD
+also complete. Slice 1C2a (coverage pixels and revisit determinism) is
+complete; Slice 1C2b (the movement/toggle/range matrix and full probe lane) is
+next. This tactical owns the far-LOD
 product-hardening series: a settle-state validation harness, the coverage-gap
 correctness burn-down, the user-facing LOD detail modes (auto / 4 / 8 / 16,
 debug 1 / 2), and residency/perf polish. It supersedes the remaining open
@@ -296,15 +297,32 @@ reproduce D1/D2 before any fix exists.
   `/tmp/mclone-lod-settle-smoke` were inspected. Native-client tests are green
   (`137` passed).
 
-#### Slice 1C2 — Image/determinism probes and full matrix (next)
+#### Slice 1C2a — Image and revisit assertions (complete 2026-07-11)
 
-- **Coverage image probe (C2).** For top-down waypoints, project each
-  in-coverage column center to screen and assert the sampled pixel is not the
-  sky clear color. This is the direct, pixel-level "no blue voids" assertion
-  matching the user captures.
-- **Revisit determinism.** A→B→A waypoint scripts assert the second A capture
-  is pixel-identical to the first (`count_pixel_mismatches == 0` under frozen
-  time) — regression-proofing without golden files.
+- **Schema-2 assertions landed.** Optional `coverageProbe.planeY` and
+  `matchesPixels` fields extend the validated waypoint contract; schema-1
+  scripts remain accepted. Coverage is restricted to explicit near-vertical
+  look-down cameras. Pixel references must name an earlier waypoint with the
+  identical camera pose.
+- **Coverage image probe (C2) landed.** For a top-down waypoint, the runner
+  reverse-projects every capture pixel onto the configured world plane, masks
+  it by the exact loaded-or-LOD-desired chunk set, and asserts that no masked
+  pixel equals the transformed sky clear RGBA. This footprint test is stronger
+  than the initially proposed center sample and directly detects small voids.
+- **Revisit determinism landed.** `matchesPixels` performs exact whole-frame
+  RGBA comparison (`count_pixel_mismatches`) after settle, without golden
+  files. The checked-in smoke is now a four-waypoint high→spawn→high revisit
+  around the original spawn/high pair.
+- **Pinned evidence.** Both high captures report 113 projected columns and
+  the same 165 sky pixels across seven coverage columns, while retaining the
+  three-column D1/D2 ledger signature. The revisit differs by zero pixels from
+  the first high capture. All four fixtures matched, closed with zero pending
+  work, and their 960×960 PNGs were inspected. Focused tests cover schema-1
+  compatibility, schema-2 reference validation, coverage masking, and
+  pixel-granular mismatch counting.
+
+#### Slice 1C2b — Movement/toggle/range matrix and full lane (next)
+
 - **Fixtures.** Small/fast first: RD4 + range 6 spawn-settle; fly-up-high
   settle (the user repro, expected-fail pinning D1/D2); one-chunk-step move;
   8-chunk move; band-crossing walk; far-LOD toggle off/on; range change.
@@ -498,7 +516,7 @@ regress). Additions:
 - `pnpm native:lod-settle:smoke` — fast fixture subset (Slice 1+; the
   permanent pre-merge check for LOD changes).
 - `pnpm native:lod-settle:probe` — full waypoint/fixture matrix with captures
-  (lands in Slice 1C2).
+  (lands in Slice 1C2b).
 - Existing tripwires: `pnpm native:desktop-offscreen:smoke`,
   `native:movement:smoke`, `native:timedemo:smoke`,
   `native:startup-streaming:perf` (+RD15), `native:frame-budget:perf`,

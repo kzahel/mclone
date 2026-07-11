@@ -1,11 +1,15 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use glam::Vec3;
+use glam::{Mat4, Vec3, Vec4};
 use mclone_app_runtime::lod_coverage::LodReplacementCounters;
 use mclone_core::{ChunkPos, LodTileKey, chunk_middle_block_coord};
-use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
+use mclone_render::chunk::ChunkRenderView;
+use mclone_render::color_profile::{RenderConfig, color_transform_wgpu};
+use mclone_render::headless::{
+    HEADLESS_FORMAT, HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png,
+};
 use mclone_scene::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
 use serde::Deserialize;
 
@@ -18,7 +22,8 @@ use crate::scene_runtime::WindowSceneAssets;
 
 const SPAWN_FIXTURE: &str = "rd4-range6-spawn-settle";
 const FLY_UP_FIXTURE: &str = "rd4-range6-fly-up-high";
-const SCRIPT_SCHEMA: u32 = 1;
+const MIN_SCRIPT_SCHEMA: u32 = 1;
+const SCRIPT_SCHEMA: u32 = 2;
 const MAX_WAYPOINTS: usize = 64;
 const MAX_CAPTURE_SETTLE_PASSES: usize = 4;
 const FLY_UP_EYE_OFFSET_X: f32 = 0.25;
@@ -57,10 +62,13 @@ struct FixtureObservation {
     expected: LodSettleExpectation,
     warmup: OffscreenWarmupReport,
     summary: mclone_app_runtime::frame_render::FullFrameRenderSummary,
+    render_view: ChunkRenderView,
     snapshot: FarLodSettleSnapshot,
     pending_stream_work: usize,
     budget_panel: mclone_diagnostics::BudgetDecisionPanelReport,
     lod_counters: LodReplacementCounters,
+    coverage_probe: Option<LodCoverageProbe>,
+    matches_pixels: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -77,9 +85,19 @@ struct LodSettleWaypoint {
     name: String,
     camera: LodSettleCamera,
     expected: LodSettleExpectation,
+    #[serde(default)]
+    coverage_probe: Option<LodCoverageProbe>,
+    #[serde(default)]
+    matches_pixels: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LodCoverageProbe {
+    plane_y: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 enum LodSettleCamera {
     SpawnSurface,
@@ -127,6 +145,8 @@ impl LodSettleScript {
                     name: SPAWN_FIXTURE.to_owned(),
                     camera: LodSettleCamera::SpawnSurface,
                     expected: LodSettleExpectation::Pass,
+                    coverage_probe: None,
+                    matches_pixels: None,
                 },
                 LodSettleWaypoint {
                     name: FLY_UP_FIXTURE.to_owned(),
@@ -139,15 +159,17 @@ impl LodSettleScript {
                         target: [center_x, FLY_UP_TARGET_Y, center_z],
                     },
                     expected: LodSettleExpectation::FailD1D2,
+                    coverage_probe: None,
+                    matches_pixels: None,
                 },
             ],
         }
     }
 
     fn validate(&self) -> Result<()> {
-        if self.schema != SCRIPT_SCHEMA {
+        if !(MIN_SCRIPT_SCHEMA..=SCRIPT_SCHEMA).contains(&self.schema) {
             bail!(
-                "far LOD settle script schema must be {SCRIPT_SCHEMA}, got {}",
+                "far LOD settle script schema must be {MIN_SCRIPT_SCHEMA}..={SCRIPT_SCHEMA}, got {}",
                 self.schema
             );
         }
@@ -155,10 +177,10 @@ impl LodSettleScript {
         if self.waypoints.is_empty() || self.waypoints.len() > MAX_WAYPOINTS {
             bail!("far LOD settle script requires 1..={MAX_WAYPOINTS} waypoints");
         }
-        let mut names = BTreeSet::new();
+        let mut prior_waypoints = BTreeMap::<&str, &LodSettleWaypoint>::new();
         for waypoint in &self.waypoints {
             validate_safe_name("waypoint", &waypoint.name)?;
-            if !names.insert(waypoint.name.as_str()) {
+            if prior_waypoints.contains_key(waypoint.name.as_str()) {
                 bail!("duplicate far LOD settle waypoint `{}`", waypoint.name);
             }
             if let LodSettleCamera::LookAt { eye, target } = waypoint.camera {
@@ -175,9 +197,62 @@ impl LodSettleScript {
                     );
                 }
             }
+            if self.schema < 2
+                && (waypoint.coverage_probe.is_some() || waypoint.matches_pixels.is_some())
+            {
+                bail!(
+                    "waypoint `{}` coverageProbe/matchesPixels requires script schema 2",
+                    waypoint.name
+                );
+            }
+            if let Some(probe) = waypoint.coverage_probe {
+                validate_coverage_probe(waypoint, probe)?;
+            }
+            if let Some(reference) = waypoint.matches_pixels.as_deref() {
+                validate_safe_name("matchesPixels", reference)?;
+                let Some(prior) = prior_waypoints.get(reference) else {
+                    bail!(
+                        "waypoint `{}` matchesPixels must name an earlier waypoint, got `{reference}`",
+                        waypoint.name
+                    );
+                };
+                if prior.camera != waypoint.camera {
+                    bail!(
+                        "waypoint `{}` matchesPixels camera differs from `{reference}`",
+                        waypoint.name
+                    );
+                }
+            }
+            prior_waypoints.insert(waypoint.name.as_str(), waypoint);
         }
         Ok(())
     }
+}
+
+fn validate_coverage_probe(waypoint: &LodSettleWaypoint, probe: LodCoverageProbe) -> Result<()> {
+    if !probe.plane_y.is_finite() {
+        bail!(
+            "waypoint `{}` coverage planeY must be finite",
+            waypoint.name
+        );
+    }
+    let LodSettleCamera::LookAt { eye, target } = waypoint.camera else {
+        bail!(
+            "waypoint `{}` coverageProbe requires an explicit top-down look-at camera",
+            waypoint.name
+        );
+    };
+    let eye = Vec3::from_array(eye);
+    let target = Vec3::from_array(target);
+    let direction = target - eye;
+    let downward_fraction = -direction.y / direction.length();
+    if eye.y <= probe.plane_y || downward_fraction < 0.95 {
+        bail!(
+            "waypoint `{}` coverageProbe camera must look down from above planeY",
+            waypoint.name
+        );
+    }
+    Ok(())
 }
 
 fn validate_safe_name(kind: &str, name: &str) -> Result<()> {
@@ -294,15 +369,19 @@ pub(crate) fn run_lod_settle_probe(
                 )?;
             }
             let snapshot = state.host.far_lod_settle_snapshot()?;
+            let render_view = state.host.render_view(target.size)?;
             state.observations.push(FixtureObservation {
                 name: waypoint.name,
                 expected: waypoint.expected,
                 warmup,
                 summary,
+                render_view,
                 snapshot,
                 pending_stream_work: state.host.pending_stream_work(),
                 budget_panel: state.host.latest_budget_decision_panel(),
                 lod_counters: state.host.lod_coverage_counters(),
+                coverage_probe: waypoint.coverage_probe,
+                matches_pixels: waypoint.matches_pixels,
             });
             Ok(())
         },
@@ -326,11 +405,34 @@ pub(crate) fn run_lod_settle_probe(
         save_rgba_png(path, loop_report.width, loop_report.height, pixels)?;
     }
 
+    let observation_indexes = state
+        .observations
+        .iter()
+        .enumerate()
+        .map(|(index, observation)| (observation.name.as_str(), index))
+        .collect::<BTreeMap<_, _>>();
+    let sky_rgba = sky_clear_rgba(&options.scene, options.render_options);
+    let pixel_analyses = state
+        .observations
+        .iter()
+        .enumerate()
+        .map(|(index, observation)| {
+            fixture_pixel_analysis(
+                observation,
+                &frame_pixels[index],
+                &frame_pixels,
+                &observation_indexes,
+                [loop_report.width, loop_report.height],
+                sky_rgba,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
     let fixtures = state
         .observations
         .iter()
         .zip(&capture_paths)
-        .map(|(observation, path)| fixture_json(observation, path))
+        .zip(&pixel_analyses)
+        .map(|((observation, path), analysis)| fixture_json(observation, path, analysis))
         .collect::<Vec<_>>();
     let expectations_met = fixtures
         .iter()
@@ -427,19 +529,254 @@ fn merge_warmups(
     first
 }
 
-fn fixture_json(observation: &FixtureObservation, capture_path: &Path) -> serde_json::Value {
+#[derive(Debug)]
+struct FixturePixelAnalysis {
+    coverage: Option<CoverageProbeResult>,
+    determinism: Option<PixelDeterminismResult>,
+}
+
+#[derive(Debug)]
+struct CoverageProbeResult {
+    plane_y: f32,
+    projected_columns: usize,
+    masked_pixels: usize,
+    sky_pixel_count: usize,
+    sky_columns: BTreeSet<ChunkPos>,
+    sky_rgba: [u8; 4],
+}
+
+#[derive(Debug)]
+struct PixelDeterminismResult {
+    reference: String,
+    mismatch_count: usize,
+}
+
+fn fixture_pixel_analysis(
+    observation: &FixtureObservation,
+    pixels: &[u8],
+    all_pixels: &[Vec<u8>],
+    observation_indexes: &BTreeMap<&str, usize>,
+    size: [u32; 2],
+    sky_rgba: [u8; 4],
+) -> Result<FixturePixelAnalysis> {
+    let coverage = observation.coverage_probe.map(|probe| {
+        coverage_probe_result(
+            &observation.snapshot,
+            observation.render_view,
+            pixels,
+            size,
+            probe,
+            sky_rgba,
+        )
+    });
+    let determinism = observation
+        .matches_pixels
+        .as_deref()
+        .map(|reference| -> Result<PixelDeterminismResult> {
+            let reference_index =
+                observation_indexes
+                    .get(reference)
+                    .copied()
+                    .with_context(|| {
+                        format!(
+                            "waypoint `{}` references missing capture `{reference}`",
+                            observation.name
+                        )
+                    })?;
+            Ok(PixelDeterminismResult {
+                reference: reference.to_owned(),
+                mismatch_count: count_pixel_mismatches(&all_pixels[reference_index], pixels),
+            })
+        })
+        .transpose()?;
+    Ok(FixturePixelAnalysis {
+        coverage,
+        determinism,
+    })
+}
+
+fn coverage_probe_result(
+    snapshot: &FarLodSettleSnapshot,
+    render_view: ChunkRenderView,
+    pixels: &[u8],
+    size: [u32; 2],
+    probe: LodCoverageProbe,
+    sky_rgba: [u8; 4],
+) -> CoverageProbeResult {
+    let coverage_columns = snapshot
+        .chunks
+        .iter()
+        .filter_map(|(pos, row)| (row.loaded || row.lod_desired_level.is_some()).then_some(*pos))
+        .collect::<BTreeSet<_>>();
+    let projected_columns = coverage_columns
+        .iter()
+        .filter(|pos| {
+            project_world_to_pixel(
+                render_view,
+                Vec4::new(
+                    chunk_middle_block_coord(pos.x) as f32 + 0.5,
+                    probe.plane_y,
+                    chunk_middle_block_coord(pos.z) as f32 + 0.5,
+                    1.0,
+                ),
+                size,
+            )
+            .is_some()
+        })
+        .count();
+    let mut masked_pixels = 0usize;
+    let mut sky_pixel_count = 0usize;
+    let mut sky_columns = BTreeSet::new();
+    let inverse_view_projection = render_view.view_projection.inverse();
+    for y in 0..size[1] {
+        for x in 0..size[0] {
+            let Some(world) =
+                pixel_world_on_plane(inverse_view_projection, [x, y], size, probe.plane_y)
+            else {
+                continue;
+            };
+            let pos = ChunkPos::new(
+                (world.x.floor() as i32).div_euclid(16),
+                (world.z.floor() as i32).div_euclid(16),
+            );
+            if !coverage_columns.contains(&pos) {
+                continue;
+            }
+            masked_pixels += 1;
+            let index = ((y * size[0] + x) * 4) as usize;
+            if pixels.get(index..index + 4) == Some(sky_rgba.as_slice()) {
+                sky_pixel_count += 1;
+                sky_columns.insert(pos);
+            }
+        }
+    }
+    CoverageProbeResult {
+        plane_y: probe.plane_y,
+        projected_columns,
+        masked_pixels,
+        sky_pixel_count,
+        sky_columns,
+        sky_rgba,
+    }
+}
+
+fn pixel_world_on_plane(
+    inverse_view_projection: Mat4,
+    pixel: [u32; 2],
+    size: [u32; 2],
+    plane_y: f32,
+) -> Option<Vec3> {
+    let ndc_x = (pixel[0] as f32 + 0.5) / size[0] as f32 * 2.0 - 1.0;
+    let ndc_y = 1.0 - (pixel[1] as f32 + 0.5) / size[1] as f32 * 2.0;
+    if !inverse_view_projection.is_finite() {
+        return None;
+    }
+    let unproject = |depth| {
+        let world = inverse_view_projection * Vec4::new(ndc_x, ndc_y, depth, 1.0);
+        (world.w.abs() > f32::EPSILON).then_some(world.truncate() / world.w)
+    };
+    let near = unproject(1.0)?;
+    let far = unproject(0.0)?;
+    let direction = far - near;
+    if direction.y.abs() <= f32::EPSILON {
+        return None;
+    }
+    let distance = (plane_y - near.y) / direction.y;
+    (distance >= 0.0).then_some(near + direction * distance)
+}
+
+fn project_world_to_pixel(
+    render_view: ChunkRenderView,
+    world: Vec4,
+    size: [u32; 2],
+) -> Option<[u32; 2]> {
+    let clip = render_view.view_projection * world;
+    if !clip.is_finite() || clip.w <= 0.0 {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    if !(-1.0..=1.0).contains(&ndc.x)
+        || !(-1.0..=1.0).contains(&ndc.y)
+        || !(0.0..=1.0).contains(&ndc.z)
+    {
+        return None;
+    }
+    let x = ((ndc.x * 0.5 + 0.5) * size[0] as f32).floor() as u32;
+    let y = ((1.0 - (ndc.y * 0.5 + 0.5)) * size[1] as f32).floor() as u32;
+    (x < size[0] && y < size[1]).then_some([x, y])
+}
+
+fn sky_clear_rgba(
+    scene: &crate::cli::SceneOptions,
+    render_options: mclone_render::chunk::TexturedSectionRenderOptions,
+) -> [u8; 4] {
+    let time_of_day = mclone_core::time::time_of_day(scene.day_time_override.unwrap_or(6000));
+    let clear = mclone_render::sky::overworld_clear_color(time_of_day);
+    let transform = RenderConfig::for_color_target(render_options.color_profile, HEADLESS_FORMAT)
+        .target_color_transform();
+    let clear = color_transform_wgpu(clear, transform);
+    [
+        unorm8(clear.r),
+        unorm8(clear.g),
+        unorm8(clear.b),
+        unorm8(clear.a),
+    ]
+}
+
+fn unorm8(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn count_pixel_mismatches(left: &[u8], right: &[u8]) -> usize {
+    left.chunks_exact(4)
+        .zip(right.chunks_exact(4))
+        .filter(|(left, right)| left != right)
+        .count()
+        + left.len().abs_diff(right.len()).div_ceil(4)
+}
+
+fn fixture_json(
+    observation: &FixtureObservation,
+    capture_path: &Path,
+    pixel_analysis: &FixturePixelAnalysis,
+) -> serde_json::Value {
     let coherence_failures = settle_coherence_failures(observation);
     let culled_but_suppressed = observation.snapshot.culled_but_suppressed_chunks();
     let observed_d1_d2 = !culled_but_suppressed.is_empty();
     let observes_d1_d2 = observation.expected == LodSettleExpectation::FailD1D2;
+    let coverage_sampled = pixel_analysis
+        .coverage
+        .as_ref()
+        .is_none_or(|coverage| coverage.projected_columns > 0 && coverage.masked_pixels > 0);
+    let observed_sky = pixel_analysis
+        .coverage
+        .as_ref()
+        .is_some_and(|coverage| !coverage.sky_columns.is_empty());
+    let coverage_matched = pixel_analysis.coverage.as_ref().is_none_or(|_| {
+        coverage_sampled
+            && match observation.expected {
+                LodSettleExpectation::Pass => !observed_sky,
+                LodSettleExpectation::FailD1D2 => observed_sky,
+            }
+    });
+    let determinism_matched = pixel_analysis
+        .determinism
+        .as_ref()
+        .is_none_or(|determinism| determinism.mismatch_count == 0);
     let observed = if !coherence_failures.is_empty() {
         "fail:set-coherence"
+    } else if !determinism_matched {
+        "fail:pixel-determinism"
+    } else if observation.expected == LodSettleExpectation::Pass && observed_sky {
+        "fail:c2-sky"
     } else if observes_d1_d2 && observed_d1_d2 {
         "fail:d1-d2"
     } else {
         "pass"
     };
     let matched_expectation = coherence_failures.is_empty()
+        && coverage_matched
+        && determinism_matched
         && match observation.expected {
             // Slice 1B defined the spawn fixture as the set-coherence canary;
             // pixel/coverage completeness becomes a pass condition in 1C2.
@@ -447,6 +784,30 @@ fn fixture_json(observation: &FixtureObservation, capture_path: &Path) -> serde_
             LodSettleExpectation::FailD1D2 => observed_d1_d2,
         };
     let mut assertion_failures = coherence_failures.clone();
+    if !coverage_sampled {
+        assertion_failures.push("C2: coverage probe projected no columns".to_owned());
+    }
+    if let Some(coverage) = pixel_analysis
+        .coverage
+        .as_ref()
+        .filter(|coverage| !coverage.sky_columns.is_empty())
+    {
+        assertion_failures.push(format!(
+            "C2: {} pixels inside the projected coverage footprint hit the sky clear color across {} columns",
+            coverage.sky_pixel_count,
+            coverage.sky_columns.len(),
+        ));
+    }
+    if let Some(determinism) = pixel_analysis
+        .determinism
+        .as_ref()
+        .filter(|determinism| determinism.mismatch_count != 0)
+    {
+        assertion_failures.push(format!(
+            "C2 revisit: {} pixels differ from `{}`",
+            determinism.mismatch_count, determinism.reference
+        ));
+    }
     if observes_d1_d2 && observed_d1_d2 {
         assertion_failures.push(format!(
             "D1/D2: {} traversal-ready suppressed columns were not painted",
@@ -475,6 +836,18 @@ fn fixture_json(observation: &FixtureObservation, capture_path: &Path) -> serde_
             "graphCulledSections": observation.summary.graph_culled_section_count,
             "farLodRegionDraws": observation.summary.far_lod_region_draw_count,
         },
+        "coverageProbe": pixel_analysis.coverage.as_ref().map(|coverage| serde_json::json!({
+            "planeY": coverage.plane_y,
+            "projectedColumns": coverage.projected_columns,
+            "maskedPixels": coverage.masked_pixels,
+            "skyClearRgba": coverage.sky_rgba,
+            "skyPixelCount": coverage.sky_pixel_count,
+            "skyColumns": chunk_positions_json(&coverage.sky_columns),
+        })),
+        "pixelDeterminism": pixel_analysis.determinism.as_ref().map(|determinism| serde_json::json!({
+            "reference": determinism.reference,
+            "mismatchCount": determinism.mismatch_count,
+        })),
         "sets": {
             "desiredTiles": observation.snapshot.runtime.producer.desired_tiles.len(),
             "residentTiles": observation.snapshot.runtime.producer.resident_tiles.len(),
@@ -627,10 +1000,14 @@ mod tests {
                 far_lod_region_draw_count: 1,
                 ..Default::default()
             },
+            render_view: mclone_render::chunk::ChunkCamera::overview_for_chunk(0, 0)
+                .render_view(960, 960),
             snapshot,
             pending_stream_work: 0,
             budget_panel: mclone_diagnostics::BudgetDecisionPanelReport::default(),
             lod_counters: LodReplacementCounters::default(),
+            coverage_probe: None,
+            matches_pixels: None,
         };
 
         assert!(settle_coherence_failures(&observation).is_empty());
@@ -672,8 +1049,13 @@ mod tests {
 
         script.validate().unwrap();
         assert_eq!(script.schema, SCRIPT_SCHEMA);
-        assert_eq!(script.waypoints.len(), 2);
+        assert_eq!(script.waypoints.len(), 4);
         assert_eq!(script.waypoints[1].expected, LodSettleExpectation::FailD1D2);
+        assert_eq!(script.waypoints[1].coverage_probe.unwrap().plane_y, 64.0);
+        assert_eq!(
+            script.waypoints[3].matches_pixels.as_deref(),
+            Some(FLY_UP_FIXTURE)
+        );
     }
 
     #[test]
@@ -724,5 +1106,96 @@ mod tests {
                 .to_string()
                 .contains("must differ")
         );
+    }
+
+    #[test]
+    fn schema_one_remains_valid_but_rejects_schema_two_assertions() {
+        let mut script = LodSettleScript::default_for_scene(&crate::cli::SceneOptions::default());
+        script.schema = 1;
+        script.validate().unwrap();
+
+        script.waypoints[1].coverage_probe = Some(LodCoverageProbe { plane_y: 64.0 });
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("requires script schema 2")
+        );
+    }
+
+    #[test]
+    fn pixel_match_requires_an_earlier_identical_camera() {
+        let mut script = LodSettleScript::default_for_scene(&crate::cli::SceneOptions::default());
+        let mut revisit = script.waypoints[1].clone();
+        revisit.name = "high-revisit".to_owned();
+        revisit.matches_pixels = Some(FLY_UP_FIXTURE.to_owned());
+        script.waypoints.push(revisit);
+        script.validate().unwrap();
+
+        script.waypoints[2].matches_pixels = Some("missing".to_owned());
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("must name an earlier waypoint")
+        );
+
+        script.waypoints[2].matches_pixels = Some(SPAWN_FIXTURE.to_owned());
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("camera differs")
+        );
+    }
+
+    #[test]
+    fn coverage_probe_maps_sky_pixels_back_into_coverage() {
+        let size = [32, 32];
+        let camera = mclone_render::chunk::ChunkCamera {
+            eye: [8.25, 200.0, 8.25],
+            target: [8.0, 64.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 58.0_f32.to_radians(),
+            z_near: 0.1,
+            z_far: 600.0,
+        };
+        let render_view = camera.render_view(size[0], size[1]);
+        let mut snapshot = FarLodSettleSnapshot::default();
+        snapshot.chunks.insert(
+            ChunkPos::new(0, 0),
+            FarLodChunkLedgerRow {
+                loaded: true,
+                ..FarLodChunkLedgerRow::default()
+            },
+        );
+        let sky_rgba = [120, 167, 255, 255];
+        let pixels = sky_rgba.repeat((size[0] * size[1]) as usize);
+
+        let result = coverage_probe_result(
+            &snapshot,
+            render_view,
+            &pixels,
+            size,
+            LodCoverageProbe { plane_y: 64.0 },
+            sky_rgba,
+        );
+
+        assert_eq!(result.projected_columns, 1);
+        assert!(result.masked_pixels > 0);
+        assert_eq!(result.sky_pixel_count, result.masked_pixels);
+        assert_eq!(result.sky_columns, BTreeSet::from([ChunkPos::new(0, 0)]));
+    }
+
+    #[test]
+    fn pixel_mismatch_count_is_rgba_pixel_granular() {
+        assert_eq!(
+            count_pixel_mismatches(&[1, 2, 3, 4, 5, 6, 7, 8], &[1, 2, 3, 4, 5, 6, 0, 8]),
+            1
+        );
+        assert_eq!(count_pixel_mismatches(&[1, 2, 3, 4], &[]), 1);
     }
 }
