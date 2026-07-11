@@ -446,9 +446,13 @@ impl McloneSceneHost {
     }
 
     pub fn apply_mono_movement_frame(&mut self, frame: FlatInputFrame, dt_seconds: f64) -> bool {
-        let Some(runtime) = self.runtime.as_ref() else {
+        if !self.gameplay_startup_complete() {
             return false;
-        };
+        }
+        let runtime = self
+            .runtime
+            .as_ref()
+            .expect("startup completion requires runtime");
         let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
         let before = self.camera.snapshot();
         let after = self.camera.apply_movement_input(runtime.client(), input);
@@ -627,7 +631,7 @@ impl McloneSceneHost {
     }
 
     pub fn commit_mono_player_pose(&mut self) -> Result<bool> {
-        if self.runtime.is_none() {
+        if !self.gameplay_startup_complete() {
             return Ok(false);
         }
         self.commit_engine_camera_player_pose_timed()
@@ -1038,13 +1042,22 @@ impl McloneSceneHost {
         self.local_startup.is_none()
     }
 
+    /// Whether authoritative startup and drawable coverage admit gameplay.
+    /// Platform drivers may expose this fact, but movement/pose methods enforce
+    /// it internally so a slow host cannot accidentally run gravity early.
+    pub fn gameplay_startup_complete(&self) -> bool {
+        self.local_startup.is_none()
+            && !self.external_runtime_startup_pending
+            && self.runtime.is_some()
+    }
+
     /// Ready or in-flight render work relevant to the requested camera plus
     /// queued client uploads. Dirty chunks waiting on neighbor readiness do not
     /// keep deterministic capture loops alive: they cannot make progress until
     /// another runtime update arrives, and the next frame will observe that
     /// update normally. Returns [`usize::MAX`] while local startup is promoting.
     pub fn pending_stream_work(&self, camera_position: Vec3) -> usize {
-        if self.local_startup.is_some() {
+        if !self.gameplay_startup_complete() {
             return usize::MAX;
         }
         let Some(runtime) = self.runtime.as_ref() else {

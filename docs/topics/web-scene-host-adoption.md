@@ -17,6 +17,19 @@ Convergence And Parity Closeout Milestone D subsequently promoted Far LOD
 through the same production host and worker/compiler seams without reopening
 this adoption series.
 
+Post-closeout correction (2026-07-11): browser worker/socket construction had
+been treated as gameplay-ready even though the authoritative underfoot chunk
+could still be streaming. The shared scene host now keeps externally supplied
+runtimes behind the same three-part startup-admission contract as native:
+host/spawn authority, drawable coverage near the startup camera, and settled
+presentation preparation. Web local authority requires the active interest
+chunk snapshot (plus the richer playable-chunk diagnostics when the adapter
+provides them); remote authority additionally requires drained initial
+transport queues. Mono movement, gravity, and pose commits enforce admission
+inside `McloneSceneHost`, so the browser cadence adapter cannot bypass it. The
+CPU-throttled mobile smoke records the held and minimum pre-admission camera Y,
+requires them to match, and waits for a grounded player after admission.
+
 ## Scope
 
 Move the production Rust/WASM browser client from its app-local

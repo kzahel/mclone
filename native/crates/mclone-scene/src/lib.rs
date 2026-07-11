@@ -334,6 +334,10 @@ pub struct McloneSceneHost {
     pending_external_asset_pack_selection: Option<ExternalAssetPackSelection>,
     runtime: Option<SceneSessionRuntime>,
     local_startup: Option<SceneLocalStartup>,
+    /// An asynchronously constructed runtime may already be connected while
+    /// its authoritative spawn/view is still streaming. Keep gameplay frozen
+    /// until the shared startup-admission evidence is complete.
+    external_runtime_startup_pending: bool,
     session: GameSessionCoordinator<ScenePendingSessionStart>,
     #[cfg(not(target_arch = "wasm32"))]
     session_runtime_factory: Option<Box<dyn SceneSessionRuntimeFactory>>,
@@ -1105,9 +1109,33 @@ impl McloneSceneHost {
         let runtime_upload_start = self.services.clock.now();
         let upload =
             self.poll_runtime_and_upload(device, center_position, frame_deadline, timing)?;
+        self.advance_external_runtime_startup_admission(center_position);
         timing.runtime_upload_ms =
             elapsed_ms(self.services.clock.elapsed_since(runtime_upload_start));
         Ok(upload)
+    }
+
+    fn advance_external_runtime_startup_admission(&mut self, camera_position: Vec3) {
+        if !self.external_runtime_startup_pending {
+            return;
+        }
+        let Some(runtime) = self.runtime.as_ref() else {
+            return;
+        };
+        let traversal_ready = runtime
+            .traversal_ready_render_section_keys(camera_position)
+            .len();
+        let evidence = mclone_app_runtime::StartupAdmissionEvidence {
+            host_ready: runtime.startup_host_ready(
+                mclone_app_runtime::StartupReadinessPolicy::Playable,
+                camera_position,
+            ),
+            drawable_section_count: self.draw.section_count().min(traversal_ready),
+            presentation_settled: true,
+        };
+        if evidence.ready() {
+            self.external_runtime_startup_pending = false;
+        }
     }
 
     fn render_compile_frame_deadline(&self) -> Option<MonotonicDeadline> {

@@ -784,7 +784,12 @@ where
         let render_seed_drawable = self.render_seed.drawable_section_count();
         // Every lane uses the same gate: host-mode evidence, a drawable render
         // seed, and prewarm settled (always true when prewarm is disabled).
-        let startup_ready = host_ready && render_seed_drawable > 0 && self.prewarm.settled();
+        let startup_ready = crate::StartupAdmissionEvidence {
+            host_ready,
+            drawable_section_count: render_seed_drawable,
+            presentation_settled: self.prewarm.settled(),
+        }
+        .ready();
 
         let step = NativeSessionStartupStep {
             host_mode,

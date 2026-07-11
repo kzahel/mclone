@@ -199,6 +199,10 @@ async function run() {
         console.error(`browser console: ${message.text()}`);
       }
     });
+    if (mobileAppLoop) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: 2 });
+    }
     if (assetPackUiProbe) {
       await page.addInitScript(() => {
         if (globalThis.sessionStorage?.getItem("mclone.assetPacks.probeInitialized") !== "1") {
@@ -463,6 +467,14 @@ async function run() {
           { timeout: 60_000 },
         );
         await waitForWebAppStreamingSettled(page);
+        await page.waitForFunction(
+          () => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.startupReady === true && state.onGround === true;
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
         const mobileTouchProbe = await exerciseMobileTouchControls(page, canvas);
         await waitForWebAppStreamingSettled(page);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
@@ -3814,6 +3826,16 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
   }
   if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
     throw new Error(`native web mobile app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    result.startupReady !== true
+    || !Number.isFinite(result.startupHoldCameraY)
+    || !Number.isFinite(result.minimumPreStartupCameraY)
+    || Math.abs(result.startupHoldCameraY - result.minimumPreStartupCameraY) > 1e-6
+    || !Number.isInteger(result.startupAdmissionFrame)
+    || result.startupAdmissionFrame < 1
+  ) {
+    throw new Error(`native web mobile startup allowed gravity before spawn admission:\n${JSON.stringify(result, null, 2)}`);
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`mobile app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);

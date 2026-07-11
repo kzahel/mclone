@@ -175,6 +175,10 @@ const runtime: AppRuntime = {
     compileInFlightCount: 0,
     compileFinalizingCount: 0,
     streamingSettled: false,
+    startupReady: false,
+    startupHoldCameraY: null as number | null,
+    minimumPreStartupCameraY: null as number | null,
+    startupAdmissionFrame: null as number | null,
     compileQueued: false,
     compileTargetX: null,
     compileTargetZ: null,
@@ -878,7 +882,18 @@ class WebFrameDriver {
   }
 
   applyReport(report: WasmReport): void {
+    const wasStartupReady = runtime.state.startupReady === true;
     this.applyCameraState(report);
+    runtime.state.startupReady = Boolean(report.startupReady);
+    if (!runtime.state.startupReady) {
+      runtime.state.startupHoldCameraY ??= runtime.state.cameraY;
+      runtime.state.minimumPreStartupCameraY = Math.min(
+        runtime.state.minimumPreStartupCameraY ?? runtime.state.cameraY,
+        runtime.state.cameraY,
+      );
+    } else if (!wasStartupReady) {
+      runtime.state.startupAdmissionFrame = Number(report.frameCount);
+    }
     runtime.state.ok = true;
     runtime.state.radiusChunks = report.radiusChunks;
     runtime.state.width = report.width;
@@ -1624,6 +1639,10 @@ class WebFrameDriver {
     runtime.state.compileInFlightCount = 0;
     runtime.state.compileFinalizingCount = 0;
     runtime.state.streamingSettled = false;
+    runtime.state.startupReady = false;
+    runtime.state.startupHoldCameraY = null;
+    runtime.state.minimumPreStartupCameraY = null;
+    runtime.state.startupAdmissionFrame = null;
     runtime.state.compileQueued = false;
     runtime.state.compileTargetX = null;
     runtime.state.compileTargetZ = null;

@@ -248,10 +248,8 @@ impl WebSceneHost {
                 .report(None, false, delta_seconds, first_after_resume)
                 .map_err(JsValue::from);
         };
-        let runtime_ready = host
-            .runtime_stats()
-            .is_some_and(|stats| stats.loaded_chunks > 0);
-        if runtime_ready && !self.startup_camera_reconciled {
+        let gameplay_ready = host.gameplay_startup_complete();
+        if gameplay_ready && !self.startup_camera_reconciled {
             if let Some(target) = find_interaction_surface(host) {
                 aim_player_host_at_block(host, target);
                 self.startup_camera_reconciled = true;
@@ -282,9 +280,7 @@ impl WebSceneHost {
             ..FlatInputFrame::default()
         };
         self.movement_input_applied |= host.apply_mono_look_frame(input);
-        if runtime_ready {
-            self.movement_input_applied |= host.apply_mono_movement_frame(input, delta_seconds);
-        }
+        self.movement_input_applied |= host.apply_mono_movement_frame(input, delta_seconds);
         if forward || backward || left || right || analog_active || jump || descend || sneak {
             let _ = host.commit_mono_player_pose().map_err(js_error)?;
         }
@@ -2053,6 +2049,7 @@ impl WebSceneHost {
                 "pendingStreamWork",
                 host.pending_stream_work(camera_position) as f64,
             )?;
+            report_set_bool(&object, "startupReady", host.gameplay_startup_complete())?;
             if let Some(stats) = host.runtime_stats() {
                 report_set_string(&object, "hostMode", stats.host_mode.label())?;
                 report_set_string(

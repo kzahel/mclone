@@ -73,6 +73,10 @@ pnpm native:web:bundle
 pnpm deploy
 ```
 
+`native:web:mobile-smoke` runs with browser CPU throttling and locks startup
+admission: the camera must remain at its held spawn height until the underfoot
+interest chunk and drawable view are ready, then settle onto loaded ground.
+
 `pnpm deploy` is an alias for `pnpm native:web:deploy`.
 
 ## Deploy Contents

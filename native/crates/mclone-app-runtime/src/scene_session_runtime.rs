@@ -48,6 +48,26 @@ pub enum StartupReadinessPolicy {
     Idle,
 }
 
+/// Platform-neutral evidence required before a client may enter gameplay.
+///
+/// Native startup pumps and asynchronously driven browser startup both use
+/// this contract. Host readiness proves that the authoritative spawn/view is
+/// present; drawable coverage prevents admitting into a blank frame; optional
+/// presentation preparation (currently native far-LOD prewarm) must also have
+/// settled.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StartupAdmissionEvidence {
+    pub host_ready: bool,
+    pub drawable_section_count: usize,
+    pub presentation_settled: bool,
+}
+
+impl StartupAdmissionEvidence {
+    pub const fn ready(self) -> bool {
+        self.host_ready && self.drawable_section_count > 0 && self.presentation_settled
+    }
+}
+
 /// Exact runtime-side facts needed to explain far-LOD coverage at settle.
 /// Painted sections remain render-view state and are joined by `mclone-scene`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -195,6 +215,14 @@ impl SceneSessionRuntime {
 
     pub fn client(&self) -> &ClientRuntime {
         self.service.core().client()
+    }
+
+    pub fn startup_host_ready(
+        &self,
+        policy: StartupReadinessPolicy,
+        camera_position: Vec3,
+    ) -> bool {
+        self.service.startup_host_ready(policy, camera_position)
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -347,5 +375,41 @@ impl Deref for SceneSessionRuntime {
 impl DerefMut for SceneSessionRuntime {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.service.as_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StartupAdmissionEvidence;
+
+    #[test]
+    fn startup_admission_requires_authority_drawable_coverage_and_settled_presentation() {
+        let ready = StartupAdmissionEvidence {
+            host_ready: true,
+            drawable_section_count: 1,
+            presentation_settled: true,
+        };
+        assert!(ready.ready());
+        assert!(
+            !StartupAdmissionEvidence {
+                host_ready: false,
+                ..ready
+            }
+            .ready()
+        );
+        assert!(
+            !StartupAdmissionEvidence {
+                drawable_section_count: 0,
+                ..ready
+            }
+            .ready()
+        );
+        assert!(
+            !StartupAdmissionEvidence {
+                presentation_settled: false,
+                ..ready
+            }
+            .ready()
+        );
     }
 }

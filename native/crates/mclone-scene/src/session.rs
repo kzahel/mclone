@@ -264,6 +264,7 @@ impl McloneSceneHost {
                 camera: camera.clone(),
                 startup_view_pose,
             }),
+            external_runtime_startup_pending: false,
             session,
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(
@@ -432,6 +433,7 @@ impl McloneSceneHost {
             pending_external_asset_pack_selection: None,
             runtime: Some(started.runtime),
             local_startup: None,
+            external_runtime_startup_pending: false,
             session,
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(
@@ -619,6 +621,7 @@ impl McloneSceneHost {
             pending_external_asset_pack_selection: None,
             runtime: Some(runtime),
             local_startup: None,
+            external_runtime_startup_pending: true,
             session,
             #[cfg(not(target_arch = "wasm32"))]
             session_runtime_factory: None,
@@ -869,6 +872,7 @@ impl McloneSceneHost {
         .context("reset scene terrain for external session start")?;
         self.scene = pending.scene;
         self.runtime = Some(runtime);
+        self.external_runtime_startup_pending = true;
         self.camera = camera;
         self.render_stats = RenderStreamStats::default();
         self.clear_transient_world_state();
@@ -1378,6 +1382,7 @@ impl McloneSceneHost {
             }
         }
         self.local_startup = None;
+        self.external_runtime_startup_pending = false;
         if self.runtime.take().is_some() {
             self.draw = TexturedSectionDrawResources::new(
                 device,

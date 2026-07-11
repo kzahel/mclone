@@ -2335,16 +2335,37 @@ impl SceneRuntimeService for WebSceneRuntimeService {
     fn startup_host_ready(
         &self,
         policy: StartupReadinessPolicy,
-        camera_position: glam::Vec3,
+        _camera_position: glam::Vec3,
     ) -> bool {
-        let view_ready = !self
-            .traversal_ready_render_section_keys(camera_position)
-            .is_empty();
+        let diagnostics = self.diagnostics();
+        let interest_center = self.runtime.scene_core().interest_center();
+        let interest_chunk_ready = self
+            .runtime
+            .client()
+            .chunk_snapshot(interest_center)
+            .is_some();
+        let host_ready = match self.host_mode() {
+            SingleViewHostMode::LocalIntegrated => {
+                interest_chunk_ready
+                    && diagnostics.loading_progress.is_none_or(|progress| {
+                        progress.playable_chunk_ready
+                            && self
+                                .runtime
+                                .client()
+                                .chunk_snapshot(progress.playable_chunk)
+                                .is_some()
+                    })
+            }
+            SingleViewHostMode::RemoteDedicated => {
+                interest_chunk_ready
+                    && diagnostics.command_queue_depth == 0
+                    && diagnostics.update_queue_depth == 0
+            }
+        };
         match policy {
-            StartupReadinessPolicy::Playable => self.loaded_chunk_count() > 0 && view_ready,
+            StartupReadinessPolicy::Playable => host_ready,
             StartupReadinessPolicy::Idle => {
-                let diagnostics = self.diagnostics();
-                view_ready
+                host_ready
                     && diagnostics.command_queue_depth == 0
                     && diagnostics.update_queue_depth == 0
                     && diagnostics.pending_jobs == 0
