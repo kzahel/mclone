@@ -402,10 +402,12 @@ resolve when their logical pack is disabled.
 
 ## Recommended Next Work
 
-Resume Tactical 170 Slice 6 for the final browser feature-profile, obsolete
-name/cfg, purity, architecture/platform/web documentation, and cross-platform
-closeout audit. Treat a dedicated browser preparation worker and first-party
-epoch-0 bootstrap as explicit follow-ups rather than reopening Tactical 169.
+Tactical 169 — Runtime Asset Pack Selection and Tactical 170 — Web Scene-Host
+Adoption are complete. Tactical 171 — Convergence And Parity Closeout tracks
+the two independent follow-ups: measure whether browser preparation warrants a
+dedicated worker, and open a focused first-party epoch-zero bootstrap/package
+slice when a never-fetch-proprietary distribution becomes a current product
+requirement. Do not reopen Tactical 169 — Runtime Asset Pack Selection.
 
 ## Slice 0 Evidence
 

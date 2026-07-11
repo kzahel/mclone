@@ -1300,6 +1300,8 @@ the evidence and options, and revise this tactical before production cutover.
 
 ## Recommended Next Step
 
-Implement Slice 6 only: perform the browser feature-profile audit,
-obsolete-name/cfg cleanup, default purity coverage, durable
-architecture/platform/web documentation, and final cross-platform closeout.
+This tactical is complete. Continue through Tactical 171 — Convergence And
+Parity Closeout. Its next implementation step is Tactical 166 — Shared
+Resident-Tile Substrate Slice 2; after that tactical removes the current
+monolithic far-LOD path, run the dedicated browser far-LOD promotion proof and
+remove only that exact web exception if it passes.

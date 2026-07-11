@@ -1,8 +1,13 @@
 # 162: Real-Chunk LOD Reduction Draft
 
-Status: draft 2026-07-09. Slice 0A retained synthetic chunk patches, Slice 1
-startup LOD prewarm, and Slice 2 coverage coordinator + source precedence landed;
-LOD budget/queue policy (Slice 3) remains next.
+Status: paused and re-scoped 2026-07-11. Slice 0A retained synthetic chunk
+patches, Slice 1 startup LOD prewarm, and Slice 2 coverage coordinator + source
+precedence landed. The proposed bespoke Slice 3 LOD budget/queue does not
+proceed: Tactical 166 — Shared Resident-Tile Substrate supersedes it with one
+shared real-section/LOD residency, worker, budget, and upload mechanism.
+Resume this tactical at Slice 4 only after that substrate can host reduced-real
+LOD as another producer. Macro ordering lives in Tactical 171 — Convergence And
+Parity Closeout.
 
 Workstream: native Rust shared runtime/persistence/render boundary. Desktop
 validation remains the likely first lane, but the target shape must stay shared
@@ -384,6 +389,10 @@ LOD still never satisfies chunk interest, collision, raycast, edits, entities, o
 gameplay authority.
 
 ### Slice 3: LOD Budget And Queue Policy
+
+Status: superseded by Tactical 166 — Shared Resident-Tile Substrate Slices 1–3.
+Do not implement this bespoke queue. The shared substrate owns the equivalent
+resident lifecycle, worker admission, budget families, and upload admission.
 
 > **Re-scoped 2026-07-09 into [`166`](166-shared-resident-tile-substrate.md).**
 > Slice 3 as drafted below would give far LOD a *bespoke* budget/queue, which

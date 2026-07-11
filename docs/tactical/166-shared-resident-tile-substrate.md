@@ -1,12 +1,13 @@
 # 166: Shared Resident-Tile Substrate (Real Sections + LOD)
 
-Status: draft 2026-07-09, revised 2026-07-09 after design review (draw batching
-via region arenas, budget-vocabulary correction, resolved open questions,
-per-slice regression tripwires). Design/decision doc, no code yet. Opened after
-a far-LOD stutter investigation found that far LOD reimplemented a crude,
-unbudgeted copy of the real-section residency/upload pipeline instead of sharing
-it. This tactical owns the shared substrate; it **pauses and re-scopes**
-[`162`](162-real-chunk-lod-reduction-draft.md) Slice 3+ (see Relationship).
+Status: active 2026-07-11. Slice 1 landed the behavior-preserving resident-tile
+cache and upload-coordinator extraction with real sections as the level-zero
+producer. Slice 2, shared budgeted admission lanes with inert LOD families, is
+next. Opened after a far-LOD stutter investigation found that far LOD
+reimplemented a crude, unbudgeted copy of the real-section residency/upload
+pipeline instead of sharing it. This tactical owns the shared substrate; it
+**pauses and re-scopes** Tactical 162 — Real-Chunk LOD Reduction Draft Slice 3+
+(see Relationship).
 
 Workstream: native Rust shared runtime/render-session/render boundary. Desktop
 validation first, but the target shape must stay host-neutral across flat, XR,
@@ -186,7 +187,7 @@ resident-tile cache rather than duplicating it. The reusable core is:
 
 ```text
 ResidentTileCache<K, M>
-  slots: map<K, { mesh: M, dirty: bool }>
+  slots: map<K, { metadata: M, dirty: bool }>
   by_chunk index for chunk-granular lookup/precedence
   apply_build_report(ready, rebuilt, removals) -> keep/add/remove diff
   dirty tracking: mark/clear/iterate dirty keys
@@ -196,9 +197,11 @@ ResidentTileCache<K, M>
 `K` must expose `chunk_pos()` and `lod_level()`; the cache is otherwise agnostic
 to Y granularity and mesh type. Concrete instances:
 
-- real: `ResidentTileCache<RenderSectionKey, TexturedRenderSectionMesh>`
-  (behavior byte-for-byte unchanged from today);
-- synthetic LOD: `ResidentTileCache<LodTileKey, LodTileMesh>` where
+- real: `ResidentTileCache<RenderSectionKey, TexturedRenderSectionMetadata>`;
+  compiled mesh payloads remain transient upload-queue items, preserving the
+  CPU-mesh eviction contract from Tactical 163 — Render Section CPU Mesh
+  Eviction;
+- synthetic LOD: `ResidentTileCache<LodTileKey, LodTileMetadata>` where
   `LodTileKey = { chunk: ChunkPos, level: u8 }`.
 
 Genericity is deliberately minimal: share the diff/dirty/eviction algorithm and
@@ -440,6 +443,46 @@ Gate:
   or force churn in real-section call sites, fall back to two concrete caches
   + shared free functions *within this slice* — do not carry gnarly generics
   forward as debt.
+
+Landed evidence (2026-07-11):
+
+- `mclone-render-session::resident_tile` now owns
+  `ResidentTileCache<K, M>`, `ResidentTileKey`, the neutral
+  `ResidentTileUploadCoordinator<K, P>`, payload byte/key facts, neutral queue
+  stats/drains, release lifecycle accounting, and the shared upload frame
+  policy. `CachedTexturedRenderSections` and
+  `RenderSectionUploadCoordinator` remain section-named facades, so no generic
+  bound leaked into render-session, renderer, scene, or app call sites.
+- Real sections use compact `TexturedRenderSectionMetadata` as level-zero
+  resident metadata. Full meshes remain transient upload payloads, preserving
+  Tactical 163 — Render Section CPU Mesh Eviction. No far-LOD producer, shader,
+  GPU layout, frame-budget family, or default changed.
+- The focused render-session suite passed `110/110`, including new independent
+  multi-level-key cache and upload tests plus all existing real-section golden
+  lifecycle tests. Client-experience ledger tests passed `23/23`; the shared
+  scene suite passed `92/92`; direct render-session and scene Wasm checks and
+  `pnpm native:web:build` passed.
+- The fixed 960x540 before/final captures reported the same `64` resident and
+  `11` drawn sections, and both files have SHA-256
+  `052647136ff313c20bb91216f478772e715fcae48406c4a3262d84e1081151f2`.
+  `/tmp/mclone-t166-s1-final.png` was inspected: textured spruce terrain,
+  actors, foliage, and sky were clean. The inspected 1280x640 synthetic-stereo
+  capture `/tmp/mclone-t166-s1-xr-emulation-final.png` retained distinct eye
+  pixels, terrain, and both UI composites.
+- Repeated release fresh/frozen startup-streaming finished the RD10 target in
+  `6053.809ms` and quiesced in `6547.870ms`; RD15 finished in `11137.282ms` and
+  quiesced in `11961.494ms`. Both recorded `0` over-budget and `0` over-2x
+  frames. The deterministic frame-budget stress probe also recorded `0/240`
+  over-budget frames and no accounting-conservation violation before and after.
+- The final release Quest APK built and attached Quest 3 per-eye frame-overlap
+  orbit gates passed. RD5 recorded dropped delta `2`, app-work p95 `12.205ms`,
+  average headroom `+3.234ms`, `0.1%` over-period, and zero skipped frames. The
+  first final RD7 sample had a runtime dropped-frame anomaly after a `48.530s`
+  settle, so the Tactical 150 — Adaptive Frame-Budget Controller repeat rule
+  was applied; the repeat recorded dropped delta `1`, app-work p95 `12.700ms`,
+  average headroom `+2.609ms`, `0.5%` over-period, and zero skipped frames. Both
+  accepted rows are inside the Tactical 150 gates. Evidence is under
+  `/tmp/mclone-t166-s1-final-*`; no capture or perf artifact is committed.
 
 ### Slice 2: Shared budgeted admission lanes
 

@@ -1,17 +1,5 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct RenderSectionCompileReleaseBatch {
-    remaining_lifecycle_items: usize,
-    compile_jobs: usize,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct RenderSectionUploadEnqueueReport {
-    queued_lifecycle_items: usize,
-    superseded_lifecycle_items: usize,
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct RenderSectionUploadDrain {
     pub rebuilt_sections: Vec<TexturedRenderSectionMesh>,
@@ -37,24 +25,7 @@ pub struct RenderSectionUploadQueueStats {
     pub held_compile_jobs: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RenderSectionUploadFramePolicy {
-    pub upload_budget: Option<usize>,
-    pub accept_budget: Option<usize>,
-}
-
-impl RenderSectionUploadFramePolicy {
-    pub const fn new(upload_budget: Option<usize>, accept_budget: Option<usize>) -> Self {
-        Self {
-            upload_budget,
-            accept_budget,
-        }
-    }
-
-    pub const fn is_budgeted(self) -> bool {
-        self.upload_budget.is_some() || self.accept_budget.is_some()
-    }
-}
+pub type RenderSectionUploadFramePolicy = ResidentTileUploadFramePolicy;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum RenderSectionUploadFrameLimit {
@@ -181,28 +152,24 @@ impl RenderSectionUploadPhaseReport {
 
 #[derive(Clone, Debug, Default)]
 pub struct RenderSectionUploadCoordinator {
-    pending_uploads: VecDeque<TexturedRenderSectionMesh>,
-    pending_removals: BTreeSet<RenderSectionKey>,
-    pending_release_batches: VecDeque<RenderSectionCompileReleaseBatch>,
+    tiles: ResidentTileUploadCoordinator<RenderSectionKey, TexturedRenderSectionMesh>,
 }
 
 impl RenderSectionUploadCoordinator {
     pub fn clear(&mut self) {
-        self.pending_uploads.clear();
-        self.pending_removals.clear();
-        self.pending_release_batches.clear();
+        self.tiles.clear();
     }
 
     pub fn has_pending_work(&self) -> bool {
-        !self.pending_uploads.is_empty() || !self.pending_removals.is_empty()
+        self.tiles.has_pending_work()
     }
 
     pub fn queued_upload_section_count(&self) -> usize {
-        self.pending_uploads.len()
+        self.tiles.queued_upload_count()
     }
 
     pub fn queued_removed_section_count(&self) -> usize {
-        self.pending_removals.len()
+        self.tiles.queued_removal_count()
     }
 
     pub fn should_drain_before_runtime_sync(&self, policy: RenderSectionUploadFramePolicy) -> bool {
@@ -237,27 +204,15 @@ impl RenderSectionUploadCoordinator {
     }
 
     pub fn stats(&self) -> RenderSectionUploadQueueStats {
+        let stats = self.tiles.stats();
         RenderSectionUploadQueueStats {
-            queued_upload_sections: self.pending_uploads.len(),
-            queued_removed_sections: self.pending_removals.len(),
-            queued_lifecycle_items: self.pending_uploads.len() + self.pending_removals.len(),
-            queued_upload_mesh_owned_bytes: self
-                .pending_uploads
-                .iter()
-                .fold(0usize, |bytes, section| {
-                    bytes.saturating_add(section.estimated_owned_bytes())
-                }),
-            held_release_batches: self.pending_release_batches.len(),
-            held_release_lifecycle_items: self
-                .pending_release_batches
-                .iter()
-                .map(|batch| batch.remaining_lifecycle_items)
-                .sum(),
-            held_compile_jobs: self
-                .pending_release_batches
-                .iter()
-                .map(|batch| batch.compile_jobs)
-                .sum(),
+            queued_upload_sections: stats.queued_uploads,
+            queued_removed_sections: stats.queued_removals,
+            queued_lifecycle_items: stats.queued_lifecycle_items,
+            queued_upload_mesh_owned_bytes: stats.queued_upload_owned_bytes,
+            held_release_batches: stats.held_release_batches,
+            held_release_lifecycle_items: stats.held_release_lifecycle_items,
+            held_compile_jobs: stats.held_producer_jobs,
         }
     }
 
@@ -271,16 +226,12 @@ impl RenderSectionUploadCoordinator {
     ) -> RenderSectionUploadPhaseReport {
         let queue_before = self.stats();
         let accepted_compile_result_count = section_update.accepted_compile_result_count;
-        let enqueue_report = self.enqueue_lifecycle_items(
+        let enqueue_report = self.tiles.enqueue(
             section_update.rebuilt_sections,
             section_update.removed_section_keys,
-        );
-        let mut release_compile_jobs =
-            self.complete_release_work(enqueue_report.superseded_lifecycle_items);
-        release_compile_jobs += self.queue_release_batch(
             accepted_compile_result_count,
-            enqueue_report.queued_lifecycle_items,
         );
+        let release_compile_jobs = enqueue_report.released_producer_jobs;
         if accepted_compile_result_count == 0
             && enqueue_report.queued_lifecycle_items == 0
             && enqueue_report.superseded_lifecycle_items == 0
@@ -304,31 +255,13 @@ impl RenderSectionUploadCoordinator {
         accept_budget: Option<usize>,
     ) -> RenderSectionUploadDrain {
         let queue_before = self.stats();
-        let accept_limit = accept_budget.unwrap_or(usize::MAX);
-        let upload_limit = upload_budget.unwrap_or(usize::MAX);
-        let upload_count = upload_limit
-            .min(accept_limit)
-            .min(self.pending_uploads.len());
-        let mut rebuilt_sections = Vec::with_capacity(upload_count);
-        for _ in 0..upload_count {
-            if let Some(section) = self.pending_uploads.pop_front() {
-                rebuilt_sections.push(section);
-            }
-        }
-        let removed_section_keys = if accept_budget.is_some() {
-            let remaining_accept_budget = accept_limit.saturating_sub(rebuilt_sections.len());
-            self.take_budgeted_removals(remaining_accept_budget)
-        } else {
-            std::mem::take(&mut self.pending_removals)
-        };
-        let lifecycle_item_count = rebuilt_sections.len() + removed_section_keys.len();
+        let drain = self.tiles.drain_budgeted(upload_budget, accept_budget);
+        let rebuilt_sections = drain.uploads;
+        let removed_section_keys = drain.removed_tile_keys;
+        let lifecycle_item_count = drain.lifecycle_item_count;
         let queue_after = self.stats();
-        let upload_limited = upload_budget.is_some()
-            && upload_count == upload_limit
-            && queue_after.queued_upload_sections > 0;
-        let accept_limited = accept_budget.is_some()
-            && lifecycle_item_count == accept_limit
-            && queue_after.queued_lifecycle_items > 0;
+        let upload_limited = drain.upload_limited;
+        let accept_limited = drain.accept_limited;
         let mut phase_report = RenderSectionUploadPhaseReport::from_queue_before(queue_before);
         phase_report.drained_upload_sections = rebuilt_sections.len();
         phase_report.drained_removed_sections = removed_section_keys.len();
@@ -352,80 +285,6 @@ impl RenderSectionUploadCoordinator {
     }
 
     pub fn complete_applied_lifecycle_items(&mut self, lifecycle_items: usize) -> usize {
-        self.complete_release_work(lifecycle_items)
-    }
-
-    fn enqueue_lifecycle_items(
-        &mut self,
-        rebuilt_sections: Vec<TexturedRenderSectionMesh>,
-        removed_section_keys: BTreeSet<RenderSectionKey>,
-    ) -> RenderSectionUploadEnqueueReport {
-        let mut report = RenderSectionUploadEnqueueReport::default();
-        for key in removed_section_keys {
-            let before_uploads = self.pending_uploads.len();
-            self.pending_uploads.retain(|section| section.key != key);
-            report.superseded_lifecycle_items += before_uploads - self.pending_uploads.len();
-            if self.pending_removals.insert(key) {
-                report.queued_lifecycle_items += 1;
-            }
-        }
-        for section in rebuilt_sections {
-            let before_uploads = self.pending_uploads.len();
-            self.pending_uploads
-                .retain(|pending| pending.key != section.key);
-            report.superseded_lifecycle_items += before_uploads - self.pending_uploads.len();
-            if self.pending_removals.remove(&section.key) {
-                report.superseded_lifecycle_items += 1;
-            }
-            self.pending_uploads.push_back(section);
-            report.queued_lifecycle_items += 1;
-        }
-        report
-    }
-
-    fn take_budgeted_removals(&mut self, budget: usize) -> BTreeSet<RenderSectionKey> {
-        if budget == 0 || self.pending_removals.is_empty() {
-            return BTreeSet::new();
-        }
-        if budget >= self.pending_removals.len() {
-            return std::mem::take(&mut self.pending_removals);
-        }
-        let keys: Vec<_> = self.pending_removals.iter().copied().take(budget).collect();
-        for key in &keys {
-            self.pending_removals.remove(key);
-        }
-        keys.into_iter().collect()
-    }
-
-    fn queue_release_batch(&mut self, compile_jobs: usize, lifecycle_items: usize) -> usize {
-        if compile_jobs == 0 {
-            return 0;
-        }
-        if lifecycle_items == 0 {
-            return compile_jobs;
-        }
-        self.pending_release_batches
-            .push_back(RenderSectionCompileReleaseBatch {
-                remaining_lifecycle_items: lifecycle_items,
-                compile_jobs,
-            });
-        0
-    }
-
-    fn complete_release_work(&mut self, mut lifecycle_items: usize) -> usize {
-        let mut release_compile_jobs = 0;
-        while lifecycle_items > 0 {
-            let Some(front) = self.pending_release_batches.front_mut() else {
-                break;
-            };
-            if lifecycle_items < front.remaining_lifecycle_items {
-                front.remaining_lifecycle_items -= lifecycle_items;
-                break;
-            }
-            lifecycle_items -= front.remaining_lifecycle_items;
-            release_compile_jobs += front.compile_jobs;
-            self.pending_release_batches.pop_front();
-        }
-        release_compile_jobs
+        self.tiles.complete_applied_lifecycle_items(lifecycle_items)
     }
 }

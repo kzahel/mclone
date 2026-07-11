@@ -542,8 +542,10 @@ app-fatal marker.
 
 ## Recommended Next Work
 
-Start a separate browser feature-parity slice with the Tactical 162 far-LOD
-performance/rendering proof. Promote `far_lod` only with its web runtime, UI,
-diagnostic, performance, and pixel evidence; then remove that one exact ledger
-entry. Keep the other four entries unchanged until their own complete proofs
-land.
+The adoption series is closed. Continue through Tactical 171 — Convergence And
+Parity Closeout: first implement Tactical 166 — Shared Resident-Tile Substrate
+Slices 2–3 so far LOD no longer uses synchronous generation, monolithic
+remeshing, and whole-buffer upload. Then promote `far_lod` only with complete
+browser runtime, UI, diagnostic, worker/transport, performance, and pixel
+evidence, removing that one exact ledger entry. Keep the other four entries
+unchanged until their own complete proofs land.

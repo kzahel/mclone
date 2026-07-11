@@ -1,22 +1,5 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-struct CachedTexturedRenderSectionSlot {
-    // docs/tactical/163: the resident cache retains only compact metadata after a
-    // section is compiled and uploaded, not the owned CPU vertex/index payload.
-    metadata: TexturedRenderSectionMetadata,
-    dirty: bool,
-}
-
-impl CachedTexturedRenderSectionSlot {
-    fn new(metadata: TexturedRenderSectionMetadata) -> Self {
-        Self {
-            metadata,
-            dirty: false,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RenderSectionResidentMeshStats {
     pub resident_section_count: usize,
@@ -33,9 +16,10 @@ impl RenderSectionResidentMeshStats {
 
 #[derive(Clone, Debug, Default)]
 pub struct CachedTexturedRenderSections {
-    sections: BTreeMap<RenderSectionKey, CachedTexturedRenderSectionSlot>,
-    section_keys_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
-    generation: u64,
+    // Tactical 166 Slice 1: real sections are the level-zero producer on the
+    // shared resident-tile lifecycle. The facade preserves section-specific
+    // names so generic bounds do not leak through render-session call sites.
+    tiles: ResidentTileCache<RenderSectionKey, TexturedRenderSectionMetadata>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -100,45 +84,42 @@ impl RenderSectionCacheUpdate {
 
 impl CachedTexturedRenderSections {
     pub fn is_empty(&self) -> bool {
-        self.sections.is_empty()
+        self.tiles.is_empty()
     }
 
     pub fn contains_chunk(&self, pos: ChunkPos) -> bool {
-        self.section_keys_by_chunk.contains_key(&pos)
+        self.tiles.contains_chunk(pos)
     }
 
     pub fn contains_section(&self, key: RenderSectionKey) -> bool {
-        self.sections.contains_key(&key)
+        self.tiles.contains_tile(key)
     }
 
     /// Resident section metadata for every cached section. This replaces the old
     /// `sections()` accessor that cloned full CPU meshes (docs/tactical/163).
     pub fn section_metadata(&self) -> Vec<TexturedRenderSectionMetadata> {
-        self.sections
-            .values()
-            .map(|slot| slot.metadata.clone())
-            .collect()
+        self.tiles.metadata().cloned().collect()
     }
 
     pub fn cached_section_count(&self) -> usize {
-        self.sections.len()
+        self.tiles.len()
     }
 
     pub fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
-        self.sections.keys().copied()
+        self.tiles.tile_keys()
     }
 
-    pub const fn generation(&self) -> u64 {
-        self.generation
+    pub fn generation(&self) -> u64 {
+        self.tiles.generation()
     }
 
     pub fn resident_mesh_stats(&self) -> RenderSectionResidentMeshStats {
         let mut stats = RenderSectionResidentMeshStats {
-            resident_section_count: self.sections.len(),
+            resident_section_count: self.tiles.len(),
             ..RenderSectionResidentMeshStats::default()
         };
-        for slot in self.sections.values() {
-            let section_stats = &slot.metadata.stats;
+        for metadata in self.tiles.metadata() {
+            let section_stats = &metadata.stats;
             stats.resident_vertex_count = stats
                 .resident_vertex_count
                 .saturating_add(section_stats.vertex_count);
@@ -157,32 +138,23 @@ impl CachedTexturedRenderSections {
         &self,
         pos: ChunkPos,
     ) -> impl Iterator<Item = RenderSectionKey> + '_ {
-        self.section_keys_by_chunk
-            .get(&pos)
-            .into_iter()
-            .flat_map(|keys| keys.iter().copied())
+        self.tiles.tile_keys_for_chunk(pos)
     }
 
     pub(crate) fn has_dirty_sections(&self) -> bool {
-        self.sections.values().any(|slot| slot.dirty)
+        self.tiles.has_dirty_tiles()
     }
 
     pub(crate) fn dirty_section_count(&self) -> usize {
-        self.sections.values().filter(|slot| slot.dirty).count()
+        self.tiles.dirty_tile_count()
     }
 
     pub(crate) fn dirty_section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
-        self.sections
-            .iter()
-            .filter_map(|(key, slot)| slot.dirty.then_some(*key))
+        self.tiles.dirty_tile_keys()
     }
 
     pub(crate) fn mark_section_dirty(&mut self, key: RenderSectionKey) -> bool {
-        let Some(slot) = self.sections.get_mut(&key) else {
-            return false;
-        };
-        slot.dirty = true;
-        true
+        self.tiles.mark_tile_dirty(key)
     }
 
     /// Mark every resident section dirty so the next sync recompiles and
@@ -190,22 +162,11 @@ impl CachedTexturedRenderSections {
     /// must reconstruct GPU buffers without a retained CPU mesh copy
     /// (docs/tactical/163). Returns the number of sections marked.
     pub(crate) fn mark_all_sections_dirty(&mut self) -> usize {
-        let mut marked = 0;
-        for slot in self.sections.values_mut() {
-            if !slot.dirty {
-                marked += 1;
-            }
-            slot.dirty = true;
-        }
-        marked
+        self.tiles.mark_all_tiles_dirty()
     }
 
     pub(crate) fn clear_section_dirty(&mut self, key: RenderSectionKey) -> bool {
-        let Some(slot) = self.sections.get_mut(&key) else {
-            return false;
-        };
-        slot.dirty = false;
-        true
+        self.tiles.clear_tile_dirty(key)
     }
 
     pub fn apply_build_report(
@@ -215,42 +176,18 @@ impl CachedTexturedRenderSections {
         removal_chunks: &BTreeSet<ChunkPos>,
         removal_section_keys: &BTreeSet<RenderSectionKey>,
     ) -> RenderSectionCacheUpdate {
-        let rebuilt_keys = rebuilt_report
-            .sections
-            .iter()
-            .map(|section| section.key)
-            .collect::<BTreeSet<_>>();
-        let rebuilt_sections = rebuilt_report
-            .sections
-            .into_iter()
-            .filter(|section| ready_section_keys.contains(&section.key))
-            .collect::<Vec<_>>();
-        let old_ready_keys = self
-            .sections
-            .keys()
-            .copied()
-            .filter(|key| ready_section_keys.contains(key))
-            .collect::<BTreeSet<_>>();
-        let removal_keys = self
-            .sections
-            .keys()
-            .copied()
-            .filter(|key| removal_chunks.contains(&ChunkPos::new(key.chunk_x, key.chunk_z)))
-            .collect::<BTreeSet<_>>();
-        let mut removed_section_keys = old_ready_keys
-            .difference(&rebuilt_keys)
-            .copied()
-            .collect::<BTreeSet<_>>();
-        removed_section_keys.extend(removal_keys);
-        removed_section_keys.extend(removal_section_keys.iter().copied());
-
-        for key in &removed_section_keys {
-            self.remove_section(*key);
-        }
+        let resident_update = self.tiles.apply_build_report(
+            ready_section_keys,
+            rebuilt_report.sections,
+            removal_chunks,
+            removal_section_keys,
+            |section| section.key,
+            TexturedRenderSectionMesh::metadata,
+        );
 
         let mut report = RenderSectionCacheUpdate {
-            rebuilt_sections,
-            removed_section_keys,
+            rebuilt_sections: resident_update.rebuilt_tiles,
+            removed_section_keys: resident_update.removed_tile_keys,
             rebuilt_vertex_count: 0,
             rebuilt_index_count: 0,
             visibility_graph_stats: rebuilt_report.visibility_graph,
@@ -258,15 +195,12 @@ impl CachedTexturedRenderSections {
             completed_compile_section_count: ready_section_keys.len(),
             ..RenderSectionCacheUpdate::default()
         };
-        // docs/tactical/163: borrow each rebuilt section only long enough to
-        // record accounting and insert its compact metadata. The full mesh
-        // payload stays in `report.rebuilt_sections` and is moved out to the
-        // upload path below — it is never cloned back into the resident cache.
+        // Tactical 163: the shared substrate inserted compact metadata only.
+        // Full payloads remain in this update and move to the upload path.
         for section in &report.rebuilt_sections {
             let stats = section.stats();
             report.rebuilt_vertex_count += stats.vertex_count;
             report.rebuilt_index_count += stats.index_count;
-            self.insert_metadata(section.metadata());
         }
         report.resident_mesh_stats = Some(self.resident_mesh_stats());
         report
@@ -283,31 +217,5 @@ impl CachedTexturedRenderSections {
             removal_chunks,
             removal_section_keys,
         )
-    }
-
-    fn insert_metadata(&mut self, metadata: TexturedRenderSectionMetadata) {
-        let key = metadata.key;
-        if !self.sections.contains_key(&key) {
-            self.generation = self.generation.wrapping_add(1);
-        }
-        self.sections
-            .insert(key, CachedTexturedRenderSectionSlot::new(metadata));
-        self.section_keys_by_chunk
-            .entry(render_section_chunk_pos(key))
-            .or_default()
-            .insert(key);
-    }
-
-    fn remove_section(&mut self, key: RenderSectionKey) -> Option<TexturedRenderSectionMetadata> {
-        let metadata = self.sections.remove(&key)?.metadata;
-        self.generation = self.generation.wrapping_add(1);
-        let pos = render_section_chunk_pos(key);
-        if let Some(keys) = self.section_keys_by_chunk.get_mut(&pos) {
-            keys.remove(&key);
-            if keys.is_empty() {
-                self.section_keys_by_chunk.remove(&pos);
-            }
-        }
-        Some(metadata)
     }
 }

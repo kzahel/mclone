@@ -24,7 +24,9 @@ owns the runtime boundary;
 [`../client-experience-architecture.md`](../client-experience-architecture.md)
 owns the draft shared client-experience core/profile/adapter target; this doc
 owns the per-feature and per-contract grids and the rule that keeps new
-features from re-forking.
+features from re-forking. Tactical 171 — Convergence And Parity Closeout owns
+the current cross-tactical ordering and exact browser feature-exception
+burn-down.
 
 > Status note: the current-state cells below were derived from a code audit on
 > 2026-06-26 and refreshed on 2026-06-28 after tactical 095 Slice 4f, the
@@ -79,6 +81,15 @@ features from re-forking.
 > ledger remains empty. Gamepad input is retained as a dated shared contract;
 > no native adapter advertises it until a real platform event source and device
 > validation land.
+> Refreshed on 2026-07-11 after Tactical 170 — Web Scene-Host Adoption moved
+> local-worker, IndexedDB, and remote-WebSocket browser modes onto
+> `McloneSceneHost`, deleted the old web orchestrator, and made browser adapter
+> purity executable. Tactical 169 — Runtime Asset Pack Selection also completed
+> shared native/web transactional asset replacement, UI, persistence, and
+> provenance. The structural matrix and prose below no longer describe the
+> retired browser runtime/render-policy fork. Tactical 171 — Convergence And
+> Parity Closeout owns the exact five-row browser feature ledger and the active
+> resident-tile/LOD sequence.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -151,13 +162,13 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ✅ |
 | Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
 | Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Underwater camera FX / screen effects | ✅ | ✅ | ✅ (multiview path + user device validation) | ✅ (shared Mono path) | ✅ (multiview path + user device validation) | ✗ (inline render fork) |
+| Underwater camera FX / screen effects | ✅ | ✅ | ✅ (multiview path + user device validation) | ✅ (shared Mono path) | ✅ (multiview path + user device validation) | ✅ (shared host/render path) |
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ◐ (debug/UI screenshots; no real HUD host) | ✗ | ✅ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✅ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ◐ (screenshot scenarios; no real input host) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (persistent world catalog + New World smoke; connect text/smoke pending) | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (world catalog UI wired; connect-screen text/smoke pending) |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ◐ TCP screenshot/settle, no long-lived offscreen host | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
-| Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ | ◐ (IndexedDB catalog + chunk/entity records; player/world metadata pending) |
+| Persistence (world save/load, in-app) | ◐ (filesystem/SQLite catalog + chunk/entity records; remaining metadata) | ◐ (persistent-world probes; not a full interactive host) | ◐ (shared native catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (IndexedDB catalog + chunk/entity records; player/world metadata pending) |
 | Basic audio (landing sound foundation) | ◐ (code; listen validation pending) | — (not targeted for no-window validation yet) | ◐ (code; listen validation pending) | ◐ (code; device audio pending) | ◐ (code; device audio pending) | ✗ |
 
 Reading the matrix:
@@ -170,9 +181,10 @@ Reading the matrix:
   `FlatInputFrame`, plus shared startup readiness CLI with desktop window mode,
   but still lacks a long-lived client loop, broader input stream, and frame
   sinks. Tactical 105 owns that cleanup.
-- **web** is near desktop parity; gaps are connect-screen text/smoke,
-  underwater FX wiring, full persistence lifecycle/metadata beyond the
-  IndexedDB catalog plus chunk/entity records, and audio.
+- **web** now uses the same scene-policy host as native. Product gaps include
+  connect-screen text/smoke, full persistence lifecycle/metadata beyond the
+  IndexedDB catalog plus chunk/entity records, audio, and the exact five
+  reason-bearing feature-axis exceptions tracked below.
 - **desktop-XR** has render/locomotion parity and a shared pause/options
   world-panel menu with controller-ray pointer. User headset validation says the
   menu works mostly fine; automated menu/replacement smoke, comfort tuning, and
@@ -192,7 +204,7 @@ Reading the matrix:
   and `mclone-scene` now computes per-view/midpoint underwater overlays and
   renders the effect through the stereo/multiview path for desktop XR and
   Android XR. User device validation says the XR treatment works pretty well.
-  Flat Android now consumes the Mono path; web still needs app-lane wiring.
+  Flat Android and web now consume the shared Mono host/render path.
 - **basic audio** exists through `mclone-audio` on native desktop, desktop XR,
   flat Android, and Android XR. It is still a foundation slice: landing sounds
   only, no web audio yet, no automated audible validation, and no step/break/
@@ -209,27 +221,27 @@ use (and should) · — n/a.
 | `mclone-protocol` / `mclone-net` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-net`; `--multi-client-smoke` |
 | `mclone-server` / `IntegratedServer` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-server` |
 | `mclone-client::ClientRuntime` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-client` |
-| `mclone-render` (view/target draw) | ✅ | ⚑ (inline render path) | ✅ | ✅ | `native:desktop-offscreen:smoke` |
+| `mclone-render` (view/target draw) | ✅ | ✅ (canvas target through scene host) | ✅ | ✅ | `native:desktop-offscreen:smoke`; `native:web:smoke` |
 | `mclone-render-session` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-render-session` |
 | `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via scene host) | `cargo test -p mclone-app-runtime` |
-| `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via scene host) | `native:desktop-offscreen:smoke`; `native:web:smoke` |
+| `app-runtime::frame_render` | ✅ | ✅ (via scene host) | ✅ | ✅ (via scene host) | `native:desktop-offscreen:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene runtime) | ✅ (composed by the scene host) | — (wasm-gated) | ✅ (composed by the scene host) | ✅ (composed by the scene host) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene` |
-| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via scene host) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
+| `app-runtime::host_mode` (local vs remote) | ✅ | ✅ (browser connection services adapt local worker/IndexedDB/WebSocket mechanics) | ✅ | ✅ (local/remote via scene host) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build`; `pnpm native:web:remote-smoke` |
 | `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via scene host, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (shared Mono host initial local/remote and New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
 | `app-runtime::client_session_policy` (display-neutral session UI action policy) | ✅ (desktop flat/offscreen and desktop XR via `mclone-scene` execute shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✅ (shared Mono host executes seed/join/start/quit effects and failed-start UI restoration; Android activity/surface remains local) | ✅ (scene host executes shared seed/join/start/quit effects, status/startup projection, failed-start UI restoration, and quit-title transitions; Android activity/session adapters remain host-local) | `cargo test -p mclone-app-runtime client_session_policy`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; tactical 141 Slice 4d; tactical 143 Slice 4a; tactical 143 Slice 6; tactical 143 Slice 7 |
 | `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (shared Mono host executes native catalog effects against the Android app-private world root; AVD New World flow covered) | ✅ (scene host executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
 | `app-runtime::client_experience` (catalog/session/settings facade) | ✅ (desktop/offscreen adapter and desktop XR scene execute facade effects; host window/runtime/pointer-lock/OpenXR work remains adapter-local) | ✅ (web adapter executes facade effects; IndexedDB promises, worker startup, and JS result writing remain adapter-local) | ✅ (shared Mono host executes facade effects; Android activity, raw touch translation, surface, and storage roots remain adapter-local) | ✅ (scene host executes facade catalog/session/settings/capability effects; Android activity/session adapters and app-private storage roots remain host-local) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-native-client catalog_`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android-xr:session-smoke`; tactical 143 Slice 2; tactical 143 Slice 4; tactical 143 Slice 6; tactical 143 Slice 7 |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
-| `app-runtime::render_asset_data` (CPU mesh/atlas/far-LOD bundle) | ✅ | ✅ (portable data; production web adoption pending) | ✅ | ✅ | `cargo test -p mclone-app-runtime`; Tactical 170 Slice 1 |
+| `app-runtime::render_asset_data` (CPU mesh/atlas/far-LOD bundle) | ✅ | ✅ (production epoch replacement through scene host) | ✅ | ✅ | `cargo test -p mclone-app-runtime`; Tactical 169 — Runtime Asset Pack Selection; Tactical 170 — Web Scene-Host Adoption |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-scene`; `native:android:avd-session-smoke` |
-| `mclone-scene` | ✅ | — | ✅ | ✅ | `native:desktop-offscreen:smoke`; `native:xr-emulation:smoke`; `native:xr:*`; `native:android:*` |
+| `mclone-scene` | ✅ | ✅ | ✅ | ✅ | `native:desktop-offscreen:smoke`; `native:web:smoke`; `native:xr-emulation:smoke`; `native:xr:*`; `native:android:*` |
 | `mclone-xr-{host,graphics}` | ✅ (desktop XR) | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, offscreen/screenshot/perf, flat
-Android, desktop XR, and Android XR now share `mclone-scene`; web still carries
-the important runtime/render fork, and offscreen still lacks an exposed
-long-lived source/sink mode.**
+Android, desktop XR, Android XR, and web now share `mclone-scene`; the old web
+runtime/render-policy fork is deleted, while browser mechanisms remain typed
+services and offscreen still lacks an exposed long-lived source/sink mode.**
 Concretely:
 
 - `McloneSceneHost<S>` with `McloneSceneHostOptions` is the native shared owner;
@@ -256,19 +268,14 @@ Concretely:
   adapter, and app-local `XrMcloneWorldState` is gone. The scene-driver
   convergence landed across tactical 086 Slices 1-4, tactical 087, and tactical
   088; the startup session descriptor wrapper landed in tactical 095 Slice 4c.
-- `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
-  calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
-  enum, but command/update accounting and remote WebSocket reconnect/resync prep
-  now flow through `mclone-app-runtime::host_mode`. Flat seed/new-world,
-  join-remote, start, back-to-title, and quit action effects now flow through
-  `mclone-app-runtime::client_session_policy`, including teardown-before-start
-  and quit-to-title transition policy, plus shared session/startup projection
-  for status fallback. Session request/state now flows through
-  `mclone-app-runtime::session` for initial local/remote starts and menu-driven
-  async New World restart; JoinRemote reconnect is wired, with a dedicated
-  connect-screen smoke still pending. The playable browser app can join a
-  dedicated WebSocket server through `?remoteWsUrl=...`, covered by
-  `native:web:remote-smoke` (see blockers #1 and #2).
+- `web-client` now drives `McloneSceneHost` through a thin browser frame driver.
+  Local worker, IndexedDB local-world, and remote WebSocket modes use typed
+  browser connection/compiler/async-operation services while the shared host
+  owns session, input/camera, render admission and synchronization, frame
+  assembly, effects, actors, settings, UI/HUD, diagnostics, and accounting.
+  The resident shared-memory render compiler and server/worldgen/light worker
+  topology remain intact. JoinRemote reconnect is wired, with a dedicated
+  connect-screen text/input smoke still pending.
 - Flat Android drives the shared Mono host and shared native remote-session
   adapter. Its app crate retains only Android activity/lifecycle, Vulkan
   surface targets, raw touch/pointer/key translation, startup properties, and
@@ -309,9 +316,11 @@ are built, exactly as transport/storage were:
   sample playback. Web/WASM audio remains deferred, audible/device validation is
   still manual, and real sound parity still needs step/break/place/entity/music
   categories.
-- **Persistence wiring — absent in every app.** Engine has
-  `FilesystemSnapshotStore`; all apps use `NullChunkSnapshotStore`, and the
-  dedicated server has no `--world-dir`. Every launch regenerates from seed.
+- **Persistence lifecycle — partial on every interactive app.** Native clients
+  have filesystem/SQLite world catalogs and platform-private roots; web has an
+  IndexedDB catalog plus chunk/entity records. Player/world metadata and full
+  lifecycle parity remain incomplete, and offscreen is a probe rather than a
+  long-lived interactive persistence host.
 - **Connect / world-select UI + text-input widget — absent.** `mclone-ui` has no
   `EditBox`, no loading/progress screen, and a 1px-rect uppercase-only font, so
   typing a server address is currently impossible. This is separate from the
@@ -400,9 +409,9 @@ Do not turn the counts into a hard budget. Use them to find cleanup candidates:
 
 ## Cross-Cutting Blockers (do these before more content features)
 
-Every new feature added today gets forked across up to four app shells. The
-highest-leverage work is the shared contracts that *stop* the forking. Land
-these first:
+The shared scene host now prevents the former app-shell policy fork. The
+highest-leverage remaining work is to preserve that boundary while closing
+lower-level render residency and explicit product/evidence gaps:
 
 1. **Reduce desktop app gravity before adding more desktop-local behavior.**
    `mclone-native-client` can own `winit`, desktop surface/input, CLI,
@@ -422,13 +431,14 @@ these first:
    text-input/connect-world UI needed to choose endpoints in app instead of via
    CLI/properties/query params. World catalog selection now has focused web
    menu smoke coverage through tactical 141. (tactical 095)
-3. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
-   and XR app shells use blocking TCP/session adapters, while browser
-   worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.
-   Shared exchange accounting, remote WebSocket reconnect/resync prep, and
-   playable browser remote-connect wiring have landed; remaining work is naming
-   cleanup plus clarifying the web render-section idle diagnostics. (tactical
-   085)
+3. **Finish shared resident-tile/LOD convergence, then burn down browser feature
+   exceptions.** Browser worker/WebSocket/IndexedDB mechanisms are now typed
+   services below `McloneSceneHost`; the old browser policy host is gone. The
+   active architectural fork is lower down: synthetic far LOD still owns a
+   synchronous monolithic residency/upload path beside real sections. Tactical
+   166 — Shared Resident-Tile Substrate removes that fork. Tactical 171 —
+   Convergence And Parity Closeout then coordinates the exact five browser
+   feature promotions.
 4. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, and user
    headset validation says it works mostly fine. Flat Android consumes

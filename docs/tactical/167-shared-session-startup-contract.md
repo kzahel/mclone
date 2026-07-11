@@ -1,6 +1,6 @@
 # 167: Shared Native Session Startup Contract
 
-Status: Slice 5 complete 2026-07-09 (startup contract locked in: the dirty-all
+Status: complete 2026-07-09; Slices 0–5 landed (startup contract locked in: the dirty-all
 recompile is renamed `recompile_all_render_section_meshes_for_resource_rebuild`
 and confined to `native_session_runtime.rs` by an enforcement test; every native
 startup lane seeds from the shared pump's render seed; renderer-rebuild + Quest

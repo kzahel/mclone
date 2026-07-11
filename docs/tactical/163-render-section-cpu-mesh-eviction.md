@@ -1,8 +1,12 @@
 # 163: Render Section CPU Mesh Eviction
 
-Status: active 2026-07-09; Slice 0 byte accounting landed; Slice 1 mesh eviction
-landed (bundled the minimum of Slices 2-3 required to keep every lane
-non-breaking — see below).
+Status: complete 2026-07-11. Slices 0–5 landed: resident caches retain compact
+metadata, compile/upload payloads are transient, diagnostics use metadata and
+renderer counters, resource rebuilds explicitly recompile, and the old
+full-mesh retention API is gone. Tactical 167 — Shared Native Session Startup
+Contract resolved the startup-remesh consequence; Tactical 168 — Unified Native
+Scene Host removed the final compatibility wrapper. Tactical 166 — Shared
+Resident-Tile Substrate now preserves and generalizes this lifecycle.
 
 Workstream: native Rust shared render-session / render-resource boundary.
 Desktop validation first, but the target shape must stay shared across flat,

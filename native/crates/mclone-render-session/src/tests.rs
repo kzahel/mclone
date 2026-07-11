@@ -134,5 +134,6 @@ mod camera_controls;
 mod codec_reports;
 mod dirty_sync;
 mod engine_session;
+mod resident_tile;
 mod snapshot_dirty;
 mod upload;

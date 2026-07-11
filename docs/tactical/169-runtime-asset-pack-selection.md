@@ -2,8 +2,11 @@
 
 Status: complete 2026-07-11; Slices 0-6 landed. Logical selection now persists
 through shared preference/reconciliation policy and platform storage adapters;
-strict provenance and reload measurement are executable. Continue with
-Tactical 170 Slice 6 rather than extending this closed implementation series.
+strict provenance and reload measurement are executable. Tactical 170 — Web
+Scene-Host Adoption is also complete. Dedicated browser preparation-worker and
+first-party epoch-zero bootstrap work remain independent follow-ups coordinated
+by Tactical 171 — Convergence And Parity Closeout; they do not reopen this
+closed implementation series.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
