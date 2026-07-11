@@ -64,6 +64,10 @@ series implements the same concern, normally reuse the document slug in its
 - [`falling-tree-physics.md`](falling-tree-physics.md): Dynamic Falling Tree
   and Sable reference investigation for future tree felling, moving voxel
   assemblies, and impact effects.
+- [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
+  research, including reusable lessons for world-space UI surfaces, pointer
+  focus/capture, virtual-keyboard text entry, input contexts, render staging,
+  lifecycle, addons, settings, and remote XR pose replication.
 - [`vanilla/networking.md`](vanilla/networking.md): Minecraft Java 1.17.1
   vanilla networking reference — connection pipeline, login/join sequence,
   50 ms tick loop, chunk/entity sync cadences, movement validation and
