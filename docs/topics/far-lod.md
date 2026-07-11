@@ -5,7 +5,7 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11 (Tactical 172 Slice 2 diagnostic A/B control).
+Last reconciled: 2026-07-11 (Tactical 172 detail chooser landed early).
 
 ## Current State
 
@@ -58,9 +58,18 @@ normal-terrain columns carve and suppress the synthetic desired set. Disabled,
 LOD is deliberately generated and rendered through the whole configured
 radius, including underneath real terrain. Inspected high angled captures
 showed the large culling-on void filled when this control was off, confirming
-normal-terrain suppression as a major contributor. The uncull view has coarse
-overlap and seam artifacts and remains diagnostic-only; D1/D2 still require a
-real correctness fix.
+normal-terrain suppression as a major contributor. The uncull view
+deliberately overlaps both representations and remains diagnostic-only; user
+review found no additional capture problem. D1/D2 still require a real
+correctness fix.
+
+At user direction, the Slice 3 product chooser landed ahead of those remaining
+fixes so it can be evaluated interactively. Graphics now cycles **LOD Detail**
+through Auto, 4 blocks, 8 blocks, and 16 blocks; the shared startup equivalent
+is `--far-lod-detail auto|4|8|16`. Auto preserves the existing three distance
+bands. Each fixed mode uses one level and one spacing over the whole shell,
+bypassing band hysteresis. Switching clears retained LOD and rebuilds from a
+mode-specific source identity.
 
 ## Ownership
 
@@ -74,8 +83,9 @@ real correctness fix.
 - Budget families: `mclone-frame-budget` panel via
   `mclone-scene/src/render_admission.rs` (`lod_grant`).
 - Config/CLI/UI: `FarTerrainLodConfig` (`far_lod.rs`), shared `--far-lod`
-  and `--far-lod-normal-terrain-culling` (`startup_args.rs`), Options Far LOD,
-  culling, and range controls (`mclone-ui`).
+  / `--far-lod-detail` / `--far-lod-normal-terrain-culling`
+  (`startup_args.rs`), Options Far LOD, detail, culling, and range controls
+  (`mclone-ui`).
 
 ## Contract
 
@@ -128,13 +138,18 @@ no silent caps, bounded steady state.
   switch reaches pixels. Default culling and far-LOD-off captures remain
   unchanged. The permanent settle smoke matched on rerun after one late-work
   flake on its final revisit.
+- Landed early from 172 Slice 3: shared Auto/fixed-4/fixed-8/fixed-16 policy,
+  mode-specific source reset, Graphics cycle control, startup argument, and web
+  reporting. Focused tests pin single-level fixed policy, mode cycling, source
+  identity, and decreasing mesh work at coarser spacing. The menu and all four
+  modes were captured and inspected without adding another fixture schema.
 
 ## Recommended Next Direction
 
-Fix D1/D2 next, using the interactive culling A/B control to confirm the real
-session outcome and the existing fly-up probe only as a regression. Then
-continue tactical 172's correctness burn-down (Slice 2), detail modes
-(Slice 3), residency/perf polish
+Evaluate Auto/4/8/16 interactively, including movement and the culling A/B.
+Use concrete observations from that session to choose the next fix; D1/D2
+remain the known coverage priority. Then continue tactical 172's correctness
+burn-down (Slice 2) and residency/perf polish
 (Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real
 LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:
 tactical 171's thread ledger.

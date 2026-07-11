@@ -2685,6 +2685,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::ToggleFarLod => "toggleFarLod",
         GameUiAction::ToggleFarLodNormalTerrainCulling => "toggleFarLodNormalTerrainCulling",
+        GameUiAction::CycleFarLodDetail => "cycleFarLodDetail",
         GameUiAction::SetFarLodRange(_) => "setFarLodRange",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::ToggleCrosshair => "toggleCrosshair",

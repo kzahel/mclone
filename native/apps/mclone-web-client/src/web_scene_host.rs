@@ -1922,6 +1922,11 @@ impl WebSceneHost {
                 "farLodNormalTerrainCulling",
                 ui_state.far_lod_normal_terrain_culling,
             )?;
+            report_set_string(
+                &object,
+                "farLodDetailMode",
+                ui_state.far_lod_detail_mode.label(),
+            )?;
             report_set_number(
                 &object,
                 "farLodRangeChunks",

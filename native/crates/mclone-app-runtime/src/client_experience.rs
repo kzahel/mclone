@@ -5,13 +5,14 @@ use crate::client_session_policy::{
     ClientSessionActionContext, ClientSessionEffects, client_session_effects_for_action,
 };
 use crate::far_lod::{
-    MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    FarLodDetailMode, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    GameCollisionMode, GameFramePacingMode, GameMovementMode, GamePlayerModel,
-    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
-    GameUiRenderState, GameXrTurnMode,
+    GameCollisionMode, GameFarLodDetailMode, GameFramePacingMode, GameMovementMode,
+    GamePlayerModel, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode,
+    GameUiAction, GameUiRenderState, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -132,6 +133,7 @@ impl ClientExperienceController {
             | GameUiAction::ToggleFullbright
             | GameUiAction::ToggleFarLod
             | GameUiAction::ToggleFarLodNormalTerrainCulling
+            | GameUiAction::CycleFarLodDetail
             | GameUiAction::SetFarLodRange(_)
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
@@ -321,6 +323,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::ToggleFullbright => self.fullbright,
             ClientExperienceActionKind::ToggleFarLod
             | ClientExperienceActionKind::ToggleFarLodNormalTerrainCulling
+            | ClientExperienceActionKind::CycleFarLodDetail
             | ClientExperienceActionKind::SetFarLodRange => self.far_lod,
             ClientExperienceActionKind::TogglePlayerCollisionBox => self.player_collision_box,
             ClientExperienceActionKind::ToggleFirstPersonPlayer => self.first_person_player,
@@ -663,6 +666,17 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::ClearFarLod);
             }
+            GameUiAction::CycleFarLodDetail => {
+                self.state.far_lod_detail_mode = self.state.far_lod_detail_mode.next();
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetFarLodDetailMode(
+                        far_lod_detail_mode_from_game(self.state.far_lod_detail_mode),
+                    ));
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::ClearFarLod);
+            }
             GameUiAction::SetFarLodRange(range_chunks) => {
                 self.state.far_lod_range_chunks = self.state.clamp_far_lod_range(range_chunks);
                 effects.push_far_lod(self.state.far_lod_enabled, self.state.far_lod_range_chunks);
@@ -884,6 +898,10 @@ impl ClientExperienceSettingsController {
                 ClientExperienceActionKind::ToggleFarLodNormalTerrainCulling,
                 profile.far_lod,
             ),
+            (
+                ClientExperienceActionKind::CycleFarLodDetail,
+                profile.far_lod,
+            ),
             (ClientExperienceActionKind::SetFarLodRange, profile.far_lod),
             (
                 ClientExperienceActionKind::TogglePlayerCollisionBox,
@@ -1030,6 +1048,7 @@ pub struct ClientExperienceSettingsState {
     pub force_fullbright: bool,
     pub far_lod_enabled: bool,
     pub far_lod_normal_terrain_culling: bool,
+    pub far_lod_detail_mode: GameFarLodDetailMode,
     pub far_lod_range_chunks: i32,
     pub min_far_lod_range_chunks: i32,
     pub max_far_lod_range_chunks: i32,
@@ -1073,6 +1092,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             force_fullbright: state.force_fullbright,
             far_lod_enabled: state.far_lod_enabled,
             far_lod_normal_terrain_culling: state.far_lod_normal_terrain_culling,
+            far_lod_detail_mode: state.far_lod_detail_mode,
             far_lod_range_chunks: state.far_lod_range_chunks,
             min_far_lod_range_chunks: state.min_far_lod_range_chunks,
             max_far_lod_range_chunks: state.max_far_lod_range_chunks,
@@ -1117,6 +1137,7 @@ impl ClientExperienceSettingsState {
         state.force_fullbright = self.force_fullbright;
         state.far_lod_enabled = self.far_lod_enabled;
         state.far_lod_normal_terrain_culling = self.far_lod_normal_terrain_culling;
+        state.far_lod_detail_mode = self.far_lod_detail_mode;
         state.far_lod_range_chunks = self.far_lod_range_chunks;
         state.min_far_lod_range_chunks = self.min_far_lod_range_chunks;
         state.max_far_lod_range_chunks = self.max_far_lod_range_chunks;
@@ -1344,6 +1365,24 @@ impl ClientExperienceSettingsEffects {
     }
 }
 
+pub const fn far_lod_detail_mode_from_game(mode: GameFarLodDetailMode) -> FarLodDetailMode {
+    match mode {
+        GameFarLodDetailMode::Auto => FarLodDetailMode::Auto,
+        GameFarLodDetailMode::Fixed4 => FarLodDetailMode::Fixed4,
+        GameFarLodDetailMode::Fixed8 => FarLodDetailMode::Fixed8,
+        GameFarLodDetailMode::Fixed16 => FarLodDetailMode::Fixed16,
+    }
+}
+
+pub const fn game_far_lod_detail_mode(mode: FarLodDetailMode) -> GameFarLodDetailMode {
+    match mode {
+        FarLodDetailMode::Auto => GameFarLodDetailMode::Auto,
+        FarLodDetailMode::Fixed4 => GameFarLodDetailMode::Fixed4,
+        FarLodDetailMode::Fixed8 => GameFarLodDetailMode::Fixed8,
+        FarLodDetailMode::Fixed16 => GameFarLodDetailMode::Fixed16,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClientExperienceSettingEffect {
     SetSectionOcclusionCulling(bool),
@@ -1353,6 +1392,7 @@ pub enum ClientExperienceSettingEffect {
         extra_radius_chunks: u32,
     },
     SetFarLodNormalTerrainCulling(bool),
+    SetFarLodDetailMode(FarLodDetailMode),
     ClearFarLod,
     SetPlayerCollisionBoxVisible(bool),
     SetFirstPersonPlayerVisible(bool),
@@ -1431,6 +1471,7 @@ pub enum ClientExperienceActionKind {
     ToggleFullbright,
     ToggleFarLod,
     ToggleFarLodNormalTerrainCulling,
+    CycleFarLodDetail,
     SetFarLodRange,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -1491,6 +1532,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::ToggleFarLodNormalTerrainCulling => {
             ClientExperienceActionKind::ToggleFarLodNormalTerrainCulling
         }
+        GameUiAction::CycleFarLodDetail => ClientExperienceActionKind::CycleFarLodDetail,
         GameUiAction::SetFarLodRange(_) => ClientExperienceActionKind::SetFarLodRange,
         GameUiAction::TogglePlayerCollisionBox => {
             ClientExperienceActionKind::TogglePlayerCollisionBox
@@ -1563,6 +1605,7 @@ pub const fn classify_client_experience_action_kind(
         }
         ClientExperienceActionKind::ToggleFarLod
         | ClientExperienceActionKind::ToggleFarLodNormalTerrainCulling
+        | ClientExperienceActionKind::CycleFarLodDetail
         | ClientExperienceActionKind::SetFarLodRange
         | ClientExperienceActionKind::ToggleCrosshair
         | ClientExperienceActionKind::ToggleFramePipelineOverlay
@@ -1805,6 +1848,7 @@ mod tests {
             GameUiAction::ToggleFullbright,
             GameUiAction::ToggleFarLod,
             GameUiAction::ToggleFarLodNormalTerrainCulling,
+            GameUiAction::CycleFarLodDetail,
             GameUiAction::SetFarLodRange(8),
             GameUiAction::TogglePlayerCollisionBox,
             GameUiAction::ToggleFirstPersonPlayer,
@@ -1828,7 +1872,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 54);
+        assert_eq!(samples.len(), 55);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2012,6 +2056,32 @@ mod tests {
                 ClientExperienceSettingEffect::ClearFarLod,
             ]
         );
+    }
+
+    #[test]
+    fn settings_cycle_far_lod_detail_resets_lod() {
+        let mut settings = ClientExperienceSettingsController::default();
+        let expected = [
+            (GameFarLodDetailMode::Fixed4, FarLodDetailMode::Fixed4),
+            (GameFarLodDetailMode::Fixed8, FarLodDetailMode::Fixed8),
+            (GameFarLodDetailMode::Fixed16, FarLodDetailMode::Fixed16),
+            (GameFarLodDetailMode::Auto, FarLodDetailMode::Auto),
+        ];
+
+        for (game_mode, engine_mode) in expected {
+            let effects = settings.apply_ui_action(
+                GameUiAction::CycleFarLodDetail,
+                ClientExperienceSettingsProfile::default(),
+            );
+            assert_eq!(settings.state().far_lod_detail_mode, game_mode);
+            assert_eq!(
+                effects.setting_effects,
+                vec![
+                    ClientExperienceSettingEffect::SetFarLodDetailMode(engine_mode),
+                    ClientExperienceSettingEffect::ClearFarLod,
+                ]
+            );
+        }
     }
 
     #[test]

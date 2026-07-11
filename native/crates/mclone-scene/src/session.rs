@@ -1855,6 +1855,15 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         Ok(())
     }
 
+    fn set_far_lod_detail_mode(
+        &mut self,
+        mode: mclone_app_runtime::far_lod::FarLodDetailMode,
+    ) -> Result<()> {
+        self.scene.far_lod = self.scene.far_lod.with_detail_mode(mode);
+        log::info!("XR far LOD detail mode set to {mode:?}");
+        Ok(())
+    }
+
     fn clear_far_lod(&mut self) -> Result<()> {
         if let Some(runtime) = &mut self.runtime {
             runtime.clear_far_lod();

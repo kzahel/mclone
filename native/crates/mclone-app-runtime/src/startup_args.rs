@@ -10,7 +10,7 @@ use mclone_render_session::{
 };
 use mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE;
 
-use crate::far_lod::FarTerrainLodConfig;
+use crate::far_lod::{FarLodDetailMode, FarTerrainLodConfig};
 use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
 };
@@ -33,6 +33,7 @@ pub const ARG_DEBUG_PASSIVE_SHOWCASE: &str = "--debug-passive-showcase";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
 pub const ARG_FAR_LOD: &str = "--far-lod";
+pub const ARG_FAR_LOD_DETAIL: &str = "--far-lod-detail";
 pub const ARG_FAR_LOD_NORMAL_TERRAIN_CULLING: &str = "--far-lod-normal-terrain-culling";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
@@ -62,6 +63,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_LIGHTING,
     ARG_LIGHT_STATUS_BATCH_SIZE,
     ARG_FAR_LOD,
+    ARG_FAR_LOD_DETAIL,
     ARG_FAR_LOD_NORMAL_TERRAIN_CULLING,
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
@@ -409,6 +411,10 @@ impl StartupArgState {
             ARG_FAR_LOD => {
                 self.scene.far_lod.enabled = parse_bool_arg(ARG_FAR_LOD, args.next())?;
             }
+            ARG_FAR_LOD_DETAIL => {
+                self.scene.far_lod.detail_mode =
+                    parse_far_lod_detail_mode_arg(ARG_FAR_LOD_DETAIL, args.next())?;
+            }
             ARG_FAR_LOD_NORMAL_TERRAIN_CULLING => {
                 self.scene.far_lod.normal_terrain_culling =
                     parse_bool_arg(ARG_FAR_LOD_NORMAL_TERRAIN_CULLING, args.next())?;
@@ -607,6 +613,21 @@ pub fn parse_render_color_profile_arg(
         .map_err(|message| anyhow::anyhow!("{flag} {message}"))
 }
 
+pub fn parse_far_lod_detail_mode_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<FarLodDetailMode> {
+    let value = parse_string_arg(flag, value)?;
+    match value.as_str() {
+        "auto" => Ok(FarLodDetailMode::Auto),
+        "4" => Ok(FarLodDetailMode::Fixed4),
+        "8" => Ok(FarLodDetailMode::Fixed8),
+        "16" => Ok(FarLodDetailMode::Fixed16),
+        "1" | "2" => bail!("{flag} detail {value} is reserved for a later debug mode"),
+        _ => bail!("{flag} must be auto, 4, 8, or 16, got `{value}`"),
+    }
+}
+
 pub fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
     let raw = value.with_context(|| format!("{flag} requires x,y,z"))?;
     let parts = raw
@@ -787,6 +808,8 @@ mod tests {
             "5",
             ARG_FAR_LOD,
             "true",
+            ARG_FAR_LOD_DETAIL,
+            "16",
             ARG_FAR_LOD_NORMAL_TERRAIN_CULLING,
             "false",
             ARG_REMOTE_ADDR,
@@ -813,7 +836,9 @@ mod tests {
                 debug_passive_showcase: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
-                far_lod: FarTerrainLodConfig::enabled().with_normal_terrain_culling(false),
+                far_lod: FarTerrainLodConfig::enabled()
+                    .with_detail_mode(FarLodDetailMode::Fixed16)
+                    .with_normal_terrain_culling(false),
             }
         );
         assert_eq!(
@@ -850,6 +875,29 @@ mod tests {
 
         let options = parse(&[ARG_LIGHTING, "false", ARG_FULLBRIGHT, "false"]);
         assert!(!options.render_options.force_fullbright);
+    }
+
+    #[test]
+    fn far_lod_detail_parser_accepts_product_modes_and_reserves_debug_modes() {
+        for (value, expected) in [
+            ("auto", FarLodDetailMode::Auto),
+            ("4", FarLodDetailMode::Fixed4),
+            ("8", FarLodDetailMode::Fixed8),
+            ("16", FarLodDetailMode::Fixed16),
+        ] {
+            assert_eq!(
+                parse_far_lod_detail_mode_arg(ARG_FAR_LOD_DETAIL, Some(value.to_owned())).unwrap(),
+                expected
+            );
+        }
+        for value in ["1", "2"] {
+            assert!(
+                parse_far_lod_detail_mode_arg(ARG_FAR_LOD_DETAIL, Some(value.to_owned()))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("reserved")
+            );
+        }
     }
 
     #[test]

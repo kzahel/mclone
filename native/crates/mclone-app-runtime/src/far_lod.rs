@@ -226,12 +226,42 @@ pub struct FarTerrainLodSettleSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FarLodDetailMode {
+    Auto,
+    Fixed4,
+    Fixed8,
+    Fixed16,
+}
+
+impl FarLodDetailMode {
+    pub const fn sample_spacing_blocks(self, auto_spacing_blocks: u32) -> u32 {
+        match self {
+            Self::Auto => auto_spacing_blocks,
+            Self::Fixed4 => 4,
+            Self::Fixed8 => 8,
+            Self::Fixed16 => 16,
+        }
+    }
+
+    pub const fn is_auto(self) -> bool {
+        matches!(self, Self::Auto)
+    }
+}
+
+impl Default for FarLodDetailMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FarTerrainLodConfig {
     pub enabled: bool,
     /// Whether normal terrain coverage removes overlapping far-LOD tiles.
     /// Disable this only as a diagnostic A/B mode: real and synthetic terrain
     /// will both draw where their coverage overlaps.
     pub normal_terrain_culling: bool,
+    pub detail_mode: FarLodDetailMode,
     pub start_margin_chunks: u32,
     pub extra_radius_chunks: u32,
     pub sample_spacing_blocks: u32,
@@ -242,6 +272,7 @@ impl FarTerrainLodConfig {
         Self {
             enabled: false,
             normal_terrain_culling: true,
+            detail_mode: FarLodDetailMode::Auto,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
             sample_spacing_blocks: DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS,
@@ -252,6 +283,7 @@ impl FarTerrainLodConfig {
         Self {
             enabled: true,
             normal_terrain_culling: true,
+            detail_mode: FarLodDetailMode::Auto,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
             sample_spacing_blocks: DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS,
@@ -271,10 +303,16 @@ impl FarTerrainLodConfig {
         self
     }
 
+    pub const fn with_detail_mode(mut self, detail_mode: FarLodDetailMode) -> Self {
+        self.detail_mode = detail_mode;
+        self
+    }
+
     fn normalized(self) -> Self {
         Self {
             enabled: self.enabled,
             normal_terrain_culling: self.normal_terrain_culling,
+            detail_mode: self.detail_mode,
             start_margin_chunks: self.start_margin_chunks,
             extra_radius_chunks: self.extra_radius_chunks.clamp(
                 MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
@@ -309,6 +347,7 @@ pub struct StartupLodPrewarmConfig {
     pub time_cap: Duration,
     pub tile_cap: usize,
     pub sample_spacing_blocks: u32,
+    pub detail_mode: FarLodDetailMode,
 }
 
 impl StartupLodPrewarmConfig {
@@ -319,6 +358,7 @@ impl StartupLodPrewarmConfig {
             time_cap: DEFAULT_STARTUP_LOD_PREWARM_TIME_CAP,
             tile_cap: DEFAULT_STARTUP_LOD_PREWARM_TILE_CAP,
             sample_spacing_blocks: DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS,
+            detail_mode: FarLodDetailMode::Auto,
         }
     }
 
@@ -329,6 +369,7 @@ impl StartupLodPrewarmConfig {
         Self {
             enabled: enabled && far_lod.enabled,
             sample_spacing_blocks: far_lod.normalized().sample_spacing_blocks,
+            detail_mode: far_lod.normalized().detail_mode,
             ..Self::disabled()
         }
     }
@@ -357,6 +398,7 @@ impl StartupLodPrewarmConfig {
         FarTerrainLodConfig {
             enabled: true,
             normal_terrain_culling: true,
+            detail_mode: self.detail_mode,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: self.extra_chunks,
             sample_spacing_blocks: self.sample_spacing_blocks,
@@ -550,6 +592,7 @@ struct FarTerrainLodBuildKey {
     start_margin_chunks: u32,
     extra_radius_chunks: u32,
     sample_spacing_blocks: u32,
+    detail_mode: FarLodDetailMode,
     normal_terrain_culling: bool,
     normal_chunk_hash: u64,
 }
@@ -558,14 +601,19 @@ struct FarTerrainLodBuildKey {
 struct FarTerrainLodSourceKey {
     seed: i64,
     sample_spacing_blocks: u32,
+    detail_mode: FarLodDetailMode,
     materials_available: bool,
 }
 
 impl FarTerrainLodSourceKey {
     fn new(seed: i64, config: FarTerrainLodConfig, materials_available: bool) -> Self {
+        let config = config.normalized();
         Self {
             seed,
-            sample_spacing_blocks: config.normalized().sample_spacing_blocks,
+            sample_spacing_blocks: config
+                .detail_mode
+                .sample_spacing_blocks(config.sample_spacing_blocks),
+            detail_mode: config.detail_mode,
             materials_available,
         }
     }
@@ -578,6 +626,7 @@ impl FarTerrainLodSourceKey {
             start_margin_chunks: 0,
             extra_radius_chunks: 1,
             sample_spacing_blocks: self.sample_spacing_blocks,
+            detail_mode: self.detail_mode,
             normal_terrain_culling: false,
             normal_chunk_hash: 0,
         }
@@ -600,6 +649,7 @@ impl FarTerrainLodBuildKey {
             start_margin_chunks: config.start_margin_chunks,
             extra_radius_chunks: config.extra_radius_chunks,
             sample_spacing_blocks: config.sample_spacing_blocks,
+            detail_mode: config.detail_mode,
             normal_terrain_culling: config.normal_terrain_culling,
             normal_chunk_hash: if config.normal_terrain_culling {
                 normal_terrain_chunk_hash(normal_terrain_chunks)
@@ -1377,6 +1427,9 @@ fn far_lod_level_band_ends(key: FarTerrainLodBuildKey) -> [u32; FAR_TERRAIN_LOD_
 }
 
 fn far_lod_raw_level(key: FarTerrainLodBuildKey, distance: u32) -> u8 {
+    if !key.detail_mode.is_auto() {
+        return 1;
+    }
     let ends = far_lod_level_band_ends(key);
     if distance <= ends[0] {
         1
@@ -1393,6 +1446,9 @@ fn far_lod_stabilized_level(
     previous: Option<u8>,
     raw: u8,
 ) -> u8 {
+    if !key.detail_mode.is_auto() {
+        return raw;
+    }
     let Some(previous) = previous.filter(|level| (1..=3).contains(level)) else {
         return raw;
     };
@@ -1515,6 +1571,7 @@ pub fn compile_far_terrain_lod_worker_input(
     let source_key = FarTerrainLodSourceKey {
         seed: input.seed,
         sample_spacing_blocks: input.sample_spacing_blocks.max(1),
+        detail_mode: FarLodDetailMode::Auto,
         materials_available: materials.is_some(),
     };
     let patch = build_retained_far_terrain_lod_patch(
@@ -1536,6 +1593,7 @@ fn build_far_terrain_lod_tile(key: FarTerrainLodBuildKey, pos: ChunkPos) -> FarT
             FarTerrainLodConfig {
                 enabled: true,
                 normal_terrain_culling: true,
+                detail_mode: key.detail_mode,
                 start_margin_chunks: 0,
                 extra_radius_chunks: 1,
                 sample_spacing_blocks: key.sample_spacing_blocks,
@@ -2197,6 +2255,70 @@ mod tests {
         assert_eq!(far_lod_sample_spacing_for_level(4, 1), 4);
         assert_eq!(far_lod_sample_spacing_for_level(4, 2), 8);
         assert_eq!(far_lod_sample_spacing_for_level(4, 3), 16);
+    }
+
+    #[test]
+    fn fixed_detail_modes_use_one_level_at_the_selected_spacing() {
+        for (mode, spacing) in [
+            (FarLodDetailMode::Fixed4, 4),
+            (FarLodDetailMode::Fixed8, 8),
+            (FarLodDetailMode::Fixed16, 16),
+        ] {
+            let config = FarTerrainLodConfig::enabled().with_detail_mode(mode);
+            let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config, None);
+            let source = FarTerrainLodSourceKey::new(12345, config, false);
+
+            assert_eq!(source.detail_mode, mode);
+            assert_eq!(source.sample_spacing_blocks, spacing);
+            assert_eq!(far_lod_raw_level(key, 12), 1);
+            assert_eq!(far_lod_stabilized_level(key, 12, Some(3), 1), 1);
+            assert_eq!(
+                far_lod_sample_spacing_for_level(source.sample_spacing_blocks, 1),
+                spacing
+            );
+        }
+    }
+
+    #[test]
+    fn auto_and_fixed_four_have_distinct_source_keys() {
+        let auto = FarTerrainLodSourceKey::new(
+            12345,
+            FarTerrainLodConfig::enabled().with_detail_mode(FarLodDetailMode::Auto),
+            false,
+        );
+        let fixed = FarTerrainLodSourceKey::new(
+            12345,
+            FarTerrainLodConfig::enabled().with_detail_mode(FarLodDetailMode::Fixed4),
+            false,
+        );
+
+        assert_ne!(auto, fixed);
+        assert_eq!(auto.sample_spacing_blocks, fixed.sample_spacing_blocks);
+    }
+
+    #[test]
+    fn coarser_fixed_detail_modes_reduce_tile_mesh_work() {
+        let mesh_counts = |mode| {
+            let source = FarTerrainLodSourceKey::new(
+                12345,
+                FarTerrainLodConfig::enabled().with_detail_mode(mode),
+                false,
+            );
+            let mesh = compile_far_terrain_lod_request(FarTerrainLodBuildRequest::new(
+                ChunkPos::new(0, 0),
+                source,
+                None,
+                far_lod_now(),
+            ))
+            .mesh;
+            (mesh.vertex_count(), mesh.index_count())
+        };
+
+        let fixed_4 = mesh_counts(FarLodDetailMode::Fixed4);
+        let fixed_8 = mesh_counts(FarLodDetailMode::Fixed8);
+        let fixed_16 = mesh_counts(FarLodDetailMode::Fixed16);
+        assert!(fixed_4.0 > fixed_8.0 && fixed_8.0 > fixed_16.0);
+        assert!(fixed_4.1 > fixed_8.1 && fixed_8.1 > fixed_16.1);
     }
 
     #[test]

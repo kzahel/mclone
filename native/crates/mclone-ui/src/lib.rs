@@ -1682,6 +1682,7 @@ pub enum GameUiAction {
     ToggleFullbright,
     ToggleFarLod,
     ToggleFarLodNormalTerrainCulling,
+    CycleFarLodDetail,
     SetFarLodRange(i32),
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -1711,6 +1712,35 @@ pub enum GameFramePacingMode {
     Vsync,
     Capped,
     Uncapped,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFarLodDetailMode {
+    #[default]
+    Auto,
+    Fixed4,
+    Fixed8,
+    Fixed16,
+}
+
+impl GameFarLodDetailMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Fixed4 => "4 blocks",
+            Self::Fixed8 => "8 blocks",
+            Self::Fixed16 => "16 blocks",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Auto => Self::Fixed4,
+            Self::Fixed4 => Self::Fixed8,
+            Self::Fixed8 => Self::Fixed16,
+            Self::Fixed16 => Self::Auto,
+        }
+    }
 }
 
 impl GameFramePacingMode {
@@ -1782,6 +1812,7 @@ pub struct GameUiRenderState {
     pub force_fullbright: bool,
     pub far_lod_enabled: bool,
     pub far_lod_normal_terrain_culling: bool,
+    pub far_lod_detail_mode: GameFarLodDetailMode,
     pub far_lod_range_chunks: i32,
     pub min_far_lod_range_chunks: i32,
     pub max_far_lod_range_chunks: i32,
@@ -1822,6 +1853,7 @@ impl Default for GameUiRenderState {
             force_fullbright: false,
             far_lod_enabled: false,
             far_lod_normal_terrain_culling: true,
+            far_lod_detail_mode: GameFarLodDetailMode::Auto,
             far_lod_range_chunks: 12,
             min_far_lod_range_chunks: 1,
             max_far_lod_range_chunks: 64,

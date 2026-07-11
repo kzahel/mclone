@@ -10,7 +10,10 @@ split for execution: Slice 1C2b1 (movement and band transitions) is complete,
 and Slice 1C2b2 (toggle/range mutations and the full probe lane) is complete.
 The Slice 1 harness is complete. Slice 2 has started with a default-on
 normal-terrain-culling A/B control that confirms suppression is a major cause
-of the fly-up void; the D1/D2 correctness fix is next. This
+of the fly-up void. At user direction, Slice 3's product chooser then landed
+ahead of the remaining Slice 2 fixes: Auto / fixed 4 / fixed 8 / fixed 16 are
+now directly testable in Graphics. Interactive evaluation is next; D1/D2
+remain open. This
 tactical owns the far-LOD product-hardening series: a settle-state validation
 harness, the coverage-gap correctness burn-down, and the user-facing LOD
 detail modes (auto / 4 / 8 / 16, debug 1 / 2), plus residency/perf polish. It
@@ -393,8 +396,9 @@ removes normal-terrain readiness from both desired-tile generation and LOD
 visibility suppression, deliberately drawing synthetic LOD underneath real
 terrain. An inspected high, angled A/B capture showed the culling-on scene's
 large empty region filled by synthetic terrain when culling was off. The
-unculled view also shows coarse overlap and existing seam holes, so this is a
-validation control, not a candidate default or a substitute for D1/D2. No new
+unculled view deliberately overlaps synthetic and real terrain, so this is a
+validation control rather than a candidate default or a substitute for D1/D2;
+user review found no additional problem in the captured comparison. No new
 probe schema or fixture framework was added; focused producer/UI/policy tests
 guard the option.
 
@@ -440,35 +444,39 @@ Gate:
   (D1 touches the real render path — treat as frame-path change);
 - no new scheduler/queue types; budget families and ordering only.
 
-### Slice 3: LOD detail modes (auto / 4 / 8 / 16)
+### Slice 3: LOD detail modes (auto / 4 / 8 / 16; chooser landed early 2026-07-11)
 
-Work:
+The product chooser was intentionally pulled ahead of the remaining Slice 2
+correctness work so its visual and performance tradeoffs can be evaluated in a
+real session now. Landed:
 
-- `FarLodDetailMode { Auto, Fixed { spacing_blocks } }` on
-  `FarTerrainLodConfig`, folded into `FarTerrainLodSourceKey` so mode changes
-  reset cleanly. Fixed mode: single level 1 at base spacing = 4/8/16; band
-  ends, hysteresis, and level history bypassed (no transitions exist).
-- Shared CLI: `--far-lod-detail auto|4|8|16` following the
+- `FarLodDetailMode::{Auto, Fixed4, Fixed8, Fixed16}` is part of
+  `FarTerrainLodConfig` and `FarTerrainLodSourceKey`, so even Auto ↔ fixed-4
+  resets cleanly despite sharing a four-block base spacing. Fixed modes use
+  only level 1 at the selected 4/8/16-block spacing; band selection and
+  hysteresis are bypassed.
+- Shared CLI `--far-lod-detail auto|4|8|16` follows the
   `--render-distance` value-arg pattern in `startup_args.rs` (all four
   platforms inherit). Debug values 1|2 parse but are rejected until Slice 5.
-- Options UI: an "LOD Detail" cycle row (the Frame Pacing / FPS Cap `Cycle`
-  widget precedent) next to the Far LOD checkbox, with the established
-  action→effect→session→ui_panels plumbing chain.
-- Harness fixtures per mode: C1/C3 with the expected single-level sets, C2
-  probe, one movement fixture per mode; a runtime mode-switch fixture
-  asserting a bounded clean reset (resident set converges to the new mode's
-  desired set at settle, no leaked tiles or GPU regions).
-- Renderer: no changes required — spacing ≥ 4 fits the existing 512/768 tile
-  slots.
+- Graphics has an enabled-with-Far-LOD **LOD Detail** cycle row using the
+  established shared action→effect→session→UI projection path. Each switch
+  updates config and clears retained LOD before rebuilding the new source.
+- The renderer needed no changes. Focused policy tests prove all fixed modes
+  request only level 1, Auto and fixed-4 retain distinct source identities,
+  mode cycling resets LOD, and coarser fixed modes monotonically reduce tile
+  vertex/index work. All four startup modes and the Graphics row were captured
+  and inspected in ordinary and culling-A/B views; the expected visible detail
+  differences are present.
 
 Notes: fixed-16 is the "whole chunk" mode (one sample per chunk, the
 chunk-granular ceiling from 166). No options persistence exists in the engine;
 like every other option, the mode resets each launch — persistence is a
 separate concern, explicitly out of scope (see Non-Goals).
 
-Gate: per-mode fixtures green; mode switching leak-free; far-LOD-off canary;
-perf smokes within spread (fixed-16 should measurably lower build cost;
-record it).
+The former per-mode fixture expansion is not a prerequisite for interactive
+use and was not added. After user evaluation, record a representative live
+fixed-4 versus fixed-16 performance comparison and add only a focused
+regression if that evaluation reveals a concrete defect.
 
 ### Slice 4: Residency, memory, and movement-perf polish
 

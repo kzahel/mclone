@@ -491,6 +491,33 @@ fn options_far_lod_culling_toggle_follows_far_lod_availability() {
 }
 
 #[test]
+fn options_far_lod_detail_cycle_follows_far_lod_availability() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+
+    for (enabled, expected) in [(false, None), (true, Some(GameUiAction::CycleFarLodDetail))] {
+        surface.set_render_state(GameUiRenderState {
+            far_lod_enabled: enabled,
+            ..GameUiRenderState::default()
+        });
+        let detail = surface
+            .layout()
+            .widget(UI_V2_OPTIONS_FAR_LOD_DETAIL)
+            .expect("far lod detail row")
+            .rect;
+        assert!(surface.pointer_down(point_in(detail), surface.render_state));
+        assert_eq!(
+            surface.pointer_up(point_in(detail), surface.render_state).1,
+            expected
+        );
+    }
+}
+
+#[test]
 fn options_render_distance_slider_uses_committed_rect() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::OptionsCategory {
