@@ -8,8 +8,9 @@ resident-tile worker/runtime/render path. Tactical 166 — Shared Resident-Tile
 Substrate is complete through Slice 4 multi-level rings. Tactical 172 — Far
 LOD Settle Contract And Detail Modes is active on the LOD thread: Slice 1A's
 pull-only exact-set/ledger foundation and Slice 1B's first executable
-spawn/fly-up settle probe have landed. Slice 1C's generalized scripts, image
-and determinism probes, fixture matrix, and permanent lanes are next, followed
+spawn/fly-up settle probe have landed. Slice 1C1's validated waypoint scripts
+and permanent smoke lane have also landed. Slice 1C2's image and determinism
+probes plus full fixture matrix are next, followed
 by the coverage-gap correctness burn-down and detail modes. Tactical 162 —
 Real-Chunk LOD Reduction Draft Slice 4 resumes after 172 Slice 2's gates are
 green. This parent owns the
@@ -75,8 +76,8 @@ explicit re-scope:
 | Browser host adoption | Tactical 170 — Web Scene-Host Adoption | **Closed.** Slices 0–6 landed; the old browser orchestrator is deleted. | Burn down only the exact web feature exceptions below. |
 | Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Paused at Slice 4.** Slices 0A–2 landed; Slice 3 was superseded by the substrate; Slice 4 is re-scoped behind Tactical 172's harness and correctness gates. | Resume Slice 4 (first reduced-real producer) after Tactical 172 Slice 2 is green. |
 | Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Closed. Slices 1–4 and the production browser proof landed.** | Preserve its worker, admission, residency, transition, seam, and render gates for later producers. |
-| Far LOD settle contract, correctness, and detail modes | Tactical 172 — Far LOD Settle Contract And Detail Modes | **Active; Slice 1A exact-set/ledger foundation and Slice 1B fixed executable spawn/fly-up probe landed.** The high fixture is pinned red with three paintable-frustum, graph-culled columns still suppressing LOD. | Land Slice 1C generalized scripts, image/determinism probes, fixture matrix, and permanent lanes; then Slice 2 correctness burn-down and the detail/residency slices. |
-| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D and the first Milestone E step landed.** | Coordinate Tactical 172 Slice 1C next; resume Tactical 162 Slice 4 after 172 Slice 2; close only after the milestones below and explicit deferred decisions are recorded. |
+| Far LOD settle contract, correctness, and detail modes | Tactical 172 — Far LOD Settle Contract And Detail Modes | **Active; Slices 1A–1C1 landed exact-set/ledger access, the executable probe, validated waypoint scripts, and `native:lod-settle:smoke`.** The high fixture is pinned red with three paintable-frustum, graph-culled columns still suppressing LOD. | Land Slice 1C2 image/determinism probes and the full fixture matrix; then Slice 2 correctness burn-down and the detail/residency slices. |
+| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D and the first Milestone E step landed.** | Coordinate Tactical 172 Slice 1C2 next; resume Tactical 162 Slice 4 after 172 Slice 2; close only after the milestones below and explicit deferred decisions are recorded. |
 
 ## Asset-Pack Follow-Ups That Do Not Reopen The Closed Series
 

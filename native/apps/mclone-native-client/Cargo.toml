@@ -50,6 +50,7 @@ mclone-xr-host = { workspace = true, optional = true }
 mclone-scene = { workspace = true }
 openxr = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
+serde.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true

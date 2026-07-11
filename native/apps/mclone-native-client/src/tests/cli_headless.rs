@@ -58,6 +58,8 @@ fn cli_parses_fixed_lod_settle_probe_options() {
     let cli = Cli::parse([
         "--lod-settle-probe".to_owned(),
         "/tmp/mclone-lod-settle".to_owned(),
+        "--lod-settle-script".to_owned(),
+        "test/fixtures/far-lod/settle-smoke.json".to_owned(),
         "--width".to_owned(),
         "800".to_owned(),
         "--height".to_owned(),
@@ -77,6 +79,10 @@ fn cli_parses_fixed_lod_settle_probe_options() {
         panic!("expected far LOD settle probe CLI mode");
     };
     assert_eq!(options.directory, PathBuf::from("/tmp/mclone-lod-settle"));
+    assert_eq!(
+        options.script,
+        Some(PathBuf::from("test/fixtures/far-lod/settle-smoke.json"))
+    );
     assert_eq!([options.width, options.height], [800, 600]);
     assert_eq!(options.scene.seed, 77);
     assert_eq!(options.scene.render_distance, 4);
@@ -86,6 +92,21 @@ fn cli_parses_fixed_lod_settle_probe_options() {
     assert!(options.scene.freeze_time);
     assert!(!options.scene.debug_passive_showcase);
     assert!(options.render_options.section_occlusion_culling);
+}
+
+#[test]
+fn cli_rejects_lod_settle_script_without_probe_mode() {
+    let error = Cli::parse([
+        "--lod-settle-script".to_owned(),
+        "test/fixtures/far-lod/settle-smoke.json".to_owned(),
+    ])
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("--lod-settle-script requires --lod-settle-probe")
+    );
 }
 
 #[test]

@@ -7,6 +7,7 @@ use mclone_app_runtime::lod_coverage::LodReplacementCounters;
 use mclone_core::{ChunkPos, LodTileKey, chunk_middle_block_coord};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_scene::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
+use serde::Deserialize;
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{LodSettleProbeOptions, StartupWaitPolicy};
@@ -15,9 +16,11 @@ use crate::offscreen_scene_host::OffscreenWarmupReport;
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::WindowSceneAssets;
 
-const FIXTURE_COUNT: usize = 2;
 const SPAWN_FIXTURE: &str = "rd4-range6-spawn-settle";
 const FLY_UP_FIXTURE: &str = "rd4-range6-fly-up-high";
+const SCRIPT_SCHEMA: u32 = 1;
+const MAX_WAYPOINTS: usize = 64;
+const MAX_CAPTURE_SETTLE_PASSES: usize = 4;
 const FLY_UP_EYE_OFFSET_X: f32 = 0.25;
 const FLY_UP_EYE_Y: f32 = 200.0;
 const FLY_UP_EYE_OFFSET_Z: f32 = 0.25;
@@ -44,12 +47,14 @@ impl LodSettleProbeReport {
 
 struct ProbeHost {
     host: OffscreenFlatClientHost,
-    warmups: Vec<OffscreenWarmupReport>,
+    script: LodSettleScript,
+    startup_warmup: Option<OffscreenWarmupReport>,
     observations: Vec<FixtureObservation>,
 }
 
 struct FixtureObservation {
-    name: &'static str,
+    name: String,
+    expected: LodSettleExpectation,
     warmup: OffscreenWarmupReport,
     summary: mclone_app_runtime::frame_render::FullFrameRenderSummary,
     snapshot: FarLodSettleSnapshot,
@@ -58,9 +63,141 @@ struct FixtureObservation {
     lod_counters: LodReplacementCounters,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LodSettleScript {
+    schema: u32,
+    name: String,
+    waypoints: Vec<LodSettleWaypoint>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LodSettleWaypoint {
+    name: String,
+    camera: LodSettleCamera,
+    expected: LodSettleExpectation,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+enum LodSettleCamera {
+    SpawnSurface,
+    LookAt { eye: [f32; 3], target: [f32; 3] },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum LodSettleExpectation {
+    Pass,
+    FailD1D2,
+}
+
+impl LodSettleExpectation {
+    const fn report_name(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::FailD1D2 => "fail:d1-d2",
+        }
+    }
+}
+
+impl LodSettleScript {
+    fn load(path: Option<&Path>, scene: &crate::cli::SceneOptions) -> Result<Self> {
+        let script = if let Some(path) = path {
+            let source = std::fs::read_to_string(path)
+                .with_context(|| format!("read far LOD settle script {}", path.display()))?;
+            serde_json::from_str(&source)
+                .with_context(|| format!("parse far LOD settle script {}", path.display()))?
+        } else {
+            Self::default_for_scene(scene)
+        };
+        script.validate()?;
+        Ok(script)
+    }
+
+    fn default_for_scene(scene: &crate::cli::SceneOptions) -> Self {
+        let center_x = chunk_middle_block_coord(scene.chunk_x) as f32;
+        let center_z = chunk_middle_block_coord(scene.chunk_z) as f32;
+        Self {
+            schema: SCRIPT_SCHEMA,
+            name: "built-in-rd4-range6-smoke".to_owned(),
+            waypoints: vec![
+                LodSettleWaypoint {
+                    name: SPAWN_FIXTURE.to_owned(),
+                    camera: LodSettleCamera::SpawnSurface,
+                    expected: LodSettleExpectation::Pass,
+                },
+                LodSettleWaypoint {
+                    name: FLY_UP_FIXTURE.to_owned(),
+                    camera: LodSettleCamera::LookAt {
+                        eye: [
+                            center_x + FLY_UP_EYE_OFFSET_X,
+                            FLY_UP_EYE_Y,
+                            center_z + FLY_UP_EYE_OFFSET_Z,
+                        ],
+                        target: [center_x, FLY_UP_TARGET_Y, center_z],
+                    },
+                    expected: LodSettleExpectation::FailD1D2,
+                },
+            ],
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.schema != SCRIPT_SCHEMA {
+            bail!(
+                "far LOD settle script schema must be {SCRIPT_SCHEMA}, got {}",
+                self.schema
+            );
+        }
+        validate_safe_name("script", &self.name)?;
+        if self.waypoints.is_empty() || self.waypoints.len() > MAX_WAYPOINTS {
+            bail!("far LOD settle script requires 1..={MAX_WAYPOINTS} waypoints");
+        }
+        let mut names = BTreeSet::new();
+        for waypoint in &self.waypoints {
+            validate_safe_name("waypoint", &waypoint.name)?;
+            if !names.insert(waypoint.name.as_str()) {
+                bail!("duplicate far LOD settle waypoint `{}`", waypoint.name);
+            }
+            if let LodSettleCamera::LookAt { eye, target } = waypoint.camera {
+                if !eye.into_iter().chain(target).all(f32::is_finite) {
+                    bail!(
+                        "waypoint `{}` camera coordinates must be finite",
+                        waypoint.name
+                    );
+                }
+                if eye == target {
+                    bail!(
+                        "waypoint `{}` camera eye and target must differ",
+                        waypoint.name
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_safe_name(kind: &str, name: &str) -> Result<()> {
+    let valid = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    if !valid {
+        bail!(
+            "far LOD settle {kind} name `{name}` must use 1..=64 lowercase ASCII letters, digits, or hyphens"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn run_lod_settle_probe(
     options: &LodSettleProbeOptions,
 ) -> Result<LodSettleProbeReport> {
+    let script = LodSettleScript::load(options.script.as_deref(), &options.scene)?;
     std::fs::create_dir_all(&options.directory).with_context(|| {
         format!(
             "create far LOD settle probe directory {}",
@@ -76,7 +213,7 @@ pub(crate) fn run_lod_settle_probe(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
-            frame_count: FIXTURE_COUNT,
+            frame_count: script.waypoints.len(),
             pace_frame_duration: None,
         },
         move |device, queue, format, size| {
@@ -91,53 +228,76 @@ pub(crate) fn run_lod_settle_probe(
                 &asset_source,
                 startup_camera,
             )?;
-            let spawn_warmup =
+            let startup_warmup =
                 host.start_scene_with_wait_policy_report(device, queue, StartupWaitPolicy::Idle)?;
-            host.place_camera_above_loaded_surface()?;
-            let spawn_camera_warmup = host.drive_until_streamed(device, queue)?;
-            let spawn_full_size = host.drive_until_streamed_at_output_size(device, queue)?;
             Ok(ProbeHost {
                 host,
-                warmups: vec![merge_warmups(
-                    merge_warmups(spawn_warmup, spawn_camera_warmup),
-                    spawn_full_size,
-                )],
-                observations: Vec::with_capacity(FIXTURE_COUNT),
+                observations: Vec::with_capacity(script.waypoints.len()),
+                script,
+                startup_warmup: Some(startup_warmup),
             })
         },
         |index, frame, state| {
-            let name = match index {
-                0 => SPAWN_FIXTURE,
-                1 => {
-                    let center_x = chunk_middle_block_coord(options.scene.chunk_x) as f32;
-                    let center_z = chunk_middle_block_coord(options.scene.chunk_z) as f32;
-                    state.host.set_camera_look_at(
-                        Vec3::new(
-                            center_x + FLY_UP_EYE_OFFSET_X,
-                            FLY_UP_EYE_Y,
-                            center_z + FLY_UP_EYE_OFFSET_Z,
-                        ),
-                        Vec3::new(center_x, FLY_UP_TARGET_Y, center_z),
-                    );
+            let waypoint = state.script.waypoints[index].clone();
+            match waypoint.camera {
+                LodSettleCamera::SpawnSurface => state.host.place_camera_above_loaded_surface()?,
+                LodSettleCamera::LookAt { eye, target } => {
+                    state
+                        .host
+                        .set_camera_look_at(Vec3::from_array(eye), Vec3::from_array(target));
                     state.host.commit_camera()?;
-                    let warmup = drive_until_streamed_with_diagnostics(
-                        &mut state.host,
-                        frame.device,
-                        frame.queue,
-                        FLY_UP_FIXTURE,
-                    )?;
-                    state.warmups.push(warmup);
-                    FLY_UP_FIXTURE
                 }
-                _ => unreachable!("fixed two-fixture probe"),
-            };
-            let summary = state
-                .host
-                .render_frame(frame, OffscreenFlatClientFrameOptions { hud: false })?;
+            }
+            let mut warmup = drive_until_streamed_with_diagnostics(
+                &mut state.host,
+                frame.device,
+                frame.queue,
+                &waypoint.name,
+            )?;
+            if let Some(startup_warmup) = state.startup_warmup.take() {
+                warmup = merge_warmups(startup_warmup, warmup);
+            }
+            let device = frame.device;
+            let queue = frame.queue;
+            let target = frame.target;
+            let encoder = frame.encoder;
+            let mut summary = state.host.render_frame(
+                mclone_render::target::RenderFrameContext::new(
+                    device,
+                    queue,
+                    &mut *encoder,
+                    target,
+                ),
+                OffscreenFlatClientFrameOptions { hud: false },
+            )?;
+            for _ in 1..MAX_CAPTURE_SETTLE_PASSES {
+                if state.host.pending_stream_work() == 0 {
+                    break;
+                }
+                warmup = merge_warmups(
+                    warmup,
+                    drive_until_streamed_with_diagnostics(
+                        &mut state.host,
+                        device,
+                        queue,
+                        &waypoint.name,
+                    )?,
+                );
+                summary = state.host.render_frame(
+                    mclone_render::target::RenderFrameContext::new(
+                        device,
+                        queue,
+                        &mut *encoder,
+                        target,
+                    ),
+                    OffscreenFlatClientFrameOptions { hud: false },
+                )?;
+            }
             let snapshot = state.host.far_lod_settle_snapshot()?;
             state.observations.push(FixtureObservation {
-                name,
-                warmup: state.warmups[index].clone(),
+                name: waypoint.name,
+                expected: waypoint.expected,
+                warmup,
                 summary,
                 snapshot,
                 pending_stream_work: state.host.pending_stream_work(),
@@ -148,18 +308,20 @@ pub(crate) fn run_lod_settle_probe(
         },
     )?;
 
-    if state.observations.len() != FIXTURE_COUNT || frame_pixels.len() != FIXTURE_COUNT {
+    let fixture_count = state.script.waypoints.len();
+    if state.observations.len() != fixture_count || frame_pixels.len() != fixture_count {
         bail!(
-            "far LOD settle probe expected {FIXTURE_COUNT} observations/captures, got {}/{}",
+            "far LOD settle probe expected {fixture_count} observations/captures, got {}/{}",
             state.observations.len(),
             frame_pixels.len()
         );
     }
 
-    let capture_paths = [
-        options.directory.join("spawn-settle.png"),
-        options.directory.join("fly-up-high.png"),
-    ];
+    let capture_paths = state
+        .observations
+        .iter()
+        .map(|observation| options.directory.join(format!("{}.png", observation.name)))
+        .collect::<Vec<_>>();
     for (path, pixels) in capture_paths.iter().zip(&frame_pixels) {
         save_rgba_png(path, loop_report.width, loop_report.height, pixels)?;
     }
@@ -191,6 +353,12 @@ pub(crate) fn run_lod_settle_probe(
             "sectionOcclusion": options.render_options.section_occlusion_culling,
             "width": loop_report.width,
             "height": loop_report.height,
+        },
+        "script": {
+            "schema": state.script.schema,
+            "name": state.script.name,
+            "path": options.script.as_ref().map(|path| path.display().to_string()),
+            "waypoints": state.script.waypoints.len(),
         },
         "fixtures": fixtures,
     });
@@ -262,12 +430,24 @@ fn merge_warmups(
 fn fixture_json(observation: &FixtureObservation, capture_path: &Path) -> serde_json::Value {
     let coherence_failures = settle_coherence_failures(observation);
     let culled_but_suppressed = observation.snapshot.culled_but_suppressed_chunks();
-    let expects_d1_d2 = observation.name == FLY_UP_FIXTURE;
     let observed_d1_d2 = !culled_but_suppressed.is_empty();
-    let matched_expectation =
-        coherence_failures.is_empty() && if expects_d1_d2 { observed_d1_d2 } else { true };
+    let observes_d1_d2 = observation.expected == LodSettleExpectation::FailD1D2;
+    let observed = if !coherence_failures.is_empty() {
+        "fail:set-coherence"
+    } else if observes_d1_d2 && observed_d1_d2 {
+        "fail:d1-d2"
+    } else {
+        "pass"
+    };
+    let matched_expectation = coherence_failures.is_empty()
+        && match observation.expected {
+            // Slice 1B defined the spawn fixture as the set-coherence canary;
+            // pixel/coverage completeness becomes a pass condition in 1C2.
+            LodSettleExpectation::Pass => true,
+            LodSettleExpectation::FailD1D2 => observed_d1_d2,
+        };
     let mut assertion_failures = coherence_failures.clone();
-    if expects_d1_d2 && observed_d1_d2 {
+    if observes_d1_d2 && observed_d1_d2 {
         assertion_failures.push(format!(
             "D1/D2: {} traversal-ready suppressed columns were not painted",
             culled_but_suppressed.len()
@@ -275,8 +455,8 @@ fn fixture_json(observation: &FixtureObservation, capture_path: &Path) -> serde_
     }
     serde_json::json!({
         "name": observation.name,
-        "expected": if expects_d1_d2 { "fail:d1-d2" } else { "pass" },
-        "observed": if expects_d1_d2 && observed_d1_d2 { "fail:d1-d2" } else if coherence_failures.is_empty() { "pass" } else { "fail:set-coherence" },
+        "expected": observation.expected.report_name(),
+        "observed": observed,
         "matchedExpectation": matched_expectation,
         "capturePath": capture_path.display().to_string(),
         "settle": {
@@ -310,7 +490,7 @@ fn fixture_json(observation: &FixtureObservation, capture_path: &Path) -> serde_
         "coherenceFailures": coherence_failures,
         "assertionFailures": assertion_failures,
         "budgetPanel": observation.budget_panel,
-        "ledger": if expects_d1_d2 || !matched_expectation { ledger_json(&observation.snapshot) } else { serde_json::Value::Null },
+        "ledger": if observes_d1_d2 || !matched_expectation { ledger_json(&observation.snapshot) } else { serde_json::Value::Null },
     })
 }
 
@@ -440,7 +620,8 @@ mod tests {
             ..FarLodSettleSnapshot::default()
         };
         let observation = FixtureObservation {
-            name: SPAWN_FIXTURE,
+            name: SPAWN_FIXTURE.to_owned(),
+            expected: LodSettleExpectation::Pass,
             warmup: OffscreenWarmupReport::default(),
             summary: mclone_app_runtime::frame_render::FullFrameRenderSummary {
                 far_lod_region_draw_count: 1,
@@ -479,6 +660,69 @@ mod tests {
         assert_eq!(
             snapshot.culled_but_suppressed_chunks(),
             BTreeSet::from([pos])
+        );
+    }
+
+    #[test]
+    fn checked_in_smoke_script_is_valid() {
+        let script: LodSettleScript = serde_json::from_str(include_str!(
+            "../../../../test/fixtures/far-lod/settle-smoke.json"
+        ))
+        .unwrap();
+
+        script.validate().unwrap();
+        assert_eq!(script.schema, SCRIPT_SCHEMA);
+        assert_eq!(script.waypoints.len(), 2);
+        assert_eq!(script.waypoints[1].expected, LodSettleExpectation::FailD1D2);
+    }
+
+    #[test]
+    fn script_validation_rejects_duplicate_and_unsafe_waypoint_names() {
+        let mut script = LodSettleScript::default_for_scene(&crate::cli::SceneOptions::default());
+        script.waypoints[1].name = script.waypoints[0].name.clone();
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+
+        script.waypoints[1].name = "unsafe/name".to_owned();
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("lowercase ASCII")
+        );
+    }
+
+    #[test]
+    fn script_validation_rejects_invalid_camera_vectors() {
+        let mut script = LodSettleScript::default_for_scene(&crate::cli::SceneOptions::default());
+        script.waypoints[1].camera = LodSettleCamera::LookAt {
+            eye: [0.0, f32::NAN, 0.0],
+            target: [0.0, 0.0, 0.0],
+        };
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("must be finite")
+        );
+
+        script.waypoints[1].camera = LodSettleCamera::LookAt {
+            eye: [1.0, 2.0, 3.0],
+            target: [1.0, 2.0, 3.0],
+        };
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("must differ")
         );
     }
 }

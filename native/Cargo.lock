@@ -1604,6 +1604,7 @@ dependencies = [
  "metal",
  "openxr",
  "pollster",
+ "serde",
  "serde_json",
  "wgpu",
  "winit",

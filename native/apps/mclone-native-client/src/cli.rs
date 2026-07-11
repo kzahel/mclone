@@ -74,6 +74,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--loading-settle-distances",
     "--loading-settle-perf",
     "--lod-settle-probe",
+    "--lod-settle-script",
     "--menu",
     "--movement-frame-probe",
     "--movement-frame-speed",
@@ -207,6 +208,7 @@ pub(crate) struct TimedemoOptions {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LodSettleProbeOptions {
     pub(crate) directory: PathBuf,
+    pub(crate) script: Option<PathBuf>,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) scene: SceneOptions,
@@ -758,6 +760,7 @@ impl Cli {
         let mut startup_streaming_perf = false;
         let mut startup_streaming_persisted_world = false;
         let mut loading_settle_perf = false;
+        let mut lod_settle_script = None;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
         let mut timedemo_frames = DEFAULT_TIMEDEMO_FRAMES;
         let mut frame_budget_frames = DEFAULT_FRAME_BUDGET_PROBE_FRAMES;
@@ -1035,6 +1038,13 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::LodSettleProbe(path))?;
+                }
+                "--lod-settle-script" => {
+                    lod_settle_script = Some(
+                        args.next()
+                            .map(PathBuf::from)
+                            .context("--lod-settle-script requires a JSON path")?,
+                    );
                 }
                 "--screenshot" => {
                     let path = args
@@ -1432,6 +1442,9 @@ impl Cli {
         {
             bail!("--startup-wait applies to window mode and --screenshot");
         }
+        if lod_settle_script.is_some() && !matches!(mode, Some(HeadlessMode::LodSettleProbe(_))) {
+            bail!("--lod-settle-script requires --lod-settle-probe");
+        }
         let render_compile_capacity_request = startup_args.scene().render_compile_capacity_request;
         let render_compile_capacity_manual_fields =
             startup_args.has_manual_render_compile_capacity_fields();
@@ -1549,6 +1562,7 @@ impl Cli {
                 Ok(Self::LodSettleProbe {
                     options: LodSettleProbeOptions {
                         directory,
+                        script: lod_settle_script,
                         width: width.unwrap_or(960),
                         height: height.unwrap_or(960),
                         scene,
@@ -2132,7 +2146,7 @@ fn print_help() {
           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --xr-emulation-screenshot /tmp/mclone-xr-emulation.png [--width 960] [--height 960] [--xr-emulation-key KeyW] [--xr-emulation-key ArrowLeft] [--xr-emulation-input-frames 8] [scene/render options as --screenshot]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
-           mclone-native-client --lod-settle-probe /tmp/mclone-lod-settle [--width 960] [--height 960] [--seed 12345] [--chunk-x 0] [--chunk-z 0]\n\
+           mclone-native-client --lod-settle-probe /tmp/mclone-lod-settle [--lod-settle-script test/fixtures/far-lod/settle-smoke.json] [--width 960] [--height 960] [--seed 12345] [--chunk-x 0] [--chunk-z 0]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--headless-dual-view-hud true|false] [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\

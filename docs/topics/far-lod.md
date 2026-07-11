@@ -5,7 +5,7 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11 (Tactical 172 Slice 1B complete).
+Last reconciled: 2026-07-11 (Tactical 172 Slice 1C1 complete).
 
 ## Current State
 
@@ -40,10 +40,12 @@ fixtures, full-size stable gating, PNG captures, structured JSON, timeout
 budget/ledger diagnostics, and expectation matching. The high fixture is
 pinned red with 81 paintable-frustum columns versus 78 painted: exactly three
 in-frustum, graph-culled columns still suppress LOD. This diagnostic path adds
-no normal per-frame state or work. Slice 1C next generalizes waypoint scripts,
-adds image/determinism probes and the fixture matrix, and creates the permanent
-lanes; Slice 2 then burns down the defect ledger before detail modes and
-residency polish.
+no normal per-frame state or work. Slice 1C1 adds validated schema-1 JSON
+waypoint scripts, arbitrary ordered eye/target execution, capture-frame
+resettling, and the permanent `native:lod-settle:smoke` lane backed by a
+checked-in fixture. Slice 1C2 next adds image/determinism probes and the full
+movement/toggle/range matrix; Slice 2 then burns down the defect ledger before
+detail modes and residency polish.
 
 ## Ownership
 
@@ -82,15 +84,18 @@ no silent caps, bounded steady state.
   spawn/fly-up executable probe; spawn set coherence green, fly-up D1/D2 pin
   red with three paintable-frustum gaps; JSON and inspected PNG evidence under
   `/tmp`.
-- Planned (172 Slice 1C): `native:lod-settle:smoke` /
-  `native:lod-settle:probe` — generalized waypoint scripts, coverage image
-  probe, revisit determinism, fixture matrix, and permanent lanes. Once
-  landed, every far-LOD change must run the smoke lane and cite per-fixture
-  results.
+- Landed (172 Slice 1C1): validated `--lod-settle-script` schema, arbitrary
+  ordered waypoint runner, checked-in two-waypoint smoke script, and permanent
+  `native:lod-settle:smoke`. Spawn set coherence and the pinned high-view
+  three-column D1/D2 result match with zero pending work; both captures were
+  inspected.
+- Planned (172 Slice 1C2): coverage image probe, revisit determinism,
+  movement/toggle/range matrix, and `native:lod-settle:probe`. Every far-LOD
+  change must already run the landed smoke lane and cite per-fixture results.
 
 ## Recommended Next Direction
 
-Follow tactical 172 in order: Slice 1C generalized/permanent harness lanes,
+Follow tactical 172 in order: Slice 1C2 image/determinism and full probe lane,
 correctness burn-down (Slice 2), detail modes (Slice 3), residency/perf polish
 (Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real
 LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:

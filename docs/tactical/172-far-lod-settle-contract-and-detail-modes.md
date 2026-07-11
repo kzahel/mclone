@@ -3,14 +3,15 @@
 Status: active 2026-07-11. Slice 0 (documentation consolidation), Slice 1A
 (pull-only exact-set accessors plus the per-chunk ledger), and Slice 1B (first
 executable offscreen settle probe with the pinned fly-up repro) are complete.
-Slice 1C (generalized scripts, image/determinism probes, fixture matrix, and
-permanent lanes) is next. This tactical owns the far-LOD product-hardening
-series: a settle-state validation harness, the coverage-gap correctness
-burn-down, the user-facing LOD detail modes (auto / 4 / 8 / 16, debug 1 / 2),
-and residency/perf polish. It supersedes the remaining open ends of Tactical
-121 — Surface LOD First Slice and pauses Tactical 162 — Real-Chunk LOD
-Reduction Draft Slice 4+ until its Slice 1–2 gates hold. Macro ordering lives
-in Tactical 171 — Convergence And Parity Closeout.
+Slice 1C1 (validated JSON waypoint scripts and the permanent smoke lane) is
+also complete. Slice 1C2 (coverage pixels, revisit determinism, and the full
+movement/toggle/range matrix) is next. This tactical owns the far-LOD
+product-hardening series: a settle-state validation harness, the coverage-gap
+correctness burn-down, the user-facing LOD detail modes (auto / 4 / 8 / 16,
+debug 1 / 2), and residency/perf polish. It supersedes the remaining open
+ends of Tactical 121 — Surface LOD First Slice and pauses Tactical 162 —
+Real-Chunk LOD Reduction Draft Slice 4+ until its Slice 1–2 gates hold. Macro
+ordering lives in Tactical 171 — Convergence And Parity Closeout.
 
 Topic: `far-lod-settle-contract`
 
@@ -272,16 +273,31 @@ reproduce D1/D2 before any fix exists.
   `native:desktop-offscreen:smoke` passed and its far-LOD-off capture was
   inspected unchanged.
 
-#### Slice 1C — Generalized scripts and permanent lanes (next)
+#### Slice 1C1 — Scripted smoke lane (complete 2026-07-11)
 
-- **Settle probe mode.** A new `mclone-native-client` mode (e.g.
-  `--lod-settle-probe --lod-settle-script <path.json>`) on the offscreen GPU
-  path (`OffscreenFlatClientHost` + `OffscreenSceneDriver`): a JSON script of
-  waypoints (camera eye/target or fly-to chunk), and per waypoint: settle
-  (reuse `pending_stream_work` + `STREAM_STABLE_FRAMES`; hard timeout dumps
-  the ledger, budget panel, and skip reasons), assert C1–C8, capture a
-  screenshot to `/tmp`, run the coverage probe. JSON report to stdout in the
-  `perf.rs` convention.
+- **Validated script contract landed.** `--lod-settle-script <path.json>`
+  accepts schema-1 scripts containing any 1–64 ordered `spawn-surface` or
+  explicit eye/target waypoints. Schema version, unknown fields, safe unique
+  names, finite coordinates, nondegenerate look vectors, and pinned `pass` /
+  `fail-d1-d2` expectations are rejected before GPU startup. Omitting the flag
+  preserves the built-in Slice 1B pair.
+- **Arbitrary waypoint runner landed.** Every waypoint commits its camera,
+  repeats both the 1×1 and full-output stable gates, captures a name-derived
+  PNG, and emits its settle/render/set/ledger evidence. If the capture frame
+  itself exposes follow-up streaming work, the runner settles and redraws
+  before accepting it; this was exercised by the first permanent-lane run and
+  closes with `pendingStreamWork=0`.
+- **Permanent fast lane landed.** The checked-in
+  `test/fixtures/far-lod/settle-smoke.json` script backs
+  `pnpm native:lod-settle:smoke`, now listed in `docs/platforms.md`. Its RD4 /
+  range-6 spawn set-coherence fixture matches `pass`; the altitude fixture
+  matches the pinned `fail:d1-d2` outcome with 81 paintable columns, 78
+  painted, and three culled-but-suppressed gaps. Both 960×960 PNGs under
+  `/tmp/mclone-lod-settle-smoke` were inspected. Native-client tests are green
+  (`137` passed).
+
+#### Slice 1C2 — Image/determinism probes and full matrix (next)
+
 - **Coverage image probe (C2).** For top-down waypoints, project each
   in-coverage column center to screen and assert the sampled pixel is not the
   sky clear color. This is the direct, pixel-level "no blue voids" assertion
@@ -292,9 +308,8 @@ reproduce D1/D2 before any fix exists.
 - **Fixtures.** Small/fast first: RD4 + range 6 spawn-settle; fly-up-high
   settle (the user repro, expected-fail pinning D1/D2); one-chunk-step move;
   8-chunk move; band-crossing walk; far-LOD toggle off/on; range change.
-- **pnpm lanes.** `native:lod-settle:smoke` (fast subset, CI-suitable) and
-  `native:lod-settle:probe` (full matrix). Wire into the validation matrix in
-  `docs/platforms.md`.
+- **Full pnpm lane.** Add `native:lod-settle:probe` for the complete matrix;
+  keep the landed `native:lod-settle:smoke` as its CI-suitable subset.
 
 Gate:
 
@@ -482,7 +497,8 @@ regress). Additions:
 
 - `pnpm native:lod-settle:smoke` — fast fixture subset (Slice 1+; the
   permanent pre-merge check for LOD changes).
-- `pnpm native:lod-settle:probe` — full waypoint/fixture matrix with captures.
+- `pnpm native:lod-settle:probe` — full waypoint/fixture matrix with captures
+  (lands in Slice 1C2).
 - Existing tripwires: `pnpm native:desktop-offscreen:smoke`,
   `native:movement:smoke`, `native:timedemo:smoke`,
   `native:startup-streaming:perf` (+RD15), `native:frame-budget:perf`,
