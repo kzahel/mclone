@@ -66,7 +66,8 @@ Shared engine crates own:
 - asset parsing and packed asset-source abstractions
 - render-section meshing, dirty/cache policy, and compile scheduling
 - renderer resources and frame drawing from explicit view/target facts
-- the shared native scene/session/UI/orchestration host (`mclone-scene`)
+- the shared cross-platform scene/session/UI/orchestration host
+  (`mclone-scene`)
 - one shared create/open/join session-start planner (`mclone-app-runtime`),
   producing typed local/remote runtime plans and active-session descriptors
 - one label-parameterized native TCP remote-session adapter
@@ -94,9 +95,9 @@ Platform app crates own:
 
 ## Host Shapes
 
-Native clients share one `mclone-scene::McloneSceneHost<S>`, configured with
-`McloneSceneHostOptions`, behind thin cadence and surface drivers (tactical
-168). Flat hosts use Mono; the headset-free gate uses synthetic Stereo:
+All display clients share one `mclone-scene::McloneSceneHost`, configured with
+`McloneSceneHostOptions`, behind thin cadence and surface drivers (Tacticals
+168 and 170). Flat hosts use Mono; the headset-free gate uses synthetic Stereo:
 
 ```text
 platform input/lifecycle
@@ -106,9 +107,13 @@ platform input/lifecycle
   -> mclone-render
 ```
 
-This covers desktop flat, offscreen flat, headset-free XR emulation, and flat
-Android. Web canvas retains its separate WASM host/render path until the
-deferred web-adoption work.
+This covers desktop flat, offscreen flat, headset-free XR emulation, flat
+Android, and the browser canvas. The browser's `WebFrameDriver` owns rAF,
+canvas/surface acquisition, DOM input, promise execution, browser resource
+fetching, and presentation, while its wasm-bindgen `WebSceneHost` wrapper owns
+only concrete WebGPU targets and browser service adapters around the same
+`McloneSceneHost`. Local worker, IndexedDB local-world, and remote WebSocket
+sessions do not introduce another scene-policy owner.
 The live desktop flat path now reaches this boundary through the app-local
 `WinitFrameDriver`: winit owns redraw cadence, surface acquisition,
 keyboard/mouse translation, mouse lock, and final presentation, while
@@ -153,9 +158,10 @@ support in `mclone-render` is feature-gated and enabled by the desktop app,
 not by shared scene consumers.
 
 The executable `pnpm native:thin-adapters:purity` source gate protects this
-boundary across the three native app crates and composes the scene-host and
-OpenXR-frame-driver purity checks. `AGENTS.md` carries the same shared-first
-ownership rule; no Tactical 168 guidance depends on app-local orchestration.
+boundary across the native apps and browser driver. It composes scene-host,
+OpenXR-frame-driver, and enforced web-adoption source checks. `AGENTS.md`
+carries the same shared-first ownership rule; no Tactical 168 or 170 guidance
+depends on app-local orchestration.
 
 ## Core Rules
 

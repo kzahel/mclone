@@ -20,7 +20,7 @@ offscreen flat and headset-free stereo validation hosts:
 | Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Two run intents share one frame loop: the real `--desktop-xr` verb is a first-class **persistent desktop XR run** (renders the mclone world until you quit, with a 2D companion window carrying status and an OS Close control for a non-headset quit; `--no-window` drops back to headless), while `--xr-clear-smoke` / `--xr-mclone-smoke --frames N` stay the frame-bounded headless CI/liveness gates. Both a companion-window Close and the headset system menu drive one graceful OpenXR shutdown (`tactical/164`). Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, controller locomotion, shared world-panel menu/pointer UI, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR (Windows VDXR) and the macOS WiVRn USB lane; user headset validation says the shared XR menu works mostly fine, while an automated replacement-menu headset click smoke remains pending. A headset mirror into the companion window is a deferred follow-up (must reuse an existing per-eye/multiview renderer, not a new per-view path). |
 | Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path, plus launch-scoped in-headset New World replacement smoke. User headset validation says the shared XR menu works mostly fine; an automated controller-click replacement-menu smoke remains pending. |
 | Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity`, Vulkan surface/lifecycle, startup properties, and raw touch/input translation over the shared Mono scene host. Validated on the arm64 `jstorrent-tablet` AVD with real terrain/HUD pixels, shared touch movement/look plus sneak, populated frame-pipeline overlay, New World replacement, and background/foreground surface rebuild. The three sentinel lanes are `native:android:avd-smoke`, `:avd-touch-smoke`, and `:avd-session-smoke`. |
-| Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown`, uses WebGPU through `wgpu`, and keeps browser workers, TypeScript glue, mobile web controls, shared Rust/WebGPU UI, and deployment alive. |
+| Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown` and drives the shared `McloneSceneHost` through a thin rAF/canvas/DOM rim. Local worker, IndexedDB local-world, and remote WebSocket modes share that owner while browser workers, promises, WebGPU targets, mobile controls, and deployment remain platform glue. The full behavioral matrix is documented in [`native-web.md`](native-web.md). |
 
 Additional host lane:
 
@@ -143,8 +143,8 @@ Shared app/runtime boundary crates currently include:
   by desktop Vulkan XR and Android XR
 - `mclone-scene`: shared mono/stereo/multiview terrain/actor scene, startup
   view-pose alignment, controller-to-engine locomotion, and XR frame render
-  topology selection. Its public native core is `McloneSceneHost<S>` configured
-  by `McloneSceneHostOptions`.
+  topology selection. Its cross-platform core is `McloneSceneHost` configured
+  by `McloneSceneHostOptions`; desktop, Android, XR, and web drivers all use it.
 
 Core shared crates must not depend on:
 
@@ -259,6 +259,9 @@ pnpm native:desktop-offscreen:smoke
 pnpm native:web:build
 ```
 
+The thin-adapter command includes the enforced browser scene-host adoption
+inventory; it is the default source-shape gate for every display client.
+
 `native:desktop-offscreen:smoke` is the current full-frame offscreen
 flat-client smoke. It runs the real offscreen host path and writes its screenshot
 under `/tmp`.
@@ -298,10 +301,16 @@ pnpm native:android-xr:validate --debug --skip-build --start-server --server-lis
 
 # Web/WASM
 pnpm native:web:smoke
+pnpm native:web:thread-smoke
+pnpm native:web:canvas-smoke
+pnpm native:web:chunk-smoke
 pnpm native:web:app-smoke
 pnpm native:web:catalog-smoke
 pnpm native:web:mobile-smoke
 pnpm native:web:asset-pack-smoke
+pnpm native:web:block-edit-probe
+pnpm native:web:movement-perf
+pnpm native:web:remote-smoke
 
 # Strict standalone first-party resolution audit
 pnpm --silent assets:validate:first-party \

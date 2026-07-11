@@ -1020,12 +1020,11 @@ impl McloneSceneHost {
         self.local_startup.is_none()
     }
 
-    /// In-flight render work relevant to the requested camera: target render
-    /// chunks/inflight sections plus queued client uploads. Tracking-halo dirt
-    /// outside the drawable render distance intentionally does not keep an
-    /// offscreen capture alive forever; target readiness is the same distinction
-    /// used by the startup-streaming probes. Returns [`usize::MAX`] while local
-    /// startup is still promoting.
+    /// Ready or in-flight render work relevant to the requested camera plus
+    /// queued client uploads. Dirty chunks waiting on neighbor readiness do not
+    /// keep deterministic capture loops alive: they cannot make progress until
+    /// another runtime update arrives, and the next frame will observe that
+    /// update normally. Returns [`usize::MAX`] while local startup is promoting.
     pub fn pending_stream_work(&self, camera_position: Vec3) -> usize {
         if self.local_startup.is_some() {
             return usize::MAX;
@@ -1035,8 +1034,7 @@ impl McloneSceneHost {
         };
         let target = runtime.target_render_work_stats(camera_position);
         let upload = self.section_uploads.stats();
-        target.pending_render_chunks
-            + target.inflight_render_sections
+        target.inflight_render_sections
             + usize::from(target.ready_render_work_pending)
             + upload.queued_upload_sections
             + upload.queued_lifecycle_items

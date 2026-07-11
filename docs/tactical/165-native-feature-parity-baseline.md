@@ -152,8 +152,10 @@ debug-overlay aggregator moved to `mclone-app-runtime` in tactical 168 Slice
 7a. The winit-bound `FramePacing` driver remains correctly desktop-local.
 
 Web keeps `FarLod`, `TravelAssist`, `FramePipelineOverlay`, `DebugDiagnostics`,
-and `ServerSimulationCadence` gated with explicit reasons; decided separately on
-threading/perf grounds (far LOD "measure on web first", Tactical 162).
+and `ServerSimulationCadence` gated with explicit reasons. Tactical 170 Slice
+6 audits them as the exact tested `WEB_FEATURE_PARITY_EXCEPTIONS` ledger; far
+LOD remains the first candidate and still requires Tactical 162's web
+performance/rendering proof.
 
 ## Remaining Follow-Ups
 

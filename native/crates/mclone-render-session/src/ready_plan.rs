@@ -204,8 +204,20 @@ pub fn plan_ready_render_sections(
 
     let mut budgeted_chunk_count = 0usize;
     for pos in sorted_loaded_dirty_chunks {
+        let section_keys = section_keys_for_chunk(pos);
+        if section_keys.is_empty() {
+            // An all-air/empty snapshot has no compile request, but it is still
+            // completed dirty work. Retaining the chunk forever makes idle
+            // accounting depend on whether terrain happened to emit geometry.
+            plan.budgeted_loaded_chunks.insert(pos);
+            budgeted_chunk_count += 1;
+            if budgeted_chunk_count >= chunk_budget {
+                break;
+            }
+            continue;
+        }
         let ready_before = plan.ready_section_keys.len();
-        for key in section_keys_for_chunk(pos) {
+        for key in section_keys {
             plan_ready_render_section_key(
                 &mut plan,
                 key,

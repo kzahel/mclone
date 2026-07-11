@@ -4,8 +4,7 @@ use web_sys::HtmlCanvasElement;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
-    WebIntegratedServerRunnerConfig, WebRuntime,
+    SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime,
 };
 use mclone_app_runtime::deferred_drop::{
     BoundedDeferredDropQueue, DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropService,
@@ -1593,24 +1592,6 @@ impl std::fmt::Debug for WebSceneRuntimeService {
 }
 
 impl WebSceneRuntimeService {
-    pub async fn local_worker(
-        config: WebIntegratedServerRunnerConfig,
-        mesh_assets: TexturedMeshAssets,
-        compiler_wake: js_sys::Function,
-    ) -> Result<Self, String> {
-        let runtime = WebRuntime::web_worker_integrated(config).await?;
-        Ok(Self::new(runtime, mesh_assets, compiler_wake))
-    }
-
-    pub async fn remote_websocket(
-        url: impl Into<String>,
-        mesh_assets: TexturedMeshAssets,
-        compiler_wake: js_sys::Function,
-    ) -> Result<Self, String> {
-        let runtime = WebRuntime::websocket_remote(url).await?;
-        Ok(Self::new(runtime, mesh_assets, compiler_wake))
-    }
-
     pub fn new(
         runtime: WebRuntime,
         mesh_assets: TexturedMeshAssets,

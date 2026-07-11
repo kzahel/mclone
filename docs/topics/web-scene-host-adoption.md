@@ -2,15 +2,17 @@
 
 Topic: web-scene-host-adoption
 
-Status: active 2026-07-11. Tactical 170 Slices 0-5 landed the executable
+Status: complete 2026-07-11. Tactical 170 Slices 0-6 landed the executable
 baselines, portable scene prerequisites, neutral scene-session shell, browser
 service adapters, direct-host proof, and atomic production cutover. Local
 worker, IndexedDB local-world, and remote WebSocket modes now use one
 `McloneSceneHost`; `WebChunkRenderSession` and the proof-only path are gone.
 Tactical 169 Slices 5-6 adopted logical packs, transactional compiler epochs,
 persistence, strict provenance, and reload diagnostics through this host.
-Resume Tactical 170 Slice 6 for parity audit, durable documentation, and
-closeout.
+The final audit added browser enforcement to the default purity gate, locked
+the exact feature-gap ledger, removed obsolete aliases/dead compatibility
+paths, stabilized actionable render-work accounting, and refreshed durable
+operating/architecture docs. Structural adoption is closed.
 
 ## Scope
 
@@ -76,7 +78,7 @@ the native display clients:
   projects their catalog into the shared host, and replaces the selected scene
   resources plus resident compiler transactionally at one asset epoch.
 - Browser audio and teleport preview remain explicit absent capabilities. The
-  reason-bearing web feature profile is preserved for Slice 6 audit.
+  reason-bearing web feature profile is preserved after the Slice 6 audit.
 
 The direct acceptance gate is green after browser service assembly:
 
@@ -436,8 +438,9 @@ separately reviewable.
 - **Audio activation:** resolved for first cutover as an absent capability.
   Promote it only after a real user-gesture activation and audible probe.
 - **Web feature exceptions:** far LOD, travel assist, frame-pipeline overlay,
-  debug diagnostics, and server cadence retain their current reason-bearing
-  state until individually validated.
+  debug diagnostics, and server cadence are the exact tested
+  `WEB_FEATURE_PARITY_EXCEPTIONS` ledger. Each retains a named implementation
+  and proof requirement until individually validated.
 - **Physics engines sit outside the parity framework:** `physics-rapier` and
   `physics-box3d` are opt-in `mclone-server` cargo features exposed only
   through the desktop client, not `ClientExperienceProfile` entries, so the
@@ -511,9 +514,31 @@ Primary code:
 - `native/apps/mclone-web-client/src/web_remote_session.rs`
 - `native/apps/mclone-web-client/www/mclone-web-app.ts`
 
+## Slice 6 Closeout Evidence (2026-07-11)
+
+The production cutover landed in `ffc33de6`; this closeout keeps all 13
+browser old-owner/policy inventory counts at zero through the default
+thin-adapter gate. The focused Rust suites passed 216 app-runtime, 107
+render-session, 92 scene, and 11 web-client tests plus three ABI locks. Direct
+scene/web WASM checks, workspace check, browser build/typecheck, desktop
+offscreen, synthetic stereo, desktop-XR check, flat-Android arm64+x86_64 build
+and AVD smoke, and the Quest APK build passed.
+
+All ten required browser behavior lanes passed. Movement crossed three chunks
+in 167 frames/renders; compile samples measured 6.7-18.7 ms total and 7.2-8.5
+ms local maximum frame gaps. Shared-memory runner/worldgen/light transports,
+resident shared-result compiler transport, zero generated-view fallback,
+zero result overflow, zero final deferred-drop backlog, and remote WebSocket
+transport were preserved. Reviewed `/tmp` captures covered desktop and mobile
+world/HUD, actor/selection/debug effects, catalog UI, native offscreen,
+synthetic stereo, and flat Android. No capture was committed. USB Quest was not
+visible after an `adb` restart, so the closeout does not claim a fresh headset
+run; Slice 3 remains the latest attached Quest 3 runtime canary.
+
 ## Recommended Next Work
 
-Implement Tactical 170 Slice 6: audit the browser feature profile, remove
-obsolete names/cfgs, expand default purity coverage, refresh durable
-architecture/platform/web documentation, and run the final cross-platform
-closeout matrix.
+Start a separate browser feature-parity slice with the Tactical 162 far-LOD
+performance/rendering proof. Promote `far_lod` only with its web runtime, UI,
+diagnostic, performance, and pixel evidence; then remove that one exact ledger
+entry. Keep the other four entries unchanged until their own complete proofs
+land.

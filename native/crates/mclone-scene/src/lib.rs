@@ -4153,14 +4153,14 @@ mod tests {
 
     #[test]
     fn xr_profile_supports_frame_pipeline_overlay() {
-        let profile = xr_client_experience_profile();
+        let profile = xr_native_client_experience_profile();
 
         assert!(profile.settings.frame_pipeline_overlay.is_supported());
     }
 
     #[test]
     fn xr_profile_supports_debug_diagnostics() {
-        let profile = xr_client_experience_profile();
+        let profile = xr_native_client_experience_profile();
 
         assert!(profile.settings.debug_diagnostics.is_supported());
     }
@@ -4185,7 +4185,7 @@ mod tests {
                 LocalWorldSummary::new(existing_world_id.clone(), "Existing World", 98_765, 1_000)
                     .unwrap();
             let mut client_experience =
-                ClientExperienceController::new(xr_client_experience_profile());
+                ClientExperienceController::new(xr_native_client_experience_profile());
             client_experience
                 .catalog_mut()
                 .set_capabilities(WorldCatalogCapabilities::persistent_local());

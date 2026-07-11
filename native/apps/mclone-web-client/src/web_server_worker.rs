@@ -418,29 +418,6 @@ impl WebIntegratedServerRunner {
         diagnostics.awaiting_tick = false;
     }
 
-    pub async fn shutdown_gracefully(&mut self) -> Result<(), String> {
-        if self.shutdown_requested {
-            return Ok(());
-        }
-        self.shutdown_requested = true;
-        let request_id = self.next_request_id();
-        let promise = self.register_pending(request_id);
-        if let Err(error) = self.post_shutdown_with_request_id(request_id) {
-            self.pending.borrow_mut().remove(&request_id);
-            self.worker.terminate();
-            return Err(error);
-        }
-        let response = JsFuture::from(promise).await.map_err(|error| {
-            format!("server worker shutdown failed: {}", js_error_string(&error))
-        })?;
-        ensure_worker_response_ok(&response)?;
-        self.worker.terminate();
-        let mut diagnostics = self.diagnostics.borrow_mut();
-        diagnostics.running = false;
-        diagnostics.awaiting_tick = false;
-        Ok(())
-    }
-
     fn next_request_id(&mut self) -> u32 {
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.wrapping_add(1).max(1);

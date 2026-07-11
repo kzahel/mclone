@@ -230,6 +230,30 @@ fn render_section_ready_plan_skips_deferred_only_chunks_for_budget() {
 }
 
 #[test]
+fn render_section_ready_plan_completes_empty_loaded_chunk_work() {
+    let empty_chunk = ChunkPos::new(3, -2);
+    let plan = plan_ready_render_sections(
+        [empty_chunk],
+        [],
+        &BTreeMap::new(),
+        1,
+        |_| Vec::new(),
+        &BTreeSet::new(),
+        |_| panic!("empty chunk must not probe section readiness"),
+    );
+
+    assert_eq!(plan.budgeted_loaded_chunks, BTreeSet::from([empty_chunk]));
+    assert!(plan.ready_section_keys.is_empty());
+
+    let mut dirty = RenderSectionDirtyState {
+        dirty_chunks: BTreeSet::from([empty_chunk]),
+        ..RenderSectionDirtyState::default()
+    };
+    dirty.apply_ready_plan(&plan);
+    assert!(dirty.dirty_chunks.is_empty());
+}
+
+#[test]
 fn render_section_sync_plan_discards_stale_and_plans_ready_work() {
     let loaded_chunk = ChunkPos::new(0, 0);
     let stale_chunk = ChunkPos::new(1, 0);

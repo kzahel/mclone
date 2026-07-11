@@ -1600,8 +1600,8 @@ old host/options names or desktop compatibility wrappers.
   `android/validate-avd.sh` and the `pnpm native:android:avd-*` scripts; set
   `MCLONE_ANDROID_ABIS=arm64-v8a`). `jstorrent-dev`/`jstorrent-playstore`
   AVDs also exist but are not the validation target.
-- Web: compile-only (`cargo check -p mclone-web-client --target
-  wasm32-unknown-unknown`); behavioral web validation is out of scope.
+- Web was compile-only for this tactical. Tactical 170 subsequently adopted
+  the same host for all browser modes and added the full behavioral matrix.
 - Android builds go through the scripts (`pnpm native:android*:apk`,
   `android/build-common.sh` auto-discovers SDK/NDK) — never hand-roll cargo
   invocations for Android or conclude the NDK is missing without running the
@@ -1623,7 +1623,7 @@ old host/options names or desktop compatibility wrappers.
 
 Tactical 168 is complete through Slice 10. Preserve the executable native
 thin-adapter and headset-free stereo gates when adding scene-host behavior.
-Web retains the runner/session seams prepared in Slice 2, but adopting the
-shared host is planned in
-[`170-web-scene-host-adoption.md`](170-web-scene-host-adoption.md) rather than
-as another Slice 168 change.
+Web adopted the runner/session seams prepared in Slice 2 and the shared host in
+completed [`170-web-scene-host-adoption.md`](170-web-scene-host-adoption.md).
+The default thin-adapter gate now covers its browser driver as well as native
+apps; remaining browser feature gaps are parity work, not host ambiguity.

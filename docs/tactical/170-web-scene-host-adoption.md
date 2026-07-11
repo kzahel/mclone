@@ -1,11 +1,11 @@
 # 170: Web Scene-Host Adoption
 
-Status: active 2026-07-11; Slices 0-5 landed. Production local worker,
-IndexedDB local-world, and remote WebSocket modes now use one shared scene
-host; the old web orchestrator and proof-only entry point are deleted. Tactical
-169 Slices 5-6 platform asset-pack adoption, persistence, strict provenance,
-and reload diagnostics also landed through that host. Slice 6 parity audit and
-closeout is next.
+Status: complete 2026-07-11; Slices 0-6 landed. Production local worker,
+IndexedDB local-world, and remote WebSocket modes use one shared scene host;
+the old web orchestrator and proof-only entry point are deleted. Tactical 169
+Slices 5-6 platform asset-pack adoption, persistence, strict provenance, and
+reload diagnostics also landed through that host. Slice 6 closed the parity,
+enforcement, public-surface, documentation, and cross-platform audit.
 
 Topic: [`web-scene-host-adoption`](../topics/web-scene-host-adoption.md)
 
@@ -1125,6 +1125,53 @@ Exit criteria:
 - operating and architecture docs agree with code; and
 - the topic status records the cutover commit/evidence and recommended next
   slice outside this tactical.
+
+### Slice 6 Result
+
+The default `pnpm native:thin-adapters:purity` gate now composes the enforced
+browser adoption inventory with the native, scene-host, and OpenXR-driver
+checks. The browser inventory covers the Rust wasm-bindgen/resource rim and
+TypeScript `WebFrameDriver`; all 13 old-owner/policy patterns remain zero.
+
+The browser feature audit retained exactly five reason-bearing gaps: far LOD,
+travel assist, frame-pipeline overlay, debug diagnostics, and server simulation
+cadence. `WEB_FEATURE_PARITY_EXCEPTIONS` now names those follow-ups and a test
+requires the ledger to match the web profile exactly, rejecting silent, stale,
+duplicate, or unlisted divergence. Audio and teleport preview remain explicit
+absent service capabilities outside that settings axis. No feature was promoted
+without its missing browser UI/runtime/diagnostic proof.
+
+The obsolete crate-local `xr_client_experience_profile` alias, public exposure
+of the internal `WebRuntime`/runtime-service helpers, unused async shutdown and
+pre-cutover convenience paths, and their now-unnecessary cfg surface are gone.
+The final browser matrix also exposed an intermittent false-idle failure:
+dirty render chunks waiting on neighbor readiness were counted as immediately
+actionable work. Deterministic drivers now wait only for ready/in-flight work
+and uploads, while raw dirty counts remain diagnostic; empty loaded chunks are
+completed without issuing a compile request. A focused render-session test
+locks that behavior.
+
+Final validation passed formatting, workspace check, 216 app-runtime tests,
+107 render-session tests, 92 scene tests, 11 web-client tests plus three ABI
+locks, direct app-runtime/scene/web WASM checks, browser build/typecheck, and
+all purity gates. The complete browser matrix passed: basic, threaded, canvas,
+chunk, app, catalog, mobile, block edit, movement/perf, and remote WebSocket.
+Movement crossed three chunks in 167 frames/renders; its compile samples were
+6.7-18.7 ms total with 7.2-8.5 ms local maximum frame gaps. Runner/worldgen/
+light transports remained shared-memory, remote remained WebSocket, compiler
+results remained `shared-result-buffer`, generated-view fallback and result
+overflow stayed false, and deferred-drop backlog ended at zero.
+
+Desktop offscreen rendered 64 sections (11 drawn, two actors), synthetic
+stereo rendered 42 sections (eight drawn, two eye UI composites, 249,679
+differing eye pixels), desktop XR checked, flat Android built for arm64+x86_64
+and passed its fresh AVD smoke, and the Quest APK rebuilt. Browser desktop,
+portrait, block-edit/debug/actor, catalog, desktop offscreen, stereo, and flat
+Android captures under `/tmp` were visually inspected and not committed. A
+fresh attached-Quest run is not claimed: after the AVD stopped, `adb` still
+listed no USB device even after a server restart. The last attached Quest 3
+runtime canary remains Slice 3 evidence; this closeout changed no OpenXR frame,
+view, target, or presentation contract.
 
 ## Validation Matrix
 

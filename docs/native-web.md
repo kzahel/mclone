@@ -8,6 +8,23 @@ https://mclone.kzahel.com/
 
 The live web client is the native Rust/WASM lane under [`../native/apps/mclone-web-client/`](../native/apps/mclone-web-client/). The retired browser engine is not part of the live tree.
 
+## Runtime Ownership
+
+The production browser uses the same `mclone_scene::McloneSceneHost` policy
+owner as desktop, Android, and XR. TypeScript `WebFrameDriver` owns rAF cadence,
+DOM input, visibility/resize events, typed promises, resource fetches, and
+presentation. The wasm-bindgen `WebSceneHost` wrapper supplies WebGPU targets
+and browser implementations of the neutral runtime, compiler, catalog, clock,
+deferred-drop, and platform-operation contracts. Local worker, persistent
+IndexedDB local-world, and remote WebSocket modes all install services into
+that one host.
+
+The web feature profile remains intentionally honest: far LOD, travel assist,
+frame-pipeline overlay, debug diagnostics, and server simulation cadence are
+reason-bearing gaps with an exact ledger in `mclone-app-runtime`. Browser audio
+and teleport preview are also explicit absent service capabilities. Host
+adoption does not synthesize support for any of them.
+
 ## Local Commands
 
 ```bash
@@ -25,6 +42,19 @@ pnpm native:web:asset-pack-smoke
 
 # Validate native Rust menu-driven world catalog create/open/delete over IndexedDB.
 pnpm native:web:catalog-smoke
+
+# Run the complete production host-mode and behavior matrix used for scene-host
+# changes. Captures and logs remain under /tmp.
+pnpm native:web:smoke
+pnpm native:web:thread-smoke
+pnpm native:web:canvas-smoke
+pnpm native:web:chunk-smoke
+pnpm native:web:app-smoke
+pnpm native:web:catalog-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:block-edit-probe
+pnpm native:web:movement-perf
+pnpm native:web:remote-smoke
 
 # Build the exact deploy bundle into dist-native-web/ without uploading.
 pnpm native:web:bundle

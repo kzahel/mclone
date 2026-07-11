@@ -465,29 +465,60 @@ pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfil
 /// legitimately forces feature divergence. Web is exempt from native feature
 /// parity, but every divergence must still be reason-bearing (never a silent
 /// `PROFILE_UNSUPPORTED` on the feature axis), enforced by
-/// `web_feature_divergences_are_reason_bearing`.
+/// `web_feature_divergences_match_audited_ledger`.
 pub fn web_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = native_client_experience_baseline();
-    settings.far_lod = ClientExperienceCapabilityStatus::Unsupported(
-        "Far LOD is measured on web separately before enabling (tactical 162)",
-    );
+    settings.far_lod = ClientExperienceCapabilityStatus::Unsupported(WEB_FAR_LOD_REASON);
     settings.travel_assist =
-        ClientExperienceCapabilityStatus::Unsupported("Travel assist is not yet wired on web");
+        ClientExperienceCapabilityStatus::Unsupported(WEB_TRAVEL_ASSIST_REASON);
     settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
-    settings.frame_pipeline_overlay = ClientExperienceCapabilityStatus::Unsupported(
-        "Frame pipeline overlay is unavailable until web emits frame accounting reports",
-    );
-    settings.debug_diagnostics = ClientExperienceCapabilityStatus::Unsupported(
-        "Debug diagnostics panel is unavailable until the web presenter is wired",
-    );
-    settings.server_simulation_cadence = ClientExperienceCapabilityStatus::Unsupported(
-        "Server simulation cadence is not yet wired on web",
-    );
+    settings.frame_pipeline_overlay =
+        ClientExperienceCapabilityStatus::Unsupported(WEB_FRAME_PIPELINE_OVERLAY_REASON);
+    settings.debug_diagnostics =
+        ClientExperienceCapabilityStatus::Unsupported(WEB_DEBUG_DIAGNOSTICS_REASON);
+    settings.server_simulation_cadence =
+        ClientExperienceCapabilityStatus::Unsupported(WEB_SERVER_SIMULATION_CADENCE_REASON);
     ClientExperienceProfile::new(settings)
 }
+
+const WEB_FAR_LOD_REASON: &str =
+    "Far LOD needs the tactical 162 web performance and rendering proof";
+const WEB_TRAVEL_ASSIST_REASON: &str =
+    "Travel assist needs browser input, UI, and movement smoke coverage";
+const WEB_FRAME_PIPELINE_OVERLAY_REASON: &str =
+    "Frame pipeline overlay needs browser frame-accounting reports and UI proof";
+const WEB_DEBUG_DIAGNOSTICS_REASON: &str =
+    "Debug diagnostics needs browser presenter wiring and panel proof";
+const WEB_SERVER_SIMULATION_CADENCE_REASON: &str =
+    "Server simulation cadence needs browser runtime control and diagnostic proof";
+
+/// Audited browser feature gaps. Each entry names a concrete follow-up and must
+/// exactly match a reason-bearing capability in [`web_client_experience_profile`].
+pub const WEB_FEATURE_PARITY_EXCEPTIONS: &[(ClientExperienceFeatureCapability, &'static str)] = &[
+    (
+        ClientExperienceFeatureCapability::FarLod,
+        WEB_FAR_LOD_REASON,
+    ),
+    (
+        ClientExperienceFeatureCapability::TravelAssist,
+        WEB_TRAVEL_ASSIST_REASON,
+    ),
+    (
+        ClientExperienceFeatureCapability::FramePipelineOverlay,
+        WEB_FRAME_PIPELINE_OVERLAY_REASON,
+    ),
+    (
+        ClientExperienceFeatureCapability::DebugDiagnostics,
+        WEB_DEBUG_DIAGNOSTICS_REASON,
+    ),
+    (
+        ClientExperienceFeatureCapability::ServerSimulationCadence,
+        WEB_SERVER_SIMULATION_CADENCE_REASON,
+    ),
+];
 
 /// Temporary, explicitly-tracked feature-axis divergences on native targets.
 /// Every entry is a genuine runtime plumbing gap to burn down toward the native
@@ -1663,23 +1694,52 @@ mod tests {
         }
     }
 
-    /// Web may diverge on features (different runtime/threading model) but never
-    /// silently: no bare `PROFILE_UNSUPPORTED` on the feature axis.
+    /// Web may diverge on features (different runtime/threading model), but the
+    /// audited ledger must exactly describe every reason-bearing gap.
     #[test]
-    fn web_feature_divergences_are_reason_bearing() {
+    fn web_feature_divergences_match_audited_ledger() {
         let profile = web_client_experience_profile().settings;
         for (feature, status) in profile.feature_axis() {
-            if let ClientExperienceCapabilityStatus::Unsupported(message) = status {
-                assert_ne!(
-                    status,
-                    ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED,
-                    "web silently drops feature {feature:?}; record an explicit reason",
-                );
-                assert!(
-                    !message.trim().is_empty(),
-                    "web feature {feature:?} exception has an empty reason",
-                );
+            let ledger_reason = WEB_FEATURE_PARITY_EXCEPTIONS
+                .iter()
+                .find(|(candidate, _)| *candidate == feature)
+                .map(|(_, reason)| *reason);
+            match status {
+                ClientExperienceCapabilityStatus::Supported => assert!(
+                    ledger_reason.is_none(),
+                    "web feature {feature:?} is supported but retains a stale exception",
+                ),
+                ClientExperienceCapabilityStatus::Unsupported(reason) => {
+                    assert_ne!(
+                        status,
+                        ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED,
+                        "web silently drops feature {feature:?}; record an explicit reason",
+                    );
+                    assert_eq!(
+                        ledger_reason,
+                        Some(reason),
+                        "web feature {feature:?} must exactly match its audited exception",
+                    );
+                }
+                other => {
+                    panic!("web feature {feature:?} has unaudited capability status {other:?}",)
+                }
             }
+        }
+
+        for &(feature, reason) in WEB_FEATURE_PARITY_EXCEPTIONS {
+            assert!(
+                !reason.trim().is_empty(),
+                "web feature {feature:?} has an empty reason"
+            );
+            assert_eq!(
+                WEB_FEATURE_PARITY_EXCEPTIONS
+                    .iter()
+                    .filter(|(candidate, _)| *candidate == feature)
+                    .count(),
+                1,
+                "web feature {feature:?} has duplicate exception entries",
+            );
         }
     }
 

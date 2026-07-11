@@ -266,7 +266,9 @@ impl McloneSceneHost {
             }),
             session,
             session_runtime_factory: None,
-            client_experience: ClientExperienceController::new(xr_client_experience_profile()),
+            client_experience: ClientExperienceController::new(
+                xr_native_client_experience_profile(),
+            ),
             camera,
             interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
@@ -432,7 +434,9 @@ impl McloneSceneHost {
             local_startup: None,
             session,
             session_runtime_factory: None,
-            client_experience: ClientExperienceController::new(xr_client_experience_profile()),
+            client_experience: ClientExperienceController::new(
+                xr_native_client_experience_profile(),
+            ),
             camera: started.camera,
             interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
@@ -2168,13 +2172,6 @@ pub(crate) fn normalized_xr_remote_addr(addr: &str) -> String {
     } else {
         addr.to_owned()
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn xr_client_experience_profile() -> ClientExperienceProfile {
-    // Shared native profile owner; the XR crate keeps this thin crate-local alias
-    // so its several call sites stay stable.
-    xr_native_client_experience_profile()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

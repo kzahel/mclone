@@ -14,22 +14,21 @@ use mclone_app_runtime::{
     RuntimeExchange, RuntimeStepReport, RuntimeUpdatePumpBudget, SingleViewRuntime,
 };
 use mclone_client::{ClientHost, ClientRuntime};
-use mclone_core::{ChunkPos, ChunkSnapshot};
+use mclone_core::ChunkPos;
 use mclone_net::LocalTransport;
 use mclone_protocol::{
     ChunkView, ClientCommand, ProtocolCodecError, ProtocolCodecResult, ServerUpdate,
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_render::RenderBackend;
-use mclone_render_session::{EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler};
-use mclone_server::{IntegratedServer, ServerRunnerDiagnostics, ServerRunnerKind};
+use mclone_server::IntegratedServer;
+#[cfg(target_arch = "wasm32")]
+use mclone_server::{ServerRunnerDiagnostics, ServerRunnerKind};
 
 pub mod web_scene_protocol;
 
 #[cfg(target_arch = "wasm32")]
 mod web_canvas;
-#[cfg(target_arch = "wasm32")]
-pub use web_canvas::{WebSceneRuntimeService, prepare_web_scene_assets_from_pack};
 #[cfg(target_arch = "wasm32")]
 mod web_scene_host;
 #[cfg(target_arch = "wasm32")]
@@ -114,7 +113,7 @@ impl WebSmokeReport {
 }
 
 #[derive(Debug)]
-pub struct WebRuntime {
+pub(crate) struct WebRuntime {
     core: SingleViewRuntime,
     host: WebRuntimeHost,
 }
@@ -132,13 +131,6 @@ impl WebRuntime {
             core,
             host: WebRuntimeHost::Inline(host),
         }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub async fn web_worker_integrated(
-        config: WebIntegratedServerRunnerConfig,
-    ) -> Result<Self, String> {
-        Self::web_worker_integrated_at(config, SMOKE_INITIAL_CENTER).await
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -185,6 +177,7 @@ impl WebRuntime {
             .map_err(|_| ProtocolCodecError::InvalidData("web runtime command failed"))
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub async fn request_chunk_view_async(
         &mut self,
         center: ChunkPos,
@@ -195,6 +188,7 @@ impl WebRuntime {
         self.send_and_drain_immediately_async(command).await
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn request_chunk_view_deferred(
         &mut self,
         center: ChunkPos,
@@ -206,7 +200,8 @@ impl WebRuntime {
         Ok(self.apply_exchange(exchange))
     }
 
-    pub fn send_gameplay_command(
+    #[cfg(test)]
+    fn send_gameplay_command(
         &mut self,
         command: ClientCommand,
     ) -> ProtocolCodecResult<WebRuntimeStepReport> {
@@ -214,27 +209,13 @@ impl WebRuntime {
             .map_err(|_| ProtocolCodecError::InvalidData("web runtime command failed"))
     }
 
-    pub async fn send_gameplay_command_async(
-        &mut self,
-        command: ClientCommand,
-    ) -> Result<WebRuntimeStepReport, String> {
-        self.send_and_drain_immediately_async(command).await
-    }
-
+    #[cfg(target_arch = "wasm32")]
     pub fn send_gameplay_command_deferred(
         &mut self,
         command: ClientCommand,
     ) -> Result<WebRuntimeStepReport, String> {
         let exchange = self.host.enqueue_command(command)?;
         Ok(self.apply_exchange(exchange))
-    }
-
-    pub fn drain_pending_runner_updates(&mut self) -> Result<WebRuntimeStepReport, String> {
-        self.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())
-    }
-
-    pub fn drain_pending_runner_updates_frame(&mut self) -> Result<WebRuntimeStepReport, String> {
-        self.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::default())
     }
 
     pub fn drain_pending_runner_updates_with_budget(
@@ -295,6 +276,7 @@ impl WebRuntime {
         Ok(combine_step_reports(command_report, drain_report))
     }
 
+    #[cfg(target_arch = "wasm32")]
     async fn send_and_drain_immediately_async(
         &mut self,
         command: ClientCommand,
@@ -308,6 +290,7 @@ impl WebRuntime {
         self.enqueue_and_drain_immediately_async(command).await
     }
 
+    #[cfg(target_arch = "wasm32")]
     async fn enqueue_and_drain_immediately_async(
         &mut self,
         command: ClientCommand,
@@ -389,36 +372,12 @@ impl WebRuntime {
         &mut self.core
     }
 
-    pub const fn engine(&self) -> &EngineRenderSession {
-        self.core.engine()
-    }
-
-    pub const fn engine_mut(&mut self) -> &mut EngineRenderSession {
-        self.core.engine_mut()
-    }
-
     pub const fn command_count(&self) -> usize {
         self.core.command_count()
     }
 
     pub const fn update_count(&self) -> usize {
         self.core.update_count()
-    }
-
-    pub const fn snapshot_update_count(&self) -> usize {
-        self.core.snapshot_update_count()
-    }
-
-    pub const fn section_block_update_count(&self) -> usize {
-        self.core.section_block_update_count()
-    }
-
-    pub const fn unload_update_count(&self) -> usize {
-        self.core.unload_update_count()
-    }
-
-    pub fn deferred_client_chunk_drop_item_count(&self) -> usize {
-        self.core.deferred_client_chunk_drop_item_count()
     }
 
     pub const fn protocol_codec_roundtrip(&self) -> bool {
@@ -429,58 +388,23 @@ impl WebRuntime {
         self.core.transport_drained()
     }
 
-    pub fn drain_player_position_updates(
-        &mut self,
-    ) -> impl Iterator<Item = mclone_protocol::PlayerPositionUpdate> + '_ {
-        self.core.client_mut().drain_player_position_updates()
-    }
-
-    pub fn sync_render_sections_with_budget<C, Snapshots>(
-        &mut self,
-        compiler: &mut C,
-        camera_position: glam::Vec3,
-        chunk_budget: usize,
-        snapshots_for_submit: Snapshots,
-    ) -> anyhow::Result<RenderSectionCacheUpdate>
-    where
-        C: RenderSectionCompiler,
-        Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
-    {
-        self.core.sync_render_sections_with_budget(
-            compiler,
-            camera_position,
-            chunk_budget,
-            snapshots_for_submit,
-        )
-    }
-
-    pub fn has_pending_render_work(
-        &self,
-        compiler_pending_job_count: usize,
-        camera_position: glam::Vec3,
-    ) -> bool {
-        self.core
-            .has_pending_render_work(compiler_pending_job_count, camera_position)
-    }
-
+    #[cfg(target_arch = "wasm32")]
     pub fn runner_kind(&self) -> ServerRunnerKind {
         self.host.runner_kind()
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn runner_diagnostics(&self) -> ServerRunnerDiagnostics {
         self.host.runner_diagnostics()
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn request_shutdown(&mut self) {
         self.host.request_shutdown();
     }
-
-    pub async fn shutdown_gracefully(&mut self) -> Result<(), String> {
-        self.host.shutdown_gracefully().await
-    }
 }
 
-pub type WebRuntimeStepReport = RuntimeStepReport;
+pub(crate) type WebRuntimeStepReport = RuntimeStepReport;
 
 #[derive(Debug)]
 enum WebRuntimeHost {
@@ -507,6 +431,7 @@ impl WebRuntimeHost {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
     async fn enqueue_command_async(
         &mut self,
         command: ClientCommand,
@@ -529,6 +454,7 @@ impl WebRuntimeHost {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
     fn runner_kind(&self) -> ServerRunnerKind {
         match self {
             Self::Inline(_) => ServerRunnerKind::InlineFallback,
@@ -539,6 +465,7 @@ impl WebRuntimeHost {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
     fn runner_diagnostics(&self) -> ServerRunnerDiagnostics {
         match self {
             Self::Inline(host) => host.diagnostics(),
@@ -561,6 +488,7 @@ impl WebRuntimeHost {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
     fn request_shutdown(&mut self) {
         match self {
             Self::Inline(_) => {}
@@ -568,19 +496,6 @@ impl WebRuntimeHost {
             Self::Worker(host) => host.request_shutdown(),
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(host) => host.request_shutdown(),
-        }
-    }
-
-    async fn shutdown_gracefully(&mut self) -> Result<(), String> {
-        match self {
-            Self::Inline(_) => Ok(()),
-            #[cfg(target_arch = "wasm32")]
-            Self::Worker(host) => host.shutdown_gracefully().await,
-            #[cfg(target_arch = "wasm32")]
-            Self::RemoteWebSocket(host) => {
-                host.request_shutdown();
-                Ok(())
-            }
         }
     }
 }
@@ -662,10 +577,12 @@ impl WebLoopbackHost {
         self.server.day_time()
     }
 
+    #[cfg(target_arch = "wasm32")]
     fn seed(&self) -> i64 {
         self.server.seed()
     }
 
+    #[cfg(target_arch = "wasm32")]
     fn diagnostics(&self) -> ServerRunnerDiagnostics {
         let mut diagnostics = ServerRunnerDiagnostics::initial(
             ServerRunnerKind::InlineFallback,
