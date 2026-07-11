@@ -1,12 +1,14 @@
 # 166: Shared Resident-Tile Substrate (Real Sections + LOD)
 
-Status: active 2026-07-11. Slices 1–3 landed the behavior-preserving
+Status: complete 2026-07-11. Slices 1–3 landed the behavior-preserving
 resident-tile/cache extraction, shared budget vocabulary, and synthetic far-LOD
 producer on shared workers, admission, residency, and per-tile region arenas.
 Tactical 171 — Convergence And Parity Closeout Milestone D then integrated and
 proved that producer in the production browser local-worker, IndexedDB, and
-remote-WebSocket lanes. Slice 4 multi-level rings are now the next
-implementation step. Opened after a far-LOD stutter investigation found that
+remote-WebSocket lanes. Slice 4 has now landed 4/8/16-block multi-level rings,
+hysteresis, replacement-before-suppress transitions, cross-level edge rebuilds,
+and bounded diagnostics. Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4
+is the next producer. Opened after a far-LOD stutter investigation found that
 far LOD reimplemented a crude, unbudgeted copy of the real-section
 residency/upload pipeline instead of sharing it. This tactical owns the shared
 substrate; it **pauses and re-scopes** Tactical 162 — Real-Chunk LOD Reduction
@@ -135,8 +137,9 @@ drift.
 
 ## LOD Levels As Concentric Rings
 
-Today far LOD is a single ring at 4-block sample spacing outside render distance.
-The target is multiple concentric rings at increasing spacing with distance
+Before Slice 4, far LOD was a single ring at 4-block sample spacing outside
+render distance. The landed shape is multiple concentric rings at increasing
+spacing with distance
 (e.g. 4 near, 8 further, 16 furthest — 16 being the chunk-granular ceiling),
 each ring still chunk-granular.
 
@@ -663,6 +666,56 @@ Gate:
   re-resolve working);
 - all Slice 3 counters remain healthy at multi-level coverage.
 
+Landed evidence (2026-07-11):
+
+- The synthetic producer now maps each desired chunk to `LodTileKey { chunk,
+  level }` using three equal distance bands over the configured Far LOD range.
+  The default base spacing produces 4/8/16-block levels. A two-chunk hysteresis
+  guard retains the prior level around each boundary; a focused oscillation
+  test holds a watched tile at zero flips while raw distance crosses back and
+  forth.
+- Desired and currently drawable keys are tracked separately. A prior level
+  remains visible until its replacement upload is resident, then visibility
+  switches atomically and the old GPU tile is removed through the existing
+  lifecycle queue. Transitions are capped at 256; current/max double residency,
+  per-level resident/visible counts, total flips, and maximum flips per tile are
+  exposed in shared debug and browser reports.
+- A level change dirties the changed tile and its four X/Z neighbors. Compact
+  native/browser worker requests carry west/east/north/south sample spacing, so
+  tile-local boundary skirts sample the adjacent level's 4/8/16 grid. Stale
+  seam-signature completions are discarded and requeued without adding a
+  worker, budget, upload, or renderer path.
+- The focused Far LOD suite passed `28/28`, including 4/8/16 band selection,
+  hysteresis, cross-level worker inputs, all-three-level residency, and a
+  replacement transition with no blank frame. Scene tests passed `92/92`;
+  web-client tests and ABI locks, direct browser Wasm/typecheck, renderer and
+  render-session tests, workspace check, formatting, thin-adapter purity,
+  frame-budget, movement-frame, movement, timedemo, normal app, asset-pack, and
+  movement browser lanes all remained green.
+- Production local-worker, IndexedDB, and remote-WebSocket browser probes each
+  filled all 912 desired/visible tiles, then moved three chunks and settled
+  levels `172/304/436`. Each recorded 68 level flips, at most one flip per tile,
+  maximum double residency 2, zero `suppressed_without_replacement`, 14 region
+  draws, no shared-result fallback/overflow, and valid inspected static/moved
+  captures. Final maximum frame gaps were `16.980ms`, `15.795ms`, and
+  `17.680ms`; off/on captures changed `220824`, `220873`, and `220563` pixels.
+  Evidence remains under `/tmp/mclone-native-web-far-lod-*` and
+  `/tmp/mclone-t166-s4-final-web-*`.
+- The inspected native 1280×720 overview showed detailed spruce/snow terrain
+  surrounded by a continuous three-level shell with 12 region draws. The exact
+  Far-LOD-off 960×540 canary stayed byte-identical at SHA-256
+  `052647136ff313c20bb91216f478772e715fcae48406c4a3262d84e1081151f2`,
+  with 64 resident and 11 drawn sections.
+- The final release Quest 3 full-frame multiview proof submitted 128 runtime
+  frames
+  with zero skips, two 1680×1760 layers, one initial Far LOD region draw,
+  `12512` upload bytes, and `305711` differing pixels. The 30-second RD1
+  per-eye frame-overlap orbit moved `24.853` blocks with 2160 submitted frames,
+  zero skipped or dropped-frame delta, zero over-period frames, app-work p95
+  `6.697ms`, average headroom `8.254ms`, and GPU `2.665ms`. Evidence is under
+  `/tmp/mclone-t166-s4-final-quest-*`; no capture or performance artifact is
+  committed.
+
 ### Later: reduced-real LOD as a third producer
 
 162 Slice 4+ (reduced-real tiles, edit dirtying, discardable persistence) drop in
@@ -678,7 +731,7 @@ pipeline.
 - Real sections stay authoritative; LOD never satisfies chunk interest,
   collision, raycast, edits, entities, or gameplay authority (carry from 162).
 - Real-section behavior stays byte-for-byte through Slices 1–2 (perf-gated);
-  far-LOD-off stays byte-identical through Slice 3 acceptance.
+  far-LOD-off stays byte-identical through Slice 4 acceptance.
 - One budget owner: LOD build/upload competes through the same
   `mclone-frame-budget` decision-family panel as real work; lanes are new
   decision families + ordering policy, **never** a new scheduler/queue object;
@@ -712,22 +765,21 @@ pipeline.
 - **Multi-draw-indirect:** not needed; packed per-region index buffers keep one
   portable path across native and WebGPU. Revisit only if region re-pack shows
   up in profiles, as a native-only optimization.
+- **Genericity and Y granularity:** `ResidentTileCache<K, M>` is generic over
+  the key/metadata while remaining agnostic to real-section versus LOD-column Y
+  shape.
+- **Region allocation:** 16×16 chunk regions with fixed per-tile vertex slots;
+  visibility changes repack only the region-local index buffer.
+- **Distance bands:** three equal bands over the configured extra radius use
+  levels 1/2/3 and default 4/8/16 spacing. Hysteresis is two chunks on every
+  platform; adaptive/per-platform band policy is not part of this tactical.
 
 ## Open Questions
 
-- Genericity: `ResidentTileCache<K, M>` vs two concrete caches sharing
-  free-function helpers — decide during Slice 1 by which keeps real-section code
-  cleanest (fallback is pre-sanctioned).
-- Y granularity: confirm the substrate stays agnostic (real = subchunk, LOD =
-  column) rather than unifying Y — recommended agnostic.
-- Region size per level: start 16×16 chunks (keeps worst-case region vertex
-  count under u16 indices); measure whether far levels want larger regions.
-- Vertex slot allocation: fixed-size slots (recommended start; waste is small
-  and bounded) vs best-fit with compaction on region re-pack.
+- Whether measured far-level density justifies regions larger than the landed
+  16×16 chunks or best-fit allocation instead of fixed slots.
 - Packed vertex format details (u16 region-relative positions + rgba8 vs
   keeping f32 for the first slice).
-- Distance→level band policy: fixed bands vs adaptive; hysteresis distance;
-  per-platform defaults (desktop permissive, Quest/Web back off earlier).
 - Reduced-real provenance/versioning: deferred to 162 Slice 4; only the producer
   slot is reserved here.
 

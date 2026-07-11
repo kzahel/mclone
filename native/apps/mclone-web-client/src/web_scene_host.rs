@@ -1950,6 +1950,42 @@ impl WebSceneHost {
                 "farLodTotalUploadBytes",
                 far_lod.total_upload_bytes as f64,
             )?;
+            for (index, count) in far_lod.resident_tiles_by_level.into_iter().enumerate() {
+                report_set_number(
+                    &object,
+                    &format!("farLodResidentLevel{}Tiles", index + 1),
+                    count as f64,
+                )?;
+            }
+            for (index, count) in far_lod.visible_tiles_by_level.into_iter().enumerate() {
+                report_set_number(
+                    &object,
+                    &format!("farLodVisibleLevel{}Tiles", index + 1),
+                    count as f64,
+                )?;
+            }
+            report_set_number(
+                &object,
+                "farLodDoubleResidentTiles",
+                far_lod.double_resident_tiles as f64,
+            )?;
+            report_set_number(
+                &object,
+                "farLodMaxDoubleResidentTiles",
+                far_lod.max_double_resident_tiles as f64,
+            )?;
+            report_set_number(&object, "farLodLevelFlips", far_lod.level_flips as f64)?;
+            report_set_number(
+                &object,
+                "farLodMaxLevelFlipsPerTile",
+                far_lod.max_level_flips_per_tile as f64,
+            )?;
+            let lod_replacements = host.lod_coverage_counters();
+            report_set_number(
+                &object,
+                "farLodSuppressedWithoutReplacement",
+                lod_replacements.suppressed_without_replacement as f64,
+            )?;
             report_set_bool(&object, "worldCatalogPersistent", world_catalog.persistent)?;
             report_set_bool(&object, "worldCatalogLoading", world_catalog.loading)?;
             report_set_number(

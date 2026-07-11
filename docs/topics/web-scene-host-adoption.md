@@ -551,7 +551,8 @@ app-fatal marker.
 
 The adoption series is closed. Continue through Tactical 171 — Convergence And
 Parity Closeout. Its Milestone D production browser proof passed and removed
-only the `FarLod` ledger entry. Next implement Tactical 166 — Shared
-Resident-Tile Substrate Slice 4, multi-level rings, while preserving the proven
-native and browser worker/admission/upload paths. Keep the remaining four web
-exceptions unchanged until their own complete proofs land.
+only the `FarLod` ledger entry. Tactical 166 — Shared Resident-Tile Substrate
+Slice 4 subsequently landed multi-level rings while preserving the proven
+native and browser worker/admission/upload paths. The macro next step is
+Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4; keep the remaining four
+web exceptions unchanged until their own complete proofs land.

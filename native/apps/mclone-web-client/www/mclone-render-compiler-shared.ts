@@ -50,6 +50,10 @@ export interface RenderCompileDoorbell {
   farLodChunkZ?: number;
   farLodLevel?: number;
   farLodSampleSpacingBlocks?: number;
+  farLodWestSampleSpacingBlocks?: number;
+  farLodEastSampleSpacingBlocks?: number;
+  farLodNorthSampleSpacingBlocks?: number;
+  farLodSouthSampleSpacingBlocks?: number;
   sharedInputByteLength?: number;
   sharedInputBufferCapacityBytes?: number;
   sharedInputControlBuffer?: SharedArrayBuffer;
@@ -95,6 +99,10 @@ export interface RenderCompileWorkerRequest {
   farLodChunkZ?: number;
   farLodLevel?: number;
   farLodSampleSpacingBlocks?: number;
+  farLodWestSampleSpacingBlocks?: number;
+  farLodEastSampleSpacingBlocks?: number;
+  farLodNorthSampleSpacingBlocks?: number;
+  farLodSouthSampleSpacingBlocks?: number;
   sharedInputControlBuffer?: SharedArrayBuffer;
   sharedInputBuffer?: SharedArrayBuffer;
   sharedInputByteLength?: number;
@@ -134,6 +142,10 @@ interface RenderCompilerDispatchArgs {
   farLodChunkZ?: number;
   farLodLevel?: number;
   farLodSampleSpacingBlocks?: number;
+  farLodWestSampleSpacingBlocks?: number;
+  farLodEastSampleSpacingBlocks?: number;
+  farLodNorthSampleSpacingBlocks?: number;
+  farLodSouthSampleSpacingBlocks?: number;
   sharedResult: RenderCompileSharedResultArena | null;
   sharedInput: RenderCompileSharedInputArena | null;
   requestSource?: {
@@ -397,6 +409,10 @@ export class RenderSectionWorkerCompiler {
       farLodChunkZ: doorbell.farLodChunkZ,
       farLodLevel: doorbell.farLodLevel,
       farLodSampleSpacingBlocks: doorbell.farLodSampleSpacingBlocks,
+      farLodWestSampleSpacingBlocks: doorbell.farLodWestSampleSpacingBlocks,
+      farLodEastSampleSpacingBlocks: doorbell.farLodEastSampleSpacingBlocks,
+      farLodNorthSampleSpacingBlocks: doorbell.farLodNorthSampleSpacingBlocks,
+      farLodSouthSampleSpacingBlocks: doorbell.farLodSouthSampleSpacingBlocks,
       sharedResult,
       sharedInput,
       requestSource: {
@@ -420,6 +436,10 @@ export class RenderSectionWorkerCompiler {
     farLodChunkZ,
     farLodLevel,
     farLodSampleSpacingBlocks,
+    farLodWestSampleSpacingBlocks,
+    farLodEastSampleSpacingBlocks,
+    farLodNorthSampleSpacingBlocks,
+    farLodSouthSampleSpacingBlocks,
     sharedResult,
     sharedInput,
     requestSource,
@@ -463,6 +483,10 @@ export class RenderSectionWorkerCompiler {
         farLodChunkZ,
         farLodLevel,
         farLodSampleSpacingBlocks,
+        farLodWestSampleSpacingBlocks,
+        farLodEastSampleSpacingBlocks,
+        farLodNorthSampleSpacingBlocks,
+        farLodSouthSampleSpacingBlocks,
       };
       if (sharedInput !== null) {
         message.sharedInputControlBuffer = sharedInput.controlBuffer;

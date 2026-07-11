@@ -1,10 +1,12 @@
 # 171: Convergence And Parity Closeout
 
-Status: active coordinating parent 2026-07-11. Milestones A–D have landed. The
+Status: active coordinating parent 2026-07-11. Milestones A–D and the first
+step of Milestone E have landed. The
 native and browser scene-host convergence series and runtime asset-pack
 implementation are closed, and production browser far LOD now uses the shared
 resident-tile worker/runtime/render path. Tactical 166 — Shared Resident-Tile
-Substrate Slice 4, multi-level rings, is next. This parent owns the cross-thread
+Substrate is complete through Slice 4 multi-level rings. Tactical 162 —
+Real-Chunk LOD Reduction Draft Slice 4 is next. This parent owns the cross-thread
 burn-down and final status reconciliation, not duplicate implementations of
 its child tacticals.
 
@@ -65,9 +67,9 @@ explicit re-scope:
 | Native live host convergence | Tactical 168 — Unified Native Scene Host | **Closed.** Slices 0–10 landed. | Do not recreate app-local frame/session/render policy. |
 | Runtime asset-pack selection and replacement | Tactical 169 — Runtime Asset Pack Selection | **Closed.** Slices 0–6 landed across native and web. | Track optional worker/bootstrap gaps below without reopening the tactical. |
 | Browser host adoption | Tactical 170 — Web Scene-Host Adoption | **Closed.** Slices 0–6 landed; the old browser orchestrator is deleted. | Burn down only the exact web feature exceptions below. |
-| Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Paused after landed Slices 0A–2.** Its proposed Slice 3 was superseded. | Resume at Slice 4 only after the shared substrate can host another producer. |
-| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Active. Slices 1–3 and the production browser proof landed.** | Implement Slice 4 multi-level rings behind the landed performance and pixel gates. |
-| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D landed.** | Coordinate Milestone E next; close only after the milestones below and explicit deferred decisions are recorded. |
+| Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Ready to resume after landed Slices 0A–2.** Its proposed Slice 3 was superseded and the shared substrate prerequisite is complete. | Implement Slice 4 as the first reduced-real producer. |
+| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Closed. Slices 1–4 and the production browser proof landed.** | Preserve its worker, admission, residency, transition, seam, and render gates for later producers. |
+| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D and the first Milestone E step landed.** | Coordinate Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4 next; close only after the milestones below and explicit deferred decisions are recorded. |
 
 ## Asset-Pack Follow-Ups That Do Not Reopen The Closed Series
 
@@ -188,12 +190,18 @@ Landed evidence (2026-07-11):
 
 ### Milestone E — LOD quality evolution
 
-- [ ] Implement Tactical 166 — Shared Resident-Tile Substrate Slice 4
+- [x] Implement Tactical 166 — Shared Resident-Tile Substrate Slice 4
   multilevel rings if the single-level substrate evidence is green.
 - [ ] Resume Tactical 162 — Real-Chunk LOD Reduction Draft at Slice 4 for
   reduced-real tiles.
 - [ ] Continue its edit dirtying and discardable persistence only after the
   reduced-real producer passes precedence, seam, and authority tests.
+
+Tactical 166 — Shared Resident-Tile Substrate Slice 4 closed its prerequisite
+with 4/8/16 rings, two-chunk hysteresis, capped replacement-before-suppress
+double residency, cross-level neighbor rebuilds, and per-level diagnostics.
+Native, all three production browser modes, per-eye Quest movement, and Quest
+full-frame multiview gates passed; detailed evidence remains in that tactical.
 
 ### Milestone F — Remaining browser parity
 
@@ -215,12 +223,12 @@ Landed evidence (2026-07-11):
 
 ## Current Next Step
 
-Execute Milestone E by implementing Tactical 166 — Shared Resident-Tile
-Substrate Slice 4, multi-level rings: add the LOD-level dimension, distance
-bands with hysteresis, replacement-before-suppress double residency, per-level
-diagnostics, and crack-free cross-level edges while preserving the Slice 3
-worker/admission/upload gates on native and browser paths. After those gates
-pass, resume Tactical 162 — Real-Chunk LOD Reduction Draft at Slice 4 for the
-first reduced-real tile producer.
+Continue Milestone E by resuming Tactical 162 — Real-Chunk LOD Reduction Draft
+at Slice 4: add the first in-memory reduced-real tile producer from already
+available authoritative chunk snapshots, using the completed shared worker,
+admission, residency, replacement, upload, coverage-precedence, and
+per-eye/multiview paths. Stop before edit dirtying or discardable persistence;
+those remain later slices after the producer passes authority, seam, pixel, and
+performance gates.
 
 Topic: convergence-and-parity-closeout

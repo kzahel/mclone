@@ -1,13 +1,14 @@
 # 162: Real-Chunk LOD Reduction Draft
 
-Status: paused and re-scoped 2026-07-11. Slice 0A retained synthetic chunk
+Status: ready to resume at Slice 4 on 2026-07-11. Slice 0A retained synthetic chunk
 patches, Slice 1 startup LOD prewarm, and Slice 2 coverage coordinator + source
 precedence landed. The proposed bespoke Slice 3 LOD budget/queue does not
 proceed: Tactical 166 — Shared Resident-Tile Substrate supersedes it with one
 shared real-section/LOD residency, worker, budget, and upload mechanism.
-Resume this tactical at Slice 4 only after that substrate can host reduced-real
-LOD as another producer. Macro ordering lives in Tactical 171 — Convergence And
-Parity Closeout.
+Tactical 166 — Shared Resident-Tile Substrate is now complete through Slice 4
+multi-level rings, so that prerequisite is green. The next implementation step
+is this tactical's Slice 4 in-memory reduced-real producer. Macro ordering lives
+in Tactical 171 — Convergence And Parity Closeout.
 
 Workstream: native Rust shared runtime/persistence/render boundary. Desktop
 validation remains the likely first lane, but the target shape must stay shared

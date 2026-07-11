@@ -730,6 +730,19 @@ impl McloneSceneHost {
                 self.render_stats.far_lod_uploaded_bytes
             ),
             format!(
+                "LOD LEVEL R{}/{}/{} V{}/{}/{} DB{}/{} FLIP{}/{}",
+                far_lod_stats.resident_tiles_by_level[0],
+                far_lod_stats.resident_tiles_by_level[1],
+                far_lod_stats.resident_tiles_by_level[2],
+                far_lod_stats.visible_tiles_by_level[0],
+                far_lod_stats.visible_tiles_by_level[1],
+                far_lod_stats.visible_tiles_by_level[2],
+                far_lod_stats.double_resident_tiles,
+                far_lod_stats.max_double_resident_tiles,
+                far_lod_stats.level_flips,
+                far_lod_stats.max_level_flips_per_tile,
+            ),
+            format!(
                 "OPTIONS OCC {} FULL {} {}",
                 if self.render_options.section_occlusion_culling {
                     "Y"

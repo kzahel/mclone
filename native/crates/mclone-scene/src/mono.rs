@@ -254,6 +254,15 @@ impl McloneSceneHost {
             .unwrap_or_default()
     }
 
+    pub fn lod_coverage_counters(
+        &self,
+    ) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.lod_coverage_counters())
+            .unwrap_or_default()
+    }
+
     pub fn runtime_poll_diagnostics(&self) -> Option<RuntimePollDiagnostics> {
         self.runtime
             .as_ref()

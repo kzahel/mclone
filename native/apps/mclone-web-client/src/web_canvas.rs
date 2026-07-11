@@ -325,6 +325,10 @@ impl WebRenderCompilerSession {
         chunk_z: i32,
         level: u8,
         sample_spacing_blocks: u32,
+        west_sample_spacing_blocks: u32,
+        east_sample_spacing_blocks: u32,
+        north_sample_spacing_blocks: u32,
+        south_sample_spacing_blocks: u32,
     ) -> Result<js_sys::Uint8Array, JsValue> {
         self.compile_count += 1;
         let seed = seed_text
@@ -335,6 +339,12 @@ impl WebRenderCompilerSession {
                 key: LodTileKey::new(ChunkPos::new(chunk_x, chunk_z), level),
                 seed,
                 sample_spacing_blocks,
+                neighbor_sample_spacings: [
+                    west_sample_spacing_blocks,
+                    east_sample_spacing_blocks,
+                    north_sample_spacing_blocks,
+                    south_sample_spacing_blocks,
+                ],
             },
             self.mesh_assets.far_lod_materials.as_ref(),
         );
@@ -1440,6 +1450,26 @@ impl WebRenderSectionCompiler {
                     "farLodSampleSpacingBlocks",
                     f64::from(input.sample_spacing_blocks),
                 )?;
+                for (name, spacing) in [
+                    (
+                        "farLodWestSampleSpacingBlocks",
+                        input.neighbor_sample_spacings[0],
+                    ),
+                    (
+                        "farLodEastSampleSpacingBlocks",
+                        input.neighbor_sample_spacings[1],
+                    ),
+                    (
+                        "farLodNorthSampleSpacingBlocks",
+                        input.neighbor_sample_spacings[2],
+                    ),
+                    (
+                        "farLodSouthSampleSpacingBlocks",
+                        input.neighbor_sample_spacings[3],
+                    ),
+                ] {
+                    set_number(object, name, f64::from(spacing))?;
+                }
                 self.write_doorbell_result_arena(object)?;
             }
         }

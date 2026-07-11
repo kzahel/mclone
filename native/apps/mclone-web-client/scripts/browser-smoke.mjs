@@ -119,6 +119,8 @@ const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
 const farLodOffCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_OFF_CANVAS_SCREENSHOT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}-off-canvas.png`;
+const farLodMovedCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_MOVED_CANVAS_SCREENSHOT
+  ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}-moved-canvas.png`;
 const movementPerfChunkBoundaries = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
@@ -262,6 +264,7 @@ async function run() {
           pageScreenshotCaptured,
           canvasScreenshotPath,
           farLodOffCanvasScreenshotPath,
+          farLodMovedCanvasScreenshotPath,
           farLodProbeReportPath,
           farLodProbe,
           farLodIndexedDb,
@@ -1224,10 +1227,18 @@ async function runFarLodProbe(page, canvas) {
         const compiler = state?.lastCompileReport;
         return state?.ok === true
           && report?.farLodEnabled === true
-          && Number(report?.farLodResidentTiles) >= 64
-          && Number(report?.farLodVisibleTiles) > 0
+          && Number(report?.farLodDesiredTiles) > 0
+          && Number(report?.farLodResidentTiles) >= Number(report?.farLodDesiredTiles)
+          && Number(report?.farLodVisibleTiles) >= Number(report?.farLodDesiredTiles)
+          && Number(report?.farLodPendingBuilds) === 0
+          && Number(report?.farLodInflightBuilds) === 0
+          && Number(report?.farLodQueuedUploads) === 0
           && Number(report?.farLodRegionDrawCount) > 0
           && Number(report?.farLodTotalUploadBytes) > 0
+          && Number(report?.farLodVisibleLevel1Tiles) > 0
+          && Number(report?.farLodVisibleLevel2Tiles) > 0
+          && Number(report?.farLodVisibleLevel3Tiles) > 0
+          && Number(report?.farLodDoubleResidentTiles) <= 256
           && compiler?.workKind === "far-lod"
           && compiler?.farLodCompileUsed === true
           && compiler?.transportKind === "shared-result-buffer"
@@ -1257,6 +1268,20 @@ async function runFarLodProbe(page, canvas) {
     "far LOD enabled",
   );
   const pixelDifference = comparePngPixels(offCapture.png, onCapture.png);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  const movement = await runFarLodMovementProbe(page);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const movedCapture = await captureValidOverviewFrame(
+    page,
+    canvas,
+    farLodMovedCanvasScreenshotPath,
+    "far LOD enabled after movement",
+  );
   const after = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp?.state ?? {};
     const report = state.lastReport ?? {};
@@ -1275,6 +1300,17 @@ async function runFarLodProbe(page, canvas) {
       regionDrawCount: Number(report.farLodRegionDrawCount) || 0,
       uploadedBytes: Number(report.farLodUploadedBytes) || 0,
       totalUploadBytes: Number(report.farLodTotalUploadBytes) || 0,
+      residentTilesByLevel: [1, 2, 3].map(
+        (level) => Number(report[`farLodResidentLevel${level}Tiles`]) || 0,
+      ),
+      visibleTilesByLevel: [1, 2, 3].map(
+        (level) => Number(report[`farLodVisibleLevel${level}Tiles`]) || 0,
+      ),
+      doubleResidentTiles: Number(report.farLodDoubleResidentTiles) || 0,
+      maxDoubleResidentTiles: Number(report.farLodMaxDoubleResidentTiles) || 0,
+      levelFlips: Number(report.farLodLevelFlips) || 0,
+      maxLevelFlipsPerTile: Number(report.farLodMaxLevelFlipsPerTile) || 0,
+      suppressedWithoutReplacement: Number(report.farLodSuppressedWithoutReplacement) || 0,
       sessionKind: state.sessionKind,
       hostMode: report.hostMode,
       runnerKind: report.runnerKind,
@@ -1285,10 +1321,22 @@ async function runFarLodProbe(page, canvas) {
   });
   return {
     ok: after.farLodEnabled === true
-      && after.residentTiles >= 64
-      && after.visibleTiles > 0
+      && after.desiredTiles > 0
+      && after.residentTiles >= after.desiredTiles
+      && after.visibleTiles >= after.desiredTiles
+      && after.pendingBuilds === 0
+      && after.inflightBuilds === 0
+      && after.queuedUploads === 0
       && after.regionDrawCount > 0
       && after.totalUploadBytes > 0
+      && after.visibleTilesByLevel.every((count) => count > 0)
+      && after.doubleResidentTiles <= 256
+      && after.maxDoubleResidentTiles <= 256
+      && after.maxDoubleResidentTiles > 0
+      && after.levelFlips > 0
+      && after.maxLevelFlipsPerTile <= 1
+      && after.suppressedWithoutReplacement === 0
+      && movement.movedChunks >= 3
       && workerProof?.workKind === "far-lod"
       && workerProof?.farLodCompileUsed === true
       && workerProof?.sharedResultBufferUsed === true
@@ -1307,8 +1355,91 @@ async function runFarLodProbe(page, canvas) {
       attemptCount: onCapture.attemptCount,
       pixels: onCapture.pixels,
     },
+    movement,
+    movedCapture: {
+      attemptCount: movedCapture.attemptCount,
+      pixels: movedCapture.pixels,
+    },
     pixelDifference,
   };
+}
+
+/** @param {Page} page */
+async function runFarLodMovementProbe(page) {
+  const start = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    return {
+      centerX: Number(state.centerX) || 0,
+      centerZ: Number(state.centerZ) || 0,
+      levelFlips: Number(state.lastReport?.farLodLevelFlips) || 0,
+    };
+  });
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
+  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.movementMode === "FLY",
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => {
+    for (let i = 0; i < 4; i += 1) {
+      globalThis.__mcloneWebApp?.adjustCameraSpeed?.(4);
+    }
+    globalThis.__mcloneWebApp?.setInputKey?.("forward", true);
+  });
+  try {
+    await page.waitForFunction(
+      ({ start }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return Math.max(
+          Math.abs(Number(state?.centerX) - start.centerX),
+          Math.abs(Number(state?.centerZ) - start.centerZ),
+        ) >= 3;
+      },
+      { start },
+      { timeout: 90_000 },
+    );
+  } finally {
+    await page.evaluate(() => globalThis.__mcloneWebApp?.setInputKey?.("forward", false));
+  }
+  await waitForWebAppStreamingSettled(page, 120_000);
+  await page.waitForFunction(
+    ({ start }) => {
+      const report = globalThis.__mcloneWebApp?.state?.lastReport;
+      return Number(report?.farLodDesiredTiles) > 0
+        && Number(report?.farLodResidentTiles) >= Number(report?.farLodDesiredTiles)
+        && Number(report?.farLodVisibleTiles) >= Number(report?.farLodDesiredTiles)
+        && Number(report?.farLodPendingBuilds) === 0
+        && Number(report?.farLodInflightBuilds) === 0
+        && Number(report?.farLodQueuedUploads) === 0
+        && Number(report?.farLodLevelFlips) > start.levelFlips
+        && Number(report?.farLodMaxDoubleResidentTiles) > 0
+        && Number(report?.farLodMaxDoubleResidentTiles) <= 256
+        && Number(report?.farLodMaxLevelFlipsPerTile) <= 1
+        && Number(report?.farLodSuppressedWithoutReplacement) === 0;
+    },
+    { start },
+    { timeout: 120_000 },
+  );
+  return page.evaluate((start) => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    const report = state.lastReport ?? {};
+    const centerX = Number(state.centerX) || 0;
+    const centerZ = Number(state.centerZ) || 0;
+    return {
+      start,
+      centerX,
+      centerZ,
+      movedChunks: Math.max(
+        Math.abs(centerX - start.centerX),
+        Math.abs(centerZ - start.centerZ),
+      ),
+      levelFlips: Number(report.farLodLevelFlips) || 0,
+      maxLevelFlipsPerTile: Number(report.farLodMaxLevelFlipsPerTile) || 0,
+      maxDoubleResidentTiles: Number(report.farLodMaxDoubleResidentTiles) || 0,
+      suppressedWithoutReplacement: Number(report.farLodSuppressedWithoutReplacement) || 0,
+    };
+  }, start);
 }
 
 /**

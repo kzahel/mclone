@@ -56,6 +56,10 @@ interface RenderCompileWorkerInbound {
   farLodChunkZ?: number;
   farLodLevel?: number;
   farLodSampleSpacingBlocks?: number;
+  farLodWestSampleSpacingBlocks?: number;
+  farLodEastSampleSpacingBlocks?: number;
+  farLodNorthSampleSpacingBlocks?: number;
+  farLodSouthSampleSpacingBlocks?: number;
   sharedInputBuffer?: SharedArrayBuffer;
   sharedInputByteLength?: number;
   sharedInputControlBuffer?: SharedArrayBuffer;
@@ -213,6 +217,10 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
           Number(message.farLodChunkZ) || 0,
           Number(message.farLodLevel) || 1,
           Number(message.farLodSampleSpacingBlocks) || 4,
+          Number(message.farLodWestSampleSpacingBlocks) || 4,
+          Number(message.farLodEastSampleSpacingBlocks) || 4,
+          Number(message.farLodNorthSampleSpacingBlocks) || 4,
+          Number(message.farLodSouthSampleSpacingBlocks) || 4,
         )
       : hasPersistentSnapshotCompiler
         ? session.compileSnapshotSectionsForTargets(

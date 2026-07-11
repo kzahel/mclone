@@ -439,9 +439,10 @@ lower-level render residency and explicit product/evidence gaps:
    Substrate Slices 1–3 moved synthetic far LOD onto shared workers, admission,
    residency, and region-arena uploads, and Tactical 171 — Convergence And
    Parity Closeout Milestone D proved that path in production browser modes.
-   Next add multi-level rings in Tactical 166 — Shared Resident-Tile Substrate
-   Slice 4, then resume reduced-real tiles and the remaining exact browser
-   feature promotions.
+   Tactical 166 — Shared Resident-Tile Substrate Slice 4 then landed 4/8/16
+   rings, hysteresis, replacement-before-suppress, and cross-level seam proof.
+   Next resume Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4, then the
+   remaining exact browser feature promotions.
 4. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, and user
    headset validation says it works mostly fine. Flat Android consumes

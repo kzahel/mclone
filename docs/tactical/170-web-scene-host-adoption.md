@@ -1303,6 +1303,7 @@ the evidence and options, and revise this tactical before production cutover.
 This tactical is complete. Tactical 171 — Convergence And Parity Closeout
 Milestone D subsequently integrated and proved the resident-tile Far LOD
 producer in the production browser scene host and shared Web Worker compiler,
-then removed only that exception. Continue with Tactical 166 — Shared
-Resident-Tile Substrate Slice 4, multi-level rings; do not reopen this adoption
-tactical for the remaining four reason-bearing browser feature gaps.
+then removed only that exception. Tactical 166 — Shared Resident-Tile
+Substrate Slice 4 subsequently completed multi-level rings. Continue with
+Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4; do not reopen this
+adoption tactical for the remaining four reason-bearing browser feature gaps.

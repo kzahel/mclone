@@ -23,7 +23,9 @@ The web feature profile remains intentionally honest: travel assist,
 frame-pipeline overlay, debug diagnostics, and server simulation cadence are
 the exact remaining reason-bearing gaps in `mclone-app-runtime`. Far LOD is
 supported through the production shared resident compiler/cache/render path.
-Browser audio and teleport preview remain explicit absent service capabilities.
+That path now uses 4/8/16 rings with two-chunk hysteresis and
+replacement-before-suppress transitions. Browser audio and teleport preview
+remain explicit absent service capabilities.
 
 ## Local Commands
 
@@ -40,9 +42,9 @@ pnpm native:web:app-smoke
 # Asset Packs screen under /tmp.
 pnpm native:web:asset-pack-smoke
 
-# Toggle Far LOD through the production Graphics UI, prove resident shared-
-# result compilation and region drawing, and compare inspected off/on captures
-# across each host/storage mode.
+# Toggle Far LOD through the production Graphics UI; prove resident shared-
+# result compilation, complete 4/8/16 coverage, and a three-chunk hysteretic
+# movement transition; compare inspected off/on/moved captures in every mode.
 pnpm native:web:far-lod-smoke
 pnpm native:web:far-lod-indexeddb-smoke
 pnpm native:web:far-lod-remote-smoke

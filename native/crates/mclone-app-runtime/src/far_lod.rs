@@ -34,6 +34,9 @@ pub const MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 1;
 pub const DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 12;
 pub const MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 64;
 pub const DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS: u32 = 4;
+pub const FAR_TERRAIN_LOD_LEVEL_COUNT: usize = 3;
+pub const FAR_TERRAIN_LOD_LEVEL_HYSTERESIS_CHUNKS: u32 = 2;
+pub const MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES: usize = 256;
 pub const DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET: usize = 4;
 pub const DEFAULT_FAR_TERRAIN_LOD_EVICTION_MARGIN_CHUNKS: u32 = 2;
 pub const MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES: usize = 4096;
@@ -68,6 +71,7 @@ fn far_lod_now() -> MonotonicInstant {
 pub struct FarTerrainLodBuildRequest {
     pub key: LodTileKey,
     source_key: FarTerrainLodSourceKey,
+    neighbor_sample_spacings: [u32; 4],
     materials: Option<Arc<FarTerrainLodMaterialPalette>>,
     queued_at: MonotonicInstant,
 }
@@ -82,18 +86,37 @@ pub struct FarTerrainLodWorkerInput {
     pub key: LodTileKey,
     pub seed: i64,
     pub sample_spacing_blocks: u32,
+    pub neighbor_sample_spacings: [u32; 4],
 }
 
 impl FarTerrainLodBuildRequest {
+    #[cfg(test)]
     fn new(
         pos: ChunkPos,
         source_key: FarTerrainLodSourceKey,
         materials: Option<Arc<FarTerrainLodMaterialPalette>>,
         queued_at: MonotonicInstant,
     ) -> Self {
-        Self {
-            key: LodTileKey::synthetic(pos),
+        Self::new_for_tile(
+            LodTileKey::synthetic(pos),
             source_key,
+            [source_key.sample_spacing_blocks; 4],
+            materials,
+            queued_at,
+        )
+    }
+
+    fn new_for_tile(
+        key: LodTileKey,
+        source_key: FarTerrainLodSourceKey,
+        neighbor_sample_spacings: [u32; 4],
+        materials: Option<Arc<FarTerrainLodMaterialPalette>>,
+        queued_at: MonotonicInstant,
+    ) -> Self {
+        Self {
+            key,
+            source_key,
+            neighbor_sample_spacings,
             materials,
             queued_at,
         }
@@ -113,7 +136,11 @@ impl FarTerrainLodBuildRequest {
         FarTerrainLodWorkerInput {
             key: self.key,
             seed: self.source_key.seed,
-            sample_spacing_blocks: self.source_key.sample_spacing_blocks,
+            sample_spacing_blocks: far_lod_sample_spacing_for_level(
+                self.source_key.sample_spacing_blocks,
+                self.key.level,
+            ),
+            neighbor_sample_spacings: self.neighbor_sample_spacings,
         }
     }
 
@@ -133,6 +160,7 @@ impl FarTerrainLodBuildRequest {
             queued_at: self.queued_at,
             mesh,
             source_key: self.source_key,
+            neighbor_sample_spacings: self.neighbor_sample_spacings,
         })
     }
 }
@@ -143,6 +171,7 @@ pub struct FarTerrainLodBuildResult {
     pub queued_at: MonotonicInstant,
     pub mesh: FarTerrainLodTileMesh,
     source_key: FarTerrainLodSourceKey,
+    neighbor_sample_spacings: [u32; 4],
 }
 
 pub trait FarTerrainLodCompiler {
@@ -166,6 +195,12 @@ pub struct FarTerrainLodProducerStats {
     pub queued_uploads: usize,
     pub last_upload_bytes: usize,
     pub total_upload_bytes: u64,
+    pub resident_tiles_by_level: [usize; FAR_TERRAIN_LOD_LEVEL_COUNT],
+    pub visible_tiles_by_level: [usize; FAR_TERRAIN_LOD_LEVEL_COUNT],
+    pub double_resident_tiles: usize,
+    pub max_double_resident_tiles: usize,
+    pub level_flips: u64,
+    pub max_level_flips_per_tile: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -211,7 +246,7 @@ impl FarTerrainLodConfig {
                 MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
                 MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
             ),
-            sample_spacing_blocks: self.sample_spacing_blocks.max(1),
+            sample_spacing_blocks: self.sample_spacing_blocks.clamp(1, CHUNK_WIDTH as u32),
         }
     }
 }
@@ -589,7 +624,14 @@ struct FarTerrainLodTileMetadata {
 pub struct FarTerrainLodCache {
     source_key: Option<FarTerrainLodSourceKey>,
     view_key: Option<FarTerrainLodBuildKey>,
-    desired_chunks: BTreeSet<ChunkPos>,
+    desired_tiles: BTreeMap<ChunkPos, LodTileKey>,
+    level_history: BTreeMap<ChunkPos, u8>,
+    visible_tiles_by_chunk: BTreeMap<ChunkPos, LodTileKey>,
+    dirty_tiles: BTreeSet<LodTileKey>,
+    level_flip_counts: BTreeMap<ChunkPos, u64>,
+    resident_tiles_by_level: [usize; FAR_TERRAIN_LOD_LEVEL_COUNT],
+    visible_tiles_by_level: [usize; FAR_TERRAIN_LOD_LEVEL_COUNT],
+    double_resident_tiles: usize,
     pending_builds: VecDeque<FarTerrainLodBuildRequest>,
     inflight_builds: BTreeMap<LodTileKey, MonotonicInstant>,
     resident_tiles: ResidentTileCache<LodTileKey, FarTerrainLodTileMetadata>,
@@ -603,6 +645,9 @@ pub struct FarTerrainLodCache {
     stale_builds: u64,
     last_upload_bytes: usize,
     total_upload_bytes: u64,
+    level_flips: u64,
+    max_level_flips_per_tile: u64,
+    max_double_resident_tiles: usize,
     now: MonotonicInstant,
 }
 
@@ -611,7 +656,14 @@ impl Default for FarTerrainLodCache {
         Self {
             source_key: None,
             view_key: None,
-            desired_chunks: BTreeSet::new(),
+            desired_tiles: BTreeMap::new(),
+            level_history: BTreeMap::new(),
+            visible_tiles_by_chunk: BTreeMap::new(),
+            dirty_tiles: BTreeSet::new(),
+            level_flip_counts: BTreeMap::new(),
+            resident_tiles_by_level: [0; FAR_TERRAIN_LOD_LEVEL_COUNT],
+            visible_tiles_by_level: [0; FAR_TERRAIN_LOD_LEVEL_COUNT],
+            double_resident_tiles: 0,
             pending_builds: VecDeque::new(),
             inflight_builds: BTreeMap::new(),
             resident_tiles: ResidentTileCache::default(),
@@ -625,6 +677,9 @@ impl Default for FarTerrainLodCache {
             stale_builds: 0,
             last_upload_bytes: 0,
             total_upload_bytes: 0,
+            level_flips: 0,
+            max_level_flips_per_tile: 0,
+            max_double_resident_tiles: 0,
             now: MonotonicInstant::ZERO,
         }
     }
@@ -639,7 +694,14 @@ impl FarTerrainLodCache {
         let abandoned_jobs = self.inflight_builds.len();
         self.source_key = None;
         self.view_key = None;
-        self.desired_chunks.clear();
+        self.desired_tiles.clear();
+        self.level_history.clear();
+        self.visible_tiles_by_chunk.clear();
+        self.dirty_tiles.clear();
+        self.level_flip_counts.clear();
+        self.resident_tiles_by_level = [0; FAR_TERRAIN_LOD_LEVEL_COUNT];
+        self.visible_tiles_by_level = [0; FAR_TERRAIN_LOD_LEVEL_COUNT];
+        self.double_resident_tiles = 0;
         self.pending_builds.clear();
         self.inflight_builds.clear();
         self.resident_tiles = ResidentTileCache::default();
@@ -709,6 +771,7 @@ impl FarTerrainLodCache {
         );
         self.update_target(key, normal_terrain_chunks, self.now);
         self.accept_completed(compiler)?;
+        self.ensure_pending_builds(self.now);
         self.submit_builds(compiler, build_budget)?;
         Ok(())
     }
@@ -758,11 +821,26 @@ impl FarTerrainLodCache {
         self.frame.removals.clear();
 
         let drain = self.uploads.drain_budgeted(Some(upload_budget), None);
+        let mut replacement_removals = BTreeSet::new();
         for mesh in &drain.uploads {
-            self.uploaded_tiles.insert(mesh.key());
+            let key = mesh.key();
+            self.uploaded_tiles.insert(key);
+            if self.desired_tiles.get(&key.chunk) == Some(&key) {
+                if let Some(old) = self.visible_tiles_by_chunk.insert(key.chunk, key) {
+                    if old != key {
+                        replacement_removals.insert(old);
+                    }
+                }
+            } else if self.visible_tiles_by_chunk.get(&key.chunk) != Some(&key) {
+                replacement_removals.insert(key);
+            }
         }
         for tile in &drain.removed_tile_keys {
             self.uploaded_tiles.remove(tile);
+            self.remove_resident_tile(*tile);
+            if self.visible_tiles_by_chunk.get(&tile.chunk) == Some(tile) {
+                self.visible_tiles_by_chunk.remove(&tile.chunk);
+            }
         }
         let upload_bytes = drain
             .uploads
@@ -774,6 +852,9 @@ impl FarTerrainLodCache {
         self.frame.uploads = drain.uploads;
         self.frame.removals = drain.removed_tile_keys;
         self.handed_off_lifecycle_items = drain.lifecycle_item_count;
+        if !replacement_removals.is_empty() {
+            self.uploads.enqueue(Vec::new(), replacement_removals, 0);
+        }
     }
 
     pub fn prepare_render_update(
@@ -782,10 +863,18 @@ impl FarTerrainLodCache {
     ) -> &FarTerrainLodFrameUpdate {
         let visible_tiles = visible_chunks
             .iter()
-            .copied()
-            .map(LodTileKey::synthetic)
+            .filter_map(|pos| self.visible_tiles_by_chunk.get(pos).copied())
             .filter(|key| self.uploaded_tiles.contains(key))
             .collect::<BTreeSet<_>>();
+        let mut visible_tiles_by_level = [0; FAR_TERRAIN_LOD_LEVEL_COUNT];
+        for tile in &visible_tiles {
+            if let Some(count) =
+                visible_tiles_by_level.get_mut(tile.level.saturating_sub(1) as usize)
+            {
+                *count += 1;
+            }
+        }
+        self.visible_tiles_by_level = visible_tiles_by_level;
         let changed = !self.frame.uploads.is_empty()
             || !self.frame.removals.is_empty()
             || self.frame.visible_tiles != visible_tiles;
@@ -802,25 +891,23 @@ impl FarTerrainLodCache {
     /// against; it excludes tiles suppressed by drawable normal chunks, since
     /// those are never desired.
     pub fn drawable_lod_tiles(&self) -> impl Iterator<Item = ChunkPos> + '_ {
-        self.desired_chunks
-            .iter()
-            .copied()
-            .filter(|pos| self.uploaded_tiles.contains(&LodTileKey::synthetic(*pos)))
+        self.desired_tiles.keys().copied().filter(|pos| {
+            self.visible_tiles_by_chunk
+                .get(pos)
+                .is_some_and(|key| self.uploaded_tiles.contains(key))
+        })
     }
 
     /// How many of the currently desired chunk patches are already retained.
     pub fn coverage(&self) -> FarTerrainLodCoverage {
         let ready_tiles = self
-            .desired_chunks
-            .iter()
-            .filter(|pos| {
-                self.resident_tiles
-                    .contains_tile(LodTileKey::synthetic(**pos))
-            })
+            .desired_tiles
+            .values()
+            .filter(|tile| self.resident_tiles.contains_tile(**tile))
             .count();
         FarTerrainLodCoverage {
             ready_tiles,
-            target_tiles: self.desired_chunks.len(),
+            target_tiles: self.desired_tiles.len(),
         }
     }
 
@@ -833,7 +920,7 @@ impl FarTerrainLodCache {
             .min();
         let upload_stats = self.uploads.stats();
         FarTerrainLodProducerStats {
-            desired_tiles: self.desired_chunks.len(),
+            desired_tiles: self.desired_tiles.len(),
             resident_tiles: self.resident_tiles.len(),
             visible_tiles: self.frame.visible_tiles.len(),
             pending_builds: self.pending_builds.len(),
@@ -846,6 +933,12 @@ impl FarTerrainLodCache {
             queued_uploads: upload_stats.queued_uploads,
             last_upload_bytes: self.last_upload_bytes,
             total_upload_bytes: self.total_upload_bytes,
+            resident_tiles_by_level: self.resident_tiles_by_level,
+            visible_tiles_by_level: self.visible_tiles_by_level,
+            double_resident_tiles: self.double_resident_tiles,
+            max_double_resident_tiles: self.max_double_resident_tiles,
+            level_flips: self.level_flips,
+            max_level_flips_per_tile: self.max_level_flips_per_tile,
         }
     }
 
@@ -857,7 +950,14 @@ impl FarTerrainLodCache {
         let abandoned = self.inflight_builds.len();
         self.source_key = Some(source_key);
         self.view_key = None;
-        self.desired_chunks.clear();
+        self.desired_tiles.clear();
+        self.level_history.clear();
+        self.visible_tiles_by_chunk.clear();
+        self.dirty_tiles.clear();
+        self.level_flip_counts.clear();
+        self.resident_tiles_by_level = [0; FAR_TERRAIN_LOD_LEVEL_COUNT];
+        self.visible_tiles_by_level = [0; FAR_TERRAIN_LOD_LEVEL_COUNT];
+        self.double_resident_tiles = 0;
         self.pending_builds.clear();
         self.inflight_builds.clear();
         self.resident_tiles = ResidentTileCache::default();
@@ -879,20 +979,63 @@ impl FarTerrainLodCache {
             return;
         }
         let desired_queue = capped_far_lod_chunk_positions(key, normal_terrain_chunks);
-        let desired_chunks = desired_queue.iter().copied().collect::<BTreeSet<_>>();
+        let previous_desired = std::mem::take(&mut self.desired_tiles);
+        let mut desired_tiles = BTreeMap::new();
+        for pos in &desired_queue {
+            let distance = chunk_distance_from_center_chunk(key.center, *pos);
+            let raw_level = far_lod_raw_level(key, distance);
+            let level = far_lod_stabilized_level(
+                key,
+                distance,
+                self.level_history.get(pos).copied(),
+                raw_level,
+            );
+            if self
+                .level_history
+                .insert(*pos, level)
+                .is_some_and(|old| old != level)
+            {
+                self.level_flips = self.level_flips.saturating_add(1);
+                let count = self.level_flip_counts.entry(*pos).or_default();
+                *count += 1;
+                self.max_level_flips_per_tile = self.max_level_flips_per_tile.max(*count);
+            }
+            desired_tiles.insert(*pos, LodTileKey::new(*pos, level));
+        }
+        let changed_chunks = previous_desired
+            .keys()
+            .copied()
+            .chain(desired_tiles.keys().copied())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter(|pos| previous_desired.get(pos) != desired_tiles.get(pos))
+            .collect::<Vec<_>>();
+        self.desired_tiles = desired_tiles;
+        for pos in changed_chunks {
+            if let Some(tile) = self.desired_tiles.get(&pos).copied() {
+                self.dirty_tiles.insert(tile);
+            }
+            for neighbor in cardinal_chunk_neighbors(pos) {
+                if let Some(tile) = self.desired_tiles.get(&neighbor).copied() {
+                    self.dirty_tiles.insert(tile);
+                }
+            }
+        }
+        self.dirty_tiles
+            .retain(|tile| self.desired_tiles.get(&tile.chunk) == Some(tile));
         self.view_key = Some(key);
-        self.desired_chunks = desired_chunks;
         self.pending_builds = desired_queue
             .into_iter()
-            .filter(|pos| {
-                let tile = LodTileKey::synthetic(*pos);
-                !self.resident_tiles.contains_tile(tile)
+            .filter_map(|pos| self.desired_tiles.get(&pos).copied())
+            .filter(|tile| {
+                (!self.resident_tiles.contains_tile(*tile) || self.dirty_tiles.contains(tile))
                     && !self.inflight_builds.contains_key(&tile)
             })
-            .map(|pos| {
-                FarTerrainLodBuildRequest::new(
-                    pos,
+            .map(|tile| {
+                FarTerrainLodBuildRequest::new_for_tile(
+                    tile,
                     self.source_key.expect("far LOD source initialized"),
+                    self.neighbor_sample_spacings(tile.chunk),
                     self.materials.clone(),
                     now,
                 )
@@ -911,11 +1054,22 @@ impl FarTerrainLodCache {
             let Some(request) = self.pending_builds.pop_front() else {
                 break;
             };
-            if !self.desired_chunks.contains(&request.key.chunk)
-                || self.resident_tiles.contains_tile(request.key)
+            if self.desired_tiles.get(&request.key.chunk) != Some(&request.key)
+                || (self.resident_tiles.contains_tile(request.key)
+                    && !self.dirty_tiles.contains(&request.key))
                 || self.inflight_builds.contains_key(&request.key)
             {
                 continue;
+            }
+            let replacement = self
+                .visible_tiles_by_chunk
+                .get(&request.key.chunk)
+                .is_some_and(|visible| *visible != request.key);
+            if replacement
+                && self.active_level_transition_count() >= MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES
+            {
+                self.pending_builds.push_front(request);
+                break;
             }
             let key = request.key;
             let queued_at = request.queued_at;
@@ -926,11 +1080,49 @@ impl FarTerrainLodCache {
         Ok(())
     }
 
+    fn ensure_pending_builds(&mut self, now: MonotonicInstant) {
+        let mut queued = self
+            .pending_builds
+            .iter()
+            .map(|request| request.key)
+            .chain(self.inflight_builds.keys().copied())
+            .collect::<BTreeSet<_>>();
+        let mut candidates = self.desired_tiles.values().copied().collect::<Vec<_>>();
+        if let Some(view) = self.view_key {
+            candidates.sort_by_key(|tile| {
+                (
+                    chunk_distance_from_center_chunk(view.center, tile.chunk),
+                    tile.chunk.z,
+                    tile.chunk.x,
+                )
+            });
+        }
+        for tile in candidates {
+            if queued.contains(&tile)
+                || (self.resident_tiles.contains_tile(tile) && !self.dirty_tiles.contains(&tile))
+            {
+                continue;
+            }
+            self.pending_builds
+                .push_back(FarTerrainLodBuildRequest::new_for_tile(
+                    tile,
+                    self.source_key.expect("far LOD source initialized"),
+                    self.neighbor_sample_spacings(tile.chunk),
+                    self.materials.clone(),
+                    now,
+                ));
+            queued.insert(tile);
+        }
+    }
+
     fn accept_completed<C: FarTerrainLodCompiler>(&mut self, compiler: &mut C) -> Result<()> {
         let completed = compiler.try_recv_completed_far_lod()?;
         for result in completed {
             self.inflight_builds.remove(&result.key);
             let retain = self.source_key == Some(result.source_key)
+                && self.desired_tiles.get(&result.key.chunk) == Some(&result.key)
+                && self.neighbor_sample_spacings(result.key.chunk)
+                    == result.neighbor_sample_spacings
                 && self.view_key.is_some_and(|key| {
                     chunk_distance_from_center_chunk(key.center, result.key.chunk)
                         <= far_lod_retain_radius(key)
@@ -945,9 +1137,13 @@ impl FarTerrainLodCache {
                 index_count: result.mesh.index_count(),
                 owned_bytes: result.mesh.estimated_owned_bytes(),
             };
-            self.resident_tiles.insert(result.key, metadata);
+            self.insert_resident_tile(result.key, metadata);
+            self.dirty_tiles.remove(&result.key);
             self.uploads.enqueue(vec![result.mesh], BTreeSet::new(), 1);
             self.completed_builds = self.completed_builds.saturating_add(1);
+            self.max_double_resident_tiles = self
+                .max_double_resident_tiles
+                .max(self.double_resident_tiles);
         }
         Ok(())
     }
@@ -959,27 +1155,30 @@ impl FarTerrainLodCache {
             .tile_keys()
             .filter(|tile| chunk_distance_from_center_chunk(key.center, tile.chunk) > retain_radius)
             .collect::<BTreeSet<_>>();
-        let limit = max_retained_lod_patches(key);
+        let limit =
+            max_retained_lod_patches(key).saturating_add(MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES);
         if self.resident_tiles.len().saturating_sub(removals.len()) > limit {
             let mut eviction_order = self
                 .resident_tiles
                 .tile_keys()
                 .filter(|tile| !removals.contains(tile))
                 .map(|tile| {
-                    let desired = self.desired_chunks.contains(&tile.chunk);
+                    let desired = self.desired_tiles.get(&tile.chunk) == Some(&tile);
+                    let visible = self.visible_tiles_by_chunk.get(&tile.chunk) == Some(&tile);
                     let distance = chunk_distance_from_center_chunk(key.center, tile.chunk);
-                    (tile, desired, distance)
+                    (tile, desired, visible, distance)
                 })
                 .collect::<Vec<_>>();
-            eviction_order.sort_by_key(|(tile, desired, distance)| {
+            eviction_order.sort_by_key(|(tile, desired, visible, distance)| {
                 (
                     *desired,
+                    *visible,
                     std::cmp::Reverse(*distance),
                     std::cmp::Reverse(tile.chunk.z),
                     std::cmp::Reverse(tile.chunk.x),
                 )
             });
-            for (tile, _, _) in eviction_order
+            for (tile, _, _, _) in eviction_order
                 .into_iter()
                 .take(self.resident_tiles.len().saturating_sub(removals.len()) - limit)
             {
@@ -987,11 +1186,159 @@ impl FarTerrainLodCache {
             }
         }
         for tile in &removals {
-            self.resident_tiles.remove(*tile);
+            self.remove_resident_tile(*tile);
+            self.dirty_tiles.remove(tile);
+            if self.visible_tiles_by_chunk.get(&tile.chunk) == Some(tile) {
+                self.visible_tiles_by_chunk.remove(&tile.chunk);
+            }
         }
         if !removals.is_empty() {
             self.uploads.enqueue(Vec::new(), removals, 0);
         }
+        let retain_radius = far_lod_retain_radius(key);
+        self.level_history
+            .retain(|pos, _| chunk_distance_from_center_chunk(key.center, *pos) <= retain_radius);
+        self.level_flip_counts
+            .retain(|pos, _| chunk_distance_from_center_chunk(key.center, *pos) <= retain_radius);
+    }
+
+    fn neighbor_sample_spacings(&self, pos: ChunkPos) -> [u32; 4] {
+        let base = self
+            .source_key
+            .map_or(DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS, |key| {
+                key.sample_spacing_blocks
+            });
+        let own_level = self.desired_tiles.get(&pos).map_or(1, |tile| tile.level);
+        cardinal_chunk_neighbors(pos).map(|neighbor| {
+            let level = self
+                .desired_tiles
+                .get(&neighbor)
+                .map_or(own_level, |tile| tile.level);
+            far_lod_sample_spacing_for_level(base, level)
+        })
+    }
+
+    fn insert_resident_tile(&mut self, tile: LodTileKey, metadata: FarTerrainLodTileMetadata) {
+        if !self.resident_tiles.contains_tile(tile) {
+            let chunk_level_count = self
+                .resident_tiles
+                .tile_keys()
+                .filter(|resident| resident.chunk == tile.chunk)
+                .count();
+            if chunk_level_count == 1 {
+                self.double_resident_tiles = self.double_resident_tiles.saturating_add(1);
+            }
+            if let Some(count) = self
+                .resident_tiles_by_level
+                .get_mut(tile.level.saturating_sub(1) as usize)
+            {
+                *count += 1;
+            }
+        }
+        self.resident_tiles.insert(tile, metadata);
+    }
+
+    fn remove_resident_tile(&mut self, tile: LodTileKey) {
+        if !self.resident_tiles.contains_tile(tile) {
+            return;
+        }
+        let chunk_level_count = self
+            .resident_tiles
+            .tile_keys()
+            .filter(|resident| resident.chunk == tile.chunk)
+            .count();
+        if chunk_level_count == 2 {
+            self.double_resident_tiles = self.double_resident_tiles.saturating_sub(1);
+        }
+        if let Some(count) = self
+            .resident_tiles_by_level
+            .get_mut(tile.level.saturating_sub(1) as usize)
+        {
+            *count = count.saturating_sub(1);
+        }
+        self.resident_tiles.remove(tile);
+    }
+
+    fn active_level_transition_count(&self) -> usize {
+        self.desired_tiles
+            .iter()
+            .filter(|(pos, desired)| {
+                self.visible_tiles_by_chunk
+                    .get(pos)
+                    .is_some_and(|visible| visible != *desired)
+                    && (self.resident_tiles.contains_tile(**desired)
+                        || self.inflight_builds.contains_key(*desired))
+            })
+            .count()
+    }
+}
+
+fn cardinal_chunk_neighbors(pos: ChunkPos) -> [ChunkPos; 4] {
+    [
+        ChunkPos::new(pos.x - 1, pos.z),
+        ChunkPos::new(pos.x + 1, pos.z),
+        ChunkPos::new(pos.x, pos.z - 1),
+        ChunkPos::new(pos.x, pos.z + 1),
+    ]
+}
+
+pub fn far_lod_sample_spacing_for_level(base_spacing: u32, level: u8) -> u32 {
+    let shift = level.saturating_sub(1).min(2);
+    base_spacing
+        .max(1)
+        .saturating_mul(1_u32 << shift)
+        .min(CHUNK_WIDTH as u32)
+}
+
+fn far_lod_level_band_ends(key: FarTerrainLodBuildKey) -> [u32; FAR_TERRAIN_LOD_LEVEL_COUNT] {
+    let (inner, outer) = far_lod_chunk_radii(key);
+    let span = outer.saturating_sub(inner).max(1);
+    let band_width = span.div_ceil(FAR_TERRAIN_LOD_LEVEL_COUNT as u32);
+    [
+        inner.saturating_add(band_width).min(outer),
+        inner
+            .saturating_add(band_width.saturating_mul(2))
+            .min(outer),
+        outer,
+    ]
+}
+
+fn far_lod_raw_level(key: FarTerrainLodBuildKey, distance: u32) -> u8 {
+    let ends = far_lod_level_band_ends(key);
+    if distance <= ends[0] {
+        1
+    } else if distance <= ends[1] {
+        2
+    } else {
+        3
+    }
+}
+
+fn far_lod_stabilized_level(
+    key: FarTerrainLodBuildKey,
+    distance: u32,
+    previous: Option<u8>,
+    raw: u8,
+) -> u8 {
+    let Some(previous) = previous.filter(|level| (1..=3).contains(level)) else {
+        return raw;
+    };
+    if previous == raw {
+        return raw;
+    }
+    let ends = far_lod_level_band_ends(key);
+    let min = match previous {
+        1 => 0,
+        2 => ends[0].saturating_add(1),
+        _ => ends[1].saturating_add(1),
+    };
+    let max = ends[usize::from(previous - 1)];
+    let guarded_min = min.saturating_sub(FAR_TERRAIN_LOD_LEVEL_HYSTERESIS_CHUNKS);
+    let guarded_max = max.saturating_add(FAR_TERRAIN_LOD_LEVEL_HYSTERESIS_CHUNKS);
+    if (guarded_min..=guarded_max).contains(&distance) {
+        previous
+    } else {
+        raw
     }
 }
 
@@ -1057,6 +1404,7 @@ fn build_retained_far_terrain_lod_patch(
     surface_chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
     pos: ChunkPos,
     source_key: FarTerrainLodSourceKey,
+    neighbor_sample_spacings: [u32; 4],
     materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> FarTerrainLodPatch {
     let mut vertices = Vec::new();
@@ -1068,6 +1416,7 @@ fn build_retained_far_terrain_lod_patch(
         source_key.seed,
         pos,
         source_key.patch_build_key(pos),
+        neighbor_sample_spacings,
         FarTerrainNormalCoverage::NoNormalChunks,
         materials,
     );
@@ -1098,6 +1447,7 @@ pub fn compile_far_terrain_lod_worker_input(
         &mut surface_chunks,
         input.key.chunk,
         source_key,
+        input.neighbor_sample_spacings,
         materials,
     );
     FarTerrainLodTileMesh::new(input.key, patch.vertices, patch.indices)
@@ -1130,6 +1480,7 @@ fn append_far_terrain_lod_chunk_patch(
     seed: i64,
     pos: ChunkPos,
     key: FarTerrainLodBuildKey,
+    neighbor_sample_spacings: [u32; 4],
     normal_coverage: FarTerrainNormalCoverage<'_>,
     materials: Option<&FarTerrainLodMaterialPalette>,
 ) {
@@ -1183,6 +1534,7 @@ fn append_far_terrain_lod_chunk_patch(
                     surface_chunks,
                     seed,
                     key,
+                    neighbor_sample_spacings,
                     cell,
                     normal_coverage,
                     materials,
@@ -1280,6 +1632,7 @@ fn neighbor_lod_cell(
     surface_chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
     seed: i64,
     key: FarTerrainLodBuildKey,
+    neighbor_sample_spacings: [u32; 4],
     cell: FarTerrainLodCell,
     normal_coverage: FarTerrainNormalCoverage<'_>,
     materials: Option<&FarTerrainLodMaterialPalette>,
@@ -1314,7 +1667,9 @@ fn neighbor_lod_cell(
             })
         }
         _ => {
-            let (x0, x1, z0, z1) = neighbor_cell_bounds(cell, direction);
+            let spacing =
+                neighbor_sample_spacings[direction.index()].clamp(1, CHUNK_WIDTH as u32) as i32;
+            let (x0, x1, z0, z1) = neighbor_cell_bounds_at_spacing(cell, direction, spacing);
             let neighbor = sample_lod_cell(surface_chunks, seed, x0, x1, z0, z1, materials)?;
             Some(LodNeighborCell {
                 cell: neighbor,
@@ -1324,17 +1679,31 @@ fn neighbor_lod_cell(
     }
 }
 
-fn neighbor_cell_bounds(
+impl LodCellDirection {
+    const fn index(self) -> usize {
+        match self {
+            Self::West => 0,
+            Self::East => 1,
+            Self::North => 2,
+            Self::South => 3,
+        }
+    }
+}
+
+fn neighbor_cell_bounds_at_spacing(
     cell: FarTerrainLodCell,
     direction: LodCellDirection,
+    spacing: i32,
 ) -> (i32, i32, i32, i32) {
-    let width = cell.x1 - cell.x0;
-    let depth = cell.z1 - cell.z0;
+    let center_x = cell.x0 + (cell.x1 - cell.x0) / 2;
+    let center_z = cell.z0 + (cell.z1 - cell.z0) / 2;
+    let aligned_x = center_x.div_euclid(spacing) * spacing;
+    let aligned_z = center_z.div_euclid(spacing) * spacing;
     match direction {
-        LodCellDirection::West => (cell.x0 - width, cell.x0, cell.z0, cell.z1),
-        LodCellDirection::East => (cell.x1, cell.x1 + width, cell.z0, cell.z1),
-        LodCellDirection::North => (cell.x0, cell.x1, cell.z0 - depth, cell.z0),
-        LodCellDirection::South => (cell.x0, cell.x1, cell.z1, cell.z1 + depth),
+        LodCellDirection::West => (cell.x0 - spacing, cell.x0, aligned_z, aligned_z + spacing),
+        LodCellDirection::East => (cell.x1, cell.x1 + spacing, aligned_z, aligned_z + spacing),
+        LodCellDirection::North => (aligned_x, aligned_x + spacing, cell.z0 - spacing, cell.z0),
+        LodCellDirection::South => (aligned_x, aligned_x + spacing, cell.z1, cell.z1 + spacing),
     }
 }
 
@@ -1677,7 +2046,7 @@ mod tests {
         cache: &mut FarTerrainLodCache,
         compiler: &mut ImmediateFarLodCompiler,
     ) -> FarTerrainLodFrameUpdate {
-        let visible = cache.desired_chunks.clone();
+        let visible = cache.desired_tiles.keys().copied().collect();
         cache.drain_render_uploads(MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES, compiler);
         cache.prepare_render_update(&visible).clone()
     }
@@ -1692,6 +2061,189 @@ mod tests {
         );
         assert_eq!(DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS, 0);
         assert_eq!(DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS, 4);
+    }
+
+    #[test]
+    fn far_terrain_lod_level_bands_map_to_4_8_16_spacing() {
+        let key = FarTerrainLodBuildKey::new(
+            12345,
+            ChunkPos::new(0, 0),
+            0,
+            FarTerrainLodConfig::enabled(),
+            None,
+        );
+
+        assert_eq!(far_lod_level_band_ends(key), [4, 8, 12]);
+        assert_eq!(far_lod_raw_level(key, 4), 1);
+        assert_eq!(far_lod_raw_level(key, 5), 2);
+        assert_eq!(far_lod_raw_level(key, 8), 2);
+        assert_eq!(far_lod_raw_level(key, 9), 3);
+        assert_eq!(far_lod_sample_spacing_for_level(4, 1), 4);
+        assert_eq!(far_lod_sample_spacing_for_level(4, 2), 8);
+        assert_eq!(far_lod_sample_spacing_for_level(4, 3), 16);
+    }
+
+    #[test]
+    fn far_terrain_lod_level_hysteresis_prevents_boundary_thrash() {
+        let key = FarTerrainLodBuildKey::new(
+            12345,
+            ChunkPos::new(0, 0),
+            0,
+            FarTerrainLodConfig::enabled(),
+            None,
+        );
+
+        assert_eq!(far_lod_stabilized_level(key, 5, Some(1), 2), 1);
+        assert_eq!(far_lod_stabilized_level(key, 6, Some(1), 2), 1);
+        assert_eq!(far_lod_stabilized_level(key, 7, Some(1), 2), 2);
+        assert_eq!(far_lod_stabilized_level(key, 4, Some(2), 1), 2);
+        assert_eq!(far_lod_stabilized_level(key, 3, Some(2), 1), 2);
+        assert_eq!(far_lod_stabilized_level(key, 2, Some(2), 1), 1);
+    }
+
+    #[test]
+    fn far_terrain_lod_requests_carry_cross_level_neighbor_spacing() {
+        let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
+        cache
+            .advance_for_camera(
+                FarTerrainLodConfig::enabled(),
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
+
+        let request = cache
+            .pending_builds
+            .iter()
+            .find(|request| request.key.chunk == ChunkPos::new(4, 0))
+            .expect("level-1 boundary tile is queued");
+        assert_eq!(request.key.level, 1);
+        assert_eq!(request.worker_input().sample_spacing_blocks, 4);
+        assert_eq!(request.worker_input().neighbor_sample_spacings[1], 8);
+    }
+
+    #[test]
+    fn far_terrain_lod_boundary_oscillation_records_no_tile_flips() {
+        let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
+        let config = FarTerrainLodConfig::enabled();
+        let watched = ChunkPos::new(5, 0);
+
+        for center_x in std::iter::once(0).chain([1, 0].into_iter().cycle().take(20)) {
+            cache
+                .advance_for_camera(
+                    config,
+                    12345,
+                    ChunkPos::new(center_x, 0),
+                    0,
+                    None,
+                    None,
+                    &mut compiler,
+                    0,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(cache.level_history.get(&watched), Some(&2));
+        assert_eq!(
+            cache.level_flip_counts.get(&watched).copied().unwrap_or(0),
+            0
+        );
+    }
+
+    #[test]
+    fn far_terrain_lod_replaces_levels_without_a_blank_frame() {
+        let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
+        let config = FarTerrainLodConfig::enabled();
+        let pos = ChunkPos::new(5, 0);
+
+        cache
+            .advance_for_camera(
+                config,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
+        let old = cache.desired_tiles[&pos];
+        assert_eq!(old.level, 2);
+        cache.insert_resident_tile(old, FarTerrainLodTileMetadata::default());
+        cache.uploaded_tiles.insert(old);
+        cache.visible_tiles_by_chunk.insert(pos, old);
+
+        cache
+            .advance_for_camera(
+                config,
+                12345,
+                ChunkPos::new(3, 0),
+                0,
+                None,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
+        let replacement = cache.desired_tiles[&pos];
+        assert_eq!(replacement.level, 1);
+        assert_eq!(cache.visible_tiles_by_chunk[&pos], old);
+
+        let request = FarTerrainLodBuildRequest::new_for_tile(
+            replacement,
+            cache.source_key.unwrap(),
+            cache.neighbor_sample_spacings(pos),
+            None,
+            far_lod_now(),
+        );
+        compiler
+            .completed
+            .push(compile_far_terrain_lod_request(request));
+        cache.inflight_builds.insert(replacement, far_lod_now());
+        cache.accept_completed(&mut compiler).unwrap();
+        assert_eq!(cache.double_resident_tiles, 1);
+        assert_eq!(cache.max_double_resident_tiles, 1);
+        assert_eq!(cache.visible_tiles_by_chunk[&pos], old);
+
+        cache.drain_render_uploads(1, &mut compiler);
+        let visible = BTreeSet::from([pos]);
+        let frame = cache.prepare_render_update(&visible);
+        assert!(frame.visible_tiles.contains(&replacement));
+        assert!(!frame.visible_tiles.contains(&old));
+        assert_eq!(cache.visible_tiles_by_chunk[&pos], replacement);
+        assert_eq!(cache.stats().double_resident_tiles, 1);
+        assert!(
+            cache.stats().max_double_resident_tiles <= MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES
+        );
+
+        cache.drain_render_uploads(1, &mut compiler);
+        assert!(!cache.resident_tiles.contains_tile(old));
+        assert_eq!(cache.stats().double_resident_tiles, 0);
+    }
+
+    #[test]
+    fn far_terrain_lod_cache_exposes_all_three_levels() {
+        let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
+        let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(3);
+
+        advance_until_complete(&mut cache, &mut compiler, config, ChunkPos::new(0, 0), 128);
+        let frame = upload_all_desired(&mut cache, &mut compiler);
+        let stats = cache.stats();
+        assert!(stats.resident_tiles_by_level.iter().all(|count| *count > 0));
+        assert!(stats.visible_tiles_by_level.iter().all(|count| *count > 0));
+        assert!(frame.visible_tiles.iter().any(|tile| tile.level == 1));
+        assert!(frame.visible_tiles.iter().any(|tile| tile.level == 2));
+        assert!(frame.visible_tiles.iter().any(|tile| tile.level == 3));
     }
 
     #[test]
@@ -1747,6 +2299,7 @@ mod tests {
             12345,
             ChunkPos::new(1, 0),
             key,
+            [DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS; 4],
             FarTerrainNormalCoverage::Radius,
             None,
         );
@@ -1961,7 +2514,7 @@ mod tests {
         assert_eq!(frame.uploads.len(), 8);
         assert_eq!(frame.visible_tiles.len(), 8);
         let stable_revision = frame.revision;
-        let visible = cache.desired_chunks.clone();
+        let visible = cache.desired_tiles.keys().copied().collect();
         cache.drain_render_uploads(3, &mut compiler);
         assert_eq!(
             cache.prepare_render_update(&visible).revision,
@@ -2004,7 +2557,7 @@ mod tests {
                     .contains_tile(LodTileKey::synthetic(pos))
             );
         }
-        assert!(!cache.desired_chunks.is_empty());
+        assert!(!cache.desired_tiles.is_empty());
     }
 
     #[test]
@@ -2028,7 +2581,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            cache.desired_chunks.len(),
+            cache.desired_tiles.len(),
             MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES
         );
         assert!(
