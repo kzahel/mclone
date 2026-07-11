@@ -257,9 +257,9 @@ impl Default for FarLodDetailMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FarTerrainLodConfig {
     pub enabled: bool,
-    /// Whether normal terrain coverage removes overlapping far-LOD tiles.
-    /// Disable this only as a diagnostic A/B mode: real and synthetic terrain
-    /// will both draw where their coverage overlaps.
+    /// Whether normal terrain coverage removes overlapping far-LOD tiles from
+    /// the desired build set. Presentation precedence remains unconditional:
+    /// real and synthetic terrain must never draw in the same chunk.
     pub normal_terrain_culling: bool,
     pub detail_mode: FarLodDetailMode,
     pub start_margin_chunks: u32,
@@ -986,8 +986,9 @@ impl FarTerrainLodCache {
     /// Chunk-aligned tiles that currently have a drawable retained synthetic
     /// patch (desired tiles whose patch geometry is built). This is the synthetic
     /// availability the [`crate::lod_coverage::LodCoverageCoordinator`] resolves
-    /// against; it excludes tiles suppressed by drawable normal chunks, since
-    /// those are never desired.
+    /// against. It intentionally does not apply presentation precedence: when
+    /// covered-build culling is disabled, ready normal chunks may have a built
+    /// tile here, but the coordinator must still suppress it before rendering.
     pub fn drawable_lod_tiles(&self) -> impl Iterator<Item = ChunkPos> + '_ {
         self.desired_tiles.keys().copied().filter(|pos| {
             self.visible_tiles_by_chunk

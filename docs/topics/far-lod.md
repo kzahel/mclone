@@ -51,17 +51,21 @@ completing the 14-waypoint Slice 1 harness;
 Slice 2 next burns down the defect ledger before detail modes and residency
 polish.
 
-Slice 2 has begun with an explicit A/B control rather than more harness
-expansion. The Graphics menu's default-on **Cull LOD Behind Terrain** option
+Slice 2 began with an explicit A/B control rather than more harness expansion.
+The Graphics menu's default-on **Cull Covered LOD Builds** option
 (also `--far-lod-normal-terrain-culling true|false`) controls whether ready
-normal-terrain columns carve and suppress the synthetic desired set. Disabled,
-LOD is deliberately generated and rendered through the whole configured
-radius, including underneath real terrain. Inspected high angled captures
-showed the large culling-on void filled when this control was off, confirming
-normal-terrain suppression as a major contributor. The uncull view
-deliberately overlaps both representations and remains diagnostic-only; user
-review found no additional capture problem. D1/D2 still require a real
-correctness fix.
+normal-terrain columns carve the synthetic desired build set. Disabled, covered
+LOD may prebuild, but final presentation still unconditionally gives real
+terrain precedence.
+
+That distinction is now a hard invariant. Interactive fixed-detail testing
+captured coarse green LOD caps rendering over textured real terrain with
+z-fighting. Final visible LOD tiles are now asserted disjoint from traversal-
+ready real chunks—a superset of chunks eligible for a real draw—in both local
+and remote runtime services. Any overlap panics in release builds with the
+chunk coordinate. The build-culling option can no longer bypass render-time
+suppression. D1/D2 still require a real coverage fix, but that fix may never
+trade a void for co-rendered representations.
 
 At user direction, the Slice 3 product chooser landed ahead of those remaining
 fixes so it can be evaluated interactively. Graphics now cycles **LOD Detail**
@@ -93,10 +97,11 @@ Real chunks stay authoritative; LOD never satisfies chunk interest, collision,
 raycast, edits, or gameplay. Chunk-granular tiles only (166 locked invariant;
 16-block spacing is the per-chunk ceiling). One budget owner, one worker pool,
 no whole-world rebuild/upload paths. Far-LOD-off is byte-identical. The settle
-contract (tactical 172, C1–C8) is the behavioral acceptance bar: deterministic
+contract (tactical 172, C1–C9) is the behavioral acceptance bar: deterministic
 desired set, painted coverage completeness at settle from any camera pose,
 set coherence, view-independent suppression, replacement-before-suppress,
-no silent caps, bounded steady state.
+no silent caps, bounded steady state, and release-active real/LOD mutual
+exclusion.
 
 ## Validation
 
@@ -143,10 +148,16 @@ no silent caps, bounded steady state.
   reporting. Focused tests pin single-level fixed policy, mode cycling, source
   identity, and decreasing mesh work at coarser spacing. The menu and all four
   modes were captured and inspected without adding another fixture schema.
+- Landed after interactive mode testing: unconditional final-frame real/LOD
+  mutual exclusion. Covered-build culling may change generation only; the
+  coordinator always suppresses visible LOD under traversal-ready real chunks,
+  and a release-active assertion panics if an overlapping tile survives final
+  admission. The supplied z-fighting capture is the motivating evidence.
 
 ## Recommended Next Direction
 
-Evaluate Auto/4/8/16 interactively, including movement and the culling A/B.
+Continue evaluating Auto/4/8/16 interactively, including movement and covered-
+build culling, with any real/LOD co-render now treated as an immediate crash.
 Use concrete observations from that session to choose the next fix; D1/D2
 remain the known coverage priority. Then continue tactical 172's correctness
 burn-down (Slice 2) and residency/perf polish

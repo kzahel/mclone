@@ -3152,7 +3152,7 @@ fn options_category_rows(
                 UiWidget::checkbox(
                     UI_V2_OPTIONS_FAR_LOD_NORMAL_TERRAIN_CULLING,
                     ph,
-                    "Cull LOD Behind Terrain",
+                    "Cull Covered LOD Builds",
                     state.far_lod_normal_terrain_culling,
                 )
                 .enabled(state.far_lod_enabled)

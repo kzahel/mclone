@@ -8,9 +8,11 @@ also complete. Slice 1C2a (coverage pixels and revisit determinism) is
 complete; Slice 1C2b (the movement/toggle/range matrix and full probe lane) is
 split for execution: Slice 1C2b1 (movement and band transitions) is complete,
 and Slice 1C2b2 (toggle/range mutations and the full probe lane) is complete.
-The Slice 1 harness is complete. Slice 2 has started with a default-on
-normal-terrain-culling A/B control that confirms suppression is a major cause
-of the fly-up void. At user direction, Slice 3's product chooser then landed
+The Slice 1 harness is complete. Slice 2 started with a normal-terrain build-
+culling A/B that confirmed suppression as a major cause of the fly-up void.
+Interactive testing then exposed forbidden real/LOD co-rendering, so final LOD
+visibility now has a release-active mutual-exclusion assertion. At user
+direction, Slice 3's product chooser also landed
 ahead of the remaining Slice 2 fixes: Auto / fixed 4 / fixed 8 / fixed 16 are
 now directly testable in Graphics. Interactive evaluation is next; D1/D2
 remain open. This
@@ -214,6 +216,11 @@ builds and queued uploads) sustained for the stability window
 - **C8 — Bounded steady state.** At settle, CPU/GPU resident tile counts and
   bytes are within declared caps; during steady movement, per-chunk-step LOD
   work is O(ring), never O(area).
+- **C9 — Real/LOD mutual exclusion.** A chunk may be presented by real terrain
+  or far LOD, never both in the same frame. Final visible LOD tiles must be
+  disjoint from traversal-ready real chunks (a superset of chunks the real
+  renderer can draw). Violation is a release-active panic with the overlapping
+  chunk coordinate, not a diagnostic counter or recoverable warning.
 
 ## Proposed Sequence
 
@@ -388,19 +395,19 @@ antidote to fire-and-forget LOD work.
 Drive every ledger defect to fixed-or-explicitly-deferred, each with its
 fixture flipping red→green in the same change.
 
-The first Slice 2 change is diagnostic rather than a fix. Graphics now exposes
-**Cull LOD Behind Terrain** (default on), backed by the shared
+The first Slice 2 change was diagnostic rather than a fix. Graphics now exposes
+**Cull Covered LOD Builds** (default on), backed by the shared
 `FarTerrainLodConfig::normal_terrain_culling` policy and the
 `--far-lod-normal-terrain-culling true|false` startup argument. Turning it off
-removes normal-terrain readiness from both desired-tile generation and LOD
-visibility suppression, deliberately drawing synthetic LOD underneath real
-terrain. An inspected high, angled A/B capture showed the culling-on scene's
-large empty region filled by synthetic terrain when culling was off. The
-unculled view deliberately overlaps synthetic and real terrain, so this is a
-validation control rather than a candidate default or a substitute for D1/D2;
-user review found no additional problem in the captured comparison. No new
-probe schema or fixture framework was added; focused producer/UI/policy tests
-guard the option.
+removes normal-terrain readiness only from desired-tile generation, allowing
+covered tiles to prebuild. Real-over-LOD presentation precedence is always on.
+The original angled A/B confirmed the suppression mechanism, but interactive
+testing then captured coarse LOD caps co-rendering over textured real terrain
+with obvious z-fighting. That state is now forbidden: after final frame
+admission, visible LOD tile keys are unconditionally asserted disjoint from
+traversal-ready real chunks in both local and remote service paths. Focused
+tests prove a one-chunk overlap panics and a disjoint frame passes. No new probe
+schema or fixture framework was added.
 
 - **D1:** fix the outside-retained traversal seeding so a camera above the
   world seeds from the visible top surface per column (or disables graph cull
@@ -465,7 +472,8 @@ real session now. Landed:
   request only level 1, Auto and fixed-4 retain distinct source identities,
   mode cycling resets LOD, and coarser fixed modes monotonically reduce tile
   vertex/index work. All four startup modes and the Graphics row were captured
-  and inspected in ordinary and culling-A/B views; the expected visible detail
+  and inspected with covered-build culling both enabled and disabled; the
+  unconditional presentation precedence remained active and expected detail
   differences are present.
 
 Notes: fixed-16 is the "whole chunk" mode (one sample per chunk, the
@@ -559,7 +567,7 @@ admission/producers own representation, multiview parity, replacement-before-
 suppress, no silent caps, far-LOD-off byte-identical, real sections never
 regress). Additions:
 
-- The settle contract C1–C8 is the acceptance bar for every LOD change from
+- The settle contract C1–C9 is the acceptance bar for every LOD change from
   Slice 1 onward; a fix without its fixture does not land.
 - Suppression must satisfy C4 (view-independent, painted-capable) — never
   reintroduce a frustum- or traversal-dependent suppression input.

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::ClientRuntime;
-use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot};
+use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot, LodTileKey};
 use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
     TexturedRenderSectionMetadata,
@@ -1246,14 +1246,10 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         )?;
         self.far_lod_cache
             .drain_render_uploads(upload_budget, &mut self.render_compile_dispatcher);
-        let no_normal_terrain_chunks = BTreeSet::new();
-        let normal_drawable = if config.normal_terrain_culling {
-            &normal_terrain_chunks
-        } else {
-            &no_normal_terrain_chunks
-        };
-        let visible = self.resolve_lod_coverage(normal_drawable);
-        Ok(Some(self.far_lod_cache.prepare_render_update(&visible)))
+        let visible = self.resolve_lod_coverage(&normal_terrain_chunks);
+        let frame = self.far_lod_cache.prepare_render_update(&visible);
+        assert_no_real_far_lod_overlap(&normal_terrain_chunks, &frame.visible_tiles);
+        Ok(Some(frame))
     }
 
     /// Drive the shared LOD coverage coordinator with this frame's drawable
@@ -2911,17 +2907,13 @@ where
             .drawable_lod_tiles()
             .map(LodTileAvailability::synthetic)
             .collect();
-        let no_normal_terrain_chunks = BTreeSet::new();
-        let normal_drawable = if config.normal_terrain_culling {
-            &normal_terrain_chunks
-        } else {
-            &no_normal_terrain_chunks
-        };
         let visible = self
             .lod_coverage
-            .resolve(normal_drawable, &normal_loaded, synthetic)
+            .resolve(&normal_terrain_chunks, &normal_loaded, synthetic)
             .visible_lod_tiles;
-        Ok(Some(self.far_lod_cache.prepare_render_update(&visible)))
+        let frame = self.far_lod_cache.prepare_render_update(&visible);
+        assert_no_real_far_lod_overlap(&normal_terrain_chunks, &frame.visible_tiles);
+        Ok(Some(frame))
     }
 
     pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
@@ -3409,6 +3401,21 @@ fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<Chu
         .collect()
 }
 
+fn assert_no_real_far_lod_overlap(
+    traversal_ready_real_chunks: &BTreeSet<ChunkPos>,
+    visible_far_lod_tiles: &BTreeSet<LodTileKey>,
+) {
+    if let Some(tile) = visible_far_lod_tiles
+        .iter()
+        .find(|tile| traversal_ready_real_chunks.contains(&tile.chunk))
+    {
+        panic!(
+            "far LOD invariant violated: chunk ({}, {}) is visible as far LOD while real terrain is traversal-ready; real and LOD terrain must never co-render",
+            tile.chunk.x, tile.chunk.z
+        );
+    }
+}
+
 fn far_lod_runtime_settle_snapshot(
     core: &SingleViewRuntime,
     cache: &FarTerrainLodCache,
@@ -3698,6 +3705,24 @@ mod tests {
         fn reconnect(&mut self) -> Result<()> {
             match *self {}
         }
+    }
+
+    #[test]
+    fn real_and_far_lod_visibility_may_be_disjoint() {
+        let real = BTreeSet::from([ChunkPos::new(0, 0)]);
+        let lod = BTreeSet::from([LodTileKey::new(ChunkPos::new(1, 0), 1)]);
+
+        assert_no_real_far_lod_overlap(&real, &lod);
+    }
+
+    #[test]
+    #[should_panic(expected = "real and LOD terrain must never co-render")]
+    fn real_and_far_lod_visibility_overlap_panics() {
+        let overlap = ChunkPos::new(3, -2);
+        let real = BTreeSet::from([overlap]);
+        let lod = BTreeSet::from([LodTileKey::new(overlap, 3)]);
+
+        assert_no_real_far_lod_overlap(&real, &lod);
     }
 
     #[test]
