@@ -8,8 +8,9 @@ also complete. Slice 1C2a (coverage pixels and revisit determinism) is
 complete; Slice 1C2b (the movement/toggle/range matrix and full probe lane) is
 split for execution: Slice 1C2b1 (movement and band transitions) is complete,
 and Slice 1C2b2 (toggle/range mutations and the full probe lane) is complete.
-The Slice 1 harness is complete. Slice 2 started with a normal-terrain build-
-culling A/B that confirmed suppression as a major cause of the fly-up void.
+The Slice 1 harness is complete. Slice 2 started with a temporary normal-
+terrain build-culling A/B that confirmed suppression as a major cause of the
+fly-up void.
 Interactive testing then exposed forbidden real/LOD co-rendering, so final LOD
 visibility now has a release-active mutual-exclusion assertion. At user
 direction, Slice 3's product chooser also landed
@@ -22,19 +23,21 @@ coverage validation is now live, and D7's replacement head-of-line block is
 fixed so fresh movement coverage can bypass a saturated replacement allowance.
 The deterministic smooth-movement lane is now complete: a 48-block/s,
 220-frame flight plus 120 stationary frames reports zero missing chunks with
-the shipped coverage-safe policy. The fix uses hidden movement-guard coverage,
-missing-first build ordering, a bounded worker surface cache, and a lazy
-far-LOD compile floor of two workers/eight pending slots. Covered-build culling
-is now default off; it remains an explicit optimization control, while final
-real/LOD exclusion remains unconditional. D2 on the opt-in culling path and
-the remaining cap/seam/performance items remain open. This
+the shipped static pure-synthetic shell. The fix uses one drawable handoff
+ring, one hidden inner guard, two hidden outer movement guards, missing-first
+build ordering, movement-leading outer-guard priority, a bounded worker surface
+cache, and a lazy far-LOD compile floor of two workers/eight pending slots.
+Target membership is independent of real-terrain loading/readiness. The
+temporary culling UI/CLI/config/report path has been removed; no replacement
+debug toggle was added. Final real/LOD exclusion remains unconditional. The
+remaining cap/seam/performance items remain open. This
 tactical owns the far-LOD product-hardening series: a settle-state validation
 harness, the coverage-gap correctness burn-down, and the user-facing LOD
 detail modes (auto / 4 / 8 / 16, debug 1 / 2), plus residency/perf polish. It
 supersedes the remaining open ends of Tactical 121 — Surface LOD First Slice
-and pauses Tactical 162 —
-Real-Chunk LOD Reduction Draft Slice 4+ until its Slice 1–2 gates hold. Macro
-ordering lives in Tactical 171 — Convergence And Parity Closeout.
+and leaves Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4+ explicitly
+deferred with no automatic resume after these gates. Macro ordering lives in
+Tactical 171 — Convergence And Parity Closeout.
 
 Topic: `far-lod-settle-contract`
 
@@ -370,9 +373,9 @@ reproduce D1/D2 before any fix exists.
   high-view waypoints: baseline, one chunk east, the hysteresis guard edge,
   the guarded band crossing, then eight chunks east. Anchor `(9,0)` stays at
   level 3 through the one-chunk move and guard, flips to level 1 on crossing,
-  and remains desired at level 1 after the eight-chunk move under the current
-  coverage-safe build policy; new anchor `(18,0)` enters at level 2.
-- **Pinned evidence.** All five fixtures currently match with 441 desired,
+  while new anchor `(18,0)` enters at level 2. After the eight-chunk move the
+  old anchor is correctly outside the static shell.
+- **Pinned evidence.** All five fixtures currently match with 392 desired,
   360 visible, and 81 real-suppressed tiles, zero pending work, and no
   coherence/assertion failures. Their
   960×960 captures under `/tmp/mclone-lod-settle-movement` were inspected.
@@ -389,10 +392,10 @@ reproduce D1/D2 before any fix exists.
   sets; schema-1/2/3 inputs remain accepted.
 - **Mutation fixture landed.** The five-waypoint script proves range-6
   baseline → off → on → range 3 → range 8. Off settles with all authoritative
-  LOD sets and suppression empty. Re-enable restores 441 desired tiles, of
+  LOD sets and suppression empty. Re-enable restores 392 desired tiles, of
   which 360 are visible and 81 are real-suppressed, and is pixel-identical to
-  baseline. Range 3 settles at 225 desired / 144 visible tiles with `(7,0)`
-  level 3 and `(9,0)` absent; range 8 settles at 625 desired / 544 visible
+  baseline. Range 3 settles at 176 desired / 144 visible tiles with `(7,0)`
+  level 3 and `(9,0)` absent; range 8 settles at 576 desired / 544 visible
   tiles with `(9,0)` level 2. Every waypoint closes with zero pending work.
   Hidden movement-guard tiles may increase resident/uploaded counts beyond the
   desired set and never participate in frame arbitration.
@@ -423,12 +426,12 @@ antidote to fire-and-forget LOD work.
 Drive every ledger defect to fixed-or-explicitly-deferred, each with its
 fixture flipping red→green in the same change.
 
-The first Slice 2 change was diagnostic rather than a fix. Graphics now exposes
-**Cull Covered LOD Builds** (default off), backed by the shared
-`FarTerrainLodConfig::normal_terrain_culling` policy and the
-`--far-lod-normal-terrain-culling true|false` startup argument. Turning it off
-removes normal-terrain readiness only from desired-tile generation, allowing
-covered tiles to prebuild. Real-over-LOD presentation precedence is always on.
+The first Slice 2 change was diagnostic rather than a fix. It temporarily
+exposed **Cull Covered LOD Builds** in Graphics plus a shared config/startup
+path. Turning it off removed normal-terrain readiness from desired-tile
+generation and established that readiness-driven target carving caused the
+annular gap. That diagnostic control is now removed from the product, CLI,
+shared config, and report. Real-over-LOD presentation precedence is always on.
 The original angled A/B confirmed the suppression mechanism, but interactive
 testing then captured coarse LOD caps co-rendering over textured real terrain
 with obvious z-fighting. That state is now forbidden: after final frame
@@ -449,10 +452,14 @@ but pending with no resident/uploaded/visible tile, classifying the defect as
 producer throughput/admission rather than screenshot, frustum, or rendering
 ambiguity.
 
-The coverage fix stays inside the existing producer and shared compile pool:
+The stable-shell fix stays inside the existing producer and shared compile
+pool:
 
-- the existing two-chunk retention margin is also a hidden movement guard;
-  guard tiles are resident/uploaded but cannot be presented until desired;
+- desired synthetic tiles form a static distance shell independent of normal-
+  terrain loading/readiness, with one drawable overlap ring at handoff;
+- one hidden inner guard and two hidden outer guards are resident/uploaded but
+  cannot be presented until desired; the second outer ring was required to
+  make the paced 48-block/s flight exact rather than merely bounded;
 - visible missing coverage is admitted before guard work, level replacement,
   and hidden seam refresh; an uploaded guard promotes immediately on entry;
 - each native compile worker caches a bounded 128 chunks of compressed surface
@@ -460,13 +467,13 @@ The coverage fix stays inside the existing producer and shared compile pool:
 - enabling far LOD lazily raises the shared compile pool to at least two
   workers and eight pending slots. Far-LOD-off keeps the prior one-worker
   default and pays no worker or queue-capacity increase;
-- covered-build culling defaults off, so ordinary coverage does not depend on
-  real-terrain readiness churn. The UI/CLI switch remains available for an
-  explicit culling-on A/B. Presentation suppression and the release-active
-  real/LOD overlap panic remain unconditional.
+- no synthetic work is generated for the deep real-terrain interior.
+  Presentation suppression and the release-active real/LOD overlap panic
+  remain unconditional.
 
 At 960×960, the resulting smooth lane passed all 340 frames (220 moving +
-120 tail) with zero clear-depth chunks and zero maximum missing age. The
+120 tail) with zero clear-depth chunks and zero maximum missing age; the gate
+now permits zero transient missing frames. The
 permanent 14-waypoint lane also passed with exact far-LOD lifecycle coherence
 and zero uncovered settled samples. Aggregate normal-section work discovered
 by a capture frame remains reported but is not confused with far-LOD
@@ -480,15 +487,25 @@ built. No ADB device was attached, so this slice has build—not new on-device
 Quest performance—evidence. Coverage claims come from depth/lifecycle data,
 not inspection of the generated PNGs.
 
+Stable-shell correction validation: the full native Rust workspace, thin-
+adapter purity, direct web/WASM build, flat Android APK, and Android XR release
+APK passed. The complete 14-waypoint LOD probe matched with 392 desired / 360
+visible / 81 real-suppressed tiles at RD4/range 6, 600 settled resident guard+
+shell tiles, zero coherence/assertion failures, and zero uncovered settled
+samples. The 340-frame smooth flight passed three consecutive runs with its
+allowance set to zero: no clear-depth frames, no missing chunks, and no first-
+failure ledger. Coverage evidence is GPU depth plus lifecycle state; PNGs are
+not used to infer gaps.
+
 - **D1 (complete):** sparse empty camera records fall back to the visible top
   surface per column rather than becoming the sole traversal seed. Renderer
   tests pin variable-height columns and the empty-camera case; the high settle
   ledger is 81/81 with zero D1 rows. A far-LOD-off altitude regression remains
   useful when the broader movement lane lands.
-- **Harness correction (complete):** settle mode now pins enabled/range without
-  erasing parsed detail/build-culling policy, reports both fields, and defines
-  visible coherence as unsuppressed desired tiles. Prebuilt tiles hidden by
-  real terrain remain required resident/uploaded but are correctly not visible.
+- **Harness correction (complete):** settle mode pins enabled/range without
+  erasing parsed detail policy and defines visible coherence as unsuppressed
+  desired tiles. Handoff tiles hidden by real terrain remain required resident/
+  uploaded but are correctly not visible.
 - **C2 depth oracle (complete for settled frames):** the offscreen render target
   permits `Depth32Float` readback after submission. The probe projects samples
   at the exact expected surface of each selected representation—generated
@@ -499,17 +516,16 @@ not inspection of the generated PNGs.
 - **Smooth movement coverage (complete for the deterministic flight):** the
   exact-surface depth oracle runs every frame over the existing movement
   script. The pre-fix persistent missing-LOD ledger is recorded above; the
-  coverage-safe default passes 340/340 frames with zero uncovered chunks. This
+  stable-shell policy passes 340/340 frames with zero uncovered chunks. This
   closes the reproduced scheduler/throughput class, not every camera path.
-- **D2 / C4 (open for culling-on and broader camera shapes):** change the
+- **D2 / C4 (open for broader camera shapes):** change the
   suppression input from traversal-ready columns to a
   view-independent painted-capable predicate (column has uploaded, drawable
-  real sections), applied consistently to desired-set carving and the
-  coordinator's `normal_drawable`. Decide and record whether covered columns
-  stay out of the desired set (today's shape, cheapest) or become
-  built-but-suppressed tiles; the contract only requires that suppression
-  implies painted-capable. Extend diagnostics so a painted-coverage gap is
-  countable (C2 as a counter, not only a probe assertion).
+  real sections), applied consistently to the coordinator's
+  `normal_drawable`. Desired-set carving by readiness is retired; the contract
+  requires that suppression implies painted-capable. Extend diagnostics so a
+  painted-coverage gap is countable (C2 as a counter, not only a probe
+  assertion).
 - **D3 / C6:** make the cap honest — surface a truncation counter/skip
   reason, clamp the UI range to what the cap can serve for the active render
   distance, and raise `MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES` if the supported
@@ -565,9 +581,9 @@ real session now. Landed:
   request only level 1, Auto and fixed-4 retain distinct source identities,
   mode cycling resets LOD, and coarser fixed modes monotonically reduce tile
   vertex/index work. All four startup modes and the Graphics row were captured
-  and inspected with covered-build culling both enabled and disabled; the
-  unconditional presentation precedence remained active and expected detail
-  differences are present.
+  and inspected during the temporary covered-build-culling A/B; that control
+  is now removed. Unconditional presentation precedence remained active and
+  expected detail differences are present.
 
 Notes: fixed-16 is the "whole chunk" mode (one sample per chunk, the
 chunk-granular ceiling from 166). No options persistence exists in the engine;
@@ -591,8 +607,7 @@ Work:
   as counters (C6).
 - **Movement cost bounds.** Harness movement fixtures assert per-chunk-step
   bounded builds/uploads (O(ring), C8) and bounded desired-set recompute
-  frequency; verify the normal-set hash only changes when the painted-capable
-  set changes (post-D2 it is no longer camera-noise-driven).
+  frequency.
 - **Region hygiene.** Empty-region reclamation, per-level region counts and
   arena slack in stats; confirm no unbounded region growth across long
   movement fixtures.
@@ -634,16 +649,16 @@ and record fixed-mode deltas in `docs/performance-records.md` /
 `docs/quest-standalone-performance-records.md`; re-pin baselines only as an
 explicit recorded decision; update `docs/topics/far-lod.md` status; run the
 web far-LOD probes (which should adopt the C3 set-coherence predicate where
-the report exposes it); hand the LOD thread back to 162 Slice 4 (reduced-real
-producer) via the 171 ledger.
+the report exposes it). Closeout does not automatically resume reduced-real.
 
-Gate: matrix recorded; 171 ledger updated; 162 unpaused with its Slice 4
-landing on a harness-validated substrate.
+Gate: matrix recorded and the 171 ledger updated. Tactical 162 remains deferred
+unless the user explicitly reprioritizes it.
 
 ## Non-Goals
 
-- Reduced-real LOD tiles, edit dirtying, LOD persistence — Tactical 162
-  Slices 4–6, resuming after Slice 2 here (ordering via 171).
+- Reduced-real LOD tiles, source reduction/extents, edit dirtying, and LOD
+  persistence — Tactical 162 Slices 4–6, explicitly deferred with no automatic
+  resume after this tactical.
 - Options persistence (no engine-wide preferences store exists; introducing
   one is its own tactical, not a LOD concern).
 - Multi-chunk tiles / band-count redesign — 166's locked chunk-granular
@@ -686,9 +701,8 @@ regress). Additions:
 - [`121`](121-surface-lod-first-slice.md): closed by this tactical; its
   remaining follow-up slices are absorbed (C/D landed via 166 evidence, E
   deferred to 162 Slice 6).
-- [`162`](162-real-chunk-lod-reduction-draft.md): paused at Slice 4; resumes
-  after Slice 2 here so the reduced-real producer lands on a validated,
-  instrumented substrate.
+- [`162`](162-real-chunk-lod-reduction-draft.md): deferred at Slice 4 by user
+  direction; this tactical's completion does not automatically resume it.
 - [`166`](166-shared-resident-tile-substrate.md): complete; owns the substrate
   mechanism this tactical hardens. Its tripwires and locked invariants are
   incorporated by reference.
@@ -700,10 +714,9 @@ regress). Additions:
 
 ## Open Questions
 
-- D2 shape: the coverage-safe default builds covered columns and suppresses
-  them only at presentation. The explicit culling-on optimization still carves
-  them out; promote it only if it can satisfy the same moving-depth contract
-  without reveal gaps and its platform benefit is measured.
+- D2 shape: the static shell has one handoff-overlap ring and suppresses it only
+  at presentation. Should that suppression input move from traversal-ready to
+  a stronger painted-capable predicate for broader camera shapes?
 - Retention budget defaults per platform (Slice 4) — measure before choosing.
 - Whether fixed-16 should unlock a larger range slider maximum once D3's
   honest cap lands (cheap tiles, coarse shell — the likely "see very far"

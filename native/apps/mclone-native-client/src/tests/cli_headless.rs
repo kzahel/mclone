@@ -72,8 +72,6 @@ fn cli_parses_fixed_lod_settle_probe_options() {
         "false".to_owned(),
         "--far-lod-detail".to_owned(),
         "16".to_owned(),
-        "--far-lod-normal-terrain-culling".to_owned(),
-        "false".to_owned(),
         "--section-occlusion".to_owned(),
         "false".to_owned(),
     ])
@@ -96,7 +94,6 @@ fn cli_parses_fixed_lod_settle_probe_options() {
         options.scene.far_lod.detail_mode,
         mclone_app_runtime::far_lod::FarLodDetailMode::Fixed16
     );
-    assert!(!options.scene.far_lod.normal_terrain_culling);
     assert_eq!(options.scene.day_time_override, Some(6000));
     assert!(options.scene.freeze_time);
     assert!(!options.scene.debug_passive_showcase);

@@ -39,8 +39,9 @@ Architecture direction:
   `ViewArea` visibility semantics;
 - base real-over-LOD arbitration on one explicit painted-capable contract, not
   a convenient loaded/readiness proxy;
-- prebuild under real terrain when useful, but never let build omission decide
-  whether the final frame has coverage;
+- keep the synthetic target as a static distance shell independent of real-
+  terrain loading/readiness, with only bounded handoff and movement guards;
+- defer reduced-real/persisted sources until this pure-synthetic path is stable;
 - validate a stationary teleport first, then a deterministic smooth path that
   records missing-column count and age without inventing a parallel movement
   or generation system.
@@ -50,8 +51,8 @@ zero pending work while its color probe reported 165 pixels equal to the sky
 clear color across seven coverage columns. Interactive review established that
 color equality is not a trustworthy hole oracle—water and other rendered
 surfaces can be visually or numerically confounded with the clear color. The
-settle executable had also overwritten parsed detail
-and covered-build-culling policy, and its coherence check incorrectly required
+settle executable had also overwritten parsed detail and the temporary
+covered-build-culling diagnostic, and its coherence check incorrectly required
 prebuilt-but-suppressed tiles to be visible. Those are harness contract defects,
 not reasons to expand its schema. A renderer trace then found the concrete D1
 mechanism: at Y=200 the sparse cache retained the empty camera section and
@@ -78,11 +79,10 @@ retaining the double-residency cap and replacement-before-suppress behavior.
 That smooth path now exists. Before the fix it found the first desired-but-
 pending missing LOD edge at frame 9 and then failed for all 331 remaining
 frames; 201 chunks were absent at movement end and 122 were still absent after
-the two-second tail. The shipped coverage-safe policy now passes the same
+the two-second tail. The shipped stable-shell policy now passes the same
 48-block/s path for all 340 frames with zero missing chunks and zero maximum
 missing age. This closes the reproduced streaming-throughput class; the wider
-tactical remains active for the opt-in culling path, silent range caps, seams,
-and performance closeout.
+tactical remains active for silent range caps, seams, and performance closeout.
 
 ## Current State
 
@@ -133,12 +133,11 @@ completing the 14-waypoint Slice 1 harness;
 Slice 2 next burns down the defect ledger before detail modes and residency
 polish.
 
-Slice 2 began with an explicit A/B control rather than more harness expansion.
-The Graphics menu's default-off **Cull Covered LOD Builds** option
-(also `--far-lod-normal-terrain-culling true|false`) controls whether ready
-normal-terrain columns carve the synthetic desired build set. Disabled, covered
-LOD may prebuild, but final presentation still unconditionally gives real
-terrain precedence.
+Slice 2 began with a temporary covered-build-culling A/B control rather than
+more harness expansion. It helped isolate the original fly-up suppression
+failure, but readiness-driven target carving is not a sound product policy.
+The Graphics row, startup argument, shared config field, and probe-report field
+have now been removed.
 
 The persistent moving gap was then reproduced without screenshot
 interpretation. The existing movement fixture is interpolated at 60 Hz and
@@ -147,13 +146,14 @@ entire configured square every frame. Both culling-on and culling-off pre-fix
 runs classified missing edge chunks as desired and pending rather than
 render-culled. The fix uses the producer's existing retention margin as hidden
 movement-guard coverage, prioritizes missing presentation before guard and
-replacement work, reuses bounded compressed surface facts per compile worker,
-and lazily guarantees two shared compile workers/eight pending slots only when
-far LOD is enabled. Guard tiles never enter presentation arbitration until
-desired. Covered-build culling now defaults off so coverage generation does
-not depend on real-terrain readiness; the explicit option remains for A/B and
-optimization work. Final real-over-LOD suppression and the release-active
-overlap panic are unchanged.
+replacement work, prioritizes outer guards toward the direction of travel,
+reuses bounded compressed surface facts per compile worker, and lazily
+guarantees two shared compile workers/eight pending slots only when far LOD is
+enabled. The current target is a pure-synthetic static shell: one drawable
+handoff ring, one hidden inner guard, and two hidden outer guards.
+Guard tiles never enter presentation arbitration until desired, and no target
+membership depends on real-terrain readiness. Final real-over-LOD suppression
+and the release-active overlap panic are unchanged.
 
 That distinction is now a hard invariant. Interactive fixed-detail testing
 captured coarse green LOD caps rendering over textured real terrain with
@@ -185,8 +185,7 @@ mode-specific source identity.
 - Budget families: `mclone-frame-budget` panel via
   `mclone-scene/src/render_admission.rs` (`lod_grant`).
 - Config/CLI/UI: `FarTerrainLodConfig` (`far_lod.rs`), shared `--far-lod`
-  / `--far-lod-detail` / `--far-lod-normal-terrain-culling`
-  (`startup_args.rs`), Options Far LOD, detail, culling, and range controls
+  / `--far-lod-detail` (`startup_args.rs`), Options Far LOD, detail, and range controls
   (`mclone-ui`).
 
 ## Contract
@@ -225,22 +224,18 @@ exclusion.
   prove missing geometry. Every waypoint still closes with zero pending work.
 - Landed (172 Slice 1C2b1): schema-3 desired-level assertions plus a
   five-waypoint movement fixture. The anchor remains level 3 across the
-  one-chunk/hysteresis guard, flips to level 1 at crossing, then remains
-  desired after the eight-chunk move under the coverage-safe policy while a
-  new level-2 anchor enters. Every waypoint currently settles at 441 desired,
-  360 visible, and 81 real-suppressed with zero pending work.
+  one-chunk/hysteresis guard and flips to level 1 at crossing. After the eight-
+  chunk move the old anchor is correctly outside the shell while a new level-2
+  anchor enters. Every waypoint currently settles at 392 desired, 360 visible,
+  and 81 real-suppressed with zero pending work.
 - Landed (172 Slice 1C2b2): schema-4 shared-policy toggle/range mutations,
   exact disabled teardown and enabled/range repopulation assertions, and
   `native:lod-settle:probe`. The full lane runs 14 waypoints across three
   scripts; all matched with zero pending work. Every far-LOD change must run
   the fast smoke lane and cite per-fixture results.
-- Landed (172 Slice 2 diagnostic): shared normal-terrain culling config/action/
-  effect/UI path plus a reproducible startup flag. Producer coverage tests
-  prove culling-off retains ready real-terrain chunks in the desired set;
-  inspected Graphics-menu and high-angle culling on/off captures prove the
-  switch reaches pixels. The culling policy now defaults off as part of the
-  moving-coverage fix; far-LOD-off remains unchanged. The permanent settle
-  smoke matched on rerun after one late-work flake on its final revisit.
+- Retired after the 172 Slice 2 diagnostic: the normal-terrain culling config,
+  action/effect/UI path, startup flag, and report field. They served the A/B
+  investigation but are not product settings. Far-LOD-off remains unchanged.
 - Landed early from 172 Slice 3: shared Auto/fixed-4/fixed-8/fixed-16 policy,
   mode-specific source reset, Graphics cycle control, startup argument, and web
   reporting. Focused tests pin single-level fixed policy, mode cycling, source
@@ -273,24 +268,32 @@ exclusion.
   script now also drives a 340-frame smooth lane (220 moving, 120 stationary)
   with per-frame exact-surface GPU depth and missing-age evidence. Its pre-fix
   run failed for 331 consecutive frames with desired-but-pending tiles; the
-  coverage-safe default passes with zero missing frames/chunks. The full
-  14-waypoint lane passes with 441 desired / 360 visible / 81 real-suppressed
-  tiles at range 6 and exact far-LOD lifecycle coherence.
+  stable-shell policy passes with zero missing frames/chunks. The probe now
+  permits zero transient missing frames. The full 14-waypoint lane passes with
+  392 desired / 360 visible / 81 real-suppressed tiles at range 6 and exact
+  far-LOD lifecycle coherence. One hidden inner ring plus two outer rings gives
+  600 settled resident tiles without generating the real-terrain interior.
 - Validation for the moving-coverage fix: full native workspace tests,
   thin-adapter purity, direct web/WASM build, far-LOD-off offscreen smoke,
   movement smoke, timedemo, and flat/Quest Android release APK builds passed.
   No ADB device was attached for a fresh on-device Quest run.
+- Validation for the stable-shell correction: full native workspace tests,
+  thin-adapter purity, direct web/WASM build, flat Android APK, and Android XR
+  release APK passed. The complete 14-waypoint probe matched; the 340-frame
+  flight passed three consecutive zero-allowance runs with no uncovered frame
+  or missing chunk. This evidence comes from GPU depth and lifecycle state,
+  not screenshot interpretation.
 
 ## Recommended Next Direction
 
-First validate the new default in the original interactive high-flight repro.
+First validate the stable shell in the original interactive high-flight repro.
 If that agrees with the depth lane, continue the remaining Slice 2 correctness
 burn-down with D3/C6: make large range requests honest instead of silently
-truncating them at the 4096-patch cap. D2 arbitration on the explicit
-culling-on path and D6 boundary coverage remain code-audit priorities;
+truncating them at the 4096-patch cap. D2 arbitration across broader camera
+shapes and D6 boundary coverage remain code-audit priorities;
 lifecycle/scheduler changes must be justified by a missing column classified
 in those states. Then continue tactical 172's remaining work and
 residency/perf polish
-(Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real
-LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:
-tactical 171's thread ledger.
+(Slice 4), debug modes (Slice 5), and re-baseline + closeout (Slice 6).
+Reduced-real LOD (tactical 162 Slice 4+) is explicitly deferred with no current
+resume commitment. Ordering authority: tactical 171's thread ledger.

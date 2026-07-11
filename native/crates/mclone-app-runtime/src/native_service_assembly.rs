@@ -1244,7 +1244,6 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             seed,
             center,
             self.core.render_distance(),
-            Some(&normal_terrain_chunks),
             materials.as_ref(),
             &mut self.render_compile_dispatcher,
             build_budget,
@@ -1283,20 +1282,14 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         config: FarTerrainLodConfig,
         seed: i64,
         center: ChunkPos,
-        camera_position: Vec3,
+        _camera_position: Vec3,
         chunk_budget: usize,
     ) -> FarTerrainLodCoverage {
-        let normal_terrain_chunks = traversal_ready_chunks(
-            &self
-                .core
-                .traversal_ready_render_section_keys(camera_position),
-        );
         self.far_lod_cache.prewarm(
             config,
             seed,
             center,
             self.core.render_distance(),
-            Some(&normal_terrain_chunks),
             self.mesh_assets.far_lod_materials.as_ref(),
             chunk_budget,
             &mut self.render_compile_dispatcher,
@@ -2898,7 +2891,6 @@ where
             seed,
             center,
             self.core.render_distance(),
-            Some(&normal_terrain_chunks),
             materials.as_ref(),
             &mut self.render_compile_dispatcher,
             build_budget,

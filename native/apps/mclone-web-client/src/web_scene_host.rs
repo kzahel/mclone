@@ -1913,11 +1913,6 @@ impl WebSceneHost {
             )?;
             report_set_bool(&object, "forceFullbright", ui_state.force_fullbright)?;
             report_set_bool(&object, "farLodEnabled", ui_state.far_lod_enabled)?;
-            report_set_bool(
-                &object,
-                "farLodNormalTerrainCulling",
-                ui_state.far_lod_normal_terrain_culling,
-            )?;
             report_set_string(
                 &object,
                 "farLodDetailMode",

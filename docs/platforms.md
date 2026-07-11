@@ -292,7 +292,8 @@ pins desired levels across one-chunk, hysteresis/band, and eight-chunk moves,
 then interpolates those poses into a paced 220-frame flight plus a 120-frame
 stationary tail. GPU depth is checked at the expected representation surface
 for every configured chunk on every smooth frame, with first-failure lifecycle
-rows and per-chunk missing age retained in the report;
+rows and per-chunk missing age retained in the report; no transient missing
+frame is allowed;
 the mutation script pins complete off teardown, deterministic on
 repopulation, and range-3/range-8 coverage counts.
 

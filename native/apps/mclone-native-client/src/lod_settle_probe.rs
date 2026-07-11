@@ -37,7 +37,7 @@ const SMOOTH_MOVEMENT_TARGET_HZ: f64 = 60.0;
 const SMOOTH_MOVEMENT_SPEED_BLOCKS_PER_SECOND: f32 = 48.0;
 const SMOOTH_MOVEMENT_TAIL_FRAMES: usize = 120;
 const SMOOTH_MOVEMENT_STABLE_FRAMES: usize = 6;
-const SMOOTH_MOVEMENT_MAX_MISSING_FRAMES: usize = 6;
+const SMOOTH_MOVEMENT_MAX_MISSING_FRAMES: usize = 0;
 const FLY_UP_EYE_OFFSET_X: f32 = 0.25;
 const FLY_UP_EYE_Y: f32 = 500.0;
 const FLY_UP_EYE_OFFSET_Z: f32 = 0.25;
@@ -745,7 +745,6 @@ pub(crate) fn run_lod_settle_probe(
             "renderDistance": options.scene.render_distance,
             "farLodRange": options.scene.far_lod.extra_radius_chunks,
             "farLodDetail": format!("{:?}", options.scene.far_lod.detail_mode),
-            "cullCoveredLodBuilds": options.scene.far_lod.normal_terrain_culling,
             "sectionOcclusion": options.render_options.section_occlusion_culling,
             "width": loop_report.width,
             "height": loop_report.height,
@@ -1823,8 +1822,7 @@ mod tests {
             lod_assertions: Vec::new(),
             mutation: None,
             expected_far_lod_state: None,
-            actual_far_lod_config: FarTerrainLodConfig::enabled()
-                .with_normal_terrain_culling(false),
+            actual_far_lod_config: FarTerrainLodConfig::enabled(),
             render_distance: 4,
         };
 
@@ -1892,7 +1890,7 @@ mod tests {
         );
         assert_eq!(
             script.waypoints[4].lod_assertions[0].expected,
-            LodDesiredLevelExpectation::Level1
+            LodDesiredLevelExpectation::NotDesired
         );
         let smooth = SmoothMovementPlan::from_script(&script).unwrap();
         assert_eq!(smooth.moving_frames, 220);

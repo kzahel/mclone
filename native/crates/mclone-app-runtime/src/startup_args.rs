@@ -34,7 +34,6 @@ pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
 pub const ARG_FAR_LOD: &str = "--far-lod";
 pub const ARG_FAR_LOD_DETAIL: &str = "--far-lod-detail";
-pub const ARG_FAR_LOD_NORMAL_TERRAIN_CULLING: &str = "--far-lod-normal-terrain-culling";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
@@ -64,7 +63,6 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_LIGHT_STATUS_BATCH_SIZE,
     ARG_FAR_LOD,
     ARG_FAR_LOD_DETAIL,
-    ARG_FAR_LOD_NORMAL_TERRAIN_CULLING,
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
     ARG_RENDER_COLOR_PROFILE,
@@ -414,10 +412,6 @@ impl StartupArgState {
             ARG_FAR_LOD_DETAIL => {
                 self.scene.far_lod.detail_mode =
                     parse_far_lod_detail_mode_arg(ARG_FAR_LOD_DETAIL, args.next())?;
-            }
-            ARG_FAR_LOD_NORMAL_TERRAIN_CULLING => {
-                self.scene.far_lod.normal_terrain_culling =
-                    parse_bool_arg(ARG_FAR_LOD_NORMAL_TERRAIN_CULLING, args.next())?;
             }
             ARG_SECTION_OCCLUSION => {
                 self.render_options.section_occlusion_culling =
@@ -810,8 +804,6 @@ mod tests {
             "true",
             ARG_FAR_LOD_DETAIL,
             "16",
-            ARG_FAR_LOD_NORMAL_TERRAIN_CULLING,
-            "false",
             ARG_REMOTE_ADDR,
             "127.0.0.1:25565",
             ARG_SCREENSHOT_EYE,
@@ -836,9 +828,7 @@ mod tests {
                 debug_passive_showcase: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
-                far_lod: FarTerrainLodConfig::enabled()
-                    .with_detail_mode(FarLodDetailMode::Fixed16)
-                    .with_normal_terrain_culling(false),
+                far_lod: FarTerrainLodConfig::enabled().with_detail_mode(FarLodDetailMode::Fixed16),
             }
         );
         assert_eq!(

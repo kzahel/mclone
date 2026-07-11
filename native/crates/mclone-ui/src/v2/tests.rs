@@ -14,15 +14,6 @@ fn point_in(rect: Rect) -> Point {
     }
 }
 
-fn hovered_label(snapshot: &UiDebugSnapshot) -> Option<&str> {
-    let hovered = snapshot.hovered?;
-    snapshot
-        .widgets
-        .iter()
-        .find(|widget| widget.id == hovered)
-        .map(|widget| widget.label.as_str())
-}
-
 fn keyboard_mouse_input() -> ResolvedFlatInput {
     ResolvedFlatInput {
         preferred_prompt: Some(InputPromptKind::KeyboardMouse),

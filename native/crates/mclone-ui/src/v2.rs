@@ -2340,7 +2340,6 @@ impl GameUiHost {
             | GameUiAction::ApplyAssetPacks
             | GameUiAction::ToggleFullbright
             | GameUiAction::ToggleFarLod
-            | GameUiAction::ToggleFarLodNormalTerrainCulling
             | GameUiAction::CycleFarLodDetail
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
@@ -2554,7 +2553,6 @@ const UI_V2_OPTIONS_CAT_MOVEMENT: UiWidgetId = UiWidgetId(126);
 const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
 const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
 const UI_V2_OPTIONS_ASSET_PACKS: UiWidgetId = UiWidgetId(129);
-const UI_V2_OPTIONS_FAR_LOD_NORMAL_TERRAIN_CULLING: UiWidgetId = UiWidgetId(130);
 const UI_V2_OPTIONS_FAR_LOD_DETAIL: UiWidgetId = UiWidgetId(131);
 const UI_V2_ASSET_PACK_ROW_BASE: u64 = 1300;
 const UI_V2_ASSET_PACK_CANCEL: UiWidgetId = UiWidgetId(1310);
@@ -3146,17 +3144,6 @@ fn options_category_rows(
                 )
                 .enabled(state.far_lod_enabled)
                 .action(GameUiAction::CycleFarLodDetail),
-            ),
-            (
-                18.0,
-                UiWidget::checkbox(
-                    UI_V2_OPTIONS_FAR_LOD_NORMAL_TERRAIN_CULLING,
-                    ph,
-                    "Cull Covered LOD Builds",
-                    state.far_lod_normal_terrain_culling,
-                )
-                .enabled(state.far_lod_enabled)
-                .action(GameUiAction::ToggleFarLodNormalTerrainCulling),
             ),
             (
                 20.0,

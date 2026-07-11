@@ -595,7 +595,6 @@ impl McloneSceneHost {
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
             far_lod_enabled: self.scene.far_lod.enabled,
-            far_lod_normal_terrain_culling: self.scene.far_lod.normal_terrain_culling,
             far_lod_detail_mode: mclone_app_runtime::client_experience::game_far_lod_detail_mode(
                 self.scene.far_lod.detail_mode,
             ),

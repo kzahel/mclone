@@ -1,19 +1,18 @@
 # 162: Real-Chunk LOD Reduction Draft
 
-Status: paused at Slice 4 on 2026-07-11, re-scoped behind Tactical 172 — Far
-LOD Settle Contract And Detail Modes. Slice 0A retained synthetic chunk
-patches, Slice 1 startup LOD prewarm, and Slice 2 coverage coordinator + source
-precedence landed. The proposed bespoke Slice 3 LOD budget/queue does not
-proceed: Tactical 166 — Shared Resident-Tile Substrate supersedes it with one
-shared real-section/LOD residency, worker, budget, and upload mechanism, and
-166 is complete through Slice 4 multi-level rings. Before this tactical's
-Slice 4 in-memory reduced-real producer lands, Tactical 172 must land its
-settle-state validation harness and coverage-gap correctness burn-down
-(172 Slices 1–2): the synthetic producer currently has confirmed coverage
-defects (172 defect ledger D1–D8) and no settle-state instrument, and a second
-producer must not inherit or mask them. Resume Slice 4 when 172 Slice 2's
-gates are green. Macro ordering lives in Tactical 171 — Convergence And Parity
-Closeout.
+Status: deferred at Slice 4 by user direction on 2026-07-11. There is no
+current commitment to resume reduced-real, persisted-source, reducer, extents,
+or protocol work after Tactical 172; basic pure-synthetic far-LOD correctness
+and stability take priority. This tactical remains the design record if that
+decision is revisited. Slice 0A retained synthetic chunk patches, Slice 1
+startup LOD prewarm, and Slice 2 coverage coordinator + source precedence
+landed. The proposed bespoke Slice 3 LOD budget/queue does not proceed:
+Tactical 166 — Shared Resident-Tile Substrate supersedes it with one shared
+real-section/LOD residency, worker, budget, and upload mechanism, and 166 is
+complete through Slice 4 multi-level rings. A second producer must not inherit
+or mask synthetic coverage defects, but green Tactical 172 gates do not
+automatically resume this work. Macro ordering lives in Tactical 171 —
+Convergence And Parity Closeout.
 
 Workstream: native Rust shared runtime/persistence/render boundary. Desktop
 validation remains the likely first lane, but the target shape must stay shared

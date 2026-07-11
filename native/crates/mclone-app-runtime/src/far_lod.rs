@@ -39,6 +39,15 @@ pub const FAR_TERRAIN_LOD_LEVEL_HYSTERESIS_CHUNKS: u32 = 2;
 pub const MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES: usize = 256;
 pub const DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET: usize = 4;
 pub const DEFAULT_FAR_TERRAIN_LOD_EVICTION_MARGIN_CHUNKS: u32 = 2;
+/// One drawable synthetic ring overlaps the real-terrain boundary so a real
+/// chunk is suppressed only after it is actually drawable.
+pub const FAR_TERRAIN_LOD_HANDOFF_OVERLAP_CHUNKS: u32 = 1;
+/// One hidden inner ring covers the real/synthetic handoff while the camera
+/// crosses a chunk boundary.
+pub const FAR_TERRAIN_LOD_INNER_GUARD_CHUNKS: u32 = 1;
+/// Two hidden outer rings give distance-priority builds two camera steps to
+/// finish before entering the drawable shell during flight.
+pub const FAR_TERRAIN_LOD_OUTER_GUARD_CHUNKS: u32 = 2;
 pub const MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES: usize = 4096;
 
 /// Startup visual-coverage prewarm defaults (tactical 162 Slice 1). These bound
@@ -262,10 +271,6 @@ impl Default for FarLodDetailMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FarTerrainLodConfig {
     pub enabled: bool,
-    /// Whether normal terrain coverage removes overlapping far-LOD tiles from
-    /// the desired build set. Presentation precedence remains unconditional:
-    /// real and synthetic terrain must never draw in the same chunk.
-    pub normal_terrain_culling: bool,
     pub detail_mode: FarLodDetailMode,
     pub start_margin_chunks: u32,
     pub extra_radius_chunks: u32,
@@ -276,7 +281,6 @@ impl FarTerrainLodConfig {
     pub const fn disabled() -> Self {
         Self {
             enabled: false,
-            normal_terrain_culling: false,
             detail_mode: FarLodDetailMode::Auto,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
@@ -287,7 +291,6 @@ impl FarTerrainLodConfig {
     pub const fn enabled() -> Self {
         Self {
             enabled: true,
-            normal_terrain_culling: false,
             detail_mode: FarLodDetailMode::Auto,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
@@ -303,11 +306,6 @@ impl FarTerrainLodConfig {
         self
     }
 
-    pub const fn with_normal_terrain_culling(mut self, enabled: bool) -> Self {
-        self.normal_terrain_culling = enabled;
-        self
-    }
-
     pub const fn with_detail_mode(mut self, detail_mode: FarLodDetailMode) -> Self {
         self.detail_mode = detail_mode;
         self
@@ -316,7 +314,6 @@ impl FarTerrainLodConfig {
     fn normalized(self) -> Self {
         Self {
             enabled: self.enabled,
-            normal_terrain_culling: self.normal_terrain_culling,
             detail_mode: self.detail_mode,
             start_margin_chunks: self.start_margin_chunks,
             extra_radius_chunks: self.extra_radius_chunks.clamp(
@@ -402,7 +399,6 @@ impl StartupLodPrewarmConfig {
     pub fn far_lod_config(&self) -> FarTerrainLodConfig {
         FarTerrainLodConfig {
             enabled: true,
-            normal_terrain_culling: true,
             detail_mode: self.detail_mode,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: self.extra_chunks,
@@ -598,8 +594,6 @@ struct FarTerrainLodBuildKey {
     extra_radius_chunks: u32,
     sample_spacing_blocks: u32,
     detail_mode: FarLodDetailMode,
-    normal_terrain_culling: bool,
-    normal_chunk_hash: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -632,20 +626,12 @@ impl FarTerrainLodSourceKey {
             extra_radius_chunks: 1,
             sample_spacing_blocks: self.sample_spacing_blocks,
             detail_mode: self.detail_mode,
-            normal_terrain_culling: false,
-            normal_chunk_hash: 0,
         }
     }
 }
 
 impl FarTerrainLodBuildKey {
-    fn new(
-        seed: i64,
-        center: ChunkPos,
-        render_distance: u32,
-        config: FarTerrainLodConfig,
-        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
-    ) -> Self {
+    fn new(seed: i64, center: ChunkPos, render_distance: u32, config: FarTerrainLodConfig) -> Self {
         let config = config.normalized();
         Self {
             seed,
@@ -655,59 +641,28 @@ impl FarTerrainLodBuildKey {
             extra_radius_chunks: config.extra_radius_chunks,
             sample_spacing_blocks: config.sample_spacing_blocks,
             detail_mode: config.detail_mode,
-            normal_terrain_culling: config.normal_terrain_culling,
-            normal_chunk_hash: if config.normal_terrain_culling {
-                normal_terrain_chunk_hash(normal_terrain_chunks)
-            } else {
-                0
-            },
         }
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-enum FarTerrainNormalCoverage<'a> {
+enum FarTerrainNormalCoverage {
+    #[cfg(test)]
     Radius,
-    ReadyChunks(&'a BTreeSet<ChunkPos>),
     NoNormalChunks,
 }
 
-impl<'a> FarTerrainNormalCoverage<'a> {
-    fn new(
-        normal_terrain_culling: bool,
-        normal_terrain_chunks: Option<&'a BTreeSet<ChunkPos>>,
-    ) -> Self {
-        if !normal_terrain_culling {
-            return Self::NoNormalChunks;
-        }
-        match normal_terrain_chunks {
-            Some(chunks) if !chunks.is_empty() => Self::ReadyChunks(chunks),
-            _ => Self::Radius,
-        }
-    }
-
-    fn covers_chunk(self, key: FarTerrainLodBuildKey, pos: ChunkPos) -> bool {
+impl FarTerrainNormalCoverage {
+    fn covers_chunk(self, _key: FarTerrainLodBuildKey, _pos: ChunkPos) -> bool {
         match self {
+            #[cfg(test)]
             Self::Radius => {
-                let (inner_chunk_radius, _) = far_lod_chunk_radii(key);
-                chunk_distance_from_center_chunk(key.center, pos) <= inner_chunk_radius
+                let (inner_chunk_radius, _) = far_lod_chunk_radii(_key);
+                chunk_distance_from_center_chunk(_key.center, _pos) <= inner_chunk_radius
             }
-            Self::ReadyChunks(chunks) => chunks.contains(&pos),
             Self::NoNormalChunks => false,
         }
     }
-}
-
-fn normal_terrain_chunk_hash(normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>) -> u64 {
-    let Some(chunks) = normal_terrain_chunks.filter(|chunks| !chunks.is_empty()) else {
-        return 0;
-    };
-    let mut hash = mix_hash(chunks.len() as u64);
-    for pos in chunks {
-        hash = mix_hash(hash ^ pos.x as u32 as u64);
-        hash = mix_hash(hash ^ ((pos.z as u32 as u64) << 1));
-    }
-    hash
 }
 
 #[derive(Debug)]
@@ -727,6 +682,7 @@ struct FarTerrainLodTileMetadata {
 pub struct FarTerrainLodCache {
     source_key: Option<FarTerrainLodSourceKey>,
     view_key: Option<FarTerrainLodBuildKey>,
+    movement_direction: (i32, i32),
     desired_tiles: BTreeMap<ChunkPos, LodTileKey>,
     /// Retained guard tiles built just beyond the visible LOD radius and under
     /// the real-terrain handoff boundary. They are uploaded but never offered
@@ -763,6 +719,7 @@ impl Default for FarTerrainLodCache {
         Self {
             source_key: None,
             view_key: None,
+            movement_direction: (0, 0),
             desired_tiles: BTreeMap::new(),
             prefetch_tiles: BTreeMap::new(),
             level_history: BTreeMap::new(),
@@ -802,6 +759,7 @@ impl FarTerrainLodCache {
         let abandoned_jobs = self.inflight_builds.len();
         self.source_key = None;
         self.view_key = None;
+        self.movement_direction = (0, 0);
         self.desired_tiles.clear();
         self.prefetch_tiles.clear();
         self.level_history.clear();
@@ -829,7 +787,6 @@ impl FarTerrainLodCache {
         seed: i64,
         center: ChunkPos,
         render_distance: u32,
-        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
         materials: Option<&FarTerrainLodMaterialPalette>,
         compiler: &mut C,
         build_budget: usize,
@@ -840,7 +797,6 @@ impl FarTerrainLodCache {
             seed,
             center,
             render_distance,
-            normal_terrain_chunks,
             materials,
             compiler,
             build_budget,
@@ -855,7 +811,6 @@ impl FarTerrainLodCache {
         seed: i64,
         center: ChunkPos,
         render_distance: u32,
-        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
         materials: Option<&FarTerrainLodMaterialPalette>,
         compiler: &mut C,
         build_budget: usize,
@@ -872,14 +827,8 @@ impl FarTerrainLodCache {
             let abandoned = self.reset_for_source(source_key, materials);
             compiler.release_completed_far_lod_jobs(abandoned);
         }
-        let key = FarTerrainLodBuildKey::new(
-            seed,
-            center,
-            render_distance,
-            config,
-            normal_terrain_chunks,
-        );
-        self.update_target(key, normal_terrain_chunks, self.now);
+        let key = FarTerrainLodBuildKey::new(seed, center, render_distance, config);
+        self.update_target(key, self.now);
         self.accept_completed(compiler)?;
         self.ensure_pending_builds(self.now);
         self.submit_builds(compiler, build_budget)?;
@@ -897,7 +846,6 @@ impl FarTerrainLodCache {
         seed: i64,
         center: ChunkPos,
         render_distance: u32,
-        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
         materials: Option<&FarTerrainLodMaterialPalette>,
         chunk_budget: usize,
         compiler: &mut C,
@@ -907,7 +855,6 @@ impl FarTerrainLodCache {
             seed,
             center,
             render_distance,
-            normal_terrain_chunks,
             materials,
             compiler,
             chunk_budget,
@@ -1007,9 +954,9 @@ impl FarTerrainLodCache {
     /// Chunk-aligned tiles that currently have a drawable retained synthetic
     /// patch (desired tiles whose patch geometry is built). This is the synthetic
     /// availability the [`crate::lod_coverage::LodCoverageCoordinator`] resolves
-    /// against. It intentionally does not apply presentation precedence: when
-    /// covered-build culling is disabled, ready normal chunks may have a built
-    /// tile here, but the coordinator must still suppress it before rendering.
+    /// against. It intentionally does not apply presentation precedence: the
+    /// handoff ring may have both a built synthetic tile and a drawable normal
+    /// chunk, but the coordinator must suppress the synthetic tile before render.
     pub fn drawable_lod_tiles(&self) -> impl Iterator<Item = ChunkPos> + '_ {
         self.desired_tiles.keys().copied().filter(|pos| {
             self.visible_tiles_by_chunk
@@ -1101,6 +1048,7 @@ impl FarTerrainLodCache {
         let abandoned = self.inflight_builds.len();
         self.source_key = Some(source_key);
         self.view_key = None;
+        self.movement_direction = (0, 0);
         self.desired_tiles.clear();
         self.prefetch_tiles.clear();
         self.level_history.clear();
@@ -1121,20 +1069,23 @@ impl FarTerrainLodCache {
         abandoned
     }
 
-    fn update_target(
-        &mut self,
-        key: FarTerrainLodBuildKey,
-        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
-        now: MonotonicInstant,
-    ) {
+    fn update_target(&mut self, key: FarTerrainLodBuildKey, now: MonotonicInstant) {
         if self.view_key == Some(key) {
             return;
         }
-        let desired_queue = capped_far_lod_chunk_positions(key, normal_terrain_chunks);
+        if let Some(previous) = self.view_key {
+            let direction = (
+                (key.center.x - previous.center.x).signum(),
+                (key.center.z - previous.center.z).signum(),
+            );
+            if direction != (0, 0) {
+                self.movement_direction = direction;
+            }
+        }
+        let desired_queue = capped_far_lod_chunk_positions(key);
         let desired_positions = desired_queue.iter().copied().collect::<BTreeSet<_>>();
         let prefetch_queue = far_lod_prefetch_chunk_positions(
             key,
-            normal_terrain_chunks,
             &desired_positions,
             max_retained_lod_patches(key).saturating_sub(desired_queue.len()),
         );
@@ -1256,7 +1207,7 @@ impl FarTerrainLodCache {
         &self,
         key: FarTerrainLodBuildKey,
         tile: LodTileKey,
-    ) -> (u8, u32, u32, i32, i32) {
+    ) -> (u8, u32, std::cmp::Reverse<i32>, u32, i32, i32) {
         let desired = self.desired_tiles.get(&tile.chunk) == Some(&tile);
         let has_coverage = self.visible_tiles_by_chunk.contains_key(&tile.chunk);
         let uploaded = self.uploaded_tiles.contains(&tile);
@@ -1275,7 +1226,20 @@ impl FarTerrainLodCache {
         } else {
             inner_radius.saturating_sub(distance).saturating_add(1)
         };
-        (class, exposure_steps, distance, tile.chunk.z, tile.chunk.x)
+        let leading_projection = if !desired && distance > outer_radius {
+            (tile.chunk.x - key.center.x) * self.movement_direction.0
+                + (tile.chunk.z - key.center.z) * self.movement_direction.1
+        } else {
+            0
+        };
+        (
+            class,
+            exposure_steps,
+            std::cmp::Reverse(leading_projection),
+            distance,
+            tile.chunk.z,
+            tile.chunk.x,
+        )
     }
 
     fn submit_builds<C: FarTerrainLodCompiler>(
@@ -1608,20 +1572,21 @@ fn far_lod_chunk_radii(key: FarTerrainLodBuildKey) -> (u32, u32) {
     (inner_chunk_radius, outer_chunk_radius)
 }
 
-fn far_lod_chunk_positions(
-    key: FarTerrainLodBuildKey,
-    normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
-) -> VecDeque<ChunkPos> {
+fn far_lod_desired_inner_radius(key: FarTerrainLodBuildKey) -> u32 {
+    let (inner_chunk_radius, _) = far_lod_chunk_radii(key);
+    inner_chunk_radius.saturating_sub(FAR_TERRAIN_LOD_HANDOFF_OVERLAP_CHUNKS.saturating_sub(1))
+}
+
+fn far_lod_chunk_positions(key: FarTerrainLodBuildKey) -> VecDeque<ChunkPos> {
     let (_, outer_chunk_radius) = far_lod_chunk_radii(key);
-    let normal_coverage =
-        FarTerrainNormalCoverage::new(key.normal_terrain_culling, normal_terrain_chunks);
+    let desired_inner_radius = far_lod_desired_inner_radius(key);
     let outer = outer_chunk_radius as i32;
     let mut positions = Vec::new();
     for dz in -outer..=outer {
         for dx in -outer..=outer {
             let pos = ChunkPos::new(key.center.x + dx, key.center.z + dz);
             let distance = dx.unsigned_abs().max(dz.unsigned_abs());
-            if distance <= outer_chunk_radius && !normal_coverage.covers_chunk(key, pos) {
+            if (desired_inner_radius..=outer_chunk_radius).contains(&distance) {
                 positions.push(pos);
             }
         }
@@ -1635,25 +1600,22 @@ fn far_lod_chunk_positions(
     positions.into()
 }
 
-fn capped_far_lod_chunk_positions(
-    key: FarTerrainLodBuildKey,
-    normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
-) -> VecDeque<ChunkPos> {
-    let mut positions = far_lod_chunk_positions(key, normal_terrain_chunks);
+fn capped_far_lod_chunk_positions(key: FarTerrainLodBuildKey) -> VecDeque<ChunkPos> {
+    let mut positions = far_lod_chunk_positions(key);
     positions.truncate(max_retained_lod_patches(key));
     positions
 }
 
 fn far_lod_prefetch_chunk_positions(
     key: FarTerrainLodBuildKey,
-    normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
     desired_positions: &BTreeSet<ChunkPos>,
     capacity: usize,
 ) -> VecDeque<ChunkPos> {
-    let (inner_radius, outer_radius) = far_lod_chunk_radii(key);
+    let (_, outer_radius) = far_lod_chunk_radii(key);
+    let desired_inner_radius = far_lod_desired_inner_radius(key);
     let retain_radius = far_lod_retain_radius(key);
-    let inner_guard_start =
-        inner_radius.saturating_sub(DEFAULT_FAR_TERRAIN_LOD_EVICTION_MARGIN_CHUNKS);
+    let inner_guard_start = desired_inner_radius.saturating_sub(FAR_TERRAIN_LOD_INNER_GUARD_CHUNKS);
+    let outer_guard_end = outer_radius.saturating_add(FAR_TERRAIN_LOD_OUTER_GUARD_CHUNKS);
     let mut positions = Vec::new();
     let retain = retain_radius as i32;
     for dz in -retain..=retain {
@@ -1663,11 +1625,9 @@ fn far_lod_prefetch_chunk_positions(
                 continue;
             }
             let distance = dx.unsigned_abs().max(dz.unsigned_abs());
-            let outside_guard = distance > outer_radius;
-            let real_handoff_guard = key.normal_terrain_culling
-                && distance >= inner_guard_start
-                && normal_terrain_chunks.is_some_and(|chunks| chunks.contains(&pos));
-            if outside_guard || real_handoff_guard {
+            let inner_guard = distance >= inner_guard_start && distance < desired_inner_radius;
+            let outside_guard = distance > outer_radius && distance <= outer_guard_end;
+            if inner_guard || outside_guard {
                 positions.push(pos);
             }
         }
@@ -1785,7 +1745,6 @@ fn build_far_terrain_lod_tile(key: FarTerrainLodBuildKey, pos: ChunkPos) -> FarT
             key.seed,
             FarTerrainLodConfig {
                 enabled: true,
-                normal_terrain_culling: true,
                 detail_mode: key.detail_mode,
                 start_margin_chunks: 0,
                 extra_radius_chunks: 1,
@@ -1807,7 +1766,7 @@ fn append_far_terrain_lod_chunk_patch<S: FarTerrainSurfaceSource>(
     pos: ChunkPos,
     key: FarTerrainLodBuildKey,
     neighbor_sample_spacings: [u32; 4],
-    normal_coverage: FarTerrainNormalCoverage<'_>,
+    normal_coverage: FarTerrainNormalCoverage,
     materials: Option<&FarTerrainLodMaterialPalette>,
 ) {
     let spacing = key.sample_spacing_blocks.max(1);
@@ -1960,7 +1919,7 @@ fn neighbor_lod_cell<S: FarTerrainSurfaceSource>(
     key: FarTerrainLodBuildKey,
     neighbor_sample_spacings: [u32; 4],
     cell: FarTerrainLodCell,
-    normal_coverage: FarTerrainNormalCoverage<'_>,
+    normal_coverage: FarTerrainNormalCoverage,
     materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> Option<LodNeighborCell> {
     match direction {
@@ -2036,7 +1995,7 @@ fn neighbor_cell_bounds_at_spacing(
 fn neighbor_region(
     key: FarTerrainLodBuildKey,
     cell: FarTerrainLodCell,
-    normal_coverage: FarTerrainNormalCoverage<'_>,
+    normal_coverage: FarTerrainNormalCoverage,
 ) -> LodNeighborRegion {
     let (_, outer_chunk_radius) = far_lod_chunk_radii(key);
     let center_x = cell.x0 + (cell.x1 - cell.x0) / 2;
@@ -2409,14 +2368,6 @@ fn surface_color(block: GeneratedBlockId, surface_y: i32) -> [f32; 4] {
     }
 }
 
-fn mix_hash(mut value: u64) -> u64 {
-    value ^= value >> 30;
-    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value ^= value >> 27;
-    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^ (value >> 31)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2459,7 +2410,7 @@ mod tests {
     ) {
         for _ in 0..64 {
             cache
-                .advance_for_camera(config, 12345, center, 0, None, None, compiler, build_budget)
+                .advance_for_camera(config, 12345, center, 0, None, compiler, build_budget)
                 .unwrap();
             if cache.coverage().is_complete() {
                 return;
@@ -2488,7 +2439,6 @@ mod tests {
                 12345,
                 ChunkPos::new(0, 0),
                 0,
-                None,
                 None,
                 &mut compiler,
                 0,
@@ -2528,7 +2478,6 @@ mod tests {
     fn far_terrain_lod_config_defaults_disabled() {
         assert!(!FarTerrainLodConfig::default().enabled);
         assert!(FarTerrainLodConfig::enabled().enabled);
-        assert!(!FarTerrainLodConfig::enabled().normal_terrain_culling);
         assert_eq!(
             FarTerrainLodConfig::enabled().start_margin_chunks,
             DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS
@@ -2544,7 +2493,6 @@ mod tests {
             ChunkPos::new(0, 0),
             0,
             FarTerrainLodConfig::enabled(),
-            None,
         );
 
         assert_eq!(far_lod_level_band_ends(key), [4, 8, 12]);
@@ -2565,7 +2513,7 @@ mod tests {
             (FarLodDetailMode::Fixed16, 16),
         ] {
             let config = FarTerrainLodConfig::enabled().with_detail_mode(mode);
-            let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config, None);
+            let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config);
             let source = FarTerrainLodSourceKey::new(12345, config, false);
 
             assert_eq!(source.detail_mode, mode);
@@ -2628,7 +2576,6 @@ mod tests {
             ChunkPos::new(0, 0),
             0,
             FarTerrainLodConfig::enabled(),
-            None,
         );
 
         assert_eq!(far_lod_stabilized_level(key, 5, Some(1), 2), 1);
@@ -2649,7 +2596,6 @@ mod tests {
                 12345,
                 ChunkPos::new(0, 0),
                 0,
-                None,
                 None,
                 &mut compiler,
                 0,
@@ -2681,7 +2627,6 @@ mod tests {
                     ChunkPos::new(center_x, 0),
                     0,
                     None,
-                    None,
                     &mut compiler,
                     0,
                 )
@@ -2709,7 +2654,6 @@ mod tests {
                 ChunkPos::new(0, 0),
                 0,
                 None,
-                None,
                 &mut compiler,
                 0,
             )
@@ -2726,7 +2670,6 @@ mod tests {
                 12345,
                 ChunkPos::new(3, 0),
                 0,
-                None,
                 None,
                 &mut compiler,
                 0,
@@ -2847,7 +2790,6 @@ mod tests {
                 ChunkPos::new(0, 0),
                 5,
                 None,
-                None,
                 &mut compiler,
                 4,
             )
@@ -2861,7 +2803,7 @@ mod tests {
     #[test]
     fn far_terrain_lod_mesh_has_surface_ring_geometry() {
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
-        let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config, None);
+        let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config);
 
         let mesh = build_far_terrain_lod_tile(key, ChunkPos::new(1, 0));
 
@@ -2903,7 +2845,7 @@ mod tests {
     #[test]
     fn far_terrain_lod_chunk_patch_emits_flat_blocky_cell_caps() {
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
-        let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config, None);
+        let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config);
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
         let mut chunks = BTreeMap::new();
@@ -2993,49 +2935,25 @@ mod tests {
     }
 
     #[test]
-    fn far_terrain_lod_fills_chunks_missing_from_ready_terrain_set() {
-        let config = FarTerrainLodConfig::enabled()
-            .with_extra_radius_chunks(1)
-            .with_normal_terrain_culling(true);
+    fn far_terrain_lod_uses_stable_shell_and_bounded_guards() {
+        let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let center = ChunkPos::new(0, 0);
-        let missing_inside_render_distance = ChunkPos::new(1, 0);
-        let covered_inside_render_distance = ChunkPos::new(0, 0);
-        let first_outer_lod_chunk = ChunkPos::new(3, 0);
-        let mut ready_chunks = BTreeSet::new();
-        for z in -2..=2 {
-            for x in -2..=2 {
-                let pos = ChunkPos::new(x, z);
-                if pos != missing_inside_render_distance {
-                    ready_chunks.insert(pos);
-                }
-            }
-        }
-        let key = FarTerrainLodBuildKey::new(12345, center, 2, config, Some(&ready_chunks));
+        let key = FarTerrainLodBuildKey::new(12345, center, 2, config);
+        let positions = far_lod_chunk_positions(key);
+        let desired = positions.iter().copied().collect::<BTreeSet<_>>();
+        let guards = far_lod_prefetch_chunk_positions(key, &desired, usize::MAX);
 
-        let positions = far_lod_chunk_positions(key, Some(&ready_chunks));
-
-        assert!(positions.contains(&missing_inside_render_distance));
-        assert!(!positions.contains(&covered_inside_render_distance));
-        assert!(positions.contains(&first_outer_lod_chunk));
-    }
-
-    #[test]
-    fn disabling_normal_terrain_culling_keeps_covered_chunks_desired() {
-        let config = FarTerrainLodConfig::enabled()
-            .with_extra_radius_chunks(1)
-            .with_normal_terrain_culling(false);
-        let center = ChunkPos::new(0, 0);
-        let ready_chunks = (-2..=2)
-            .flat_map(|z| (-2..=2).map(move |x| ChunkPos::new(x, z)))
-            .collect::<BTreeSet<_>>();
-        let key = FarTerrainLodBuildKey::new(12345, center, 2, config, Some(&ready_chunks));
-
-        let positions = far_lod_chunk_positions(key, Some(&ready_chunks));
-
-        assert_eq!(positions.len(), 49);
-        assert!(positions.contains(&center));
+        assert_eq!(positions.len(), 40);
+        assert!(!positions.contains(&center));
+        assert!(!positions.contains(&ChunkPos::new(1, 0)));
         assert!(positions.contains(&ChunkPos::new(2, 0)));
         assert!(positions.contains(&ChunkPos::new(3, 0)));
+        assert_eq!(guards.len(), 80);
+        assert!(!guards.contains(&center));
+        assert!(guards.contains(&ChunkPos::new(1, 0)));
+        assert!(guards.contains(&ChunkPos::new(4, 0)));
+        assert!(guards.contains(&ChunkPos::new(5, 0)));
+        assert!(!guards.contains(&ChunkPos::new(6, 0)));
     }
 
     #[test]
@@ -3138,7 +3056,6 @@ mod tests {
                 ChunkPos::new(0, 0),
                 0,
                 None,
-                None,
                 &mut compiler,
                 3,
             )
@@ -3179,11 +3096,11 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert!(first_ready.len() > 8);
         cache
-            .advance_for_camera(config, 12345, moved_center, 0, None, None, &mut compiler, 0)
+            .advance_for_camera(config, 12345, moved_center, 0, None, &mut compiler, 0)
             .unwrap();
 
-        let moved_key = FarTerrainLodBuildKey::new(12345, moved_center, 0, config, None);
-        let moved_desired = far_lod_chunk_positions(moved_key, None)
+        let moved_key = FarTerrainLodBuildKey::new(12345, moved_center, 0, config);
+        let moved_desired = far_lod_chunk_positions(moved_key)
             .into_iter()
             .collect::<BTreeSet<_>>();
         let reused = first_ready
@@ -3217,7 +3134,6 @@ mod tests {
                     ChunkPos::new(0, 0),
                     0,
                     None,
-                    None,
                     &mut compiler,
                     64,
                 )
@@ -3238,7 +3154,6 @@ mod tests {
                 ChunkPos::new(1, 0),
                 0,
                 None,
-                None,
                 &mut compiler,
                 0,
             )
@@ -3249,6 +3164,43 @@ mod tests {
         assert!(cache.drawable_lod_tiles().any(|pos| pos == guarded));
         // A seam refresh may be queued after neighbors change level, but the
         // prefetched tile is already promoted and covers the chunk meanwhile.
+    }
+
+    #[test]
+    fn movement_guard_prioritizes_the_leading_edge() {
+        let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
+        let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
+
+        cache
+            .advance_for_camera(
+                config,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
+        cache
+            .advance_for_camera(
+                config,
+                12345,
+                ChunkPos::new(1, 0),
+                0,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
+
+        let key = cache.view_key.unwrap();
+        let leading = cache.prefetch_tiles[&ChunkPos::new(4, 0)];
+        let side = cache.prefetch_tiles[&ChunkPos::new(1, 3)];
+        let trailing = cache.prefetch_tiles[&ChunkPos::new(-2, 0)];
+        assert!(cache.build_priority(key, leading) < cache.build_priority(key, side));
+        assert!(cache.build_priority(key, side) < cache.build_priority(key, trailing));
     }
 
     #[test]
@@ -3264,7 +3216,6 @@ mod tests {
                 12345,
                 ChunkPos::new(0, 0),
                 0,
-                None,
                 None,
                 &mut compiler,
                 0,
@@ -3339,11 +3290,10 @@ mod tests {
             ChunkPos::new(0, 0),
             0,
             None,
-            None,
             3,
             &mut compiler,
         );
-        assert_eq!(first.target_tiles, 8);
+        assert_eq!(first.target_tiles, 9);
         assert_eq!(first.ready_tiles, 0);
         assert!(!first.is_complete());
 
@@ -3358,13 +3308,12 @@ mod tests {
                 ChunkPos::new(0, 0),
                 0,
                 None,
-                None,
                 3,
                 &mut compiler,
             );
         }
         assert!(coverage.is_complete());
-        assert_eq!(coverage.ready_tiles, 8);
+        assert_eq!(coverage.ready_tiles, 9);
         assert_eq!(cache.coverage(), coverage);
     }
 
@@ -3386,7 +3335,6 @@ mod tests {
                 ChunkPos::new(0, 0),
                 0,
                 None,
-                None,
                 24,
                 &mut compiler,
             );
@@ -3405,16 +3353,7 @@ mod tests {
         // The first live frame must reuse the prewarmed patches, not reset them:
         // prewarm and live share the same source key (seed + spacing + materials).
         cache
-            .advance_for_camera(
-                live,
-                12345,
-                ChunkPos::new(0, 0),
-                0,
-                None,
-                None,
-                &mut compiler,
-                0,
-            )
+            .advance_for_camera(live, 12345, ChunkPos::new(0, 0), 0, None, &mut compiler, 0)
             .unwrap();
         for pos in &prewarmed {
             assert!(
@@ -3444,7 +3383,7 @@ mod tests {
         assert!(!first_ready.is_empty());
 
         cache
-            .advance_for_camera(config, 12345, far_center, 0, None, None, &mut compiler, 0)
+            .advance_for_camera(config, 12345, far_center, 0, None, &mut compiler, 0)
             .unwrap();
 
         for pos in first_ready {
