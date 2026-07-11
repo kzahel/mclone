@@ -385,7 +385,9 @@ impl AndroidGpuState {
         };
         surface.configure(&device, &config);
 
-        let asset_source = load_asset_source().context("load Android game assets")?;
+        let asset_source = mclone_assets::SharedAssetSource::new(
+            load_asset_source().context("load Android game assets")?,
+        );
         let mesh_assets = load_textured_mesh_assets_from_source(&asset_source)
             .context("load Android textured mesh assets")?;
         let actor_assets = load_actor_texture_assets_from_asset_source(&asset_source)
@@ -402,6 +404,12 @@ impl AndroidGpuState {
             actor_assets.figures,
             &asset_source,
         )?;
+        if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
+            host.configure_asset_pack_sources(
+                registry,
+                mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+            )?;
+        }
         apply_startup_camera_options(&mut host, startup.camera);
         let mut ui = GameUiHost::new_ingame();
         ui.set_new_world_seed(startup.scene.seed);

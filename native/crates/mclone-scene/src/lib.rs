@@ -71,7 +71,7 @@ use mclone_app_runtime::{
     TraversalReadySectionCache, debug_block_palette_overlay, debug_hotbar_icons, elapsed_ms,
     micros_to_ms, set_player_appearance_command_for_ui_model,
 };
-use mclone_assets::{ActorFigureId, AssetSource};
+use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection, AssetSource};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{AudioOutputCapability, landing_playback_for_impact};
@@ -319,6 +319,8 @@ pub struct McloneSceneHost {
     asset_replacement_status: AssetReplacementStatus,
     last_asset_replacement_commit: Option<AssetReplacementCommitReport>,
     asset_pack_sources: Option<AssetPackSourceRegistry>,
+    external_asset_pack_preparation: bool,
+    pending_external_asset_pack_selection: Option<ExternalAssetPackSelection>,
     runtime: Option<SceneSessionRuntime>,
     local_startup: Option<SceneLocalStartup>,
     session: GameSessionCoordinator<ScenePendingSessionStart>,

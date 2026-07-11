@@ -17,6 +17,10 @@ Current status:
   Android app feeds those tokens into the shared startup parser.
 - AVD validation builds an APK for the selected device or AVD ABI, stages
   assets, verifies the app-rendered frame marker, and captures a screenshot.
+- APK builds regenerate and embed the authored and generated-fallback logical
+  packs. Startup atomically stages them into the app-owned `assets/packs/`
+  discovery root; the separately installed reference archive remains the
+  optional local/proprietary source.
 - Quest-flat validation has passed on an attached Quest 3 as a 2D panel in the
   headset compositor.
 - Durable flat Android startup timings are recorded in
@@ -45,6 +49,10 @@ toolchain instead of WSL `bash`.
 ```bash
 pnpm native:android:apk
 ```
+
+The build runs `pnpm assets:pack:first-party` and packages the staged catalog,
+pack sidecars, `mclone-authored.pbp`, and
+`mclone-generated-fallback.pbp` under APK `assets/first-party-packs/`.
 
 The default APK build targets `arm64-v8a`, which is the physical device/Quest
 path. Build a broadly compatible emulator APK explicitly with:

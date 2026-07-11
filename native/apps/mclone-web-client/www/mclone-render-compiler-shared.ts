@@ -24,6 +24,15 @@ export interface RenderSectionWorkerCompilerOptions {
   workerName?: string;
 }
 
+export interface RenderCompilerAssetSelection {
+  authoredPack: Uint8Array;
+  referencePack: Uint8Array;
+  fallbackPack: Uint8Array;
+  authoredEnabled: boolean;
+  referenceEnabled: boolean;
+  epoch: number;
+}
+
 // The SAB "doorbell" handed from Rust main-wasm to JS when a compile is armed for a frame
 // (see `WebSceneHost.syncCameraRenderFrame`). JS relays it to the worker and reads
 // byte counts back for diagnostics; it never decodes the packed section bytes itself.
@@ -136,7 +145,10 @@ export class RenderSectionWorkerCompiler {
   initTimeout: ReturnType<typeof setTimeout>;
   worker: Worker;
 
-  constructor(assetPack: Uint8Array, options: RenderSectionWorkerCompilerOptions = {}) {
+  constructor(
+    assetPack: Uint8Array | RenderCompilerAssetSelection,
+    options: RenderSectionWorkerCompilerOptions = {},
+  ) {
     const {
       workerUrl,
       bindgenJsUrl,
@@ -278,7 +290,34 @@ export class RenderSectionWorkerCompiler {
     this.initialize(assetPack);
   }
 
-  initialize(assetPack: Uint8Array): void {
+  initialize(assetPack: Uint8Array | RenderCompilerAssetSelection): void {
+    if (!(assetPack instanceof Uint8Array)) {
+      const authoredPack = assetPack.authoredPack.slice();
+      const referencePack = assetPack.referencePack.slice();
+      const fallbackPack = assetPack.fallbackPack.slice();
+      const byteLength = authoredPack.byteLength
+        + referencePack.byteLength
+        + fallbackPack.byteLength;
+      this.metrics.assetPackSendCount += 1;
+      this.metrics.workerAssetPackInitByteLength = byteLength;
+      this.metrics.transferredRequestByteCount += byteLength;
+      this.worker.postMessage(
+        {
+          kind: "init-render-compiler",
+          requestId: 0,
+          bindgenJsUrl: this.bindgenJsUrl.href,
+          bindgenWasmUrl: this.bindgenWasmUrl.href,
+          authoredPack,
+          referencePack,
+          fallbackPack,
+          authoredEnabled: assetPack.authoredEnabled,
+          referenceEnabled: assetPack.referenceEnabled,
+          assetEpoch: assetPack.epoch,
+        },
+        [authoredPack.buffer, referencePack.buffer, fallbackPack.buffer],
+      );
+      return;
+    }
     const initAssetPack = assetPack.slice();
     this.metrics.assetPackSendCount += 1;
     this.metrics.workerAssetPackInitByteLength = initAssetPack.byteLength;

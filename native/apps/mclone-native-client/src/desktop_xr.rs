@@ -810,6 +810,7 @@ fn create_mclone_terrain_state(
             runtime,
         )
     });
+    crate::desktop_scene_host::configure_desktop_asset_pack_sources(&mut state)?;
     Ok(state)
 }
 

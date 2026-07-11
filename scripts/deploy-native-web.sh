@@ -95,6 +95,7 @@ ensure_wasm_bindgen() {
 echo "==> Building native web assets"
 cd "$PROJECT_DIR"
 pnpm assets:pack
+pnpm assets:pack:first-party
 cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
 ensure_wasm_bindgen
 # --typescript emits mclone_web_client.d.ts alongside the JS glue (070 Stage 2). It does not

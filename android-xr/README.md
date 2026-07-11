@@ -23,12 +23,22 @@ frame, and logs `MCLONE_ANDROID_XR_ASSETS_READY`,
 through the shared XR scene runtime; use `--remote-addr` in the scripts to pass
 a launch-scoped TCP remote address through `mclone.startup.argv`.
 
+The APK also embeds the deterministic authored and generated-fallback logical
+packs. Startup stages them into the app-owned `assets/packs/` discovery root,
+and the shared scene host exposes the same Asset Packs catalog/actions as the
+other client lanes. The separately staged Minecraft archive remains the
+optional local/proprietary reference source.
+
 ## Build
 
 ```bash
 bash android-xr/build-apk.sh --debug
 bash android-xr/build-apk.sh --release
 ```
+
+Both build modes run `pnpm assets:pack:first-party` before Gradle packages the
+staged first-party catalog, sidecars, and packs under APK
+`assets/first-party-packs/`.
 
 On Windows, use Git Bash so the script sees the Windows Rust and Android SDK
 toolchains:

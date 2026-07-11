@@ -23,7 +23,6 @@ use std::sync::mpsc;
 use mclone_core::ChunkSnapshot;
 use mclone_mesh::RenderSectionKey;
 use mclone_mesh::TexturedRenderSectionBuildReport;
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_render_session::{
     build_render_sections_from_snapshots_with_biome_zoom_seed, render_section_keys_for_snapshot,
 };
@@ -33,6 +32,10 @@ use crate::render_asset_data::TexturedMeshAssets;
 pub const AUTHORED_FIRST_PARTY_PACK_ID: &str = "mclone-authored";
 pub const GENERATED_FALLBACK_PACK_ID: &str = "mclone-generated-fallback";
 pub const MINECRAFT_REFERENCE_PACK_ID: &str = "minecraft-1.17.1-reference";
+
+pub fn reference_asset_pack_selection() -> AssetPackSelection {
+    AssetPackSelection::new([AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID)])
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PreparedAssetCoverage {
@@ -85,7 +88,7 @@ impl PreparedSceneAssets {
         screen_effects: ScreenEffectTextureAssets,
         audio: PreparedAudioAssets,
     ) -> Self {
-        let selection = AssetPackSelection::new([AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID)]);
+        let selection = reference_asset_pack_selection();
         let mut provenance = AssetProvenanceReport::new(epoch, selection.clone());
         provenance.record(AssetProvenanceEntry {
             path: mclone_assets::AssetPath::new("assets/mclone/runtime-startup-source"),
@@ -173,12 +176,29 @@ impl AssetPackSourceRegistry {
                     generated_fallback_path.as_ref().display()
                 )
             })?;
-        let authored_descriptor = first_party_descriptor(
-            &authored,
-            AUTHORED_FIRST_PARTY_PACK_ID,
-            AssetPackOrigin::FirstParty,
-            10,
-        )?;
+        Self::from_packed_with_reference(Some(authored), generated, reference)
+    }
+
+    pub fn from_packed_with_reference(
+        authored: Option<PackedAssetSource>,
+        generated: PackedAssetSource,
+        reference: SharedAssetSource,
+    ) -> Result<Self> {
+        let authored_descriptor = match authored.as_ref() {
+            Some(authored) => first_party_descriptor(
+                authored,
+                AUTHORED_FIRST_PARTY_PACK_ID,
+                AssetPackOrigin::FirstParty,
+                10,
+            )?,
+            None => AssetPackDescriptor::new(
+                AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID),
+                "Mclone Original Assets",
+                AssetPackOrigin::FirstParty,
+                10,
+            )?
+            .unavailable("Not installed by this platform"),
+        };
         let reference_descriptor = AssetPackDescriptor::new(
             AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID),
             "Minecraft 1.17.1 Reference",
@@ -195,18 +215,39 @@ impl AssetPackSourceRegistry {
         let authored_id = authored_descriptor.id.clone();
         let reference_id = reference_descriptor.id.clone();
         let fallback_id = fallback_descriptor.id.clone();
+        let mut sources = vec![
+            (reference_id, reference),
+            (fallback_id, SharedAssetSource::new(generated)),
+        ];
+        if let Some(authored) = authored {
+            sources.push((authored_id, SharedAssetSource::new(authored)));
+        }
         Self::new(
             AssetPackCatalog::new([
                 authored_descriptor,
                 reference_descriptor,
                 fallback_descriptor,
             ])?,
-            [
-                (authored_id, SharedAssetSource::new(authored)),
-                (reference_id, reference),
-                (fallback_id, SharedAssetSource::new(generated)),
-            ],
+            sources,
         )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn discover_native_with_reference(reference: SharedAssetSource) -> Result<Option<Self>> {
+        let authored = discover_native_first_party_pack(
+            "MCLONE_ASSET_AUTHORED_PACK",
+            crate::render_assets::DEFAULT_AUTHORED_FIRST_PARTY_PACK_FILE,
+            false,
+        )?;
+        let Some(generated) = discover_native_first_party_pack(
+            "MCLONE_ASSET_FALLBACK_PACK",
+            crate::render_assets::DEFAULT_GENERATED_FALLBACK_PACK_FILE,
+            true,
+        )?
+        else {
+            return Ok(None);
+        };
+        Self::from_packed_with_reference(authored, generated, reference).map(Some)
     }
 
     pub fn catalog(&self) -> &AssetPackCatalog {
@@ -220,6 +261,49 @@ impl AssetPackSourceRegistry {
     ) -> Result<PreparedSceneAssets> {
         prepare_scene_asset_selection(epoch, &self.catalog, selection, &self.sources)
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn discover_native_first_party_pack(
+    environment_name: &str,
+    file_name: &str,
+    required_for_discovery: bool,
+) -> Result<Option<PackedAssetSource>> {
+    let explicit = std::env::var_os(environment_name).map(std::path::PathBuf::from);
+    let candidates = explicit.clone().map_or_else(
+        || crate::render_assets::first_party_pack_candidates(file_name),
+        |path| vec![path],
+    );
+    for path in &candidates {
+        if !path.is_file() {
+            continue;
+        }
+        let pack = PackedAssetSource::from_file(path)
+            .with_context(|| format!("failed to open asset pack {}", path.display()))?;
+        log::info!(
+            "discovered logical asset pack {} at {}",
+            pack.manifest()
+                .pack_id
+                .as_ref()
+                .map_or(file_name, AssetPackId::as_str),
+            path.display()
+        );
+        return Ok(Some(pack));
+    }
+    if explicit.is_some() {
+        bail!(
+            "{environment_name} does not name a readable file: {}",
+            candidates
+                .first()
+                .map_or_else(|| "<empty>".to_owned(), |path| path.display().to_string())
+        );
+    }
+    if required_for_discovery {
+        log::info!(
+            "generated fallback pack is not installed; Asset Packs Apply remains unavailable"
+        );
+    }
+    Ok(None)
 }
 
 pub enum AssetPreparePoll<T> {
@@ -440,6 +524,38 @@ pub struct PreparedAssetReplacement {
     pub sections: TexturedRenderSectionBuildReport,
 }
 
+impl PreparedAssetReplacement {
+    pub fn build(
+        assets: PreparedSceneAssets,
+        mut snapshots: Vec<ChunkSnapshot>,
+        target_sections: std::collections::BTreeSet<RenderSectionKey>,
+        biome_zoom_seed: Option<i64>,
+    ) -> Result<Self> {
+        snapshots.sort_by_key(|snapshot| snapshot.pos);
+        let compile_target_sections = if target_sections.is_empty() {
+            snapshots
+                .iter()
+                .flat_map(render_section_keys_for_snapshot)
+                .collect()
+        } else {
+            target_sections.clone()
+        };
+        let sections = build_render_sections_from_snapshots_with_biome_zoom_seed(
+            &snapshots,
+            &assets.mesh.catalog,
+            &compile_target_sections,
+            biome_zoom_seed,
+        )
+        .context("failed to compile replacement render sections")?;
+        Ok(Self {
+            assets,
+            source_snapshots: snapshots,
+            target_sections,
+            sections,
+        })
+    }
+}
+
 pub struct PreparedAssetReplacementRequest {
     epoch: u64,
     backend: PreparedAssetReplacementRequestBackend,
@@ -465,29 +581,12 @@ impl PreparedAssetReplacementRequest {
         std::thread::Builder::new()
             .name(format!("mclone-asset-mesh-prepare-{epoch}"))
             .spawn(move || {
-                let result = (|| {
-                    let compile_target_sections = if target_sections.is_empty() {
-                        snapshots
-                            .iter()
-                            .flat_map(render_section_keys_for_snapshot)
-                            .collect()
-                    } else {
-                        target_sections.clone()
-                    };
-                    let sections = build_render_sections_from_snapshots_with_biome_zoom_seed(
-                        &snapshots,
-                        &assets.mesh.catalog,
-                        &compile_target_sections,
-                        biome_zoom_seed,
-                    )
-                    .context("failed to compile replacement render sections")?;
-                    Ok(PreparedAssetReplacement {
-                        assets,
-                        source_snapshots: snapshots,
-                        target_sections,
-                        sections,
-                    })
-                })();
+                let result = PreparedAssetReplacement::build(
+                    assets,
+                    snapshots,
+                    target_sections,
+                    biome_zoom_seed,
+                );
                 let _ = sender.send(result);
             })
             .context("failed to spawn replacement mesh preparation worker")?;

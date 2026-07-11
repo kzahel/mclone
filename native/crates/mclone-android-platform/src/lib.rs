@@ -8,6 +8,8 @@ use android_activity::AndroidApp;
 pub const ANDROID_ASSET_ROOT_ENV: &str = "MCLONE_ANDROID_ASSET_ROOT";
 pub const ANDROID_WORLD_ROOT_DIR_NAME: &str = "worlds";
 pub const ANDROID_REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
+pub const ANDROID_BUNDLED_AUTHORED_PACK: &str = "first-party-packs/mclone-authored.pbp";
+pub const ANDROID_BUNDLED_FALLBACK_PACK: &str = "first-party-packs/mclone-generated-fallback.pbp";
 
 pub fn normalize_android_legacy_remote_addr(value: &str) -> Option<String> {
     let value = value.trim();
@@ -53,6 +55,44 @@ pub fn android_app_data_asset_root(
         app.external_data_path(),
         preference,
     )
+}
+
+#[cfg(target_os = "android")]
+pub fn stage_android_bundled_first_party_packs(
+    app: &AndroidApp,
+    asset_root: &std::path::Path,
+) -> std::io::Result<Vec<PathBuf>> {
+    use std::ffi::CString;
+    use std::fs::File;
+    use std::io;
+
+    let output_root = asset_root.join("assets/packs");
+    std::fs::create_dir_all(&output_root)?;
+    let manager = app.asset_manager();
+    let mut staged = Vec::new();
+    for (bundled, file_name) in [
+        (ANDROID_BUNDLED_AUTHORED_PACK, "mclone-authored.pbp"),
+        (
+            ANDROID_BUNDLED_FALLBACK_PACK,
+            "mclone-generated-fallback.pbp",
+        ),
+    ] {
+        let bundled_name = CString::new(bundled).expect("bundled asset path contains no nul");
+        let mut source = manager.open(&bundled_name).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("APK is missing bundled asset {bundled}"),
+            )
+        })?;
+        let destination = output_root.join(file_name);
+        let temporary = output_root.join(format!(".{file_name}.tmp"));
+        let mut file = File::create(&temporary)?;
+        io::copy(&mut source, &mut file)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, &destination)?;
+        staged.push(destination);
+    }
+    Ok(staged)
 }
 
 pub fn android_world_root_from_app_data_paths(

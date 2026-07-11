@@ -89,6 +89,7 @@ CARGO_NDK_PLATFORM="$(mclone_gradle_min_sdk "$SCRIPT_DIR/app/build.gradle.kts")"
 CARGO_NDK_PLATFORM="${CARGO_NDK_PLATFORM:-28}"
 mclone_android_build_preflight "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION"
 mclone_export_android_build_env "$ANDROID_SDK_HOME" "$NDK_HOME"
+mclone_prepare_first_party_asset_packs
 
 CARGO_FEATURE_ARGS=()
 if [[ -n "$CARGO_FEATURES" ]]; then

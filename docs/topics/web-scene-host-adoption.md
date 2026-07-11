@@ -7,8 +7,9 @@ baselines, portable scene prerequisites, neutral scene-session shell, browser
 service adapters, direct-host proof, and atomic production cutover. Local
 worker, IndexedDB local-world, and remote WebSocket modes now use one
 `McloneSceneHost`; `WebChunkRenderSession` and the proof-only path are gone.
-Return to Tactical 169 Slice 5 for platform asset-pack adoption, then resume
-Tactical 170 Slice 6 for parity audit, durable documentation, and closeout.
+Tactical 169 Slice 5 has now adopted logical packs and transactional compiler
+epochs through this host. Continue Tactical 169 Slice 6, then resume Tactical
+170 Slice 6 for parity audit, durable documentation, and closeout.
 
 ## Scope
 
@@ -70,9 +71,9 @@ the native display clients:
   `WebRenderSectionCompiler`, shared-memory rings, bounded pools, ABI locks,
   transport metrics, and fallback probes retain their prior topology.
 - The active prepared asset set stays in the long-lived host across session
-  replacement. Current production still uses the one existing packed
-  6,985-file payload at epoch 0; logical pack discovery/selection and compiler
-  reinitialization remain Tactical 169 Slice 5 work.
+  replacement. Production now fetches reference, authored, and fallback packs,
+  projects their catalog into the shared host, and replaces the selected scene
+  resources plus resident compiler transactionally at one asset epoch.
 - Browser audio and teleport preview remain explicit absent capabilities. The
   reason-bearing web feature profile is preserved for Slice 6 audit.
 
@@ -321,9 +322,10 @@ browser host or cutover toggle.
   Android captures were also inspected. The Quest APK rebuilt; no headset was
   visible after restarting `adb`, so the current slice does not claim a fresh
   attached-device result. No capture was committed.
-- The long-lived host retains the current prepared asset epoch 0 across
-  session replacements. Browser pack discovery/selection and transactional
-  compiler reinitialization intentionally remain Tactical 169 Slice 5 work.
+- At the production cutover, the long-lived host retained prepared asset epoch
+  0 across session replacements. Browser pack discovery/selection and
+  transactional compiler reinitialization were intentionally deferred to
+  Tactical 169 Slice 5 and have since landed through that host.
 
 ## Locked Decisions
 
@@ -444,10 +446,12 @@ separately reviewable.
 - **Slice 2 native regression risk:** the platform-matrix hold is closed.
   Desktop/native captures stayed byte-identical, flat Android rendered, and an
   attached Quest 3 reached a playable local world with no app-fatal marker.
-- **Asset-pack work:** the production host retains one prepared asset epoch and
-  does not add a competing resource owner. Tactical 169 Slice 5 must now add
-  browser pack discovery/byte staging and transactional resident-compiler
-  reinitialization through that landed shared-host boundary.
+- **Asset-pack work:** resolved for platform adoption in Tactical 169 Slice 5.
+  Browser fetch/worker lifecycle stays in `WebFrameDriver`, while catalog,
+  selection, preparation, replacement, and commit policy stay in shared Rust.
+  The current synchronous main-Wasm CPU preparation fallback should move to a
+  dedicated worker after timing evidence; it does not add a competing policy or
+  active-resource owner.
 
 ## Validation Contract
 
@@ -508,12 +512,8 @@ Primary code:
 
 ## Recommended Next Work
 
-1. Return to Tactical 169 Slice 5 and adopt the shared logical asset-pack
-catalog/selection on the supported platform lanes. On web, fetch/stage pack
-descriptors and bytes and reinitialize the resident compiler transactionally
-through the landed `McloneSceneHost` asset epoch; do not add policy back to
-`WebFrameDriver`.
-2. After Tactical 169 records its platform evidence, resume Tactical 170 Slice
-6 for the browser feature-profile audit, obsolete-name/cfg cleanup, default
-purity coverage, architecture/platform/web documentation, and final
-cross-platform closeout.
+1. Complete Tactical 169 Slice 6 persistence, strict provenance audit,
+replacement measurement, and standalone-pack documentation closeout.
+2. Resume Tactical 170 Slice 6 for the browser feature-profile audit,
+obsolete-name/cfg cleanup, default purity coverage, architecture/platform/web
+documentation, and final cross-platform closeout.

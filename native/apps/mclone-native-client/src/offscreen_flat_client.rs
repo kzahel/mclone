@@ -488,11 +488,6 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let asset_replacement_smoke = asset_replacement_smoke_paths()?;
     let asset_pack_ui_sources = asset_pack_ui_source_paths()?;
     let asset_pack_ui_smoke = asset_pack_ui_smoke_enabled();
-    if asset_pack_ui_smoke && asset_pack_ui_sources.is_none() {
-        bail!(
-            "MCLONE_ASSET_PACK_UI_SMOKE requires MCLONE_ASSET_PACK_UI_AUTHORED and MCLONE_ASSET_PACK_UI_FALLBACK"
-        );
-    }
     let assets = WindowSceneAssets::load()?;
     let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
@@ -529,6 +524,12 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 &asset_source,
                 startup_camera,
             )?;
+            if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
+                host.driver.host_mut().configure_asset_pack_sources(
+                    registry,
+                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                )?;
+            }
             if let Some((authored, fallback)) = &asset_pack_ui_sources {
                 let registry = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::from_files_with_reference(
                     authored,
@@ -537,9 +538,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 )?;
                 host.driver.host_mut().configure_asset_pack_sources(
                     registry,
-                    mclone_assets::AssetPackSelection::new([mclone_assets::AssetPackId::new(
-                        mclone_app_runtime::prepared_assets::MINECRAFT_REFERENCE_PACK_ID,
-                    )]),
+                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
                 )?;
             }
             host.start_scene_with_wait_policy(device, queue, startup_wait)?;

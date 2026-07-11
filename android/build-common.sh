@@ -9,6 +9,12 @@ mclone_build_warn() {
     echo "warning: $*" >&2
 }
 
+mclone_prepare_first_party_asset_packs() {
+    command -v pnpm >/dev/null 2>&1 || mclone_build_die "pnpm is required to build bundled first-party asset packs"
+    echo "Building deterministic first-party asset packs for Android packaging..."
+    (cd "$REPO_ROOT" && pnpm --silent assets:pack:first-party)
+}
+
 mclone_windows_local_android_sdk() {
     if [[ -n "${LOCALAPPDATA:-}" && "$(uname -s 2>/dev/null || true)" =~ MINGW|MSYS|CYGWIN ]] && command -v cygpath >/dev/null 2>&1; then
         cygpath -u "$LOCALAPPDATA/Android/Sdk"

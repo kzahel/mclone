@@ -33,6 +33,8 @@ const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js",
 const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
 const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
+const AUTHORED_ASSET_PACK_URL = new URL("/first-party-packs/mclone-authored.pbp", import.meta.url);
+const FALLBACK_ASSET_PACK_URL = new URL("/first-party-packs/mclone-generated-fallback.pbp", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 const SCENE_ADAPTER_CONTRACT_EXPORT = "mclone_web_scene_adapter_contract_report";
 const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
@@ -374,7 +376,11 @@ async function renderCanvas() {
       };
     }
 
-    const assetPack = await fetchAssetPack(ASSET_PACK_URL);
+    const [assetPack, authoredAssetPack, fallbackAssetPack] = await Promise.all([
+      fetchAssetPack(ASSET_PACK_URL),
+      fetchAssetPack(AUTHORED_ASSET_PACK_URL),
+      fetchAssetPack(FALLBACK_ASSET_PACK_URL),
+    ]);
     const compiler = new RenderSectionWorkerCompiler(assetPack, {
       workerUrl: RENDER_COMPILER_WORKER_URL,
       bindgenJsUrl: BINDGEN_JS_URL,
@@ -385,6 +391,8 @@ async function renderCanvas() {
     const session = await module.mclone_web_create_worker_scene_host_with_startup(
       canvas,
       assetPack,
+      authoredAssetPack,
+      fallbackAssetPack,
       12345n,
       0,
       0,
@@ -572,9 +580,15 @@ async function runIndexedDbPersistenceSmoke(module, assetPack, canvas, compilerM
 async function createIndexedDbSmokeSession(
   module, assetPack, canvas, worldId, clearWorldStorage, compilerWake,
 ) {
+  const [authoredAssetPack, fallbackAssetPack] = await Promise.all([
+    fetchAssetPack(AUTHORED_ASSET_PACK_URL),
+    fetchAssetPack(FALLBACK_ASSET_PACK_URL),
+  ]);
   return await module.mclone_web_create_worker_scene_host_with_startup(
     canvas,
     assetPack,
+    authoredAssetPack,
+    fallbackAssetPack,
     424242n,
     0,
     0,

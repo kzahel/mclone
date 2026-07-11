@@ -59,6 +59,7 @@ mod android {
     use mclone_android_platform::{
         ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, android_app_data_asset_root,
         android_app_data_world_root, normalize_android_legacy_remote_addr,
+        stage_android_bundled_first_party_packs,
     };
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
@@ -206,13 +207,14 @@ mod android {
     }
 
     #[allow(unsafe_code)]
-    fn configure_android_asset_root(app: &AndroidApp) {
+    fn configure_android_asset_root(app: &AndroidApp) -> Option<std::path::PathBuf> {
         if let Some(existing) = std::env::var_os(ANDROID_ASSET_ROOT_ENV) {
+            let path = std::path::PathBuf::from(existing);
             log::info!(
                 "Android XR preserving {ANDROID_ASSET_ROOT_ENV}={}",
-                std::path::PathBuf::from(existing).display()
+                path.display()
             );
-            return;
+            return Some(path);
         }
 
         let Some(path) =
@@ -221,7 +223,7 @@ mod android {
             log::warn!(
                 "Android XR could not resolve an app data path for {ANDROID_ASSET_ROOT_ENV}"
             );
-            return;
+            return None;
         };
 
         unsafe {
@@ -231,6 +233,7 @@ mod android {
             "Android XR {ANDROID_ASSET_ROOT_ENV} configured from app data path: {}",
             path.display()
         );
+        Some(path)
     }
 
     struct AndroidXrRuntimeAssets {
@@ -1145,7 +1148,15 @@ mod android {
     #[unsafe(no_mangle)]
     fn android_main(app: AndroidApp) {
         init_android_logger();
-        configure_android_asset_root(&app);
+        if let Some(asset_root) = configure_android_asset_root(&app)
+            && let Err(error) = stage_android_bundled_first_party_packs(&app, &asset_root)
+        {
+            report_android_xr_failure(
+                &app,
+                &anyhow::anyhow!("stage bundled first-party asset packs: {error}"),
+            );
+            return;
+        }
         log::info!("Mclone Android XR package starting");
 
         let startup_argv = match android_startup_argv_json(&app) {
@@ -2071,6 +2082,16 @@ mod android {
                 startup_view_pose,
             )?
         };
+        if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(
+            mclone_assets::SharedAssetSource::new(
+                load_asset_source().context("reload Android XR reference source for asset-pack discovery")?,
+            ),
+        )? {
+            terrain.configure_asset_pack_sources(
+                registry,
+                mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+            )?;
+        }
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
             Ok(audio) => Some(audio),
             Err(error) => {

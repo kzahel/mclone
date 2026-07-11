@@ -4,11 +4,15 @@
 
 use anyhow::{Context, Result};
 use mclone_app_runtime::native_service_assembly::NativeSessionServices;
+use mclone_app_runtime::prepared_assets::{
+    AssetPackSourceRegistry, reference_asset_pack_selection,
+};
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_scene::{McloneSceneHost, McloneSceneHostOptions, XrStartupViewPose};
 
 use crate::cli::SceneOptions;
+use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneAssets, native_window_scene_runtime_with_mesh_assets};
 
 pub(crate) type DesktopSceneHost = McloneSceneHost;
@@ -109,7 +113,18 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
             runtime,
         )
     });
+    configure_desktop_asset_pack_sources(&mut host)?;
     Ok(host)
+}
+
+pub(crate) fn configure_desktop_asset_pack_sources(host: &mut McloneSceneHost) -> Result<()> {
+    let reference = mclone_assets::SharedAssetSource::new(
+        load_asset_source().context("reload native reference source for asset-pack discovery")?,
+    );
+    let Some(registry) = AssetPackSourceRegistry::discover_native_with_reference(reference)? else {
+        return Ok(());
+    };
+    host.configure_asset_pack_sources(registry, reference_asset_pack_selection())
 }
 
 pub(crate) fn scene_host_options_from_desktop(

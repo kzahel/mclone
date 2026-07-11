@@ -12,6 +12,9 @@ use glam::Vec3;
 use mclone_app_runtime::chunk_tracking_radius_for_render_distance;
 use mclone_app_runtime::client_experience::web_client_experience_profile;
 use mclone_app_runtime::platform_operation::{PlatformOperationCompletion, PlatformOperationToken};
+use mclone_app_runtime::prepared_assets::{
+    AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
+};
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionRuntimeKind,
     SessionStartRequest,
@@ -29,8 +32,9 @@ use mclone_input::{
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_scene::{
-    ExternalSceneSessionStart, HostEffects, McloneSceneHost, McloneSceneHostOptions,
-    MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
+    AssetReplacementStatus, ExternalSceneSessionStart, HostEffects, McloneSceneHost,
+    McloneSceneHostOptions, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation,
+    MonoWorldActionStatus,
 };
 use mclone_ui::{
     GameHelpParent, GameOptionsParent, GameScreen, GameTouchSettings, GameUiAction, GuiScale,
@@ -42,7 +46,8 @@ use web_sys::HtmlCanvasElement;
 
 use crate::web_canvas::{
     WebCanvasContext, WebSceneRuntimeService, decode_world_catalog_response, gui_key_from_label,
-    prepare_web_scene_assets_from_pack, startup_render_options, ui_action_label,
+    prepare_web_scene_assets_from_pack, prepare_web_scene_assets_from_selection,
+    startup_render_options, ui_action_label, web_asset_pack_catalog,
 };
 use crate::web_scene_protocol::{
     WebSceneFrameAdmission, WebSceneFrameDriverPolicy, WebSceneFrameState,
@@ -135,6 +140,7 @@ pub struct WebSceneHost {
     shutdown_complete: bool,
     compiler_wake: js_sys::Function,
     asset_pack_file_count: usize,
+    pending_asset_pack_file_count: Option<(u64, usize)>,
     status_overlay: StatusOverlay,
     touch_look_sensitivity: f32,
     touch_settings_available: bool,
@@ -303,6 +309,20 @@ impl WebSceneHost {
                 .max_resume_drop_backlog
                 .max(summary.upload.poll_client_deferred_chunk_drop_backlog_items);
             self.resume_frames_remaining -= 1;
+        }
+        if let Some((epoch, file_count)) = self.pending_asset_pack_file_count {
+            match host.asset_replacement_status() {
+                AssetReplacementStatus::Active {
+                    epoch: active_epoch,
+                } if *active_epoch == epoch => {
+                    self.asset_pack_file_count = file_count;
+                    self.pending_asset_pack_file_count = None;
+                }
+                AssetReplacementStatus::Failed { .. } => {
+                    self.pending_asset_pack_file_count = None;
+                }
+                _ => {}
+            }
         }
         self.report(Some(&summary), true, delta_seconds, first_after_resume)
             .map_err(JsValue::from)
@@ -962,13 +982,80 @@ impl WebSceneHost {
     pub async fn shutdown_async(&mut self) -> Result<JsValue, JsValue> {
         self.shutdown()
     }
+
+    #[wasm_bindgen(js_name = completeAssetPackSelection)]
+    pub async fn complete_asset_pack_selection(
+        &mut self,
+        authored_pack_bytes: js_sys::Uint8Array,
+        reference_pack_bytes: js_sys::Uint8Array,
+        fallback_pack_bytes: js_sys::Uint8Array,
+    ) -> Result<JsValue, JsValue> {
+        let pending = self
+            .host_ref()?
+            .pending_external_asset_pack_selection()
+            .cloned()
+            .ok_or_else(|| JsValue::from_str("no browser asset-pack selection is pending"))?;
+        let authored_enabled = pending
+            .selection
+            .is_enabled(&mclone_assets::AssetPackId::new(
+                AUTHORED_FIRST_PARTY_PACK_ID,
+            ));
+        let reference_enabled = pending
+            .selection
+            .is_enabled(&mclone_assets::AssetPackId::new(
+                MINECRAFT_REFERENCE_PACK_ID,
+            ));
+        let authored = authored_pack_bytes.to_vec();
+        let reference = reference_pack_bytes.to_vec();
+        let fallback = fallback_pack_bytes.to_vec();
+        let selected_file_count = [
+            authored_enabled.then_some(authored.as_slice()),
+            reference_enabled.then_some(reference.as_slice()),
+            Some(fallback.as_slice()),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|bytes| PackedAssetSource::from_bytes(bytes.to_vec()).map(|pack| pack.file_count()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| JsValue::from_str(&format!("failed to inspect selected packs: {error}")))?
+        .into_iter()
+        .sum();
+        let assets = match prepare_web_scene_assets_from_selection(
+            pending.epoch,
+            authored,
+            reference,
+            fallback,
+            authored_enabled,
+            reference_enabled,
+        ) {
+            Ok(assets) => assets,
+            Err(error) => {
+                self.host_mut()?
+                    .fail_external_asset_pack_preparation(error.clone());
+                return Err(JsValue::from_str(&error));
+            }
+        };
+        if let Err(error) = self
+            .host_mut()?
+            .complete_external_asset_pack_preparation(assets)
+        {
+            let message = format!("failed to complete browser asset replacement: {error:#}");
+            self.host_mut()?
+                .fail_external_asset_pack_preparation(message.clone());
+            return Err(JsValue::from_str(&message));
+        }
+        self.pending_asset_pack_file_count = Some((pending.epoch, selected_file_count));
+        self.ui_report(false, None).map_err(JsValue::from)
+    }
 }
 
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub async fn mclone_web_create_worker_scene_host_with_startup(
     canvas: HtmlCanvasElement,
-    asset_pack_bytes: js_sys::Uint8Array,
+    reference_pack_bytes: js_sys::Uint8Array,
+    authored_pack_bytes: js_sys::Uint8Array,
+    fallback_pack_bytes: js_sys::Uint8Array,
     seed: i64,
     initial_center_x: i32,
     initial_center_z: i32,
@@ -1029,7 +1116,9 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
     };
     create_scene_host(
         canvas,
-        asset_pack_bytes.to_vec(),
+        reference_pack_bytes.to_vec(),
+        authored_pack_bytes.to_vec(),
+        fallback_pack_bytes.to_vec(),
         runtime,
         descriptor,
         scene,
@@ -1048,7 +1137,9 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
 #[allow(clippy::too_many_arguments)]
 pub async fn mclone_web_create_remote_scene_host_with_startup(
     canvas: HtmlCanvasElement,
-    asset_pack_bytes: js_sys::Uint8Array,
+    reference_pack_bytes: js_sys::Uint8Array,
+    authored_pack_bytes: js_sys::Uint8Array,
+    fallback_pack_bytes: js_sys::Uint8Array,
     websocket_url: String,
     initial_center_x: i32,
     initial_center_z: i32,
@@ -1086,7 +1177,9 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
     };
     create_scene_host(
         canvas,
-        asset_pack_bytes.to_vec(),
+        reference_pack_bytes.to_vec(),
+        authored_pack_bytes.to_vec(),
+        fallback_pack_bytes.to_vec(),
         runtime,
         descriptor,
         scene,
@@ -1104,7 +1197,9 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
 #[allow(clippy::too_many_arguments)]
 async fn create_scene_host(
     canvas: HtmlCanvasElement,
-    asset_pack_bytes: Vec<u8>,
+    reference_pack_bytes: Vec<u8>,
+    authored_pack_bytes: Vec<u8>,
+    fallback_pack_bytes: Vec<u8>,
     runtime: crate::WebRuntime,
     descriptor: ActiveSessionDescriptor,
     scene: McloneSceneHostOptions,
@@ -1114,11 +1209,17 @@ async fn create_scene_host(
     let render_color_profile = render_options.color_profile.as_str().to_owned();
     let initial_center = scene.center();
     let initial_speed = f64::from(scene.movement_speed_multiplier);
-    let asset_pack_file_count = PackedAssetSource::from_bytes(asset_pack_bytes.clone())
+    let asset_pack_file_count = PackedAssetSource::from_bytes(reference_pack_bytes.clone())
         .map_err(|error| JsValue::from_str(&format!("invalid browser asset pack: {error}")))?
         .file_count();
+    let catalog = web_asset_pack_catalog(
+        authored_pack_bytes,
+        reference_pack_bytes.clone(),
+        fallback_pack_bytes,
+    )
+    .map_err(JsValue::from)?;
     let active_assets =
-        prepare_web_scene_assets_from_pack(asset_pack_bytes).map_err(JsValue::from)?;
+        prepare_web_scene_assets_from_pack(reference_pack_bytes).map_err(JsValue::from)?;
     let context = WebCanvasContext::new_with_color_profile(canvas, render_options.color_profile)
         .await
         .map_err(JsValue::from)?;
@@ -1165,6 +1266,11 @@ async fn create_scene_host(
     .map_err(js_error)?;
     host.set_mono_ui_context(MonoUiContext::default());
     host.set_mono_ui_screen(None);
+    host.configure_external_asset_pack_catalog(
+        catalog,
+        mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+    )
+    .map_err(js_error)?;
     host.set_mono_player_camera(
         Vec3d::new(
             f64::from(initial_center.x) * 16.0 + 8.0,
@@ -1200,6 +1306,7 @@ async fn create_scene_host(
         shutdown_complete: false,
         compiler_wake,
         asset_pack_file_count,
+        pending_asset_pack_file_count: None,
         status_overlay: StatusOverlay::hidden(),
         touch_look_sensitivity: 1.0,
         touch_settings_available: false,
@@ -1629,6 +1736,43 @@ impl WebSceneHost {
                 "activeAssetEpoch",
                 host.active_asset_epoch() as f64,
             )?;
+            match host.asset_replacement_status() {
+                AssetReplacementStatus::Active { .. } => {
+                    report_set_string(&object, "assetReplacementState", "active")?;
+                }
+                AssetReplacementStatus::PreparingAssets { .. } => {
+                    report_set_string(&object, "assetReplacementState", "preparing-assets")?;
+                }
+                AssetReplacementStatus::PreparingMeshes { .. } => {
+                    report_set_string(&object, "assetReplacementState", "preparing-meshes")?;
+                }
+                AssetReplacementStatus::Failed { message, .. } => {
+                    report_set_string(&object, "assetReplacementState", "failed")?;
+                    report_set_string(&object, "assetReplacementError", message)?;
+                }
+            }
+            if let Some(pending) = host.pending_external_asset_pack_selection() {
+                report_set_bool(&object, "assetPackRequest", true)?;
+                report_set_number(&object, "assetPackRequestEpoch", pending.epoch as f64)?;
+                report_set_bool(
+                    &object,
+                    "assetPackAuthoredEnabled",
+                    pending
+                        .selection
+                        .is_enabled(&mclone_assets::AssetPackId::new(
+                            AUTHORED_FIRST_PARTY_PACK_ID,
+                        )),
+                )?;
+                report_set_bool(
+                    &object,
+                    "assetPackReferenceEnabled",
+                    pending
+                        .selection
+                        .is_enabled(&mclone_assets::AssetPackId::new(
+                            MINECRAFT_REFERENCE_PACK_ID,
+                        )),
+                )?;
+            }
             let ui_state = host.mono_ui_render_state();
             let world_catalog = ui_state.world_catalog;
             report_set_bool(&object, "uiActive", host.mono_ui_is_active())?;

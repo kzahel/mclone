@@ -18,6 +18,11 @@ pnpm native:web:serve
 # Validate the interactive browser app with Playwright screenshots in /tmp.
 pnpm native:web:app-smoke
 
+# Apply the authored-plus-generated logical selection through the shared host,
+# reinitialize the resident compiler at the same epoch, and capture the native
+# Asset Packs screen under /tmp.
+pnpm native:web:asset-pack-smoke
+
 # Validate native Rust menu-driven world catalog create/open/delete over IndexedDB.
 pnpm native:web:catalog-smoke
 
@@ -38,6 +43,12 @@ The deploy path packages:
 - `native/apps/mclone-web-client/www`
 - wasm-bindgen output under `/pkg/`
 - `reference/minecraft-1.17.1/extracted.zip`
+- deterministic authored/fallback packs and sidecars under
+  `/first-party-packs/`
+
+The bundle command regenerates the two first-party packs before staging them.
+The browser fetches all three payloads, while shared Rust owns selection order,
+fallback policy, preparation, and the transactional asset epoch.
 
 The Cloudflare Worker in [`../worker/index.js`](../worker/index.js) serves the bundle with COOP/COEP/CORP headers so browser worker and `SharedArrayBuffer` paths can run. Wrangler must be authenticated for the Cloudflare account before deploy.
 

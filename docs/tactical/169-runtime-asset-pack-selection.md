@@ -1,8 +1,9 @@
 # 169: Runtime Asset Pack Selection
 
-Status: active implementation parent 2026-07-11; Slices 0-4 landed. Tactical
-170 Slices 0-5 completed the shared-host browser prerequisite. Resume this
-tactical at Slice 5 platform discovery/adoption; do not skip to Slice 6.
+Status: active implementation parent 2026-07-11; Slices 0-5 landed. Platform
+discovery/adoption now uses the shared catalog and epoch contract on every
+supported client lane. Resume this tactical at Slice 6 persistence, audit, and
+closeout.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
@@ -584,7 +585,7 @@ that Tactical 170 deletes. Non-web discovery/staging work from Slice 5 may
 still proceed first when it is the immediate platform priority, but an agent
 proposing the next slice must call out this handoff explicitly.
 
-### Slice 5 - Platform Discovery and Adoption
+### Slice 5 - Platform Discovery and Adoption — DONE (2026-07-11)
 
 This is a cross-tactical adoption slice, not a requirement to modify every
 current platform host in place. Native, Android, XR, and offscreen adoption may
@@ -599,30 +600,108 @@ with Tactical 170:
   shared-host cutover, then return here to record the platform evidence and
   finish this tactical's acceptance/audit work.
 
-- [ ] Desktop: project local loose/packed discovery into the shared catalog;
+- [x] Desktop: project local loose/packed discovery into the shared catalog;
   preserve environment variables as launch/CI defaults rather than live UI
   policy.
-- [ ] Flat Android and Android XR: stage both first-party packs in packaging,
+- [x] Flat Android and Android XR: stage both first-party packs in packaging,
   discover optional local reference content, and use the shared catalog/action
   path.
-- [ ] Desktop XR: use the same shared scene/UI state with no app-local pack
+- [x] Desktop XR: use the same shared scene/UI state with no app-local pack
   selector.
-- [ ] Web, coordinated with Tactical 170: fetch/stage pack descriptors and
+- [x] Web, coordinated with Tactical 170: fetch/stage pack descriptors and
   bytes, compose/reinitialize its resident compiler worker under the shared
   selection/epoch contract, and show the same native-rendered UI screen through
   `McloneSceneHost`; do not extend the old production orchestrator.
-- [ ] Offscreen and synthetic-stereo: add programmatic selection inputs for
+- [x] Offscreen and synthetic-stereo: add programmatic selection inputs for
   deterministic validation without inventing a separate product policy.
-- [ ] Update the platform parity capability/exception ledger if any host cannot
+- [x] Update the platform parity capability/exception ledger if any host cannot
   yet apply a selection; do not silently omit the screen/action.
 
 Handoff status (2026-07-11): Tactical 170 Slice 5 atomically moved production
 local worker, IndexedDB local-world, and remote WebSocket modes onto one
 `McloneSceneHost` and deleted `WebChunkRenderSession` plus the proof-only path.
 The host retains the existing prepared epoch 0 across session replacements;
-no competing asset epoch or browser-local selection policy was added. The web
-checkbox above is still open: pack descriptor/byte staging and transactional
-resident-compiler reinitialization are the work to perform here.
+no competing asset epoch or browser-local selection policy was added.
+
+Landed evidence (2026-07-11):
+
+- `AssetPackSourceRegistry::discover_native_with_reference` projects the two
+  logical first-party packs plus the optional local reference source into the
+  shared catalog. Launch/CI environment paths remain discovery overrides;
+  normal product discovery searches platform asset roots and the deterministic
+  first-party stage. The generated fallback is required, while a missing
+  authored pack remains a truthful unavailable row.
+- Desktop flat, desktop XR, flat Android, Android XR, offscreen flat, and
+  synthetic stereo configure the same registry and `McloneSceneHost` action
+  path. There is no app-local selector. The offscreen four-profile smoke now
+  exercises production discovery rather than validation-only source injection.
+- Both Android builds run the deterministic first-party pack command and embed
+  the staged catalog, packs, and sidecars under APK
+  `assets/first-party-packs/`. Startup atomically stages the two packs into the
+  app-owned `assets/packs/` discovery root before scene construction.
+- The production browser fetches reference, authored, and fallback bytes, then
+  configures the shared host with the resulting catalog. Apply emits a typed
+  external preparation request from `McloneSceneHost`; the browser constructs
+  a candidate resident compiler for the requested selection/epoch, completes
+  the shared prepared-set transaction, and retires the old compiler only after
+  the host reports the new epoch active. Failure retains the old compiler and
+  active scene resources.
+- Browser pack priority, fallback admission, selection validation, CPU asset
+  composition, visible-section replacement, and commit policy stay in shared
+  Rust. JavaScript owns only fetch, rAF pause/resume, worker construction, and
+  retirement. The current browser CPU prepare/full-view compile is a truthful
+  synchronous main-Wasm fallback while rAF is paused; moving that work to a
+  dedicated preparation worker remains a performance follow-up, not a second
+  policy path.
+- No supported client needs a capability-ledger exception: all consume the
+  shared Asset Packs screen/action and can apply a selection. Persistence is
+  intentionally still Slice 6 work.
+
+Focused validation:
+
+```text
+cargo test -p mclone-assets -p mclone-mesh -p mclone-app-runtime \
+  -p mclone-scene -p mclone-ui --lib
+  passed
+cargo test -p mclone-native-client --bin mclone-native-client
+  passed
+cargo check -p mclone-app-runtime -p mclone-scene \
+  -p mclone-web-client --target wasm32-unknown-unknown
+  passed (two pre-existing mclone-server warnings)
+pnpm native:web:typecheck
+pnpm native:web:asset-pack-smoke
+pnpm native:web:bundle
+  passed; epoch 0 -> 1, session preserved, selected catalog 265 files,
+  compiler asset epoch 1, three pack loads, shared-result transport,
+  no generated-view fallback or result overflow
+MCLONE_ASSET_PACK_UI_SMOKE=1 pnpm native:desktop-offscreen:smoke
+  passed; production discovery applied Original, Hybrid, Fallback, and
+  Vanilla at epochs 1..4 in one session
+pnpm native:desktop-offscreen:smoke
+pnpm native:xr-emulation:smoke
+pnpm native:xr:check
+  passed
+pnpm native:android:apk:avd
+pnpm native:android:avd-smoke -- --skip-build ...
+pnpm native:android-xr:apk
+  passed; flat debug and Quest release APKs contain authored and fallback
+  packs; flat Android logged two staged/discovered packs and reached playable
+  9/9
+web scene-host, thin-adapter, scene-host, XR-frame, and asset-lock gates
+  passed
+```
+
+Rendered evidence was inspected at
+`/tmp/mclone-t169-slice5-native-asset-pack-ui.png`,
+`/tmp/mclone-t169-slice5-native-world.png`,
+`/tmp/mclone-xr-emulation.png`,
+`/tmp/mclone-native-web-asset-pack-ui-probe.png`, and
+`/tmp/mclone-android-avd-chunk.png`. The captures show the truthful three-row
+catalog, normal textured terrain/actors, distinct stereo views, the browser's
+active proprietary-free Original selection, and a live flat-Android
+terrain/HUD/touch frame. No capture is committed. The Quest APK rebuilt, but
+`adb` reported no attached device, so Slice 5 does not claim a fresh headset
+runtime result.
 
 Exit criteria: the Asset Packs screen is accessible and truthful on every
 supported client lane; each lane either applies the selection or carries an

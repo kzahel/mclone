@@ -25,6 +25,12 @@ pub struct AssetReplacementCommitReport {
     pub update_count_unchanged: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExternalAssetPackSelection {
+    pub epoch: u64,
+    pub selection: mclone_assets::AssetPackSelection,
+}
+
 pub(crate) enum SceneAssetReplacementPending {
     Assets(PreparedSceneAssetsRequest),
     Meshes(PreparedAssetReplacementRequest),
@@ -69,13 +75,99 @@ impl McloneSceneHost {
             self.active_assets.coverage,
         )?;
         self.asset_pack_sources = Some(registry);
+        self.external_asset_pack_preparation = false;
+        self.pending_external_asset_pack_selection = None;
         Ok(())
+    }
+
+    /// Configure a platform-owned asynchronous preparation backend.
+    ///
+    /// Discovery projects only catalog facts into the shared controller. The
+    /// platform retains fetched/staged bytes and later returns a complete
+    /// `PreparedSceneAssets` bundle for the exact requested epoch/selection.
+    pub fn configure_external_asset_pack_catalog(
+        &mut self,
+        catalog: AssetPackCatalog,
+        active_selection: AssetPackSelection,
+    ) -> Result<()> {
+        catalog
+            .source_order(&active_selection)
+            .context("active asset selection is invalid for external preparation")?;
+        self.active_assets.selection = active_selection.clone();
+        self.active_assets.provenance.selection = active_selection.clone();
+        self.client_experience.asset_packs_mut().configure(
+            catalog,
+            active_selection,
+            &self.active_assets.provenance,
+            self.active_assets.coverage,
+        )?;
+        self.asset_pack_sources = None;
+        self.external_asset_pack_preparation = true;
+        self.pending_external_asset_pack_selection = None;
+        Ok(())
+    }
+
+    pub fn pending_external_asset_pack_selection(&self) -> Option<&ExternalAssetPackSelection> {
+        self.pending_external_asset_pack_selection.as_ref()
+    }
+
+    /// Complete browser/other asynchronous CPU preparation and synchronously
+    /// build the currently visible replacement sections. Native platforms use
+    /// their background preparation/compiler request; this portable fallback
+    /// keeps the same transactional frame-boundary commit contract.
+    pub fn complete_external_asset_pack_preparation(
+        &mut self,
+        assets: PreparedSceneAssets,
+    ) -> Result<()> {
+        let pending = self
+            .pending_external_asset_pack_selection
+            .as_ref()
+            .context("no external asset-pack preparation is pending")?;
+        if assets.epoch != pending.epoch || assets.selection != pending.selection {
+            bail!(
+                "external asset preparation mismatch: expected epoch {} selection {:?}, got epoch {} selection {:?}",
+                pending.epoch,
+                pending.selection,
+                assets.epoch,
+                assets.selection
+            );
+        }
+        let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
+        let replacement = PreparedAssetReplacement::build(
+            assets,
+            snapshots,
+            target_sections,
+            self.current_biome_zoom_seed(),
+        )?;
+        let epoch = replacement.assets.epoch;
+        self.pending_external_asset_pack_selection = None;
+        self.asset_replacement = Some(SceneAssetReplacementPending::Meshes(
+            PreparedAssetReplacementRequest::ready(replacement),
+        ));
+        self.asset_replacement_status = AssetReplacementStatus::PreparingMeshes { epoch };
+        self.client_experience
+            .asset_packs_mut()
+            .mark_preparing_meshes();
+        Ok(())
+    }
+
+    pub fn fail_external_asset_pack_preparation(&mut self, message: impl Into<String>) {
+        self.pending_external_asset_pack_selection = None;
+        self.fail_asset_replacement(message.into());
     }
 
     pub(crate) fn apply_asset_pack_effects(&mut self, effects: Vec<ClientAssetPackEffect>) {
         for effect in effects {
             match effect {
                 ClientAssetPackEffect::ApplySelection(selection) => {
+                    if self.external_asset_pack_preparation {
+                        let epoch = self.active_assets.epoch.saturating_add(1);
+                        self.pending_external_asset_pack_selection =
+                            Some(ExternalAssetPackSelection { epoch, selection });
+                        self.asset_replacement_status =
+                            AssetReplacementStatus::PreparingAssets { epoch };
+                        continue;
+                    }
                     let result = (|| {
                         let registry = self
                             .asset_pack_sources

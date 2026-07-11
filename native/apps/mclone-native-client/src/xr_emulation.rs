@@ -36,7 +36,7 @@ pub(crate) fn run_xr_emulation_screenshot(
 ) -> Result<XrEmulationScreenshotReport> {
     let emulated_input = held_xr_emulation_input(&options.held_keys)?;
     let assets = WindowSceneAssets::load()?;
-    let asset_source = load_asset_source()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let input_frames = options.input_frames;
@@ -57,6 +57,12 @@ pub(crate) fn run_xr_emulation_screenshot(
                 &assets,
                 &asset_source,
             )?;
+            if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
+                driver.host_mut().configure_asset_pack_sources(
+                    registry,
+                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                )?;
+            }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_streamed(device, queue, views)?;
             drive_asset_replacement_roundtrip_if_requested(

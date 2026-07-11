@@ -25,6 +25,8 @@ pub const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
 pub const DEFAULT_REFERENCE_PACK_FILE: &str = "extracted.zip";
 pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
 pub const DEFAULT_OVERLAY_PACK_FILE: &str = "mclone-default-overlay.pbp";
+pub const DEFAULT_AUTHORED_FIRST_PARTY_PACK_FILE: &str = "mclone-authored.pbp";
+pub const DEFAULT_GENERATED_FALLBACK_PACK_FILE: &str = "mclone-generated-fallback.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
 pub use crate::{
@@ -654,6 +656,25 @@ pub fn default_asset_pack_path() -> PathBuf {
     repo_root().join(format!(
         "reference/minecraft-{DEFAULT_REFERENCE_ASSET_VERSION}/{DEFAULT_REFERENCE_PACK_FILE}"
     ))
+}
+
+pub fn default_first_party_pack_stage_root() -> PathBuf {
+    repo_root().join("generated-assets/first-party-stage/first-party-packs")
+}
+
+pub fn first_party_pack_candidates(file_name: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    for root in platform_configured_asset_roots() {
+        candidates.push(root.join("assets/packs").join(file_name));
+    }
+    candidates.push(default_first_party_pack_stage_root().join(file_name));
+    candidates.push(
+        repo_root()
+            .join("generated-assets/texture-lab")
+            .join(file_name),
+    );
+    candidates.push(repo_root().join("assets/packs").join(file_name));
+    dedup_paths(candidates)
 }
 
 pub fn default_android_external_files_dir() -> PathBuf {

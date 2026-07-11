@@ -57,6 +57,7 @@ NDK_HOME="$(mclone_resolve_ndk_home "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_N
 NORMALIZED_ABIS="$(mclone_normalize_android_abis "$BUILD_ABIS")"
 mclone_android_build_preflight "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION" "$NORMALIZED_ABIS"
 mclone_export_android_build_env "$ANDROID_SDK_HOME" "$NDK_HOME"
+mclone_prepare_first_party_asset_packs
 
 NDK_PREBUILT="$(find "$NDK_HOME/toolchains/llvm/prebuilt" -maxdepth 1 -mindepth 1 -type d | head -1)"
 if [[ -z "$NDK_PREBUILT" ]]; then

@@ -10,6 +10,12 @@ export const repoRoot = resolve(nativeRoot, "..");
 export const webSourceRoot = join(appRoot, "www");
 export const stagedWebRoot = join(nativeRoot, "target", "mclone-web-client-www");
 export const webEmitTsconfig = join(appRoot, "tsconfig.web.json");
+export const firstPartyPackStageRoot = join(
+  repoRoot,
+  "generated-assets",
+  "first-party-stage",
+  "first-party-packs",
+);
 
 /**
  * Builds the browser-loadable native web root from authored www/ sources.
@@ -29,6 +35,9 @@ export async function buildWebGlue(options = {}) {
   await cp(webSourceRoot, stagedWebRoot, {
     recursive: true,
     filter: (source) => extname(source) !== ".ts",
+  });
+  await cp(firstPartyPackStageRoot, join(stagedWebRoot, "first-party-packs"), {
+    recursive: true,
   });
   await assertNoVisibleGameUiInAppHtml(stagedWebRoot);
 

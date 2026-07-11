@@ -38,6 +38,12 @@ interface RenderCompileWorkerInbound {
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
   assetPack?: Uint8Array;
+  authoredPack?: Uint8Array;
+  referencePack?: Uint8Array;
+  fallbackPack?: Uint8Array;
+  authoredEnabled?: boolean;
+  referenceEnabled?: boolean;
+  assetEpoch?: number;
   targetSections?: Int32Array | number[] | ArrayBufferView | ArrayBuffer;
   centerX?: number;
   centerZ?: number;
@@ -68,6 +74,7 @@ let workerCompileCount = 0;
 let workerAssetLoadCount = 0;
 let workerAssetPackInitByteLength = 0;
 let workerAssetPackFileCount = 0;
+let workerAssetEpoch = 0;
 const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 
 workerSelf.onmessage = async (event: MessageEvent) => {
@@ -92,12 +99,28 @@ workerSelf.onmessage = async (event: MessageEvent) => {
 async function handleInit(message: RenderCompileWorkerInbound): Promise<void> {
   try {
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
-    const assetPackByteLength = byteLengthOf(message.assetPack);
-    compilerSession = new module.WebRenderCompilerSession(message.assetPack as Uint8Array);
+    const selected = message.authoredPack instanceof Uint8Array
+      && message.referencePack instanceof Uint8Array
+      && message.fallbackPack instanceof Uint8Array;
+    const assetPackByteLength = selected
+      ? byteLengthOf(message.authoredPack)
+        + byteLengthOf(message.referencePack)
+        + byteLengthOf(message.fallbackPack)
+      : byteLengthOf(message.assetPack);
+    compilerSession = selected
+      ? module.WebRenderCompilerSession.newSelected(
+          message.authoredPack as Uint8Array,
+          message.referencePack as Uint8Array,
+          message.fallbackPack as Uint8Array,
+          Boolean(message.authoredEnabled),
+          Boolean(message.referenceEnabled),
+        )
+      : new module.WebRenderCompilerSession(message.assetPack as Uint8Array);
     workerAssetLoadCount = Number(compilerSession.assetLoadCount?.()) || 1;
     workerAssetPackInitByteLength = Number(compilerSession.assetPackByteLength?.())
       || assetPackByteLength;
     workerAssetPackFileCount = Number(compilerSession.assetPackFileCount?.()) || 0;
+    workerAssetEpoch = Number(message.assetEpoch) || 0;
     workerSelf.postMessage({
       ok: true,
       kind: "render-compiler-ready",
@@ -110,6 +133,7 @@ async function handleInit(message: RenderCompileWorkerInbound): Promise<void> {
       workerAssetPackInitByteLength,
       workerAssetPackFileCount,
       persistentAssetCatalog: true,
+      assetEpoch: workerAssetEpoch,
     });
   } catch (error) {
     workerSelf.postMessage({
@@ -123,6 +147,7 @@ async function handleInit(message: RenderCompileWorkerInbound): Promise<void> {
       workerAssetLoadCount,
       workerAssetPackInitByteLength,
       workerAssetPackFileCount,
+      assetEpoch: workerAssetEpoch,
       persistentAssetCatalog: false,
       reason: stringifyError(error),
     });
@@ -207,6 +232,7 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
       workerAssetLoadCount,
       workerAssetPackInitByteLength,
       workerAssetPackFileCount,
+      assetEpoch: workerAssetEpoch,
       persistentAssetCatalog: compilerSession !== null,
       requestAssetPackByteLength,
       requestTargetSectionsByteLength,

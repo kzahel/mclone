@@ -13,7 +13,10 @@ use mclone_app_runtime::deferred_drop::{
 use mclone_app_runtime::far_lod::{FarTerrainLodConfig, FarTerrainLodMaterialPalette};
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::monotonic::MonotonicDeadline;
-use mclone_app_runtime::prepared_assets::PreparedSceneAssets;
+use mclone_app_runtime::prepared_assets::{
+    AUTHORED_FIRST_PARTY_PACK_ID, AssetPackSourceRegistry, MINECRAFT_REFERENCE_PACK_ID,
+    PreparedSceneAssets,
+};
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_app_runtime::render_compile_capacity::{
     RenderCompileCapacityHostKind, host_total_memory_bytes,
@@ -39,7 +42,7 @@ use mclone_app_runtime::{
     TimedRenderSectionCacheUpdate, loading_progress_overlay_from_diagnostics,
     view_readiness_overlay_from_diagnostics,
 };
-use mclone_assets::PackedAssetSource;
+use mclone_assets::{AssetPackId, AssetPackSelection, PackedAssetSource, SharedAssetSource};
 use mclone_audio::PreparedAudioAssets;
 use mclone_client::ClientRuntime;
 #[cfg(test)]
@@ -244,6 +247,41 @@ impl WebRenderCompilerSession {
             mesh_assets,
             asset_pack_byte_length,
             asset_load_count: 1,
+            compile_count: 0,
+            snapshot_mirror: BTreeMap::new(),
+            mirror_generation: 0,
+            biome_zoom_seed: None,
+            last_delta_upsert_count: 0,
+            last_delta_eviction_count: 0,
+        })
+    }
+
+    #[wasm_bindgen(js_name = newSelected)]
+    pub fn new_selected(
+        authored_pack_bytes: js_sys::Uint8Array,
+        reference_pack_bytes: js_sys::Uint8Array,
+        fallback_pack_bytes: js_sys::Uint8Array,
+        authored_enabled: bool,
+        reference_enabled: bool,
+    ) -> Result<WebRenderCompilerSession, JsValue> {
+        let asset_pack_byte_length = authored_pack_bytes.length() as usize
+            + reference_pack_bytes.length() as usize
+            + fallback_pack_bytes.length() as usize;
+        let (mesh_assets, asset_pack_file_count) = load_selected_web_mesh_assets(
+            authored_pack_bytes.to_vec(),
+            reference_pack_bytes.to_vec(),
+            fallback_pack_bytes.to_vec(),
+            authored_enabled,
+            reference_enabled,
+        )
+        .map_err(JsValue::from)?;
+        Ok(Self {
+            mesh_assets: WebTexturedMeshAssets {
+                catalog: mesh_assets.catalog,
+                asset_pack_file_count,
+            },
+            asset_pack_byte_length,
+            asset_load_count: 3,
             compile_count: 0,
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
@@ -2189,6 +2227,98 @@ pub fn prepare_web_scene_assets_from_pack(bytes: Vec<u8>) -> Result<PreparedScen
         screen_effects,
         PreparedAudioAssets::silent(),
     ))
+}
+
+pub fn prepare_web_scene_assets_from_selection(
+    epoch: u64,
+    authored_bytes: Vec<u8>,
+    reference_bytes: Vec<u8>,
+    fallback_bytes: Vec<u8>,
+    authored_enabled: bool,
+    reference_enabled: bool,
+) -> Result<PreparedSceneAssets, String> {
+    let authored = PackedAssetSource::from_bytes(authored_bytes)
+        .map_err(|error| format!("failed to parse authored browser pack: {error}"))?;
+    let reference = PackedAssetSource::from_bytes(reference_bytes)
+        .map_err(|error| format!("failed to parse reference browser pack: {error}"))?;
+    let fallback = PackedAssetSource::from_bytes(fallback_bytes)
+        .map_err(|error| format!("failed to parse generated browser pack: {error}"))?;
+    let registry = AssetPackSourceRegistry::from_packed_with_reference(
+        Some(authored),
+        fallback,
+        SharedAssetSource::new(reference),
+    )
+    .map_err(|error| format!("failed to compose browser asset catalog: {error:#}"))?;
+    registry
+        .prepare(
+            epoch,
+            web_asset_pack_selection(authored_enabled, reference_enabled),
+        )
+        .map_err(|error| format!("failed to prepare browser asset selection: {error:#}"))
+}
+
+pub fn web_asset_pack_catalog(
+    authored_bytes: Vec<u8>,
+    reference_bytes: Vec<u8>,
+    fallback_bytes: Vec<u8>,
+) -> Result<mclone_assets::AssetPackCatalog, String> {
+    let authored = PackedAssetSource::from_bytes(authored_bytes)
+        .map_err(|error| format!("failed to parse authored browser pack: {error}"))?;
+    let reference = PackedAssetSource::from_bytes(reference_bytes)
+        .map_err(|error| format!("failed to parse reference browser pack: {error}"))?;
+    let fallback = PackedAssetSource::from_bytes(fallback_bytes)
+        .map_err(|error| format!("failed to parse generated browser pack: {error}"))?;
+    AssetPackSourceRegistry::from_packed_with_reference(
+        Some(authored),
+        fallback,
+        SharedAssetSource::new(reference),
+    )
+    .map(|registry| registry.catalog().clone())
+    .map_err(|error| format!("failed to compose browser asset catalog: {error:#}"))
+}
+
+fn load_selected_web_mesh_assets(
+    authored_bytes: Vec<u8>,
+    reference_bytes: Vec<u8>,
+    fallback_bytes: Vec<u8>,
+    authored_enabled: bool,
+    reference_enabled: bool,
+) -> Result<(TexturedMeshAssets, usize), String> {
+    let file_count = [
+        authored_enabled.then_some(&authored_bytes),
+        reference_enabled.then_some(&reference_bytes),
+        Some(&fallback_bytes),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|bytes| {
+        PackedAssetSource::from_bytes(bytes.clone())
+            .map(|source| source.file_count())
+            .map_err(|error| format!("failed to count selected browser pack: {error}"))
+    })
+    .collect::<Result<Vec<_>, _>>()?
+    .into_iter()
+    .sum();
+    let assets = prepare_web_scene_assets_from_selection(
+        1,
+        authored_bytes,
+        reference_bytes,
+        fallback_bytes,
+        authored_enabled,
+        reference_enabled,
+    )?;
+    Ok((assets.mesh, file_count))
+}
+
+fn web_asset_pack_selection(authored_enabled: bool, reference_enabled: bool) -> AssetPackSelection {
+    let mut enabled = Vec::new();
+    if authored_enabled {
+        enabled.push(AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID));
+    }
+    if reference_enabled {
+        enabled.push(AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID));
+    }
+    AssetPackSelection::new(enabled)
 }
 
 pub(super) fn gui_key_from_label(label: &str) -> Option<GuiKey> {

@@ -1,4 +1,5 @@
 import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
+import type { RenderCompilerAssetSelection } from "./mclone-render-compiler-shared.js";
 import {
   INPUT_KEY_NAMES,
   applyHotbarState,
@@ -117,6 +118,8 @@ const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
 const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
+const AUTHORED_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-authored.pbp");
+const FALLBACK_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-generated-fallback.pbp");
 
 const DEFAULT_RADIUS_CHUNKS = 1;
 const MIN_RADIUS_CHUNKS = 1;
@@ -297,6 +300,8 @@ class WebFrameDriver {
   session: WebSceneHost | null;
   compiler: RenderCompiler | null;
   assetPack: Uint8Array | null;
+  authoredAssetPack: Uint8Array | null;
+  fallbackAssetPack: Uint8Array | null;
   keys: InputKeys;
   touchKeys: InputKeys;
   touchMovementImpulse: TouchMovementImpulse;
@@ -320,6 +325,11 @@ class WebFrameDriver {
   lastFrameTime: number;
   tickFrameBusy: boolean;
   sessionBusy: boolean;
+  pendingAssetCompilerSwap: {
+    previous: RenderCompiler;
+    candidate: RenderCompiler;
+    epoch: number;
+  } | null;
 
   constructor() {
     // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
@@ -329,6 +339,8 @@ class WebFrameDriver {
     this.session = null;
     this.compiler = null;
     this.assetPack = null;
+    this.authoredAssetPack = null;
+    this.fallbackAssetPack = null;
     this.keys = defaultInputKeys() as InputKeys;
     this.touchKeys = defaultInputKeys() as InputKeys;
     this.touchMovementImpulse = defaultMovementImpulse();
@@ -359,6 +371,7 @@ class WebFrameDriver {
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
     this.sessionBusy = false;
+    this.pendingAssetCompilerSwap = null;
   }
 
   async init(): Promise<void> {
@@ -403,8 +416,14 @@ class WebFrameDriver {
 
     runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
-    const assetPack = await fetchAssetPack(ASSET_PACK_URL);
+    const [assetPack, authoredAssetPack, fallbackAssetPack] = await Promise.all([
+      fetchAssetPack(ASSET_PACK_URL),
+      fetchAssetPack(AUTHORED_ASSET_PACK_URL),
+      fetchAssetPack(FALLBACK_ASSET_PACK_URL),
+    ]);
     this.assetPack = assetPack;
+    this.authoredAssetPack = authoredAssetPack;
+    this.fallbackAssetPack = fallbackAssetPack;
     this.compiler = this.createRenderCompiler();
     const compilerWake = (doorbell: WasmReport): void => {
       void this.wakeRenderCompiler(doorbell);
@@ -417,6 +436,8 @@ class WebFrameDriver {
       this.session = await module.mclone_web_create_remote_scene_host_with_startup(
         this.canvas,
         assetPack,
+        authoredAssetPack,
+        fallbackAssetPack,
         remoteWebSocketUrl,
         startup.chunkX,
         startup.chunkZ,
@@ -435,6 +456,8 @@ class WebFrameDriver {
       this.session = await module.mclone_web_create_worker_scene_host_with_startup(
         this.canvas,
         assetPack,
+        authoredAssetPack,
+        fallbackAssetPack,
         seed,
         startup.chunkX,
         startup.chunkZ,
@@ -687,6 +710,7 @@ class WebFrameDriver {
     }
     this.hasRendered ||= Boolean(frame.rendered);
     this.applyReport(frame);
+    this.settleAssetCompilerSwap(frame);
     if (
       Number(frame.acceptedCompileSectionCount) > 0
       && runtime.state.lastCompileReport
@@ -1226,6 +1250,7 @@ class WebFrameDriver {
     publishRuntimeState(runtime.state);
     this.dispatchSceneSessionOperation(report, options);
     this.dispatchWorldCatalogOperation(report, options);
+    this.dispatchAssetPackOperation(report);
   }
 
   dispatchSceneSessionOperation(
@@ -1296,6 +1321,94 @@ class WebFrameDriver {
       return;
     }
     void this.completeWorldCatalogRequest(report, options);
+  }
+
+  dispatchAssetPackOperation(report: WasmReport): void {
+    if (report.assetPackRequest !== true || this.sessionBusy) {
+      return;
+    }
+    void this.completeAssetPackSelection(report);
+  }
+
+  async completeAssetPackSelection(report: WasmReport): Promise<void> {
+    if (
+      !this.session
+      || !this.assetPack
+      || !this.authoredAssetPack
+      || !this.fallbackAssetPack
+      || !this.compiler
+      || this.sessionBusy
+    ) {
+      return;
+    }
+    this.sessionBusy = true;
+    runtime.state.sessionBusy = true;
+    const priorCompiler = this.compiler;
+    let candidateCompiler: RenderCompiler | null = null;
+    try {
+      await Promise.allSettled(
+        [...this.pendingTimings.values()]
+          .map((pending) => pending.workerPromise)
+          .filter((promise): promise is Promise<any> => promise !== null),
+      );
+      const selection: RenderCompilerAssetSelection = {
+        authoredPack: this.authoredAssetPack,
+        referencePack: this.assetPack,
+        fallbackPack: this.fallbackAssetPack,
+        authoredEnabled: Boolean(report.assetPackAuthoredEnabled),
+        referenceEnabled: Boolean(report.assetPackReferenceEnabled),
+        epoch: Number(report.assetPackRequestEpoch) || 0,
+      };
+      candidateCompiler = this.createRenderCompiler(selection);
+      await candidateCompiler.ready;
+      this.compiler = candidateCompiler;
+      const completion = await this.session.completeAssetPackSelection(
+        this.authoredAssetPack,
+        this.assetPack,
+        this.fallbackAssetPack,
+      );
+      await nextAnimationFrame();
+      this.pendingAssetCompilerSwap = {
+        previous: priorCompiler,
+        candidate: candidateCompiler,
+        epoch: selection.epoch,
+      };
+      candidateCompiler = null;
+      this.applyNativeUiReport(completion);
+      runtime.state.assetPackCompletionCount =
+        (Number(runtime.state.assetPackCompletionCount) || 0) + 1;
+    } catch (error) {
+      candidateCompiler?.terminate();
+      this.compiler = priorCompiler;
+      runtime.state.ok = false;
+      runtime.state.status = stringifyError(error);
+      console.error(error);
+      publishRuntimeState(runtime.state);
+    } finally {
+      this.sessionBusy = false;
+      runtime.state.sessionBusy = false;
+      this.flushNativeTouchControlsOverlay();
+    }
+  }
+
+  settleAssetCompilerSwap(report: WasmReport): void {
+    const swap = this.pendingAssetCompilerSwap;
+    if (!swap) {
+      return;
+    }
+    if (
+      report.assetReplacementState === "active"
+      && Number(report.activeAssetEpoch) === swap.epoch
+    ) {
+      swap.previous.terminate();
+      this.pendingAssetCompilerSwap = null;
+      return;
+    }
+    if (report.assetReplacementState === "failed") {
+      swap.candidate.terminate();
+      this.compiler = swap.previous;
+      this.pendingAssetCompilerSwap = null;
+    }
   }
 
   async completeWorldCatalogRequest(
@@ -1444,21 +1557,16 @@ class WebFrameDriver {
     }
   }
 
-  createRenderCompiler(): RenderCompiler {
+  createRenderCompiler(selection?: RenderCompilerAssetSelection): RenderCompiler {
     if (!this.assetPack) {
       throw new Error("asset pack is not loaded");
     }
-    return new RenderSectionWorkerCompiler(this.assetPack, {
+    return new RenderSectionWorkerCompiler(selection ?? this.assetPack, {
       workerUrl: RENDER_COMPILER_WORKER_URL,
       bindgenJsUrl: BINDGEN_JS_URL,
       bindgenWasmUrl: BINDGEN_WASM_URL,
       workerName: "mclone-render-compiler-app",
     });
-  }
-
-  replaceRenderCompiler(): void {
-    this.compiler?.terminate();
-    this.compiler = this.createRenderCompiler();
   }
 
   resetStreamingStateForSessionRestart(): void {

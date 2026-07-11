@@ -3,10 +3,11 @@
 Topic: asset-pack-profiles
 
 Status: active implementation 2026-07-11. Tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-4 and Tactical
-[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-5 landed. The
-browser production cutover prerequisite is complete; Tactical 169 Slice 5
-platform discovery/adoption is next.
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-5 and Tactical
+[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-5 landed. Every
+supported client now discovers/stages the logical packs and applies through the
+shared host epoch contract. Tactical 169 Slice 6 persistence/audit/closeout is
+next.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -50,7 +51,7 @@ proprietary-free only when runtime provenance evidence reports zero resolved
 Minecraft/unknown assets. Merely putting the authored overlay before the
 Minecraft pack is not sufficient.
 
-## Current State (Verified 2026-07-10)
+## Current State (Verified 2026-07-11)
 
 - `mclone-assets` has validated ZIP-backed `PackedAssetSource` packs and a
   first-source-wins `AssetSourceChain`.
@@ -89,8 +90,23 @@ Minecraft pack is not sufficient.
   enlarged under `/tmp` and inspected for contrast/code legibility.
 - The combined build stages byte-identical packs/sidecars plus a fingerprinted
   catalog under ignored
-  `generated-assets/first-party-stage/first-party-packs/`. Platform installation
-  and runtime selection remain later slices.
+  `generated-assets/first-party-stage/first-party-packs/`. Platform packaging,
+  web bundling, and native discovery now consume that canonical stage.
+- Native discovery projects environment overrides, platform `assets/packs/`
+  roots, and deterministic build-stage candidates into one shared source
+  registry. Desktop flat/XR, flat Android, Android XR, offscreen, and synthetic
+  stereo all configure that registry on `McloneSceneHost`; no app owns a
+  separate selection policy.
+- Flat Android and Quest APK builds generate and embed both first-party packs.
+  Android startup atomically stages them into the app-owned discovery root.
+  The flat AVD logged both packs as staged/discovered and rendered a playable
+  scene; the Quest release APK contained both packs, but no headset was attached
+  for a fresh runtime run.
+- Production web fetches all three pack payloads, projects their catalog into
+  the shared host, and transactionally replaces both shared scene resources and
+  the resident compiler at one asset epoch. The browser Apply probe completed
+  epoch `0 -> 1` without replacing its local-world session and reported a
+  265-file authored-plus-fallback selection with three worker pack loads.
 - `mclone-assets` now validates the engine-native `mclone-visuals-v1` catalog
   against all 209 canonical state ids/keys and parses the generated
   missing-resource registry and explicit silent-audio policy.
@@ -346,37 +362,25 @@ resolve when their logical pack is disabled.
 
 ## Known Gaps
 
-- The shared catalog/selection/provenance contracts are not yet projected from
-  platform discovery or wired into scene/UI state.
 - Legacy reference/overlay builders do not emit the optional manifest
   provenance fields; their outputs remain `Unknown` until trusted discovery
   identifies them. The two new standalone first-party builders do emit them.
 - The compatibility overlay remains partial; use the authored + generated
   standalone outputs for new first-party work.
-- Web's resident compiler worker and single-byte-pack bootstrap need a
-  replacement epoch/reinitialization path through the now-production shared
-  scene host.
-- Platform discovery/adoption is not wired to the shared catalog yet; the
-  desktop offscreen source registry is a deterministic validation injection,
-  not product discovery policy.
-- Web now projects the shared screen/actions through the production
-  `McloneSceneHost` and retains prepared epoch 0 across session replacement.
-  Apply still reports its explicit unavailable reason until logical pack
-  discovery, byte staging, and compiler reinitialization land.
+- Web pauses rAF and performs CPU selected-pack preparation plus current-view
+  compilation synchronously in main Wasm before the frame-boundary commit. It
+  uses the same shared preparation/session interfaces and the resident compiler
+  is a real worker at the requested epoch, but browser CPU preparation should
+  move to a dedicated worker after measurement.
 - Asset selection persistence has no shared cross-platform preference adapter.
 
 ## Recommended Next Work
 
-Resume Tactical 169 Slice 5 for platform discovery/adoption. Project native,
-Android/XR, offscreen, and web staging into the shared catalog and action path.
-For web, fetch pack descriptors/bytes and transactionally reinitialize the
-resident compiler under the `McloneSceneHost` prepared-set epoch; keep fetch,
-worker, and byte ownership in browser services and selection policy in shared
-code.
-
-After Slice 5 records truthful capability/evidence for every supported client,
-continue Tactical 169 Slice 6 persistence/audit/closeout, then return to
-Tactical 170 Slice 6 for the final browser parity and documentation audit.
+Continue Tactical 169 Slice 6 persistence/audit/closeout: persist logical ids,
+retain unavailable selections, add machine-readable strict provenance checks,
+measure replacement time/memory, and close the standalone documentation audit.
+Then return to Tactical 170 Slice 6 for the final browser parity and
+documentation audit.
 
 ## Slice 0 Evidence
 

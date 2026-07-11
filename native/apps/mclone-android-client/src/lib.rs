@@ -12,6 +12,7 @@ mod android {
 
     use mclone_android_platform::{
         ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, android_app_data_asset_root,
+        stage_android_bundled_first_party_packs,
     };
     use mclone_scene::McloneSceneHost;
     use winit::event_loop::{ControlFlow, EventLoop};
@@ -83,19 +84,17 @@ mod android {
     }
 
     #[allow(unsafe_code)]
-    fn configure_android_asset_root(app: &AndroidApp) {
+    fn configure_android_asset_root(app: &AndroidApp) -> Option<std::path::PathBuf> {
         if let Some(existing) = std::env::var_os(ANDROID_ASSET_ROOT_ENV) {
-            log::info!(
-                "preserving {ANDROID_ASSET_ROOT_ENV}={}",
-                std::path::PathBuf::from(existing).display()
-            );
-            return;
+            let path = std::path::PathBuf::from(existing);
+            log::info!("preserving {ANDROID_ASSET_ROOT_ENV}={}", path.display());
+            return Some(path);
         }
         let Some(path) =
             android_app_data_asset_root(app, AndroidAppDataPathPreference::InternalFirst)
         else {
             log::warn!("could not resolve Android app data path for {ANDROID_ASSET_ROOT_ENV}");
-            return;
+            return None;
         };
         unsafe {
             std::env::set_var(ANDROID_ASSET_ROOT_ENV, &path);
@@ -104,13 +103,23 @@ mod android {
             "configured {ANDROID_ASSET_ROOT_ENV} from app data path: {}",
             path.display()
         );
+        Some(path)
     }
 
     #[allow(unsafe_code)]
     #[unsafe(no_mangle)]
     fn android_main(app: AndroidApp) {
         init_android_logger();
-        configure_android_asset_root(&app);
+        let asset_root = configure_android_asset_root(&app);
+        if let Some(asset_root) = asset_root {
+            match stage_android_bundled_first_party_packs(&app, &asset_root) {
+                Ok(paths) => log::info!("staged {} bundled first-party asset packs", paths.len()),
+                Err(error) => {
+                    log::error!("MCLONE_ANDROID_FAILURE: stage bundled asset packs: {error}");
+                    return;
+                }
+            }
+        }
         log::info!("Mclone Android starting");
         let startup = match prepare_android_startup(&app) {
             Ok(startup) => startup,

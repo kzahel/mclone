@@ -43,12 +43,15 @@ const indexedDbReloadProbe = process.argv.includes("--indexeddb-reload-probe")
   || process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE === "1";
 const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
+const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
+  || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const appLoop = movementPerf
   || blockEditProbe
   || indexedDbReloadProbe
   || catalogUiProbe
+  || assetPackUiProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
@@ -67,6 +70,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-indexeddb-reload-probe.png"
     : catalogUiProbe
     ? "/tmp/mclone-native-web-catalog-ui-probe.png"
+    : assetPackUiProbe
+    ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
@@ -79,6 +84,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png"
     : catalogUiProbe
     ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
+    : assetPackUiProbe
+    ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
@@ -96,6 +103,8 @@ const indexedDbReloadProbeReportPath = process.env.MCLONE_NATIVE_WEB_INDEXEDDB_R
   ?? "/tmp/mclone-native-web-indexeddb-reload-probe.json";
 const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
+const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
 const movementPerfChunkBoundaries = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
@@ -275,6 +284,39 @@ async function run() {
         };
         await writeFile(catalogUiProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
         assertCatalogUiProbeResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (assetPackUiProbe) {
+        const assetPackUiProbeResult = await runAssetPackUiProbe(page, canvas);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          assetPackUiProbeReportPath,
+          appLoop,
+          assetPackUiProbe,
+          canvasPixels,
+          assetPackUiProbeResult,
+          result,
+        };
+        await writeFile(assetPackUiProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        if (
+          !assetPackUiProbeResult?.ok
+          || pageErrors.length > 0
+          || canvasPixels.nonClearInteriorPixelCount <= 128
+        ) {
+          throw new Error(`asset-pack UI probe failed:\n${JSON.stringify(report, null, 2)}`);
+        }
         console.log(JSON.stringify(report, null, 2));
         return;
       }
@@ -1056,6 +1098,75 @@ async function runCatalogUiProbe(page, canvas) {
 
 /**
  * @param {Page} page
+ * @param {Locator} canvas
+ */
+async function runAssetPackUiProbe(page, canvas) {
+  await waitForWebAppReady(page);
+  await waitForWebAppStreamingSettled(page, 60_000);
+  const before = await page.evaluate(() => ({
+    activeAssetEpoch: Number(globalThis.__mcloneWebApp?.state?.lastReport?.activeAssetEpoch) || 0,
+    completionCount: Number(globalThis.__mcloneWebApp?.state?.assetPackCompletionCount) || 0,
+    sessionKind: globalThis.__mcloneWebApp?.state?.sessionKind,
+  }));
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  const geometry = await nativeUiGeometry(page);
+  await clickNativeUiPoint(page, {
+    x: geometry.width * 0.5,
+    y: geometry.height * 0.5 + 12.0,
+  });
+  await waitForNativeUiScreen(page, "options");
+  await clickNativeUiPoint(page, assetPackOptionsButtonPoint(geometry));
+  await waitForNativeUiScreen(page, "assetPacks");
+  await clickNativeUiPoint(page, assetPackRowPoint(geometry, 0));
+  await clickNativeUiPoint(page, assetPackRowPoint(geometry, 1));
+  const applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
+  await page.waitForFunction(
+    ({ epoch, completionCount }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const report = state?.lastReport;
+      return Number(state?.assetPackCompletionCount) > completionCount
+        && Number(report?.activeAssetEpoch) === epoch
+        && report?.assetReplacementState === "active"
+        && state?.streamingSettled === true
+        && state?.sessionBusy === false;
+    },
+    { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
+    { timeout: 120_000 },
+  );
+  const after = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    return {
+      activeAssetEpoch: Number(state.lastReport?.activeAssetEpoch) || 0,
+      assetReplacementState: state.lastReport?.assetReplacementState,
+      assetPackFileCount: Number(state.lastReport?.assetPackFileCount) || 0,
+      completionCount: Number(state.assetPackCompletionCount) || 0,
+      sessionKind: state.sessionKind,
+      sessionState: state.sessionState,
+      nativeUiScreen: state.nativeUiScreen,
+      streamingSettled: state.streamingSettled,
+      compiler: state.lastCompileReport ?? null,
+    };
+  });
+  return {
+    ok: after.activeAssetEpoch === before.activeAssetEpoch + 1
+      && after.assetReplacementState === "active"
+      && after.completionCount > before.completionCount
+      && after.sessionKind === before.sessionKind
+      && after.sessionState === "active"
+      && after.nativeUiScreen === "assetPacks"
+      && after.streamingSettled === true
+      && Number(after.compiler?.workerAssetLoadCount) === 3
+      && Number(after.compiler?.assetEpoch) === after.activeAssetEpoch
+      && after.compiler?.generatedViewFallbackUsed === false,
+    before,
+    applyReport,
+    after,
+  };
+}
+
+/**
+ * @param {Page} page
  * @param {number} expectedEntryCount
  */
 async function openNativeWorldList(page, expectedEntryCount) {
@@ -1203,6 +1314,40 @@ function worldDeleteConfirmPoint(geometry) {
   return {
     x: panel.x + panel.width * 0.5,
     y: panel.y + 99.0,
+  };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function assetPackOptionsButtonPoint(geometry) {
+  const panelWidth = Math.min(Math.max(geometry.width - 18.0, 242.0), 360.0);
+  const panelHeight = Math.min(238.0, Math.max(geometry.height - 4.0, 1.0));
+  const panel = centeredPanel(geometry, panelWidth, panelHeight);
+  return { x: panel.x + panel.width * 0.5, y: panel.y + 136.0 };
+}
+
+/**
+ * @param {{ width: number, height: number }} geometry
+ * @param {number} index
+ */
+function assetPackRowPoint(geometry, index) {
+  const width = Math.min(Math.max(geometry.width - 12.0, 300.0), 456.0);
+  const height = Math.min(Math.max(geometry.height - 4.0, 220.0), 286.0);
+  const panel = centeredPanel(geometry, width, height);
+  const rowHeight = Math.min(Math.max((panel.height - 116.0) / 3.0, 32.0), 42.0);
+  return {
+    x: panel.x + panel.width * 0.5,
+    y: panel.y + 28.0 + index * (rowHeight + 3.0) + rowHeight * 0.5,
+  };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function assetPackApplyPoint(geometry) {
+  const width = Math.min(Math.max(geometry.width - 12.0, 300.0), 456.0);
+  const height = Math.min(Math.max(geometry.height - 4.0, 220.0), 286.0);
+  const panel = centeredPanel(geometry, width, height);
+  return {
+    x: panel.x + panel.width * 0.5 + 51.0,
+    y: panel.y + panel.height - 17.0,
   };
 }
 

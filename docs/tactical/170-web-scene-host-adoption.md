@@ -2,9 +2,9 @@
 
 Status: active 2026-07-11; Slices 0-5 landed. Production local worker,
 IndexedDB local-world, and remote WebSocket modes now use one shared scene
-host; the old web orchestrator and proof-only entry point are deleted. Return
-to Tactical 169 Slice 5 for platform asset-pack adoption before this
-tactical's Slice 6 parity audit and closeout.
+host; the old web orchestrator and proof-only entry point are deleted. Tactical
+169 Slice 5 platform asset-pack adoption also landed through that host. Complete
+Tactical 169 Slice 6 before this tactical's Slice 6 parity audit and closeout.
 
 Topic: [`web-scene-host-adoption`](../topics/web-scene-host-adoption.md)
 
@@ -1034,12 +1034,12 @@ work is serialized through the typed platform-operation boundary; rAF skips
 while a completion holds the WASM session borrow and resumes on the following
 animation frame, so a promise cannot overlap a host call.
 
-The active prepared asset set remains epoch 0 in the long-lived host across
-runtime replacements. The browser still fetches and parses the existing
-6,985-file packed payload once and initializes the resident compiler catalog
-once; this slice did not add selection or compiler-epoch policy. Logical pack
-discovery, byte staging, selection, and transactional compiler
-reinitialization remain Tactical 169 Slice 5 work.
+At this cutover, the active prepared asset set remained epoch 0 in the
+long-lived host across runtime replacements. The browser fetched and parsed the
+existing 6,985-file packed payload once and initialized the resident compiler
+catalog once; this slice did not add selection or compiler-epoch policy. Those
+logical-pack and transactional compiler changes were deferred to Tactical 169
+Slice 5 and have since landed through the same host.
 
 `pnpm native:web:scene-host-adoption` now runs in enforcement mode by default.
 Its 5,299-line Rust and 1,890-line TypeScript inventory reports zero competing
@@ -1245,9 +1245,8 @@ the evidence and options, and revise this tactical before production cutover.
 
 ## Recommended Next Step
 
-Implement Slice 5 only. Atomically move local worker, IndexedDB local-world,
-and remote WebSocket production modes onto `McloneSceneHost`; consume Tactical
-169's active asset-set/epoch seam; preserve the Slice 4 visibility, loss, and
-capability decisions; delete `WebChunkRenderSession`, duplicated policy, and
-the proof-only entry point; and enable the end-state enforcement tripwires.
-Stop before Slice 6's parity and cleanup audit.
+Complete Tactical 169 Slice 6 persistence, provenance audit, measurement, and
+standalone-pack documentation closeout. Then return here for Slice 6's browser
+feature-profile audit, obsolete-name/cfg cleanup, default purity coverage,
+durable architecture/platform/web documentation, and final cross-platform
+closeout.

@@ -21,4 +21,5 @@ android {
     }
 
     sourceSets["main"].jniLibs.srcDirs("../jniLibs")
+    sourceSets["main"].assets.srcDir(rootProject.file("../generated-assets/first-party-stage"))
 }
