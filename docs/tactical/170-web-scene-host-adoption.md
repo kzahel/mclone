@@ -1300,8 +1300,9 @@ the evidence and options, and revise this tactical before production cutover.
 
 ## Recommended Next Step
 
-This tactical is complete. Continue through Tactical 171 — Convergence And
-Parity Closeout. Tactical 166 — Shared Resident-Tile Substrate Slices 1–3 have
-removed the native monolithic far-LOD path. The next implementation step is the
-dedicated production browser far-LOD integration and promotion proof; remove
-only that exact web exception if every gate passes.
+This tactical is complete. Tactical 171 — Convergence And Parity Closeout
+Milestone D subsequently integrated and proved the resident-tile Far LOD
+producer in the production browser scene host and shared Web Worker compiler,
+then removed only that exception. Continue with Tactical 166 — Shared
+Resident-Tile Substrate Slice 4, multi-level rings; do not reopen this adoption
+tactical for the remaining four reason-bearing browser feature gaps.

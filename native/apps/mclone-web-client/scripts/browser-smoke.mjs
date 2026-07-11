@@ -45,6 +45,10 @@ const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
+const farLodProbe = process.argv.includes("--far-lod-probe")
+  || process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE === "1";
+const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
+  || process.env.MCLONE_NATIVE_WEB_FAR_LOD_INDEXEDDB === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const appLoop = movementPerf
@@ -52,6 +56,7 @@ const appLoop = movementPerf
   || indexedDbReloadProbe
   || catalogUiProbe
   || assetPackUiProbe
+  || farLodProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
@@ -72,6 +77,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
+    : farLodProbe
+    ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
@@ -86,6 +93,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
+    : farLodProbe
+    ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
@@ -105,6 +114,11 @@ const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_
   ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
 const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
+const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
+const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
+  ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
+const farLodOffCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_OFF_CANVAS_SCREENSHOT
+  ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}-off-canvas.png`;
 const movementPerfChunkBoundaries = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
@@ -199,9 +213,15 @@ async function run() {
       const indexedDbReloadQuery = indexedDbReloadProbe
         ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(indexedDbReloadWorldId)}&clearWorldStorage=1`
         : "";
+      const farLodWorldId = farLodIndexedDb
+        ? `far-lod-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
+        : "";
+      const farLodQuery = farLodIndexedDb
+        ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(farLodWorldId)}&clearWorldStorage=1`
+        : "";
       const appUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-        : `${baseUrl}/app.html${indexedDbReloadQuery}`;
+        : `${baseUrl}/app.html${indexedDbReloadQuery || farLodQuery}`;
       await page.goto(appUrl, { waitUntil: "load" });
       await page.waitForFunction(
         () => typeof globalThis.__mcloneWebApp !== "undefined",
@@ -226,6 +246,37 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (farLodProbe) {
+        const farLodProbeResult = await runFarLodProbe(page, canvas);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await readFile(canvasScreenshotPath);
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          farLodOffCanvasScreenshotPath,
+          farLodProbeReportPath,
+          farLodProbe,
+          farLodIndexedDb,
+          farLodWorldId: farLodWorldId || null,
+          remoteWebSocket,
+          remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
+          canvasPixels,
+          farLodProbeResult,
+          result,
+        };
+        await writeFile(farLodProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        assertFarLodProbeResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (indexedDbReloadProbe) {
         const indexedDbReloadProbeResult = await runIndexedDbReloadProbe(
           page,
@@ -1108,6 +1159,185 @@ async function runCatalogUiProbe(page, canvas) {
  * @param {Page} page
  * @param {Locator} canvas
  */
+async function runFarLodProbe(page, canvas) {
+  await waitForWebAppReady(page);
+  await waitForWebAppStreamingSettled(page, 60_000);
+  const before = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    return {
+      frameCount: Number(state.frameCount) || 0,
+      renderCount: Number(state.renderCount) || 0,
+      maxFrameGapMs: Number(state.maxFrameGapMs) || 0,
+      farLodEnabled: Boolean(state.lastReport?.farLodEnabled),
+      sessionKind: state.sessionKind,
+      hostMode: state.lastReport?.hostMode,
+      runnerKind: state.lastReport?.runnerKind,
+    };
+  });
+  if (before.farLodEnabled) {
+    throw new Error(`far LOD probe requires the production setting to start disabled:\n${JSON.stringify(before, null, 2)}`);
+  }
+  await page.evaluate(() => globalThis.__mcloneWebApp?.setDebugOverlay?.(false));
+  await page.waitForTimeout(50);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const offCapture = await captureValidOverviewFrame(
+    page,
+    canvas,
+    farLodOffCanvasScreenshotPath,
+    "far LOD disabled",
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  const geometry = await nativeUiGeometry(page);
+  await clickNativeUiPoint(page, {
+    x: geometry.width * 0.5,
+    y: geometry.height * 0.5 + 12.0,
+  });
+  await waitForNativeUiScreen(page, "options");
+  await clickNativeUiPoint(page, graphicsOptionsButtonPoint(geometry));
+  await waitForNativeUiScreen(page, "optionsCategory");
+  const toggleReport = await clickNativeUiPoint(page, farLodCheckboxPoint(geometry));
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.lastUiAction?.action === "toggleFarLod"
+        && state?.lastReport?.farLodEnabled === true;
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
+  await waitForNativeUiScreen(page, "none");
+
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const report = state?.lastReport;
+        const compiler = state?.lastCompileReport;
+        return state?.ok === true
+          && report?.farLodEnabled === true
+          && Number(report?.farLodResidentTiles) >= 64
+          && Number(report?.farLodVisibleTiles) > 0
+          && Number(report?.farLodRegionDrawCount) > 0
+          && Number(report?.farLodTotalUploadBytes) > 0
+          && compiler?.workKind === "far-lod"
+          && compiler?.farLodCompileUsed === true
+          && compiler?.transportKind === "shared-result-buffer"
+          && compiler?.sharedResultBufferUsed === true
+          && compiler?.generatedViewFallbackUsed === false;
+      },
+      undefined,
+      { timeout: 120_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(`far LOD worker/render proof did not become drawable: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state, null, 2)}`);
+  }
+  const workerProof = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.state?.lastCompileReport ?? null,
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const onCapture = await captureValidOverviewFrame(
+    page,
+    canvas,
+    canvasScreenshotPath,
+    "far LOD enabled",
+  );
+  const pixelDifference = comparePngPixels(offCapture.png, onCapture.png);
+  const after = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    const report = state.lastReport ?? {};
+    return {
+      frameCount: Number(state.frameCount) || 0,
+      renderCount: Number(state.renderCount) || 0,
+      maxFrameGapMs: Number(state.maxFrameGapMs) || 0,
+      farLodEnabled: report.farLodEnabled,
+      farLodRangeChunks: Number(report.farLodRangeChunks) || 0,
+      desiredTiles: Number(report.farLodDesiredTiles) || 0,
+      residentTiles: Number(report.farLodResidentTiles) || 0,
+      visibleTiles: Number(report.farLodVisibleTiles) || 0,
+      pendingBuilds: Number(report.farLodPendingBuilds) || 0,
+      inflightBuilds: Number(report.farLodInflightBuilds) || 0,
+      queuedUploads: Number(report.farLodQueuedUploads) || 0,
+      regionDrawCount: Number(report.farLodRegionDrawCount) || 0,
+      uploadedBytes: Number(report.farLodUploadedBytes) || 0,
+      totalUploadBytes: Number(report.farLodTotalUploadBytes) || 0,
+      sessionKind: state.sessionKind,
+      hostMode: report.hostMode,
+      runnerKind: report.runnerKind,
+      runnerTransportKind: report.runnerTransportKind,
+      compiler: state.lastCompileReport ?? null,
+      lastUiAction: state.lastUiAction ?? null,
+    };
+  });
+  return {
+    ok: after.farLodEnabled === true
+      && after.residentTiles >= 64
+      && after.visibleTiles > 0
+      && after.regionDrawCount > 0
+      && after.totalUploadBytes > 0
+      && workerProof?.workKind === "far-lod"
+      && workerProof?.farLodCompileUsed === true
+      && workerProof?.sharedResultBufferUsed === true
+      && workerProof?.sharedResultOverflow === false
+      && workerProof?.generatedViewFallbackUsed === false
+      && pixelDifference.differentPixelCount > 128,
+    before,
+    toggleReport,
+    after,
+    workerProof,
+    offCapture: {
+      attemptCount: offCapture.attemptCount,
+      pixels: offCapture.pixels,
+    },
+    onCapture: {
+      attemptCount: onCapture.attemptCount,
+      pixels: onCapture.pixels,
+    },
+    pixelDifference,
+  };
+}
+
+/**
+ * WebGPU presentation readback can occasionally capture an incomplete frame.
+ * Render the same production overview again until the canvas is visibly valid.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {string} path
+ * @param {string} label
+ */
+async function captureValidOverviewFrame(page, canvas, path, label) {
+  let png = null;
+  let pixels = null;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    await page.evaluate(() => globalThis.__mcloneWebApp?.renderOverviewFrame?.());
+    png = await canvas.screenshot({ path, timeout: 60_000 });
+    pixels = analyzePng(png);
+    if (pixels.nearBlackInteriorPixelCount < pixels.width * pixels.height * 0.15) {
+      return { png, pixels, attemptCount: attempt };
+    }
+  }
+  throw new Error(`${label} overview capture remained incomplete after 6 attempts:\n${JSON.stringify(pixels, null, 2)}`);
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
 async function runAssetPackUiProbe(page, canvas) {
   await waitForWebAppReady(page);
   await waitForWebAppStreamingSettled(page, 60_000);
@@ -1331,6 +1561,30 @@ async function clickNativeUiPoint(page, point) {
     app.handleNativeUiPointerDown?.(clientX, clientY, "mouse");
     return app.handleNativeUiPointerUp?.(clientX, clientY, "mouse") ?? null;
   }, point);
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function graphicsOptionsButtonPoint(geometry) {
+  const panel = centeredPanel(
+    geometry,
+    Math.min(Math.max(geometry.width - 18.0, 242.0), 360.0),
+    Math.min(238.0, Math.max(geometry.height - 4.0, 1.0)),
+  );
+  return { x: panel.x + panel.width * 0.5, y: panel.y + 40.0 };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function farLodCheckboxPoint(geometry) {
+  const panel = centeredPanel(
+    geometry,
+    Math.min(Math.max(geometry.width - 18.0, 242.0), 420.0),
+    Math.min(136.0, Math.max(geometry.height - 4.0, 1.0)),
+  );
+  const columnWidth = Math.max((panel.width - 46.0) / 2.0, 110.0);
+  return {
+    x: panel.x + 18.0 + columnWidth * 0.5,
+    y: panel.y + 30.0 + 24.0 + 9.0,
+  };
 }
 
 /** @param {Page} page */
@@ -4092,6 +4346,53 @@ function assertOverviewWorkerReport(workerReport, center, label) {
     throw new Error(`${label} render compiler worker summary was malformed:\n${JSON.stringify({ center, workerReport }, null, 2)}`);
   }
 }
+/**
+ * @param {any} report
+ * @param {string[]} pageErrors
+ * @param {ReturnType<typeof analyzePng>} canvasPixels
+ */
+function assertFarLodProbeResult(report, pageErrors, canvasPixels) {
+  if (
+    !report.farLodProbeResult?.ok
+    || pageErrors.length > 0
+    || canvasPixels.nonClearInteriorPixelCount <= 128
+    || canvasPixels.nearBlackInteriorPixelCount >= canvasPixels.width * canvasPixels.height * 0.15
+  ) {
+    throw new Error(`far LOD browser probe failed:\n${JSON.stringify({ report, pageErrors }, null, 2)}`);
+  }
+}
+
+/**
+ * @param {Buffer} beforeBytes
+ * @param {Buffer} afterBytes
+ */
+function comparePngPixels(beforeBytes, afterBytes) {
+  const before = decodePngRgba(beforeBytes);
+  const after = decodePngRgba(afterBytes);
+  if (before.width !== after.width || before.height !== after.height) {
+    throw new Error(
+      `PNG dimensions differ: ${before.width}x${before.height} vs ${after.width}x${after.height}`,
+    );
+  }
+  let differentPixelCount = 0;
+  for (let offset = 0; offset < before.rgba.length; offset += 4) {
+    if (
+      before.rgba[offset] !== after.rgba[offset]
+      || before.rgba[offset + 1] !== after.rgba[offset + 1]
+      || before.rgba[offset + 2] !== after.rgba[offset + 2]
+      || before.rgba[offset + 3] !== after.rgba[offset + 3]
+    ) {
+      differentPixelCount += 1;
+    }
+  }
+  return {
+    width: before.width,
+    height: before.height,
+    differentPixelCount,
+    totalPixelCount: before.width * before.height,
+  };
+}
+
 /** @param {Buffer} bytes */
 function analyzePng(bytes) {
   const png = decodePngRgba(bytes);
@@ -4105,6 +4406,7 @@ function analyzePng(bytes) {
   let clearColorPixelCount = 0;
   let nonClearInteriorPixelCount = 0;
   let skyLikePixelCount = 0;
+  let nearBlackInteriorPixelCount = 0;
   const inset = 4;
   for (let y = 0; y < png.height; y += 1) {
     for (let x = 0; x < png.width; x += 1) {
@@ -4125,6 +4427,9 @@ function analyzePng(bytes) {
       }
       if (x >= inset && x < png.width - inset && y >= inset && y < png.height - inset) {
         interiorColors.add(`${r},${g},${b}`);
+        if (r <= 3 && g <= 3 && b <= 3) {
+          nearBlackInteriorPixelCount += 1;
+        }
         if (!isClear) {
           nonClearInteriorPixelCount += 1;
         }
@@ -4139,6 +4444,7 @@ function analyzePng(bytes) {
     clearColorPixelCount,
     nonClearInteriorPixelCount,
     skyLikePixelCount,
+    nearBlackInteriorPixelCount,
     expectedClearColor: expected,
   };
 }

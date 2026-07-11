@@ -154,6 +154,8 @@ struct LastFrameStats {
     flat_hud_rebuilds: usize,
     flat_hud_cache_hits: usize,
     deferred_drop_backlog: usize,
+    far_lod_region_draw_count: usize,
+    far_lod_uploaded_bytes: usize,
 }
 
 /// Browser resource/presentation rim around the one shared scene-policy owner.
@@ -338,6 +340,8 @@ impl WebSceneHost {
             flat_hud_rebuilds: summary.render.flat_hud_retained_cache.rebuild_count as usize,
             flat_hud_cache_hits: summary.render.flat_hud_retained_cache.cache_hit_count as usize,
             deferred_drop_backlog: summary.upload.poll_client_deferred_chunk_drop_backlog_items,
+            far_lod_region_draw_count: summary.render.far_lod_region_draw_count,
+            far_lod_uploaded_bytes: summary.render.far_lod_uploaded_bytes,
         };
         if host.mono_ui_screen() == Some(GameScreen::Pause) && summary.render.gui_command_count > 0
         {
@@ -1106,6 +1110,7 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
     light_status_batch_size: usize,
     section_occlusion_culling: bool,
     force_fullbright: bool,
+    far_lod_enabled: bool,
     render_color_profile: String,
     server_worker_url: String,
     server_job_worker_url: String,
@@ -1152,7 +1157,11 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         render_distance,
         movement_speed_multiplier,
         use_initial_spawn_center: false,
-        far_lod: Default::default(),
+        far_lod: if far_lod_enabled {
+            mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled()
+        } else {
+            Default::default()
+        },
         startup_lod_prewarm: false,
         ..McloneSceneHostOptions::default()
     };
@@ -1189,6 +1198,7 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
     movement_speed_multiplier: f32,
     section_occlusion_culling: bool,
     force_fullbright: bool,
+    far_lod_enabled: bool,
     render_color_profile: String,
     compiler_wake: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
@@ -1213,7 +1223,11 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
         render_distance,
         movement_speed_multiplier,
         use_initial_spawn_center: false,
-        far_lod: Default::default(),
+        far_lod: if far_lod_enabled {
+            mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled()
+        } else {
+            Default::default()
+        },
         startup_lod_prewarm: false,
         ..McloneSceneHostOptions::default()
     };
@@ -1265,10 +1279,14 @@ async fn create_scene_host(
     let context = WebCanvasContext::new_with_color_profile(canvas, render_options.color_profile)
         .await
         .map_err(JsValue::from)?;
-    let runtime =
-        WebSceneRuntimeService::new(runtime, active_assets.mesh.clone(), compiler_wake.clone())
-            .into_scene_session_runtime(descriptor.clone());
     let (mut platform, clock, catalog_operations) = WebScenePlatformServices::new();
+    let runtime = WebSceneRuntimeService::new(
+        runtime,
+        active_assets.mesh.clone(),
+        compiler_wake.clone(),
+        clock.clone(),
+    )
+    .into_scene_session_runtime(descriptor.clone());
     let operation = match &descriptor {
         ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
             WebSceneSessionOperation::StartLocal {
@@ -1446,6 +1464,7 @@ impl WebSceneHost {
             runtime,
             active_assets.mesh.clone(),
             self.compiler_wake.clone(),
+            self.platform.clock_handle(),
         )
         .into_scene_session_runtime(descriptor.clone());
         let (device, queue) = (&self.context.device, &self.context.queue);
@@ -1897,6 +1916,40 @@ impl WebSceneHost {
                 ui_state.section_occlusion_culling,
             )?;
             report_set_bool(&object, "forceFullbright", ui_state.force_fullbright)?;
+            report_set_bool(&object, "farLodEnabled", ui_state.far_lod_enabled)?;
+            report_set_number(
+                &object,
+                "farLodRangeChunks",
+                f64::from(ui_state.far_lod_range_chunks),
+            )?;
+            let far_lod = host.far_lod_stats();
+            report_set_number(&object, "farLodDesiredTiles", far_lod.desired_tiles as f64)?;
+            report_set_number(
+                &object,
+                "farLodResidentTiles",
+                far_lod.resident_tiles as f64,
+            )?;
+            report_set_number(&object, "farLodVisibleTiles", far_lod.visible_tiles as f64)?;
+            report_set_number(
+                &object,
+                "farLodPendingBuilds",
+                far_lod.pending_builds as f64,
+            )?;
+            report_set_number(
+                &object,
+                "farLodInflightBuilds",
+                far_lod.inflight_builds as f64,
+            )?;
+            report_set_number(
+                &object,
+                "farLodQueuedUploads",
+                far_lod.queued_uploads as f64,
+            )?;
+            report_set_number(
+                &object,
+                "farLodTotalUploadBytes",
+                far_lod.total_upload_bytes as f64,
+            )?;
             report_set_bool(&object, "worldCatalogPersistent", world_catalog.persistent)?;
             report_set_bool(&object, "worldCatalogLoading", world_catalog.loading)?;
             report_set_number(
@@ -2195,6 +2248,16 @@ impl WebSceneHost {
             &object,
             "deferredDropBacklogItems",
             self.last_frame.deferred_drop_backlog as f64,
+        )?;
+        report_set_number(
+            &object,
+            "farLodRegionDrawCount",
+            self.last_frame.far_lod_region_draw_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "farLodUploadedBytes",
+            self.last_frame.far_lod_uploaded_bytes as f64,
         )?;
         report_set_number(&object, "meshBuildCount", self.mesh_build_count as f64)?;
         Ok(object.into())

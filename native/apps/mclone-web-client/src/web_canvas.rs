@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime,
@@ -9,9 +9,14 @@ use super::{
 use mclone_app_runtime::deferred_drop::{
     BoundedDeferredDropQueue, DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropService,
 };
-use mclone_app_runtime::far_lod::{FarTerrainLodConfig, FarTerrainLodMaterialPalette};
+use mclone_app_runtime::far_lod::{
+    FarTerrainLodBuildRequest, FarTerrainLodBuildResult, FarTerrainLodCache, FarTerrainLodCompiler,
+    FarTerrainLodConfig, FarTerrainLodMaterialPalette, FarTerrainLodWorkerInput,
+    compile_far_terrain_lod_worker_input,
+};
 use mclone_app_runtime::host_mode::SingleViewHostMode;
-use mclone_app_runtime::monotonic::MonotonicDeadline;
+use mclone_app_runtime::lod_coverage::{LodCoverageCoordinator, LodTileAvailability};
+use mclone_app_runtime::monotonic::{MonotonicClockHandle, MonotonicDeadline};
 use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, AssetPackSourceRegistry, MINECRAFT_REFERENCE_PACK_ID,
     PreparedSceneAssets,
@@ -48,7 +53,7 @@ use mclone_client::ClientRuntime;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus, chunk_section_index,
 };
-use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot};
+use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, LodTileKey};
 use mclone_mesh::{
     RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     TexturedRenderSectionMesh, TexturedRenderSectionMetadata, load_textured_terrain_assets,
@@ -57,7 +62,7 @@ use mclone_protocol::{ClientCommand, ServerUpdate, decode_server_update, encode_
 use mclone_render::actor_assets::load_actor_texture_assets;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
-use mclone_render::far_lod::FarTerrainLodFrameUpdate;
+use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodTileMesh};
 use mclone_render::screen_effect::load_screen_effect_texture_assets;
 use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompileQueueHealth, RenderSectionCompileRequest,
@@ -97,6 +102,7 @@ const WEB_DEFERRED_DROP_DRAIN_ITEM_BUDGET: usize = 256;
 const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD1\0";
 const WEB_RENDER_COMPILE_DELTA_FLAG_RESET: u32 = 1;
 const WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED: u32 = 2;
+const WEB_FAR_LOD_TILE_MESH_MAGIC: &[u8; 8] = b"MCWLOD1\0";
 
 // 067 Stage 2 ABI / Stage 5 lock: resident render-compiler shared ring constants.
 // The worker writes the result control word + payload and main wasm reads them back
@@ -277,6 +283,7 @@ impl WebRenderCompilerSession {
         Ok(Self {
             mesh_assets: WebTexturedMeshAssets {
                 catalog: mesh_assets.catalog,
+                far_lod_materials: mesh_assets.far_lod_materials,
                 asset_pack_file_count,
             },
             asset_pack_byte_length,
@@ -308,6 +315,31 @@ impl WebRenderCompilerSession {
     #[wasm_bindgen(js_name = compileCount)]
     pub fn compile_count(&self) -> usize {
         self.compile_count
+    }
+
+    #[wasm_bindgen(js_name = compileFarLodTile)]
+    pub fn compile_far_lod_tile(
+        &mut self,
+        seed_text: String,
+        chunk_x: i32,
+        chunk_z: i32,
+        level: u8,
+        sample_spacing_blocks: u32,
+    ) -> Result<js_sys::Uint8Array, JsValue> {
+        self.compile_count += 1;
+        let seed = seed_text
+            .parse::<i64>()
+            .map_err(|error| JsValue::from_str(&format!("invalid far LOD seed: {error}")))?;
+        let mesh = compile_far_terrain_lod_worker_input(
+            FarTerrainLodWorkerInput {
+                key: LodTileKey::new(ChunkPos::new(chunk_x, chunk_z), level),
+                seed,
+                sample_spacing_blocks,
+            },
+            self.mesh_assets.far_lod_materials.as_ref(),
+        );
+        let packed = encode_web_far_lod_tile_mesh(&mesh).map_err(JsValue::from)?;
+        Ok(js_sys::Uint8Array::from(packed.as_slice()))
     }
 
     #[wasm_bindgen(js_name = compileGeneratedChunkSections)]
@@ -803,6 +835,60 @@ impl<'a> WebRenderCompileInputReader<'a> {
     }
 }
 
+fn encode_web_far_lod_tile_mesh(mesh: &FarTerrainLodTileMesh) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::with_capacity(
+        WEB_FAR_LOD_TILE_MESH_MAGIC.len()
+            + 20
+            + mesh.vertices().len() * std::mem::size_of::<f32>()
+            + mesh.indices().len() * std::mem::size_of::<u32>(),
+    );
+    bytes.extend_from_slice(WEB_FAR_LOD_TILE_MESH_MAGIC);
+    bytes.extend_from_slice(&mesh.key().chunk.x.to_le_bytes());
+    bytes.extend_from_slice(&mesh.key().chunk.z.to_le_bytes());
+    bytes.extend_from_slice(&u32::from(mesh.key().level).to_le_bytes());
+    write_web_compile_input_u32(
+        &mut bytes,
+        mesh.vertices().len(),
+        "far LOD vertex float count",
+    )?;
+    write_web_compile_input_u32(&mut bytes, mesh.indices().len(), "far LOD index count")?;
+    for value in mesh.vertices() {
+        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+    }
+    for index in mesh.indices() {
+        bytes.extend_from_slice(&index.to_le_bytes());
+    }
+    Ok(bytes)
+}
+
+fn decode_web_far_lod_tile_mesh(bytes: &[u8]) -> Result<FarTerrainLodTileMesh, String> {
+    let mut reader = WebRenderCompileInputReader::new(bytes);
+    let magic = reader.read_bytes(WEB_FAR_LOD_TILE_MESH_MAGIC.len(), "far LOD magic")?;
+    if magic != WEB_FAR_LOD_TILE_MESH_MAGIC {
+        return Err("web far LOD tile mesh had an invalid magic header".to_owned());
+    }
+    let key = LodTileKey::new(
+        ChunkPos::new(
+            reader.read_i32("far LOD chunk x")?,
+            reader.read_i32("far LOD chunk z")?,
+        ),
+        u8::try_from(reader.read_u32("far LOD level")?)
+            .map_err(|_| "web far LOD level exceeded u8".to_owned())?,
+    );
+    let vertex_float_count = reader.read_u32("far LOD vertex float count")? as usize;
+    let index_count = reader.read_u32("far LOD index count")? as usize;
+    let mut vertices = Vec::with_capacity(vertex_float_count);
+    for _ in 0..vertex_float_count {
+        vertices.push(f32::from_bits(reader.read_u32("far LOD vertex float")?));
+    }
+    let mut indices = Vec::with_capacity(index_count);
+    for _ in 0..index_count {
+        indices.push(reader.read_u32("far LOD index")?);
+    }
+    reader.finish()?;
+    Ok(FarTerrainLodTileMesh::new(key, vertices, indices))
+}
+
 fn packed_compile_report_summary_to_js(
     byte_length: usize,
     report: &mclone_mesh::TexturedRenderSectionBuildReport,
@@ -1030,6 +1116,11 @@ impl WebRenderCompilerSharedArena {
         )?;
         // Arm the result control word last so the worker only observes PENDING after
         // the input payload is fully published into shared memory.
+        self.arm_result()?;
+        Ok(grew)
+    }
+
+    fn arm_result(&self) -> Result<(), String> {
         render_compiler_atomic_store(
             &self.result_control,
             RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
@@ -1045,7 +1136,7 @@ impl WebRenderCompilerSharedArena {
             RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
             RENDER_COMPILER_SHARED_RESULT_PENDING,
         )?;
-        Ok(grew)
+        Ok(())
     }
 
     fn poll_result_status(&self) -> Result<i32, String> {
@@ -1103,10 +1194,24 @@ impl WebRenderCompilerSharedArena {
     }
 }
 
-struct WebSharedCompileInFlight {
-    request_id: u32,
-    target_sections: BTreeSet<RenderSectionKey>,
-    section_revisions: BTreeMap<RenderSectionKey, u64>,
+enum WebSharedCompileInFlight {
+    Sections {
+        request_id: u32,
+        target_sections: BTreeSet<RenderSectionKey>,
+        section_revisions: BTreeMap<RenderSectionKey, u64>,
+    },
+    FarLod {
+        request_id: u32,
+        request: FarTerrainLodBuildRequest,
+    },
+}
+
+impl WebSharedCompileInFlight {
+    fn request_id(&self) -> u32 {
+        match self {
+            Self::Sections { request_id, .. } | Self::FarLod { request_id, .. } => *request_id,
+        }
+    }
 }
 
 /// Web `RenderSectionCompiler` over the resident `SharedArrayBuffer` ring (067 Stage 2),
@@ -1124,6 +1229,9 @@ struct WebSharedCompileInFlight {
 struct WebRenderSectionCompiler {
     shared: Option<WebRenderCompilerSharedArena>,
     in_flight: Option<WebSharedCompileInFlight>,
+    completed_sections: VecDeque<RenderSectionCompileResult>,
+    completed_far_lod: VecDeque<FarTerrainLodBuildResult>,
+    far_lod_error: Option<String>,
     next_request_id: u32,
     pending_jobs: usize,
     compile_count: usize,
@@ -1187,6 +1295,9 @@ impl WebRenderSectionCompiler {
                 .unwrap_or(0),
             shared,
             in_flight: None,
+            completed_sections: VecDeque::new(),
+            completed_far_lod: VecDeque::new(),
+            far_lod_error: None,
             next_request_id: 1,
             pending_jobs: 0,
             compile_count: 0,
@@ -1207,7 +1318,7 @@ impl WebRenderSectionCompiler {
     fn in_flight_request_id(&self) -> Option<u32> {
         self.in_flight
             .as_ref()
-            .map(|in_flight| in_flight.request_id)
+            .map(WebSharedCompileInFlight::request_id)
     }
 
     fn allocate_request_id(&mut self) -> u32 {
@@ -1262,6 +1373,27 @@ impl WebRenderSectionCompiler {
         Ok(())
     }
 
+    fn write_doorbell_result_arena(&self, object: &js_sys::Object) -> Result<(), String> {
+        let Some(arena) = self.shared.as_ref() else {
+            return Ok(());
+        };
+        render_compiler_set_value(
+            object,
+            "sharedResultControlBuffer",
+            arena.result_control_buffer.as_ref(),
+        )?;
+        render_compiler_set_value(
+            object,
+            "sharedResultResponseBuffer",
+            arena.result_buffer.as_ref(),
+        )?;
+        set_number(
+            object,
+            "sharedResultBufferCapacityBytes",
+            f64::from(arena.result_capacity),
+        )
+    }
+
     /// Build a complete worker doorbell for the in-flight compile (067 Stage 3): the
     /// request id, the budget's target section keys (so the worker compiles only those —
     /// the per-frame increment, not a whole-view job), the delta input width, and the
@@ -1272,33 +1404,45 @@ impl WebRenderSectionCompiler {
         let Some(in_flight) = self.in_flight.as_ref() else {
             return Ok(false);
         };
-        set_number(object, "requestId", f64::from(in_flight.request_id))?;
-        write_target_sections(object, &in_flight.target_sections)?;
-        set_number(
-            object,
-            "submittedCompileSectionCount",
-            in_flight.target_sections.len() as f64,
-        )?;
-        // 067 Stage 4: the input is now a delta, so the "chunk count" reported up the existing
-        // diagnostics chain is the number of columns shipped this compile (upserts). A
-        // neighbor-dirtied target legitimately ships 0 upserts (the worker mirror already holds
-        // it), while the delta byte length stays > 0 (fixed header). The worker surfaces the
-        // matching upsert/eviction/mirror counts from its own session getters.
-        set_number(
-            object,
-            "snapshotInputChunkCount",
-            self.last_input_upsert_count as f64,
-        )?;
-        // 067 follow-up 1: columns actually cloned on the main thread for this submit, counted
-        // at the clone site. It must equal `snapshotInputChunkCount` (the upserts shipped); the
-        // smoke asserts the equality so a reintroduced whole-world clone (clone all, ship delta)
-        // shows up as a divergence instead of silently regressing main-thread allocation.
-        set_number(
-            object,
-            "snapshotInputClonedColumnCount",
-            self.last_submit_cloned_column_count as f64,
-        )?;
-        self.write_doorbell_arenas(object)?;
+        set_number(object, "requestId", f64::from(in_flight.request_id()))?;
+        match in_flight {
+            WebSharedCompileInFlight::Sections {
+                target_sections, ..
+            } => {
+                set_string(object, "workKind", "render-sections")?;
+                write_target_sections(object, target_sections)?;
+                set_number(
+                    object,
+                    "submittedCompileSectionCount",
+                    target_sections.len() as f64,
+                )?;
+                set_number(
+                    object,
+                    "snapshotInputChunkCount",
+                    self.last_input_upsert_count as f64,
+                )?;
+                set_number(
+                    object,
+                    "snapshotInputClonedColumnCount",
+                    self.last_submit_cloned_column_count as f64,
+                )?;
+                self.write_doorbell_arenas(object)?;
+            }
+            WebSharedCompileInFlight::FarLod { request, .. } => {
+                let input = request.worker_input();
+                set_string(object, "workKind", "far-lod")?;
+                set_string(object, "farLodSeed", &input.seed.to_string())?;
+                set_number(object, "farLodChunkX", f64::from(input.key.chunk.x))?;
+                set_number(object, "farLodChunkZ", f64::from(input.key.chunk.z))?;
+                set_number(object, "farLodLevel", f64::from(input.key.level))?;
+                set_number(
+                    object,
+                    "farLodSampleSpacingBlocks",
+                    f64::from(input.sample_spacing_blocks),
+                )?;
+                self.write_doorbell_result_arena(object)?;
+            }
+        }
         Ok(true)
     }
 
@@ -1345,6 +1489,130 @@ impl WebRenderSectionCompiler {
             generation,
         });
         upserts
+    }
+
+    fn poll_completed_work(&mut self) -> anyhow::Result<()> {
+        if self.in_flight.is_none() {
+            return Ok(());
+        }
+        let Some(arena) = self.shared.as_ref() else {
+            return Ok(());
+        };
+        let status = arena.poll_result_status().map_err(anyhow::Error::msg)?;
+        match status {
+            RENDER_COMPILER_SHARED_RESULT_COMPLETE => {
+                let packed = self
+                    .shared
+                    .as_ref()
+                    .expect("shared arena present")
+                    .read_result_bytes()
+                    .map_err(anyhow::Error::msg)?;
+                let in_flight = self
+                    .take_in_flight()
+                    .expect("in-flight compile present after status check");
+                self.last_packed_byte_length = packed.len();
+                self.last_result_overflow = false;
+                self.shared_result_response_count += 1;
+                self.shared_result_byte_count += packed.len();
+                if let Some(arena) = self.shared.as_ref() {
+                    self.last_result_capacity_bytes = arena.result_capacity as usize;
+                }
+                match in_flight {
+                    WebSharedCompileInFlight::Sections {
+                        target_sections,
+                        section_revisions,
+                        ..
+                    } => {
+                        let section_report = decode_textured_render_section_build_report(&packed)
+                            .map_err(|error| {
+                            anyhow::anyhow!(
+                                "failed to decode packed render section report: {error:#}"
+                            )
+                        })?;
+                        self.completed_sections.push_back(
+                            render_section_compile_result_from_report(
+                                target_sections,
+                                section_revisions,
+                                section_report,
+                            ),
+                        );
+                    }
+                    WebSharedCompileInFlight::FarLod { request, .. } => {
+                        let mesh =
+                            decode_web_far_lod_tile_mesh(&packed).map_err(anyhow::Error::msg)?;
+                        self.completed_far_lod
+                            .push_back(request.complete_worker_mesh(mesh)?);
+                    }
+                }
+            }
+            RENDER_COMPILER_SHARED_RESULT_OVERFLOW => {
+                let required = self
+                    .shared
+                    .as_ref()
+                    .expect("shared arena present")
+                    .result_capacity_word()
+                    .map_err(anyhow::Error::msg)?;
+                if let Some(arena) = self.shared.as_mut() {
+                    arena.grow_result(required);
+                    self.last_result_capacity_bytes = arena.result_capacity as usize;
+                }
+                self.shared_result_overflow_count += 1;
+                self.last_result_overflow = true;
+                let in_flight = self.take_in_flight().expect("in-flight compile present");
+                let message = format!(
+                    "render compile result overflowed the resident shared buffer ({required} bytes required)"
+                );
+                match in_flight {
+                    WebSharedCompileInFlight::Sections {
+                        target_sections,
+                        section_revisions,
+                        ..
+                    } => self
+                        .completed_sections
+                        .push_back(RenderSectionCompileResult {
+                            target_sections,
+                            section_revisions,
+                            result: Err(message),
+                        }),
+                    WebSharedCompileInFlight::FarLod { .. } => {
+                        self.far_lod_error = Some(message);
+                    }
+                }
+            }
+            RENDER_COMPILER_SHARED_RESULT_FAILED => {
+                self.last_result_overflow = false;
+                let in_flight = self.take_in_flight().expect("in-flight compile present");
+                match in_flight {
+                    WebSharedCompileInFlight::Sections {
+                        target_sections,
+                        section_revisions,
+                        ..
+                    } => {
+                        self.mirror_tracking.clear();
+                        self.completed_sections
+                            .push_back(RenderSectionCompileResult {
+                                target_sections,
+                                section_revisions,
+                                result: Err(
+                                    "render compiler worker reported a failed compile".to_owned()
+                                ),
+                            });
+                    }
+                    WebSharedCompileInFlight::FarLod { .. } => {
+                        self.far_lod_error = Some(
+                            "render compiler worker reported a failed far LOD compile".to_owned(),
+                        );
+                    }
+                }
+            }
+            RENDER_COMPILER_SHARED_RESULT_PENDING | 0 => {}
+            other => {
+                return Err(anyhow::anyhow!(
+                    "render compile result control word had unexpected status {other}"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1427,7 +1695,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             self.last_submit_cloned_column_count, self.last_input_upsert_count,
             "web render compiler should clone exactly the upsert columns it submits"
         );
-        self.in_flight = Some(WebSharedCompileInFlight {
+        self.in_flight = Some(WebSharedCompileInFlight::Sections {
             request_id,
             target_sections,
             section_revisions,
@@ -1438,98 +1706,56 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
     }
 
     fn try_recv_completed(&mut self) -> anyhow::Result<Vec<RenderSectionCompileResult>> {
-        if self.in_flight.is_none() {
-            return Ok(Vec::new());
-        }
-        let Some(arena) = self.shared.as_ref() else {
-            return Ok(Vec::new());
-        };
-        let status = arena
-            .poll_result_status()
-            .map_err(|error| anyhow::anyhow!(error))?;
-        match status {
-            RENDER_COMPILER_SHARED_RESULT_COMPLETE => {
-                let packed = self
-                    .shared
-                    .as_ref()
-                    .expect("shared arena present")
-                    .read_result_bytes()
-                    .map_err(|error| anyhow::anyhow!(error))?;
-                let in_flight = self
-                    .take_in_flight()
-                    .expect("in-flight compile present after status check");
-                let section_report =
-                    decode_textured_render_section_build_report(&packed).map_err(|error| {
-                        anyhow::anyhow!("failed to decode packed render section report: {error:#}")
-                    })?;
-                self.last_packed_byte_length = packed.len();
-                self.last_result_overflow = false;
-                self.shared_result_response_count += 1;
-                self.shared_result_byte_count += packed.len();
-                if let Some(arena) = self.shared.as_ref() {
-                    self.last_result_capacity_bytes = arena.result_capacity as usize;
-                }
-                Ok(vec![render_section_compile_result_from_report(
-                    in_flight.target_sections,
-                    in_flight.section_revisions,
-                    section_report,
-                )])
-            }
-            RENDER_COMPILER_SHARED_RESULT_OVERFLOW => {
-                // Labeled hard-diagnostic fallback: the worker had to allocate a
-                // one-off larger buffer (only reachable through its postMessage), so
-                // main wasm cannot read it from the resident ring. Record it, grow the
-                // resident buffer so the retry fits, and fail this compile so the
-                // sections requeue. With a 16 MB resident buffer vs ~11.6 MB worst case
-                // this path stays dormant in the validated lanes.
-                let required = self
-                    .shared
-                    .as_ref()
-                    .expect("shared arena present")
-                    .result_capacity_word()
-                    .map_err(|error| anyhow::anyhow!(error))?;
-                if let Some(arena) = self.shared.as_mut() {
-                    arena.grow_result(required);
-                    self.last_result_capacity_bytes = arena.result_capacity as usize;
-                }
-                self.shared_result_overflow_count += 1;
-                self.last_result_overflow = true;
-                // 067 Stage 4: do NOT clear the mirror shadow here. The worker applied this
-                // delta to its mirror before encoding the (oversized) result, so the mirror is
-                // correctly advanced; keeping the shadow lets the requeued compile ship a
-                // minimal delta instead of re-shipping the whole world.
-                let in_flight = self.take_in_flight().expect("in-flight compile present");
-                Ok(vec![RenderSectionCompileResult {
-                    target_sections: in_flight.target_sections,
-                    section_revisions: in_flight.section_revisions,
-                    result: Err(format!(
-                        "render compile result overflowed the resident shared buffer ({required} bytes required)"
-                    )),
-                }])
-            }
-            RENDER_COMPILER_SHARED_RESULT_FAILED => {
-                self.last_result_overflow = false;
-                // 067 Stage 4: a worker-reported failure (decode error, or the mirror-generation
-                // desync tripwire) leaves the worker mirror in an unknown state, so drop the
-                // shadow. The next submit then sees an empty shadow and ships a full resync,
-                // rebuilding the worker mirror from scratch.
-                self.mirror_tracking.clear();
-                let in_flight = self.take_in_flight().expect("in-flight compile present");
-                Ok(vec![RenderSectionCompileResult {
-                    target_sections: in_flight.target_sections,
-                    section_revisions: in_flight.section_revisions,
-                    result: Err("render compiler worker reported a failed compile".to_string()),
-                }])
-            }
-            RENDER_COMPILER_SHARED_RESULT_PENDING | 0 => Ok(Vec::new()),
-            other => Err(anyhow::anyhow!(
-                "render compile result control word had unexpected status {other}"
-            )),
-        }
+        self.poll_completed_work()?;
+        Ok(self.completed_sections.drain(..).collect())
     }
 
     fn pending_job_count(&self) -> usize {
         self.pending_jobs
+    }
+}
+
+impl FarTerrainLodCompiler for WebRenderSectionCompiler {
+    fn available_far_lod_job_slots(&self) -> usize {
+        usize::from(self.shared.is_some() && self.in_flight.is_none())
+    }
+
+    fn submit_far_lod(&mut self, request: FarTerrainLodBuildRequest) -> anyhow::Result<()> {
+        if self.shared.is_none() {
+            return Err(anyhow::anyhow!(
+                "web render compiler has no shared arena (SharedArrayBuffer unavailable)"
+            ));
+        }
+        if self.in_flight.is_some() {
+            return Err(anyhow::anyhow!(
+                "web render compiler already has a compile in flight"
+            ));
+        }
+        self.shared
+            .as_ref()
+            .expect("shared arena present after is_none check")
+            .arm_result()
+            .map_err(anyhow::Error::msg)?;
+        let request_id = self.allocate_request_id();
+        self.in_flight = Some(WebSharedCompileInFlight::FarLod {
+            request_id,
+            request,
+        });
+        self.pending_jobs = 1;
+        self.compile_count += 1;
+        Ok(())
+    }
+
+    fn try_recv_completed_far_lod(&mut self) -> anyhow::Result<Vec<FarTerrainLodBuildResult>> {
+        self.poll_completed_work()?;
+        if let Some(error) = self.far_lod_error.take() {
+            return Err(anyhow::anyhow!(error));
+        }
+        Ok(self.completed_far_lod.drain(..).collect())
+    }
+
+    fn release_completed_far_lod_jobs(&mut self, count: usize) -> usize {
+        count
     }
 }
 
@@ -1573,6 +1799,9 @@ pub struct WebSceneRuntimeService {
     runtime: WebRuntime,
     mesh_assets: TexturedMeshAssets,
     render_compiler: WebRenderSectionCompiler,
+    far_lod_cache: FarTerrainLodCache,
+    lod_coverage: LodCoverageCoordinator,
+    clock: MonotonicClockHandle,
     compiler_wake: WebRenderCompilerWakeSink,
     deferred_chunk_drops: BoundedDeferredDropQueue,
 }
@@ -1596,11 +1825,15 @@ impl WebSceneRuntimeService {
         runtime: WebRuntime,
         mesh_assets: TexturedMeshAssets,
         compiler_wake: js_sys::Function,
+        clock: MonotonicClockHandle,
     ) -> Self {
         Self {
             runtime,
             mesh_assets,
             render_compiler: WebRenderSectionCompiler::new(),
+            far_lod_cache: FarTerrainLodCache::new(),
+            lod_coverage: LodCoverageCoordinator::new(),
+            clock,
             compiler_wake: WebRenderCompilerWakeSink {
                 callback: compiler_wake,
             },
@@ -1686,6 +1919,22 @@ impl WebSceneRuntimeService {
     fn diagnostics(&self) -> mclone_server::ServerRunnerDiagnostics {
         self.runtime.runner_diagnostics()
     }
+
+    fn resolve_lod_coverage(&mut self, normal_drawable: &BTreeSet<ChunkPos>) -> BTreeSet<ChunkPos> {
+        let normal_loaded = self
+            .runtime
+            .client()
+            .loaded_chunk_positions()
+            .collect::<BTreeSet<_>>();
+        let synthetic = self
+            .far_lod_cache
+            .drawable_lod_tiles()
+            .map(LodTileAvailability::synthetic)
+            .collect::<Vec<_>>();
+        self.lod_coverage
+            .resolve(normal_drawable, &normal_loaded, synthetic)
+            .visible_lod_tiles
+    }
 }
 
 impl SceneRuntimeService for WebSceneRuntimeService {
@@ -1722,31 +1971,67 @@ impl SceneRuntimeService for WebSceneRuntimeService {
             .runtime
             .scene_core_mut()
             .replace_asset_epoch_sections(epoch, sections);
+        self.clear_far_lod();
         self.render_compiler = WebRenderSectionCompiler::new();
         self.mesh_assets = mesh_assets;
         Ok(())
     }
 
-    fn clear_far_lod(&mut self) {}
+    fn clear_far_lod(&mut self) {
+        let abandoned = self.far_lod_cache.clear();
+        self.render_compiler
+            .release_completed_far_lod_jobs(abandoned);
+        self.lod_coverage.clear();
+    }
 
     fn prepare_far_lod_frame(
         &mut self,
-        _config: FarTerrainLodConfig,
-        _seed: i64,
-        _center: ChunkPos,
-        _camera_position: glam::Vec3,
-        _build_budget: usize,
-        _upload_budget: usize,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        camera_position: glam::Vec3,
+        build_budget: usize,
+        upload_budget: usize,
     ) -> anyhow::Result<Option<&FarTerrainLodFrameUpdate>> {
-        Ok(None)
+        if !config.enabled {
+            self.clear_far_lod();
+            return Ok(None);
+        }
+        let normal_terrain_chunks = self
+            .runtime
+            .scene_core()
+            .traversal_ready_render_section_keys(camera_position)
+            .into_iter()
+            .map(|section| ChunkPos::new(section.chunk_x, section.chunk_z))
+            .collect::<BTreeSet<_>>();
+        let previous_request = self.render_compiler.in_flight_request_id();
+        self.far_lod_cache.advance_for_camera_at(
+            self.clock.now(),
+            config,
+            seed,
+            center,
+            self.runtime.scene_core().render_distance(),
+            Some(&normal_terrain_chunks),
+            self.mesh_assets.far_lod_materials.as_ref(),
+            &mut self.render_compiler,
+            build_budget,
+        )?;
+        let current_request = self.render_compiler.in_flight_request_id();
+        if current_request.is_some() && current_request != previous_request {
+            self.compiler_wake.wake(&self.render_compiler)?;
+        }
+        self.far_lod_cache
+            .drain_render_uploads(upload_budget, &mut self.render_compiler);
+        let visible = self.resolve_lod_coverage(&normal_terrain_chunks);
+        Ok(Some(self.far_lod_cache.prepare_render_update(&visible)))
     }
 
     fn far_lod_stats(&self) -> mclone_app_runtime::far_lod::FarTerrainLodProducerStats {
-        Default::default()
+        self.far_lod_cache.stats()
     }
 
     fn lod_coverage_counters(&self) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
-        Default::default()
+        self.lod_coverage.counters()
     }
 
     fn release_render_compile_jobs(&mut self, count: usize) -> usize {
@@ -2171,6 +2456,7 @@ fn render_section_keys_from_int32_array(
 #[derive(Clone, Debug)]
 struct WebTexturedMeshAssets {
     catalog: TexturedMeshCatalog,
+    far_lod_materials: Option<FarTerrainLodMaterialPalette>,
     asset_pack_file_count: usize,
 }
 
@@ -2180,9 +2466,12 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
     let asset_pack_file_count = source.file_count();
     let assets = load_textured_terrain_assets(&source)
         .map_err(|error| format!("failed to load packed textured terrain assets: {error}"))?;
+    let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(&source)
+        .map_err(|error| format!("failed to load packed far-LOD assets: {error}"))?;
 
     Ok(WebTexturedMeshAssets {
         catalog: assets.catalog,
+        far_lod_materials,
         asset_pack_file_count,
     })
 }
@@ -2761,6 +3050,7 @@ fn startup_options_to_js_value(options: &StartupOptions) -> Result<JsValue, Stri
         options.scene.debug_passive_showcase,
     )?;
     set_bool(&object, "lightingEnabled", options.scene.lighting_enabled)?;
+    set_bool(&object, "farLodEnabled", options.scene.far_lod.enabled)?;
     set_number(
         &object,
         "lightStatusBatchSize",
@@ -3166,6 +3456,21 @@ mod tests {
         let mut trailing = bytes;
         trailing.push(0);
         assert!(decode_web_render_compile_delta(&trailing).is_err());
+    }
+
+    #[test]
+    fn web_far_lod_tile_mesh_roundtrips_worker_payload() {
+        let mesh = FarTerrainLodTileMesh::new(
+            LodTileKey::new(ChunkPos::new(-7, 11), 1),
+            vec![1.0, 2.0, 3.0, 0.25, 0.5, 0.75, 1.0],
+            vec![0, 0, 0],
+        );
+        let packed = encode_web_far_lod_tile_mesh(&mesh).unwrap();
+        assert_eq!(decode_web_far_lod_tile_mesh(&packed).unwrap(), mesh);
+
+        let mut trailing = packed;
+        trailing.push(0);
+        assert!(decode_web_far_lod_tile_mesh(&trailing).is_err());
     }
 }
 

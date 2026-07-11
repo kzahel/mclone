@@ -468,7 +468,6 @@ pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfil
 /// `web_feature_divergences_match_audited_ledger`.
 pub fn web_client_experience_profile() -> ClientExperienceProfile {
     let mut settings = native_client_experience_baseline();
-    settings.far_lod = ClientExperienceCapabilityStatus::Unsupported(WEB_FAR_LOD_REASON);
     settings.travel_assist =
         ClientExperienceCapabilityStatus::Unsupported(WEB_TRAVEL_ASSIST_REASON);
     settings.turn_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
@@ -484,8 +483,6 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
     ClientExperienceProfile::new(settings)
 }
 
-const WEB_FAR_LOD_REASON: &str =
-    "Far LOD needs browser worker/runtime integration plus performance and rendering proof";
 const WEB_TRAVEL_ASSIST_REASON: &str =
     "Travel assist needs browser input, UI, and movement smoke coverage";
 const WEB_FRAME_PIPELINE_OVERLAY_REASON: &str =
@@ -498,10 +495,6 @@ const WEB_SERVER_SIMULATION_CADENCE_REASON: &str =
 /// Audited browser feature gaps. Each entry names a concrete follow-up and must
 /// exactly match a reason-bearing capability in [`web_client_experience_profile`].
 pub const WEB_FEATURE_PARITY_EXCEPTIONS: &[(ClientExperienceFeatureCapability, &'static str)] = &[
-    (
-        ClientExperienceFeatureCapability::FarLod,
-        WEB_FAR_LOD_REASON,
-    ),
     (
         ClientExperienceFeatureCapability::TravelAssist,
         WEB_TRAVEL_ASSIST_REASON,

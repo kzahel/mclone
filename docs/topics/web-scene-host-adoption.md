@@ -12,7 +12,10 @@ persistence, strict provenance, and reload diagnostics through this host.
 The final audit added browser enforcement to the default purity gate, locked
 the exact feature-gap ledger, removed obsolete aliases/dead compatibility
 paths, stabilized actionable render-work accounting, and refreshed durable
-operating/architecture docs. Structural adoption is closed.
+operating/architecture docs. Structural adoption is closed. Tactical 171 —
+Convergence And Parity Closeout Milestone D subsequently promoted Far LOD
+through the same production host and worker/compiler seams without reopening
+this adoption series.
 
 ## Scope
 
@@ -78,7 +81,8 @@ the native display clients:
   projects their catalog into the shared host, and replaces the selected scene
   resources plus resident compiler transactionally at one asset epoch.
 - Browser audio and teleport preview remain explicit absent capabilities. The
-  reason-bearing web feature profile is preserved after the Slice 6 audit.
+  reason-bearing web feature profile now has exactly four gaps after the
+  separately proven Far LOD promotion.
 
 The direct acceptance gate is green after browser service assembly:
 
@@ -437,10 +441,13 @@ separately reviewable.
   guard is always released.
 - **Audio activation:** resolved for first cutover as an absent capability.
   Promote it only after a real user-gesture activation and audible probe.
-- **Web feature exceptions:** far LOD, travel assist, frame-pipeline overlay,
-  debug diagnostics, and server cadence are the exact tested
-  `WEB_FEATURE_PARITY_EXCEPTIONS` ledger. Each retains a named implementation
-  and proof requirement until individually validated.
+- **Web feature exceptions:** travel assist, frame-pipeline overlay, debug
+  diagnostics, and server cadence are the exact tested
+  `WEB_FEATURE_PARITY_EXCEPTIONS` ledger. Far LOD left the ledger only after
+  production local-worker, IndexedDB, remote-WebSocket, UI, diagnostics,
+  shared-result worker, performance, and pixel gates passed. Each remaining
+  row retains a named implementation and proof requirement until individually
+  validated.
 - **Physics engines sit outside the parity framework:** `physics-rapier` and
   `physics-box3d` are opt-in `mclone-server` cargo features exposed only
   through the desktop client, not `ClientExperienceProfile` entries, so the
@@ -543,9 +550,8 @@ app-fatal marker.
 ## Recommended Next Work
 
 The adoption series is closed. Continue through Tactical 171 — Convergence And
-Parity Closeout. Tactical 166 — Shared Resident-Tile Substrate Slices 1–3 have
-removed the synchronous monolithic far-LOD path on native targets. Next run the
-production browser integration and promotion proof with complete runtime, UI,
-diagnostic, worker/transport, performance, and pixel evidence. Remove only the
-`FarLod` ledger entry if every gate passes; keep the other four entries
-unchanged until their own complete proofs land.
+Parity Closeout. Its Milestone D production browser proof passed and removed
+only the `FarLod` ledger entry. Next implement Tactical 166 — Shared
+Resident-Tile Substrate Slice 4, multi-level rings, while preserving the proven
+native and browser worker/admission/upload paths. Keep the remaining four web
+exceptions unchanged until their own complete proofs land.

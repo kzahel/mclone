@@ -88,8 +88,9 @@ burn-down.
 > shared native/web transactional asset replacement, UI, persistence, and
 > provenance. The structural matrix and prose below no longer describe the
 > retired browser runtime/render-policy fork. Tactical 171 — Convergence And
-> Parity Closeout owns the exact five-row browser feature ledger and the active
-> resident-tile/LOD sequence.
+> Parity Closeout Milestone D then promoted production browser Far LOD through
+> the shared resident-tile worker/runtime/render path. It owns the exact
+> remaining four-row browser feature ledger and active LOD sequence.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -183,7 +184,7 @@ Reading the matrix:
   sinks. Tactical 105 owns that cleanup.
 - **web** now uses the same scene-policy host as native. Product gaps include
   connect-screen text/smoke, full persistence lifecycle/metadata beyond the
-  IndexedDB catalog plus chunk/entity records, audio, and the exact five
+  IndexedDB catalog plus chunk/entity records, audio, and the exact four
   reason-bearing feature-axis exceptions tracked below.
 - **desktop-XR** has render/locomotion parity and a shared pause/options
   world-panel menu with controller-ray pointer. User headset validation says the
@@ -434,12 +435,13 @@ lower-level render residency and explicit product/evidence gaps:
 3. **Finish shared resident-tile/LOD convergence, then burn down browser feature
    exceptions.** Browser worker/WebSocket/IndexedDB mechanisms are now typed
    services below `McloneSceneHost`; the old browser policy host is gone. The
-   native architectural fork is now closed: Tactical 166 — Shared
-   Resident-Tile Substrate Slices 1–3 moved synthetic far LOD onto shared
-   workers, admission, residency, and region-arena uploads. Tactical 171 —
-   Convergence And Parity Closeout now starts with the production browser
-   far-LOD integration/proof, then coordinates the remaining exact feature
-   promotions.
+   architectural fork is now closed: Tactical 166 — Shared Resident-Tile
+   Substrate Slices 1–3 moved synthetic far LOD onto shared workers, admission,
+   residency, and region-arena uploads, and Tactical 171 — Convergence And
+   Parity Closeout Milestone D proved that path in production browser modes.
+   Next add multi-level rings in Tactical 166 — Shared Resident-Tile Substrate
+   Slice 4, then resume reduced-real tiles and the remaining exact browser
+   feature promotions.
 4. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, and user
    headset validation says it works mostly fine. Flat Android consumes

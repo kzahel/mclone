@@ -63,6 +63,7 @@ interface WebStartupOptions extends WasmReport {
   remoteWebSocketUrl?: string;
   sectionOcclusionCulling: boolean;
   forceFullbright: boolean;
+  farLodEnabled: boolean;
   renderColorProfile: string;
   worldStorage: "transient" | "indexeddb";
   worldId: string;
@@ -94,6 +95,10 @@ interface AppRuntime {
   blockStateAt?: (x: number, y: number, z: number) => WasmReport | null;
   openNativeTitleUi?: () => WasmReport | null;
   openNativePauseUi?: () => WasmReport | null;
+  pauseRendering?: () => void;
+  resumeRendering?: () => void;
+  renderOverviewFrame?: () => WasmReport | null;
+  setDebugOverlay?: (visible: boolean) => WasmReport | null;
   openNativeHelpUi?: () => WasmReport | null;
   closeNativeUi?: () => WasmReport | null;
   handleNativeUiKey?: (key: string) => WasmReport | null;
@@ -254,6 +259,10 @@ async function boot(): Promise<WasmReport> {
   runtime.blockStateAt = (x: number, y: number, z: number) => app.blockStateAt(x, y, z);
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
   runtime.openNativePauseUi = () => app.openNativePauseUi();
+  runtime.pauseRendering = () => app.pauseRendering();
+  runtime.resumeRendering = () => app.resumeRendering();
+  runtime.renderOverviewFrame = () => app.renderOverviewFrame();
+  runtime.setDebugOverlay = (visible: boolean) => app.setNativeDebugOverlay(visible);
   runtime.openNativeHelpUi = () => app.openNativeHelpUi();
   runtime.closeNativeUi = () => app.closeNativeUi();
   runtime.handleNativeUiKey = (key: string) => app.handleNativeUiKey(key);
@@ -445,6 +454,7 @@ class WebFrameDriver {
         startup.movementSpeedMultiplier,
         this.sectionOcclusionCulling,
         this.forceFullbright,
+        startup.farLodEnabled,
         startup.renderColorProfile,
         compilerWake,
       );
@@ -466,6 +476,7 @@ class WebFrameDriver {
         startup.lightStatusBatchSize,
         this.sectionOcclusionCulling,
         this.forceFullbright,
+        startup.farLodEnabled,
         startup.renderColorProfile,
         SERVER_WORKER_URL.href,
         SERVER_JOB_WORKER_URL.href,
@@ -479,6 +490,7 @@ class WebFrameDriver {
     }
     for (const name of [
       "renderFrame",
+      "syncOverviewRenderFrame",
       "renderCompilerSharedSupported",
       "cameraFrameState",
       "resizeCanvas",
@@ -548,6 +560,9 @@ class WebFrameDriver {
   }
 
   start(): void {
+    if (this.animationFrame !== 0) {
+      return;
+    }
     this.lastFrameTime = performance.now();
     const frame = (now: number) => {
       if (!this.tickFrameBusy && !this.sessionBusy) {
@@ -562,6 +577,30 @@ class WebFrameDriver {
       this.animationFrame = requestAnimationFrame(frame);
     };
     this.animationFrame = requestAnimationFrame(frame);
+  }
+
+  pauseRendering(): void {
+    if (this.animationFrame !== 0) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = 0;
+    }
+  }
+
+  resumeRendering(): void {
+    this.start();
+  }
+
+  renderOverviewFrame(): WasmReport | null {
+    if (!this.session || this.sessionBusy || this.tickFrameBusy) {
+      return null;
+    }
+    const report = this.session.syncOverviewRenderFrame(
+      Number(runtime.state.centerX) || 0,
+      Number(runtime.state.centerZ) || 0,
+      this.radiusChunks,
+    );
+    this.handleSceneFrame(report);
+    return report;
   }
 
 
@@ -1833,6 +1872,7 @@ function startupOptionsFromLocation(module: WasmModule): WebStartupOptions {
     lightStatusBatchSize: Math.max(1, finiteInteger(raw.lightStatusBatchSize, 9)),
     sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
     forceFullbright: Boolean(raw.forceFullbright),
+    farLodEnabled: Boolean(raw.farLodEnabled),
     renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
     worldStorage: raw.worldStorage === "indexeddb" ? "indexeddb" : "transient",
     worldId: String(raw.worldId ?? ""),

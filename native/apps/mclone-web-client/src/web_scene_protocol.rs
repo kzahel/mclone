@@ -439,6 +439,10 @@ impl WebScenePlatformServices {
         self.clock.observe_millis(millis)
     }
 
+    pub fn clock_handle(&self) -> MonotonicClockHandle {
+        self.clock.handle()
+    }
+
     pub fn lifecycle(&self) -> &WebSceneSessionLifecycle {
         &self.lifecycle
     }

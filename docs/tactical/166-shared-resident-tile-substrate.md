@@ -3,10 +3,11 @@
 Status: active 2026-07-11. Slices 1–3 landed the behavior-preserving
 resident-tile/cache extraction, shared budget vocabulary, and synthetic far-LOD
 producer on shared workers, admission, residency, and per-tile region arenas.
-The coordinating next step is Tactical 171 — Convergence And Parity Closeout
-Milestone D, the production browser far-LOD proof. Slice 4 multi-level rings
-remain later work. Opened after a far-LOD stutter investigation found that far
-LOD reimplemented a crude, unbudgeted copy of the real-section
+Tactical 171 — Convergence And Parity Closeout Milestone D then integrated and
+proved that producer in the production browser local-worker, IndexedDB, and
+remote-WebSocket lanes. Slice 4 multi-level rings are now the next
+implementation step. Opened after a far-LOD stutter investigation found that
+far LOD reimplemented a crude, unbudgeted copy of the real-section
 residency/upload pipeline instead of sharing it. This tactical owns the shared
 substrate; it **pauses and re-scopes** Tactical 162 — Real-Chunk LOD Reduction
 Draft Slice 3+ (see Relationship).
@@ -634,6 +635,13 @@ Landed evidence (2026-07-11):
   measured GPU `2.536ms`, app-work p95 `6.780ms`, up to six region draws, and
   `616032` upload bytes during bounded ring changes. The clean comparison is
   retained under `/tmp/mclone-t166-s3-quest-rd1-far-lod-{off,on}.txt`.
+- Tactical 171 — Convergence And Parity Closeout Milestone D carried the same
+  producer into the production browser host and resident shared-memory render
+  compiler. Local-worker, IndexedDB, and remote-WebSocket probes each reached
+  64 resident/visible tiles, four region draws, `317152` uploaded bytes, and a
+  `32930`-pixel off/on horizon difference with no compiler fallback or result
+  overflow. The `FarLod` browser exception is removed; Slice 4 can now evolve
+  quality on the proven cross-platform substrate.
 
 ### Slice 4: Multi-level rings
 

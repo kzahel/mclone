@@ -49,8 +49,9 @@ series implements the same concern, normally reuse the document slug in its
 - [`web-scene-host-adoption.md`](web-scene-host-adoption.md): completed browser
   adoption of the shared `McloneSceneHost`, including landed service and
   typed-async boundaries, preserved worker/compiler topology, production
-  cutover evidence, and the exact remaining browser feature ledger. Macro
-  sequencing now lives in Tactical 171 — Convergence And Parity Closeout.
+  cutover evidence, the subsequently proven browser Far LOD producer, and the
+  exact remaining four-row browser feature ledger. Macro sequencing now lives
+  in Tactical 171 — Convergence And Parity Closeout.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`performance.md`](performance.md): native performance priority queue,

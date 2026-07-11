@@ -35,6 +35,7 @@ type WasmModule = typeof import("mclone-web-client-wasm");
 interface RenderCompileWorkerInbound {
   kind?: string;
   requestId?: number;
+  workKind?: "render-sections" | "far-lod";
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
   assetPack?: Uint8Array;
@@ -50,6 +51,11 @@ interface RenderCompileWorkerInbound {
   radiusChunks?: number;
   snapshotInputChunkCount?: number;
   snapshotInputClonedColumnCount?: number;
+  farLodSeed?: string;
+  farLodChunkX?: number;
+  farLodChunkZ?: number;
+  farLodLevel?: number;
+  farLodSampleSpacingBlocks?: number;
   sharedInputBuffer?: SharedArrayBuffer;
   sharedInputByteLength?: number;
   sharedInputControlBuffer?: SharedArrayBuffer;
@@ -158,6 +164,8 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
   try {
     workerCompileCount += 1;
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
+    const workKind = message.workKind === "far-lod" ? "far-lod" : "render-sections";
+    const farLodCompile = workKind === "far-lod";
     const targetSections = normalizeTargetSections(message.targetSections);
     const centerX = Number(message.centerX) || 0;
     const centerZ = Number(message.centerZ) || 0;
@@ -181,6 +189,9 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
     const hasPersistentFullCompiler =
       compilerSession !== null
       && typeof compilerSession.compileGeneratedChunkSections === "function";
+    const hasPersistentFarLodCompiler =
+      compilerSession !== null
+      && typeof compilerSession.compileFarLodTile === "function";
     const hasGeneratedTargetedCompiler =
       targetSections.length > 0
       && (
@@ -192,39 +203,53 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
     // TS cannot use to narrow the module-level `compilerSession`. The persistent branches below
     // are only reached when the flag is set, so this non-null view is sound.
     const session = compilerSession as WebRenderCompilerSession;
-    const packed = hasPersistentSnapshotCompiler
-      ? session.compileSnapshotSectionsForTargets(
-          snapshotInput as Uint8Array,
-          targetSections,
+    if (farLodCompile && !hasPersistentFarLodCompiler) {
+      throw new Error("resident render compiler does not expose compileFarLodTile");
+    }
+    const packed = farLodCompile
+      ? session.compileFarLodTile(
+          String(message.farLodSeed ?? "0"),
+          Number(message.farLodChunkX) || 0,
+          Number(message.farLodChunkZ) || 0,
+          Number(message.farLodLevel) || 1,
+          Number(message.farLodSampleSpacingBlocks) || 4,
         )
-      : hasPersistentGeneratedCompiler
-        ? session.compileGeneratedChunkSectionsForTargets(
-            centerX,
-            centerZ,
-            radiusChunks,
+      : hasPersistentSnapshotCompiler
+        ? session.compileSnapshotSectionsForTargets(
+            snapshotInput as Uint8Array,
             targetSections,
           )
-        : hasPersistentFullCompiler
-          ? session.compileGeneratedChunkSections(centerX, centerZ, radiusChunks)
-          : hasGeneratedTargetedCompiler
-          ? module.mclone_web_compile_generated_chunk_sections_for_targets(
-              message.assetPack as Uint8Array,
+        : hasPersistentGeneratedCompiler
+          ? session.compileGeneratedChunkSectionsForTargets(
               centerX,
               centerZ,
               radiusChunks,
               targetSections,
             )
-            : module.mclone_web_compile_generated_chunk_sections(
+          : hasPersistentFullCompiler
+            ? session.compileGeneratedChunkSections(centerX, centerZ, radiusChunks)
+            : hasGeneratedTargetedCompiler
+            ? module.mclone_web_compile_generated_chunk_sections_for_targets(
                 message.assetPack as Uint8Array,
                 centerX,
                 centerZ,
                 radiusChunks,
-              );
-    const summary = module.mclone_web_packed_compile_report_summary(packed);
+                targetSections,
+              )
+              : module.mclone_web_compile_generated_chunk_sections(
+                  message.assetPack as Uint8Array,
+                  centerX,
+                  centerZ,
+                  radiusChunks,
+                );
+    const summary = farLodCompile
+      ? { farLodTile: true, packedByteLength: packed.byteLength }
+      : module.mclone_web_packed_compile_report_summary(packed);
     const response = writeSharedCompileResult(message, packed);
     const report = {
       ok: true,
       requestId: message.requestId,
+      workKind,
       transportKind: response.transportKind,
       sharedMemorySupported: renderCompilerSharedMemorySupported(),
       workerWasmInitCount,
@@ -257,8 +282,8 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
       snapshotInputUpsertCount: Number(compilerSession?.lastDeltaUpsertCount?.()) || 0,
       snapshotInputEvictionCount: Number(compilerSession?.lastDeltaEvictionCount?.()) || 0,
       snapshotMirrorChunkCount: Number(compilerSession?.mirrorChunkCount?.()) || 0,
-      snapshotInputCompileUsed: hasPersistentSnapshotCompiler,
-      generatedViewFallbackUsed: !hasPersistentSnapshotCompiler,
+      snapshotInputCompileUsed: !farLodCompile && hasPersistentSnapshotCompiler,
+      generatedViewFallbackUsed: !farLodCompile && !hasPersistentSnapshotCompiler,
       sharedResultBufferUsed: response.sharedResultBufferUsed,
       sharedResultByteLength: response.sharedResultByteLength,
       sharedResultBufferCapacityBytes: response.sharedResultBufferCapacityBytes,
@@ -267,7 +292,9 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
       centerZ,
       radiusChunks,
       targetSectionCount: Math.floor(targetSections.length / 3),
-      targetedCompileUsed: hasPersistentSnapshotCompiler || hasGeneratedTargetedCompiler,
+      targetedCompileUsed: !farLodCompile
+        && (hasPersistentSnapshotCompiler || hasGeneratedTargetedCompiler),
+      farLodCompileUsed: farLodCompile,
       summary,
       // 067 Stage 3 removed the non-SAB fallback from the live path; the app requires
       // cross-origin isolation, so the result always rides the resident shared buffer and

@@ -151,14 +151,13 @@ The formerly app-local frame-pacing POD structs (`FramePacingMode`,
 debug-overlay aggregator moved to `mclone-app-runtime` in tactical 168 Slice
 7a. The winit-bound `FramePacing` driver remains correctly desktop-local.
 
-Web keeps `FarLod`, `TravelAssist`, `FramePipelineOverlay`, `DebugDiagnostics`,
-and `ServerSimulationCadence` gated with explicit reasons. Tactical 170 — Web
-Scene-Host Adoption Slice 6 audits them as the exact tested
+Web keeps `TravelAssist`, `FramePipelineOverlay`, `DebugDiagnostics`, and
+`ServerSimulationCadence` gated with their original explicit reasons. Tactical
+170 — Web Scene-Host Adoption Slice 6 established the exact tested
 `WEB_FEATURE_PARITY_EXCEPTIONS` ledger. Tactical 171 — Convergence And Parity
-Closeout now coordinates their burn-down. Far LOD remains first, after Tactical
-166 — Shared Resident-Tile Substrate Slices 1–3 removed the synchronous,
-monolithic native implementation. Promotion now waits only on the production
-browser integration and performance/rendering proof.
+Closeout Milestone D subsequently integrated and proved Far LOD in production
+browser modes, promoted it to supported, and removed only that row. The same
+parent coordinates the remaining four-row burn-down.
 
 ## Remaining Follow-Ups
 
@@ -214,11 +213,11 @@ Historical execution record:
 4. **[LANDED via 168 Slice 8] Server simulation cadence on XR + flat Android.**
    The shared host applies cadence to local-integrated runtimes and retains it
    in scene options; both ledger rows are gone.
-5. **Web far-LOD decision.** Separate from native parity: complete the required
-   substrate work in Tactical 166 — Shared Resident-Tile Substrate, then decide
-   whether the browser worker/runtime model can carry far LOD before removing
-   its web reason. Tactical 171 — Convergence And Parity Closeout owns the
-   cross-thread promotion gate.
+5. **[LANDED via Tactical 171 — Convergence And Parity Closeout Milestone D]
+   Web Far LOD.** Tactical 166 — Shared Resident-Tile Substrate Slices 1–3
+   supplied the producer; the production browser local-worker, IndexedDB, and
+   remote-WebSocket proof passed through the resident shared-result compiler,
+   and the web reason was removed atomically with the capability promotion.
 6. **Settings persistence (orthogonal, same root cause).** Native graphics
    settings still reset to defaults every launch; only web `localStorage`
    persists two touch settings. The absence of a shared preferences owner is the

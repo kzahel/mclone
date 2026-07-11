@@ -19,11 +19,11 @@ deferred-drop, and platform-operation contracts. Local worker, persistent
 IndexedDB local-world, and remote WebSocket modes all install services into
 that one host.
 
-The web feature profile remains intentionally honest: far LOD, travel assist,
+The web feature profile remains intentionally honest: travel assist,
 frame-pipeline overlay, debug diagnostics, and server simulation cadence are
-reason-bearing gaps with an exact ledger in `mclone-app-runtime`. Browser audio
-and teleport preview are also explicit absent service capabilities. Host
-adoption does not synthesize support for any of them.
+the exact remaining reason-bearing gaps in `mclone-app-runtime`. Far LOD is
+supported through the production shared resident compiler/cache/render path.
+Browser audio and teleport preview remain explicit absent service capabilities.
 
 ## Local Commands
 
@@ -39,6 +39,13 @@ pnpm native:web:app-smoke
 # reinitialize the resident compiler at the same epoch, and capture the native
 # Asset Packs screen under /tmp.
 pnpm native:web:asset-pack-smoke
+
+# Toggle Far LOD through the production Graphics UI, prove resident shared-
+# result compilation and region drawing, and compare inspected off/on captures
+# across each host/storage mode.
+pnpm native:web:far-lod-smoke
+pnpm native:web:far-lod-indexeddb-smoke
+pnpm native:web:far-lod-remote-smoke
 
 # Validate native Rust menu-driven world catalog create/open/delete over IndexedDB.
 pnpm native:web:catalog-smoke

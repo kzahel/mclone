@@ -2,7 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -23,6 +26,8 @@ use mclone_worldgen::block::{
 };
 use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_surface_chunk};
 use serde::Deserialize;
+
+use crate::monotonic::MonotonicInstant;
 
 pub const DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS: u32 = 0;
 pub const MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 1;
@@ -47,12 +52,36 @@ pub const STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET: usize = 24;
 pub const SEA_LEVEL: f32 = 63.0;
 pub const FAR_TERRAIN_LOD_MATERIALS_PATH: &str = "assets/mclone/lod/materials.v1.json";
 
+#[cfg(not(target_arch = "wasm32"))]
+fn far_lod_now() -> MonotonicInstant {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    let elapsed = ORIGIN.get_or_init(Instant::now).elapsed();
+    MonotonicInstant::from_nanos(u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn far_lod_now() -> MonotonicInstant {
+    MonotonicInstant::ZERO
+}
+
 #[derive(Clone, Debug)]
 pub struct FarTerrainLodBuildRequest {
     pub key: LodTileKey,
     source_key: FarTerrainLodSourceKey,
     materials: Option<Arc<FarTerrainLodMaterialPalette>>,
-    queued_at: Instant,
+    queued_at: MonotonicInstant,
+}
+
+/// Portable payload a platform compiler needs to build one synthetic tile.
+///
+/// Queue timing, source identity, and material ownership stay with the request
+/// on the host. Browser workers receive only these small deterministic inputs
+/// and return a packed [`FarTerrainLodTileMesh`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FarTerrainLodWorkerInput {
+    pub key: LodTileKey,
+    pub seed: i64,
+    pub sample_spacing_blocks: u32,
 }
 
 impl FarTerrainLodBuildRequest {
@@ -60,7 +89,7 @@ impl FarTerrainLodBuildRequest {
         pos: ChunkPos,
         source_key: FarTerrainLodSourceKey,
         materials: Option<Arc<FarTerrainLodMaterialPalette>>,
-        queued_at: Instant,
+        queued_at: MonotonicInstant,
     ) -> Self {
         Self {
             key: LodTileKey::synthetic(pos),
@@ -76,15 +105,42 @@ impl FarTerrainLodBuildRequest {
             pos,
             FarTerrainLodSourceKey::new(12345, FarTerrainLodConfig::enabled(), false),
             None,
-            Instant::now(),
+            far_lod_now(),
         )
+    }
+
+    pub fn worker_input(&self) -> FarTerrainLodWorkerInput {
+        FarTerrainLodWorkerInput {
+            key: self.key,
+            seed: self.source_key.seed,
+            sample_spacing_blocks: self.source_key.sample_spacing_blocks,
+        }
+    }
+
+    pub fn complete_worker_mesh(
+        self,
+        mesh: FarTerrainLodTileMesh,
+    ) -> Result<FarTerrainLodBuildResult> {
+        if mesh.key() != self.key {
+            bail!(
+                "far LOD worker returned tile {:?} for request {:?}",
+                mesh.key(),
+                self.key
+            );
+        }
+        Ok(FarTerrainLodBuildResult {
+            key: self.key,
+            queued_at: self.queued_at,
+            mesh,
+            source_key: self.source_key,
+        })
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct FarTerrainLodBuildResult {
     pub key: LodTileKey,
-    pub queued_at: Instant,
+    pub queued_at: MonotonicInstant,
     pub mesh: FarTerrainLodTileMesh,
     source_key: FarTerrainLodSourceKey,
 }
@@ -535,7 +591,7 @@ pub struct FarTerrainLodCache {
     view_key: Option<FarTerrainLodBuildKey>,
     desired_chunks: BTreeSet<ChunkPos>,
     pending_builds: VecDeque<FarTerrainLodBuildRequest>,
-    inflight_builds: BTreeMap<LodTileKey, Instant>,
+    inflight_builds: BTreeMap<LodTileKey, MonotonicInstant>,
     resident_tiles: ResidentTileCache<LodTileKey, FarTerrainLodTileMetadata>,
     uploaded_tiles: BTreeSet<LodTileKey>,
     uploads: ResidentTileUploadCoordinator<LodTileKey, FarTerrainLodTileMesh>,
@@ -547,6 +603,7 @@ pub struct FarTerrainLodCache {
     stale_builds: u64,
     last_upload_bytes: usize,
     total_upload_bytes: u64,
+    now: MonotonicInstant,
 }
 
 impl Default for FarTerrainLodCache {
@@ -568,6 +625,7 @@ impl Default for FarTerrainLodCache {
             stale_builds: 0,
             last_upload_bytes: 0,
             total_upload_bytes: 0,
+            now: MonotonicInstant::ZERO,
         }
     }
 }
@@ -605,6 +663,33 @@ impl FarTerrainLodCache {
         compiler: &mut C,
         build_budget: usize,
     ) -> Result<()> {
+        self.advance_for_camera_at(
+            far_lod_now(),
+            config,
+            seed,
+            center,
+            render_distance,
+            normal_terrain_chunks,
+            materials,
+            compiler,
+            build_budget,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_for_camera_at<C: FarTerrainLodCompiler>(
+        &mut self,
+        now: MonotonicInstant,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        render_distance: u32,
+        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+        compiler: &mut C,
+        build_budget: usize,
+    ) -> Result<()> {
+        self.now = self.now.max(now);
         if !config.enabled {
             let abandoned = self.clear();
             compiler.release_completed_far_lod_jobs(abandoned);
@@ -622,7 +707,7 @@ impl FarTerrainLodCache {
             config,
             normal_terrain_chunks,
         );
-        self.update_target(key, normal_terrain_chunks);
+        self.update_target(key, normal_terrain_chunks, self.now);
         self.accept_completed(compiler)?;
         self.submit_builds(compiler, build_budget)?;
         Ok(())
@@ -753,7 +838,8 @@ impl FarTerrainLodCache {
             visible_tiles: self.frame.visible_tiles.len(),
             pending_builds: self.pending_builds.len(),
             inflight_builds: self.inflight_builds.len(),
-            oldest_build_age_ms: oldest.map(|queued| queued.elapsed().as_secs_f64() * 1_000.0),
+            oldest_build_age_ms: oldest
+                .map(|queued| self.now.saturating_duration_since(queued).as_secs_f64() * 1_000.0),
             submitted_builds: self.submitted_builds,
             completed_builds: self.completed_builds,
             stale_builds: self.stale_builds,
@@ -787,6 +873,7 @@ impl FarTerrainLodCache {
         &mut self,
         key: FarTerrainLodBuildKey,
         normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
+        now: MonotonicInstant,
     ) {
         if self.view_key == Some(key) {
             return;
@@ -795,7 +882,6 @@ impl FarTerrainLodCache {
         let desired_chunks = desired_queue.iter().copied().collect::<BTreeSet<_>>();
         self.view_key = Some(key);
         self.desired_chunks = desired_chunks;
-        let now = Instant::now();
         self.pending_builds = desired_queue
             .into_iter()
             .filter(|pos| {
@@ -991,19 +1077,30 @@ fn build_retained_far_terrain_lod_patch(
 pub(crate) fn compile_far_terrain_lod_request(
     request: FarTerrainLodBuildRequest,
 ) -> FarTerrainLodBuildResult {
+    let mesh =
+        compile_far_terrain_lod_worker_input(request.worker_input(), request.materials.as_deref());
+    request
+        .complete_worker_mesh(mesh)
+        .expect("local far LOD compiler preserves the request tile key")
+}
+
+pub fn compile_far_terrain_lod_worker_input(
+    input: FarTerrainLodWorkerInput,
+    materials: Option<&FarTerrainLodMaterialPalette>,
+) -> FarTerrainLodTileMesh {
     let mut surface_chunks = BTreeMap::new();
+    let source_key = FarTerrainLodSourceKey {
+        seed: input.seed,
+        sample_spacing_blocks: input.sample_spacing_blocks.max(1),
+        materials_available: materials.is_some(),
+    };
     let patch = build_retained_far_terrain_lod_patch(
         &mut surface_chunks,
-        request.key.chunk,
-        request.source_key,
-        request.materials.as_deref(),
+        input.key.chunk,
+        source_key,
+        materials,
     );
-    FarTerrainLodBuildResult {
-        key: request.key,
-        queued_at: request.queued_at,
-        mesh: FarTerrainLodTileMesh::new(request.key, patch.vertices, patch.indices),
-        source_key: request.source_key,
-    }
+    FarTerrainLodTileMesh::new(input.key, patch.vertices, patch.indices)
 }
 
 #[cfg(test)]
@@ -1021,7 +1118,7 @@ fn build_far_terrain_lod_tile(key: FarTerrainLodBuildKey, pos: ChunkPos) -> FarT
             false,
         ),
         None,
-        Instant::now(),
+        far_lod_now(),
     ))
     .mesh
 }

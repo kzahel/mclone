@@ -38,12 +38,18 @@ export interface RenderCompilerAssetSelection {
 // byte counts back for diagnostics; it never decodes the packed section bytes itself.
 export interface RenderCompileDoorbell {
   requestId?: number;
+  workKind?: "render-sections" | "far-lod";
   centerX?: number;
   centerZ?: number;
   radiusChunks?: number;
   targetSections?: Int32Array | number[];
   snapshotInputChunkCount?: number;
   snapshotInputClonedColumnCount?: number;
+  farLodSeed?: string;
+  farLodChunkX?: number;
+  farLodChunkZ?: number;
+  farLodLevel?: number;
+  farLodSampleSpacingBlocks?: number;
   sharedInputByteLength?: number;
   sharedInputBufferCapacityBytes?: number;
   sharedInputControlBuffer?: SharedArrayBuffer;
@@ -75,6 +81,7 @@ export interface RenderCompileSharedInputArena {
 export interface RenderCompileWorkerRequest {
   kind: string;
   requestId: number;
+  workKind?: "render-sections" | "far-lod";
   bindgenJsUrl: string;
   bindgenWasmUrl: string;
   centerX?: number;
@@ -83,6 +90,11 @@ export interface RenderCompileWorkerRequest {
   targetSections?: Int32Array | number[];
   snapshotInputChunkCount?: number;
   snapshotInputClonedColumnCount?: number;
+  farLodSeed?: string;
+  farLodChunkX?: number;
+  farLodChunkZ?: number;
+  farLodLevel?: number;
+  farLodSampleSpacingBlocks?: number;
   sharedInputControlBuffer?: SharedArrayBuffer;
   sharedInputBuffer?: SharedArrayBuffer;
   sharedInputByteLength?: number;
@@ -110,12 +122,18 @@ export interface RenderCompilePending {
 
 interface RenderCompilerDispatchArgs {
   requestId: number;
+  workKind?: "render-sections" | "far-lod";
   centerX?: number;
   centerZ?: number;
   radiusChunks?: number;
   targetSections?: Int32Array | number[];
   snapshotInputChunkCount?: number;
   snapshotInputClonedColumnCount?: number;
+  farLodSeed?: string;
+  farLodChunkX?: number;
+  farLodChunkZ?: number;
+  farLodLevel?: number;
+  farLodSampleSpacingBlocks?: number;
   sharedResult: RenderCompileSharedResultArena | null;
   sharedInput: RenderCompileSharedInputArena | null;
   requestSource?: {
@@ -367,12 +385,18 @@ export class RenderSectionWorkerCompiler {
     const sharedInput = sharedInputArenaFromDoorbell(doorbell);
     return this.dispatchCompile({
       requestId,
+      workKind: doorbell.workKind,
       centerX: doorbell.centerX,
       centerZ: doorbell.centerZ,
       radiusChunks: doorbell.radiusChunks,
       targetSections: doorbell.targetSections,
       snapshotInputChunkCount: Number(doorbell.snapshotInputChunkCount) || 0,
       snapshotInputClonedColumnCount: Number(doorbell.snapshotInputClonedColumnCount) || 0,
+      farLodSeed: doorbell.farLodSeed,
+      farLodChunkX: doorbell.farLodChunkX,
+      farLodChunkZ: doorbell.farLodChunkZ,
+      farLodLevel: doorbell.farLodLevel,
+      farLodSampleSpacingBlocks: doorbell.farLodSampleSpacingBlocks,
       sharedResult,
       sharedInput,
       requestSource: {
@@ -384,12 +408,18 @@ export class RenderSectionWorkerCompiler {
 
   dispatchCompile({
     requestId,
+    workKind,
     centerX,
     centerZ,
     radiusChunks,
     targetSections,
     snapshotInputChunkCount,
     snapshotInputClonedColumnCount,
+    farLodSeed,
+    farLodChunkX,
+    farLodChunkZ,
+    farLodLevel,
+    farLodSampleSpacingBlocks,
     sharedResult,
     sharedInput,
     requestSource,
@@ -419,6 +449,7 @@ export class RenderSectionWorkerCompiler {
       const message: RenderCompileWorkerRequest = {
         kind: "compile-render-sections",
         requestId,
+        workKind,
         bindgenJsUrl: this.bindgenJsUrl.href,
         bindgenWasmUrl: this.bindgenWasmUrl.href,
         centerX,
@@ -427,6 +458,11 @@ export class RenderSectionWorkerCompiler {
         targetSections,
         snapshotInputChunkCount,
         snapshotInputClonedColumnCount,
+        farLodSeed,
+        farLodChunkX,
+        farLodChunkZ,
+        farLodLevel,
+        farLodSampleSpacingBlocks,
       };
       if (sharedInput !== null) {
         message.sharedInputControlBuffer = sharedInput.controlBuffer;

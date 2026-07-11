@@ -1,12 +1,12 @@
 # 171: Convergence And Parity Closeout
 
-Status: active coordinating parent 2026-07-11. The native and browser scene-host
-convergence series and runtime asset-pack implementation are closed. Tactical
-166 — Shared Resident-Tile Substrate Slices 1–3 have landed. Milestone D, the
-production browser far-LOD proof and first possible exception removal, is the
-next implementation step. This parent owns the cross-thread burn-down and
-final status reconciliation, not duplicate implementations of its child
-tacticals.
+Status: active coordinating parent 2026-07-11. Milestones A–D have landed. The
+native and browser scene-host convergence series and runtime asset-pack
+implementation are closed, and production browser far LOD now uses the shared
+resident-tile worker/runtime/render path. Tactical 166 — Shared Resident-Tile
+Substrate Slice 4, multi-level rings, is next. This parent owns the cross-thread
+burn-down and final status reconciliation, not duplicate implementations of
+its child tacticals.
 
 Topic: `convergence-and-parity-closeout`
 
@@ -66,8 +66,8 @@ explicit re-scope:
 | Runtime asset-pack selection and replacement | Tactical 169 — Runtime Asset Pack Selection | **Closed.** Slices 0–6 landed across native and web. | Track optional worker/bootstrap gaps below without reopening the tactical. |
 | Browser host adoption | Tactical 170 — Web Scene-Host Adoption | **Closed.** Slices 0–6 landed; the old browser orchestrator is deleted. | Burn down only the exact web feature exceptions below. |
 | Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Paused after landed Slices 0A–2.** Its proposed Slice 3 was superseded. | Resume at Slice 4 only after the shared substrate can host another producer. |
-| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Active. Slices 1–3 landed.** | Run this parent's browser proof, then consider Slice 4 behind the landed performance and pixel gates. |
-| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active.** Initial ledger and stale-doc reconciliation landed with Tactical 166 — Shared Resident-Tile Substrate Slice 1. | Close only after the milestones below and explicit deferred decisions are recorded. |
+| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Active. Slices 1–3 and the production browser proof landed.** | Implement Slice 4 multi-level rings behind the landed performance and pixel gates. |
+| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D landed.** | Coordinate Milestone E next; close only after the milestones below and explicit deferred decisions are recorded. |
 
 ## Asset-Pack Follow-Ups That Do Not Reopen The Closed Series
 
@@ -88,14 +88,13 @@ focused child tactical rather than appending slices to the closed tactical.
 
 ## Exact Browser Feature Burn-Down
 
-The executable `WEB_FEATURE_PARITY_EXCEPTIONS` ledger currently contains five
+The executable `WEB_FEATURE_PARITY_EXCEPTIONS` ledger currently contains four
 entries. Tactical 171 — Convergence And Parity Closeout is the coordinating
 tactical for their removal; a focused child tactical is optional when one row
 needs more than one bounded slice.
 
 | Browser exception | Current reason | Promotion gate |
 |---|---|---|
-| `FarLod` | The shared resident-tile implementation is not yet integrated and proven in the production browser worker/runtime lanes. | Prove browser runtime, UI, diagnostics, local-worker/remote transport behavior, performance, and pixels before flipping support. |
 | `TravelAssist` | Browser input, UI, and movement behavior are not proven together. | Shared action/effect handling, desktop-equivalent browser input semantics, settings UI, movement smoke, and visible state evidence. |
 | `FramePipelineOverlay` | Browser frame-accounting reports are not fully projected into the shared overlay. | Shared accountant inputs, honest unavailable fields, UI toggle, report conservation tests, and inspected browser capture. |
 | `DebugDiagnostics` | Browser diagnostic presenter/panel wiring lacks complete proof. | Shared diagnostic facts, browser presenter wiring, UI toggle, focused tests, and inspected desktop/mobile browser captures. |
@@ -112,7 +111,7 @@ Rules for every row:
 
 Audio output and teleport-preview rendering are absent browser services rather
 than entries in this feature-axis ledger. Track them separately instead of
-silently expanding or redefining these five rows.
+silently expanding or redefining these four rows.
 
 ## Ordered Closeout Milestones
 
@@ -143,10 +142,49 @@ silently expanding or redefining these five rows.
 
 ### Milestone D — First browser exception removal
 
-- [ ] Run the production web far-LOD proof after Milestone C.
-- [ ] Remove only `FarLod` from `WEB_FEATURE_PARITY_EXCEPTIONS` if every gate
-  passes.
-- [ ] Leave the other four reasons byte-for-byte intact.
+- [x] Run the production web far-LOD proof after Milestone C.
+- [x] Remove only `FarLod` from `WEB_FEATURE_PARITY_EXCEPTIONS` after every gate
+  passed.
+- [x] Leave the other four reasons byte-for-byte intact.
+
+Landed evidence (2026-07-11):
+
+- `WebSceneRuntimeService` now owns the same `FarTerrainLodCache` and
+  `LodCoverageCoordinator` used by native hosts. Browser frame preparation
+  advances that cache from the projected monotonic clock, drains accepted
+  tiles into the existing region-arena renderer, and clears coverage on asset
+  epoch replacement.
+- Far-LOD jobs use the resident `WebRenderSectionCompiler` worker and its
+  `SharedArrayBuffer` input/result arenas. The worker accepts a compact
+  deterministic tile request, calls the Wasm compiler with the active asset
+  palette, and returns the packed tile mesh through the shared-result buffer.
+  Real section work retains priority; no main-thread generation, generated
+  view fallback, or private worker pool was added, and the existing result
+  overflow diagnostic remained dormant.
+- The shared Graphics UI action enables the production path. Browser reports
+  expose desired/resident/visible tile counts, build and upload queue state,
+  total upload bytes, per-frame region draws/uploads, and worker transport
+  proof. `FarLod` is now `Supported`; the exact remaining four exception rows
+  and their reasons are unchanged.
+- Dedicated local-worker, IndexedDB local-world, and remote-WebSocket probes
+  each reached 64 resident and 64 visible tiles, four region draws, and
+  `317152` uploaded bytes. All three reported `workKind=far-lod`,
+  `shared-result-buffer`, no generated-view fallback, and no result overflow.
+  Final maximum frame gaps were `10.335ms` local, `10.320ms` IndexedDB, and
+  `10.315ms` remote.
+- Each probe captures the same paused production overview with Far LOD off and
+  on, rejects incomplete WebGPU presentation readbacks, and observed `32930`
+  changed pixels. The inspected local and remote images showed detailed
+  spruce/mountain terrain with the coarse green horizon filling only when Far
+  LOD was enabled; the IndexedDB PNG was byte-identical to the clean local
+  capture. Captures and reports remain under
+  `/tmp/mclone-native-web-far-lod-*`; none are committed.
+- Focused validation passed app-runtime Far LOD and client-experience tests,
+  all web-client tests, direct `wasm32-unknown-unknown` web check, browser
+  typecheck, unchanged local/IndexedDB/remote/movement/asset-pack smokes,
+  thin-adapter purity, formatting, and the inspected native desktop offscreen
+  pixel canary. The first unchanged local app smoke hit a transient
+  movement-settle timeout; its immediate unchanged rerun passed.
 
 ### Milestone E — LOD quality evolution
 
@@ -177,13 +215,12 @@ silently expanding or redefining these five rows.
 
 ## Current Next Step
 
-Execute Milestone D of Tactical 171 — Convergence And Parity Closeout: integrate
-the landed resident-tile far-LOD producer with the production browser scene
-host and shared Web Worker compiler/session path, then prove settings UI,
-local-worker and IndexedDB worlds, remote WebSocket mode, diagnostics,
-performance, and pixels. Remove only `FarLod` from
-`WEB_FEATURE_PARITY_EXCEPTIONS` if every gate passes; leave the other four
-reasons byte-for-byte intact. Do not begin Tactical 166 — Shared Resident-Tile
-Substrate Slice 4 before that proof.
+Execute Milestone E by implementing Tactical 166 — Shared Resident-Tile
+Substrate Slice 4, multi-level rings: add the LOD-level dimension, distance
+bands with hysteresis, replacement-before-suppress double residency, per-level
+diagnostics, and crack-free cross-level edges while preserving the Slice 3
+worker/admission/upload gates on native and browser paths. After those gates
+pass, resume Tactical 162 — Real-Chunk LOD Reduction Draft at Slice 4 for the
+first reduced-real tile producer.
 
 Topic: convergence-and-parity-closeout
