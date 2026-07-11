@@ -37,6 +37,10 @@ impl ActorTextureImage {
     pub const fn layout(&self) -> ActorTextureLayout {
         self.layout
     }
+
+    pub fn byte_len(&self) -> usize {
+        self.rgba.len()
+    }
 }
 
 pub fn load_actor_texture_assets(

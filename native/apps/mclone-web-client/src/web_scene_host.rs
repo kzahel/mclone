@@ -54,6 +54,48 @@ use crate::web_scene_protocol::{
     WebScenePlatformServices, WebSceneSessionCompletionDisposition, WebSceneSessionOperation,
     WebSceneSessionOperationResult,
 };
+
+const WEB_ASSET_PACK_PREFERENCE_KEY: &str = "mclone.assetPacks.v1";
+
+struct WebAssetPackPreferenceStorage;
+
+impl mclone_app_runtime::asset_pack_preferences::AssetPackPreferenceStorage
+    for WebAssetPackPreferenceStorage
+{
+    fn load(
+        &self,
+    ) -> anyhow::Result<Option<mclone_app_runtime::asset_pack_preferences::AssetPackPreference>>
+    {
+        let Some(storage) =
+            web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+        else {
+            return Ok(None);
+        };
+        storage
+            .get_item(WEB_ASSET_PACK_PREFERENCE_KEY)
+            .map_err(|error| anyhow::anyhow!("read browser localStorage: {error:?}"))?
+            .map(|json| {
+                mclone_app_runtime::asset_pack_preferences::AssetPackPreference::from_json(&json)
+            })
+            .transpose()
+    }
+
+    fn store(
+        &self,
+        preference: &mclone_app_runtime::asset_pack_preferences::AssetPackPreference,
+    ) -> anyhow::Result<()> {
+        let storage = web_sys::window()
+            .and_then(|window| window.local_storage().ok().flatten())
+            .ok_or_else(|| anyhow::anyhow!("browser localStorage is unavailable"))?;
+        storage
+            .set_item(WEB_ASSET_PACK_PREFERENCE_KEY, &preference.to_json()?)
+            .map_err(|error| anyhow::anyhow!("write browser localStorage: {error:?}"))
+    }
+
+    fn label(&self) -> &str {
+        "browser localStorage mclone.assetPacks.v1"
+    }
+}
 use crate::web_server_worker::WebIntegratedServerRunnerConfig;
 
 const DEFAULT_SEED: i64 = 12_345;
@@ -1271,6 +1313,8 @@ async fn create_scene_host(
         mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
     )
     .map_err(js_error)?;
+    host.configure_asset_pack_preference_storage(Box::new(WebAssetPackPreferenceStorage))
+        .map_err(js_error)?;
     host.set_mono_player_camera(
         Vec3d::new(
             f64::from(initial_center.x) * 16.0 + 8.0,
@@ -1736,6 +1780,71 @@ impl WebSceneHost {
                 "activeAssetEpoch",
                 host.active_asset_epoch() as f64,
             )?;
+            let active_selection = host.active_asset_pack_selection();
+            report_set_bool(
+                &object,
+                "assetPackActiveAuthored",
+                active_selection.is_enabled(&mclone_assets::AssetPackId::new(
+                    AUTHORED_FIRST_PARTY_PACK_ID,
+                )),
+            )?;
+            report_set_bool(
+                &object,
+                "assetPackActiveReference",
+                active_selection.is_enabled(&mclone_assets::AssetPackId::new(
+                    MINECRAFT_REFERENCE_PACK_ID,
+                )),
+            )?;
+            let asset_diagnostics = host.asset_pack_runtime_diagnostics();
+            report_set_string(
+                &object,
+                "assetPackPreferredIds",
+                &asset_diagnostics.preferred_ids.join(","),
+            )?;
+            report_set_number(
+                &object,
+                "assetProvenanceFirstParty",
+                asset_diagnostics.provenance.first_party as f64,
+            )?;
+            report_set_number(
+                &object,
+                "assetProvenanceGenerated",
+                asset_diagnostics.provenance.generated as f64,
+            )?;
+            report_set_number(
+                &object,
+                "assetProvenanceMinecraftReference",
+                asset_diagnostics.provenance.minecraft_reference as f64,
+            )?;
+            report_set_number(
+                &object,
+                "assetProvenanceUnknown",
+                asset_diagnostics.provenance.unknown as f64,
+            )?;
+            report_set_bool(
+                &object,
+                "assetProprietaryFree",
+                asset_diagnostics.proprietary_free,
+            )?;
+            if let Some(commit) = asset_diagnostics.last_commit {
+                report_set_number(&object, "assetReloadPreparationMs", commit.preparation_ms)?;
+                report_set_number(&object, "assetReloadCompileMs", commit.compile_ms)?;
+                report_set_number(&object, "assetReloadUploadMs", commit.upload_ms)?;
+                report_set_number(&object, "assetReloadTotalMs", commit.total_ms)?;
+                report_set_number(
+                    &object,
+                    "assetReloadPeakRetainedCpuBytes",
+                    commit.peak_retained_cpu_bytes as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "assetReloadPeakRetainedGpuBytes",
+                    commit.peak_retained_gpu_bytes as f64,
+                )?;
+            }
+            if let Some(error) = host.asset_pack_preference_error() {
+                report_set_string(&object, "assetPackPreferenceError", error)?;
+            }
             match host.asset_replacement_status() {
                 AssetReplacementStatus::Active { .. } => {
                     report_set_string(&object, "assetReplacementState", "active")?;

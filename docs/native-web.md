@@ -50,6 +50,18 @@ The bundle command regenerates the two first-party packs before staging them.
 The browser fetches all three payloads, while shared Rust owns selection order,
 fallback policy, preparation, and the transactional asset epoch.
 
+The active logical selection persists in localStorage key
+`mclone.assetPacks.v1`. `native:web:asset-pack-smoke` clears that key, applies
+Original, reloads the page, and requires the shared scene resources and
+resident compiler to restore at the same epoch with zero resolved
+Minecraft/unknown provenance. Runtime reports also expose reload timing and
+estimated peak retained payload bytes.
+
+The current browser still fetches the reference archive for epoch-0 bootstrap
+even when a persisted first-party selection is restored immediately afterward.
+“Proprietary-free” describes the active resolution ledger, not an assertion
+that reference bytes were absent from the deploy or network bootstrap.
+
 The Cloudflare Worker in [`../worker/index.js`](../worker/index.js) serves the bundle with COOP/COEP/CORP headers so browser worker and `SharedArrayBuffer` paths can run. Wrangler must be authenticated for the Cloudflare account before deploy.
 
 ## Local Post-Push Deploy Hook

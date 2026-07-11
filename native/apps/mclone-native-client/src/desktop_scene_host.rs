@@ -113,18 +113,29 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
             runtime,
         )
     });
-    configure_desktop_asset_pack_sources(&mut host)?;
+    configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref())?;
     Ok(host)
 }
 
-pub(crate) fn configure_desktop_asset_pack_sources(host: &mut McloneSceneHost) -> Result<()> {
+pub(crate) fn configure_desktop_asset_pack_sources(
+    host: &mut McloneSceneHost,
+    world_root: Option<&std::path::Path>,
+) -> Result<()> {
     let reference = mclone_assets::SharedAssetSource::new(
         load_asset_source().context("reload native reference source for asset-pack discovery")?,
     );
     let Some(registry) = AssetPackSourceRegistry::discover_native_with_reference(reference)? else {
         return Ok(());
     };
-    host.configure_asset_pack_sources(registry, reference_asset_pack_selection())
+    host.configure_asset_pack_sources(registry, reference_asset_pack_selection())?;
+    if let Some(path) =
+        mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(world_root)
+    {
+        host.configure_asset_pack_preference_storage(Box::new(
+            mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
+        ))?;
+    }
+    Ok(())
 }
 
 pub(crate) fn scene_host_options_from_desktop(

@@ -49,6 +49,10 @@ impl TextureAtlasImage {
             rgba: &self.rgba,
         }
     }
+
+    pub fn byte_len(&self) -> usize {
+        self.rgba.len()
+    }
 }
 
 impl From<MeshTextureAtlasImage> for TextureAtlasImage {

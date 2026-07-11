@@ -15,7 +15,7 @@ pub enum AssetReplacementStatus {
     Failed { active_epoch: u64, message: String },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AssetReplacementCommitReport {
     pub epoch: u64,
     pub section_count: usize,
@@ -23,6 +23,23 @@ pub struct AssetReplacementCommitReport {
     pub camera_preserved: bool,
     pub command_count_unchanged: bool,
     pub update_count_unchanged: bool,
+    pub preparation_ms: f64,
+    pub compile_ms: f64,
+    pub upload_ms: f64,
+    pub total_ms: f64,
+    pub peak_retained_cpu_bytes: usize,
+    pub peak_retained_gpu_bytes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssetPackRuntimeDiagnostics {
+    pub epoch: u64,
+    pub active_ids: Vec<String>,
+    pub preferred_ids: Vec<String>,
+    pub provenance: mclone_assets::AssetProvenanceSummary,
+    pub proprietary_free: bool,
+    pub preference_error: Option<String>,
+    pub last_commit: Option<AssetReplacementCommitReport>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,10 +66,16 @@ impl McloneSceneHost {
         self.active_assets.epoch
     }
 
+    pub fn active_asset_pack_selection(&self) -> &AssetPackSelection {
+        &self.active_assets.selection
+    }
+
     pub fn begin_asset_replacement(&mut self, request: PreparedSceneAssetsRequest) -> Result<()> {
         let epoch = request.epoch();
         self.validate_replacement_epoch(epoch)?;
         self.asset_replacement = Some(SceneAssetReplacementPending::Assets(request));
+        self.asset_replacement_started_at = Some(self.services.clock.now());
+        self.asset_replacement_assets_ready_at = None;
         self.asset_replacement_status = AssetReplacementStatus::PreparingAssets { epoch };
         Ok(())
     }
@@ -70,13 +93,15 @@ impl McloneSceneHost {
         self.active_assets.provenance.selection = active_selection.clone();
         self.client_experience.asset_packs_mut().configure(
             registry.catalog().clone(),
-            active_selection,
+            active_selection.clone(),
             &self.active_assets.provenance,
             self.active_assets.coverage,
         )?;
         self.asset_pack_sources = Some(registry);
+        self.asset_pack_preference = AssetPackPreference::from_selection(&active_selection);
         self.external_asset_pack_preparation = false;
         self.pending_external_asset_pack_selection = None;
+        self.pending_restored_asset_pack_selection = None;
         Ok(())
     }
 
@@ -97,18 +122,80 @@ impl McloneSceneHost {
         self.active_assets.provenance.selection = active_selection.clone();
         self.client_experience.asset_packs_mut().configure(
             catalog,
-            active_selection,
+            active_selection.clone(),
             &self.active_assets.provenance,
             self.active_assets.coverage,
         )?;
         self.asset_pack_sources = None;
+        self.asset_pack_preference = AssetPackPreference::from_selection(&active_selection);
         self.external_asset_pack_preparation = true;
         self.pending_external_asset_pack_selection = None;
+        self.pending_restored_asset_pack_selection = None;
         Ok(())
     }
 
     pub fn pending_external_asset_pack_selection(&self) -> Option<&ExternalAssetPackSelection> {
         self.pending_external_asset_pack_selection.as_ref()
+    }
+
+    pub fn configure_asset_pack_preference_storage(
+        &mut self,
+        storage: Box<dyn AssetPackPreferenceStorage>,
+    ) -> Result<()> {
+        match storage.load() {
+            Ok(Some(preference)) => {
+                let resolution =
+                    preference.reconcile(self.client_experience.asset_packs().catalog());
+                self.asset_pack_preference = preference;
+                if resolution.selection != self.active_assets.selection {
+                    self.client_experience
+                        .asset_packs_mut()
+                        .begin_preferred_selection(resolution.selection.clone())?;
+                    if self.runtime.is_some() {
+                        self.request_asset_pack_selection(resolution.selection)?;
+                    } else {
+                        self.pending_restored_asset_pack_selection = Some(resolution.selection);
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.asset_pack_preference_error =
+                    Some(format!("failed to load {}: {error:#}", storage.label()));
+            }
+        }
+        self.asset_pack_preference_storage = Some(storage);
+        Ok(())
+    }
+
+    pub fn preferred_asset_pack_ids(&self) -> impl Iterator<Item = &mclone_assets::AssetPackId> {
+        self.asset_pack_preference.enabled_ids()
+    }
+
+    pub fn asset_pack_preference_error(&self) -> Option<&str> {
+        self.asset_pack_preference_error.as_deref()
+    }
+
+    pub fn asset_pack_runtime_diagnostics(&self) -> AssetPackRuntimeDiagnostics {
+        let provenance = self.active_assets.provenance.summary();
+        AssetPackRuntimeDiagnostics {
+            epoch: self.active_assets.epoch,
+            active_ids: self
+                .active_assets
+                .selection
+                .enabled_ids()
+                .map(|id| id.as_str().to_owned())
+                .collect(),
+            preferred_ids: self
+                .asset_pack_preference
+                .enabled_ids()
+                .map(|id| id.as_str().to_owned())
+                .collect(),
+            proprietary_free: provenance.minecraft_reference == 0 && provenance.unknown == 0,
+            provenance,
+            preference_error: self.asset_pack_preference_error.clone(),
+            last_commit: self.last_asset_replacement_commit,
+        }
     }
 
     /// Complete browser/other asynchronous CPU preparation and synchronously
@@ -132,6 +219,7 @@ impl McloneSceneHost {
                 assets.selection
             );
         }
+        self.asset_replacement_assets_ready_at = Some(self.services.clock.now());
         let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
         let replacement = PreparedAssetReplacement::build(
             assets,
@@ -160,24 +248,7 @@ impl McloneSceneHost {
         for effect in effects {
             match effect {
                 ClientAssetPackEffect::ApplySelection(selection) => {
-                    if self.external_asset_pack_preparation {
-                        let epoch = self.active_assets.epoch.saturating_add(1);
-                        self.pending_external_asset_pack_selection =
-                            Some(ExternalAssetPackSelection { epoch, selection });
-                        self.asset_replacement_status =
-                            AssetReplacementStatus::PreparingAssets { epoch };
-                        continue;
-                    }
-                    let result = (|| {
-                        let registry = self
-                            .asset_pack_sources
-                            .clone()
-                            .context("asset pack sources are not configured on this platform")?;
-                        let epoch = self.active_assets.epoch.saturating_add(1);
-                        let request =
-                            PreparedSceneAssetsRequest::from_registry(epoch, registry, selection)?;
-                        self.begin_asset_replacement(request)
-                    })();
+                    let result = self.request_asset_pack_selection(selection);
                     if let Err(error) = result {
                         self.client_experience
                             .asset_packs_mut()
@@ -188,8 +259,27 @@ impl McloneSceneHost {
         }
     }
 
+    fn request_asset_pack_selection(&mut self, selection: AssetPackSelection) -> Result<()> {
+        let epoch = self.active_assets.epoch.saturating_add(1);
+        self.asset_replacement_started_at = Some(self.services.clock.now());
+        self.asset_replacement_assets_ready_at = None;
+        if self.external_asset_pack_preparation {
+            self.pending_external_asset_pack_selection =
+                Some(ExternalAssetPackSelection { epoch, selection });
+            self.asset_replacement_status = AssetReplacementStatus::PreparingAssets { epoch };
+            return Ok(());
+        }
+        let registry = self
+            .asset_pack_sources
+            .clone()
+            .context("asset pack sources are not configured on this platform")?;
+        let request = PreparedSceneAssetsRequest::from_registry(epoch, registry, selection)?;
+        self.begin_asset_replacement(request)
+    }
+
     pub fn begin_prepared_asset_replacement(&mut self, assets: PreparedSceneAssets) -> Result<()> {
         let epoch = assets.epoch;
+        let started_at = self.services.clock.now();
         self.validate_replacement_epoch(epoch)?;
         let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
         let request = PreparedAssetReplacementRequest::spawn(
@@ -199,6 +289,8 @@ impl McloneSceneHost {
             self.current_biome_zoom_seed(),
         )?;
         self.asset_replacement = Some(SceneAssetReplacementPending::Meshes(request));
+        self.asset_replacement_started_at = Some(started_at);
+        self.asset_replacement_assets_ready_at = Some(started_at);
         self.asset_replacement_status = AssetReplacementStatus::PreparingMeshes { epoch };
         Ok(())
     }
@@ -221,6 +313,14 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<()> {
+        if self.asset_replacement.is_none()
+            && self.runtime.is_some()
+            && let Some(selection) = self.pending_restored_asset_pack_selection.take()
+        {
+            if let Err(error) = self.request_asset_pack_selection(selection) {
+                self.fail_asset_replacement(format!("restore preferred asset packs: {error:#}"));
+            }
+        }
         let Some(pending) = self.asset_replacement.take() else {
             return Ok(());
         };
@@ -239,6 +339,7 @@ impl McloneSceneHost {
                         return Ok(());
                     }
                     let epoch = assets.epoch;
+                    self.asset_replacement_assets_ready_at = Some(self.services.clock.now());
                     let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
                     let request = match PreparedAssetReplacementRequest::spawn(
                         assets,
@@ -359,6 +460,8 @@ impl McloneSceneHost {
 
     fn fail_asset_replacement(&mut self, message: String) {
         self.asset_replacement = None;
+        self.asset_replacement_started_at = None;
+        self.asset_replacement_assets_ready_at = None;
         self.asset_replacement_status = AssetReplacementStatus::Failed {
             active_epoch: self.active_assets.epoch,
             message,
@@ -376,12 +479,52 @@ impl McloneSceneHost {
         queue: &wgpu::Queue,
         replacement: PreparedAssetReplacement,
     ) -> Result<()> {
+        let commit_started_at = self.services.clock.now();
+        let replacement_started_at = self
+            .asset_replacement_started_at
+            .unwrap_or(commit_started_at);
+        let assets_ready_at = self
+            .asset_replacement_assets_ready_at
+            .unwrap_or(replacement_started_at);
         let PreparedAssetReplacement {
             assets,
             source_snapshots: _,
             target_sections: _,
             sections,
         } = replacement;
+        let active_asset_bytes = estimated_prepared_asset_bytes(&self.active_assets);
+        let candidate_asset_bytes = estimated_prepared_asset_bytes(&assets);
+        let active_section_bytes = self.runtime.as_ref().map_or(0, |runtime| {
+            runtime
+                .resident_section_metadata()
+                .into_iter()
+                .map(|metadata| estimated_section_gpu_bytes(&metadata.stats()))
+                .sum()
+        });
+        let candidate_section_bytes = sections
+            .sections
+            .iter()
+            .map(mclone_mesh::TexturedRenderSectionMesh::estimated_owned_bytes)
+            .sum::<usize>();
+        let atlas_upload_copies = 2 + usize::from(self.mono_gui.is_some());
+        let active_gpu_bytes = active_asset_bytes
+            .saturating_add(active_section_bytes)
+            .saturating_add(
+                self.active_assets
+                    .mesh
+                    .atlas
+                    .byte_len()
+                    .saturating_mul(atlas_upload_copies.saturating_sub(1)),
+            );
+        let candidate_gpu_bytes = candidate_asset_bytes
+            .saturating_add(candidate_section_bytes)
+            .saturating_add(
+                assets
+                    .mesh
+                    .atlas
+                    .byte_len()
+                    .saturating_mul(atlas_upload_copies.saturating_sub(1)),
+            );
         let runtime = self
             .runtime
             .as_mut()
@@ -440,6 +583,7 @@ impl McloneSceneHost {
         // instance drops old queued/results and resets resident compile state
         // to the already prepared full-view report.
         runtime.replace_asset_epoch(assets.epoch, assets.mesh.clone(), sections.clone())?;
+        let commit_finished_at = self.services.clock.now();
 
         self.mesh_assets = assets.mesh.clone();
         self.draw = draw;
@@ -462,6 +606,26 @@ impl McloneSceneHost {
             camera_preserved: self.camera.snapshot() == camera_before,
             command_count_unchanged: runtime.core().command_count() == command_count_before,
             update_count_unchanged: runtime.core().update_count() == update_count_before,
+            preparation_ms: assets_ready_at
+                .saturating_duration_since(replacement_started_at)
+                .as_secs_f64()
+                * 1_000.0,
+            compile_ms: commit_started_at
+                .saturating_duration_since(assets_ready_at)
+                .as_secs_f64()
+                * 1_000.0,
+            upload_ms: commit_finished_at
+                .saturating_duration_since(commit_started_at)
+                .as_secs_f64()
+                * 1_000.0,
+            total_ms: commit_finished_at
+                .saturating_duration_since(replacement_started_at)
+                .as_secs_f64()
+                * 1_000.0,
+            peak_retained_cpu_bytes: active_asset_bytes
+                .saturating_add(candidate_asset_bytes)
+                .saturating_add(candidate_section_bytes),
+            peak_retained_gpu_bytes: active_gpu_bytes.saturating_add(candidate_gpu_bytes),
         };
         self.asset_replacement_status = AssetReplacementStatus::Active {
             epoch: self.active_assets.epoch,
@@ -471,7 +635,37 @@ impl McloneSceneHost {
             &self.active_assets.provenance,
             self.active_assets.coverage,
         );
+        let preference = self.asset_pack_preference.after_successful_apply(
+            self.client_experience.asset_packs().catalog(),
+            &self.active_assets.selection,
+        );
+        if let Some(storage) = self.asset_pack_preference_storage.as_ref() {
+            if let Err(error) = storage.store(&preference) {
+                self.asset_pack_preference_error =
+                    Some(format!("failed to store {}: {error:#}", storage.label()));
+            } else {
+                self.asset_pack_preference_error = None;
+            }
+        }
+        self.asset_pack_preference = preference;
+        self.asset_replacement_started_at = None;
+        self.asset_replacement_assets_ready_at = None;
         self.last_asset_replacement_commit = Some(report);
         Ok(())
     }
+}
+
+fn estimated_prepared_asset_bytes(assets: &PreparedSceneAssets) -> usize {
+    assets
+        .mesh
+        .atlas
+        .byte_len()
+        .saturating_add(assets.actors.atlas.byte_len())
+        .saturating_add(assets.screen_effects.underwater_rgba.len())
+}
+
+fn estimated_section_gpu_bytes(stats: &mclone_mesh::SectionMeshStats) -> usize {
+    (stats.vertex_count as usize)
+        .saturating_mul(std::mem::size_of::<mclone_mesh::TexturedChunkVertex>())
+        .saturating_add((stats.index_count as usize).saturating_mul(std::mem::size_of::<u32>()))
 }

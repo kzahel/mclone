@@ -157,6 +157,7 @@
     "assets:inventory:first-party": "cargo run --quiet --manifest-path native/Cargo.toml -p mclone-assets --bin first_party_inventory -- --output generated-assets/texture-lab/first-party-inventory.v1.json",
     "assets:pack:generated-fallback": "pnpm assets:inventory:first-party && node ./scripts/run-python.mjs ./tools/minecraft_assets/first_party_pack.py generated-fallback",
     "assets:pack:first-party": "pnpm texture-lab:pack-authored && pnpm assets:pack:generated-fallback && pnpm assets:stage:first-party",
+    "assets:validate:first-party": "cargo run --quiet --manifest-path native/Cargo.toml -p mclone-app-runtime --bin first_party_asset_prepare -- --json generated-assets/first-party-stage/first-party-packs/mclone-authored.pbp generated-assets/first-party-stage/first-party-packs/mclone-generated-fallback.pbp",
     "assets:pack:first-party:test": "node ./scripts/run-python.mjs -m unittest tools.minecraft_assets.test_first_party_pack",
     "assets:stage:first-party": "node ./scripts/run-python.mjs ./tools/minecraft_assets/first_party_pack.py stage",
     "asset-lab:install": "pnpm --dir ./tools/asset-lab install",

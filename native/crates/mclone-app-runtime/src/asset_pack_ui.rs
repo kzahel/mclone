@@ -159,6 +159,22 @@ impl ClientAssetPackController {
         }
     }
 
+    pub fn begin_preferred_selection(&mut self, selection: AssetPackSelection) -> Result<()> {
+        self.catalog
+            .source_order(&selection)
+            .context("preferred asset selection is invalid")?;
+        if selection == self.active {
+            self.staged = selection;
+            self.apply_state = AssetPackUiApplyState::Idle;
+            self.message.clear();
+            return Ok(());
+        }
+        self.staged = selection;
+        self.apply_state = AssetPackUiApplyState::PreparingAssets;
+        self.message = "Restoring preferred packs".to_owned();
+        Ok(())
+    }
+
     pub fn mark_preparing_meshes(&mut self) {
         self.apply_state = AssetPackUiApplyState::PreparingMeshes;
         self.message = "Preparing visible meshes".to_owned();

@@ -757,6 +757,7 @@ fn create_mclone_terrain_state(
         options.underwater_mode,
         options.debug_ui_screen,
     )?;
+    let asset_pack_world_root = scene.world_root.clone();
     let startup_view_pose = options.view_pose.map(|view_pose| XrStartupViewPose {
         position: view_pose.position,
         yaw_degrees: view_pose.yaw_degrees,
@@ -810,7 +811,10 @@ fn create_mclone_terrain_state(
             runtime,
         )
     });
-    crate::desktop_scene_host::configure_desktop_asset_pack_sources(&mut state)?;
+    crate::desktop_scene_host::configure_desktop_asset_pack_sources(
+        &mut state,
+        asset_pack_world_root.as_deref(),
+    )?;
     Ok(state)
 }
 

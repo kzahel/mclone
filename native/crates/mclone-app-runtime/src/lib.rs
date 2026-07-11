@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod asset_pack_preferences;
 pub mod asset_pack_ui;
 pub mod camera_reconcile;
 pub mod catalog_executor;

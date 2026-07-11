@@ -62,6 +62,11 @@ pub(crate) fn run_xr_emulation_screenshot(
                     registry,
                     mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
                 )?;
+                if let Some(path) = mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(scene.world_root.as_deref()) {
+                    driver.host_mut().configure_asset_pack_preference_storage(Box::new(
+                        mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
+                    ))?;
+                }
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_streamed(device, queue, views)?;

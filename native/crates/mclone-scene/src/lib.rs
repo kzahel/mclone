@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
+use mclone_app_runtime::asset_pack_preferences::{AssetPackPreference, AssetPackPreferenceStorage};
 use mclone_app_runtime::catalog_executor::WorldCatalogOperationService;
 use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCatalogRequest};
 #[cfg(not(target_arch = "wasm32"))]
@@ -318,7 +319,13 @@ pub struct McloneSceneHost {
     asset_replacement: Option<SceneAssetReplacementPending>,
     asset_replacement_status: AssetReplacementStatus,
     last_asset_replacement_commit: Option<AssetReplacementCommitReport>,
+    asset_replacement_started_at: Option<MonotonicInstant>,
+    asset_replacement_assets_ready_at: Option<MonotonicInstant>,
     asset_pack_sources: Option<AssetPackSourceRegistry>,
+    asset_pack_preference: AssetPackPreference,
+    asset_pack_preference_storage: Option<Box<dyn AssetPackPreferenceStorage>>,
+    asset_pack_preference_error: Option<String>,
+    pending_restored_asset_pack_selection: Option<AssetPackSelection>,
     external_asset_pack_preparation: bool,
     pending_external_asset_pack_selection: Option<ExternalAssetPackSelection>,
     runtime: Option<SceneSessionRuntime>,

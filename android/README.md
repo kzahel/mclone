@@ -19,8 +19,12 @@ Current status:
   assets, verifies the app-rendered frame marker, and captures a screenshot.
 - APK builds regenerate and embed the authored and generated-fallback logical
   packs. Startup atomically stages them into the app-owned `assets/packs/`
-  discovery root; the separately installed reference archive remains the
-  optional local/proprietary source.
+  discovery root. The separately installed reference archive is optional in
+  the active selection, but the current app still uses it for epoch-0 bootstrap
+  before restoring a first-party preference.
+- Enabled logical ids persist under app data at
+  `preferences/asset-packs.v1.json`; restoration uses the same transactional
+  shared-host Apply path and retains temporarily unavailable ids.
 - Quest-flat validation has passed on an attached Quest 3 as a 2D panel in the
   headset compositor.
 - Durable flat Android startup timings are recorded in

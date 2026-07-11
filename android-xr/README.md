@@ -26,8 +26,11 @@ a launch-scoped TCP remote address through `mclone.startup.argv`.
 The APK also embeds the deterministic authored and generated-fallback logical
 packs. Startup stages them into the app-owned `assets/packs/` discovery root,
 and the shared scene host exposes the same Asset Packs catalog/actions as the
-other client lanes. The separately staged Minecraft archive remains the
-optional local/proprietary reference source.
+other client lanes. The separately staged Minecraft archive is optional in the
+active selection, but the current app still uses it for epoch-0 bootstrap
+before restoring a first-party preference. Enabled logical ids persist under
+app data at `preferences/asset-packs.v1.json` and unavailable ids are retained
+until their pack returns.
 
 ## Build
 

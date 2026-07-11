@@ -1,9 +1,9 @@
 # 169: Runtime Asset Pack Selection
 
-Status: active implementation parent 2026-07-11; Slices 0-5 landed. Platform
-discovery/adoption now uses the shared catalog and epoch contract on every
-supported client lane. Resume this tactical at Slice 6 persistence, audit, and
-closeout.
+Status: complete 2026-07-11; Slices 0-6 landed. Logical selection now persists
+through shared preference/reconciliation policy and platform storage adapters;
+strict provenance and reload measurement are executable. Continue with
+Tactical 170 Slice 6 rather than extending this closed implementation series.
 
 Topic: [`asset-pack-profiles`](../topics/asset-pack-profiles.md)
 
@@ -713,24 +713,117 @@ an implementation against the soon-to-be-deleted web host. This tactical stays
 open and resumes after that handoff; the explicit exception above is a truthful
 intermediate state, not permission to claim Slice 5 complete.
 
-### Slice 6 - Persistence, Audit, and Closeout
+### Slice 6 - Persistence, Audit, and Closeout — DONE (2026-07-11)
 
-- [ ] Persist enabled logical pack ids as a client-global preference through a
+- [x] Persist enabled logical pack ids as a client-global preference through a
   shared preference contract with platform storage adapters.
-- [ ] Gracefully retain unavailable selected ids and fall back to generated
+- [x] Gracefully retain unavailable selected ids and fall back to generated
   content until they reappear.
-- [ ] Add machine-readable active-selection/provenance diagnostics.
-- [ ] Add a strict validation command that fails if Minecraft/unknown origin is
+- [x] Add machine-readable active-selection/provenance diagnostics.
+- [x] Add a strict validation command that fails if Minecraft/unknown origin is
   resolved with the Minecraft pack disabled.
-- [ ] Record reload preparation/compile/upload timing and peak retained CPU/GPU
+- [x] Record reload preparation/compile/upload timing and peak retained CPU/GPU
   bytes; optimize only from evidence.
-- [ ] Update tactical `115`, the topic, asset tooling docs, packaging docs, and
+- [x] Update tactical `115`, the topic, asset tooling docs, packaging docs, and
   platform matrix to state the final standalone boundary.
 
 Exit criteria: selection survives restart on implemented platforms, strict
 first-party validation is automated, no required provenance consumer is
 unaccounted, and the topic accurately records remaining coverage rather than
 claiming completion from texture counts alone.
+
+Landed evidence (2026-07-11):
+
+- `mclone-app-runtime::asset_pack_preferences` owns the versioned logical-id
+  document, deterministic JSON encoding, catalog reconciliation, retained
+  unavailable/undiscovered ids, and the platform storage contract. A successful
+  Apply replaces the persisted available ids while retaining requested ids that
+  are temporarily absent; when a pack reappears it becomes applicable again.
+- `McloneSceneHost` loads a preference after catalog discovery, defers restore
+  until an asynchronously starting runtime is active, routes restoration
+  through the normal selection/epoch transaction, and stores only after a
+  successful frame-boundary commit. Preference I/O failure is diagnostic and
+  never rolls back the active resources.
+- Desktop flat/XR, offscreen, flat Android, and Android XR use the native JSON
+  adapter. The default path is `preferences/asset-packs.v1.json` beside the
+  client-global world root; `MCLONE_ASSET_PACK_PREFERENCE_FILE` is the
+  launch/validation override. Web uses localStorage key
+  `mclone.assetPacks.v1` through the same shared document and host policy.
+- The browser Apply probe persists `mclone-authored`, reloads the page, and
+  restores Original at epoch 1 with the local-world session active and the
+  resident compiler also at epoch 1. The native file-adapter smoke reopens an
+  explicit preference and renders Original at epoch 1 with zero resolved
+  reference/unknown provenance.
+- Runtime diagnostics expose active/preferred ids, epoch, provenance summary,
+  strict proprietary-free truth, preference failures, stage timings, and
+  estimated peak retained CPU/GPU payload bytes. Native offscreen writes the
+  machine-readable record to
+  `/tmp/mclone-asset-pack-runtime-diagnostics.json`; the web report projects
+  the same fields.
+- `pnpm assets:validate:first-party` prepares only the authored and generated
+  archives and emits the exact resolution ledger as JSON. It fails unless
+  resolved Minecraft-reference and unknown counts are both zero. The verified
+  run recorded 11 first-party and 135 generated resolutions, two suppressed
+  sounds, one optional missing result, and no resolved reference/unknown source.
+- The measured native Vanilla reload at 166 resident sections recorded
+  `68.190 ms` preparation, `195.425 ms` compile, `46.896 ms` upload, and
+  `310.511 ms` total. Estimated peak simultaneously retained payloads were
+  `40,803,488` CPU bytes and `82,816,592` GPU bytes. These are lower-bound
+  payload estimates, not allocator/device-heap measurements, and do not justify
+  an atlas fast path yet.
+- Web's projected host clock recorded `458.330 ms` from prepared-set request to
+  commit in the exercised run and estimated `62,273,952` CPU plus `126,256,840`
+  GPU payload bytes at the busy initial view. Its synchronous prepare and GPU
+  upload occur between projected rAF observations, so their individual zero-ms
+  buckets are a clock-resolution limitation; native stage timings are the
+  stage-attribution evidence.
+
+Focused validation:
+
+```text
+cargo test -p mclone-app-runtime -p mclone-scene -p mclone-ui --lib
+  216 + 92 + 76 passed; 0 failed
+cargo test -p mclone-native-client --bin mclone-native-client
+  130 passed; 0 failed
+cargo check -p mclone-app-runtime -p mclone-scene \
+  -p mclone-web-client --target wasm32-unknown-unknown
+  passed (two pre-existing mclone-server warnings)
+pnpm assets:pack:first-party
+pnpm --silent assets:validate:first-party
+  passed; 149 ledger entries, minecraft_reference=0, unknown=0
+pnpm native:web:typecheck
+pnpm native:web:asset-pack-smoke
+  passed; Apply and reload both restored Original at epoch 1, compiler epoch 1
+native file preference restore smoke
+  passed; Original restored at epoch 1 with strict provenance
+native four-selection UI/diagnostic smoke
+  passed; metrics JSON written under /tmp
+pnpm native:xr-emulation:smoke
+pnpm native:xr:check
+  passed
+pnpm native:android:apk:avd
+pnpm native:android:avd-smoke -- --skip-build ...
+pnpm native:android-xr:apk
+  passed; flat Android reached playable 9/9; both APKs contain both packs
+```
+
+The inspected captures at
+`/tmp/mclone-t169-slice6-native-asset-pack-ui.png`,
+`/tmp/mclone-t169-slice6-native-preference.png`,
+`/tmp/mclone-native-web-asset-pack-ui-probe.png`,
+`/tmp/mclone-xr-emulation.png`, and `/tmp/mclone-android-avd-chunk.png` show the
+shared screen, restored labeled first-party world/actors, restored browser
+selection, distinct stereo views, and live Android terrain/HUD/touch controls.
+No capture is committed. The Quest APK rebuilt, but `adb` reported no attached
+device, so this slice does not claim a fresh headset run.
+
+The standalone claim is intentionally bounded to the authored/generated pack
+inputs and their resolution graph. Current native and web clients still
+load/fetch the local reference payload to construct epoch 0 before a persisted
+first-party selection is restored. Removing that bootstrap/install dependency
+requires a first-party epoch-0 startup/package path; this closeout does not
+misstate inactive-reference provenance as proof that the payload was never
+staged or fetched.
 
 ## Validation Matrix
 

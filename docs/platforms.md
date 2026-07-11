@@ -30,6 +30,16 @@ Additional host lane:
 | Headset-free XR emulation | active acceptance lane | The default desktop binary feeds fixed-IPD synthetic Stereo views and optional keyboard-translated controller input through `OffscreenDriver` and the same `McloneSceneHost` used by OpenXR. `pnpm native:xr-emulation:smoke` writes a side-by-side capture to `/tmp/mclone-xr-emulation.png`; it does not initialize or depend on OpenXR. This is a render/input/host seam gate, not an OpenXR runtime substitute. |
 | Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
+Asset-pack selection is now a shared cross-platform contract. Desktop,
+offscreen, flat Android, desktop/Android XR, and web discover or fetch platform
+bytes but use one shared catalog, UI, preference reconciliation, provenance,
+and frame-boundary replacement policy. Native platforms persist logical ids in
+`preferences/asset-packs.v1.json` beside their client-global world root; web
+uses localStorage `mclone.assetPacks.v1`. Current clients still bootstrap epoch
+0 from the local reference payload before restoring a first-party preference,
+so active proprietary-free provenance does not imply the reference payload was
+never installed or fetched.
+
 The retired TypeScript/browser engine is gone from the live tree. Use Git
 history only when old behavior context is explicitly needed; retained oracle
 helpers and fixtures remain active reference assets.
@@ -291,6 +301,11 @@ pnpm native:web:smoke
 pnpm native:web:app-smoke
 pnpm native:web:catalog-smoke
 pnpm native:web:mobile-smoke
+pnpm native:web:asset-pack-smoke
+
+# Strict standalone first-party resolution audit
+pnpm --silent assets:validate:first-party \
+  > /tmp/mclone-first-party-provenance.json
 ```
 
 Run the narrowest lane that can catch the bug class:

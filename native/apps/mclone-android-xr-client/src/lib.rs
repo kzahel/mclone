@@ -2041,6 +2041,10 @@ mod android {
             actor_assets,
             asset_source,
         } = runtime_assets;
+        let asset_pack_preference_path =
+            mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
+                scene_options.world_root.as_deref(),
+            );
         let mut terrain = if let Some(remote_addr) = remote_addr {
             let session = NativeRemoteServerSession::connect(remote_addr.as_str(), "Android XR")?;
             let runtime = AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
@@ -2091,6 +2095,11 @@ mod android {
                 registry,
                 mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
             )?;
+            if let Some(path) = asset_pack_preference_path {
+                terrain.configure_asset_pack_preference_storage(Box::new(
+                    mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
+                ))?;
+            }
         }
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
             Ok(audio) => Some(audio),

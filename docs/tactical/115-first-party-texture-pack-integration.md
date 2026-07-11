@@ -1,8 +1,8 @@
 # 115 - First-Party Texture Pack Integration
 
-Status: active; Slice 2 first-party overlay pack landed. Runtime selection,
-standalone generated fallback construction, and the cross-platform Asset Packs
-UI continue in tactical
+Status: complete 2026-07-11. Slices 1-2 landed the development overlay bridge;
+the standalone authored/generated stack, shared runtime selection, platform
+adoption, persistence, and strict provenance audit landed through Tactical
 [`169`](169-runtime-asset-pack-selection.md) and topic
 [`asset-pack-profiles`](../topics/asset-pack-profiles.md).
 
@@ -162,6 +162,26 @@ The first standalone milestone should be small and explicit. Dirt and
 grass-block are enough for proving source-chain behavior, but not enough for a
 normal generated overworld because `BlockStateRegistry::terrain_mvp()` includes
 stone, logs, leaves, plants, fluids, snow, ores, and other states.
+
+Landed through Tactical 169:
+
+- `mclone-authored.pbp` packages accepted original art, first-party figures,
+  and far-LOD metadata.
+- `mclone-generated-fallback.pbp` supplies deterministic labeled materials,
+  actor/effect replacements, all 209 engine-native block visual records,
+  missing-id registry, and explicit silent-audio policy.
+- Both packs compile through the neutral native mesh catalog; no Minecraft
+  blockstate/model JSON is read by the strict first-party preparation command.
+- `pnpm assets:validate:first-party` emits the full machine-readable ledger and
+  rejects resolved Minecraft-reference or unknown origins.
+- Runtime Asset Packs selection, transactional epoch replacement, persistence,
+  Android/web packaging, and platform evidence live in Tactical 169 rather than
+  this historical overlay bridge.
+
+The standalone claim applies to these two pack inputs and their resolution
+graph. Current clients still use the local reference payload for epoch-0
+bootstrap before restoring a first-party preference; removing that startup
+dependency is separate packaging/boot work and is not hidden by this closure.
 
 ## Non-Goals For Slice 1
 

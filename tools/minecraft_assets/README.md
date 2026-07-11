@@ -13,6 +13,7 @@ pnpm texture-lab:coverage
 pnpm texture-lab:pack-authored
 pnpm assets:pack:generated-fallback
 pnpm assets:pack:first-party
+pnpm assets:validate:first-party
 pnpm assets:pack:first-party:test
 pnpm assets:stage:first-party
 ```
@@ -91,7 +92,19 @@ with a fingerprinted catalog under:
 generated-assets/first-party-stage/first-party-packs/
 ```
 
-This directory is the canonical release/platform staging input. Runtime and
-platform adoption of the two-pack selection is intentionally deferred to later
-tactical 169 slices; do not substitute the partial
-`mclone-default-overlay.pbp` for either standalone artifact.
+This directory is the canonical release/platform staging input. Desktop,
+Android/XR, web, and offscreen packaging/discovery consume it; do not substitute
+the partial `mclone-default-overlay.pbp` for either standalone artifact.
+
+Run the strict runtime-facing audit with:
+
+```bash
+pnpm --silent assets:validate:first-party \
+  > /tmp/mclone-first-party-provenance.json
+```
+
+The command opens only the staged authored and generated packs, prepares the
+same terrain/actor/effect/LOD/audio inputs as the runtime, and emits the full
+resolution ledger. It exits nonzero if any resolved entry has Minecraft or
+unknown origin. Missing optional resources and explicitly suppressed audio stay
+visible in the ledger but do not masquerade as resolved unknown content.

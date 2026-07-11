@@ -2,12 +2,11 @@
 
 Topic: asset-pack-profiles
 
-Status: active implementation 2026-07-11. Tactical
-[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-5 and Tactical
-[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-5 landed. Every
-supported client now discovers/stages the logical packs and applies through the
-shared host epoch contract. Tactical 169 Slice 6 persistence/audit/closeout is
-next.
+Status: implementation complete 2026-07-11. Tactical
+[`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-6 and Tactical
+[`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-5 landed. Selection,
+transactional replacement, platform adoption, persistence, strict provenance,
+and reload measurement are executable. Tactical 170 Slice 6 is next.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
@@ -107,6 +106,24 @@ Minecraft pack is not sufficient.
   the resident compiler at one asset epoch. The browser Apply probe completed
   epoch `0 -> 1` without replacing its local-world session and reported a
   265-file authored-plus-fallback selection with three worker pack loads.
+- A versioned shared preference stores enabled logical ids, reconciles them
+  against current availability, and retains unavailable/undiscovered ids until
+  they reappear. Scene restoration uses the ordinary epoch transaction and
+  persistence occurs only after commit. Native clients use a JSON file beside
+  the client-global world root; web uses `mclone.assetPacks.v1` localStorage.
+- Browser Apply/reload and native file-reopen smokes restore Original at epoch
+  1 with the session intact and zero resolved reference/unknown provenance.
+  Preference failures are machine-readable diagnostics rather than asset
+  transaction failures.
+- `pnpm assets:validate:first-party` emits a strict JSON ledger and fails on any
+  resolved Minecraft-reference or unknown source. The verified 149-entry
+  ledger contains 11 first-party and 135 generated resolutions, two suppressed
+  sounds, one optional missing result, and no resolved reference/unknown source.
+- Reload diagnostics record stage timings plus estimated simultaneous retained
+  CPU/GPU payloads. The measured native Vanilla reload took 68.190 ms prepare,
+  195.425 ms compile, 46.896 ms upload, and 310.511 ms total, with estimated
+  peaks of 40,803,488 CPU and 82,816,592 GPU bytes. The estimates omit allocator
+  and driver overhead and do not yet justify a compatible-atlas fast path.
 - `mclone-assets` now validates the engine-native `mclone-visuals-v1` catalog
   against all 209 canonical state ids/keys and parses the generated
   missing-resource registry and explicit silent-audio policy.
@@ -174,14 +191,14 @@ Minecraft pack is not sufficient.
   far-LOD material palette in `TexturedMeshAssets`. Native render compile
   workers capture the catalog at construction, and draw resources own their GPU
   atlas. Replacing only source-chain state would leave stale derived resources.
-- Actor loading still reads the Minecraft cow texture; the underwater effect
-  reads a Minecraft texture; local landing sounds use Minecraft resource paths.
-  First-party figure JSON is currently loose under repo `assets/`. A truthful
-  global provenance claim therefore covers more than terrain textures.
-- Web render/compiler sessions currently receive one packed byte payload and
-  initialize resident worker catalog state from it. Native platforms discover
-  filesystem/staged roots. Pack discovery is platform glue; selection and
-  composition policy are shared behavior.
+- Actor, underwater-effect, figure, and landing-audio preparation all resolve
+  through the selected named source chain. First-party packs provide actor,
+  effect, and figure replacements plus explicit silent-audio policy, so the
+  global provenance claim covers more than terrain textures.
+- Web fetches reference, authored, and fallback bytes and initializes a
+  replacement resident compiler from the selected logical set at each asset
+  epoch. Native platforms discover filesystem/staged roots. Pack byte discovery
+  remains platform glue; selection and composition policy are shared behavior.
 
 ## Logical Pack Model
 
@@ -372,15 +389,19 @@ resolve when their logical pack is disabled.
   uses the same shared preparation/session interfaces and the resident compiler
   is a real worker at the requested epoch, but browser CPU preparation should
   move to a dedicated worker after measurement.
-- Asset selection persistence has no shared cross-platform preference adapter.
+- Current clients still load/fetch the reference payload to construct epoch 0
+  before restoring a first-party preference. The authored/generated archives
+  and strict resolution graph are standalone, but a fully proprietary-free
+  distribution bootstrap still needs a first-party epoch-0 startup/package
+  path. Inactive-reference provenance does not claim the payload was never
+  staged or fetched.
 
 ## Recommended Next Work
 
-Continue Tactical 169 Slice 6 persistence/audit/closeout: persist logical ids,
-retain unavailable selections, add machine-readable strict provenance checks,
-measure replacement time/memory, and close the standalone documentation audit.
-Then return to Tactical 170 Slice 6 for the final browser parity and
-documentation audit.
+Resume Tactical 170 Slice 6 for the final browser feature-profile, obsolete
+name/cfg, purity, architecture/platform/web documentation, and cross-platform
+closeout audit. Treat a dedicated browser preparation worker and first-party
+epoch-0 bootstrap as explicit follow-ups rather than reopening Tactical 169.
 
 ## Slice 0 Evidence
 

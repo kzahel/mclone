@@ -488,6 +488,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let asset_replacement_smoke = asset_replacement_smoke_paths()?;
     let asset_pack_ui_sources = asset_pack_ui_source_paths()?;
     let asset_pack_ui_smoke = asset_pack_ui_smoke_enabled();
+    let asset_pack_preference_smoke = asset_pack_preference_smoke_enabled();
     let assets = WindowSceneAssets::load()?;
     let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
@@ -504,6 +505,9 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     }
     if asset_pack_ui_smoke {
         frame_count = frame_count.max(480);
+    }
+    if asset_pack_preference_smoke {
+        frame_count = frame_count.max(240);
     }
     let (loop_report, frame_pixels, mut host) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
@@ -524,11 +528,13 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 &asset_source,
                 startup_camera,
             )?;
+            let mut asset_packs_configured = false;
             if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
                 host.driver.host_mut().configure_asset_pack_sources(
                     registry,
                     mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
                 )?;
+                asset_packs_configured = true;
             }
             if let Some((authored, fallback)) = &asset_pack_ui_sources {
                 let registry = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::from_files_with_reference(
@@ -540,6 +546,29 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                     registry,
                     mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
                 )?;
+                asset_packs_configured = true;
+            }
+            if asset_packs_configured {
+                if let Some(path) =
+                    mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
+                        scene.world_root.as_deref(),
+                    )
+                {
+                    let storage = mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path);
+                    if asset_pack_preference_smoke {
+                        mclone_app_runtime::asset_pack_preferences::AssetPackPreferenceStorage::store(
+                            &storage,
+                            &mclone_app_runtime::asset_pack_preferences::AssetPackPreference::new([
+                                mclone_assets::AssetPackId::new(
+                                    mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID,
+                                ),
+                            ]),
+                        )?;
+                    }
+                    host.driver
+                        .host_mut()
+                        .configure_asset_pack_preference_storage(Box::new(storage))?;
+                }
             }
             host.start_scene_with_wait_policy(device, queue, startup_wait)?;
             configure_screenshot_scene(&mut host, options, device, queue)?;
@@ -558,6 +587,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             host.advance_asset_replacement_smoke(index)?;
             host.advance_asset_pack_ui_smoke(device, queue)?;
             let diagnostic_needs_pacing = host.asset_replacement_smoke.is_some()
+                || (asset_pack_preference_smoke && host.driver.host().active_asset_epoch() == 0)
                 || host
                     .asset_pack_ui_smoke
                     .as_ref()
@@ -682,6 +712,64 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             state.effective_label.as_str(),
             state.row_count()
         );
+        let diagnostics = host.driver.host().asset_pack_runtime_diagnostics();
+        let commit = diagnostics
+            .last_commit
+            .context("asset pack UI smoke completed without commit diagnostics")?;
+        let diagnostics_path =
+            std::path::Path::new("/tmp/mclone-asset-pack-runtime-diagnostics.json");
+        std::fs::write(
+            diagnostics_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema": 1,
+                "epoch": diagnostics.epoch,
+                "active_ids": diagnostics.active_ids,
+                "preferred_ids": diagnostics.preferred_ids,
+                "proprietary_free": diagnostics.proprietary_free,
+                "preference_error": diagnostics.preference_error,
+                "provenance": {
+                    "first_party": diagnostics.provenance.first_party,
+                    "generated": diagnostics.provenance.generated,
+                    "minecraft_reference": diagnostics.provenance.minecraft_reference,
+                    "unknown": diagnostics.provenance.unknown,
+                    "suppressed": diagnostics.provenance.suppressed,
+                    "missing": diagnostics.provenance.missing,
+                },
+                "reload": {
+                    "preparation_ms": commit.preparation_ms,
+                    "compile_ms": commit.compile_ms,
+                    "upload_ms": commit.upload_ms,
+                    "total_ms": commit.total_ms,
+                    "peak_retained_cpu_bytes": commit.peak_retained_cpu_bytes,
+                    "peak_retained_gpu_bytes": commit.peak_retained_gpu_bytes,
+                },
+            }))?,
+        )?;
+        println!(
+            "asset pack runtime diagnostics wrote {} total_ms={:.3} peak_cpu={} peak_gpu={}",
+            diagnostics_path.display(),
+            commit.total_ms,
+            commit.peak_retained_cpu_bytes,
+            commit.peak_retained_gpu_bytes,
+        );
+    }
+
+    if asset_pack_preference_smoke {
+        let diagnostics = host.driver.host().asset_pack_runtime_diagnostics();
+        if diagnostics.epoch != 1
+            || diagnostics.active_ids
+                != [mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID.to_owned()]
+            || diagnostics.preferred_ids != diagnostics.active_ids
+            || !diagnostics.proprietary_free
+            || diagnostics.preference_error.is_some()
+        {
+            bail!("asset pack preference smoke did not restore Original: {diagnostics:?}");
+        }
+        println!(
+            "asset pack preference smoke restored {} at epoch {} with no reference/unknown provenance",
+            diagnostics.active_ids.join(","),
+            diagnostics.epoch,
+        );
     }
 
     let pixels = frame_pixels
@@ -756,6 +844,10 @@ fn asset_pack_ui_source_paths() -> Result<Option<(PathBuf, PathBuf)>> {
 fn asset_pack_ui_smoke_enabled() -> bool {
     std::env::var("MCLONE_ASSET_PACK_UI_SMOKE")
         .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
+}
+
+fn asset_pack_preference_smoke_enabled() -> bool {
+    std::env::var("MCLONE_ASSET_PACK_PREFERENCE_SMOKE").as_deref() == Ok("1")
 }
 
 fn screenshot_startup_camera(

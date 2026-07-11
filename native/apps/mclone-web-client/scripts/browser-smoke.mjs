@@ -183,6 +183,14 @@ async function run() {
         console.error(`browser console: ${message.text()}`);
       }
     });
+    if (assetPackUiProbe) {
+      await page.addInitScript(() => {
+        if (globalThis.sessionStorage?.getItem("mclone.assetPacks.probeInitialized") !== "1") {
+          globalThis.localStorage?.removeItem("mclone.assetPacks.v1");
+          globalThis.sessionStorage?.setItem("mclone.assetPacks.probeInitialized", "1");
+        }
+      });
+    }
 
     if (appLoop) {
       const indexedDbReloadWorldId = indexedDbReloadProbe
@@ -1146,8 +1154,76 @@ async function runAssetPackUiProbe(page, canvas) {
       nativeUiScreen: state.nativeUiScreen,
       streamingSettled: state.streamingSettled,
       compiler: state.lastCompileReport ?? null,
+      diagnostics: {
+        proprietaryFree: state.lastReport?.assetProprietaryFree,
+        minecraftReference: Number(state.lastReport?.assetProvenanceMinecraftReference) || 0,
+        unknown: Number(state.lastReport?.assetProvenanceUnknown) || 0,
+        preparationMs: Number(state.lastReport?.assetReloadPreparationMs) || 0,
+        compileMs: Number(state.lastReport?.assetReloadCompileMs) || 0,
+        uploadMs: Number(state.lastReport?.assetReloadUploadMs) || 0,
+        totalMs: Number(state.lastReport?.assetReloadTotalMs) || 0,
+        peakRetainedCpuBytes: Number(state.lastReport?.assetReloadPeakRetainedCpuBytes) || 0,
+        peakRetainedGpuBytes: Number(state.lastReport?.assetReloadPeakRetainedGpuBytes) || 0,
+      },
     };
   });
+  const persistedJson = await page.evaluate(
+    () => globalThis.localStorage?.getItem("mclone.assetPacks.v1") ?? null,
+  );
+  await page.reload({ waitUntil: "load" });
+  await waitForWebAppReady(page);
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const report = state?.lastReport;
+      return report?.assetReplacementState === "active"
+        && Number(report?.activeAssetEpoch) === 1
+        && report?.assetPackActiveAuthored === true
+        && report?.assetPackActiveReference === false
+        && report?.assetPackPreferredIds === "mclone-authored"
+        && !report?.assetPackPreferenceError
+        && state?.streamingSettled === true
+        && state?.sessionBusy === false;
+    },
+    undefined,
+    { timeout: 120_000 },
+  );
+  const restored = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    return {
+      activeAssetEpoch: Number(state.lastReport?.activeAssetEpoch) || 0,
+      assetReplacementState: state.lastReport?.assetReplacementState,
+      activeAuthored: state.lastReport?.assetPackActiveAuthored,
+      activeReference: state.lastReport?.assetPackActiveReference,
+      preferredIds: state.lastReport?.assetPackPreferredIds,
+      preferenceError: state.lastReport?.assetPackPreferenceError ?? null,
+      completionCount: Number(state.assetPackCompletionCount) || 0,
+      sessionKind: state.sessionKind,
+      sessionState: state.sessionState,
+      compiler: state.lastCompileReport ?? null,
+      diagnostics: {
+        proprietaryFree: state.lastReport?.assetProprietaryFree,
+        minecraftReference: Number(state.lastReport?.assetProvenanceMinecraftReference) || 0,
+        unknown: Number(state.lastReport?.assetProvenanceUnknown) || 0,
+        preparationMs: Number(state.lastReport?.assetReloadPreparationMs) || 0,
+        compileMs: Number(state.lastReport?.assetReloadCompileMs) || 0,
+        uploadMs: Number(state.lastReport?.assetReloadUploadMs) || 0,
+        totalMs: Number(state.lastReport?.assetReloadTotalMs) || 0,
+        peakRetainedCpuBytes: Number(state.lastReport?.assetReloadPeakRetainedCpuBytes) || 0,
+        peakRetainedGpuBytes: Number(state.lastReport?.assetReloadPeakRetainedGpuBytes) || 0,
+      },
+    };
+  });
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  const restoredGeometry = await nativeUiGeometry(page);
+  await clickNativeUiPoint(page, {
+    x: restoredGeometry.width * 0.5,
+    y: restoredGeometry.height * 0.5 + 12.0,
+  });
+  await waitForNativeUiScreen(page, "options");
+  await clickNativeUiPoint(page, assetPackOptionsButtonPoint(restoredGeometry));
+  await waitForNativeUiScreen(page, "assetPacks");
   return {
     ok: after.activeAssetEpoch === before.activeAssetEpoch + 1
       && after.assetReplacementState === "active"
@@ -1158,10 +1234,29 @@ async function runAssetPackUiProbe(page, canvas) {
       && after.streamingSettled === true
       && Number(after.compiler?.workerAssetLoadCount) === 3
       && Number(after.compiler?.assetEpoch) === after.activeAssetEpoch
-      && after.compiler?.generatedViewFallbackUsed === false,
+      && after.compiler?.generatedViewFallbackUsed === false
+      && after.diagnostics.proprietaryFree === true
+      && after.diagnostics.minecraftReference === 0
+      && after.diagnostics.unknown === 0
+      && after.diagnostics.peakRetainedCpuBytes > 0
+      && after.diagnostics.peakRetainedGpuBytes > 0
+      && typeof persistedJson === "string"
+      && persistedJson.includes("mclone-authored")
+      && restored.activeAssetEpoch === 1
+      && restored.assetReplacementState === "active"
+      && restored.activeAuthored === true
+      && restored.activeReference === false
+      && restored.preferredIds === "mclone-authored"
+      && restored.preferenceError === null
+      && restored.completionCount > 0
+      && restored.sessionKind === before.sessionKind
+      && restored.sessionState === "active"
+      && Number(restored.compiler?.assetEpoch) === restored.activeAssetEpoch,
     before,
     applyReport,
     after,
+    persistedJson,
+    restored,
   };
 }
 

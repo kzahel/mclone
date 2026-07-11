@@ -7,9 +7,10 @@ baselines, portable scene prerequisites, neutral scene-session shell, browser
 service adapters, direct-host proof, and atomic production cutover. Local
 worker, IndexedDB local-world, and remote WebSocket modes now use one
 `McloneSceneHost`; `WebChunkRenderSession` and the proof-only path are gone.
-Tactical 169 Slice 5 has now adopted logical packs and transactional compiler
-epochs through this host. Continue Tactical 169 Slice 6, then resume Tactical
-170 Slice 6 for parity audit, durable documentation, and closeout.
+Tactical 169 Slices 5-6 adopted logical packs, transactional compiler epochs,
+persistence, strict provenance, and reload diagnostics through this host.
+Resume Tactical 170 Slice 6 for parity audit, durable documentation, and
+closeout.
 
 ## Scope
 
@@ -512,8 +513,7 @@ Primary code:
 
 ## Recommended Next Work
 
-1. Complete Tactical 169 Slice 6 persistence, strict provenance audit,
-replacement measurement, and standalone-pack documentation closeout.
-2. Resume Tactical 170 Slice 6 for the browser feature-profile audit,
-obsolete-name/cfg cleanup, default purity coverage, architecture/platform/web
-documentation, and final cross-platform closeout.
+Implement Tactical 170 Slice 6: audit the browser feature profile, remove
+obsolete names/cfgs, expand default purity coverage, refresh durable
+architecture/platform/web documentation, and run the final cross-platform
+closeout matrix.

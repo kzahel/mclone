@@ -3,8 +3,9 @@
 Status: active 2026-07-11; Slices 0-5 landed. Production local worker,
 IndexedDB local-world, and remote WebSocket modes now use one shared scene
 host; the old web orchestrator and proof-only entry point are deleted. Tactical
-169 Slice 5 platform asset-pack adoption also landed through that host. Complete
-Tactical 169 Slice 6 before this tactical's Slice 6 parity audit and closeout.
+169 Slices 5-6 platform asset-pack adoption, persistence, strict provenance,
+and reload diagnostics also landed through that host. Slice 6 parity audit and
+closeout is next.
 
 Topic: [`web-scene-host-adoption`](../topics/web-scene-host-adoption.md)
 
@@ -1245,8 +1246,6 @@ the evidence and options, and revise this tactical before production cutover.
 
 ## Recommended Next Step
 
-Complete Tactical 169 Slice 6 persistence, provenance audit, measurement, and
-standalone-pack documentation closeout. Then return here for Slice 6's browser
-feature-profile audit, obsolete-name/cfg cleanup, default purity coverage,
-durable architecture/platform/web documentation, and final cross-platform
-closeout.
+Implement Slice 6 only: perform the browser feature-profile audit,
+obsolete-name/cfg cleanup, default purity coverage, durable
+architecture/platform/web documentation, and final cross-platform closeout.
