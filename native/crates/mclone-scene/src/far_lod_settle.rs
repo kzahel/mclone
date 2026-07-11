@@ -12,6 +12,7 @@ pub struct FarLodChunkLedgerRow {
     pub paintable_in_frustum: bool,
     pub painted: bool,
     pub lod_desired_level: Option<u8>,
+    pub lod_prefetch_level: Option<u8>,
     pub lod_resident_levels: BTreeSet<u8>,
     pub lod_uploaded_levels: BTreeSet<u8>,
     pub lod_published_level: Option<u8>,
@@ -53,6 +54,7 @@ impl FarLodSettleSnapshot {
             .chain(painted_chunks.iter().copied())
             .chain(runtime.suppressed_chunks.iter().copied())
             .chain(producer.desired_tiles.keys().copied())
+            .chain(producer.prefetch_tiles.keys().copied())
             .chain(tile_chunks(&producer.resident_tiles))
             .chain(tile_chunks(&producer.uploaded_tiles))
             .chain(producer.published_tiles_by_chunk.keys().copied())
@@ -71,6 +73,7 @@ impl FarLodSettleSnapshot {
                     paintable_in_frustum: paintable_frustum_chunks.contains(&pos),
                     painted: painted_chunks.contains(&pos),
                     lod_desired_level: producer.desired_tiles.get(&pos).copied(),
+                    lod_prefetch_level: producer.prefetch_tiles.get(&pos).copied(),
                     lod_resident_levels: tile_levels(&producer.resident_tiles, pos),
                     lod_uploaded_levels: tile_levels(&producer.uploaded_tiles, pos),
                     lod_published_level: producer

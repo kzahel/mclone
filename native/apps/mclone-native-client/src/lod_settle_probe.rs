@@ -11,7 +11,8 @@ use mclone_app_runtime::lod_coverage::LodReplacementCounters;
 use mclone_core::{ChunkPos, LodTileKey, chunk_middle_block_coord, chunk_min_block_coord};
 use mclone_render::chunk::ChunkRenderView;
 use mclone_render::headless::{
-    HeadlessFrameLoopOptions, read_depth32, run_headless_capture_loop_with_aux, save_rgba_png,
+    HeadlessFrameLoopOptions, read_depth32, run_headless_aux_loop,
+    run_headless_capture_loop_with_aux, save_rgba_png,
 };
 use mclone_scene::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
 use mclone_worldgen::block::is_air_like;
@@ -31,6 +32,12 @@ const MIN_SCRIPT_SCHEMA: u32 = 1;
 const SCRIPT_SCHEMA: u32 = 4;
 const MAX_WAYPOINTS: usize = 64;
 const MAX_CAPTURE_SETTLE_PASSES: usize = 4;
+const MAX_CLEAR_DEPTH_SAMPLE_DETAILS: usize = 64;
+const SMOOTH_MOVEMENT_TARGET_HZ: f64 = 60.0;
+const SMOOTH_MOVEMENT_SPEED_BLOCKS_PER_SECOND: f32 = 48.0;
+const SMOOTH_MOVEMENT_TAIL_FRAMES: usize = 120;
+const SMOOTH_MOVEMENT_STABLE_FRAMES: usize = 6;
+const SMOOTH_MOVEMENT_MAX_MISSING_FRAMES: usize = 6;
 const FLY_UP_EYE_OFFSET_X: f32 = 0.25;
 const FLY_UP_EYE_Y: f32 = 500.0;
 const FLY_UP_EYE_OFFSET_Z: f32 = 0.25;
@@ -62,6 +69,49 @@ struct ProbeHost {
     observations: Vec<FixtureObservation>,
 }
 
+#[derive(Clone, Copy)]
+struct SmoothPose {
+    eye: Vec3,
+    target: Vec3,
+}
+
+struct SmoothMovementPlan {
+    start: SmoothPose,
+    poses: Vec<SmoothPose>,
+    moving_frames: usize,
+}
+
+struct SmoothProbeHost {
+    host: OffscreenFlatClientHost,
+    plan: SmoothMovementPlan,
+    current: Option<SmoothFrameObservation>,
+    surface_sampler: SurfaceSampler,
+}
+
+struct SmoothFrameObservation {
+    moving: bool,
+    center: ChunkPos,
+    snapshot: FarLodSettleSnapshot,
+    render_view: ChunkRenderView,
+    pending_stream_work: usize,
+    far_lod_stats: mclone_app_runtime::far_lod::FarTerrainLodProducerStats,
+}
+
+struct SmoothFrameEvidence {
+    index: usize,
+    moving: bool,
+    center: ChunkPos,
+    pending_stream_work: usize,
+    far_lod_stats: mclone_app_runtime::far_lod::FarTerrainLodProducerStats,
+    coverage: CoverageProbeResult,
+    clear_ledger: Vec<serde_json::Value>,
+}
+
+struct SmoothMovementResult {
+    value: serde_json::Value,
+    expectations_met: bool,
+}
+
 struct FixtureObservation {
     name: String,
     expected: LodSettleExpectation,
@@ -78,6 +128,7 @@ struct FixtureObservation {
     mutation: Option<LodSettleMutation>,
     expected_far_lod_state: Option<FarLodStateAssertion>,
     actual_far_lod_config: FarTerrainLodConfig,
+    render_distance: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -388,6 +439,55 @@ impl LodSettleScript {
     }
 }
 
+impl SmoothMovementPlan {
+    fn from_script(script: &LodSettleScript) -> Option<Self> {
+        let endpoints = script
+            .waypoints
+            .iter()
+            .map(|waypoint| match waypoint.camera {
+                LodSettleCamera::LookAt { eye, target } if waypoint.coverage_probe.is_some() => {
+                    Some(SmoothPose {
+                        eye: Vec3::from_array(eye),
+                        target: Vec3::from_array(target),
+                    })
+                }
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let start = *endpoints.first()?;
+        if endpoints.len() < 2 {
+            return None;
+        }
+        let blocks_per_frame =
+            SMOOTH_MOVEMENT_SPEED_BLOCKS_PER_SECOND / SMOOTH_MOVEMENT_TARGET_HZ as f32;
+        let mut poses = Vec::new();
+        for segment in endpoints.windows(2) {
+            let from = segment[0];
+            let to = segment[1];
+            let distance = from.eye.distance(to.eye);
+            let frame_count = (distance / blocks_per_frame).ceil().max(1.0) as usize;
+            for frame in 1..=frame_count {
+                let amount = frame as f32 / frame_count as f32;
+                poses.push(SmoothPose {
+                    eye: from.eye.lerp(to.eye, amount),
+                    target: from.target.lerp(to.target, amount),
+                });
+            }
+        }
+        if poses.is_empty() {
+            return None;
+        }
+        let moving_frames = poses.len();
+        let last = *poses.last()?;
+        poses.extend(std::iter::repeat_n(last, SMOOTH_MOVEMENT_TAIL_FRAMES));
+        Some(Self {
+            start,
+            poses,
+            moving_frames,
+        })
+    }
+}
+
 fn validate_coverage_probe(waypoint: &LodSettleWaypoint, probe: LodCoverageProbe) -> Result<()> {
     if !probe.plane_y.is_finite() {
         bail!(
@@ -432,6 +532,7 @@ pub(crate) fn run_lod_settle_probe(
     options: &LodSettleProbeOptions,
 ) -> Result<LodSettleProbeReport> {
     let script = LodSettleScript::load(options.script.as_deref(), &options.scene)?;
+    let smooth_plan = SmoothMovementPlan::from_script(&script);
     std::fs::create_dir_all(&options.directory).with_context(|| {
         format!(
             "create far LOD settle probe directory {}",
@@ -559,6 +660,7 @@ pub(crate) fn run_lod_settle_probe(
                 mutation: waypoint.mutation,
                 expected_far_lod_state: waypoint.expected_far_lod_state,
                 actual_far_lod_config: state.host.far_lod_config(),
+                render_distance: state.host.render_distance(),
             });
             Ok(())
         },
@@ -593,6 +695,7 @@ pub(crate) fn run_lod_settle_probe(
         .enumerate()
         .map(|(index, observation)| (observation.name.as_str(), index))
         .collect::<BTreeMap<_, _>>();
+    let mut surface_sampler = SurfaceSampler::default();
     let pixel_analyses = state
         .observations
         .iter()
@@ -606,6 +709,7 @@ pub(crate) fn run_lod_settle_probe(
                 &observation_indexes,
                 [loop_report.width, loop_report.height],
                 options.scene.seed,
+                &mut surface_sampler,
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -616,9 +720,15 @@ pub(crate) fn run_lod_settle_probe(
         .zip(&pixel_analyses)
         .map(|((observation, path), analysis)| fixture_json(observation, path, analysis))
         .collect::<Vec<_>>();
+    let smooth_movement = smooth_plan
+        .map(|plan| run_smooth_movement_probe(options, plan))
+        .transpose()?;
     let expectations_met = fixtures
         .iter()
-        .all(|fixture| fixture["matchedExpectation"].as_bool() == Some(true));
+        .all(|fixture| fixture["matchedExpectation"].as_bool() == Some(true))
+        && smooth_movement
+            .as_ref()
+            .is_none_or(|movement| movement.expectations_met);
     let report_path = options.directory.join("lod-settle-report.json");
     let value = serde_json::json!({
         "schema": 1,
@@ -646,6 +756,7 @@ pub(crate) fn run_lod_settle_probe(
             "path": options.script.as_ref().map(|path| path.display().to_string()),
             "waypoints": state.script.waypoints.len(),
         },
+        "smoothMovement": smooth_movement.map(|movement| movement.value),
         "fixtures": fixtures,
     });
     std::fs::write(&report_path, serde_json::to_string_pretty(&value)?).with_context(|| {
@@ -657,6 +768,248 @@ pub(crate) fn run_lod_settle_probe(
     Ok(LodSettleProbeReport {
         value,
         expectations_met,
+    })
+}
+
+fn run_smooth_movement_probe(
+    options: &LodSettleProbeOptions,
+    plan: SmoothMovementPlan,
+) -> Result<SmoothMovementResult> {
+    let frame_count = plan.poses.len();
+    let moving_frames = plan.moving_frames;
+    let start = plan.start;
+    let end = *plan
+        .poses
+        .last()
+        .context("smooth movement plan requires a final pose")?;
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let startup_camera = SpectatorCamera::spawn_for_scene(&scene);
+    let seed = options.scene.seed;
+    let frame_duration = std::time::Duration::from_secs_f64(1.0 / SMOOTH_MOVEMENT_TARGET_HZ);
+
+    let (headless, frames, state) = run_headless_aux_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count,
+            pace_frame_duration: Some(frame_duration),
+        },
+        move |device, queue, format, size| {
+            let mut host = OffscreenFlatClientHost::new(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+                startup_camera,
+            )?;
+            host.start_scene_with_wait_policy_report(device, queue, StartupWaitPolicy::Idle)?;
+            host.set_camera_look_at(start.eye, start.target);
+            host.commit_camera()?;
+            drive_until_streamed_with_diagnostics(&mut host, device, queue, "smooth-start")?;
+            let target_frame_ms = 1_000.0 / SMOOTH_MOVEMENT_TARGET_HZ;
+            host.set_frame_clock(target_frame_ms, Some(target_frame_ms));
+            Ok(SmoothProbeHost {
+                host,
+                plan,
+                current: None,
+                surface_sampler: SurfaceSampler::default(),
+            })
+        },
+        |index, frame, state| {
+            let pose = state.plan.poses[index];
+            state.host.set_camera_look_at(pose.eye, pose.target);
+            state.host.commit_camera()?;
+            state
+                .host
+                .render_frame(frame, OffscreenFlatClientFrameOptions { hud: false })?;
+            let render_view = state.host.render_view([options.width, options.height])?;
+            state.current = Some(SmoothFrameObservation {
+                moving: index < state.plan.moving_frames,
+                center: ChunkPos::from_block_coords(
+                    pose.eye.x.floor() as i32,
+                    pose.eye.z.floor() as i32,
+                ),
+                snapshot: state.host.far_lod_settle_snapshot()?,
+                render_view,
+                pending_stream_work: state.host.pending_stream_work(),
+                far_lod_stats: state.host.far_lod_stats(),
+            });
+            Ok(())
+        },
+        |index, device, queue, state| {
+            let depths = read_depth32(device, queue, state.host.depth_target())?;
+            let observation = state
+                .current
+                .take()
+                .context("smooth depth capture is missing its frame observation")?;
+            let coverage = coverage_probe_result(
+                &observation.snapshot,
+                observation.render_view,
+                &depths,
+                [options.width, options.height],
+                LodCoverageProbe { plane_y: 64.0 },
+                state.host.far_lod_config(),
+                seed,
+                state.host.render_distance(),
+                &mut state.surface_sampler,
+            );
+            let clear_ledger = coverage
+                .clear_depth_columns
+                .iter()
+                .take(MAX_CLEAR_DEPTH_SAMPLE_DETAILS)
+                .map(|pos| {
+                    observation.snapshot.chunks.get(pos).map_or_else(
+                        || ledger_row_json(*pos, &FarLodChunkLedgerRow::default()),
+                        |row| ledger_row_json(*pos, row),
+                    )
+                })
+                .collect();
+            Ok(SmoothFrameEvidence {
+                index,
+                moving: observation.moving,
+                center: observation.center,
+                pending_stream_work: observation.pending_stream_work,
+                far_lod_stats: observation.far_lod_stats,
+                coverage,
+                clear_ledger,
+            })
+        },
+    )?;
+
+    let mut active_missing = BTreeMap::<ChunkPos, usize>::new();
+    let mut max_chunk_missing_frames = 0usize;
+    let mut longest_missing_chunk = None;
+    let mut current_any_gap_run = 0usize;
+    let mut max_any_gap_run_frames = 0usize;
+    let mut frames_with_clear_depth = 0usize;
+    let mut max_clear_depth_columns = 0usize;
+    for frame in &frames {
+        let clear = &frame.coverage.clear_depth_columns;
+        if clear.is_empty() {
+            current_any_gap_run = 0;
+        } else {
+            frames_with_clear_depth += 1;
+            current_any_gap_run += 1;
+            max_any_gap_run_frames = max_any_gap_run_frames.max(current_any_gap_run);
+            max_clear_depth_columns = max_clear_depth_columns.max(clear.len());
+        }
+        active_missing.retain(|pos, _| clear.contains(pos));
+        for pos in clear {
+            let age = active_missing.entry(*pos).or_default();
+            *age += 1;
+            if *age > max_chunk_missing_frames {
+                max_chunk_missing_frames = *age;
+                longest_missing_chunk = Some(*pos);
+            }
+        }
+    }
+
+    let first_failure = frames
+        .iter()
+        .find(|frame| !frame.coverage.clear_depth_columns.is_empty());
+    let final_stable = frames
+        .iter()
+        .rev()
+        .take(SMOOTH_MOVEMENT_STABLE_FRAMES)
+        .count()
+        == SMOOTH_MOVEMENT_STABLE_FRAMES
+        && frames
+            .iter()
+            .rev()
+            .take(SMOOTH_MOVEMENT_STABLE_FRAMES)
+            .all(|frame| frame.coverage.clear_depth_columns.is_empty());
+    let expectations_met = final_stable
+        && max_chunk_missing_frames <= SMOOTH_MOVEMENT_MAX_MISSING_FRAMES
+        && max_any_gap_run_frames <= SMOOTH_MOVEMENT_MAX_MISSING_FRAMES;
+    let value = serde_json::json!({
+        "status": if expectations_met { "pass" } else { "fail" },
+        "depthIsCoverageEvidence": true,
+        "targetHz": SMOOTH_MOVEMENT_TARGET_HZ,
+        "speedBlocksPerSecond": SMOOTH_MOVEMENT_SPEED_BLOCKS_PER_SECOND,
+        "movingFrames": moving_frames,
+        "tailFrames": SMOOTH_MOVEMENT_TAIL_FRAMES,
+        "totalFrames": frames.len(),
+        "startEye": start.eye.to_array(),
+        "endEye": end.eye.to_array(),
+        "framesWithClearDepth": frames_with_clear_depth,
+        "maxClearDepthColumns": max_clear_depth_columns,
+        "maxConsecutiveClearFrames": max_any_gap_run_frames,
+        "maxChunkMissingFrames": max_chunk_missing_frames,
+        "longestMissingChunk": longest_missing_chunk.map(|pos| serde_json::json!({ "x": pos.x, "z": pos.z })),
+        "allowedMissingFrames": SMOOTH_MOVEMENT_MAX_MISSING_FRAMES,
+        "finalStableFrames": SMOOTH_MOVEMENT_STABLE_FRAMES,
+        "finalStable": final_stable,
+        "headless": {
+            "width": headless.width,
+            "height": headless.height,
+            "setupMs": headless.setup_ms,
+            "totalFrameMs": headless.total_frame_ms,
+            "averageFrameMs": headless.average_frame_ms,
+            "maxFrameMs": headless.max_frame_ms,
+        },
+        "firstFailure": first_failure.map(smooth_failure_json),
+        "finalFailure": frames.last().filter(|frame| !frame.coverage.clear_depth_columns.is_empty()).map(smooth_failure_json),
+        "frames": frames.iter().map(|frame| serde_json::json!({
+            "index": frame.index,
+            "moving": frame.moving,
+            "center": { "x": frame.center.x, "z": frame.center.z },
+            "pendingStreamWork": frame.pending_stream_work,
+            "projectedColumns": frame.coverage.projected_columns,
+            "clearDepthSamples": frame.coverage.clear_depth_sample_count,
+            "clearDepthColumns": frame.coverage.clear_depth_columns.len(),
+            "farLod": smooth_far_lod_stats_json(frame.far_lod_stats),
+        })).collect::<Vec<_>>(),
+        "finalBudgetPanel": state.host.latest_budget_decision_panel(),
+    });
+    Ok(SmoothMovementResult {
+        value,
+        expectations_met,
+    })
+}
+
+fn smooth_failure_json(frame: &SmoothFrameEvidence) -> serde_json::Value {
+    serde_json::json!({
+        "index": frame.index,
+        "moving": frame.moving,
+        "center": { "x": frame.center.x, "z": frame.center.z },
+        "pendingStreamWork": frame.pending_stream_work,
+        "clearDepthSampleCount": frame.coverage.clear_depth_sample_count,
+        "clearDepthColumns": chunk_positions_json(&frame.coverage.clear_depth_columns),
+        "clearDepthSamples": frame.coverage.clear_depth_samples.iter().map(|sample| serde_json::json!({
+            "chunk": { "x": sample.chunk.x, "z": sample.chunk.z },
+            "source": sample.source,
+            "local": { "x": sample.local_x, "z": sample.local_z },
+            "surfaceY": sample.surface_y,
+            "pixel": { "x": sample.pixel[0], "y": sample.pixel[1] },
+            "clearPixelsIn3x3": sample.clear_pixels_in_3x3,
+        })).collect::<Vec<_>>(),
+        "ledger": frame.clear_ledger,
+        "farLod": smooth_far_lod_stats_json(frame.far_lod_stats),
+    })
+}
+
+fn smooth_far_lod_stats_json(
+    stats: mclone_app_runtime::far_lod::FarTerrainLodProducerStats,
+) -> serde_json::Value {
+    serde_json::json!({
+        "desiredTiles": stats.desired_tiles,
+        "prefetchTiles": stats.prefetch_tiles,
+        "residentTiles": stats.resident_tiles,
+        "visibleTiles": stats.visible_tiles,
+        "pendingBuilds": stats.pending_builds,
+        "inflightBuilds": stats.inflight_builds,
+        "queuedUploads": stats.queued_uploads,
+        "submittedBuilds": stats.submitted_builds,
+        "completedBuilds": stats.completed_builds,
+        "staleBuilds": stats.stale_builds,
+        "oldestBuildAgeMs": stats.oldest_build_age_ms,
     })
 }
 
@@ -728,6 +1081,11 @@ struct CoverageProbeResult {
     clear_depth_samples: Vec<CoverageClearDepthSample>,
 }
 
+#[derive(Default)]
+struct SurfaceSampler {
+    chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct CoverageClearDepthSample {
     chunk: ChunkPos,
@@ -753,6 +1111,7 @@ fn fixture_pixel_analysis(
     observation_indexes: &BTreeMap<&str, usize>,
     size: [u32; 2],
     seed: i64,
+    surface_sampler: &mut SurfaceSampler,
 ) -> Result<FixturePixelAnalysis> {
     let coverage = observation.coverage_probe.map(|probe| {
         coverage_probe_result(
@@ -763,6 +1122,8 @@ fn fixture_pixel_analysis(
             probe,
             observation.actual_far_lod_config,
             seed,
+            observation.render_distance,
+            surface_sampler,
         )
     });
     let determinism = observation
@@ -799,58 +1160,79 @@ fn coverage_probe_result(
     _probe: LodCoverageProbe,
     config: FarTerrainLodConfig,
     seed: i64,
+    render_distance: u32,
+    surface_sampler: &mut SurfaceSampler,
 ) -> CoverageProbeResult {
-    let mut chunks = BTreeMap::<ChunkPos, GeneratedChunk>::new();
     let mut projected_columns = 0usize;
     let mut sampled_depth_points = 0usize;
     let mut clear_depth_sample_count = 0usize;
     let mut clear_depth_columns = BTreeSet::new();
     let mut clear_depth_samples = Vec::new();
-    for (pos, row) in &snapshot.chunks {
-        let samples = if let Some(level) = row.lod_visible_levels.iter().next().copied() {
-            let spacing = far_lod_sample_spacing_for_level(config.sample_spacing_blocks, level);
-            lod_surface_test_points(&mut chunks, seed, *pos, spacing)
-                .into_iter()
-                .map(|sample| ("far-lod", sample))
-                .collect::<Vec<_>>()
-        } else if row.suppressed {
-            real_surface_test_points(&mut chunks, seed, *pos)
-                .into_iter()
-                .map(|sample| ("real", sample))
-                .collect::<Vec<_>>()
-        } else {
-            continue;
-        };
-        let mut column_projected = false;
-        for (source, sample) in samples {
-            let Some([x, y]) = project_world_to_pixel(
-                render_view,
-                Vec4::new(sample.world_x, sample.surface_y, sample.world_z, 1.0),
-                size,
-            ) else {
-                continue;
+    let center = ChunkPos::from_block_coords(
+        render_view.camera_position.x.floor() as i32,
+        render_view.camera_position.z.floor() as i32,
+    );
+    let outer_radius = render_distance.saturating_add(config.extra_radius_chunks) as i32;
+    for dz in -outer_radius..=outer_radius {
+        for dx in -outer_radius..=outer_radius {
+            let pos = ChunkPos::new(center.x + dx, center.z + dz);
+            let row = snapshot.chunks.get(&pos);
+            let suppressed = row.is_some_and(|row| row.suppressed);
+            let visible_level = row.and_then(|row| row.lod_visible_levels.iter().next().copied());
+            let desired_level = row.and_then(|row| row.lod_desired_level);
+            let (source, samples) = if suppressed {
+                ("real", real_surface_test_points(surface_sampler, seed, pos))
+            } else {
+                let level = visible_level.or(desired_level).unwrap_or(3);
+                let spacing = far_lod_sample_spacing_for_level(config.sample_spacing_blocks, level);
+                (
+                    if visible_level.is_some() {
+                        "far-lod"
+                    } else if desired_level.is_some() {
+                        "missing-lod"
+                    } else {
+                        "undesired"
+                    },
+                    lod_surface_test_points(surface_sampler, seed, pos, spacing),
+                )
             };
-            column_projected = true;
-            sampled_depth_points += 1;
-            let index = (y * size[0] + x) as usize;
-            if depths
-                .get(index)
-                .is_none_or(|depth| *depth <= 0.0 || !depth.is_finite())
-            {
-                clear_depth_sample_count += 1;
-                clear_depth_columns.insert(*pos);
-                clear_depth_samples.push(CoverageClearDepthSample {
-                    chunk: *pos,
-                    source,
-                    local_x: sample.world_x - chunk_min_block_coord(pos.x) as f32,
-                    local_z: sample.world_z - chunk_min_block_coord(pos.z) as f32,
-                    surface_y: sample.surface_y,
-                    pixel: [x, y],
-                    clear_pixels_in_3x3: clear_depth_neighborhood_count(depths, size, [x, y]),
-                });
+            let mut column_projected = false;
+            for sample in samples {
+                let Some([x, y]) = project_world_to_pixel(
+                    render_view,
+                    Vec4::new(sample.world_x, sample.surface_y, sample.world_z, 1.0),
+                    size,
+                ) else {
+                    continue;
+                };
+                column_projected = true;
+                sampled_depth_points += 1;
+                let index = (y * size[0] + x) as usize;
+                if depths
+                    .get(index)
+                    .is_none_or(|depth| *depth <= 0.0 || !depth.is_finite())
+                {
+                    clear_depth_sample_count += 1;
+                    clear_depth_columns.insert(pos);
+                    if clear_depth_samples.len() < MAX_CLEAR_DEPTH_SAMPLE_DETAILS {
+                        clear_depth_samples.push(CoverageClearDepthSample {
+                            chunk: pos,
+                            source,
+                            local_x: sample.world_x - chunk_min_block_coord(pos.x) as f32,
+                            local_z: sample.world_z - chunk_min_block_coord(pos.z) as f32,
+                            surface_y: sample.surface_y,
+                            pixel: [x, y],
+                            clear_pixels_in_3x3: clear_depth_neighborhood_count(
+                                depths,
+                                size,
+                                [x, y],
+                            ),
+                        });
+                    }
+                }
             }
+            projected_columns += usize::from(column_projected);
         }
-        projected_columns += usize::from(column_projected);
     }
     CoverageProbeResult {
         projected_columns,
@@ -869,7 +1251,7 @@ struct SurfaceTestPoint {
 }
 
 fn real_surface_test_points(
-    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    sampler: &mut SurfaceSampler,
     seed: i64,
     pos: ChunkPos,
 ) -> Vec<SurfaceTestPoint> {
@@ -880,7 +1262,7 @@ fn real_surface_test_points(
         .filter_map(|(x, z)| {
             let world_x = chunk_min_block_coord(pos.x) + x;
             let world_z = chunk_min_block_coord(pos.z) + z;
-            surface_y_at(chunks, seed, world_x, world_z).map(|surface_y| SurfaceTestPoint {
+            surface_y_at(sampler, seed, world_x, world_z).map(|surface_y| SurfaceTestPoint {
                 world_x: world_x as f32 + 0.5,
                 world_z: world_z as f32 + 0.5,
                 surface_y,
@@ -890,7 +1272,7 @@ fn real_surface_test_points(
 }
 
 fn lod_surface_test_points(
-    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    sampler: &mut SurfaceSampler,
     seed: i64,
     pos: ChunkPos,
     spacing: u32,
@@ -906,7 +1288,7 @@ fn lod_surface_test_points(
             let z1 = (z0 + spacing).min(16);
             let sample_x = min_x + x0 + (x1 - x0) / 2;
             let sample_z = min_z + z0 + (z1 - z0) / 2;
-            surface_y_at(chunks, seed, sample_x, sample_z).map(|surface_y| SurfaceTestPoint {
+            surface_y_at(sampler, seed, sample_x, sample_z).map(|surface_y| SurfaceTestPoint {
                 // Stay off the quad diagonal and cell boundaries so rasterization
                 // tests the owned top face rather than a seam pixel.
                 world_x: min_x as f32 + x0 as f32 + (x1 - x0) as f32 * 0.35,
@@ -918,13 +1300,14 @@ fn lod_surface_test_points(
 }
 
 fn surface_y_at(
-    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    sampler: &mut SurfaceSampler,
     seed: i64,
     world_x: i32,
     world_z: i32,
 ) -> Option<f32> {
     let pos = ChunkPos::from_block_coords(world_x, world_z);
-    let chunk = chunks
+    let chunk = sampler
+        .chunks
         .entry(pos)
         .or_insert_with(|| generate_overworld_surface_chunk(seed, pos.x, pos.z));
     let local_x = world_x - chunk_min_block_coord(pos.x);
@@ -1254,12 +1637,9 @@ fn settle_coherence_failures(observation: &FixtureObservation) -> Vec<String> {
         .map(|(pos, level)| LodTileKey::new(*pos, *level))
         .collect::<BTreeSet<_>>();
     let mut failures = Vec::new();
-    if observation.pending_stream_work != 0 {
-        failures.push(format!(
-            "pending_stream_work={} after settle",
-            observation.pending_stream_work
-        ));
-    }
+    // The aggregate also includes normal-section work that a capture render
+    // can discover after the drive-to-idle pass. Keep it in the report, but
+    // gate the exact far-LOD lifecycle below and painted depth separately.
     if expects_enabled && desired.is_empty() {
         failures.push("desired LOD tile set is empty".to_owned());
     }
@@ -1328,6 +1708,7 @@ fn ledger_row_json(pos: ChunkPos, row: &FarLodChunkLedgerRow) -> serde_json::Val
         "paintableInFrustum": row.paintable_in_frustum,
         "painted": row.painted,
         "lodDesiredLevel": row.lod_desired_level,
+        "lodPrefetchLevel": row.lod_prefetch_level,
         "lodResidentLevels": row.lod_resident_levels,
         "lodUploadedLevels": row.lod_uploaded_levels,
         "lodPublishedLevel": row.lod_published_level,
@@ -1401,6 +1782,7 @@ mod tests {
             mutation: None,
             expected_far_lod_state: None,
             actual_far_lod_config: FarTerrainLodConfig::enabled(),
+            render_distance: 4,
         };
 
         assert!(settle_coherence_failures(&observation).is_empty());
@@ -1443,6 +1825,7 @@ mod tests {
             expected_far_lod_state: None,
             actual_far_lod_config: FarTerrainLodConfig::enabled()
                 .with_normal_terrain_culling(false),
+            render_distance: 4,
         };
 
         assert!(settle_coherence_failures(&observation).is_empty());
@@ -1509,7 +1892,15 @@ mod tests {
         );
         assert_eq!(
             script.waypoints[4].lod_assertions[0].expected,
-            LodDesiredLevelExpectation::NotDesired
+            LodDesiredLevelExpectation::Level1
+        );
+        let smooth = SmoothMovementPlan::from_script(&script).unwrap();
+        assert_eq!(smooth.moving_frames, 220);
+        assert_eq!(smooth.poses.len(), 220 + SMOOTH_MOVEMENT_TAIL_FRAMES);
+        assert_eq!(smooth.start.eye.to_array(), [8.25, 500.0, 8.25]);
+        assert_eq!(
+            smooth.poses.last().unwrap().eye.to_array(),
+            [184.25, 500.0, 8.25]
         );
     }
 
@@ -1709,6 +2100,7 @@ mod tests {
         );
         let depths = vec![0.0; (size[0] * size[1]) as usize];
 
+        let mut surface_sampler = SurfaceSampler::default();
         let result = coverage_probe_result(
             &snapshot,
             render_view,
@@ -1717,15 +2109,14 @@ mod tests {
             LodCoverageProbe { plane_y: 64.0 },
             FarTerrainLodConfig::enabled(),
             12345,
+            0,
+            &mut surface_sampler,
         );
 
-        assert_eq!(result.projected_columns, 1);
+        assert!(result.projected_columns > 0);
         assert!(result.sampled_depth_points > 0);
         assert_eq!(result.clear_depth_sample_count, result.sampled_depth_points);
-        assert_eq!(
-            result.clear_depth_columns,
-            BTreeSet::from([ChunkPos::new(0, 0)])
-        );
+        assert!(result.clear_depth_columns.contains(&ChunkPos::new(0, 0)));
     }
 
     #[test]

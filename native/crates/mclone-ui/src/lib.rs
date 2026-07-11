@@ -1852,7 +1852,7 @@ impl Default for GameUiRenderState {
             section_occlusion_culling: true,
             force_fullbright: false,
             far_lod_enabled: false,
-            far_lod_normal_terrain_culling: true,
+            far_lod_normal_terrain_culling: false,
             far_lod_detail_mode: GameFarLodDetailMode::Auto,
             far_lod_range_chunks: 12,
             min_far_lod_range_chunks: 1,

@@ -20,7 +20,14 @@ no longer strand the sparse visibility graph, and the high fixture paints
 81/81 real columns with no culled-but-suppressed rows. Depth-backed settled
 coverage validation is now live, and D7's replacement head-of-line block is
 fixed so fresh movement coverage can bypass a saturated replacement allowance.
-D2 and per-frame smooth-movement coverage remain open. This
+The deterministic smooth-movement lane is now complete: a 48-block/s,
+220-frame flight plus 120 stationary frames reports zero missing chunks with
+the shipped coverage-safe policy. The fix uses hidden movement-guard coverage,
+missing-first build ordering, a bounded worker surface cache, and a lazy
+far-LOD compile floor of two workers/eight pending slots. Covered-build culling
+is now default off; it remains an explicit optimization control, while final
+real/LOD exclusion remains unconditional. D2 on the opt-in culling path and
+the remaining cap/seam/performance items remain open. This
 tactical owns the far-LOD product-hardening series: a settle-state validation
 harness, the coverage-gap correctness burn-down, and the user-facing LOD
 detail modes (auto / 4 / 8 / 16, debug 1 / 2), plus residency/perf polish. It
@@ -363,13 +370,14 @@ reproduce D1/D2 before any fix exists.
   high-view waypoints: baseline, one chunk east, the hysteresis guard edge,
   the guarded band crossing, then eight chunks east. Anchor `(9,0)` stays at
   level 3 through the one-chunk move and guard, flips to level 1 on crossing,
-  and becomes not-desired after the eight-chunk move; new anchor `(18,0)`
-  enters at level 2.
-- **Pinned evidence.** All five fixtures matched with 360 desired = 360
-  visible tiles, zero pending work, and no coherence/assertion failures. Their
+  and remains desired at level 1 after the eight-chunk move under the current
+  coverage-safe build policy; new anchor `(18,0)` enters at level 2.
+- **Pinned evidence.** All five fixtures currently match with 441 desired,
+  360 visible, and 81 real-suppressed tiles, zero pending work, and no
+  coherence/assertion failures. Their
   960×960 captures under `/tmp/mclone-lod-settle-movement` were inspected.
   These are deliberately movement/set-level fixtures; the separate fast smoke
-  owns the expected-red C2/D1-D2 pixel assertions.
+  owns the high/revisit C2 and D1/D2 regression assertions.
 
 #### Slice 1C2b2 — Toggle/range mutations and full lane (complete 2026-07-11)
 
@@ -381,10 +389,13 @@ reproduce D1/D2 before any fix exists.
   sets; schema-1/2/3 inputs remain accepted.
 - **Mutation fixture landed.** The five-waypoint script proves range-6
   baseline → off → on → range 3 → range 8. Off settles with all authoritative
-  LOD sets and suppression empty. Re-enable restores 360 desired/resident/
-  published/visible tiles and is pixel-identical to baseline. Range 3 settles
-  at 144 tiles with `(7,0)` level 3 and `(9,0)` absent; range 8 settles at 544
+  LOD sets and suppression empty. Re-enable restores 441 desired tiles, of
+  which 360 are visible and 81 are real-suppressed, and is pixel-identical to
+  baseline. Range 3 settles at 225 desired / 144 visible tiles with `(7,0)`
+  level 3 and `(9,0)` absent; range 8 settles at 625 desired / 544 visible
   tiles with `(9,0)` level 2. Every waypoint closes with zero pending work.
+  Hidden movement-guard tiles may increase resident/uploaded counts beyond the
+  desired set and never participate in frame arbitration.
 - **Full pnpm lane landed.** `native:lod-settle:probe` runs the smoke,
   movement, and mutation scripts into `/tmp/mclone-lod-settle-probe`, producing
   14 captures and three structured reports. All three scripts matched on the
@@ -394,9 +405,9 @@ reproduce D1/D2 before any fix exists.
 
 Gate:
 
-- Harness runs green on fixtures the current build genuinely satisfies;
-  the fly-up fixture is red and its failure report names the D1/D2 mechanism
-  (culled-but-suppressed columns present in the ledger);
+- Harness runs green on fixtures the current build genuinely satisfies; an
+  intentionally red repro must name its classified lifecycle mechanism in the
+  ledger and flip green with its fix;
 - accessors add no per-frame cost when unused (debug/probe pull only);
 - far-LOD-off canary unchanged; existing suites green.
 
@@ -413,7 +424,7 @@ Drive every ledger defect to fixed-or-explicitly-deferred, each with its
 fixture flipping red→green in the same change.
 
 The first Slice 2 change was diagnostic rather than a fix. Graphics now exposes
-**Cull Covered LOD Builds** (default on), backed by the shared
+**Cull Covered LOD Builds** (default off), backed by the shared
 `FarTerrainLodConfig::normal_terrain_culling` policy and the
 `--far-lod-normal-terrain-culling true|false` startup argument. Turning it off
 removes normal-terrain readiness only from desired-tile generation, allowing
@@ -425,6 +436,49 @@ admission, visible LOD tile keys are unconditionally asserted disjoint from
 traversal-ready real chunks in both local and remote service paths. Focused
 tests prove a one-chunk overlap panics and a disjoint frame passes. No new probe
 schema or fixture framework was added.
+
+The sustained-movement reproduction likewise reuses the checked-in movement
+script instead of adding a schema. It interpolates the existing camera poses
+at 48 blocks/s and 60 Hz, reads GPU depth at the expected real or LOD surface
+for all 441 configured chunks every frame, and retains the first failing
+lifecycle rows plus per-chunk missing age. Before the fix, both culling-on and
+culling-off runs failed for 331 consecutive frames: the first new edge
+appeared at frame 9, 201 chunks were still absent at movement end, and 122
+remained absent after the two-second stationary tail. Those rows were desired
+but pending with no resident/uploaded/visible tile, classifying the defect as
+producer throughput/admission rather than screenshot, frustum, or rendering
+ambiguity.
+
+The coverage fix stays inside the existing producer and shared compile pool:
+
+- the existing two-chunk retention margin is also a hidden movement guard;
+  guard tiles are resident/uploaded but cannot be presented until desired;
+- visible missing coverage is admitted before guard work, level replacement,
+  and hidden seam refresh; an uploaded guard promotes immediately on entry;
+- each native compile worker caches a bounded 128 chunks of compressed surface
+  columns, avoiding repeated full worldgen for neighboring LOD tiles;
+- enabling far LOD lazily raises the shared compile pool to at least two
+  workers and eight pending slots. Far-LOD-off keeps the prior one-worker
+  default and pays no worker or queue-capacity increase;
+- covered-build culling defaults off, so ordinary coverage does not depend on
+  real-terrain readiness churn. The UI/CLI switch remains available for an
+  explicit culling-on A/B. Presentation suppression and the release-active
+  real/LOD overlap panic remain unconditional.
+
+At 960×960, the resulting smooth lane passed all 340 frames (220 moving +
+120 tail) with zero clear-depth chunks and zero maximum missing age. The
+permanent 14-waypoint lane also passed with exact far-LOD lifecycle coherence
+and zero uncovered settled samples. Aggregate normal-section work discovered
+by a capture frame remains reported but is not confused with far-LOD
+coherence or painted coverage.
+
+Landing validation: the full native Rust workspace test suite passed (the
+existing renderer/worldgen ignores remained ignored); thin-adapter purity and
+the direct web/WASM build passed; the far-LOD-off desktop capture, movement
+smoke, and timedemo passed; and both flat Android and Android XR release APKs
+built. No ADB device was attached, so this slice has build—not new on-device
+Quest performance—evidence. Coverage claims come from depth/lifecycle data,
+not inspection of the generated PNGs.
 
 - **D1 (complete):** sparse empty camera records fall back to the visible top
   surface per column rather than becoming the sole traversal seed. Renderer
@@ -442,7 +496,13 @@ schema or fixture framework was added.
   inferring coverage from RGB or a constant-Y plane. At Y=500 the five-point
   movement matrix covers all 441 RD4 + range-6 chunks and reports zero clear
   representation samples at every settled position.
-- **D2 / C4:** change the suppression input from traversal-ready columns to a
+- **Smooth movement coverage (complete for the deterministic flight):** the
+  exact-surface depth oracle runs every frame over the existing movement
+  script. The pre-fix persistent missing-LOD ledger is recorded above; the
+  coverage-safe default passes 340/340 frames with zero uncovered chunks. This
+  closes the reproduced scheduler/throughput class, not every camera path.
+- **D2 / C4 (open for culling-on and broader camera shapes):** change the
+  suppression input from traversal-ready columns to a
   view-independent painted-capable predicate (column has uploaded, drawable
   real sections), applied consistently to desired-set carving and the
   coordinator's `normal_drawable`. Decide and record whether covered columns
@@ -640,10 +700,10 @@ regress). Additions:
 
 ## Open Questions
 
-- D2 shape: carve covered columns out of the desired set (today) vs
-  build-but-suppress. Default position is keep carving (cheapest, no Quest
-  overdraw risk); revisit only if the harness shows reveal-latency pops on
-  chunk unload.
+- D2 shape: the coverage-safe default builds covered columns and suppresses
+  them only at presentation. The explicit culling-on optimization still carves
+  them out; promote it only if it can satisfy the same moving-depth contract
+  without reveal gaps and its platform benefit is measured.
 - Retention budget defaults per platform (Slice 4) — measure before choosing.
 - Whether fixed-16 should unlock a larger range slider maximum once D3's
   honest cap lands (cheap tiles, coarse shell — the likely "see very far"

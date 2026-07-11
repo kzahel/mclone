@@ -15,7 +15,7 @@
       "expectedFarLodState": {
         "enabled": true,
         "extraRadiusChunks": 6,
-        "desiredTiles": 360,
+        "desiredTiles": 441,
         "suppressedChunks": 81
       },
       "expected": "pass"
@@ -57,7 +57,7 @@
       "expectedFarLodState": {
         "enabled": true,
         "extraRadiusChunks": 6,
-        "desiredTiles": 360,
+        "desiredTiles": 441,
         "suppressedChunks": 81
       },
       "matchesPixels": "mutation-baseline-range6",
@@ -81,7 +81,7 @@
       "expectedFarLodState": {
         "enabled": true,
         "extraRadiusChunks": 3,
-        "desiredTiles": 144,
+        "desiredTiles": 225,
         "suppressedChunks": 81
       },
       "expected": "pass"
@@ -103,7 +103,7 @@
       "expectedFarLodState": {
         "enabled": true,
         "extraRadiusChunks": 8,
-        "desiredTiles": 544,
+        "desiredTiles": 625,
         "suppressedChunks": 81
       },
       "expected": "pass"

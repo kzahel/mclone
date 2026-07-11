@@ -873,6 +873,12 @@ where
             submit_ms,
             device_poll_ms,
         });
+        if let Some(frame_duration) = options.pace_frame_duration {
+            let elapsed = frame_start.elapsed();
+            if elapsed < frame_duration {
+                std::thread::sleep(frame_duration - elapsed);
+            }
+        }
     }
 
     let frame_count = frames.len();
@@ -896,6 +902,103 @@ where
             frames,
         },
         pixels,
+        auxiliary,
+        state,
+    ))
+}
+
+/// Run an offscreen frame loop with a caller-owned post-submit readback while
+/// retaining only the compact auxiliary result. This is intended for paced
+/// diagnostics such as per-frame depth/ID coverage probes where keeping every
+/// full RGBA or depth frame would add hundreds of megabytes of unrelated test
+/// storage.
+pub fn run_headless_aux_loop<S, A, Init, Frame, Capture>(
+    options: HeadlessFrameLoopOptions,
+    init: Init,
+    mut render_frame: Frame,
+    mut capture_frame: Capture,
+) -> Result<(HeadlessFrameLoopReport, Vec<A>, S)>
+where
+    Init: FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat, [u32; 2]) -> Result<S>,
+    Frame: FnMut(usize, RenderFrameContext<'_>, &mut S) -> Result<()>,
+    Capture: FnMut(usize, &wgpu::Device, &wgpu::Queue, &mut S) -> Result<A>,
+{
+    let setup_start = Instant::now();
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+    let mut state = init(&device, &queue, HEADLESS_FORMAT, [width, height])?;
+    let setup_ms = elapsed_ms(setup_start.elapsed());
+    let mut frames = Vec::with_capacity(options.frame_count);
+    let mut auxiliary = Vec::with_capacity(options.frame_count);
+    let mut total_frame_ms = 0.0;
+    let mut min_frame_ms = f64::INFINITY;
+    let mut max_frame_ms = 0.0_f64;
+
+    for index in 0..options.frame_count {
+        let frame_start = Instant::now();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_headless_aux_loop_encoder"),
+        });
+        let encode_start = Instant::now();
+        {
+            let frame =
+                RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+            render_frame(index, frame, &mut state)?;
+        }
+        let encode_ms = elapsed_ms(encode_start.elapsed());
+
+        let submit_start = Instant::now();
+        queue.submit(std::iter::once(encoder.finish()));
+        let submit_ms = elapsed_ms(submit_start.elapsed());
+
+        let poll_start = Instant::now();
+        device
+            .poll(wgpu::PollType::Wait)
+            .context("device poll failed")?;
+        let device_poll_ms = elapsed_ms(poll_start.elapsed());
+
+        auxiliary.push(capture_frame(index, &device, &queue, &mut state)?);
+
+        let frame_ms = elapsed_ms(frame_start.elapsed());
+        total_frame_ms += frame_ms;
+        min_frame_ms = min_frame_ms.min(frame_ms);
+        max_frame_ms = max_frame_ms.max(frame_ms);
+        frames.push(HeadlessFrameLoopTiming {
+            frame_ms,
+            encode_ms,
+            submit_ms,
+            device_poll_ms,
+        });
+        if let Some(frame_duration) = options.pace_frame_duration {
+            let elapsed = frame_start.elapsed();
+            if elapsed < frame_duration {
+                std::thread::sleep(frame_duration - elapsed);
+            }
+        }
+    }
+
+    let frame_count = frames.len();
+    let average_frame_ms = if frame_count == 0 {
+        0.0
+    } else {
+        total_frame_ms / frame_count as f64
+    };
+    let min_frame_ms = if frame_count == 0 { 0.0 } else { min_frame_ms };
+
+    Ok((
+        HeadlessFrameLoopReport {
+            width,
+            height,
+            frame_count,
+            setup_ms,
+            total_frame_ms,
+            average_frame_ms,
+            min_frame_ms,
+            max_frame_ms,
+            frames,
+        },
         auxiliary,
         state,
     ))

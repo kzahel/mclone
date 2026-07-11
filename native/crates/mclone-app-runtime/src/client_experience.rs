@@ -2048,11 +2048,11 @@ mod tests {
             ClientExperienceSettingsProfile::default(),
         );
 
-        assert!(!settings.state().far_lod_normal_terrain_culling);
+        assert!(settings.state().far_lod_normal_terrain_culling);
         assert_eq!(
             effects.setting_effects,
             vec![
-                ClientExperienceSettingEffect::SetFarLodNormalTerrainCulling(false),
+                ClientExperienceSettingEffect::SetFarLodNormalTerrainCulling(true),
                 ClientExperienceSettingEffect::ClearFarLod,
             ]
         );

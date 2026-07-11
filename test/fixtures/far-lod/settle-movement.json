@@ -73,7 +73,7 @@
         "planeY": 64.0
       },
       "lodAssertions": [
-        { "chunk": [9, 0], "expected": "not-desired" },
+        { "chunk": [9, 0], "expected": "level-1" },
         { "chunk": [18, 0], "expected": "level-2" }
       ],
       "expected": "pass"

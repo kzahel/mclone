@@ -388,6 +388,18 @@ impl OffscreenFlatClientHost {
         self.driver.host().scene_options().far_lod
     }
 
+    pub(crate) fn render_distance(&self) -> u32 {
+        self.driver.host().current_render_distance()
+    }
+
+    pub(crate) fn set_frame_clock(&mut self, frame_ms: f64, target_frame_ms: Option<f64>) {
+        self.driver
+            .set_clock(crate::offscreen_scene_host::OffscreenFrameClock {
+                frame_ms,
+                target_frame_ms,
+            });
+    }
+
     pub(crate) fn pending_stream_work(&self) -> usize {
         self.driver.host().pending_stream_work(self.camera.position)
     }
@@ -402,6 +414,10 @@ impl OffscreenFlatClientHost {
         &self,
     ) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
         self.driver.host().lod_coverage_counters()
+    }
+
+    pub(crate) fn far_lod_stats(&self) -> mclone_app_runtime::far_lod::FarTerrainLodProducerStats {
+        self.driver.host().far_lod_stats()
     }
 
     pub(crate) fn render_frame(

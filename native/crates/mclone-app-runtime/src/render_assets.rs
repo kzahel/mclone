@@ -19,7 +19,7 @@ use mclone_render_session::{
 use crate::elapsed_ms;
 use crate::far_lod::{
     FarTerrainLodBuildRequest, FarTerrainLodBuildResult, FarTerrainLodCompiler,
-    compile_far_terrain_lod_request,
+    FarTerrainLodWorkerCache, compile_far_terrain_lod_request_cached,
 };
 pub use crate::render_asset_data::{
     SceneTexturedSections, TextureAtlasImage, TexturedMeshAssets,
@@ -38,6 +38,8 @@ pub use crate::{
 };
 
 pub const RENDER_COMPILE_WORKER_TIMING_COMPILED: bool = cfg!(feature = "perf-diagnostics");
+pub const FAR_LOD_RENDER_COMPILE_WORKER_FLOOR: usize = 2;
+pub const FAR_LOD_RENDER_COMPILE_MAX_PENDING_FLOOR: usize = 8;
 
 #[derive(Debug)]
 struct RenderSectionCompileQueue {
@@ -169,6 +171,17 @@ impl RenderSectionCompileQueue {
         Ok(())
     }
 
+    fn ensure_request_slot_capacity(&self, capacity: usize) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("render section compile queue lock poisoned"))?;
+        if state.request_slots.len() < capacity {
+            state.request_slots.resize_with(capacity, || None);
+        }
+        Ok(())
+    }
+
     fn enqueue(
         &self,
         request: RenderSectionCompileRequest,
@@ -294,6 +307,9 @@ enum RenderSectionCompileDispatchStatus {
 #[derive(Debug)]
 pub struct RenderSectionCompileWorker {
     queue: Arc<RenderSectionCompileQueue>,
+    catalog: TexturedMeshCatalog,
+    result_sender: mpsc::Sender<RenderSectionCompileResult>,
+    far_lod_result_sender: mpsc::Sender<FarTerrainLodBuildResult>,
     receiver: mpsc::Receiver<RenderSectionCompileResult>,
     far_lod_receiver: mpsc::Receiver<FarTerrainLodBuildResult>,
     handles: Vec<thread::JoinHandle<()>>,
@@ -423,6 +439,10 @@ impl RenderSectionCompiler for NativeRenderSectionCompileDispatcher {
 }
 
 impl FarTerrainLodCompiler for NativeRenderSectionCompileDispatcher {
+    fn ensure_far_lod_capacity(&mut self) -> Result<()> {
+        self.worker.ensure_far_lod_capacity()
+    }
+
     fn available_far_lod_job_slots(&self) -> usize {
         self.worker.available_far_lod_job_slots()
     }
@@ -512,6 +532,7 @@ impl RenderSectionCompileWorker {
             let handle = thread::Builder::new()
                 .name(thread_name)
                 .spawn(move || {
+                    let mut far_lod_cache = FarTerrainLodWorkerCache::default();
                     while let Some(work) = queue.take_next() {
                         #[cfg(feature = "perf-diagnostics")]
                         let compile_start = worker_timing_enabled.then(Instant::now);
@@ -520,7 +541,10 @@ impl RenderSectionCompileWorker {
                                 .send(compile_render_section_request(&catalog, request))
                                 .is_ok(),
                             RenderCompileWork::FarLod(request) => far_lod_result_sender
-                                .send(compile_far_terrain_lod_request(request))
+                                .send(compile_far_terrain_lod_request_cached(
+                                    request,
+                                    &mut far_lod_cache,
+                                ))
                                 .is_ok(),
                         };
                         #[cfg(feature = "perf-diagnostics")]
@@ -538,6 +562,9 @@ impl RenderSectionCompileWorker {
 
         Ok(Self {
             queue,
+            catalog,
+            result_sender,
+            far_lod_result_sender,
             receiver,
             far_lod_receiver,
             handles,
@@ -548,6 +575,63 @@ impl RenderSectionCompileWorker {
             worker_timing_enabled,
             metrics,
         })
+    }
+
+    fn ensure_far_lod_capacity(&mut self) -> Result<()> {
+        if self.worker_count >= FAR_LOD_RENDER_COMPILE_WORKER_FLOOR
+            && self.max_pending_jobs >= FAR_LOD_RENDER_COMPILE_MAX_PENDING_FLOOR
+        {
+            return Ok(());
+        }
+        let max_pending_jobs = self
+            .max_pending_jobs
+            .max(FAR_LOD_RENDER_COMPILE_MAX_PENDING_FLOOR);
+        self.queue.ensure_request_slot_capacity(max_pending_jobs)?;
+        self.max_pending_jobs = max_pending_jobs;
+
+        while self.worker_count < FAR_LOD_RENDER_COMPILE_WORKER_FLOOR {
+            let worker_index = self.worker_count;
+            let catalog = self.catalog.clone();
+            let queue = Arc::clone(&self.queue);
+            let result_sender = self.result_sender.clone();
+            let far_lod_result_sender = self.far_lod_result_sender.clone();
+            #[cfg(feature = "perf-diagnostics")]
+            let worker_metrics = self.metrics.clone();
+            let worker_timing_enabled = self.worker_timing_enabled;
+            let handle = thread::Builder::new()
+                .name(format!("mclone-render-compile-{worker_index}"))
+                .spawn(move || {
+                    let mut far_lod_cache = FarTerrainLodWorkerCache::default();
+                    while let Some(work) = queue.take_next() {
+                        #[cfg(feature = "perf-diagnostics")]
+                        let compile_start = worker_timing_enabled.then(Instant::now);
+                        let sent = match work {
+                            RenderCompileWork::Section(request) => result_sender
+                                .send(compile_render_section_request(&catalog, request))
+                                .is_ok(),
+                            RenderCompileWork::FarLod(request) => far_lod_result_sender
+                                .send(compile_far_terrain_lod_request_cached(
+                                    request,
+                                    &mut far_lod_cache,
+                                ))
+                                .is_ok(),
+                        };
+                        #[cfg(feature = "perf-diagnostics")]
+                        if let Some(compile_start) = compile_start {
+                            worker_metrics.record_task(compile_start.elapsed().as_micros());
+                        }
+                        if !sent {
+                            break;
+                        }
+                    }
+                })
+                .context("failed to grow render compile workers for far LOD")?;
+            #[cfg(not(feature = "perf-diagnostics"))]
+            let _ = worker_timing_enabled;
+            self.handles.push(handle);
+            self.worker_count += 1;
+        }
+        Ok(())
     }
 
     pub fn pending_job_count(&self) -> usize {
@@ -1298,6 +1382,31 @@ mod tests {
 
         let error = worker.submit(empty_compile_request()).unwrap_err();
         assert!(error.to_string().contains("no free compile slots"));
+        Ok(())
+    }
+
+    #[test]
+    fn far_lod_lazily_grows_shared_compile_capacity() -> Result<()> {
+        let mut worker = RenderSectionCompileWorker::with_worker_count_and_max_pending_jobs(
+            TexturedMeshCatalog::default(),
+            1,
+            4,
+        )?;
+
+        worker.ensure_far_lod_capacity()?;
+
+        assert_eq!(
+            worker.compile_worker_count(),
+            FAR_LOD_RENDER_COMPILE_WORKER_FLOOR
+        );
+        assert_eq!(
+            worker.max_pending_job_count(),
+            FAR_LOD_RENDER_COMPILE_MAX_PENDING_FLOOR
+        );
+        assert_eq!(
+            worker.available_pending_job_slots(),
+            FAR_LOD_RENDER_COMPILE_MAX_PENDING_FLOOR
+        );
         Ok(())
     }
 
