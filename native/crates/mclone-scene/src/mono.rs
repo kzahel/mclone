@@ -253,6 +253,24 @@ impl McloneSceneHost {
             .unwrap_or_default()
     }
 
+    /// Pull the exact far-LOD lifecycle and real-terrain paint sets for a mono
+    /// view. The renderer reuses its cached culling records and only materializes
+    /// the section-key set for this explicit diagnostic call.
+    pub fn mono_far_lod_settle_snapshot(
+        &self,
+        render_view: ChunkRenderView,
+    ) -> Option<FarLodSettleSnapshot> {
+        let runtime = self.runtime.as_ref()?;
+        let render_options = self.effective_render_options(render_view.camera_position);
+        let painted_sections = self
+            .draw
+            .drawn_section_keys_for_view(render_view, render_options);
+        Some(FarLodSettleSnapshot::new(
+            runtime.far_lod_settle_snapshot(render_view.camera_position),
+            painted_sections,
+        ))
+    }
+
     pub fn lod_coverage_counters(
         &self,
     ) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {

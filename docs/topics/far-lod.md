@@ -5,7 +5,7 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11.
+Last reconciled: 2026-07-11 (Tactical 172 Slice 1A complete).
 
 ## Current State
 
@@ -30,10 +30,17 @@ the two load-bearing ones:
   what actually paints — so culled-but-ready columns get neither real terrain
   nor a LOD tile, and `suppressed_without_replacement` cannot see it.
 
-There is no settle-state instrument yet: nothing asserts which chunks/tiles
-are drawn at which levels once streaming settles. Tactical 172 Slice 1 builds
-that harness first (settle contract C1–C8), then Slice 2 burns down the defect
-ledger, then detail modes (auto/4/8/16, debug 1/2) and residency polish.
+The settle-state instrument now has its pull-only data foundation. Tactical 172
+Slice 1A exposes exact desired/resident/uploaded/published/visible/pending/
+inflight/queued LOD sets, loaded/readiness/suppression sets, and render-view
+painted real columns through `McloneSceneHost`, joined into a deterministic
+per-chunk ledger. It also classifies the D1/D2
+`culled_but_suppressed_chunks` signature without adding normal per-frame state
+or work. Slice 1B is next: run that ledger through the first executable
+offscreen settle probe and pin the fly-up repro red. Slice 1C generalizes the
+waypoint scripts, image/determinism probes, fixtures, and permanent lanes;
+Slice 2 then burns down the defect ledger before detail modes and residency
+polish.
 
 ## Ownership
 
@@ -65,15 +72,20 @@ no silent caps, bounded steady state.
 - Existing: `far_lod`/`lod_coverage` unit suites, offscreen far-LOD captures
   (RD4, seed 12345, playable + idle), web far-LOD probes
   (`native:web:far-lod-*-smoke`), Quest orbit far-LOD on/off metrics lanes.
-- Planned (172 Slice 1): `native:lod-settle:smoke` / `native:lod-settle:probe`
-  — waypoint scripts with settle assertions, per-chunk ledger dumps, coverage
-  image probe, revisit determinism. Once landed, every far-LOD change must run
-  the smoke lane and cite per-fixture results.
+- Landed (172 Slice 1A): pull-only exact lifecycle/runtime/painted sets and the
+  per-chunk D1/D2-classifying ledger; focused shared unit suites and direct web
+  WASM check green.
+- Planned (172 Slice 1B–1C): `native:lod-settle:smoke` /
+  `native:lod-settle:probe` — first the fixed spawn/fly-up executable repro,
+  then generalized waypoint scripts, coverage image probe, revisit
+  determinism, and the permanent lanes. Once landed, every far-LOD change must
+  run the smoke lane and cite per-fixture results.
 
 ## Recommended Next Direction
 
-Follow tactical 172 in order: harness (Slice 1, lands with the fly-up repro
-red), correctness burn-down (Slice 2), detail modes (Slice 3), residency/perf
-polish (Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6).
-Reduced-real LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2.
-Ordering authority: tactical 171's thread ledger.
+Follow tactical 172 in order: Slice 1B first executable settle probe with the
+fly-up repro red, Slice 1C generalized/permanent harness lanes, correctness
+burn-down (Slice 2), detail modes (Slice 3), residency/perf polish (Slice 4),
+debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real LOD
+(tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:
+tactical 171's thread ledger.

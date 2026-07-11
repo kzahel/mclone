@@ -328,6 +328,21 @@ where
         self.pending_removals.len()
     }
 
+    /// Exact tile identities waiting for upload. Diagnostic callers can pull
+    /// this on demand without making the steady-state frame path clone or
+    /// retain a second copy of the queue.
+    pub fn queued_upload_tile_keys(&self) -> impl Iterator<Item = K> + '_ {
+        self.pending_uploads
+            .iter()
+            .map(ResidentTileUploadPayload::tile_key)
+    }
+
+    /// Exact tile identities waiting for removal. Kept alongside the upload
+    /// accessor so settle diagnostics can explain every queued lifecycle item.
+    pub fn queued_removal_tile_keys(&self) -> impl Iterator<Item = K> + '_ {
+        self.pending_removals.iter().copied()
+    }
+
     pub fn stats(&self) -> ResidentTileUploadQueueStats {
         ResidentTileUploadQueueStats {
             queued_uploads: self.pending_uploads.len(),

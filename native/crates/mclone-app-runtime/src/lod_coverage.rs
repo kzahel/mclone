@@ -85,6 +85,14 @@ impl NormalChunkCoverage {
             .count()
     }
 
+    /// Exact chunks currently suppressing LOD through normal-terrain
+    /// precedence. Diagnostic callers pull this bounded set on demand.
+    pub fn drawable_chunks(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.chunks.iter().filter_map(|(pos, state)| {
+            matches!(state, NormalChunkDrawState::Drawable).then_some(*pos)
+        })
+    }
+
     pub fn tracked_count(&self) -> usize {
         self.chunks.len()
     }

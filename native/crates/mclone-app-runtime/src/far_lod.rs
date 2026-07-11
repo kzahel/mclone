@@ -203,6 +203,28 @@ pub struct FarTerrainLodProducerStats {
     pub max_level_flips_per_tile: u64,
 }
 
+/// Pull-only exact producer state used by the far-LOD settle harness.
+///
+/// Normal frame reporting deliberately keeps count-only stats. Constructing
+/// this snapshot clones the producer's bounded sets only when a diagnostic
+/// caller asks for them, so enabling far LOD does not add steady-state work by
+/// itself.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FarTerrainLodSettleSnapshot {
+    pub desired_tiles: BTreeMap<ChunkPos, u8>,
+    pub resident_tiles: BTreeSet<LodTileKey>,
+    pub uploaded_tiles: BTreeSet<LodTileKey>,
+    /// Per-chunk replacement winner retained by the producer before coverage
+    /// precedence suppresses tiles behind normal terrain.
+    pub published_tiles_by_chunk: BTreeMap<ChunkPos, LodTileKey>,
+    /// Tiles admitted to the current renderer frame after coverage precedence.
+    pub visible_tiles: BTreeSet<LodTileKey>,
+    pub pending_builds: BTreeSet<LodTileKey>,
+    pub inflight_builds: BTreeSet<LodTileKey>,
+    pub queued_uploads: BTreeSet<LodTileKey>,
+    pub queued_removals: BTreeSet<LodTileKey>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FarTerrainLodConfig {
     pub enabled: bool,
@@ -939,6 +961,31 @@ impl FarTerrainLodCache {
             max_double_resident_tiles: self.max_double_resident_tiles,
             level_flips: self.level_flips,
             max_level_flips_per_tile: self.max_level_flips_per_tile,
+        }
+    }
+
+    /// Clone the exact bounded lifecycle sets for an explicit settle probe.
+    /// This is intentionally an accessor rather than mirrored diagnostic state:
+    /// callers pay for collection only when they request a snapshot.
+    pub fn settle_snapshot(&self) -> FarTerrainLodSettleSnapshot {
+        FarTerrainLodSettleSnapshot {
+            desired_tiles: self
+                .desired_tiles
+                .iter()
+                .map(|(pos, tile)| (*pos, tile.level))
+                .collect(),
+            resident_tiles: self.resident_tiles.tile_keys().collect(),
+            uploaded_tiles: self.uploaded_tiles.clone(),
+            published_tiles_by_chunk: self.visible_tiles_by_chunk.clone(),
+            visible_tiles: self.frame.visible_tiles.clone(),
+            pending_builds: self
+                .pending_builds
+                .iter()
+                .map(|request| request.key)
+                .collect(),
+            inflight_builds: self.inflight_builds.keys().copied().collect(),
+            queued_uploads: self.uploads.queued_upload_tile_keys().collect(),
+            queued_removals: self.uploads.queued_removal_tile_keys().collect(),
         }
     }
 
@@ -2049,6 +2096,47 @@ mod tests {
         let visible = cache.desired_tiles.keys().copied().collect();
         cache.drain_render_uploads(MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES, compiler);
         cache.prepare_render_update(&visible).clone()
+    }
+
+    #[test]
+    fn settle_snapshot_exposes_exact_producer_lifecycle_sets() {
+        let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
+        let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
+        cache
+            .advance_for_camera(
+                config,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
+
+        let queued = cache.settle_snapshot();
+        assert!(!queued.desired_tiles.is_empty());
+        assert_eq!(queued.pending_builds.len(), queued.desired_tiles.len());
+        assert!(queued.resident_tiles.is_empty());
+        assert!(queued.uploaded_tiles.is_empty());
+        assert!(queued.visible_tiles.is_empty());
+
+        advance_until_complete(&mut cache, &mut compiler, config, ChunkPos::new(0, 0), 64);
+        let built = cache.settle_snapshot();
+        assert_eq!(built.resident_tiles.len(), built.desired_tiles.len());
+        assert_eq!(built.queued_uploads, built.resident_tiles);
+        assert!(built.pending_builds.is_empty());
+        assert!(built.inflight_builds.is_empty());
+
+        let frame = upload_all_desired(&mut cache, &mut compiler);
+        let visible = cache.settle_snapshot();
+        assert_eq!(visible.uploaded_tiles, visible.resident_tiles);
+        assert_eq!(visible.visible_tiles, frame.visible_tiles);
+        assert_eq!(visible.visible_tiles.len(), visible.desired_tiles.len());
+        assert!(visible.queued_uploads.is_empty());
+        assert!(visible.queued_removals.is_empty());
     }
 
     #[test]

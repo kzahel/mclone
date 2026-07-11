@@ -23,7 +23,9 @@ use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueH
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::LoadingProgressOverlay;
 
-use crate::far_lod::{FarTerrainLodConfig, FarTerrainLodProducerStats};
+use crate::far_lod::{
+    FarTerrainLodConfig, FarTerrainLodProducerStats, FarTerrainLodSettleSnapshot,
+};
 use crate::host_mode::SingleViewHostMode;
 use crate::lod_coverage::LodReplacementCounters;
 use crate::monotonic::MonotonicDeadline;
@@ -44,6 +46,16 @@ pub enum StartupReadinessPolicy {
     #[default]
     Playable,
     Idle,
+}
+
+/// Exact runtime-side facts needed to explain far-LOD coverage at settle.
+/// Painted sections remain render-view state and are joined by `mclone-scene`.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FarLodRuntimeSettleSnapshot {
+    pub producer: FarTerrainLodSettleSnapshot,
+    pub loaded_chunks: BTreeSet<ChunkPos>,
+    pub traversal_ready_sections: BTreeSet<RenderSectionKey>,
+    pub suppressed_chunks: BTreeSet<ChunkPos>,
 }
 
 pub trait SceneRuntimeService {
@@ -69,6 +81,7 @@ pub trait SceneRuntimeService {
         upload_budget: usize,
     ) -> Result<Option<&FarTerrainLodFrameUpdate>>;
     fn far_lod_stats(&self) -> FarTerrainLodProducerStats;
+    fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot;
     fn lod_coverage_counters(&self) -> LodReplacementCounters;
     fn release_render_compile_jobs(&mut self, count: usize) -> usize;
     fn simulation_cadence(&self) -> Option<SimulationCadenceConfig>;

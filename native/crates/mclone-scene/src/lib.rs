@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
 
+mod far_lod_settle;
+
+pub use far_lod_settle::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

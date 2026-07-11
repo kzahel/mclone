@@ -6,12 +6,13 @@ native and browser scene-host convergence series and runtime asset-pack
 implementation are closed, and production browser far LOD now uses the shared
 resident-tile worker/runtime/render path. Tactical 166 — Shared Resident-Tile
 Substrate is complete through Slice 4 multi-level rings. Tactical 172 — Far
-LOD Settle Contract And Detail Modes is next on the LOD thread (settle-state
-validation harness, coverage-gap correctness burn-down, then detail modes);
-Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4 resumes after 172
-Slice 2's gates are green. This parent owns the cross-thread
-burn-down and final status reconciliation, not duplicate implementations of
-its child tacticals.
+LOD Settle Contract And Detail Modes is active on the LOD thread: Slice 1A's
+pull-only exact-set/ledger foundation has landed and Slice 1B's first
+executable settle probe is next, followed by the coverage-gap correctness
+burn-down and detail modes. Tactical 162 — Real-Chunk LOD Reduction Draft
+Slice 4 resumes after 172 Slice 2's gates are green. This parent owns the
+cross-thread burn-down and final status reconciliation, not duplicate
+implementations of its child tacticals.
 
 Topic: `convergence-and-parity-closeout`
 
@@ -72,8 +73,8 @@ explicit re-scope:
 | Browser host adoption | Tactical 170 — Web Scene-Host Adoption | **Closed.** Slices 0–6 landed; the old browser orchestrator is deleted. | Burn down only the exact web feature exceptions below. |
 | Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Paused at Slice 4.** Slices 0A–2 landed; Slice 3 was superseded by the substrate; Slice 4 is re-scoped behind Tactical 172's harness and correctness gates. | Resume Slice 4 (first reduced-real producer) after Tactical 172 Slice 2 is green. |
 | Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Closed. Slices 1–4 and the production browser proof landed.** | Preserve its worker, admission, residency, transition, seam, and render gates for later producers. |
-| Far LOD settle contract, correctness, and detail modes | Tactical 172 — Far LOD Settle Contract And Detail Modes | **Planned; supersedes Tactical 121's open ends and holds the LOD thread.** Confirmed coverage defects are ledgered (D1–D8), including altitude graph-cull voids and the suppression/painted mismatch. | Land Slice 1 (settle-state harness with the pinned fly-up repro), then Slice 2 (correctness burn-down), then detail modes and residency polish. |
-| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D and the first Milestone E step landed.** | Coordinate Tactical 172 — Far LOD Settle Contract And Detail Modes next; resume Tactical 162 Slice 4 after 172 Slice 2; close only after the milestones below and explicit deferred decisions are recorded. |
+| Far LOD settle contract, correctness, and detail modes | Tactical 172 — Far LOD Settle Contract And Detail Modes | **Active; Slice 1A exact-set accessors and the D1/D2-classifying per-chunk ledger landed.** Confirmed coverage defects remain ledgered D1–D8, including altitude graph-cull voids and the suppression/painted mismatch. | Land Slice 1B (first executable offscreen settle probe with the pinned fly-up repro), then Slice 1C permanent lanes, Slice 2 correctness burn-down, and the detail/residency slices. |
+| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D and the first Milestone E step landed.** | Coordinate Tactical 172 Slice 1B next; resume Tactical 162 Slice 4 after 172 Slice 2; close only after the milestones below and explicit deferred decisions are recorded. |
 
 ## Asset-Pack Follow-Ups That Do Not Reopen The Closed Series
 

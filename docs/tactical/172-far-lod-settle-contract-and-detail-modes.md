@@ -1,13 +1,15 @@
 # 172: Far LOD Settle Contract And Detail Modes
 
-Status: planned 2026-07-11; Slice 0 (documentation consolidation) lands with
-this document. This tactical owns the far-LOD product-hardening series: a
-settle-state validation harness, the coverage-gap correctness burn-down, the
-user-facing LOD detail modes (auto / 4 / 8 / 16, debug 1 / 2), and
-residency/perf polish. It supersedes the remaining open ends of Tactical 121 —
-Surface LOD First Slice and pauses Tactical 162 — Real-Chunk LOD Reduction
-Draft Slice 4+ until its Slice 1–2 gates hold. Macro ordering lives in
-Tactical 171 — Convergence And Parity Closeout.
+Status: active 2026-07-11. Slice 0 (documentation consolidation) and Slice 1A
+(pull-only exact-set accessors plus the per-chunk ledger) are complete. Slice
+1B (first executable offscreen settle probe with the pinned fly-up repro) is
+next. This tactical owns the far-LOD product-hardening series: a settle-state
+validation harness, the coverage-gap correctness burn-down, the user-facing
+LOD detail modes (auto / 4 / 8 / 16, debug 1 / 2), and residency/perf polish.
+It supersedes the remaining open ends of Tactical 121 — Surface LOD First
+Slice and pauses Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4+ until
+its Slice 1–2 gates hold. Macro ordering lives in Tactical 171 — Convergence
+And Parity Closeout.
 
 Topic: `far-lod-settle-contract`
 
@@ -215,19 +217,44 @@ slice.
 The instrument comes first, and it lands red: the fly-up fixture must
 reproduce D1/D2 before any fix exists.
 
-Work:
+#### Slice 1A — Pull-only exact sets and ledger (complete 2026-07-11)
 
-- **Exact-set accessors.** Expose the real sets, not just counts, through
-  `McloneMonoSceneHost` (and the web report where cheap): desired tiles with
-  levels, resident/uploaded/visible tile sets, suppression set, drawn real
-  columns, loaded chunks. Internals already exist (`desired_tiles`,
-  `visible_tiles_by_chunk`, `frame.visible_tiles`, chunk records' drawable
-  flags); this is plumbing, not new state.
-- **Per-chunk ledger.** A debug dump keyed by chunk:
+- **Exact-set accessors landed.** `FarTerrainLodSettleSnapshot` exposes desired
+  levels plus resident, uploaded, published, visible, pending, inflight, queued
+  upload, and queued removal tile identities. `FarLodRuntimeSettleSnapshot`
+  joins loaded chunks, traversal-ready sections, and the coordinator's actual
+  suppression set across native and web runtime services. The renderer
+  recomputes exact drawn real sections on explicit pull from its cached culling
+  records; normal frame summaries remain count-only and retain no duplicate
+  diagnostic state.
+- **Per-chunk ledger landed.** `McloneSceneHost::mono_far_lod_settle_snapshot`
+  exposes a deterministic debug dump keyed by chunk:
   `{loaded, traversal_ready, painted (drawn sections), lod_desired_level,
-  lod_resident_levels, lod_visible_level, suppressed, pending/inflight}` —
-  the artifact that makes any hole self-explaining. Emitted in the probe
-  report on assertion failure and on settle timeout.
+  lod_resident_levels, lod_visible_levels, suppressed,
+  lod_pending_levels/lod_inflight_levels}` — plus uploaded/published/queued
+  lifecycle levels. The snapshot directly classifies
+  `culled_but_suppressed_chunks`, the D1/D2 failure signature that later probe
+  reports emit on assertion failure and settle timeout.
+- **Focused evidence:** app-runtime, render-session, scene, and renderer unit
+  suites green (`224 + 110 + 94 + 121` passed; two renderer GPU tests remain
+  intentionally ignored); direct `wasm32-unknown-unknown` web-client check
+  green. This subsection changes no pixels or frame-path behavior, so no
+  capture lane was required.
+
+#### Slice 1B — First executable settle probe (next)
+
+- Add the first `mclone-native-client` offscreen settle-probe entry using
+  `OffscreenFlatClientHost` / `OffscreenSceneDriver`, reusing
+  `pending_stream_work` plus `STREAM_STABLE_FRAMES` with a hard timeout.
+- Start with two fixed, small fixtures rather than general script plumbing:
+  RD4 + range 6 spawn-settle (green) and fly-up-high settle (expected red).
+  Failure output must include the Slice 1A ledger and name non-empty
+  `culled_but_suppressed_chunks`, pinning D1/D2 before either fix lands.
+- Emit a structured report to stdout in the `perf.rs` convention and keep any
+  diagnostic capture under `/tmp`.
+
+#### Slice 1C — Generalized scripts and permanent lanes
+
 - **Settle probe mode.** A new `mclone-native-client` mode (e.g.
   `--lod-settle-probe --lod-settle-script <path.json>`) on the offscreen GPU
   path (`OffscreenFlatClientHost` + `OffscreenSceneDriver`): a JSON script of

@@ -2965,6 +2965,28 @@ impl TexturedSectionDrawResources {
         self.prepare_render_records_with_stats().0
     }
 
+    /// Recompute the exact drawable section keys for one view from the same
+    /// cached records and culling routine used by rendering.
+    ///
+    /// This is a pull-only settle diagnostic. Normal frames retain count-only
+    /// summaries and do not clone or store the culling set after encoding.
+    pub fn drawn_section_keys_for_view(
+        &self,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+    ) -> BTreeSet<RenderSectionKey> {
+        let records = self.prepare_render_records();
+        let culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections(&records, render_view, options, &mut scratch)
+        };
+        culling
+            .drawn_keys
+            .into_iter()
+            .filter(|key| self.sections.contains_key(key))
+            .collect()
+    }
+
     pub fn prepare_render_records_with_stats(
         &self,
     ) -> (

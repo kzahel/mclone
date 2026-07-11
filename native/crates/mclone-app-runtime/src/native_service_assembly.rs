@@ -58,8 +58,8 @@ use crate::render_assets::{
     NativeRenderSectionCompileDispatcher, load_textured_mesh_assets,
 };
 use crate::scene_session_runtime::{
-    DEFAULT_STARTUP_READINESS_TIMEOUT, SceneRuntimeService, SceneSessionRuntime,
-    StartupReadinessPolicy,
+    DEFAULT_STARTUP_READINESS_TIMEOUT, FarLodRuntimeSettleSnapshot, SceneRuntimeService,
+    SceneSessionRuntime, StartupReadinessPolicy,
 };
 use crate::session::{ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest};
 use crate::startup_render_seed::StartupRenderSectionSeed;
@@ -1300,6 +1300,15 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         self.far_lod_cache.stats()
     }
 
+    pub fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
+        far_lod_runtime_settle_snapshot(
+            &self.core,
+            &self.far_lod_cache,
+            &self.lod_coverage,
+            camera_position,
+        )
+    }
+
     pub fn render_distance(&self) -> u32 {
         self.core.render_distance()
     }
@@ -1984,6 +1993,13 @@ where
         match self {
             Self::Local(scene) => scene.far_lod_stats(),
             Self::RemoteDedicated(scene) => scene.far_lod_stats(),
+        }
+    }
+
+    pub fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
+        match self {
+            Self::Local(scene) => scene.far_lod_settle_snapshot(camera_position),
+            Self::RemoteDedicated(scene) => scene.far_lod_settle_snapshot(camera_position),
         }
     }
 
@@ -2900,6 +2916,15 @@ where
         self.far_lod_cache.stats()
     }
 
+    pub fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
+        far_lod_runtime_settle_snapshot(
+            &self.core,
+            &self.far_lod_cache,
+            &self.lod_coverage,
+            camera_position,
+        )
+    }
+
     pub fn render_distance(&self) -> u32 {
         self.core.render_distance()
     }
@@ -3372,6 +3397,20 @@ fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<Chu
         .collect()
 }
 
+fn far_lod_runtime_settle_snapshot(
+    core: &SingleViewRuntime,
+    cache: &FarTerrainLodCache,
+    coverage: &LodCoverageCoordinator,
+    camera_position: Vec3,
+) -> FarLodRuntimeSettleSnapshot {
+    FarLodRuntimeSettleSnapshot {
+        producer: cache.settle_snapshot(),
+        loaded_chunks: core.client().loaded_chunk_positions().collect(),
+        traversal_ready_sections: core.traversal_ready_render_section_keys(camera_position),
+        suppressed_chunks: coverage.normal_coverage().drawable_chunks().collect(),
+    }
+}
+
 impl<S> SceneRuntimeService for NativeSceneServices<S>
 where
     S: RemoteDedicatedServerSession + 'static,
@@ -3431,6 +3470,10 @@ where
 
     fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
         NativeSceneServices::far_lod_stats(self)
+    }
+
+    fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
+        NativeSceneServices::far_lod_settle_snapshot(self, camera_position)
     }
 
     fn lod_coverage_counters(&self) -> LodReplacementCounters {

@@ -27,7 +27,7 @@ use mclone_app_runtime::render_compile_capacity::{
     preflight_render_compile_capacity_report,
 };
 use mclone_app_runtime::scene_session_runtime::{
-    SceneRuntimeService, SceneSessionRuntime, StartupReadinessPolicy,
+    FarLodRuntimeSettleSnapshot, SceneRuntimeService, SceneSessionRuntime, StartupReadinessPolicy,
 };
 use mclone_app_runtime::session::ActiveSessionDescriptor;
 use mclone_app_runtime::startup_args::{
@@ -2058,6 +2058,22 @@ impl SceneRuntimeService for WebSceneRuntimeService {
 
     fn far_lod_stats(&self) -> mclone_app_runtime::far_lod::FarTerrainLodProducerStats {
         self.far_lod_cache.stats()
+    }
+
+    fn far_lod_settle_snapshot(&self, camera_position: glam::Vec3) -> FarLodRuntimeSettleSnapshot {
+        FarLodRuntimeSettleSnapshot {
+            producer: self.far_lod_cache.settle_snapshot(),
+            loaded_chunks: self.runtime.client().loaded_chunk_positions().collect(),
+            traversal_ready_sections: self
+                .runtime
+                .scene_core()
+                .traversal_ready_render_section_keys(camera_position),
+            suppressed_chunks: self
+                .lod_coverage
+                .normal_coverage()
+                .drawable_chunks()
+                .collect(),
+        }
     }
 
     fn lod_coverage_counters(&self) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
