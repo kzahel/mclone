@@ -58,9 +58,26 @@ mechanism: at Y=200 the sparse cache retained the empty camera section and
 treated it as the sole traversal seed. Switching empty sparse camera sections
 to per-column outermost visible drawable seeds changed the high ledger from
 78/81 to 81/81 painted columns and removed all three
-culled-but-suppressed columns. The broader goal remains open until an explicit
-depth/coverage attachment replaces color inference and a smooth movement path
-can classify any genuine missing representation.
+culled-but-suppressed columns. The broader goal remains open until a smooth
+movement path uses explicit coverage evidence to classify and bound any
+genuine missing representation.
+
+The explicit oracle is now GPU depth readback, sampled at the exact expected
+surface of the representation that owns each chunk: generated block-top
+surfaces for real terrain and the sampled flat-cell height for synthetic LOD.
+This deliberately does not use screenshot interpretation or RGB equality. A
+full-height top-down run projects all 441 chunks in the RD4 + range-6 square;
+the five settled movement positions, through an eight-chunk relocation, each
+reported zero clear-depth representation samples after correcting the earlier
+flat-Y attribution error.
+
+Sustained movement had an architectural starvation path: new edge coverage
+could sit behind a saturated wall of level replacements. D7 is now fixed:
+bounded admission rotates blocked
+replacement requests and continues scanning for fresh missing tiles, while
+retaining the double-residency cap and replacement-before-suppress behavior.
+The goal remains active until a deterministic smooth path checks depth every
+frame and bounds any remaining uncovered sample's age.
 
 ## Current State
 
@@ -221,13 +238,23 @@ exclusion.
   coherent. Clear-color matches remain reportable diagnostics but are marked
   explicitly as non-evidence; the fixed high/revisit fixtures now pass on
   structural painted-coverage and lifecycle facts.
+- Landed in the active coverage goal: the offscreen target exposes readable
+  `Depth32Float` coverage after the submitted frame. Coverage samples are
+  representation-aware rather than flat-plane or color based. At Y=500 the
+  checked movement matrix covers all 441 expected chunks and passed at all
+  five settled positions with zero clear-depth samples.
+- Landed in the active coverage goal: D7 no longer lets a replacement blocked
+  by the 256-tile double-residency allowance stop fresh-coverage admission.
+  The bounded queue scan defers that replacement and admits eligible missing
+  tiles behind it; a focused cache test saturates the allowance and proves the
+  fresh tile is submitted.
 
 ## Recommended Next Direction
 
-Continue the active coverage goal by replacing RGB inference with a readable
-depth or explicit real/LOD coverage attachment. Then add a deterministic smooth
-path that freezes and dumps the exact lifecycle row on the first genuinely
-uncovered in-range sample. D2 arbitration and D6 boundary coverage remain
+Continue the active coverage goal with a deterministic smooth path that reads
+depth each frame and freezes/dumps the exact lifecycle row on the first
+genuinely uncovered in-range representation sample, including its missing age.
+D2 arbitration and D6 boundary coverage remain
 code-audit priorities; lifecycle/scheduler changes
 must be justified by a missing column classified in those states. Then
 continue tactical 172's remaining correctness burn-down (Slice 2) and

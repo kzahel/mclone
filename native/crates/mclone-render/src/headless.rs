@@ -797,11 +797,31 @@ where
 pub fn run_headless_capture_loop<S, Init, Frame>(
     options: HeadlessFrameLoopOptions,
     init: Init,
-    mut render_frame: Frame,
+    render_frame: Frame,
 ) -> Result<(HeadlessFrameLoopReport, Vec<Vec<u8>>, S)>
 where
     Init: FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat, [u32; 2]) -> Result<S>,
     Frame: FnMut(usize, RenderFrameContext<'_>, &mut S) -> Result<()>,
+{
+    let (report, pixels, _, state) =
+        run_headless_capture_loop_with_aux(options, init, render_frame, |_, _, _, _| Ok(()))?;
+    Ok((report, pixels, state))
+}
+
+/// Run the normal color capture loop and collect one caller-owned auxiliary
+/// readback after each rendered frame has been submitted. This keeps probe-only
+/// depth/ID capture out of production frame orchestration while guaranteeing
+/// that the auxiliary texture reflects the same frame as the RGBA result.
+pub fn run_headless_capture_loop_with_aux<S, A, Init, Frame, Capture>(
+    options: HeadlessFrameLoopOptions,
+    init: Init,
+    mut render_frame: Frame,
+    mut capture_frame: Capture,
+) -> Result<(HeadlessFrameLoopReport, Vec<Vec<u8>>, Vec<A>, S)>
+where
+    Init: FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat, [u32; 2]) -> Result<S>,
+    Frame: FnMut(usize, RenderFrameContext<'_>, &mut S) -> Result<()>,
+    Capture: FnMut(usize, &wgpu::Device, &wgpu::Queue, &S) -> Result<A>,
 {
     let setup_start = Instant::now();
     let width = options.width.max(1);
@@ -812,6 +832,7 @@ where
     let setup_ms = elapsed_ms(setup_start.elapsed());
     let mut frames = Vec::with_capacity(options.frame_count);
     let mut pixels = Vec::with_capacity(options.frame_count);
+    let mut auxiliary = Vec::with_capacity(options.frame_count);
     let mut total_frame_ms = 0.0;
     let mut min_frame_ms = f64::INFINITY;
     let mut max_frame_ms = 0.0_f64;
@@ -840,6 +861,7 @@ where
         let device_poll_ms = elapsed_ms(poll_start.elapsed());
 
         pixels.push(read_rgba8(&device, &queue, &target.texture, width, height)?);
+        auxiliary.push(capture_frame(index, &device, &queue, &state)?);
 
         let frame_ms = elapsed_ms(frame_start.elapsed());
         total_frame_ms += frame_ms;
@@ -874,6 +896,7 @@ where
             frames,
         },
         pixels,
+        auxiliary,
         state,
     ))
 }
@@ -956,6 +979,79 @@ fn read_rgba8(
     height: u32,
 ) -> Result<Vec<u8>> {
     read_rgba8_layer(device, queue, texture, width, height, 0)
+}
+
+/// Read a single-sample `Depth32Float` target in row-major pixel order.
+/// Reversed-Z terrain targets clear to `0.0`, so callers can distinguish
+/// untouched pixels from any real or synthetic geometry without consulting
+/// color output.
+pub fn read_depth32(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    depth: &ChunkDepthTarget,
+) -> Result<Vec<f32>> {
+    let unpadded_row_bytes = depth.width * std::mem::size_of::<f32>() as u32;
+    let padded_row_bytes = padded_row_bytes(unpadded_row_bytes);
+    let buffer_size = padded_row_bytes as u64 * depth.height as u64;
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mclone_headless_depth_readback"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_headless_depth_readback_encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: depth.texture(),
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::DepthOnly,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row_bytes),
+                rows_per_image: Some(depth.height),
+            },
+        },
+        wgpu::Extent3d {
+            width: depth.width,
+            height: depth.height,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let slice = staging.slice(..);
+    let (sender, receiver) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    device
+        .poll(wgpu::PollType::Wait)
+        .context("device poll failed")?;
+    receiver
+        .recv()
+        .context("failed to receive depth readback map result")?
+        .context("failed to map depth readback buffer")?;
+
+    let mapped = slice.get_mapped_range();
+    let mut values = Vec::with_capacity((depth.width * depth.height) as usize);
+    for row in 0..depth.height {
+        let start = (row * padded_row_bytes) as usize;
+        let row_bytes = &mapped[start..start + unpadded_row_bytes as usize];
+        values.extend(
+            row_bytes
+                .chunks_exact(4)
+                .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+        );
+    }
+    drop(mapped);
+    staging.unmap();
+    Ok(values)
 }
 
 fn read_rgba8_layer(

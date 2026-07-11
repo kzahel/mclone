@@ -2,19 +2,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Vec3, Vec4};
 use mclone_app_runtime::far_lod::{
     FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, far_lod_sample_spacing_for_level,
 };
 use mclone_app_runtime::lod_coverage::LodReplacementCounters;
-use mclone_core::{ChunkPos, LodTileKey, chunk_middle_block_coord};
+use mclone_core::{ChunkPos, LodTileKey, chunk_middle_block_coord, chunk_min_block_coord};
 use mclone_render::chunk::ChunkRenderView;
-use mclone_render::color_profile::{RenderConfig, color_transform_wgpu};
 use mclone_render::headless::{
-    HEADLESS_FORMAT, HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png,
+    HeadlessFrameLoopOptions, read_depth32, run_headless_capture_loop_with_aux, save_rgba_png,
 };
 use mclone_scene::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
+use mclone_worldgen::block::is_air_like;
+use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_surface_chunk};
 use serde::Deserialize;
 
 use crate::camera::SpectatorCamera;
@@ -31,7 +32,7 @@ const SCRIPT_SCHEMA: u32 = 4;
 const MAX_WAYPOINTS: usize = 64;
 const MAX_CAPTURE_SETTLE_PASSES: usize = 4;
 const FLY_UP_EYE_OFFSET_X: f32 = 0.25;
-const FLY_UP_EYE_Y: f32 = 200.0;
+const FLY_UP_EYE_Y: f32 = 500.0;
 const FLY_UP_EYE_OFFSET_Z: f32 = 0.25;
 const FLY_UP_TARGET_Y: f32 = 64.0;
 
@@ -240,7 +241,11 @@ impl LodSettleScript {
                             FLY_UP_EYE_Y,
                             center_z + FLY_UP_EYE_OFFSET_Z,
                         ],
-                        target: [center_x, FLY_UP_TARGET_Y, center_z],
+                        target: [
+                            center_x + FLY_UP_EYE_OFFSET_X,
+                            FLY_UP_TARGET_Y,
+                            center_z + FLY_UP_EYE_OFFSET_Z,
+                        ],
                     },
                     expected: LodSettleExpectation::Pass,
                     coverage_probe: Some(LodCoverageProbe { plane_y: 64.0 }),
@@ -438,7 +443,7 @@ pub(crate) fn run_lod_settle_probe(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let startup_camera = SpectatorCamera::spawn_for_scene(&scene);
-    let (loop_report, frame_pixels, state) = run_headless_capture_loop(
+    let (loop_report, frame_pixels, frame_depths, state) = run_headless_capture_loop_with_aux(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
@@ -557,14 +562,19 @@ pub(crate) fn run_lod_settle_probe(
             });
             Ok(())
         },
+        |_, device, queue, state| read_depth32(device, queue, state.host.depth_target()),
     )?;
 
     let fixture_count = state.script.waypoints.len();
-    if state.observations.len() != fixture_count || frame_pixels.len() != fixture_count {
+    if state.observations.len() != fixture_count
+        || frame_pixels.len() != fixture_count
+        || frame_depths.len() != fixture_count
+    {
         bail!(
-            "far LOD settle probe expected {fixture_count} observations/captures, got {}/{}",
+            "far LOD settle probe expected {fixture_count} observations/color/depth captures, got {}/{}/{}",
             state.observations.len(),
-            frame_pixels.len()
+            frame_pixels.len(),
+            frame_depths.len()
         );
     }
 
@@ -583,7 +593,6 @@ pub(crate) fn run_lod_settle_probe(
         .enumerate()
         .map(|(index, observation)| (observation.name.as_str(), index))
         .collect::<BTreeMap<_, _>>();
-    let sky_rgba = sky_clear_rgba(&options.scene, options.render_options);
     let pixel_analyses = state
         .observations
         .iter()
@@ -592,10 +601,11 @@ pub(crate) fn run_lod_settle_probe(
             fixture_pixel_analysis(
                 observation,
                 &frame_pixels[index],
+                &frame_depths[index],
                 &frame_pixels,
                 &observation_indexes,
                 [loop_report.width, loop_report.height],
-                sky_rgba,
+                options.scene.seed,
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -711,12 +721,22 @@ struct FixturePixelAnalysis {
 
 #[derive(Debug)]
 struct CoverageProbeResult {
-    plane_y: f32,
     projected_columns: usize,
-    masked_pixels: usize,
-    sky_pixel_count: usize,
-    sky_columns: BTreeSet<ChunkPos>,
-    sky_rgba: [u8; 4],
+    sampled_depth_points: usize,
+    clear_depth_sample_count: usize,
+    clear_depth_columns: BTreeSet<ChunkPos>,
+    clear_depth_samples: Vec<CoverageClearDepthSample>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CoverageClearDepthSample {
+    chunk: ChunkPos,
+    source: &'static str,
+    local_x: f32,
+    local_z: f32,
+    surface_y: f32,
+    pixel: [u32; 2],
+    clear_pixels_in_3x3: usize,
 }
 
 #[derive(Debug)]
@@ -728,19 +748,21 @@ struct PixelDeterminismResult {
 fn fixture_pixel_analysis(
     observation: &FixtureObservation,
     pixels: &[u8],
+    depths: &[f32],
     all_pixels: &[Vec<u8>],
     observation_indexes: &BTreeMap<&str, usize>,
     size: [u32; 2],
-    sky_rgba: [u8; 4],
+    seed: i64,
 ) -> Result<FixturePixelAnalysis> {
     let coverage = observation.coverage_probe.map(|probe| {
         coverage_probe_result(
             &observation.snapshot,
             observation.render_view,
-            pixels,
+            depths,
             size,
             probe,
-            sky_rgba,
+            observation.actual_far_lod_config,
+            seed,
         )
     });
     let determinism = observation
@@ -772,91 +794,160 @@ fn fixture_pixel_analysis(
 fn coverage_probe_result(
     snapshot: &FarLodSettleSnapshot,
     render_view: ChunkRenderView,
-    pixels: &[u8],
+    depths: &[f32],
     size: [u32; 2],
-    probe: LodCoverageProbe,
-    sky_rgba: [u8; 4],
+    _probe: LodCoverageProbe,
+    config: FarTerrainLodConfig,
+    seed: i64,
 ) -> CoverageProbeResult {
-    let coverage_columns = snapshot
-        .chunks
-        .iter()
-        .filter_map(|(pos, row)| (row.loaded || row.lod_desired_level.is_some()).then_some(*pos))
-        .collect::<BTreeSet<_>>();
-    let projected_columns = coverage_columns
-        .iter()
-        .filter(|pos| {
-            project_world_to_pixel(
+    let mut chunks = BTreeMap::<ChunkPos, GeneratedChunk>::new();
+    let mut projected_columns = 0usize;
+    let mut sampled_depth_points = 0usize;
+    let mut clear_depth_sample_count = 0usize;
+    let mut clear_depth_columns = BTreeSet::new();
+    let mut clear_depth_samples = Vec::new();
+    for (pos, row) in &snapshot.chunks {
+        let samples = if let Some(level) = row.lod_visible_levels.iter().next().copied() {
+            let spacing = far_lod_sample_spacing_for_level(config.sample_spacing_blocks, level);
+            lod_surface_test_points(&mut chunks, seed, *pos, spacing)
+                .into_iter()
+                .map(|sample| ("far-lod", sample))
+                .collect::<Vec<_>>()
+        } else if row.suppressed {
+            real_surface_test_points(&mut chunks, seed, *pos)
+                .into_iter()
+                .map(|sample| ("real", sample))
+                .collect::<Vec<_>>()
+        } else {
+            continue;
+        };
+        let mut column_projected = false;
+        for (source, sample) in samples {
+            let Some([x, y]) = project_world_to_pixel(
                 render_view,
-                Vec4::new(
-                    chunk_middle_block_coord(pos.x) as f32 + 0.5,
-                    probe.plane_y,
-                    chunk_middle_block_coord(pos.z) as f32 + 0.5,
-                    1.0,
-                ),
+                Vec4::new(sample.world_x, sample.surface_y, sample.world_z, 1.0),
                 size,
-            )
-            .is_some()
-        })
-        .count();
-    let mut masked_pixels = 0usize;
-    let mut sky_pixel_count = 0usize;
-    let mut sky_columns = BTreeSet::new();
-    let inverse_view_projection = render_view.view_projection.inverse();
-    for y in 0..size[1] {
-        for x in 0..size[0] {
-            let Some(world) =
-                pixel_world_on_plane(inverse_view_projection, [x, y], size, probe.plane_y)
-            else {
+            ) else {
                 continue;
             };
-            let pos = ChunkPos::new(
-                (world.x.floor() as i32).div_euclid(16),
-                (world.z.floor() as i32).div_euclid(16),
-            );
-            if !coverage_columns.contains(&pos) {
-                continue;
-            }
-            masked_pixels += 1;
-            let index = ((y * size[0] + x) * 4) as usize;
-            if pixels.get(index..index + 4) == Some(sky_rgba.as_slice()) {
-                sky_pixel_count += 1;
-                sky_columns.insert(pos);
+            column_projected = true;
+            sampled_depth_points += 1;
+            let index = (y * size[0] + x) as usize;
+            if depths
+                .get(index)
+                .is_none_or(|depth| *depth <= 0.0 || !depth.is_finite())
+            {
+                clear_depth_sample_count += 1;
+                clear_depth_columns.insert(*pos);
+                clear_depth_samples.push(CoverageClearDepthSample {
+                    chunk: *pos,
+                    source,
+                    local_x: sample.world_x - chunk_min_block_coord(pos.x) as f32,
+                    local_z: sample.world_z - chunk_min_block_coord(pos.z) as f32,
+                    surface_y: sample.surface_y,
+                    pixel: [x, y],
+                    clear_pixels_in_3x3: clear_depth_neighborhood_count(depths, size, [x, y]),
+                });
             }
         }
+        projected_columns += usize::from(column_projected);
     }
     CoverageProbeResult {
-        plane_y: probe.plane_y,
         projected_columns,
-        masked_pixels,
-        sky_pixel_count,
-        sky_columns,
-        sky_rgba,
+        sampled_depth_points,
+        clear_depth_sample_count,
+        clear_depth_columns,
+        clear_depth_samples,
     }
 }
 
-fn pixel_world_on_plane(
-    inverse_view_projection: Mat4,
-    pixel: [u32; 2],
-    size: [u32; 2],
-    plane_y: f32,
-) -> Option<Vec3> {
-    let ndc_x = (pixel[0] as f32 + 0.5) / size[0] as f32 * 2.0 - 1.0;
-    let ndc_y = 1.0 - (pixel[1] as f32 + 0.5) / size[1] as f32 * 2.0;
-    if !inverse_view_projection.is_finite() {
-        return None;
-    }
-    let unproject = |depth| {
-        let world = inverse_view_projection * Vec4::new(ndc_x, ndc_y, depth, 1.0);
-        (world.w.abs() > f32::EPSILON).then_some(world.truncate() / world.w)
-    };
-    let near = unproject(1.0)?;
-    let far = unproject(0.0)?;
-    let direction = far - near;
-    if direction.y.abs() <= f32::EPSILON {
-        return None;
-    }
-    let distance = (plane_y - near.y) / direction.y;
-    (distance >= 0.0).then_some(near + direction * distance)
+#[derive(Clone, Copy)]
+struct SurfaceTestPoint {
+    world_x: f32,
+    world_z: f32,
+    surface_y: f32,
+}
+
+fn real_surface_test_points(
+    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    seed: i64,
+    pos: ChunkPos,
+) -> Vec<SurfaceTestPoint> {
+    const OFFSETS: [i32; 3] = [4, 8, 12];
+    OFFSETS
+        .into_iter()
+        .flat_map(|z| OFFSETS.into_iter().map(move |x| (x, z)))
+        .filter_map(|(x, z)| {
+            let world_x = chunk_min_block_coord(pos.x) + x;
+            let world_z = chunk_min_block_coord(pos.z) + z;
+            surface_y_at(chunks, seed, world_x, world_z).map(|surface_y| SurfaceTestPoint {
+                world_x: world_x as f32 + 0.5,
+                world_z: world_z as f32 + 0.5,
+                surface_y,
+            })
+        })
+        .collect()
+}
+
+fn lod_surface_test_points(
+    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    seed: i64,
+    pos: ChunkPos,
+    spacing: u32,
+) -> Vec<SurfaceTestPoint> {
+    let spacing = spacing.clamp(1, 16) as i32;
+    let min_x = chunk_min_block_coord(pos.x);
+    let min_z = chunk_min_block_coord(pos.z);
+    (0..16)
+        .step_by(spacing as usize)
+        .flat_map(|z0| (0..16).step_by(spacing as usize).map(move |x0| (x0, z0)))
+        .filter_map(|(x0, z0)| {
+            let x1 = (x0 + spacing).min(16);
+            let z1 = (z0 + spacing).min(16);
+            let sample_x = min_x + x0 + (x1 - x0) / 2;
+            let sample_z = min_z + z0 + (z1 - z0) / 2;
+            surface_y_at(chunks, seed, sample_x, sample_z).map(|surface_y| SurfaceTestPoint {
+                // Stay off the quad diagonal and cell boundaries so rasterization
+                // tests the owned top face rather than a seam pixel.
+                world_x: min_x as f32 + x0 as f32 + (x1 - x0) as f32 * 0.35,
+                world_z: min_z as f32 + z0 as f32 + (z1 - z0) as f32 * 0.65,
+                surface_y,
+            })
+        })
+        .collect()
+}
+
+fn surface_y_at(
+    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    seed: i64,
+    world_x: i32,
+    world_z: i32,
+) -> Option<f32> {
+    let pos = ChunkPos::from_block_coords(world_x, world_z);
+    let chunk = chunks
+        .entry(pos)
+        .or_insert_with(|| generate_overworld_surface_chunk(seed, pos.x, pos.z));
+    let local_x = world_x - chunk_min_block_coord(pos.x);
+    let local_z = world_z - chunk_min_block_coord(pos.z);
+    (chunk.min_y..chunk.min_y + chunk.height)
+        .rev()
+        .find(|y| !is_air_like(chunk.block_at_y(local_x, *y, local_z).raw()))
+        .map(|y| (y + 1) as f32)
+}
+
+fn clear_depth_neighborhood_count(depths: &[f32], size: [u32; 2], pixel: [u32; 2]) -> usize {
+    let min_x = pixel[0].saturating_sub(1);
+    let max_x = pixel[0].saturating_add(1).min(size[0].saturating_sub(1));
+    let min_y = pixel[1].saturating_sub(1);
+    let max_y = pixel[1].saturating_add(1).min(size[1].saturating_sub(1));
+    (min_y..=max_y)
+        .flat_map(|y| (min_x..=max_x).map(move |x| (y * size[0] + x) as usize))
+        .filter(|index| {
+            depths
+                .get(*index)
+                .is_none_or(|depth| *depth <= 0.0 || !depth.is_finite())
+        })
+        .count()
 }
 
 fn project_world_to_pixel(
@@ -878,27 +969,6 @@ fn project_world_to_pixel(
     let x = ((ndc.x * 0.5 + 0.5) * size[0] as f32).floor() as u32;
     let y = ((1.0 - (ndc.y * 0.5 + 0.5)) * size[1] as f32).floor() as u32;
     (x < size[0] && y < size[1]).then_some([x, y])
-}
-
-fn sky_clear_rgba(
-    scene: &crate::cli::SceneOptions,
-    render_options: mclone_render::chunk::TexturedSectionRenderOptions,
-) -> [u8; 4] {
-    let time_of_day = mclone_core::time::time_of_day(scene.day_time_override.unwrap_or(6000));
-    let clear = mclone_render::sky::overworld_clear_color(time_of_day);
-    let transform = RenderConfig::for_color_target(render_options.color_profile, HEADLESS_FORMAT)
-        .target_color_transform();
-    let clear = color_transform_wgpu(clear, transform);
-    [
-        unorm8(clear.r),
-        unorm8(clear.g),
-        unorm8(clear.b),
-        unorm8(clear.a),
-    ]
-}
-
-fn unorm8(value: f64) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn count_pixel_mismatches(left: &[u8], right: &[u8]) -> usize {
@@ -1029,11 +1099,15 @@ fn fixture_json(
     let coverage_sampled = pixel_analysis
         .coverage
         .as_ref()
-        .is_none_or(|coverage| coverage.projected_columns > 0 && coverage.masked_pixels > 0);
+        .is_none_or(|coverage| coverage.projected_columns > 0 && coverage.sampled_depth_points > 0);
+    let observed_clear_depth = pixel_analysis
+        .coverage
+        .as_ref()
+        .is_some_and(|coverage| !coverage.clear_depth_columns.is_empty());
     let coverage_matched = pixel_analysis.coverage.as_ref().is_none_or(|_| {
         coverage_sampled
             && match observation.expected {
-                LodSettleExpectation::Pass => !observed_d1_d2,
+                LodSettleExpectation::Pass => !observed_d1_d2 && !observed_clear_depth,
                 LodSettleExpectation::FailD1D2 => observed_d1_d2,
             }
     });
@@ -1051,6 +1125,8 @@ fn fixture_json(
         "fail:pixel-determinism"
     } else if observed_d1_d2 {
         "fail:d1-d2"
+    } else if observed_clear_depth {
+        "fail:c2-clear-depth"
     } else {
         "pass"
     };
@@ -1062,7 +1138,7 @@ fn fixture_json(
         && match observation.expected {
             // Slice 1B defined the spawn fixture as the set-coherence canary;
             // pixel/coverage completeness becomes a pass condition in 1C2.
-            LodSettleExpectation::Pass => !observed_d1_d2,
+            LodSettleExpectation::Pass => !observed_d1_d2 && !observed_clear_depth,
             LodSettleExpectation::FailD1D2 => observed_d1_d2,
         };
     let mut assertion_failures = coherence_failures.clone();
@@ -1070,6 +1146,17 @@ fn fixture_json(
     assertion_failures.extend(lod_assertion_failures);
     if !coverage_sampled {
         assertion_failures.push("C2: coverage probe projected no columns".to_owned());
+    }
+    if let Some(coverage) = pixel_analysis
+        .coverage
+        .as_ref()
+        .filter(|coverage| !coverage.clear_depth_columns.is_empty())
+    {
+        assertion_failures.push(format!(
+            "C2: {} inset samples retained clear depth across {} in-coverage columns",
+            coverage.clear_depth_sample_count,
+            coverage.clear_depth_columns.len(),
+        ));
     }
     if let Some(determinism) = pixel_analysis
         .determinism
@@ -1110,13 +1197,19 @@ fn fixture_json(
             "farLodRegionDraws": observation.summary.far_lod_region_draw_count,
         },
         "coverageProbe": pixel_analysis.coverage.as_ref().map(|coverage| serde_json::json!({
-            "planeY": coverage.plane_y,
             "projectedColumns": coverage.projected_columns,
-            "maskedPixels": coverage.masked_pixels,
-            "skyClearRgba": coverage.sky_rgba,
-            "clearColorPixelCount": coverage.sky_pixel_count,
-            "clearColorColumns": chunk_positions_json(&coverage.sky_columns),
-            "clearColorIsCoverageEvidence": false,
+            "sampledDepthPoints": coverage.sampled_depth_points,
+            "clearDepthSampleCount": coverage.clear_depth_sample_count,
+            "clearDepthColumns": chunk_positions_json(&coverage.clear_depth_columns),
+            "clearDepthSamples": coverage.clear_depth_samples.iter().map(|sample| serde_json::json!({
+                "chunk": { "x": sample.chunk.x, "z": sample.chunk.z },
+                "source": sample.source,
+                "local": { "x": sample.local_x, "z": sample.local_z },
+                "surfaceY": sample.surface_y,
+                "pixel": { "x": sample.pixel[0], "y": sample.pixel[1] },
+                "clearPixelsIn3x3": sample.clear_pixels_in_3x3,
+            })).collect::<Vec<_>>(),
+            "depthIsCoverageEvidence": true,
         })),
         "pixelDeterminism": pixel_analysis.determinism.as_ref().map(|determinism| serde_json::json!({
             "reference": determinism.reference,
@@ -1146,7 +1239,7 @@ fn fixture_json(
         "coherenceFailures": coherence_failures,
         "assertionFailures": assertion_failures,
         "budgetPanel": observation.budget_panel,
-        "ledger": if observed_d1_d2 || !matched_expectation { ledger_json(&observation.snapshot) } else { serde_json::Value::Null },
+        "ledger": if observed_clear_depth || observed_d1_d2 || !matched_expectation { ledger_json(&observation.snapshot) } else { serde_json::Value::Null },
     })
 }
 
@@ -1594,7 +1687,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_probe_maps_sky_pixels_back_into_coverage() {
+    fn coverage_probe_maps_clear_depth_back_into_coverage() {
         let size = [32, 32];
         let camera = mclone_render::chunk::ChunkCamera {
             eye: [8.25, 200.0, 8.25],
@@ -1610,25 +1703,29 @@ mod tests {
             ChunkPos::new(0, 0),
             FarLodChunkLedgerRow {
                 loaded: true,
+                suppressed: true,
                 ..FarLodChunkLedgerRow::default()
             },
         );
-        let sky_rgba = [120, 167, 255, 255];
-        let pixels = sky_rgba.repeat((size[0] * size[1]) as usize);
+        let depths = vec![0.0; (size[0] * size[1]) as usize];
 
         let result = coverage_probe_result(
             &snapshot,
             render_view,
-            &pixels,
+            &depths,
             size,
             LodCoverageProbe { plane_y: 64.0 },
-            sky_rgba,
+            FarTerrainLodConfig::enabled(),
+            12345,
         );
 
         assert_eq!(result.projected_columns, 1);
-        assert!(result.masked_pixels > 0);
-        assert_eq!(result.sky_pixel_count, result.masked_pixels);
-        assert_eq!(result.sky_columns, BTreeSet::from([ChunkPos::new(0, 0)]));
+        assert!(result.sampled_depth_points > 0);
+        assert_eq!(result.clear_depth_sample_count, result.sampled_depth_points);
+        assert_eq!(
+            result.clear_depth_columns,
+            BTreeSet::from([ChunkPos::new(0, 0)])
+        );
     }
 
     #[test]

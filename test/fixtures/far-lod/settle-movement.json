@@ -6,8 +6,11 @@
       "name": "movement-baseline-high",
       "camera": {
         "kind": "look-at",
-        "eye": [8.25, 200.0, 8.25],
-        "target": [8.0, 64.0, 8.0]
+        "eye": [8.25, 500.0, 8.25],
+        "target": [8.25, 64.0, 8.25]
+      },
+      "coverageProbe": {
+        "planeY": 64.0
       },
       "lodAssertions": [
         { "chunk": [9, 0], "expected": "level-3" }
@@ -18,8 +21,11 @@
       "name": "movement-one-chunk-east",
       "camera": {
         "kind": "look-at",
-        "eye": [24.25, 200.0, 8.25],
-        "target": [24.0, 64.0, 8.0]
+        "eye": [24.25, 500.0, 8.25],
+        "target": [24.25, 64.0, 8.25]
+      },
+      "coverageProbe": {
+        "planeY": 64.0
       },
       "lodAssertions": [
         { "chunk": [9, 0], "expected": "level-3" }
@@ -30,8 +36,11 @@
       "name": "movement-band-guard",
       "camera": {
         "kind": "look-at",
-        "eye": [40.25, 200.0, 8.25],
-        "target": [40.0, 64.0, 8.0]
+        "eye": [40.25, 500.0, 8.25],
+        "target": [40.25, 64.0, 8.25]
+      },
+      "coverageProbe": {
+        "planeY": 64.0
       },
       "lodAssertions": [
         { "chunk": [9, 0], "expected": "level-3" }
@@ -42,8 +51,11 @@
       "name": "movement-band-cross",
       "camera": {
         "kind": "look-at",
-        "eye": [56.25, 200.0, 8.25],
-        "target": [56.0, 64.0, 8.0]
+        "eye": [56.25, 500.0, 8.25],
+        "target": [56.25, 64.0, 8.25]
+      },
+      "coverageProbe": {
+        "planeY": 64.0
       },
       "lodAssertions": [
         { "chunk": [9, 0], "expected": "level-1" }
@@ -54,8 +66,11 @@
       "name": "movement-eight-chunks-east",
       "camera": {
         "kind": "look-at",
-        "eye": [184.25, 200.0, 8.25],
-        "target": [184.0, 64.0, 8.0]
+        "eye": [184.25, 500.0, 8.25],
+        "target": [184.25, 64.0, 8.25]
+      },
+      "coverageProbe": {
+        "planeY": 64.0
       },
       "lodAssertions": [
         { "chunk": [9, 0], "expected": "not-desired" },

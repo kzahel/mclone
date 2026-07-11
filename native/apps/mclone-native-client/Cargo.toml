@@ -42,6 +42,7 @@ mclone-render = { workspace = true, features = ["native-surface"] }
 mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
+mclone-worldgen.workspace = true
 mclone-xr-graphics = { workspace = true, optional = true }
 mclone-xr-host = { workspace = true, optional = true }
 # Non-optional so the flat/offscreen lanes can consume the shared scene host's

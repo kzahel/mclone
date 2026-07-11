@@ -1174,7 +1174,12 @@ impl FarTerrainLodCache {
         build_budget: usize,
     ) -> Result<()> {
         let admitted = build_budget.min(compiler.available_far_lod_job_slots());
-        for _ in 0..admitted {
+        let candidates = self.pending_builds.len();
+        let mut submitted = 0usize;
+        for _ in 0..candidates {
+            if submitted >= admitted {
+                break;
+            }
             let Some(request) = self.pending_builds.pop_front() else {
                 break;
             };
@@ -1192,14 +1197,19 @@ impl FarTerrainLodCache {
             if replacement
                 && self.active_level_transition_count() >= MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES
             {
-                self.pending_builds.push_front(request);
-                break;
+                // A saturated replacement allowance must not block fresh
+                // missing coverage queued behind this request. Keep the
+                // replacement pending and scan the remainder of the bounded
+                // queue for work that does not require double residency.
+                self.pending_builds.push_back(request);
+                continue;
             }
             let key = request.key;
             let queued_at = request.queued_at;
             compiler.submit_far_lod(request)?;
             self.inflight_builds.insert(key, queued_at);
             self.submitted_builds = self.submitted_builds.saturating_add(1);
+            submitted += 1;
         }
         Ok(())
     }
@@ -2467,6 +2477,57 @@ mod tests {
         cache.drain_render_uploads(1, &mut compiler);
         assert!(!cache.resident_tiles.contains_tile(old));
         assert_eq!(cache.stats().double_resident_tiles, 0);
+    }
+
+    #[test]
+    fn saturated_replacements_do_not_block_fresh_coverage_builds() {
+        let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
+        let config = FarTerrainLodConfig::enabled();
+        let source_key = FarTerrainLodSourceKey::new(12345, config, false);
+        cache.source_key = Some(source_key);
+
+        for x in 0..MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES as i32 {
+            let pos = ChunkPos::new(x, 0);
+            let desired = LodTileKey::new(pos, 2);
+            cache.desired_tiles.insert(pos, desired);
+            cache
+                .visible_tiles_by_chunk
+                .insert(pos, LodTileKey::new(pos, 1));
+            cache.insert_resident_tile(desired, FarTerrainLodTileMetadata::default());
+        }
+
+        let replacement = LodTileKey::new(ChunkPos::new(0, 0), 2);
+        cache.dirty_tiles.insert(replacement);
+        let fresh = LodTileKey::new(ChunkPos::new(1000, 0), 1);
+        cache.desired_tiles.insert(fresh.chunk, fresh);
+        cache
+            .pending_builds
+            .push_back(FarTerrainLodBuildRequest::new_for_tile(
+                replacement,
+                source_key,
+                [4; 4],
+                None,
+                far_lod_now(),
+            ));
+        cache
+            .pending_builds
+            .push_back(FarTerrainLodBuildRequest::new_for_tile(
+                fresh,
+                source_key,
+                [4; 4],
+                None,
+                far_lod_now(),
+            ));
+
+        cache.submit_builds(&mut compiler, 1).unwrap();
+
+        assert_eq!(compiler.submitted, vec![fresh]);
+        assert_eq!(cache.pending_builds.len(), 1);
+        assert_eq!(
+            cache.pending_builds.front().map(|request| request.key),
+            Some(replacement)
+        );
     }
 
     #[test]

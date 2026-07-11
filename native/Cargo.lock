@@ -1599,6 +1599,7 @@ dependencies = [
  "mclone-scene",
  "mclone-server",
  "mclone-ui",
+ "mclone-worldgen",
  "mclone-xr-graphics",
  "mclone-xr-host",
  "metal",

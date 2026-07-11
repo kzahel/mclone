@@ -1853,7 +1853,7 @@ impl GpuChunkTextureAtlas {
 }
 
 pub struct ChunkDepthTarget {
-    _texture: wgpu::Texture,
+    texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub width: u32,
     pub height: u32,
@@ -1874,12 +1874,12 @@ impl ChunkDepthTarget {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
         Self {
-            _texture: texture,
+            texture,
             view,
             width,
             height,
@@ -1891,6 +1891,10 @@ impl ChunkDepthTarget {
             return;
         }
         *self = Self::new(device, width, height);
+    }
+
+    pub fn texture(&self) -> &wgpu::Texture {
+        &self.texture
     }
 }
 

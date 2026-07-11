@@ -328,6 +328,10 @@ impl OffscreenDriver {
         self.render_inner(frame, ui, hud_visible, true)
     }
 
+    pub(crate) fn depth_target(&self) -> &ChunkDepthTarget {
+        &self.depth
+    }
+
     pub(crate) fn render_stereo(
         &mut self,
         device: &wgpu::Device,

@@ -364,6 +364,10 @@ impl OffscreenFlatClientHost {
         self.driver.far_lod_settle_snapshot()
     }
 
+    pub(crate) fn depth_target(&self) -> &mclone_render::chunk::ChunkDepthTarget {
+        self.driver.depth_target()
+    }
+
     pub(crate) fn render_view(
         &self,
         size: [u32; 2],

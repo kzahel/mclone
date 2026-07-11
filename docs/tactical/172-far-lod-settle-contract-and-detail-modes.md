@@ -17,8 +17,10 @@ ahead of the remaining Slice 2 fixes: Auto / fixed 4 / fixed 8 / fixed 16 are
 now directly testable in Graphics. Interactive evaluation then opened the
 coverage-correctness goal. D1 is fixed: an empty retained camera section can
 no longer strand the sparse visibility graph, and the high fixture paints
-81/81 real columns with no culled-but-suppressed rows. D2 and depth-backed
-coverage validation remain open. This
+81/81 real columns with no culled-but-suppressed rows. Depth-backed settled
+coverage validation is now live, and D7's replacement head-of-line block is
+fixed so fresh movement coverage can bypass a saturated replacement allowance.
+D2 and per-frame smooth-movement coverage remain open. This
 tactical owns the far-LOD product-hardening series: a settle-state validation
 harness, the coverage-gap correctness burn-down, and the user-facing LOD
 detail modes (auto / 4 / 8 / 16, debug 1 / 2), plus residency/perf polish. It
@@ -171,14 +173,16 @@ the shared-edge height profile and neither emits a covering skirt, thin
 vertical cracks show sky exactly along the concentric band boundaries,
 compounding D1/D2 visually.
 
-### D7 — Replacement head-of-line blocking under the double-residency cap
+### D7 — Replacement head-of-line blocking under the double-residency cap (fixed 2026-07-11)
 
 `submit_builds` (`far_lod.rs:1047`) handles a replacement build that exceeds
 `MAX_FAR_TERRAIN_LOD_DOUBLE_RESIDENT_TILES` by pushing it back and **breaking
 the whole admission loop**. Because pending builds are nearest-first, a wall
 of level transitions (e.g. D4's go-live storm, or a band shift during flight)
-stalls all fresh-coverage builds queued behind it for as long as the cap is
-saturated. Fresh coverage should not starve behind blocked replacements.
+stalled all fresh-coverage builds queued behind it for as long as the cap was
+saturated. Admission now scans the bounded pending queue, defers saturated
+replacement requests to its tail, and spends the available build grant on
+eligible fresh coverage. A focused saturated-cap test pins that behavior.
 
 ### D8 — Churn discards under band/readiness movement (efficiency, bounded)
 
@@ -431,6 +435,13 @@ schema or fixture framework was added.
   erasing parsed detail/build-culling policy, reports both fields, and defines
   visible coherence as unsuppressed desired tiles. Prebuilt tiles hidden by
   real terrain remain required resident/uploaded but are correctly not visible.
+- **C2 depth oracle (complete for settled frames):** the offscreen render target
+  permits `Depth32Float` readback after submission. The probe projects samples
+  at the exact expected surface of each selected representation—generated
+  block tops for real terrain and sampled flat-cell heights for LOD—rather than
+  inferring coverage from RGB or a constant-Y plane. At Y=500 the five-point
+  movement matrix covers all 441 RD4 + range-6 chunks and reports zero clear
+  representation samples at every settled position.
 - **D2 / C4:** change the suppression input from traversal-ready columns to a
   view-independent painted-capable predicate (column has uploaded, drawable
   real sections), applied consistently to desired-set carving and the
@@ -452,9 +463,12 @@ schema or fixture framework was added.
   neighbors, include diagonal neighbor dirtying if required); validate with a
   band-boundary fixture and explicit depth/representation coverage along the
   boundary rings.
-- **D7:** replacement admission skips (defers) capped replacements instead of
-  breaking the loop, so fresh coverage keeps building; add a skip-reason
-  counter.
+- **D7 (behavior fixed):** replacement admission now defers capped
+  replacements to the bounded queue tail instead of breaking the loop, so
+  eligible fresh coverage keeps building. A focused test saturates all 256
+  double-resident transitions and proves a fresh tile behind the blocked
+  replacement is submitted. A dedicated skip-reason counter remains useful
+  observability work for the smooth-movement lane.
 - **D8:** measure `stale_builds` share under the movement fixtures; bound it
   (e.g. re-check desired level at submit time; tolerate benign neighbor-spacing
   mismatches via seam-signature requeue only for edge tiles) if it exceeds a
@@ -462,7 +476,8 @@ schema or fixture framework was added.
 
 Gate:
 
-- All Slice 1 fixtures green, including fly-up (C2 holds from altitude);
+- All Slice 1 fixtures green, including depth-backed fly-up coverage from
+  altitude;
 - `suppressed_without_replacement` and the new painted-gap counter stay 0
   across the movement fixtures;
 - 166 perf tripwires within spread, including Quest orbit far-LOD-on lanes
