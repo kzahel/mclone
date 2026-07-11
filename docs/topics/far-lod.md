@@ -5,7 +5,7 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11 (Tactical 172 Slice 1C2b1 complete).
+Last reconciled: 2026-07-11 (Tactical 172 Slice 1 complete).
 
 ## Current State
 
@@ -46,9 +46,10 @@ resettling, and the permanent `native:lod-settle:smoke` lane backed by a
 checked-in fixture. Slice 1C2a extends that fixture to four waypoints with a
 schema-2 projected-footprint C2 probe and exact high→spawn→high pixel revisit.
 Slice 1C2b1 adds the checked-in movement matrix with explicit desired-level
-assertions. Slice 1C2b2 next adds toggle/range mutations and the full probe
-lane; Slice 2 then burns down the defect ledger before detail modes and
-residency polish.
+assertions. Slice 1C2b2 adds toggle/range mutations and the full probe lane,
+completing the 14-waypoint Slice 1 harness;
+Slice 2 next burns down the defect ledger before detail modes and residency
+polish.
 
 ## Ownership
 
@@ -103,14 +104,16 @@ no silent caps, bounded steady state.
   desired set after the eight-chunk move while a new level-2 anchor enters.
   Every waypoint settled at 360 desired/visible with zero pending work; all
   captures were inspected.
-- Planned (172 Slice 1C2b2): toggle/range mutations and
-  `native:lod-settle:probe`. Every far-LOD change must already run the landed
-  smoke lane and cite per-fixture results.
+- Landed (172 Slice 1C2b2): schema-4 shared-policy toggle/range mutations,
+  exact disabled teardown and enabled/range repopulation assertions, and
+  `native:lod-settle:probe`. The full lane runs 14 waypoints across three
+  scripts; all matched with zero pending work. Every far-LOD change must run
+  the fast smoke lane and cite per-fixture results.
 
 ## Recommended Next Direction
 
-Follow tactical 172 in order: Slice 1C2b2 toggle/range and full probe lane,
-correctness burn-down (Slice 2), detail modes (Slice 3), residency/perf polish
+Follow tactical 172 in order: correctness burn-down (Slice 2), detail modes
+(Slice 3), residency/perf polish
 (Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real
 LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:
 tactical 171's thread ledger.

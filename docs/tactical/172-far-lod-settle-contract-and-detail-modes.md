@@ -7,12 +7,13 @@ Slice 1C1 (validated JSON waypoint scripts and the permanent smoke lane) is
 also complete. Slice 1C2a (coverage pixels and revisit determinism) is
 complete; Slice 1C2b (the movement/toggle/range matrix and full probe lane) is
 split for execution: Slice 1C2b1 (movement and band transitions) is complete,
-while Slice 1C2b2 (toggle/range mutations and the full probe lane) is next.
-This tactical owns the far-LOD
-product-hardening series: a settle-state validation harness, the coverage-gap
-correctness burn-down, the user-facing LOD detail modes (auto / 4 / 8 / 16,
-debug 1 / 2), and residency/perf polish. It supersedes the remaining open
-ends of Tactical 121 — Surface LOD First Slice and pauses Tactical 162 —
+and Slice 1C2b2 (toggle/range mutations and the full probe lane) is complete.
+The Slice 1 harness is complete; Slice 2 correctness burn-down is next. This
+tactical owns the far-LOD product-hardening series: a settle-state validation
+harness, the coverage-gap correctness burn-down, and the user-facing LOD
+detail modes (auto / 4 / 8 / 16, debug 1 / 2), plus residency/perf polish. It
+supersedes the remaining open ends of Tactical 121 — Surface LOD First Slice
+and pauses Tactical 162 —
 Real-Chunk LOD Reduction Draft Slice 4+ until its Slice 1–2 gates hold. Macro
 ordering lives in Tactical 171 — Convergence And Parity Closeout.
 
@@ -341,13 +342,26 @@ reproduce D1/D2 before any fix exists.
   These are deliberately movement/set-level fixtures; the separate fast smoke
   owns the expected-red C2/D1-D2 pixel assertions.
 
-#### Slice 1C2b2 — Toggle/range mutations and full lane (next)
+#### Slice 1C2b2 — Toggle/range mutations and full lane (complete 2026-07-11)
 
-- **Remaining fixtures.** Far-LOD toggle off/on and range change, including
-  settled absence/repopulation assertions and replacement-before-suppress
-  evidence.
-- **Full pnpm lane.** Add `native:lod-settle:probe` for the complete matrix;
-  keep the landed `native:lod-settle:smoke` as its CI-suitable subset.
+- **Schema-4 mutations landed.** `toggle-far-lod` and `set-far-lod-range`
+  execute through the real shared `GameUiAction` / client-experience settings
+  dispatcher, including its `ClearFarLod` effect. `expectedFarLodState` pins
+  actual enabled/range config plus desired/suppressed counts. Disabled state
+  additionally requires empty resident, uploaded, published, and visible
+  sets; schema-1/2/3 inputs remain accepted.
+- **Mutation fixture landed.** The five-waypoint script proves range-6
+  baseline → off → on → range 3 → range 8. Off settles with all authoritative
+  LOD sets and suppression empty. Re-enable restores 360 desired/resident/
+  published/visible tiles and is pixel-identical to baseline. Range 3 settles
+  at 144 tiles with `(7,0)` level 3 and `(9,0)` absent; range 8 settles at 544
+  tiles with `(9,0)` level 2. Every waypoint closes with zero pending work.
+- **Full pnpm lane landed.** `native:lod-settle:probe` runs the smoke,
+  movement, and mutation scripts into `/tmp/mclone-lod-settle-probe`, producing
+  14 captures and three structured reports. All three scripts matched on the
+  landing run (`4 + 5 + 5` fixtures, maximum pending work zero); the mutation
+  captures were inspected. `native:lod-settle:smoke` remains the fast required
+  subset for every far-LOD change.
 
 Gate:
 
@@ -536,7 +550,7 @@ regress). Additions:
 - `pnpm native:lod-settle:smoke` — fast fixture subset (Slice 1+; the
   permanent pre-merge check for LOD changes).
 - `pnpm native:lod-settle:probe` — full waypoint/fixture matrix with captures
-  (lands in Slice 1C2b2).
+  (14 fixtures across smoke, movement, and mutation scripts).
 - Existing tripwires: `pnpm native:desktop-offscreen:smoke`,
   `native:movement:smoke`, `native:timedemo:smoke`,
   `native:startup-streaming:perf` (+RD15), `native:frame-budget:perf`,

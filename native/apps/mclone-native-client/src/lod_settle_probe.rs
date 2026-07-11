@@ -3,6 +3,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3, Vec4};
+use mclone_app_runtime::far_lod::{
+    FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+};
 use mclone_app_runtime::lod_coverage::LodReplacementCounters;
 use mclone_core::{ChunkPos, LodTileKey, chunk_middle_block_coord};
 use mclone_render::chunk::ChunkRenderView;
@@ -23,7 +27,7 @@ use crate::scene_runtime::WindowSceneAssets;
 const SPAWN_FIXTURE: &str = "rd4-range6-spawn-settle";
 const FLY_UP_FIXTURE: &str = "rd4-range6-fly-up-high";
 const MIN_SCRIPT_SCHEMA: u32 = 1;
-const SCRIPT_SCHEMA: u32 = 3;
+const SCRIPT_SCHEMA: u32 = 4;
 const MAX_WAYPOINTS: usize = 64;
 const MAX_CAPTURE_SETTLE_PASSES: usize = 4;
 const FLY_UP_EYE_OFFSET_X: f32 = 0.25;
@@ -70,6 +74,9 @@ struct FixtureObservation {
     coverage_probe: Option<LodCoverageProbe>,
     matches_pixels: Option<String>,
     lod_assertions: Vec<LodTileAssertion>,
+    mutation: Option<LodSettleMutation>,
+    expected_far_lod_state: Option<FarLodStateAssertion>,
+    actual_far_lod_config: FarTerrainLodConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -92,6 +99,38 @@ struct LodSettleWaypoint {
     matches_pixels: Option<String>,
     #[serde(default)]
     lod_assertions: Vec<LodTileAssertion>,
+    #[serde(default)]
+    mutation: Option<LodSettleMutation>,
+    #[serde(default)]
+    expected_far_lod_state: Option<FarLodStateAssertion>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+enum LodSettleMutation {
+    ToggleFarLod,
+    SetFarLodRange {
+        #[serde(rename = "extraRadiusChunks")]
+        extra_radius_chunks: u32,
+    },
+}
+
+impl LodSettleMutation {
+    const fn report_name(self) -> &'static str {
+        match self {
+            Self::ToggleFarLod => "toggle-far-lod",
+            Self::SetFarLodRange { .. } => "set-far-lod-range",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FarLodStateAssertion {
+    enabled: bool,
+    extra_radius_chunks: u32,
+    desired_tiles: usize,
+    suppressed_chunks: usize,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -190,6 +229,8 @@ impl LodSettleScript {
                     coverage_probe: None,
                     matches_pixels: None,
                     lod_assertions: Vec::new(),
+                    mutation: None,
+                    expected_far_lod_state: None,
                 },
                 LodSettleWaypoint {
                     name: FLY_UP_FIXTURE.to_owned(),
@@ -205,6 +246,8 @@ impl LodSettleScript {
                     coverage_probe: None,
                     matches_pixels: None,
                     lod_assertions: Vec::new(),
+                    mutation: None,
+                    expected_far_lod_state: None,
                 },
             ],
         }
@@ -254,6 +297,55 @@ impl LodSettleScript {
                     "waypoint `{}` lodAssertions requires script schema 3",
                     waypoint.name
                 );
+            }
+            if self.schema < 4
+                && (waypoint.mutation.is_some() || waypoint.expected_far_lod_state.is_some())
+            {
+                bail!(
+                    "waypoint `{}` mutation/expectedFarLodState requires script schema 4",
+                    waypoint.name
+                );
+            }
+            if waypoint.mutation.is_some() && waypoint.expected_far_lod_state.is_none() {
+                bail!(
+                    "waypoint `{}` mutation requires expectedFarLodState",
+                    waypoint.name
+                );
+            }
+            if let Some(LodSettleMutation::SetFarLodRange {
+                extra_radius_chunks,
+            }) = waypoint.mutation
+                && !(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS
+                    ..=MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
+                    .contains(&extra_radius_chunks)
+            {
+                bail!(
+                    "waypoint `{}` far LOD range must be {}..={}, got {extra_radius_chunks}",
+                    waypoint.name,
+                    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+                    MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS
+                );
+            }
+            if let Some(expected) = waypoint.expected_far_lod_state {
+                if !(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS
+                    ..=MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
+                    .contains(&expected.extra_radius_chunks)
+                {
+                    bail!(
+                        "waypoint `{}` expected far LOD range must be {}..={}",
+                        waypoint.name,
+                        MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+                        MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS
+                    );
+                }
+                if !expected.enabled
+                    && (expected.desired_tiles != 0 || expected.suppressed_chunks != 0)
+                {
+                    bail!(
+                        "waypoint `{}` disabled far LOD state must expect zero desired/suppressed chunks",
+                        waypoint.name
+                    );
+                }
             }
             if let Some(probe) = waypoint.coverage_probe {
                 validate_coverage_probe(waypoint, probe)?;
@@ -376,6 +468,20 @@ pub(crate) fn run_lod_settle_probe(
         },
         |index, frame, state| {
             let waypoint = state.script.waypoints[index].clone();
+            if let Some(mutation) = waypoint.mutation {
+                let action = match mutation {
+                    LodSettleMutation::ToggleFarLod => mclone_ui::GameUiAction::ToggleFarLod,
+                    LodSettleMutation::SetFarLodRange {
+                        extra_radius_chunks,
+                    } => mclone_ui::GameUiAction::SetFarLodRange(
+                        i32::try_from(extra_radius_chunks)
+                            .expect("validated far LOD range fits i32"),
+                    ),
+                };
+                state
+                    .host
+                    .apply_ui_action(action, frame.device, frame.queue)?;
+            }
             match waypoint.camera {
                 LodSettleCamera::SpawnSurface => state.host.place_camera_above_loaded_surface()?,
                 LodSettleCamera::LookAt { eye, target } => {
@@ -445,6 +551,9 @@ pub(crate) fn run_lod_settle_probe(
                 coverage_probe: waypoint.coverage_probe,
                 matches_pixels: waypoint.matches_pixels,
                 lod_assertions: waypoint.lod_assertions,
+                mutation: waypoint.mutation,
+                expected_far_lod_state: waypoint.expected_far_lod_state,
+                actual_far_lod_config: state.host.far_lod_config(),
             });
             Ok(())
         },
@@ -830,6 +939,76 @@ fn lod_assertion_results(
     (results, failures)
 }
 
+fn far_lod_state_result(observation: &FixtureObservation) -> (serde_json::Value, Vec<String>) {
+    let Some(expected) = observation.expected_far_lod_state else {
+        return (serde_json::Value::Null, Vec::new());
+    };
+    let producer = &observation.snapshot.runtime.producer;
+    let actual_desired = producer.desired_tiles.len();
+    let actual_suppressed = observation.snapshot.runtime.suppressed_chunks.len();
+    let actual = observation.actual_far_lod_config;
+    let mut failures = Vec::new();
+    if actual.enabled != expected.enabled {
+        failures.push(format!(
+            "far LOD enabled expected {} but was {}",
+            expected.enabled, actual.enabled
+        ));
+    }
+    if actual.extra_radius_chunks != expected.extra_radius_chunks {
+        failures.push(format!(
+            "far LOD range expected {} but was {}",
+            expected.extra_radius_chunks, actual.extra_radius_chunks
+        ));
+    }
+    if actual_desired != expected.desired_tiles {
+        failures.push(format!(
+            "far LOD desired tiles expected {} but was {actual_desired}",
+            expected.desired_tiles
+        ));
+    }
+    if actual_suppressed != expected.suppressed_chunks {
+        failures.push(format!(
+            "far LOD suppressed chunks expected {} but was {actual_suppressed}",
+            expected.suppressed_chunks
+        ));
+    }
+    if !expected.enabled {
+        let retained = producer.resident_tiles.len()
+            + producer.uploaded_tiles.len()
+            + producer.published_tiles_by_chunk.len()
+            + producer.visible_tiles.len();
+        if retained != 0 {
+            failures.push(format!(
+                "disabled far LOD retained {retained} resident/uploaded/published/visible entries"
+            ));
+        }
+    }
+    let matched = failures.is_empty();
+    (
+        serde_json::json!({
+            "expected": {
+                "enabled": expected.enabled,
+                "extraRadiusChunks": expected.extra_radius_chunks,
+                "desiredTiles": expected.desired_tiles,
+                "suppressedChunks": expected.suppressed_chunks,
+            },
+            "actual": {
+                "enabled": actual.enabled,
+                "extraRadiusChunks": actual.extra_radius_chunks,
+                "desiredTiles": actual_desired,
+                "suppressedChunks": actual_suppressed,
+                "residentTiles": producer.resident_tiles.len(),
+                "uploadedTiles": producer.uploaded_tiles.len(),
+                "publishedTiles": producer.published_tiles_by_chunk.len(),
+                "visibleTiles": producer.visible_tiles.len(),
+                "frameSummaryFarLodRegionDraws": observation.summary.far_lod_region_draw_count,
+            },
+            "matched": matched,
+        }),
+        failures,
+    )
+}
+
 fn fixture_json(
     observation: &FixtureObservation,
     capture_path: &Path,
@@ -841,6 +1020,8 @@ fn fixture_json(
     let observes_d1_d2 = observation.expected == LodSettleExpectation::FailD1D2;
     let (lod_assertions, lod_assertion_failures) = lod_assertion_results(observation);
     let lod_assertions_matched = lod_assertion_failures.is_empty();
+    let (far_lod_state, far_lod_state_failures) = far_lod_state_result(observation);
+    let far_lod_state_matched = far_lod_state_failures.is_empty();
     let coverage_sampled = pixel_analysis
         .coverage
         .as_ref()
@@ -862,6 +1043,8 @@ fn fixture_json(
         .is_none_or(|determinism| determinism.mismatch_count == 0);
     let observed = if !coherence_failures.is_empty() {
         "fail:set-coherence"
+    } else if !far_lod_state_matched {
+        "fail:far-lod-state"
     } else if !lod_assertions_matched {
         "fail:lod-assertion"
     } else if !determinism_matched {
@@ -874,6 +1057,7 @@ fn fixture_json(
         "pass"
     };
     let matched_expectation = coherence_failures.is_empty()
+        && far_lod_state_matched
         && lod_assertions_matched
         && coverage_matched
         && determinism_matched
@@ -884,6 +1068,7 @@ fn fixture_json(
             LodSettleExpectation::FailD1D2 => observed_d1_d2,
         };
     let mut assertion_failures = coherence_failures.clone();
+    assertion_failures.extend(far_lod_state_failures);
     assertion_failures.extend(lod_assertion_failures);
     if !coverage_sampled {
         assertion_failures.push("C2: coverage probe projected no columns".to_owned());
@@ -950,6 +1135,14 @@ fn fixture_json(
             "mismatchCount": determinism.mismatch_count,
         })),
         "lodAssertions": lod_assertions,
+        "mutation": observation.mutation.map(|mutation| serde_json::json!({
+            "kind": mutation.report_name(),
+            "extraRadiusChunks": match mutation {
+                LodSettleMutation::SetFarLodRange { extra_radius_chunks } => Some(extra_radius_chunks),
+                LodSettleMutation::ToggleFarLod => None,
+            },
+        })),
+        "farLodState": far_lod_state,
         "sets": {
             "desiredTiles": observation.snapshot.runtime.producer.desired_tiles.len(),
             "residentTiles": observation.snapshot.runtime.producer.resident_tiles.len(),
@@ -971,6 +1164,9 @@ fn fixture_json(
 
 fn settle_coherence_failures(observation: &FixtureObservation) -> Vec<String> {
     let producer = &observation.snapshot.runtime.producer;
+    let expects_enabled = observation
+        .expected_far_lod_state
+        .is_none_or(|state| state.enabled);
     let desired = producer
         .desired_tiles
         .iter()
@@ -983,7 +1179,7 @@ fn settle_coherence_failures(observation: &FixtureObservation) -> Vec<String> {
             observation.pending_stream_work
         ));
     }
-    if desired.is_empty() {
+    if expects_enabled && desired.is_empty() {
         failures.push("desired LOD tile set is empty".to_owned());
     }
     if !producer.pending_builds.is_empty()
@@ -1111,6 +1307,9 @@ mod tests {
             coverage_probe: None,
             matches_pixels: None,
             lod_assertions: Vec::new(),
+            mutation: None,
+            expected_far_lod_state: None,
+            actual_far_lod_config: FarTerrainLodConfig::enabled(),
         };
 
         assert!(settle_coherence_failures(&observation).is_empty());
@@ -1169,7 +1368,7 @@ mod tests {
         .unwrap();
 
         script.validate().unwrap();
-        assert_eq!(script.schema, SCRIPT_SCHEMA);
+        assert_eq!(script.schema, 3);
         assert_eq!(script.waypoints.len(), 5);
         assert_eq!(
             script.waypoints[3].lod_assertions[0].expected,
@@ -1178,6 +1377,28 @@ mod tests {
         assert_eq!(
             script.waypoints[4].lod_assertions[0].expected,
             LodDesiredLevelExpectation::NotDesired
+        );
+    }
+
+    #[test]
+    fn checked_in_mutation_script_is_valid() {
+        let script: LodSettleScript = serde_json::from_str(include_str!(
+            "../../../../test/fixtures/far-lod/settle-mutations.json"
+        ))
+        .unwrap();
+
+        script.validate().unwrap();
+        assert_eq!(script.schema, SCRIPT_SCHEMA);
+        assert_eq!(script.waypoints.len(), 5);
+        assert_eq!(
+            script.waypoints[1].mutation,
+            Some(LodSettleMutation::ToggleFarLod)
+        );
+        assert_eq!(
+            script.waypoints[4].mutation,
+            Some(LodSettleMutation::SetFarLodRange {
+                extra_radius_chunks: 8
+            })
         );
     }
 
@@ -1272,6 +1493,34 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("duplicate LOD assertion")
+        );
+    }
+
+    #[test]
+    fn mutations_require_schema_four_and_expected_state() {
+        let mut script = LodSettleScript::default_for_scene(&crate::cli::SceneOptions::default());
+        script.waypoints[0].mutation = Some(LodSettleMutation::ToggleFarLod);
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("requires expectedFarLodState")
+        );
+
+        script.schema = 3;
+        script.waypoints[0].expected_far_lod_state = Some(FarLodStateAssertion {
+            enabled: false,
+            extra_radius_chunks: 6,
+            desired_tiles: 0,
+            suppressed_chunks: 0,
+        });
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("requires script schema 4")
         );
     }
 

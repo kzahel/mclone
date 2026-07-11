@@ -371,6 +371,19 @@ impl OffscreenFlatClientHost {
         self.driver.host().mono_render_view(size)
     }
 
+    pub(crate) fn apply_ui_action(
+        &mut self,
+        action: mclone_ui::GameUiAction,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        self.driver.apply_ui_action(action, device, queue)
+    }
+
+    pub(crate) fn far_lod_config(&self) -> mclone_app_runtime::far_lod::FarTerrainLodConfig {
+        self.driver.host().scene_options().far_lod
+    }
+
     pub(crate) fn pending_stream_work(&self) -> usize {
         self.driver.host().pending_stream_work(self.camera.position)
     }

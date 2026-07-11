@@ -279,6 +279,19 @@ Slice 2 fixes it. Its schema-2 top-down assertions also pin 165 sky-clear
 pixels inside the projected coverage footprint and require the high→spawn→high
 revisit capture to be pixel-identical.
 
+Run the full movement/configuration matrix when changing the harness, desired
+LOD bands, toggle/range behavior, or lifecycle transitions:
+
+```bash
+pnpm native:lod-settle:probe
+```
+
+It produces 14 captures and three reports under
+`/tmp/mclone-lod-settle-probe/{smoke,movement,mutations}`. The movement script
+pins desired levels across one-chunk, hysteresis/band, and eight-chunk moves;
+the mutation script pins complete off teardown, deterministic on
+repopulation, and range-3/range-8 coverage counts.
+
 Platform-specific gates:
 
 ```bash
