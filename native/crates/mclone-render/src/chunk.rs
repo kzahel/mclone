@@ -1428,11 +1428,15 @@ fn traversal_start_keys(
     };
     if records
         .get(&camera_key)
-        .is_some_and(|record| record.traversal_ready)
+        .is_some_and(|record| record.traversal_ready && record.drawable)
     {
         return vec![camera_key];
     }
 
+    // Vanilla's full-height ViewArea can traverse from an empty camera section
+    // through retained empty neighbors to the visible terrain. Native keeps a
+    // sparse resident graph, so an empty camera record may have no continuous
+    // path to the surface and cannot safely be the sole traversal seed.
     outside_retained_section_start_keys(records, frustum_keys, camera_position)
 }
 
@@ -1447,29 +1451,40 @@ fn outside_retained_section_start_keys(
     let Some(min_section_y) = records.keys().map(|key| key.section_y).min() else {
         return Vec::new();
     };
-    let Some(max_section_y) = records.keys().map(|key| key.section_y).max() else {
-        return Vec::new();
-    };
-
     let min_build_y = min_section_y * RENDER_SECTION_HEIGHT;
-    let target_section_y = if camera_position.y.floor() as i32 > min_build_y {
-        max_section_y
-    } else {
-        min_section_y
-    };
+    let seed_from_above = camera_position.y.floor() as i32 > min_build_y;
 
-    // Mirrors LevelRenderer.updateRenderChunks when the camera has no containing RenderChunk.
-    let mut starts = records
-        .keys()
-        .copied()
-        .filter(|key| {
-            key.section_y == target_section_y
-                && frustum_keys.contains(key)
-                && records
-                    .get(key)
-                    .is_some_and(|record| record.traversal_ready)
-        })
-        .collect::<Vec<_>>();
+    // Minecraft seeds every visible column at the world's top or bottom render
+    // layer when the camera has no containing RenderChunk. Native retains only
+    // resident sections rather than a full-height ViewArea, so a single global
+    // section layer can omit shorter columns entirely. Use each column's
+    // outermost visible, drawable, traversal-ready resident section as its
+    // equivalent entry point. An empty resident section is not a sufficient
+    // seed: sparse native retention can leave the visible surface separated
+    // from it by non-frustum records, so the graph could never reach the first
+    // section that actually paints the column.
+    let mut starts_by_column = BTreeMap::<(i32, i32), RenderSectionKey>::new();
+    for key in records.keys().copied().filter(|key| {
+        frustum_keys.contains(key)
+            && records
+                .get(key)
+                .is_some_and(|record| record.traversal_ready && record.drawable)
+    }) {
+        starts_by_column
+            .entry((key.chunk_x, key.chunk_z))
+            .and_modify(|current| {
+                let is_better = if seed_from_above {
+                    key.section_y > current.section_y
+                } else {
+                    key.section_y < current.section_y
+                };
+                if is_better {
+                    *current = key;
+                }
+            })
+            .or_insert(key);
+    }
+    let mut starts = starts_by_column.into_values().collect::<Vec<_>>();
     starts.sort_by(|a, b| {
         let a_distance = render_section_center(*a).distance_squared(camera_position);
         let b_distance = render_section_center(*b).distance_squared(camera_position);
@@ -4424,6 +4439,97 @@ mod tests {
         assert_eq!(stats.drawn_section_count, 2);
         assert_eq!(stats.graph_culled_section_count, 1);
         assert_eq!(stats.graph_culled_index_count, 6);
+    }
+
+    #[test]
+    fn outside_seed_enters_each_visible_column_at_its_own_top_section() {
+        let sections = vec![
+            fake_section(
+                RenderSectionKey::new(-1, 1, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(0, 3, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(1, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let prepared = prepared_records_for_sections(&sections);
+        let empty_above_short_column = RenderSectionKey::new(1, 2, 0);
+        let mut prepared = prepared;
+        prepared.records.insert(
+            empty_above_short_column,
+            TexturedSectionCullingRecord {
+                index_count: 0,
+                visibility: VisibilitySet::all_visible(),
+                drawable: false,
+                traversal_ready: true,
+            },
+        );
+        let frustum_keys = prepared.records.keys().copied().collect();
+
+        let starts = outside_retained_section_start_keys(
+            &prepared.records,
+            &frustum_keys,
+            Vec3::new(8.0, 128.0, 8.0),
+        );
+
+        assert_eq!(starts.len(), 3);
+        assert!(!starts.contains(&empty_above_short_column));
+        assert_eq!(
+            starts.into_iter().collect::<BTreeSet<_>>(),
+            sections
+                .into_iter()
+                .map(|section| section.key)
+                .collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[test]
+    fn empty_sparse_camera_section_falls_back_to_visible_column_surfaces() {
+        let camera_key = RenderSectionKey::new(0, 12, 0);
+        let surface_keys = [
+            RenderSectionKey::new(-1, 4, 0),
+            RenderSectionKey::new(0, 4, 0),
+            RenderSectionKey::new(1, 3, 0),
+        ];
+        let mut records = surface_keys
+            .into_iter()
+            .map(|key| {
+                (
+                    key,
+                    TexturedSectionCullingRecord {
+                        index_count: 6,
+                        visibility: VisibilitySet::all_visible(),
+                        drawable: true,
+                        traversal_ready: true,
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        records.insert(
+            camera_key,
+            TexturedSectionCullingRecord {
+                index_count: 0,
+                visibility: VisibilitySet::all_visible(),
+                drawable: false,
+                traversal_ready: true,
+            },
+        );
+        let frustum_keys = records.keys().copied().collect();
+
+        let starts = traversal_start_keys(&records, &frustum_keys, Vec3::new(8.0, 200.0, 8.0));
+
+        assert_eq!(
+            starts.into_iter().collect::<BTreeSet<_>>(),
+            surface_keys.into_iter().collect::<BTreeSet<_>>()
+        );
     }
 
     #[test]

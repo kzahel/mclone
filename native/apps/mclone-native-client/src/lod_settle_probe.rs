@@ -242,8 +242,8 @@ impl LodSettleScript {
                         ],
                         target: [center_x, FLY_UP_TARGET_Y, center_z],
                     },
-                    expected: LodSettleExpectation::FailD1D2,
-                    coverage_probe: None,
+                    expected: LodSettleExpectation::Pass,
+                    coverage_probe: Some(LodCoverageProbe { plane_y: 64.0 }),
                     matches_pixels: None,
                     lod_assertions: Vec::new(),
                     mutation: None,
@@ -624,6 +624,8 @@ pub(crate) fn run_lod_settle_probe(
             "centerChunk": { "x": options.scene.chunk_x, "z": options.scene.chunk_z },
             "renderDistance": options.scene.render_distance,
             "farLodRange": options.scene.far_lod.extra_radius_chunks,
+            "farLodDetail": format!("{:?}", options.scene.far_lod.detail_mode),
+            "cullCoveredLodBuilds": options.scene.far_lod.normal_terrain_culling,
             "sectionOcclusion": options.render_options.section_occlusion_culling,
             "width": loop_report.width,
             "height": loop_report.height,
@@ -1016,8 +1018,10 @@ fn fixture_json(
 ) -> serde_json::Value {
     let coherence_failures = settle_coherence_failures(observation);
     let culled_but_suppressed = observation.snapshot.culled_but_suppressed_chunks();
-    let observed_d1_d2 = !culled_but_suppressed.is_empty();
-    let observes_d1_d2 = observation.expected == LodSettleExpectation::FailD1D2;
+    // A wholly graph-culled in-frustum column is a coverage defect only in the
+    // explicit unoccluded/top-down probe. An angled gameplay view can
+    // legitimately occlude a paintable column behind nearer real terrain.
+    let observed_d1_d2 = observation.coverage_probe.is_some() && !culled_but_suppressed.is_empty();
     let (lod_assertions, lod_assertion_failures) = lod_assertion_results(observation);
     let lod_assertions_matched = lod_assertion_failures.is_empty();
     let (far_lod_state, far_lod_state_failures) = far_lod_state_result(observation);
@@ -1026,15 +1030,11 @@ fn fixture_json(
         .coverage
         .as_ref()
         .is_none_or(|coverage| coverage.projected_columns > 0 && coverage.masked_pixels > 0);
-    let observed_sky = pixel_analysis
-        .coverage
-        .as_ref()
-        .is_some_and(|coverage| !coverage.sky_columns.is_empty());
     let coverage_matched = pixel_analysis.coverage.as_ref().is_none_or(|_| {
         coverage_sampled
             && match observation.expected {
-                LodSettleExpectation::Pass => !observed_sky,
-                LodSettleExpectation::FailD1D2 => observed_sky,
+                LodSettleExpectation::Pass => !observed_d1_d2,
+                LodSettleExpectation::FailD1D2 => observed_d1_d2,
             }
     });
     let determinism_matched = pixel_analysis
@@ -1049,9 +1049,7 @@ fn fixture_json(
         "fail:lod-assertion"
     } else if !determinism_matched {
         "fail:pixel-determinism"
-    } else if observation.expected == LodSettleExpectation::Pass && observed_sky {
-        "fail:c2-sky"
-    } else if observes_d1_d2 && observed_d1_d2 {
+    } else if observed_d1_d2 {
         "fail:d1-d2"
     } else {
         "pass"
@@ -1064,7 +1062,7 @@ fn fixture_json(
         && match observation.expected {
             // Slice 1B defined the spawn fixture as the set-coherence canary;
             // pixel/coverage completeness becomes a pass condition in 1C2.
-            LodSettleExpectation::Pass => true,
+            LodSettleExpectation::Pass => !observed_d1_d2,
             LodSettleExpectation::FailD1D2 => observed_d1_d2,
         };
     let mut assertion_failures = coherence_failures.clone();
@@ -1072,17 +1070,6 @@ fn fixture_json(
     assertion_failures.extend(lod_assertion_failures);
     if !coverage_sampled {
         assertion_failures.push("C2: coverage probe projected no columns".to_owned());
-    }
-    if let Some(coverage) = pixel_analysis
-        .coverage
-        .as_ref()
-        .filter(|coverage| !coverage.sky_columns.is_empty())
-    {
-        assertion_failures.push(format!(
-            "C2: {} pixels inside the projected coverage footprint hit the sky clear color across {} columns",
-            coverage.sky_pixel_count,
-            coverage.sky_columns.len(),
-        ));
     }
     if let Some(determinism) = pixel_analysis
         .determinism
@@ -1094,7 +1081,7 @@ fn fixture_json(
             determinism.mismatch_count, determinism.reference
         ));
     }
-    if observes_d1_d2 && observed_d1_d2 {
+    if observed_d1_d2 {
         assertion_failures.push(format!(
             "D1/D2: {} traversal-ready suppressed columns were not painted",
             culled_but_suppressed.len()
@@ -1127,8 +1114,9 @@ fn fixture_json(
             "projectedColumns": coverage.projected_columns,
             "maskedPixels": coverage.masked_pixels,
             "skyClearRgba": coverage.sky_rgba,
-            "skyPixelCount": coverage.sky_pixel_count,
-            "skyColumns": chunk_positions_json(&coverage.sky_columns),
+            "clearColorPixelCount": coverage.sky_pixel_count,
+            "clearColorColumns": chunk_positions_json(&coverage.sky_columns),
+            "clearColorIsCoverageEvidence": false,
         })),
         "pixelDeterminism": pixel_analysis.determinism.as_ref().map(|determinism| serde_json::json!({
             "reference": determinism.reference,
@@ -1158,7 +1146,7 @@ fn fixture_json(
         "coherenceFailures": coherence_failures,
         "assertionFailures": assertion_failures,
         "budgetPanel": observation.budget_panel,
-        "ledger": if observes_d1_d2 || !matched_expectation { ledger_json(&observation.snapshot) } else { serde_json::Value::Null },
+        "ledger": if observed_d1_d2 || !matched_expectation { ledger_json(&observation.snapshot) } else { serde_json::Value::Null },
     })
 }
 
@@ -1198,18 +1186,28 @@ fn settle_coherence_failures(observation: &FixtureObservation) -> Vec<String> {
     for (label, actual) in [
         ("resident", &producer.resident_tiles),
         ("uploaded", &producer.uploaded_tiles),
-        ("visible", &producer.visible_tiles),
     ] {
         let missing = desired.difference(actual).count();
         if missing != 0 {
             failures.push(format!("{missing} desired tiles are not {label}"));
         }
     }
-    if producer.visible_tiles != desired {
+    let expected_visible = desired
+        .iter()
+        .copied()
+        .filter(|tile| {
+            !observation
+                .snapshot
+                .runtime
+                .suppressed_chunks
+                .contains(&tile.chunk)
+        })
+        .collect::<BTreeSet<_>>();
+    if producer.visible_tiles != expected_visible {
         failures.push(format!(
-            "visible tile set differs from desired: visible={} desired={}",
+            "visible tile set differs from unsuppressed desired: visible={} expected={}",
             producer.visible_tiles.len(),
-            desired.len()
+            expected_visible.len()
         ));
     }
     if observation.summary.drawn_section_count == 0
@@ -1316,6 +1314,48 @@ mod tests {
     }
 
     #[test]
+    fn coherence_allows_desired_prebuild_hidden_by_real_terrain() {
+        let pos = ChunkPos::new(1, 2);
+        let tile = LodTileKey::new(pos, 1);
+        let mut producer = FarTerrainLodSettleSnapshot::default();
+        producer.desired_tiles.insert(pos, 1);
+        producer.resident_tiles.insert(tile);
+        producer.uploaded_tiles.insert(tile);
+        let snapshot = FarLodSettleSnapshot {
+            runtime: FarLodRuntimeSettleSnapshot {
+                producer,
+                suppressed_chunks: BTreeSet::from([pos]),
+                ..FarLodRuntimeSettleSnapshot::default()
+            },
+            ..FarLodSettleSnapshot::default()
+        };
+        let observation = FixtureObservation {
+            name: SPAWN_FIXTURE.to_owned(),
+            expected: LodSettleExpectation::Pass,
+            warmup: OffscreenWarmupReport::default(),
+            summary: mclone_app_runtime::frame_render::FullFrameRenderSummary {
+                drawn_section_count: 1,
+                ..Default::default()
+            },
+            render_view: mclone_render::chunk::ChunkCamera::overview_for_chunk(0, 0)
+                .render_view(960, 960),
+            snapshot,
+            pending_stream_work: 0,
+            budget_panel: mclone_diagnostics::BudgetDecisionPanelReport::default(),
+            lod_counters: LodReplacementCounters::default(),
+            coverage_probe: None,
+            matches_pixels: None,
+            lod_assertions: Vec::new(),
+            mutation: None,
+            expected_far_lod_state: None,
+            actual_far_lod_config: FarTerrainLodConfig::enabled()
+                .with_normal_terrain_culling(false),
+        };
+
+        assert!(settle_coherence_failures(&observation).is_empty());
+    }
+
+    #[test]
     fn d1_d2_classifier_excludes_off_frustum_suppression() {
         let pos = ChunkPos::new(0, 0);
         let mut snapshot = FarLodSettleSnapshot::default();
@@ -1352,7 +1392,7 @@ mod tests {
         script.validate().unwrap();
         assert_eq!(script.schema, 2);
         assert_eq!(script.waypoints.len(), 4);
-        assert_eq!(script.waypoints[1].expected, LodSettleExpectation::FailD1D2);
+        assert_eq!(script.waypoints[1].expected, LodSettleExpectation::Pass);
         assert_eq!(script.waypoints[1].coverage_probe.unwrap().plane_y, 64.0);
         assert_eq!(
             script.waypoints[3].matches_pixels.as_deref(),
@@ -1456,6 +1496,7 @@ mod tests {
     fn schema_one_remains_valid_but_rejects_schema_two_assertions() {
         let mut script = LodSettleScript::default_for_scene(&crate::cli::SceneOptions::default());
         script.schema = 1;
+        script.waypoints[1].coverage_probe = None;
         script.validate().unwrap();
 
         script.waypoints[1].coverage_probe = Some(LodCoverageProbe { plane_y: 64.0 });

@@ -14,8 +14,11 @@ Interactive testing then exposed forbidden real/LOD co-rendering, so final LOD
 visibility now has a release-active mutual-exclusion assertion. At user
 direction, Slice 3's product chooser also landed
 ahead of the remaining Slice 2 fixes: Auto / fixed 4 / fixed 8 / fixed 16 are
-now directly testable in Graphics. Interactive evaluation is next; D1/D2
-remain open. This
+now directly testable in Graphics. Interactive evaluation then opened the
+coverage-correctness goal. D1 is fixed: an empty retained camera section can
+no longer strand the sparse visibility graph, and the high fixture paints
+81/81 real columns with no culled-but-suppressed rows. D2 and depth-backed
+coverage validation remain open. This
 tactical owns the far-LOD product-hardening series: a settle-state validation
 harness, the coverage-gap correctness burn-down, and the user-facing LOD
 detail modes (auto / 4 / 8 / 16, debug 1 / 2), plus residency/perf polish. It
@@ -95,17 +98,24 @@ Numbered so slices, fixtures, and commits can reference them. "Confirmed"
 means the mechanism is proven by code reading; the Slice 1 harness converts
 each to a reproducible red fixture before its fix lands in Slice 2.
 
-### D1 — Real terrain graph-culled from high altitude (primary void source)
+### D1 — Real terrain graph-culled from high altitude (fixed 2026-07-11)
 
-When the camera rises above all resident render sections, the occlusion
-traversal fallback (`mclone-render/src/chunk.rs::traversal_start_keys`,
-`outside_retained_section_start_keys`) seeds the visibility BFS **only from
-resident sections at the single highest section layer** (`max_section_y`) that
-are in-frustum and traversal-ready. Columns whose tops sit below that layer,
-or that are not connected to a seed through resident+ready+visible sections,
-are never reached — they are graph-culled and draw nothing, even though they
-are loaded, compiled, and directly visible from above. This is a render
-correctness bug independent of LOD; LOD makes it obvious because of D2.
+At the pinned Y=200 view, native retained the empty section containing the
+camera and marked it traversal-ready. `traversal_start_keys` therefore used it
+as the sole BFS seed. Minecraft's full-height `ViewArea` has continuous empty
+neighbors down to the visible surface; native's sparse resident graph does not.
+Whole loaded, compiled, directly visible columns were consequently unreachable.
+
+The fix accepts the containing camera section as a sole seed only when it is
+drawable. Otherwise the sparse adaptation enters each in-frustum column at its
+own outermost drawable, traversal-ready resident section (top from above,
+bottom from below), retaining graph culling below those surfaces. The pinned
+high fixture changed from 78/81 to 81/81 painted columns, zero
+culled-but-suppressed columns, and 187 rather than 173 drawn sections. The
+remaining 165 pixels equal to the clear color are not accepted as coverage
+evidence: review showed that rendered water/surface color can be confounded
+with clear RGB. The probe reports those matches as non-evidence until depth or
+an explicit coverage attachment replaces the color oracle.
 
 ### D2 — LOD suppression predicate is a superset of what actually paints
 
@@ -193,8 +203,9 @@ builds and queued uploads) sustained for the stability window
   equality with the producer's view.
 - **C2 — Coverage completeness.** At settle, every column within the far-LOD
   outer radius is painted: it has drawn real-section geometry or a visible
-  LOD tile. From an unoccluded viewpoint (top-down fixture), no in-coverage
-  column may render as sky.
+  LOD tile. From an unoccluded viewpoint (top-down fixture), an explicit depth
+  or representation attachment must prove that no in-coverage sample remains
+  at clear depth. RGB equality with the sky color is not coverage evidence.
 - **C3 — Set coherence.** At settle: every desired tile is resident, uploaded,
   and visible unless suppressed; nothing is pending, inflight, or queued;
   `visible ∪ suppressed == desired`; per-level visible counts match the band
@@ -294,8 +305,8 @@ reproduce D1/D2 before any fix exists.
 - **Validated script contract landed.** `--lod-settle-script <path.json>`
   accepts schema-1 scripts containing any 1–64 ordered `spawn-surface` or
   explicit eye/target waypoints. Schema version, unknown fields, safe unique
-  names, finite coordinates, nondegenerate look vectors, and pinned `pass` /
-  `fail-d1-d2` expectations are rejected before GPU startup. Omitting the flag
+  names, finite coordinates, nondegenerate look vectors, and pinned expectation
+  values are rejected before GPU startup. Omitting the flag
   preserves the built-in Slice 1B pair.
 - **Arbitrary waypoint runner landed.** Every waypoint commits its camera,
   repeats both the 1×1 and full-output stable gates, captures a name-derived
@@ -319,22 +330,24 @@ reproduce D1/D2 before any fix exists.
   scripts remain accepted. Coverage is restricted to explicit near-vertical
   look-down cameras. Pixel references must name an earlier waypoint with the
   identical camera pose.
-- **Coverage image probe (C2) landed.** For a top-down waypoint, the runner
+- **Coverage image probe (C2) landed, then invalidated as a correctness
+  oracle.** For a top-down waypoint, the runner
   reverse-projects every capture pixel onto the configured world plane, masks
-  it by the exact loaded-or-LOD-desired chunk set, and asserts that no masked
-  pixel equals the transformed sky clear RGBA. This footprint test is stronger
-  than the initially proposed center sample and directly detects small voids.
+  it by the exact loaded-or-LOD-desired chunk set. Its original assertion that
+  a masked pixel equal to transformed sky-clear RGBA is a void is unsound:
+  rendered water/surface color can collide with the clear color. Color matches
+  are now diagnostic-only and marked non-evidence; C2 needs depth or an
+  explicit representation attachment.
 - **Revisit determinism landed.** `matchesPixels` performs exact whole-frame
   RGBA comparison (`count_pixel_mismatches`) after settle, without golden
   files. The checked-in smoke is now a four-waypoint high→spawn→high revisit
   around the original spawn/high pair.
-- **Pinned evidence.** Both high captures report 113 projected columns and
-  the same 165 sky pixels across seven coverage columns, while retaining the
-  three-column D1/D2 ledger signature. The revisit differs by zero pixels from
-  the first high capture. All four fixtures matched, closed with zero pending
-  work, and their 960×960 PNGs were inspected. Focused tests cover schema-1
-  compatibility, schema-2 reference validation, coverage masking, and
-  pixel-granular mismatch counting.
+- **Pinned evidence.** Both high captures report 113 projected columns and the
+  same 165 clear-color matches across seven coverage columns; these are no
+  longer called sky gaps. The revisit differs by zero pixels from the first
+  high capture. After D1, both high ledgers paint 81/81 columns with no D1 rows.
+  Focused tests cover schema-1 compatibility, schema-2 reference validation,
+  coverage masking, and pixel-granular mismatch counting.
 
 #### Slice 1C2b1 — Movement and band-transition matrix (complete 2026-07-11)
 
@@ -409,11 +422,15 @@ traversal-ready real chunks in both local and remote service paths. Focused
 tests prove a one-chunk overlap panics and a disjoint frame passes. No new probe
 schema or fixture framework was added.
 
-- **D1:** fix the outside-retained traversal seeding so a camera above the
-  world seeds from the visible top surface per column (or disables graph cull
-  when no valid seed layer covers the frustum), restoring drawn real terrain
-  from altitude. This is a render fix with value independent of LOD; validate
-  with a far-LOD-off altitude fixture too.
+- **D1 (complete):** sparse empty camera records fall back to the visible top
+  surface per column rather than becoming the sole traversal seed. Renderer
+  tests pin variable-height columns and the empty-camera case; the high settle
+  ledger is 81/81 with zero D1 rows. A far-LOD-off altitude regression remains
+  useful when the broader movement lane lands.
+- **Harness correction (complete):** settle mode now pins enabled/range without
+  erasing parsed detail/build-culling policy, reports both fields, and defines
+  visible coherence as unsuppressed desired tiles. Prebuilt tiles hidden by
+  real terrain remain required resident/uploaded but are correctly not visible.
 - **D2 / C4:** change the suppression input from traversal-ready columns to a
   view-independent painted-capable predicate (column has uploaded, drawable
   real sections), applied consistently to desired-set carving and the
@@ -433,7 +450,8 @@ schema or fixture framework was added.
   equivalent rest rule); keep the oscillation tests green.
 - **D6:** close band-boundary cracks (skirt/drop-face coverage for coarser
   neighbors, include diagonal neighbor dirtying if required); validate with a
-  band-boundary capture fixture and the C2 probe along boundary rings.
+  band-boundary fixture and explicit depth/representation coverage along the
+  boundary rings.
 - **D7:** replacement admission skips (defers) capped replacements instead of
   breaking the loop, so fresh coverage keeps building; add a skip-reason
   counter.

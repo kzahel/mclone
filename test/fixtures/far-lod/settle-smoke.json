@@ -19,7 +19,7 @@
       "coverageProbe": {
         "planeY": 64.0
       },
-      "expected": "fail-d1-d2"
+      "expected": "pass"
     },
     {
       "name": "rd4-range6-spawn-revisit",
@@ -39,7 +39,7 @@
         "planeY": 64.0
       },
       "matchesPixels": "rd4-range6-fly-up-high",
-      "expected": "fail-d1-d2"
+      "expected": "pass"
     }
   ]
 }

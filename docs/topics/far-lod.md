@@ -5,7 +5,62 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11 (Tactical 172 detail chooser landed early).
+Last reconciled: 2026-07-11 (coverage-correctness goal active).
+
+## Coverage Correctness Goal
+
+Active goal, opened from interactive evidence on 2026-07-11: eliminate
+persistent chunk-aligned and annular holes anywhere inside configured terrain
+coverage after streaming settles, then bound the same failure during sustained
+movement. Preserve the release-active invariant that real and synthetic
+terrain never render for the same chunk in one frame.
+
+The acceptance contract is representation-based rather than queue-based. For
+every expected in-range column, a settled frame must select exactly one
+painted representation:
+
+```text
+painted real terrain XOR visible far LOD
+```
+
+`pending_stream_work == 0`, desired/resident count equality, and an uploaded
+tile are supporting lifecycle facts; none proves that a column painted. A
+missing column must be classified at its first failing frame as undesired,
+pending, inflight, resident-only, upload-queued, unpublished, or suppressed
+without painted real replacement. Fix the owner named by that state instead
+of adding another independent ticket or scheduler.
+
+Architecture direction:
+
+- keep normal terrain authoritative and Far LOD presentation-only;
+- keep the shared compile worker/admission substrate and bounded resident-tile
+  lifecycle;
+- make sparse native section traversal preserve Minecraft's full-height
+  `ViewArea` visibility semantics;
+- base real-over-LOD arbitration on one explicit painted-capable contract, not
+  a convenient loaded/readiness proxy;
+- prebuild under real terrain when useful, but never let build omission decide
+  whether the final frame has coverage;
+- validate a stationary teleport first, then a deterministic smooth path that
+  records missing-column count and age without inventing a parallel movement
+  or generation system.
+
+First evidence under the active goal: the existing high-view fixture reached
+zero pending work while its color probe reported 165 pixels equal to the sky
+clear color across seven coverage columns. Interactive review established that
+color equality is not a trustworthy hole oracle—water and other rendered
+surfaces can be visually or numerically confounded with the clear color. The
+settle executable had also overwritten parsed detail
+and covered-build-culling policy, and its coherence check incorrectly required
+prebuilt-but-suppressed tiles to be visible. Those are harness contract defects,
+not reasons to expand its schema. A renderer trace then found the concrete D1
+mechanism: at Y=200 the sparse cache retained the empty camera section and
+treated it as the sole traversal seed. Switching empty sparse camera sections
+to per-column outermost visible drawable seeds changed the high ledger from
+78/81 to 81/81 painted columns and removed all three
+culled-but-suppressed columns. The broader goal remains open until an explicit
+depth/coverage attachment replaces color inference and a smooth movement path
+can classify any genuine missing representation.
 
 ## Current State
 
@@ -19,13 +74,17 @@ desktop offscreen, Quest 3, and all three production browser lanes.
 
 Known broken in real sessions: coverage gaps. Flying up after spawn shows
 concentric blue-void rings between drawn real terrain and the LOD bands (user
-captures 2026-07-11). Confirmed mechanisms are ledgered as D1–D8 in
+captures 2026-07-11), and later movement testing captured large rectangular
+empty areas among otherwise complete real and synthetic terrain. Confirmed
+mechanisms are ledgered as D1–D8 in
 [tactical 172](../tactical/172-far-lod-settle-contract-and-detail-modes.md);
 the two load-bearing ones:
 
-- **D1:** with the camera above all resident sections, the occlusion-traversal
-  fallback seeds only the highest resident section layer, graph-culling loaded
-  visible real terrain (`mclone-render/src/chunk.rs::traversal_start_keys`).
+- **D1 (fixed in the active coverage goal):** a retained but empty camera
+  section was accepted as the sole occlusion seed even when the sparse native
+  graph had no continuous path down to every visible surface. Empty sparse
+  camera records now fall back to the outermost visible drawable section in
+  each column (`mclone-render/src/chunk.rs::traversal_start_keys`).
 - **D2:** LOD suppression uses traversal-ready columns — a strict superset of
   what actually paints — so culled-but-ready columns get neither real terrain
   nor a LOD tile, and `suppressed_without_replacement` cannot see it.
@@ -64,8 +123,9 @@ z-fighting. Final visible LOD tiles are now asserted disjoint from traversal-
 ready real chunks—a superset of chunks eligible for a real draw—in both local
 and remote runtime services. Any overlap panics in release builds with the
 chunk coordinate. The build-culling option can no longer bypass render-time
-suppression. D1/D2 still require a real coverage fix, but that fix may never
-trade a void for co-rendered representations.
+suppression. The active coverage goal fixed D1 without weakening this rule;
+D2 arbitration and any later boundary work may never trade a void for
+co-rendered representations.
 
 At user direction, the Slice 3 product chooser landed ahead of those remaining
 fixes so it can be evaluated interactively. Graphics now cycles **LOD Detail**
@@ -121,10 +181,10 @@ exclusion.
   three-column D1/D2 result match with zero pending work; both captures were
   inspected.
 - Landed (172 Slice 1C2a): schema-2 `coverageProbe` / `matchesPixels`
-  assertions with schema-1 compatibility. Both high captures pin 165
-  sky-clear pixels inside the projected coverage footprint across seven
-  columns; the A→B→A revisit is pixel-identical and every waypoint has zero
-  pending work. All four captures were inspected.
+  fields with schema-1 compatibility. The A→B→A exact-pixel revisit remains a
+  determinism check. The original clear-color-equals-gap assertion is retired:
+  its 165 matching pixels can include rendered water/surface color and do not
+  prove missing geometry. Every waypoint still closes with zero pending work.
 - Landed (172 Slice 1C2b1): schema-3 desired-level assertions plus a
   five-waypoint movement fixture. The anchor remains level 3 across the
   one-chunk/hysteresis guard, flips to level 1 at crossing, then leaves the
@@ -153,14 +213,25 @@ exclusion.
   coordinator always suppresses visible LOD under traversal-ready real chunks,
   and a release-active assertion panics if an overlapping tile survives final
   admission. The supplied z-fighting capture is the motivating evidence.
+- Landed in the active coverage goal: sparse empty camera sections no longer
+  become sole visibility-graph seeds. The high fixture moved from 78/81 to
+  81/81 painted real columns and its three culled-but-suppressed ledger rows
+  disappeared. The settle executable now preserves parsed detail/build-culling
+  policy, reports it, and treats desired prebuild hidden behind real terrain as
+  coherent. Clear-color matches remain reportable diagnostics but are marked
+  explicitly as non-evidence; the fixed high/revisit fixtures now pass on
+  structural painted-coverage and lifecycle facts.
 
 ## Recommended Next Direction
 
-Continue evaluating Auto/4/8/16 interactively, including movement and covered-
-build culling, with any real/LOD co-render now treated as an immediate crash.
-Use concrete observations from that session to choose the next fix; D1/D2
-remain the known coverage priority. Then continue tactical 172's correctness
-burn-down (Slice 2) and residency/perf polish
+Continue the active coverage goal by replacing RGB inference with a readable
+depth or explicit real/LOD coverage attachment. Then add a deterministic smooth
+path that freezes and dumps the exact lifecycle row on the first genuinely
+uncovered in-range sample. D2 arbitration and D6 boundary coverage remain
+code-audit priorities; lifecycle/scheduler changes
+must be justified by a missing column classified in those states. Then
+continue tactical 172's remaining correctness burn-down (Slice 2) and
+residency/perf polish
 (Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real
 LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:
 tactical 171's thread ledger.

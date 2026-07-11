@@ -1552,7 +1552,10 @@ impl Cli {
                     bail!("--lod-settle-probe applies only to local integrated worlds");
                 }
                 scene.render_distance = 4;
-                scene.far_lod = FarTerrainLodConfig::enabled().with_extra_radius_chunks(6);
+                // Pin the fixture's enabled/radius dimensions without erasing
+                // explicitly parsed detail and covered-build-culling policy.
+                scene.far_lod.enabled = true;
+                scene.far_lod.extra_radius_chunks = 6;
                 scene.day_time_override = Some(6000);
                 scene.freeze_time = true;
                 scene.debug_passive_showcase = false;
