@@ -2340,6 +2340,7 @@ impl GameUiHost {
             | GameUiAction::ApplyAssetPacks
             | GameUiAction::ToggleFullbright
             | GameUiAction::ToggleFarLod
+            | GameUiAction::ToggleFarLodNormalTerrainCulling
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
@@ -2552,6 +2553,7 @@ const UI_V2_OPTIONS_CAT_MOVEMENT: UiWidgetId = UiWidgetId(126);
 const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
 const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
 const UI_V2_OPTIONS_ASSET_PACKS: UiWidgetId = UiWidgetId(129);
+const UI_V2_OPTIONS_FAR_LOD_NORMAL_TERRAIN_CULLING: UiWidgetId = UiWidgetId(130);
 const UI_V2_ASSET_PACK_ROW_BASE: u64 = 1300;
 const UI_V2_ASSET_PACK_CANCEL: UiWidgetId = UiWidgetId(1310);
 const UI_V2_ASSET_PACK_APPLY: UiWidgetId = UiWidgetId(1311);
@@ -3024,7 +3026,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
 /// the row list twice.
 const fn options_category_row_count(category: GameOptionsCategory) -> usize {
     match category {
-        GameOptionsCategory::Graphics => 6,
+        GameOptionsCategory::Graphics => 7,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::Debug => 4,
@@ -3131,6 +3133,17 @@ fn options_category_rows(
                 18.0,
                 UiWidget::checkbox(UI_V2_OPTIONS_FAR_LOD, ph, "Far LOD", state.far_lod_enabled)
                     .action(GameUiAction::ToggleFarLod),
+            ),
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_FAR_LOD_NORMAL_TERRAIN_CULLING,
+                    ph,
+                    "Cull LOD Behind Terrain",
+                    state.far_lod_normal_terrain_culling,
+                )
+                .enabled(state.far_lod_enabled)
+                .action(GameUiAction::ToggleFarLodNormalTerrainCulling),
             ),
             (
                 20.0,

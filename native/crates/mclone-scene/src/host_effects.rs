@@ -30,6 +30,7 @@ pub trait ClientExperienceSettingsHost {
     fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()>;
     fn set_fullbright(&mut self, enabled: bool) -> Result<()>;
     fn set_far_lod(&mut self, enabled: bool, extra_radius_chunks: u32) -> Result<()>;
+    fn set_far_lod_normal_terrain_culling(&mut self, enabled: bool) -> Result<()>;
     fn clear_far_lod(&mut self) -> Result<()>;
     fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()>;
     fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()>;
@@ -76,6 +77,9 @@ where
                 enabled,
                 extra_radius_chunks,
             } => target.set_far_lod(enabled, extra_radius_chunks)?,
+            ClientExperienceSettingEffect::SetFarLodNormalTerrainCulling(enabled) => {
+                target.set_far_lod_normal_terrain_culling(enabled)?;
+            }
             ClientExperienceSettingEffect::ClearFarLod => target.clear_far_lod()?,
             ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
                 target.set_player_collision_box_visible(visible)?;
@@ -202,6 +206,7 @@ mod tests {
         record_method!(set_section_occlusion_culling(enabled: bool));
         record_method!(set_fullbright(enabled: bool));
         record_method!(set_far_lod(enabled: bool, extra_radius_chunks: u32));
+        record_method!(set_far_lod_normal_terrain_culling(enabled: bool));
         record_method!(clear_far_lod());
         record_method!(set_player_collision_box_visible(visible: bool));
         record_method!(set_first_person_player_visible(visible: bool));

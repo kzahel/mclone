@@ -447,6 +447,50 @@ fn options_disabled_far_lod_range_is_not_hit() {
 }
 
 #[test]
+fn options_far_lod_culling_toggle_follows_far_lod_availability() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+
+    surface.set_render_state(GameUiRenderState {
+        far_lod_enabled: false,
+        ..GameUiRenderState::default()
+    });
+    let culling = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_FAR_LOD_NORMAL_TERRAIN_CULLING)
+        .expect("far lod culling row")
+        .rect;
+    assert!(surface.pointer_down(point_in(culling), surface.render_state));
+    assert_eq!(
+        surface
+            .pointer_up(point_in(culling), surface.render_state)
+            .1,
+        None
+    );
+
+    surface.set_render_state(GameUiRenderState {
+        far_lod_enabled: true,
+        ..GameUiRenderState::default()
+    });
+    let culling = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_FAR_LOD_NORMAL_TERRAIN_CULLING)
+        .expect("far lod culling row")
+        .rect;
+    assert!(surface.pointer_down(point_in(culling), surface.render_state));
+    assert_eq!(
+        surface
+            .pointer_up(point_in(culling), surface.render_state)
+            .1,
+        Some(GameUiAction::ToggleFarLodNormalTerrainCulling)
+    );
+}
+
+#[test]
 fn options_render_distance_slider_uses_committed_rect() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::OptionsCategory {

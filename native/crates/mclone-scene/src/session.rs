@@ -1846,6 +1846,15 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         Ok(())
     }
 
+    fn set_far_lod_normal_terrain_culling(&mut self, enabled: bool) -> Result<()> {
+        self.scene.far_lod = self.scene.far_lod.with_normal_terrain_culling(enabled);
+        log::info!(
+            "XR far LOD normal-terrain culling {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Ok(())
+    }
+
     fn clear_far_lod(&mut self) -> Result<()> {
         if let Some(runtime) = &mut self.runtime {
             runtime.clear_far_lod();

@@ -1246,7 +1246,13 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         )?;
         self.far_lod_cache
             .drain_render_uploads(upload_budget, &mut self.render_compile_dispatcher);
-        let visible = self.resolve_lod_coverage(&normal_terrain_chunks);
+        let no_normal_terrain_chunks = BTreeSet::new();
+        let normal_drawable = if config.normal_terrain_culling {
+            &normal_terrain_chunks
+        } else {
+            &no_normal_terrain_chunks
+        };
+        let visible = self.resolve_lod_coverage(normal_drawable);
         Ok(Some(self.far_lod_cache.prepare_render_update(&visible)))
     }
 
@@ -2905,9 +2911,15 @@ where
             .drawable_lod_tiles()
             .map(LodTileAvailability::synthetic)
             .collect();
+        let no_normal_terrain_chunks = BTreeSet::new();
+        let normal_drawable = if config.normal_terrain_culling {
+            &normal_terrain_chunks
+        } else {
+            &no_normal_terrain_chunks
+        };
         let visible = self
             .lod_coverage
-            .resolve(&normal_terrain_chunks, &normal_loaded, synthetic)
+            .resolve(normal_drawable, &normal_loaded, synthetic)
             .visible_lod_tiles;
         Ok(Some(self.far_lod_cache.prepare_render_update(&visible)))
     }

@@ -5,7 +5,7 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11 (Tactical 172 Slice 1 complete).
+Last reconciled: 2026-07-11 (Tactical 172 Slice 2 diagnostic A/B control).
 
 ## Current State
 
@@ -51,6 +51,17 @@ completing the 14-waypoint Slice 1 harness;
 Slice 2 next burns down the defect ledger before detail modes and residency
 polish.
 
+Slice 2 has begun with an explicit A/B control rather than more harness
+expansion. The Graphics menu's default-on **Cull LOD Behind Terrain** option
+(also `--far-lod-normal-terrain-culling true|false`) controls whether ready
+normal-terrain columns carve and suppress the synthetic desired set. Disabled,
+LOD is deliberately generated and rendered through the whole configured
+radius, including underneath real terrain. Inspected high angled captures
+showed the large culling-on void filled when this control was off, confirming
+normal-terrain suppression as a major contributor. The uncull view has coarse
+overlap and seam artifacts and remains diagnostic-only; D1/D2 still require a
+real correctness fix.
+
 ## Ownership
 
 - Producer/cache, band policy, coordinator, prewarm:
@@ -63,7 +74,8 @@ polish.
 - Budget families: `mclone-frame-budget` panel via
   `mclone-scene/src/render_admission.rs` (`lod_grant`).
 - Config/CLI/UI: `FarTerrainLodConfig` (`far_lod.rs`), shared `--far-lod`
-  (`startup_args.rs`), Options checkbox + range slider (`mclone-ui`).
+  and `--far-lod-normal-terrain-culling` (`startup_args.rs`), Options Far LOD,
+  culling, and range controls (`mclone-ui`).
 
 ## Contract
 
@@ -109,10 +121,19 @@ no silent caps, bounded steady state.
   `native:lod-settle:probe`. The full lane runs 14 waypoints across three
   scripts; all matched with zero pending work. Every far-LOD change must run
   the fast smoke lane and cite per-fixture results.
+- Landed (172 Slice 2 diagnostic): shared normal-terrain culling config/action/
+  effect/UI path plus a reproducible startup flag. Producer coverage tests
+  prove culling-off retains ready real-terrain chunks in the desired set;
+  inspected Graphics-menu and high-angle culling on/off captures prove the
+  switch reaches pixels. Default culling and far-LOD-off captures remain
+  unchanged. The permanent settle smoke matched on rerun after one late-work
+  flake on its final revisit.
 
 ## Recommended Next Direction
 
-Follow tactical 172 in order: correctness burn-down (Slice 2), detail modes
+Fix D1/D2 next, using the interactive culling A/B control to confirm the real
+session outcome and the existing fly-up probe only as a regression. Then
+continue tactical 172's correctness burn-down (Slice 2), detail modes
 (Slice 3), residency/perf polish
 (Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real
 LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:

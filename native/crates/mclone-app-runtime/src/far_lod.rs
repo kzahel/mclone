@@ -228,6 +228,10 @@ pub struct FarTerrainLodSettleSnapshot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FarTerrainLodConfig {
     pub enabled: bool,
+    /// Whether normal terrain coverage removes overlapping far-LOD tiles.
+    /// Disable this only as a diagnostic A/B mode: real and synthetic terrain
+    /// will both draw where their coverage overlaps.
+    pub normal_terrain_culling: bool,
     pub start_margin_chunks: u32,
     pub extra_radius_chunks: u32,
     pub sample_spacing_blocks: u32,
@@ -237,6 +241,7 @@ impl FarTerrainLodConfig {
     pub const fn disabled() -> Self {
         Self {
             enabled: false,
+            normal_terrain_culling: true,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
             sample_spacing_blocks: DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS,
@@ -246,6 +251,7 @@ impl FarTerrainLodConfig {
     pub const fn enabled() -> Self {
         Self {
             enabled: true,
+            normal_terrain_culling: true,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
             sample_spacing_blocks: DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS,
@@ -260,9 +266,15 @@ impl FarTerrainLodConfig {
         self
     }
 
+    pub const fn with_normal_terrain_culling(mut self, enabled: bool) -> Self {
+        self.normal_terrain_culling = enabled;
+        self
+    }
+
     fn normalized(self) -> Self {
         Self {
             enabled: self.enabled,
+            normal_terrain_culling: self.normal_terrain_culling,
             start_margin_chunks: self.start_margin_chunks,
             extra_radius_chunks: self.extra_radius_chunks.clamp(
                 MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
@@ -344,6 +356,7 @@ impl StartupLodPrewarmConfig {
     pub fn far_lod_config(&self) -> FarTerrainLodConfig {
         FarTerrainLodConfig {
             enabled: true,
+            normal_terrain_culling: true,
             start_margin_chunks: DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS,
             extra_radius_chunks: self.extra_chunks,
             sample_spacing_blocks: self.sample_spacing_blocks,
@@ -537,6 +550,7 @@ struct FarTerrainLodBuildKey {
     start_margin_chunks: u32,
     extra_radius_chunks: u32,
     sample_spacing_blocks: u32,
+    normal_terrain_culling: bool,
     normal_chunk_hash: u64,
 }
 
@@ -564,6 +578,7 @@ impl FarTerrainLodSourceKey {
             start_margin_chunks: 0,
             extra_radius_chunks: 1,
             sample_spacing_blocks: self.sample_spacing_blocks,
+            normal_terrain_culling: false,
             normal_chunk_hash: 0,
         }
     }
@@ -585,7 +600,12 @@ impl FarTerrainLodBuildKey {
             start_margin_chunks: config.start_margin_chunks,
             extra_radius_chunks: config.extra_radius_chunks,
             sample_spacing_blocks: config.sample_spacing_blocks,
-            normal_chunk_hash: normal_terrain_chunk_hash(normal_terrain_chunks),
+            normal_terrain_culling: config.normal_terrain_culling,
+            normal_chunk_hash: if config.normal_terrain_culling {
+                normal_terrain_chunk_hash(normal_terrain_chunks)
+            } else {
+                0
+            },
         }
     }
 }
@@ -598,7 +618,13 @@ enum FarTerrainNormalCoverage<'a> {
 }
 
 impl<'a> FarTerrainNormalCoverage<'a> {
-    fn new(normal_terrain_chunks: Option<&'a BTreeSet<ChunkPos>>) -> Self {
+    fn new(
+        normal_terrain_culling: bool,
+        normal_terrain_chunks: Option<&'a BTreeSet<ChunkPos>>,
+    ) -> Self {
+        if !normal_terrain_culling {
+            return Self::NoNormalChunks;
+        }
         match normal_terrain_chunks {
             Some(chunks) if !chunks.is_empty() => Self::ReadyChunks(chunks),
             _ => Self::Radius,
@@ -1403,7 +1429,8 @@ fn far_lod_chunk_positions(
     normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
 ) -> VecDeque<ChunkPos> {
     let (_, outer_chunk_radius) = far_lod_chunk_radii(key);
-    let normal_coverage = FarTerrainNormalCoverage::new(normal_terrain_chunks);
+    let normal_coverage =
+        FarTerrainNormalCoverage::new(key.normal_terrain_culling, normal_terrain_chunks);
     let outer = outer_chunk_radius as i32;
     let mut positions = Vec::new();
     for dz in -outer..=outer {
@@ -1508,6 +1535,7 @@ fn build_far_terrain_lod_tile(key: FarTerrainLodBuildKey, pos: ChunkPos) -> FarT
             key.seed,
             FarTerrainLodConfig {
                 enabled: true,
+                normal_terrain_culling: true,
                 start_margin_chunks: 0,
                 extra_radius_chunks: 1,
                 sample_spacing_blocks: key.sample_spacing_blocks,
@@ -2487,6 +2515,25 @@ mod tests {
         assert!(positions.contains(&missing_inside_render_distance));
         assert!(!positions.contains(&covered_inside_render_distance));
         assert!(positions.contains(&first_outer_lod_chunk));
+    }
+
+    #[test]
+    fn disabling_normal_terrain_culling_keeps_covered_chunks_desired() {
+        let config = FarTerrainLodConfig::enabled()
+            .with_extra_radius_chunks(1)
+            .with_normal_terrain_culling(false);
+        let center = ChunkPos::new(0, 0);
+        let ready_chunks = (-2..=2)
+            .flat_map(|z| (-2..=2).map(move |x| ChunkPos::new(x, z)))
+            .collect::<BTreeSet<_>>();
+        let key = FarTerrainLodBuildKey::new(12345, center, 2, config, Some(&ready_chunks));
+
+        let positions = far_lod_chunk_positions(key, Some(&ready_chunks));
+
+        assert_eq!(positions.len(), 49);
+        assert!(positions.contains(&center));
+        assert!(positions.contains(&ChunkPos::new(2, 0)));
+        assert!(positions.contains(&ChunkPos::new(3, 0)));
     }
 
     #[test]

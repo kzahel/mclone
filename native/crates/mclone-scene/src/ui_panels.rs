@@ -595,6 +595,7 @@ impl McloneSceneHost {
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
             far_lod_enabled: self.scene.far_lod.enabled,
+            far_lod_normal_terrain_culling: self.scene.far_lod.normal_terrain_culling,
             far_lod_range_chunks: self.scene.far_lod.extra_radius_chunks as i32,
             min_far_lod_range_chunks: MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             max_far_lod_range_chunks: MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,

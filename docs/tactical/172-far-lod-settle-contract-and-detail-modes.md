@@ -8,7 +8,9 @@ also complete. Slice 1C2a (coverage pixels and revisit determinism) is
 complete; Slice 1C2b (the movement/toggle/range matrix and full probe lane) is
 split for execution: Slice 1C2b1 (movement and band transitions) is complete,
 and Slice 1C2b2 (toggle/range mutations and the full probe lane) is complete.
-The Slice 1 harness is complete; Slice 2 correctness burn-down is next. This
+The Slice 1 harness is complete. Slice 2 has started with a default-on
+normal-terrain-culling A/B control that confirms suppression is a major cause
+of the fly-up void; the D1/D2 correctness fix is next. This
 tactical owns the far-LOD product-hardening series: a settle-state validation
 harness, the coverage-gap correctness burn-down, and the user-facing LOD
 detail modes (auto / 4 / 8 / 16, debug 1 / 2), plus residency/perf polish. It
@@ -382,6 +384,19 @@ antidote to fire-and-forget LOD work.
 
 Drive every ledger defect to fixed-or-explicitly-deferred, each with its
 fixture flipping red→green in the same change.
+
+The first Slice 2 change is diagnostic rather than a fix. Graphics now exposes
+**Cull LOD Behind Terrain** (default on), backed by the shared
+`FarTerrainLodConfig::normal_terrain_culling` policy and the
+`--far-lod-normal-terrain-culling true|false` startup argument. Turning it off
+removes normal-terrain readiness from both desired-tile generation and LOD
+visibility suppression, deliberately drawing synthetic LOD underneath real
+terrain. An inspected high, angled A/B capture showed the culling-on scene's
+large empty region filled by synthetic terrain when culling was off. The
+unculled view also shows coarse overlap and existing seam holes, so this is a
+validation control, not a candidate default or a substitute for D1/D2. No new
+probe schema or fixture framework was added; focused producer/UI/policy tests
+guard the option.
 
 - **D1:** fix the outside-retained traversal seeding so a camera above the
   world seeds from the visible top surface per column (or disables graph cull
