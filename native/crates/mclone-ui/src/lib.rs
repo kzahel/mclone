@@ -717,6 +717,8 @@ pub struct Slider {
 }
 
 impl Slider {
+    const TRACK_INSET: f32 = 8.0;
+
     pub fn new(id: WidgetId, rect: Rect, label: impl Into<String>, value: f32) -> Self {
         Self {
             id,
@@ -737,7 +739,17 @@ impl Slider {
     }
 
     pub fn value_from_point(&self, point: Point) -> f32 {
-        ((point.x - self.rect.x) / self.rect.width.max(1.0)).clamp(0.0, 1.0)
+        let track = self.track_rect();
+        ((point.x - track.x) / track.width.max(1.0)).clamp(0.0, 1.0)
+    }
+
+    fn track_rect(&self) -> Rect {
+        Rect::new(
+            self.rect.x + Self::TRACK_INSET,
+            self.rect.bottom() - 6.0,
+            (self.rect.width - Self::TRACK_INSET * 2.0).max(0.0),
+            2.0,
+        )
     }
 
     pub fn render(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
@@ -758,12 +770,7 @@ impl Slider {
         Button::new(self.id, self.rect, &self.label)
             .enabled(self.enabled)
             .render_with_text_mode(draw, font, interaction, atlas_text);
-        let track = Rect::new(
-            self.rect.x + 8.0,
-            self.rect.bottom() - 6.0,
-            self.rect.width - 16.0,
-            2.0,
-        );
+        let track = self.track_rect();
         draw.fill(track, Color::rgba(15, 18, 18, 230));
         let knob_x = track.x + self.value * track.width;
         draw.fill(

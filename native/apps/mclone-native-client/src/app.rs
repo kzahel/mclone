@@ -926,9 +926,6 @@ impl ChunkApp {
         if result.scene.clear_gameplay_input {
             self.clear_flat_gameplay_input();
         }
-        if !result.scene.preserve_pointer_state {
-            self.last_cursor = None;
-        }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
     }

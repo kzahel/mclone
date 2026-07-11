@@ -119,7 +119,6 @@ pub struct MonoUiActionOutcome {
     pub scene_replaced: bool,
     pub session_start_requested: bool,
     pub clear_gameplay_input: bool,
-    pub preserve_pointer_state: bool,
 }
 
 /// How the mono view topology presents UI.
@@ -734,10 +733,7 @@ impl McloneSceneHost {
         H: HostEffects,
     {
         if self.local_startup.is_some() && !matches!(action, GameUiAction::Quit) {
-            return Ok(MonoUiActionOutcome {
-                preserve_pointer_state: true,
-                ..MonoUiActionOutcome::default()
-            });
+            return Ok(MonoUiActionOutcome::default());
         }
 
         if from_pointer_click
@@ -801,19 +797,6 @@ impl McloneSceneHost {
             scene_replaced,
             session_start_requested: starts_session,
             clear_gameplay_input: true,
-            preserve_pointer_state: matches!(
-                action,
-                GameUiAction::SetRenderDistance(_)
-                    | GameUiAction::SetFlySpeed(_)
-                    | GameUiAction::SetMovementSpeed(_)
-                    | GameUiAction::SetCollisionMode(_)
-                    | GameUiAction::SetTravelAssistMode(_)
-                    | GameUiAction::SetTurnMode(_)
-                    | GameUiAction::SetXrTurnMode(_)
-                    | GameUiAction::SetTouchLookSensitivity(_)
-                    | GameUiAction::SetTouchControlsMode(_)
-                    | GameUiAction::SetServerSimulationCadence(_)
-            ),
         })
     }
 

@@ -36,6 +36,33 @@ fn gui_scale_matches_minecraft_style_thresholds() {
 }
 
 #[test]
+fn slider_value_mapping_uses_the_rendered_track_geometry() {
+    let slider = Slider::new(
+        WidgetId(1),
+        Rect::new(20.0, 10.0, 100.0, 20.0),
+        "Value",
+        0.5,
+    );
+    let track = slider.track_rect();
+
+    assert_eq!(slider.value_from_point(Point { x: track.x, y: 0.0 }), 0.0);
+    assert_eq!(
+        slider.value_from_point(Point {
+            x: track.center_x(),
+            y: 0.0,
+        }),
+        0.5,
+    );
+    assert_eq!(
+        slider.value_from_point(Point {
+            x: track.right(),
+            y: 0.0,
+        }),
+        1.0,
+    );
+}
+
+#[test]
 fn draw_list_intersects_clip_stack() {
     let mut draw = GuiDrawList::new();
     draw.push_clip(Rect::new(10.0, 10.0, 20.0, 20.0));

@@ -504,6 +504,96 @@ fn options_movement_speed_slider_uses_committed_rect_for_drag() {
     assert_eq!(action, Some(GameUiAction::SetMovementSpeed(8.0)));
 }
 
+fn assert_slider_capture_lifecycle(
+    screen: UiScreenId,
+    state: GameUiRenderState,
+    id: UiWidgetId,
+    expected_max: GameUiAction,
+) {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(screen));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    surface.set_render_state(state);
+    let rect = surface.layout().widget(id).expect("slider row").rect;
+    let press = point_in(rect);
+    let past_max = Point {
+        x: rect.right() + 20.0,
+        y: rect.bottom() + 20.0,
+    };
+
+    assert!(surface.pointer_down(press, state));
+    assert_eq!(surface.captured, Some(id));
+    assert_eq!(surface.pointer_move(past_max, state).1, Some(expected_max));
+    assert_eq!(surface.pointer_up(past_max, state).1, Some(expected_max));
+    assert_eq!(surface.captured, None);
+
+    // Moving after release must not continue to drive the former widget.
+    assert_eq!(surface.pointer_move(press, state).1, None);
+}
+
+#[test]
+fn every_options_slider_retains_capture_through_release() {
+    let graphics = UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    };
+    let graphics_state = GameUiRenderState {
+        far_lod_enabled: true,
+        render_distance: 8,
+        min_render_distance: 2,
+        max_render_distance: 16,
+        far_lod_range_chunks: 8,
+        min_far_lod_range_chunks: 4,
+        max_far_lod_range_chunks: 32,
+        ..GameUiRenderState::default()
+    };
+    assert_slider_capture_lifecycle(
+        graphics,
+        graphics_state,
+        UI_V2_OPTIONS_FAR_LOD_RANGE,
+        GameUiAction::SetFarLodRange(32),
+    );
+    assert_slider_capture_lifecycle(
+        graphics,
+        graphics_state,
+        UI_V2_OPTIONS_RADIUS,
+        GameUiAction::SetRenderDistance(16),
+    );
+
+    let movement = UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Movement,
+    };
+    let movement_state = GameUiRenderState {
+        fly_speed_multiplier: 1.0,
+        min_fly_speed_multiplier: 0.125,
+        max_fly_speed_multiplier: 8.0,
+        movement_speed_multiplier: 1.0,
+        min_movement_speed_multiplier: 0.125,
+        max_movement_speed_multiplier: 8.0,
+        touch_settings: Some(GameTouchSettings::new(2.0, 1.0, 5.0)),
+        ..GameUiRenderState::default()
+    };
+    assert_slider_capture_lifecycle(
+        movement,
+        movement_state,
+        UI_V2_OPTIONS_FLY_SPEED,
+        GameUiAction::SetFlySpeed(8.0),
+    );
+    assert_slider_capture_lifecycle(
+        movement,
+        movement_state,
+        UI_V2_OPTIONS_MOVEMENT_SPEED,
+        GameUiAction::SetMovementSpeed(8.0),
+    );
+    assert_slider_capture_lifecycle(
+        movement,
+        movement_state,
+        UI_V2_OPTIONS_TOUCH_LOOK,
+        GameUiAction::SetTouchLookSensitivity(5.0),
+    );
+}
+
 #[test]
 fn help_layout_retains_shortcut_rows_and_back_button() {
     let mut surface = UiSurface::new();

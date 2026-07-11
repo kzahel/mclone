@@ -629,13 +629,18 @@ impl UiSurface {
         let hovered = self.layout.hit_test(point);
         let captured = self.captured;
         self.set_interaction_state(Some(point), hovered, None);
-        let action = match (captured, self.hovered) {
-            (Some(captured), Some(released)) if captured == released => self
-                .layout
-                .widget(captured)
-                .and_then(|widget| self.action_for_widget(widget, point)),
-            _ => None,
-        };
+        let action = captured
+            .and_then(|captured| self.layout.widget(captured))
+            .and_then(|widget| match widget.action {
+                // A slider owns the pointer from press through release, even
+                // when the pointer leaves its visible bounds. The final value
+                // is clamped by the widget's own track geometry.
+                Some(UiWidgetAction::Slider(_)) => self.action_for_widget(widget, point),
+                Some(UiWidgetAction::Static(_)) if self.hovered == Some(widget.id) => {
+                    self.action_for_widget(widget, point)
+                }
+                _ => None,
+            });
         (true, action)
     }
 
