@@ -52,6 +52,11 @@ series implements the same concern, normally reuse the document slug in its
   cutover evidence, the subsequently proven browser Far LOD producer, and the
   exact remaining four-row browser feature ledger. Macro sequencing now lives
   in Tactical 171 — Convergence And Parity Closeout.
+- [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
+  resident-tile producer mechanism, the settle contract, the confirmed
+  coverage-defect ledger (altitude graph-cull voids, suppression/painted
+  mismatch), planned settle-state validation lanes, and the tactical 172 →
+  162 ordering.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`performance.md`](performance.md): native performance priority queue,

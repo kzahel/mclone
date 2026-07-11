@@ -19,3 +19,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   scene host
 - `convergence-and-parity-closeout` — cross-tactical resident-tile, LOD,
   browser feature-parity, asset follow-up, and documentation burn-down
+- `far-lod-settle-contract` — tactical 172 settle-state harness, coverage
+  correctness burn-down, and LOD detail modes

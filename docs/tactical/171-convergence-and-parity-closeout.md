@@ -5,8 +5,11 @@ step of Milestone E have landed. The
 native and browser scene-host convergence series and runtime asset-pack
 implementation are closed, and production browser far LOD now uses the shared
 resident-tile worker/runtime/render path. Tactical 166 — Shared Resident-Tile
-Substrate is complete through Slice 4 multi-level rings. Tactical 162 —
-Real-Chunk LOD Reduction Draft Slice 4 is next. This parent owns the cross-thread
+Substrate is complete through Slice 4 multi-level rings. Tactical 172 — Far
+LOD Settle Contract And Detail Modes is next on the LOD thread (settle-state
+validation harness, coverage-gap correctness burn-down, then detail modes);
+Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4 resumes after 172
+Slice 2's gates are green. This parent owns the cross-thread
 burn-down and final status reconciliation, not duplicate implementations of
 its child tacticals.
 
@@ -67,9 +70,10 @@ explicit re-scope:
 | Native live host convergence | Tactical 168 — Unified Native Scene Host | **Closed.** Slices 0–10 landed. | Do not recreate app-local frame/session/render policy. |
 | Runtime asset-pack selection and replacement | Tactical 169 — Runtime Asset Pack Selection | **Closed.** Slices 0–6 landed across native and web. | Track optional worker/bootstrap gaps below without reopening the tactical. |
 | Browser host adoption | Tactical 170 — Web Scene-Host Adoption | **Closed.** Slices 0–6 landed; the old browser orchestrator is deleted. | Burn down only the exact web feature exceptions below. |
-| Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Ready to resume after landed Slices 0A–2.** Its proposed Slice 3 was superseded and the shared substrate prerequisite is complete. | Implement Slice 4 as the first reduced-real producer. |
+| Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Paused at Slice 4.** Slices 0A–2 landed; Slice 3 was superseded by the substrate; Slice 4 is re-scoped behind Tactical 172's harness and correctness gates. | Resume Slice 4 (first reduced-real producer) after Tactical 172 Slice 2 is green. |
 | Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Closed. Slices 1–4 and the production browser proof landed.** | Preserve its worker, admission, residency, transition, seam, and render gates for later producers. |
-| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D and the first Milestone E step landed.** | Coordinate Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4 next; close only after the milestones below and explicit deferred decisions are recorded. |
+| Far LOD settle contract, correctness, and detail modes | Tactical 172 — Far LOD Settle Contract And Detail Modes | **Planned; supersedes Tactical 121's open ends and holds the LOD thread.** Confirmed coverage defects are ledgered (D1–D8), including altitude graph-cull voids and the suppression/painted mismatch. | Land Slice 1 (settle-state harness with the pinned fly-up repro), then Slice 2 (correctness burn-down), then detail modes and residency polish. |
+| Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active; Milestones A–D and the first Milestone E step landed.** | Coordinate Tactical 172 — Far LOD Settle Contract And Detail Modes next; resume Tactical 162 Slice 4 after 172 Slice 2; close only after the milestones below and explicit deferred decisions are recorded. |
 
 ## Asset-Pack Follow-Ups That Do Not Reopen The Closed Series
 

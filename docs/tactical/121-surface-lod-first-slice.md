@@ -1,7 +1,14 @@
 # 121: Surface LOD First Slice
 
-Status: active; Slices A and B landed. Shared native Rust renderer/runtime
-workstream.
+Status: closed 2026-07-11. Slices A and B landed; the prototype proved its
+value and evolved past this tactical's scope. The remaining follow-up slices
+are dispositioned below: C (scheduling/diagnostics) and D (XR/Quest
+measurement) landed through Tactical 166 — Shared Resident-Tile Substrate
+(shared workers, budget families, counters, and Quest far-LOD gates); E
+(persistence decision) stays deferred to Tactical 162 — Real-Chunk LOD
+Reduction Draft Slice 6. Product hardening (settle contract, coverage
+correctness, detail modes) now lives in Tactical 172 — Far LOD Settle
+Contract And Detail Modes. Shared native Rust renderer/runtime workstream.
 
 ## Purpose
 
@@ -120,25 +127,25 @@ unless pop-in testing proves we need a hidden overlap/blend margin.
 ### B. Replace Placeholder Surface Source
 
 Status: landed first real-surface version and the blocky heightfield revision.
-Remaining work is to avoid rebuilding from scratch on every center/range key
-change, add texture-atlas material mapping instead of vertex-only colors,
-improve color/material selection, and decide whether feature whitelists such as
-trees are worth adding.
+The rebuild-from-scratch concern was resolved by retained tiles (Tactical 162
+Slice 0A) and the shared substrate (Tactical 166). Texture-atlas material
+mapping and feature whitelists remain unscheduled ideas; if picked up they
+belong to the current LOD tactical of record, not here.
 
 ### C. Runtime Scheduling And Diagnostics
 
-Expose mesh vertex/index counts, pending chunk count, update cadence, and build
-time in diagnostics. The cache now has a per-frame generation budget, but this
-still needs user-facing/profiling visibility.
+Status: landed via Tactical 166 — shared worker admission, `LodBuildAdmission`
+/ `LodUpload` budget families, and producer/queue/upload counters exposed in
+debug overlays and reports.
 
 ### D. XR And Quest Measurement
 
-Measure fragment cost, pop-in, and frame pacing with normal render distance near
-5 chunks and LOD beginning just outside that range. Do not default-enable until
-Quest headset captures show a product benefit.
+Status: landed via Tactical 166 Slices 3–4 — Quest far-LOD on/off orbit
+comparisons, multiview proofs, and per-frame upload/draw accounting. Default
+enablement remains a product decision tracked by Tactical 172.
 
 ### E. Persistence Decision
 
-Only after the prototype proves value, decide whether to add persistent LOD
-storage. If we do, document the data shape separately from Distant Horizons'
-column/segment implementation so our surface-only constraints stay clear.
+Status: deferred to Tactical 162 Slice 6 (discardable LOD persistence),
+unchanged: decide only after reduced-real semantics, dirtying, and budget
+behavior are stable.
