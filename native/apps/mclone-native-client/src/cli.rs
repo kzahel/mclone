@@ -60,7 +60,6 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--adaptive-render-admission-budget",
     "--cadence",
     "--desktop-xr",
-    "--far-lod",
     "--first-person-player",
     "--frame-accounting",
     "--frame-budget-frames",
@@ -769,7 +768,6 @@ impl Cli {
         let mut xr_debug_ui_screen_explicit = false;
         let mut xr_debug_ui_screen = None;
         let mut rebuild_render_scale = None;
-        let mut far_lod = FarTerrainLodConfig::default();
         let mut startup_lod_prewarm = true;
         let mut adaptive_chunk_publication_budget = None;
         let mut adaptive_render_admission_budget = None;
@@ -1181,13 +1179,6 @@ impl Cli {
                     window_frame_report_frames =
                         parse_window_frame_report_frames_arg(&arg, args.next())?;
                 }
-                "--far-lod" => {
-                    far_lod = if parse_bool_arg("--far-lod", args.next())? {
-                        FarTerrainLodConfig::enabled()
-                    } else {
-                        FarTerrainLodConfig::default()
-                    };
-                }
                 "--startup-lod-prewarm" => {
                     startup_lod_prewarm = parse_bool_arg("--startup-lod-prewarm", args.next())?;
                 }
@@ -1440,7 +1431,6 @@ impl Cli {
         let mut scene = SceneOptions::from_startup_scene(startup_options.scene)?;
         scene.first_person_player_visible = first_person_player_visible;
         scene.simulation_cadence = simulation_cadence;
-        scene.far_lod = far_lod;
         scene.startup_lod_prewarm = startup_lod_prewarm;
         scene.adaptive_chunk_publication_budget =
             adaptive_chunk_publication_budget.unwrap_or(scene.remote_addr.is_none());
