@@ -140,11 +140,14 @@ pub const fn budget_decision_family_label(family: BudgetDecisionFamily) -> &'sta
         BudgetDecisionFamily::CompletedResultAcceptance => "completed-result-acceptance",
         BudgetDecisionFamily::SectionUpload => "section-upload",
         BudgetDecisionFamily::RenderCompileWorkers => "render-compile-workers",
+        BudgetDecisionFamily::LodBuildAdmission => "lod-build-admission",
+        BudgetDecisionFamily::LodUpload => "lod-upload",
     }
 }
 
 pub const fn budget_decision_reason_label(reason: BudgetDecisionReason) -> &'static str {
     match reason {
+        BudgetDecisionReason::InactiveNoProducer => "inactive-no-producer",
         BudgetDecisionReason::ColdStartFloor => "cold-start-floor",
         BudgetDecisionReason::MissingInputFloor => "missing-input-floor",
         BudgetDecisionReason::TargetPeriodChangedFloor => "target-period-changed-floor",

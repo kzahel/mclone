@@ -12,6 +12,15 @@ use serde::{Deserialize, Serialize};
 const TARGET_PERIOD_EPSILON_MS: f64 = 0.001;
 pub const DEFAULT_COST_EWMA_ALPHA: f64 = 0.25;
 
+pub const RENDER_BUDGET_DECISION_FAMILY_ORDER: [BudgetDecisionFamily; 6] = [
+    BudgetDecisionFamily::RenderAdmission,
+    BudgetDecisionFamily::CompletedResultAcceptance,
+    BudgetDecisionFamily::SectionUpload,
+    BudgetDecisionFamily::RenderCompileWorkers,
+    BudgetDecisionFamily::LodBuildAdmission,
+    BudgetDecisionFamily::LodUpload,
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetTelemetryWindow {
@@ -87,6 +96,7 @@ impl BudgetCostEstimates {
             BudgetDecisionFamily::RenderAdmission
             | BudgetDecisionFamily::FeatureJobAdmission
             | BudgetDecisionFamily::RenderCompileWorkers => self.render_admission_scan_ms,
+            BudgetDecisionFamily::LodBuildAdmission | BudgetDecisionFamily::LodUpload => None,
         }
         .map(sanitize_ms)
     }
@@ -144,17 +154,23 @@ impl EwmaCostEstimator {
         let sample = sanitize_ms(elapsed_ms) / f64::from(units);
         let alpha = self.alpha;
         let slot = match family {
-            BudgetDecisionFamily::FeaturePublication => &mut self.estimates.feature_publish_ms,
-            BudgetDecisionFamily::LightPublication => &mut self.estimates.light_publish_ms,
-            BudgetDecisionFamily::CompletedResultAcceptance => {
-                &mut self.estimates.completed_result_accept_ms
+            BudgetDecisionFamily::FeaturePublication => {
+                Some(&mut self.estimates.feature_publish_ms)
             }
-            BudgetDecisionFamily::SectionUpload => &mut self.estimates.section_upload_ms,
+            BudgetDecisionFamily::LightPublication => Some(&mut self.estimates.light_publish_ms),
+            BudgetDecisionFamily::CompletedResultAcceptance => {
+                Some(&mut self.estimates.completed_result_accept_ms)
+            }
+            BudgetDecisionFamily::SectionUpload => Some(&mut self.estimates.section_upload_ms),
             BudgetDecisionFamily::RenderAdmission
             | BudgetDecisionFamily::FeatureJobAdmission
             | BudgetDecisionFamily::RenderCompileWorkers => {
-                &mut self.estimates.render_admission_scan_ms
+                Some(&mut self.estimates.render_admission_scan_ms)
             }
+            BudgetDecisionFamily::LodBuildAdmission | BudgetDecisionFamily::LodUpload => None,
+        };
+        let Some(slot) = slot else {
+            return self.estimates;
         };
         *slot = Some(slot.map_or(sample, |current| current + alpha * (sample - current)));
         self.estimates
@@ -207,6 +223,8 @@ pub struct FamilyBudgetConfig {
     pub floor_pending_units: Option<u32>,
     pub cap_pending_units: Option<u32>,
     pub raise_pending_units: u32,
+    #[serde(default = "active_family_default")]
+    pub producer_active: bool,
 }
 
 impl FamilyBudgetConfig {
@@ -230,6 +248,24 @@ impl FamilyBudgetConfig {
             floor_pending_units: None,
             cap_pending_units: None,
             raise_pending_units: 1,
+            producer_active: true,
+        }
+    }
+
+    pub const fn inert(family: BudgetDecisionFamily, address: BudgetDecisionAddress) -> Self {
+        Self {
+            family,
+            address,
+            floor_units: 0,
+            cap_units: 0,
+            raise_units: 0,
+            floor_period_fraction: 0.0,
+            cap_period_fraction: 0.0,
+            raise_period_fraction: 0.0,
+            floor_pending_units: Some(0),
+            cap_pending_units: Some(0),
+            raise_pending_units: 0,
+            producer_active: false,
         }
     }
 
@@ -240,7 +276,11 @@ impl FamilyBudgetConfig {
     }
 
     fn floor_units(self) -> u32 {
-        self.floor_units.max(1)
+        if self.producer_active {
+            self.floor_units.max(1)
+        } else {
+            0
+        }
     }
 
     fn cap_units(self) -> u32 {
@@ -360,6 +400,18 @@ impl Default for BudgetControllerConfig {
                     0.0,
                     0.0,
                 ),
+                FamilyBudgetConfig::inert(
+                    LodBuildAdmission,
+                    BudgetDecisionAddress::new(
+                        DesktopFlatWinit,
+                        BeforeRender,
+                        RenderSectionAdmission,
+                    ),
+                ),
+                FamilyBudgetConfig::inert(
+                    LodUpload,
+                    BudgetDecisionAddress::new(DesktopFlatWinit, BeforeRender, UploadApply),
+                ),
             ],
         }
     }
@@ -417,6 +469,18 @@ pub fn render_frame_budget_controller_config(
                 4,
                 0.0,
                 0.0,
+            ),
+            FamilyBudgetConfig::inert(
+                LodBuildAdmission,
+                BudgetDecisionAddress::new(
+                    host_kind,
+                    admission_window,
+                    StageId::RenderSectionAdmission,
+                ),
+            ),
+            FamilyBudgetConfig::inert(
+                LodUpload,
+                BudgetDecisionAddress::new(host_kind, admission_window, StageId::UploadApply),
             ),
         ],
     }
@@ -681,7 +745,11 @@ impl BudgetController {
                 .entry(family_config.family)
                 .or_insert_with(|| FamilyState::floor(*family_config));
             let previous_max_units = state.current_units;
-            let reason = if missing_input {
+            let reason = if !family_config.producer_active {
+                state.reset_to_floor(*family_config);
+                state.initialized = true;
+                BudgetDecisionReason::InactiveNoProducer
+            } else if missing_input {
                 state.reset_to_floor(*family_config);
                 state.initialized = true;
                 BudgetDecisionReason::MissingInputFloor
@@ -698,8 +766,12 @@ impl BudgetController {
             } else {
                 state.raise_or_hold(*family_config, self.config.raise_after_clean_windows)
             };
-            let snapshot =
-                input_snapshot(input, target_period_ms.unwrap_or(0.0), family_config.family);
+            let snapshot = input_snapshot(
+                input,
+                target_period_ms.unwrap_or(0.0),
+                family_config.family,
+                family_config.producer_active,
+            );
             decisions.push(BudgetDecisionReport {
                 family: family_config.family,
                 address: family_config.address,
@@ -976,6 +1048,7 @@ fn input_snapshot(
     input: &BudgetControllerInput,
     target_period_ms: f64,
     family: BudgetDecisionFamily,
+    producer_active: bool,
 ) -> BudgetInputSnapshotReport {
     let mut snapshot = BudgetInputSnapshotReport::new(target_period_ms);
     snapshot.host_mode = input.host_mode;
@@ -994,16 +1067,22 @@ fn input_snapshot(
         .sum();
     snapshot.dropped_frames_delta = input.windows.iter().map(|w| w.dropped_frames_delta).sum();
     snapshot.stale_frames_delta = input.windows.iter().map(|w| w.stale_frames_delta).sum();
-    snapshot.queue_depth = input
-        .windows
-        .iter()
-        .map(|w| w.queue_depth)
-        .max()
-        .unwrap_or_default();
-    snapshot.oldest_queue_age_ms =
-        max_option(input.windows.iter().filter_map(|w| w.oldest_queue_age_ms));
-    snapshot.per_unit_cost_ms = input.costs.cost_for(family);
+    if producer_active {
+        snapshot.queue_depth = input
+            .windows
+            .iter()
+            .map(|w| w.queue_depth)
+            .max()
+            .unwrap_or_default();
+        snapshot.oldest_queue_age_ms =
+            max_option(input.windows.iter().filter_map(|w| w.oldest_queue_age_ms));
+        snapshot.per_unit_cost_ms = input.costs.cost_for(family);
+    }
     snapshot
+}
+
+const fn active_family_default() -> bool {
+    true
 }
 
 fn halve_toward_floor(current: u32, floor: u32) -> u32 {
@@ -1340,6 +1419,90 @@ mod tests {
         assert_eq!(workers.address.stage, StageId::CpuMeshCompile);
         assert_eq!(workers.grant.min_units, 1);
         assert_eq!(workers.grant.max_units, 1);
+    }
+
+    #[test]
+    fn render_budget_order_places_inert_lod_after_real_work() {
+        let config = render_frame_budget_controller_config(
+            FrameHostKind::AndroidXrOpenXr,
+            WorkWindow::PostSubmitOverlapSlack,
+        );
+        assert_eq!(
+            config
+                .families
+                .iter()
+                .map(|config| config.family)
+                .collect::<Vec<_>>(),
+            RENDER_BUDGET_DECISION_FAMILY_ORDER
+        );
+
+        let mut controller = BudgetController::new(config);
+        let panel = controller.decide(
+            &clean_input(11.1).with_window(
+                BudgetTelemetryWindow::new(
+                    FrameHostKind::AndroidXrOpenXr,
+                    WorkWindow::PostSubmitOverlapSlack,
+                )
+                .with_queue_age_ms(27, 300.0),
+            ),
+        );
+        for family in [
+            BudgetDecisionFamily::LodBuildAdmission,
+            BudgetDecisionFamily::LodUpload,
+        ] {
+            let lod = decision(&panel, family);
+            assert_eq!(lod.trace.reason, BudgetDecisionReason::InactiveNoProducer);
+            assert_eq!(lod.grant.elapsed_ms, 0.0);
+            assert_eq!(lod.grant.min_units, 0);
+            assert_eq!(lod.grant.max_units, 0);
+            assert_eq!(lod.grant.max_pending_units, Some(0));
+            assert_eq!(lod.trace.input_snapshot.queue_depth, 0);
+            assert_eq!(lod.trace.input_snapshot.oldest_queue_age_ms, None);
+            assert_eq!(lod.trace.input_snapshot.per_unit_cost_ms, None);
+        }
+    }
+
+    #[test]
+    fn inert_lod_families_do_not_change_real_decision_traces() {
+        let config = render_frame_budget_controller_config(
+            FrameHostKind::DesktopFlatWinit,
+            WorkWindow::BeforeRender,
+        );
+        let mut real_only_config = config.clone();
+        real_only_config
+            .families
+            .retain(|family| family.producer_active);
+        let mut with_lod = BudgetController::new(config);
+        let mut real_only = BudgetController::new(real_only_config);
+        let inputs = [
+            clean_input(10.0),
+            clean_input(10.0),
+            clean_input(10.0).with_window(
+                BudgetTelemetryWindow::new(
+                    FrameHostKind::DesktopFlatWinit,
+                    WorkWindow::BeforeRender,
+                )
+                .with_missed_frames(1),
+            ),
+            clean_input(11.1),
+        ];
+
+        for input in inputs {
+            let with_lod_panel = with_lod.decide(&input);
+            let real_only_panel = real_only.decide(&input);
+            let active_decisions = with_lod_panel
+                .decisions
+                .iter()
+                .filter(|decision| {
+                    !matches!(
+                        decision.family,
+                        BudgetDecisionFamily::LodBuildAdmission | BudgetDecisionFamily::LodUpload
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(active_decisions, real_only_panel.decisions);
+        }
     }
 
     #[test]

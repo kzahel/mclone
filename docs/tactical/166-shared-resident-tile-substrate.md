@@ -1,9 +1,10 @@
 # 166: Shared Resident-Tile Substrate (Real Sections + LOD)
 
-Status: active 2026-07-11. Slice 1 landed the behavior-preserving resident-tile
-cache and upload-coordinator extraction with real sections as the level-zero
-producer. Slice 2, shared budgeted admission lanes with inert LOD families, is
-next. Opened after a far-LOD stutter investigation found that far LOD
+Status: active 2026-07-11. Slices 1–2 landed the behavior-preserving
+resident-tile/cache extraction and shared budget vocabulary with real sections
+as the level-zero producer and inert LOD build/upload families. Slice 3, moving
+synthetic far LOD onto that substrate, is next. Opened after a far-LOD stutter
+investigation found that far LOD
 reimplemented a crude, unbudgeted copy of the real-section residency/upload
 pipeline instead of sharing it. This tactical owns the shared substrate; it
 **pauses and re-scopes** Tactical 162 — Real-Chunk LOD Reduction Draft Slice 3+
@@ -501,6 +502,57 @@ Gate:
   variants, panel config, and ordering policy (see Priority And Budget
   tripwire);
 - same real-section perf gate as Slice 1.
+
+Landed evidence (2026-07-11):
+
+- Frame-pipeline schema 9 adds `LodBuildAdmission` and `LodUpload` after the
+  four real render families in the explicit
+  `RENDER_BUDGET_DECISION_FAMILY_ORDER`. Both use the existing controller and
+  panel. While no producer exists, they report `inactive-no-producer`, zero
+  elapsed/unit/pending grants, zero queue depth, and unavailable queue age and
+  cost. No scheduler, queue, worker pool, or producer was added.
+- The production `native:frame-budget:perf` report now serializes the scene
+  host's real final decision panel instead of an empty placeholder. Its fixed
+  240-frame run reported the three scheduler families, four real render
+  families, then the two inert LOD families; it recorded `0` over-budget,
+  `0` over-2x, and `0` accounting-conservation violations. Deterministic
+  controller tests compare the real-family reports with and without the inert
+  rows over cold start, clean growth, frame-miss pressure, and target-period
+  change; every real report is exactly equal.
+- The fixed 960x540 before/final captures both reported `64` resident and `11`
+  drawn sections and are byte-identical with SHA-256
+  `052647136ff313c20bb91216f478772e715fcae48406c4a3262d84e1081151f2`.
+  `/tmp/mclone-t166-s2-final.png` was inspected: textured spruce terrain,
+  foliage, cow, chicken, and sky were clean. The inspected browser smoke
+  captures rendered the production WebGPU canvas and HUD with `64` resident
+  sections.
+- The required RD4 far-LOD-on captures were inspected at both `playable` and
+  `idle` readiness. `/tmp/mclone-t166-s2-far-lod-playable.png` showed the
+  coarse surface shell surrounding the transitioning real-section coverage;
+  `/tmp/mclone-t166-s2-far-lod-idle.png` showed clean real-section replacement,
+  continuous background LOD, and no blank boundary seam. Existing coordinator
+  replacement/counter tests remained green.
+- The full native workspace, focused diagnostics/frame-budget/app-runtime
+  suites, `92/92` shared-scene tests, scene-host purity gate, Wasm build, and
+  browser worker/WebGPU smoke passed. Movement and timedemo smokes passed; the
+  latter rendered 60 frames at `3.811ms` average and `6.891ms` maximum.
+- Comparable frozen-fluid release startup lanes stayed inside the Slice 1
+  spread: RD10 reached full view in `6057.983ms` and quiesced in `6598.687ms`;
+  RD15 reached full view in `11186.835ms` and quiesced in `12163.226ms`. Both
+  recorded `0` over-budget and `0` over-2x frames. A detached same-host run of
+  the pre-slice commit also reproduced the longer non-frozen fluid tail
+  (`49863.597ms` versus final `49654.794ms`), proving that tail was not caused
+  by the inert families.
+- The release Quest APK built and attached Quest 3 per-eye frame-overlap orbit
+  gates passed. RD5 recorded dropped/skipped delta `0/0`, app-work p95
+  `12.339ms`, average headroom `+3.101ms`, `0.1%` over-period, and zero
+  conservation violations. The first RD7 row had a runtime dropped-frame
+  counter anomaly and was rejected under Tactical 150 — Adaptive Frame-Budget
+  Controller's repeat rule; the accepted repeat recorded dropped/skipped delta
+  `0/0`, app-work p95 `12.702ms`, average headroom `+2.605ms`, `0.5%`
+  over-period, and zero conservation violations. Device logs show both LOD
+  families inert with zero grants. Evidence is under
+  `/tmp/mclone-t166-s2-*`; no capture or perf artifact is committed.
 
 ### Slice 3: Far LOD becomes a producer (kills the stutter)
 

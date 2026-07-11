@@ -12,6 +12,8 @@ pub enum BudgetDecisionFamily {
     CompletedResultAcceptance,
     SectionUpload,
     RenderCompileWorkers,
+    LodBuildAdmission,
+    LodUpload,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -43,6 +45,7 @@ impl BudgetDecisionAddress {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BudgetDecisionReason {
+    InactiveNoProducer,
     ColdStartFloor,
     MissingInputFloor,
     TargetPeriodChangedFloor,

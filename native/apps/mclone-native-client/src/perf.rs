@@ -418,6 +418,7 @@ pub(crate) struct FrameBudgetProbeReport {
     initial_index_count: u32,
     headless: mclone_render::headless::HeadlessFrameLoopReport,
     frame_accounting: Option<FrameSummaryReport>,
+    budget_decision_panel: BudgetDecisionPanelReport,
     frames: Vec<FrameBudgetProbeFrameReport>,
 }
 
@@ -1161,7 +1162,7 @@ impl FrameBudgetProbeReport {
             pipeline_frame_accounting.clone(),
             QueuePanelReport::new(Vec::new()),
         )
-        .with_budget_decision_panel(BudgetDecisionPanelReport::empty());
+        .with_budget_decision_panel(self.budget_decision_panel.clone());
         print_frame_accounting_json_field(&frame_pipeline_report, true);
         println!("  \"frame_reports\": [");
         for (index, frame) in self.frames.iter().enumerate() {
@@ -4083,6 +4084,7 @@ pub(crate) fn run_frame_budget_probe(
         .frame_accounting
         .as_ref()
         .map(FrameAccumulator::summary_report);
+    let budget_decision_panel = state.driver.latest_budget_decision_panel();
     Ok(FrameBudgetProbeReport {
         options: options.clone(),
         runtime_setup_ms: state.runtime_setup_ms,
@@ -4094,6 +4096,7 @@ pub(crate) fn run_frame_budget_probe(
         initial_index_count: state.initial_index_count,
         headless,
         frame_accounting,
+        budget_decision_panel,
         frames: frame_reports,
     })
 }

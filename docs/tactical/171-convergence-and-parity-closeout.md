@@ -2,8 +2,8 @@
 
 Status: active coordinating parent 2026-07-11. The native and browser scene-host
 convergence series and runtime asset-pack implementation are closed. Tactical
-166 — Shared Resident-Tile Substrate Slice 1 has landed; its Slice 2 is the next
-implementation step. This parent owns the cross-thread burn-down and final
+166 — Shared Resident-Tile Substrate Slices 1–2 have landed; its Slice 3 is the
+next implementation step. This parent owns the cross-thread burn-down and final
 status reconciliation, not duplicate implementations of its child tacticals.
 
 Topic: `convergence-and-parity-closeout`
@@ -64,7 +64,7 @@ explicit re-scope:
 | Runtime asset-pack selection and replacement | Tactical 169 — Runtime Asset Pack Selection | **Closed.** Slices 0–6 landed across native and web. | Track optional worker/bootstrap gaps below without reopening the tactical. |
 | Browser host adoption | Tactical 170 — Web Scene-Host Adoption | **Closed.** Slices 0–6 landed; the old browser orchestrator is deleted. | Burn down only the exact web feature exceptions below. |
 | Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Paused after landed Slices 0A–2.** Its proposed Slice 3 was superseded. | Resume at Slice 4 only after the shared substrate can host another producer. |
-| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Active. Slice 1 landed.** | Implement Slice 2 next, then Slices 3–4 behind their performance and pixel gates. |
+| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Active. Slices 1–2 landed.** | Implement Slice 3 next, then Slice 4 behind its performance and pixel gates. |
 | Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active.** Initial ledger and stale-doc reconciliation landed with Tactical 166 — Shared Resident-Tile Substrate Slice 1. | Close only after the milestones below and explicit deferred decisions are recorded. |
 
 ## Asset-Pack Follow-Ups That Do Not Reopen The Closed Series
@@ -125,10 +125,10 @@ silently expanding or redefining these five rows.
 
 ### Milestone B — Shared budget vocabulary
 
-- [ ] Implement Tactical 166 — Shared Resident-Tile Substrate Slice 2.
-- [ ] Add inert LOD decision families and ordering to the existing shared
+- [x] Implement Tactical 166 — Shared Resident-Tile Substrate Slice 2.
+- [x] Add inert LOD decision families and ordering to the existing shared
   frame-budget panel without adding another scheduler or queue.
-- [ ] Prove existing real-section decisions and pixels remain unchanged.
+- [x] Prove existing real-section decisions and pixels remain unchanged.
 
 ### Milestone C — Synthetic far LOD onto the substrate
 
@@ -175,9 +175,10 @@ silently expanding or redefining these five rows.
 
 ## Current Next Step
 
-Implement Tactical 166 — Shared Resident-Tile Substrate Slice 2: add the inert
-LOD build/upload decision families and cross-family ordering to the existing
-shared frame-budget panel while preserving every real-section decision and
-pixel result.
+Implement Tactical 166 — Shared Resident-Tile Substrate Slice 3: make synthetic
+far LOD a real producer on the shared worker/admission/residency substrate,
+replace monolithic remesh/re-upload with per-tile region-arena lifecycle, and
+pass the desktop, browser, per-eye, multiview, and Quest movement gates without
+changing the far-LOD-off path.
 
 Topic: convergence-and-parity-closeout
