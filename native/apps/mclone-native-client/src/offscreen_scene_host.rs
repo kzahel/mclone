@@ -291,6 +291,13 @@ impl OffscreenDriver {
         self.last_summary.clone()
     }
 
+    pub(crate) fn far_lod_settle_snapshot(&self) -> Result<mclone_scene::FarLodSettleSnapshot> {
+        let render_view = self.host.mono_render_view(self.size)?;
+        self.host
+            .mono_far_lod_settle_snapshot(render_view)
+            .context("offscreen far LOD settle snapshot requires an active runtime")
+    }
+
     pub(crate) fn captured(&self) -> &[MonoSceneFrameSummary] {
         &self.captured
     }
@@ -592,6 +599,36 @@ impl OffscreenDriver {
         self.drive_to_wait_policy(device, queue, StartupWaitPolicy::Idle)
     }
 
+    /// Re-run the idle gate at the actual capture size. The normal warmup path
+    /// intentionally uses a 1x1 target; probes call this once afterward so the
+    /// first full-size frustum cannot reveal one last unit of stream work.
+    pub(crate) fn drive_until_streamed_at_output_size(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<OffscreenWarmupReport> {
+        let mut stable = 0usize;
+        self.drive_until_with_target_size(
+            device,
+            queue,
+            move |driver, summary| {
+                let camera_position = driver.host.camera_snapshot().eye;
+                let pending = driver.host.pending_stream_work(glam::Vec3::new(
+                    camera_position.x as f32,
+                    camera_position.y as f32,
+                    camera_position.z as f32,
+                ));
+                if pending == 0 && summary.render.drawn_section_count > 0 {
+                    stable += 1;
+                } else {
+                    stable = 0;
+                }
+                stable >= STREAM_STABLE_FRAMES
+            },
+            false,
+        )
+    }
+
     pub(crate) fn drive_until_target_complete(
         &mut self,
         device: &wgpu::Device,
@@ -629,10 +666,22 @@ impl OffscreenDriver {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        ready: impl FnMut(&Self, &MonoSceneFrameSummary) -> bool,
+    ) -> Result<OffscreenWarmupReport> {
+        self.drive_until_with_target_size(device, queue, ready, true)
+    }
+
+    fn drive_until_with_target_size(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         mut ready: impl FnMut(&Self, &MonoSceneFrameSummary) -> bool,
+        shrink_target: bool,
     ) -> Result<OffscreenWarmupReport> {
         let output_size = self.size;
-        self.resize_target(device, [1, 1]);
+        if shrink_target {
+            self.resize_target(device, [1, 1]);
+        }
         let scratch = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("mclone_offscreen_driver_warmup"),
             size: wgpu::Extent3d {
@@ -692,7 +741,9 @@ impl OffscreenDriver {
                 }
             )
         })();
-        self.resize_target(device, output_size);
+        if shrink_target {
+            self.resize_target(device, output_size);
+        }
         result
     }
 

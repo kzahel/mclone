@@ -73,6 +73,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--help",
     "--loading-settle-distances",
     "--loading-settle-perf",
+    "--lod-settle-probe",
     "--menu",
     "--movement-frame-probe",
     "--movement-frame-speed",
@@ -201,6 +202,15 @@ pub(crate) struct TimedemoOptions {
     pub(crate) height: u32,
     pub(crate) frames: usize,
     pub(crate) path_radius_chunks: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LodSettleProbeOptions {
+    pub(crate) directory: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) scene: SceneOptions,
+    pub(crate) render_options: TexturedSectionRenderOptions,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -671,6 +681,9 @@ pub(crate) enum Cli {
     LoadingSettlePerf {
         options: LoadingSettlePerfOptions,
     },
+    LodSettleProbe {
+        options: LodSettleProbeOptions,
+    },
     XrClearSmoke {
         options: XrClearSmokeOptions,
     },
@@ -693,6 +706,7 @@ enum HeadlessMode {
     ActorWalkReview(PathBuf),
     Clear(PathBuf),
     DualView(PathBuf),
+    LodSettleProbe(PathBuf),
     Screenshot(PathBuf),
     XrEmulationScreenshot(PathBuf),
     RendererRebuildSmoke(PathBuf),
@@ -1005,6 +1019,22 @@ impl Cli {
                 "--headless-dual-view-hud" => {
                     headless_dual_view_hud =
                         parse_bool_arg("--headless-dual-view-hud", args.next())?;
+                }
+                "--lod-settle-probe" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--lod-settle-probe requires an output directory")?;
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || startup_streaming_perf
+                        || loading_settle_perf
+                    {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::LodSettleProbe(path))?;
                 }
                 "--screenshot" => {
                     let path = args
@@ -1392,6 +1422,7 @@ impl Cli {
                             | HeadlessMode::ActorReviewSheet(_)
                             | HeadlessMode::ActorWalkReview(_)
                             | HeadlessMode::DualView(_)
+                            | HeadlessMode::LodSettleProbe(_)
                             | HeadlessMode::XrEmulationScreenshot(_)
                             | HeadlessMode::RendererRebuildSmoke(_)
                             | HeadlessMode::TorchLightProbe(_)
@@ -1503,6 +1534,28 @@ impl Cli {
                     hud: headless_dual_view_hud,
                 },
             }),
+            Some(HeadlessMode::LodSettleProbe(directory)) => {
+                if scene.remote_addr.is_some() {
+                    bail!("--lod-settle-probe applies only to local integrated worlds");
+                }
+                scene.render_distance = 4;
+                scene.far_lod = FarTerrainLodConfig::enabled().with_extra_radius_chunks(6);
+                scene.day_time_override = Some(6000);
+                scene.freeze_time = true;
+                scene.debug_passive_showcase = false;
+                scene.adaptive_render_admission_budget = false;
+                let mut render_options = render_options;
+                render_options.section_occlusion_culling = true;
+                Ok(Self::LodSettleProbe {
+                    options: LodSettleProbeOptions {
+                        directory,
+                        width: width.unwrap_or(960),
+                        height: height.unwrap_or(960),
+                        scene,
+                        render_options,
+                    },
+                })
+            }
             Some(HeadlessMode::Screenshot(path)) => Ok(Self::HeadlessScreenshot {
                 options: HeadlessScreenshotOptions {
                     path,
@@ -2079,6 +2132,7 @@ fn print_help() {
           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --xr-emulation-screenshot /tmp/mclone-xr-emulation.png [--width 960] [--height 960] [--xr-emulation-key KeyW] [--xr-emulation-key ArrowLeft] [--xr-emulation-input-frames 8] [scene/render options as --screenshot]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client --lod-settle-probe /tmp/mclone-lod-settle [--width 960] [--height 960] [--seed 12345] [--chunk-x 0] [--chunk-z 0]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--headless-dual-view-hud true|false] [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\

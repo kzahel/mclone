@@ -320,7 +320,18 @@ impl OffscreenFlatClientHost {
         queue: &wgpu::Queue,
         startup_wait: StartupWaitPolicy,
     ) -> Result<()> {
-        self.driver
+        let _ = self.start_scene_with_wait_policy_report(device, queue, startup_wait)?;
+        Ok(())
+    }
+
+    pub(crate) fn start_scene_with_wait_policy_report(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        startup_wait: StartupWaitPolicy,
+    ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
+        let report = self
+            .driver
             .drive_to_wait_policy(device, queue, startup_wait)?;
         if matches!(
             startup_wait,
@@ -329,7 +340,44 @@ impl OffscreenFlatClientHost {
         {
             bail!("offscreen flat client reached readiness without render sections");
         }
-        Ok(())
+        Ok(report)
+    }
+
+    pub(crate) fn drive_until_streamed(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
+        self.driver.drive_until_streamed(device, queue)
+    }
+
+    pub(crate) fn drive_until_streamed_at_output_size(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
+        self.driver
+            .drive_until_streamed_at_output_size(device, queue)
+    }
+
+    pub(crate) fn far_lod_settle_snapshot(&self) -> Result<mclone_scene::FarLodSettleSnapshot> {
+        self.driver.far_lod_settle_snapshot()
+    }
+
+    pub(crate) fn pending_stream_work(&self) -> usize {
+        self.driver.host().pending_stream_work(self.camera.position)
+    }
+
+    pub(crate) fn latest_budget_decision_panel(
+        &self,
+    ) -> mclone_diagnostics::BudgetDecisionPanelReport {
+        self.driver.latest_budget_decision_panel()
+    }
+
+    pub(crate) fn lod_coverage_counters(
+        &self,
+    ) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
+        self.driver.host().lod_coverage_counters()
     }
 
     pub(crate) fn render_frame(
@@ -476,9 +524,26 @@ impl OffscreenFlatClientHost {
         self.driver.set_camera(&self.camera);
     }
 
-    fn set_camera_look_at(&mut self, eye: Vec3, target: Vec3) {
+    pub(crate) fn set_camera_look_at(&mut self, eye: Vec3, target: Vec3) {
         aim_spectator_at(&mut self.camera, eye, target);
         self.driver.set_camera(&self.camera);
+    }
+
+    pub(crate) fn commit_camera(&mut self) -> Result<bool> {
+        self.driver.commit_camera()
+    }
+
+    pub(crate) fn place_camera_above_loaded_surface(&mut self) -> Result<()> {
+        let (world_x, world_z) = self.camera.block_column();
+        let surface_y = self
+            .driver
+            .host()
+            .mono_highest_non_air_block_y_at_world(world_x, world_z)
+            .with_context(|| format!("no loaded spawn surface at ({world_x}, {world_z})"))?;
+        self.camera.place_above_surface(surface_y);
+        self.driver.set_camera(&self.camera);
+        self.driver.commit_camera()?;
+        Ok(())
     }
 }
 

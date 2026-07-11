@@ -9,6 +9,7 @@ use mclone_mesh::RenderSectionKey;
 pub struct FarLodChunkLedgerRow {
     pub loaded: bool,
     pub traversal_ready: bool,
+    pub paintable_in_frustum: bool,
     pub painted: bool,
     pub lod_desired_level: Option<u8>,
     pub lod_resident_levels: BTreeSet<u8>,
@@ -26,6 +27,8 @@ pub struct FarLodChunkLedgerRow {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FarLodSettleSnapshot {
     pub runtime: FarLodRuntimeSettleSnapshot,
+    pub paintable_frustum_sections: BTreeSet<RenderSectionKey>,
+    pub paintable_frustum_chunks: BTreeSet<ChunkPos>,
     pub painted_sections: BTreeSet<RenderSectionKey>,
     pub painted_chunks: BTreeSet<ChunkPos>,
     pub chunks: BTreeMap<ChunkPos, FarLodChunkLedgerRow>,
@@ -34,8 +37,10 @@ pub struct FarLodSettleSnapshot {
 impl FarLodSettleSnapshot {
     pub(crate) fn new(
         runtime: FarLodRuntimeSettleSnapshot,
+        paintable_frustum_sections: BTreeSet<RenderSectionKey>,
         painted_sections: BTreeSet<RenderSectionKey>,
     ) -> Self {
+        let paintable_frustum_chunks = section_chunks(&paintable_frustum_sections);
         let painted_chunks = section_chunks(&painted_sections);
         let traversal_ready_chunks = section_chunks(&runtime.traversal_ready_sections);
         let producer = &runtime.producer;
@@ -44,6 +49,7 @@ impl FarLodSettleSnapshot {
             .iter()
             .copied()
             .chain(traversal_ready_chunks.iter().copied())
+            .chain(paintable_frustum_chunks.iter().copied())
             .chain(painted_chunks.iter().copied())
             .chain(runtime.suppressed_chunks.iter().copied())
             .chain(producer.desired_tiles.keys().copied())
@@ -62,6 +68,7 @@ impl FarLodSettleSnapshot {
                 let row = FarLodChunkLedgerRow {
                     loaded: runtime.loaded_chunks.contains(&pos),
                     traversal_ready: traversal_ready_chunks.contains(&pos),
+                    paintable_in_frustum: paintable_frustum_chunks.contains(&pos),
                     painted: painted_chunks.contains(&pos),
                     lod_desired_level: producer.desired_tiles.get(&pos).copied(),
                     lod_resident_levels: tile_levels(&producer.resident_tiles, pos),
@@ -82,6 +89,8 @@ impl FarLodSettleSnapshot {
             .collect();
         Self {
             runtime,
+            paintable_frustum_sections,
+            paintable_frustum_chunks,
             painted_sections,
             painted_chunks,
             chunks,
@@ -89,12 +98,17 @@ impl FarLodSettleSnapshot {
     }
 
     /// The exact D1/D2 failure signature: a ready, suppression-owning normal
-    /// column that the current render view did not actually paint.
+    /// column with paintable geometry in the frustum that graph traversal did
+    /// not actually paint.
     pub fn culled_but_suppressed_chunks(&self) -> BTreeSet<ChunkPos> {
         self.chunks
             .iter()
             .filter_map(|(pos, row)| {
-                (row.loaded && row.traversal_ready && row.suppressed && !row.painted)
+                (row.loaded
+                    && row.traversal_ready
+                    && row.paintable_in_frustum
+                    && row.suppressed
+                    && !row.painted)
                     .then_some(*pos)
             })
             .collect()
@@ -133,7 +147,11 @@ mod tests {
             .insert(RenderSectionKey::new(pos.x, 5, pos.z));
         runtime.suppressed_chunks.insert(pos);
 
-        let snapshot = FarLodSettleSnapshot::new(runtime, BTreeSet::new());
+        let snapshot = FarLodSettleSnapshot::new(
+            runtime,
+            BTreeSet::from([RenderSectionKey::new(pos.x, 5, pos.z)]),
+            BTreeSet::new(),
+        );
         let row = &snapshot.chunks[&pos];
         assert!(row.loaded);
         assert!(row.traversal_ready);
@@ -166,7 +184,7 @@ mod tests {
         runtime.producer.inflight_builds.insert(level_two);
         runtime.producer.queued_uploads.insert(level_two);
 
-        let snapshot = FarLodSettleSnapshot::new(runtime, BTreeSet::new());
+        let snapshot = FarLodSettleSnapshot::new(runtime, BTreeSet::new(), BTreeSet::new());
         let row = &snapshot.chunks[&pos];
         assert_eq!(row.lod_desired_level, Some(2));
         assert_eq!(row.lod_resident_levels, BTreeSet::from([1, 2]));

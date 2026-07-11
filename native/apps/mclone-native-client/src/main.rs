@@ -12,6 +12,7 @@ mod desktop_scene_host;
 mod desktop_xr;
 mod frame_pacing;
 mod headless;
+mod lod_settle_probe;
 mod offscreen_flat_client;
 mod offscreen_scene_host;
 mod perf;
@@ -41,6 +42,7 @@ use crate::headless::{
     run_headless_screenshot, run_renderer_rebuild_smoke, write_actor_review_sheet,
     write_actor_walk_review, write_headless_dual_view,
 };
+use crate::lod_settle_probe::run_lod_settle_probe;
 use crate::perf::{
     run_frame_budget_probe, run_loading_settle_perf, run_movement_perf_smoke,
     run_startup_streaming_perf, run_timedemo,
@@ -281,6 +283,11 @@ fn main() -> Result<()> {
                 report.remote_actor_walk_animation_distances
             );
             Ok(())
+        }
+        Cli::LodSettleProbe { options } => {
+            let report = run_lod_settle_probe(&options)?;
+            report.print_json()?;
+            report.validate()
         }
         Cli::MovementPerf { options } => {
             let report = run_movement_perf_smoke(&options)?;

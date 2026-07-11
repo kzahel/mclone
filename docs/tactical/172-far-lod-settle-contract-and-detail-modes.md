@@ -1,15 +1,16 @@
 # 172: Far LOD Settle Contract And Detail Modes
 
-Status: active 2026-07-11. Slice 0 (documentation consolidation) and Slice 1A
-(pull-only exact-set accessors plus the per-chunk ledger) are complete. Slice
-1B (first executable offscreen settle probe with the pinned fly-up repro) is
-next. This tactical owns the far-LOD product-hardening series: a settle-state
-validation harness, the coverage-gap correctness burn-down, the user-facing
-LOD detail modes (auto / 4 / 8 / 16, debug 1 / 2), and residency/perf polish.
-It supersedes the remaining open ends of Tactical 121 — Surface LOD First
-Slice and pauses Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4+ until
-its Slice 1–2 gates hold. Macro ordering lives in Tactical 171 — Convergence
-And Parity Closeout.
+Status: active 2026-07-11. Slice 0 (documentation consolidation), Slice 1A
+(pull-only exact-set accessors plus the per-chunk ledger), and Slice 1B (first
+executable offscreen settle probe with the pinned fly-up repro) are complete.
+Slice 1C (generalized scripts, image/determinism probes, fixture matrix, and
+permanent lanes) is next. This tactical owns the far-LOD product-hardening
+series: a settle-state validation harness, the coverage-gap correctness
+burn-down, the user-facing LOD detail modes (auto / 4 / 8 / 16, debug 1 / 2),
+and residency/perf polish. It supersedes the remaining open ends of Tactical
+121 — Surface LOD First Slice and pauses Tactical 162 — Real-Chunk LOD
+Reduction Draft Slice 4+ until its Slice 1–2 gates hold. Macro ordering lives
+in Tactical 171 — Convergence And Parity Closeout.
 
 Topic: `far-lod-settle-contract`
 
@@ -241,19 +242,37 @@ reproduce D1/D2 before any fix exists.
   green. This subsection changes no pixels or frame-path behavior, so no
   capture lane was required.
 
-#### Slice 1B — First executable settle probe (next)
+#### Slice 1B — First executable settle probe (complete 2026-07-11)
 
-- Add the first `mclone-native-client` offscreen settle-probe entry using
-  `OffscreenFlatClientHost` / `OffscreenSceneDriver`, reusing
-  `pending_stream_work` plus `STREAM_STABLE_FRAMES` with a hard timeout.
-- Start with two fixed, small fixtures rather than general script plumbing:
-  RD4 + range 6 spawn-settle (green) and fly-up-high settle (expected red).
-  Failure output must include the Slice 1A ledger and name non-empty
-  `culled_but_suppressed_chunks`, pinning D1/D2 before either fix lands.
-- Emit a structured report to stdout in the `perf.rs` convention and keep any
-  diagnostic capture under `/tmp`.
+- **Executable mode landed.** `mclone-native-client --lod-settle-probe
+  /tmp/mclone-lod-settle` runs on `OffscreenFlatClientHost` /
+  `OffscreenSceneDriver`, reusing `pending_stream_work` plus
+  `STREAM_STABLE_FRAMES`. It repeats the stable gate at full capture size after
+  the normal 1×1 warmup so the first real frustum cannot reveal late work.
+  Timeouts include pending work, the budget/skip panel, and the Slice 1A
+  ledger.
+- **Two fixed fixtures landed.** Both use seed 12345, RD4, range 6, frozen noon,
+  section occlusion on, and 960×960 captures. Spawn-settle is the green
+  set-coherence fixture; fly-up-high is the expected-red D1/D2 pin. The mode
+  exits successfully only when both outcomes match their expectations.
+- **Classifier tightened from first-draw evidence.** The renderer now exposes
+  exact uploaded+traversal-ready sections inside the frustum as well as drawn
+  sections on diagnostic pull. `culled_but_suppressed_chunks` therefore means
+  a paintable in-frustum normal column was wholly graph-culled while still
+  suppressing LOD; ordinary off-screen columns no longer count.
+- **Pinned evidence:** spawn settled with `pending=0`, 360 desired/visible
+  tiles, and no set-coherence failures. The high fixture settled with
+  `pending=0`, 81 paintable-frustum normal columns, 78 painted columns, and
+  exactly 3 D1/D2 culled-but-suppressed columns. It reported 467 frustum real
+  sections, 173 drawn, and 294 graph-culled. Structured stdout plus
+  `lod-settle-report.json`, `spawn-settle.png`, and `fly-up-high.png` were
+  written under `/tmp/mclone-lod-settle-1b`; both PNGs were inspected.
+- **Regression evidence:** native-client 133, renderer 126, and scene 94 tests
+  passed (two intentional renderer GPU ignores); direct web/WASM check passed;
+  `native:desktop-offscreen:smoke` passed and its far-LOD-off capture was
+  inspected unchanged.
 
-#### Slice 1C — Generalized scripts and permanent lanes
+#### Slice 1C — Generalized scripts and permanent lanes (next)
 
 - **Settle probe mode.** A new `mclone-native-client` mode (e.g.
   `--lod-settle-probe --lod-settle-script <path.json>`) on the offscreen GPU

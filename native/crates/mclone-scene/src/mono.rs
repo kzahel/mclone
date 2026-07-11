@@ -262,12 +262,13 @@ impl McloneSceneHost {
     ) -> Option<FarLodSettleSnapshot> {
         let runtime = self.runtime.as_ref()?;
         let render_options = self.effective_render_options(render_view.camera_position);
-        let painted_sections = self
+        let view_sets = self
             .draw
-            .drawn_section_keys_for_view(render_view, render_options);
+            .section_view_set_snapshot(render_view, render_options);
         Some(FarLodSettleSnapshot::new(
             runtime.far_lod_settle_snapshot(render_view.camera_position),
-            painted_sections,
+            view_sets.paintable_frustum_keys,
+            view_sets.drawn_keys,
         ))
     }
 

@@ -482,6 +482,15 @@ pub struct TexturedSectionRenderStats {
     pub graph_culled_index_count: u32,
 }
 
+/// Pull-only exact section sets for one render view. `paintable_frustum_keys`
+/// excludes non-drawable and not-yet-ready records; a column present there but
+/// absent from `drawn_keys` was graph-culled rather than merely off-screen.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TexturedSectionViewSetSnapshot {
+    pub paintable_frustum_keys: BTreeSet<RenderSectionKey>,
+    pub drawn_keys: BTreeSet<RenderSectionKey>,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TexturedSectionRenderPhase {
     #[default]
@@ -2970,21 +2979,37 @@ impl TexturedSectionDrawResources {
     ///
     /// This is a pull-only settle diagnostic. Normal frames retain count-only
     /// summaries and do not clone or store the culling set after encoding.
-    pub fn drawn_section_keys_for_view(
+    pub fn section_view_set_snapshot(
         &self,
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
-    ) -> BTreeSet<RenderSectionKey> {
+    ) -> TexturedSectionViewSetSnapshot {
         let records = self.prepare_render_records();
-        let culling = {
+        let (culling, paintable_frustum_keys) = {
             let mut scratch = self.cull_scratch.borrow_mut();
-            cull_textured_sections(&records, render_view, options, &mut scratch)
+            let culling = cull_textured_sections(&records, render_view, options, &mut scratch);
+            let paintable_frustum_keys = scratch
+                .frustum_keys
+                .iter()
+                .copied()
+                .filter(|key| {
+                    records
+                        .records
+                        .get(key)
+                        .is_some_and(|record| record.drawable && record.traversal_ready)
+                })
+                .collect();
+            (culling, paintable_frustum_keys)
         };
-        culling
+        let drawn_keys = culling
             .drawn_keys
             .into_iter()
             .filter(|key| self.sections.contains_key(key))
-            .collect()
+            .collect();
+        TexturedSectionViewSetSnapshot {
+            paintable_frustum_keys,
+            drawn_keys,
+        }
     }
 
     pub fn prepare_render_records_with_stats(

@@ -54,6 +54,41 @@ fn cli_parses_headless_dual_view_hud() {
 }
 
 #[test]
+fn cli_parses_fixed_lod_settle_probe_options() {
+    let cli = Cli::parse([
+        "--lod-settle-probe".to_owned(),
+        "/tmp/mclone-lod-settle".to_owned(),
+        "--width".to_owned(),
+        "800".to_owned(),
+        "--height".to_owned(),
+        "600".to_owned(),
+        "--seed".to_owned(),
+        "77".to_owned(),
+        "--render-distance".to_owned(),
+        "12".to_owned(),
+        "--far-lod".to_owned(),
+        "false".to_owned(),
+        "--section-occlusion".to_owned(),
+        "false".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::LodSettleProbe { options } = cli else {
+        panic!("expected far LOD settle probe CLI mode");
+    };
+    assert_eq!(options.directory, PathBuf::from("/tmp/mclone-lod-settle"));
+    assert_eq!([options.width, options.height], [800, 600]);
+    assert_eq!(options.scene.seed, 77);
+    assert_eq!(options.scene.render_distance, 4);
+    assert_eq!(options.scene.far_lod.extra_radius_chunks, 6);
+    assert!(options.scene.far_lod.enabled);
+    assert_eq!(options.scene.day_time_override, Some(6000));
+    assert!(options.scene.freeze_time);
+    assert!(!options.scene.debug_passive_showcase);
+    assert!(options.render_options.section_occlusion_culling);
+}
+
+#[test]
 fn cli_parses_xr_emulation_screenshot_and_keyboard_input() {
     let cli = Cli::parse([
         "--xr-emulation-screenshot".to_owned(),
