@@ -6,7 +6,9 @@ executable offscreen settle probe with the pinned fly-up repro) are complete.
 Slice 1C1 (validated JSON waypoint scripts and the permanent smoke lane) is
 also complete. Slice 1C2a (coverage pixels and revisit determinism) is
 complete; Slice 1C2b (the movement/toggle/range matrix and full probe lane) is
-next. This tactical owns the far-LOD
+split for execution: Slice 1C2b1 (movement and band transitions) is complete,
+while Slice 1C2b2 (toggle/range mutations and the full probe lane) is next.
+This tactical owns the far-LOD
 product-hardening series: a settle-state validation harness, the coverage-gap
 correctness burn-down, the user-facing LOD detail modes (auto / 4 / 8 / 16,
 debug 1 / 2), and residency/perf polish. It supersedes the remaining open
@@ -321,11 +323,29 @@ reproduce D1/D2 before any fix exists.
   compatibility, schema-2 reference validation, coverage masking, and
   pixel-granular mismatch counting.
 
-#### Slice 1C2b — Movement/toggle/range matrix and full lane (next)
+#### Slice 1C2b1 — Movement and band-transition matrix (complete 2026-07-11)
 
-- **Fixtures.** Small/fast first: RD4 + range 6 spawn-settle; fly-up-high
-  settle (the user repro, expected-fail pinning D1/D2); one-chunk-step move;
-  8-chunk move; band-crossing walk; far-LOD toggle off/on; range change.
+- **Schema-3 desired-level assertions landed.** Optional `lodAssertions`
+  entries pin a chunk as `not-desired` or desired at level 1/2/3. They are
+  unique per waypoint, participate in expectation matching, and report exact
+  expected/actual levels. Schema-1/2 inputs remain accepted.
+- **Checked-in movement fixture landed.** `settle-movement.json` drives five
+  high-view waypoints: baseline, one chunk east, the hysteresis guard edge,
+  the guarded band crossing, then eight chunks east. Anchor `(9,0)` stays at
+  level 3 through the one-chunk move and guard, flips to level 1 on crossing,
+  and becomes not-desired after the eight-chunk move; new anchor `(18,0)`
+  enters at level 2.
+- **Pinned evidence.** All five fixtures matched with 360 desired = 360
+  visible tiles, zero pending work, and no coherence/assertion failures. Their
+  960×960 captures under `/tmp/mclone-lod-settle-movement` were inspected.
+  These are deliberately movement/set-level fixtures; the separate fast smoke
+  owns the expected-red C2/D1-D2 pixel assertions.
+
+#### Slice 1C2b2 — Toggle/range mutations and full lane (next)
+
+- **Remaining fixtures.** Far-LOD toggle off/on and range change, including
+  settled absence/repopulation assertions and replacement-before-suppress
+  evidence.
 - **Full pnpm lane.** Add `native:lod-settle:probe` for the complete matrix;
   keep the landed `native:lod-settle:smoke` as its CI-suitable subset.
 
@@ -516,7 +536,7 @@ regress). Additions:
 - `pnpm native:lod-settle:smoke` — fast fixture subset (Slice 1+; the
   permanent pre-merge check for LOD changes).
 - `pnpm native:lod-settle:probe` — full waypoint/fixture matrix with captures
-  (lands in Slice 1C2b).
+  (lands in Slice 1C2b2).
 - Existing tripwires: `pnpm native:desktop-offscreen:smoke`,
   `native:movement:smoke`, `native:timedemo:smoke`,
   `native:startup-streaming:perf` (+RD15), `native:frame-budget:perf`,

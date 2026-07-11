@@ -1,0 +1,67 @@
+{
+  "schema": 3,
+  "name": "far-lod-settle-movement",
+  "waypoints": [
+    {
+      "name": "movement-baseline-high",
+      "camera": {
+        "kind": "look-at",
+        "eye": [8.25, 200.0, 8.25],
+        "target": [8.0, 64.0, 8.0]
+      },
+      "lodAssertions": [
+        { "chunk": [9, 0], "expected": "level-3" }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "movement-one-chunk-east",
+      "camera": {
+        "kind": "look-at",
+        "eye": [24.25, 200.0, 8.25],
+        "target": [24.0, 64.0, 8.0]
+      },
+      "lodAssertions": [
+        { "chunk": [9, 0], "expected": "level-3" }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "movement-band-guard",
+      "camera": {
+        "kind": "look-at",
+        "eye": [40.25, 200.0, 8.25],
+        "target": [40.0, 64.0, 8.0]
+      },
+      "lodAssertions": [
+        { "chunk": [9, 0], "expected": "level-3" }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "movement-band-cross",
+      "camera": {
+        "kind": "look-at",
+        "eye": [56.25, 200.0, 8.25],
+        "target": [56.0, 64.0, 8.0]
+      },
+      "lodAssertions": [
+        { "chunk": [9, 0], "expected": "level-1" }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "movement-eight-chunks-east",
+      "camera": {
+        "kind": "look-at",
+        "eye": [184.25, 200.0, 8.25],
+        "target": [184.0, 64.0, 8.0]
+      },
+      "lodAssertions": [
+        { "chunk": [9, 0], "expected": "not-desired" },
+        { "chunk": [18, 0], "expected": "level-2" }
+      ],
+      "expected": "pass"
+    }
+  ]
+}

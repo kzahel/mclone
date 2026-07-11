@@ -5,7 +5,7 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11 (Tactical 172 Slice 1C2a complete).
+Last reconciled: 2026-07-11 (Tactical 172 Slice 1C2b1 complete).
 
 ## Current State
 
@@ -45,9 +45,10 @@ waypoint scripts, arbitrary ordered eye/target execution, capture-frame
 resettling, and the permanent `native:lod-settle:smoke` lane backed by a
 checked-in fixture. Slice 1C2a extends that fixture to four waypoints with a
 schema-2 projected-footprint C2 probe and exact high→spawn→high pixel revisit.
-Slice 1C2b next adds the full movement/toggle/range matrix and full probe lane;
-Slice 2 then burns down the defect ledger before detail modes and residency
-polish.
+Slice 1C2b1 adds the checked-in movement matrix with explicit desired-level
+assertions. Slice 1C2b2 next adds toggle/range mutations and the full probe
+lane; Slice 2 then burns down the defect ledger before detail modes and
+residency polish.
 
 ## Ownership
 
@@ -96,13 +97,19 @@ no silent caps, bounded steady state.
   sky-clear pixels inside the projected coverage footprint across seven
   columns; the A→B→A revisit is pixel-identical and every waypoint has zero
   pending work. All four captures were inspected.
-- Planned (172 Slice 1C2b): movement/toggle/range matrix and
+- Landed (172 Slice 1C2b1): schema-3 desired-level assertions plus a
+  five-waypoint movement fixture. The anchor remains level 3 across the
+  one-chunk/hysteresis guard, flips to level 1 at crossing, then leaves the
+  desired set after the eight-chunk move while a new level-2 anchor enters.
+  Every waypoint settled at 360 desired/visible with zero pending work; all
+  captures were inspected.
+- Planned (172 Slice 1C2b2): toggle/range mutations and
   `native:lod-settle:probe`. Every far-LOD change must already run the landed
   smoke lane and cite per-fixture results.
 
 ## Recommended Next Direction
 
-Follow tactical 172 in order: Slice 1C2b matrix and full probe lane,
+Follow tactical 172 in order: Slice 1C2b2 toggle/range and full probe lane,
 correctness burn-down (Slice 2), detail modes (Slice 3), residency/perf polish
 (Slice 4), debug modes (Slice 5), re-baseline + handoff (Slice 6). Reduced-real
 LOD (tactical 162 Slice 4+) resumes only after 172 Slice 2. Ordering authority:

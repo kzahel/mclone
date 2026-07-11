@@ -23,7 +23,7 @@ use crate::scene_runtime::WindowSceneAssets;
 const SPAWN_FIXTURE: &str = "rd4-range6-spawn-settle";
 const FLY_UP_FIXTURE: &str = "rd4-range6-fly-up-high";
 const MIN_SCRIPT_SCHEMA: u32 = 1;
-const SCRIPT_SCHEMA: u32 = 2;
+const SCRIPT_SCHEMA: u32 = 3;
 const MAX_WAYPOINTS: usize = 64;
 const MAX_CAPTURE_SETTLE_PASSES: usize = 4;
 const FLY_UP_EYE_OFFSET_X: f32 = 0.25;
@@ -69,6 +69,7 @@ struct FixtureObservation {
     lod_counters: LodReplacementCounters,
     coverage_probe: Option<LodCoverageProbe>,
     matches_pixels: Option<String>,
+    lod_assertions: Vec<LodTileAssertion>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -89,6 +90,47 @@ struct LodSettleWaypoint {
     coverage_probe: Option<LodCoverageProbe>,
     #[serde(default)]
     matches_pixels: Option<String>,
+    #[serde(default)]
+    lod_assertions: Vec<LodTileAssertion>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LodTileAssertion {
+    chunk: [i32; 2],
+    expected: LodDesiredLevelExpectation,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum LodDesiredLevelExpectation {
+    NotDesired,
+    #[serde(rename = "level-1")]
+    Level1,
+    #[serde(rename = "level-2")]
+    Level2,
+    #[serde(rename = "level-3")]
+    Level3,
+}
+
+impl LodDesiredLevelExpectation {
+    const fn level(self) -> Option<u8> {
+        match self {
+            Self::NotDesired => None,
+            Self::Level1 => Some(1),
+            Self::Level2 => Some(2),
+            Self::Level3 => Some(3),
+        }
+    }
+
+    const fn report_name(self) -> &'static str {
+        match self {
+            Self::NotDesired => "not-desired",
+            Self::Level1 => "level-1",
+            Self::Level2 => "level-2",
+            Self::Level3 => "level-3",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
@@ -147,6 +189,7 @@ impl LodSettleScript {
                     expected: LodSettleExpectation::Pass,
                     coverage_probe: None,
                     matches_pixels: None,
+                    lod_assertions: Vec::new(),
                 },
                 LodSettleWaypoint {
                     name: FLY_UP_FIXTURE.to_owned(),
@@ -161,6 +204,7 @@ impl LodSettleScript {
                     expected: LodSettleExpectation::FailD1D2,
                     coverage_probe: None,
                     matches_pixels: None,
+                    lod_assertions: Vec::new(),
                 },
             ],
         }
@@ -205,6 +249,12 @@ impl LodSettleScript {
                     waypoint.name
                 );
             }
+            if self.schema < 3 && !waypoint.lod_assertions.is_empty() {
+                bail!(
+                    "waypoint `{}` lodAssertions requires script schema 3",
+                    waypoint.name
+                );
+            }
             if let Some(probe) = waypoint.coverage_probe {
                 validate_coverage_probe(waypoint, probe)?;
             }
@@ -220,6 +270,18 @@ impl LodSettleScript {
                     bail!(
                         "waypoint `{}` matchesPixels camera differs from `{reference}`",
                         waypoint.name
+                    );
+                }
+            }
+            let mut asserted_chunks = BTreeSet::new();
+            for assertion in &waypoint.lod_assertions {
+                let pos = ChunkPos::new(assertion.chunk[0], assertion.chunk[1]);
+                if !asserted_chunks.insert(pos) {
+                    bail!(
+                        "waypoint `{}` has duplicate LOD assertion for chunk {},{}",
+                        waypoint.name,
+                        pos.x,
+                        pos.z
                     );
                 }
             }
@@ -382,6 +444,7 @@ pub(crate) fn run_lod_settle_probe(
                 lod_counters: state.host.lod_coverage_counters(),
                 coverage_probe: waypoint.coverage_probe,
                 matches_pixels: waypoint.matches_pixels,
+                lod_assertions: waypoint.lod_assertions,
             });
             Ok(())
         },
@@ -735,6 +798,38 @@ fn count_pixel_mismatches(left: &[u8], right: &[u8]) -> usize {
         + left.len().abs_diff(right.len()).div_ceil(4)
 }
 
+fn lod_assertion_results(
+    observation: &FixtureObservation,
+) -> (Vec<serde_json::Value>, Vec<String>) {
+    let desired = &observation.snapshot.runtime.producer.desired_tiles;
+    let mut results = Vec::with_capacity(observation.lod_assertions.len());
+    let mut failures = Vec::new();
+    for assertion in &observation.lod_assertions {
+        let pos = ChunkPos::new(assertion.chunk[0], assertion.chunk[1]);
+        let actual = desired.get(&pos).copied();
+        let matched = actual == assertion.expected.level();
+        if !matched {
+            failures.push(format!(
+                "C1: chunk {},{} expected {} but desired level was {}",
+                pos.x,
+                pos.z,
+                assertion.expected.report_name(),
+                actual.map_or_else(
+                    || "not-desired".to_owned(),
+                    |level| format!("level-{level}")
+                )
+            ));
+        }
+        results.push(serde_json::json!({
+            "chunk": { "x": pos.x, "z": pos.z },
+            "expected": assertion.expected.report_name(),
+            "actual": actual.map(|level| format!("level-{level}")).unwrap_or_else(|| "not-desired".to_owned()),
+            "matched": matched,
+        }));
+    }
+    (results, failures)
+}
+
 fn fixture_json(
     observation: &FixtureObservation,
     capture_path: &Path,
@@ -744,6 +839,8 @@ fn fixture_json(
     let culled_but_suppressed = observation.snapshot.culled_but_suppressed_chunks();
     let observed_d1_d2 = !culled_but_suppressed.is_empty();
     let observes_d1_d2 = observation.expected == LodSettleExpectation::FailD1D2;
+    let (lod_assertions, lod_assertion_failures) = lod_assertion_results(observation);
+    let lod_assertions_matched = lod_assertion_failures.is_empty();
     let coverage_sampled = pixel_analysis
         .coverage
         .as_ref()
@@ -765,6 +862,8 @@ fn fixture_json(
         .is_none_or(|determinism| determinism.mismatch_count == 0);
     let observed = if !coherence_failures.is_empty() {
         "fail:set-coherence"
+    } else if !lod_assertions_matched {
+        "fail:lod-assertion"
     } else if !determinism_matched {
         "fail:pixel-determinism"
     } else if observation.expected == LodSettleExpectation::Pass && observed_sky {
@@ -775,6 +874,7 @@ fn fixture_json(
         "pass"
     };
     let matched_expectation = coherence_failures.is_empty()
+        && lod_assertions_matched
         && coverage_matched
         && determinism_matched
         && match observation.expected {
@@ -784,6 +884,7 @@ fn fixture_json(
             LodSettleExpectation::FailD1D2 => observed_d1_d2,
         };
     let mut assertion_failures = coherence_failures.clone();
+    assertion_failures.extend(lod_assertion_failures);
     if !coverage_sampled {
         assertion_failures.push("C2: coverage probe projected no columns".to_owned());
     }
@@ -848,6 +949,7 @@ fn fixture_json(
             "reference": determinism.reference,
             "mismatchCount": determinism.mismatch_count,
         })),
+        "lodAssertions": lod_assertions,
         "sets": {
             "desiredTiles": observation.snapshot.runtime.producer.desired_tiles.len(),
             "residentTiles": observation.snapshot.runtime.producer.resident_tiles.len(),
@@ -1008,6 +1110,7 @@ mod tests {
             lod_counters: LodReplacementCounters::default(),
             coverage_probe: None,
             matches_pixels: None,
+            lod_assertions: Vec::new(),
         };
 
         assert!(settle_coherence_failures(&observation).is_empty());
@@ -1048,13 +1151,33 @@ mod tests {
         .unwrap();
 
         script.validate().unwrap();
-        assert_eq!(script.schema, SCRIPT_SCHEMA);
+        assert_eq!(script.schema, 2);
         assert_eq!(script.waypoints.len(), 4);
         assert_eq!(script.waypoints[1].expected, LodSettleExpectation::FailD1D2);
         assert_eq!(script.waypoints[1].coverage_probe.unwrap().plane_y, 64.0);
         assert_eq!(
             script.waypoints[3].matches_pixels.as_deref(),
             Some(FLY_UP_FIXTURE)
+        );
+    }
+
+    #[test]
+    fn checked_in_movement_script_is_valid() {
+        let script: LodSettleScript = serde_json::from_str(include_str!(
+            "../../../../test/fixtures/far-lod/settle-movement.json"
+        ))
+        .unwrap();
+
+        script.validate().unwrap();
+        assert_eq!(script.schema, SCRIPT_SCHEMA);
+        assert_eq!(script.waypoints.len(), 5);
+        assert_eq!(
+            script.waypoints[3].lod_assertions[0].expected,
+            LodDesiredLevelExpectation::Level1
+        );
+        assert_eq!(
+            script.waypoints[4].lod_assertions[0].expected,
+            LodDesiredLevelExpectation::NotDesired
         );
     }
 
@@ -1121,6 +1244,34 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("requires script schema 2")
+        );
+    }
+
+    #[test]
+    fn lod_assertions_require_schema_three_and_unique_chunks() {
+        let mut script = LodSettleScript::default_for_scene(&crate::cli::SceneOptions::default());
+        let assertion = LodTileAssertion {
+            chunk: [9, 0],
+            expected: LodDesiredLevelExpectation::Level3,
+        };
+        script.waypoints[0].lod_assertions.push(assertion);
+        script.schema = 2;
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("requires script schema 3")
+        );
+
+        script.schema = 3;
+        script.waypoints[0].lod_assertions.push(assertion);
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate LOD assertion")
         );
     }
 
